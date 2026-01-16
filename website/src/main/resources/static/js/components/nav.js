@@ -19,9 +19,7 @@ class AppNav extends HTMLElement {
     render() {
         const isAuthenticated = !!localStorage.getItem('cbellLoginToken');
         const storedName = (localStorage.getItem('cbellUsername') || '').trim();
-        const initials = storedName
-            ? storedName.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()
-            : 'CB';
+        const initials = storedName ? storedName[0].toUpperCase() : 'C';
         const profileHref = isAuthenticated ? '/profile' : '/login';
         this.innerHTML = `
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">

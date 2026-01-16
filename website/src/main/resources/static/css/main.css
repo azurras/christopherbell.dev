@@ -46,6 +46,23 @@ body {
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.15);
 }
 
+.post-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    background-color: #212529;
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.post-avatar-text {
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+}
+
 .home {
     padding: 3rem 0 4rem;
 }

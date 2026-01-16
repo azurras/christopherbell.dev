@@ -19,6 +19,7 @@ export function createFeedItem(post, ctx) {
   const s = ctx.sanitize;
   const when = ctx.formatWhen(post.createdOn || post.lastUpdatedOn);
   const handle = post.username ? `@${s(post.username)}` : '@user';
+  const avatarInitial = (post.username || 'U')[0].toUpperCase();
   const liked = !!post.liked;
   const likes = post.likesCount || 0;
   const repliesCount = post.replyCount || 0;
@@ -26,18 +27,23 @@ export function createFeedItem(post, ctx) {
   const item = document.createElement('div');
   item.className = 'list-group-item py-3 post-item';
   item.innerHTML = `
-    <div class="d-flex w-100 justify-content-between align-items-start">
-      <div class="w-100">
-        <div class="fw-semibold"><a href="/u/${encodeURIComponent(post.username || '')}" class="link-underline link-underline-opacity-0">${handle}</a></div>
-        <p class="mb-1 fs-5"><a href="/p/${encodeURIComponent(post.id)}" class="post-link text-body">${s(post.text)}</a></p>
+    <div class="d-flex w-100">
+      <div class="post-avatar flex-shrink-0 me-3">
+        <span class="post-avatar-text">${avatarInitial}</span>
       </div>
-      <div class="ms-3 text-end flex-shrink-0 position-relative">
-        <small class="text-muted d-block">${when}</small>
-        ${ctx.canDelete(post) ? `
-        <button class="btn btn-sm btn-light post-menu-btn mt-1" data-post="${post.id}" aria-label="More">⋯</button>
-        <div class="post-menu d-none card p-2" style="position:absolute; right:0; top:100%; z-index:1000;">
-          <button class="btn btn-link text-danger p-0 post-delete-btn" data-post="${post.id}">Delete</button>
-        </div>` : ''}
+      <div class="d-flex w-100 justify-content-between align-items-start">
+        <div class="w-100">
+          <div class="fw-semibold"><a href="/u/${encodeURIComponent(post.username || '')}" class="link-underline link-underline-opacity-0">${handle}</a></div>
+          <p class="mb-1 fs-5"><a href="/p/${encodeURIComponent(post.id)}" class="post-link text-body">${s(post.text)}</a></p>
+        </div>
+        <div class="ms-3 text-end flex-shrink-0 position-relative">
+          <small class="text-muted d-block">${when}</small>
+          ${ctx.canDelete(post) ? `
+          <button class="btn btn-sm btn-light post-menu-btn mt-1" data-post="${post.id}" aria-label="More">⋯</button>
+          <div class="post-menu d-none card p-2" style="position:absolute; right:0; top:100%; z-index:1000;">
+            <button class="btn btn-link text-danger p-0 post-delete-btn" data-post="${post.id}">Delete</button>
+          </div>` : ''}
+        </div>
       </div>
     </div>
     ${post.level && post.level > 0 && post.parentId && !ctx.suppressParentContext ? `<div class="parent-context card mt-2 w-100">

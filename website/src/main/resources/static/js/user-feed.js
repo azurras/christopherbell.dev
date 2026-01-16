@@ -16,6 +16,11 @@ function getUsernameFromPath() {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+function initialsFromUsername(username) {
+  if (!username) return '';
+  return username[0].toUpperCase();
+}
+
 
 let STATE = { before: null, limit: 20, loading: false, done: false };
 let ME = { id: null, role: null, username: null };
@@ -79,6 +84,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (list && username) {
     const handle = document.getElementById('userHandle');
     if (handle) handle.textContent = `@${username}`;
+    const initialsEl = document.getElementById('userInitials');
+    if (initialsEl) initialsEl.textContent = initialsFromUsername(username);
     list.innerHTML = '';
     RENDER_CTX = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(ME), currentUserName: ME?.username || null });
     SCROLLER = createInfiniteScroller({
