@@ -1,6 +1,7 @@
 package dev.christopherbell.view;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -51,10 +52,16 @@ public class ViewController {
     return "whatsforlunch.html";
   }
 
-  @RequestMapping(value = "/{path:^(?!api|static|.*\\.).*$}")
-  public String redirect() {
-    return "forward:/index.html";
+  /**
+   * Serves the Back Office page shell (role gated on the client).
+   *
+   * @return {@code back-office.html}
+   */
+  @GetMapping(value = "/back-office")
+  public String getBackOfficePage() {
+    return "back-office.html";
   }
+
 
   /**
    * Serves the Void home page.

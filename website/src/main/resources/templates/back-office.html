@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Back Office</title>
+  <link rel="stylesheet" type="text/css" href="/css/main.css"/>
+  <link rel="shortcut icon" href="/images/headers/logo.png"/>
+</head>
+<body>
+  <div id="nav"></div>
+  <main class="container py-4 d-none" id="backOfficeContent" role="main">
+    <div class="row justify-content-center">
+      <div class="col-12 col-lg-8">
+        <h1 class="display-6 mb-3">Back Office</h1>
+        <p class="text-muted">Admin-only workspace.</p>
+        <div id="backOfficeAlert" class="alert alert-danger d-none" role="alert"></div>
+        <div class="card">
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0" id="backOfficeTable">
+                <thead>
+                  <tr>
+                    <th>Username</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Approved</th>
+                    <th>Created</th>
+                    <th>Last Login</th>
+                    <th>Updated</th>
+                    <th>ID</th>
+                    <th>Type</th>
+                    <th>Approved By</th>
+                    <th>Created By</th>
+                    <th>Last Modified By</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer id="footer"></footer>
+  <script type="module" src="/js/app.js"></script>
+  <script type="module" src="/js/back-office.js"></script>
+</body>
+</html>

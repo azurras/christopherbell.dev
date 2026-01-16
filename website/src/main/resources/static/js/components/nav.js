@@ -11,8 +11,41 @@ class AppNav extends HTMLElement {
     /** Lifecycle hook: mount component and subscribe to auth changes. */
     connectedCallback() {
         this.render();
-        pubsub.subscribe('auth:login', () => this.render());
-        pubsub.subscribe('auth:logout', () => this.render());
+        this.loadUserInfo();
+        pubsub.subscribe('auth:login', async () => {
+            await this.loadUserInfo(true);
+            this.render();
+        });
+        pubsub.subscribe('auth:logout', () => {
+            localStorage.removeItem('cbellUsername');
+            localStorage.removeItem('cbellRole');
+            this.render();
+        });
+    }
+
+    async loadUserInfo(force = false) {
+        const token = localStorage.getItem('cbellLoginToken');
+        if (!token) return;
+        if (!force && localStorage.getItem('cbellRole') && localStorage.getItem('cbellUsername')) {
+            return;
+        }
+        if (this.userLoadInFlight) return;
+        this.userLoadInFlight = true;
+        try {
+            const resp = await fetch('/api/accounts/2025-09-03/me', {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (resp.ok && data && data.payload) {
+                localStorage.setItem('cbellUsername', data.payload.username || '');
+                localStorage.setItem('cbellRole', data.payload.role || '');
+                this.render();
+            }
+        } catch (_) {
+            // Ignore profile fetch errors to keep nav usable.
+        } finally {
+            this.userLoadInFlight = false;
+        }
     }
 
     /** Render the navbar markup based on authentication state. */
@@ -21,6 +54,7 @@ class AppNav extends HTMLElement {
         const storedName = (localStorage.getItem('cbellUsername') || '').trim();
         const initials = storedName ? storedName[0].toUpperCase() : 'C';
         const profileHref = isAuthenticated ? '/profile' : '/login';
+        const isAdmin = (localStorage.getItem('cbellRole') || '') === 'ADMIN';
         this.innerHTML = `
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container-fluid">
@@ -44,6 +78,7 @@ class AppNav extends HTMLElement {
                         <span class="avatar-initials">${initials}</span>
                     </button>
                     <div class="dropdown-menu dropdown-menu-end profile-menu">
+                        ${isAdmin ? `<a class="dropdown-item" href="/back-office">Back Office</a>` : ''}
                         <a class="dropdown-item" href="${profileHref}">Profile</a>
                         <button id="logout" type="button" class="dropdown-item">Logout</button>
                     </div>

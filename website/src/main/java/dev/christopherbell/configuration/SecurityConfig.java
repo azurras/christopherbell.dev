@@ -50,6 +50,7 @@ public class SecurityConfig {
       "/thebell/**",
       "/void",
       "/void/**",
+      "/back-office",
       "/wfl"
   };
 
