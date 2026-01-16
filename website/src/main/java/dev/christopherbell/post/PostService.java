@@ -15,12 +15,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import dev.christopherbell.libs.security.UsernameSanitizer;
 
 /**
@@ -29,17 +29,30 @@ import dev.christopherbell.libs.security.UsernameSanitizer;
  * <p>Enforces input validation, ensures ownership via the authenticated
  * account, and delegates persistence to {@link PostRepository}.</p>
  */
-@RequiredArgsConstructor
 @Service
 public class PostService {
   private final PostRepository postRepository;
   private final AccountRepository accountRepository;
   private final PostMapper postMapper;
   private final PermissionService permissionService;
+  private final boolean expirationEnabled;
 
   private static final int MAX_TEXT_LENGTH = 280;
   private static final Duration BASE_LIFESPAN = Duration.ofHours(24);
   private static final Duration EXTENSION_PER_LIKE = Duration.ofHours(24);
+
+  public PostService(
+      PostRepository postRepository,
+      AccountRepository accountRepository,
+      PostMapper postMapper,
+      PermissionService permissionService,
+      @Value("${posts.expiration.enabled:false}") boolean expirationEnabled) {
+    this.postRepository = postRepository;
+    this.accountRepository = accountRepository;
+    this.postMapper = postMapper;
+    this.permissionService = permissionService;
+    this.expirationEnabled = expirationEnabled;
+  }
 
   /**
    * Creates a new post for the currently authenticated account.
@@ -94,7 +107,7 @@ public class PostService {
         .likesCount(0)
         .createdOn(now)
         .lastUpdatedOn(now)
-        .expiresOn(calculateExpiration(now, 0))
+        .expiresOn(expirationEnabled ? calculateExpiration(now, 0) : null)
         .build();
 
     var saved = postRepository.save(post);
@@ -451,6 +464,9 @@ public class PostService {
 
   @Scheduled(fixedDelayString = "${posts.expiration.cleanup-interval:600000}")
   public void purgeExpiredPosts() {
+    if (!expirationEnabled) {
+      return;
+    }
     var missing = postRepository.findByExpiresOnIsNull();
     if (!missing.isEmpty()) {
       missing.forEach(p -> {
@@ -468,7 +484,7 @@ public class PostService {
   }
 
   private void refreshExpiration(Post post) {
-    if (post == null) {
+    if (!expirationEnabled || post == null) {
       return;
     }
     int likes = post.getLikesCount() != null ? post.getLikesCount() : 0;
@@ -476,7 +492,7 @@ public class PostService {
   }
 
   private void ensureExpirationSet(Post post) {
-    if (post == null || post.getExpiresOn() != null) {
+    if (!expirationEnabled || post == null || post.getExpiresOn() != null) {
       return;
     }
     refreshExpiration(post);
@@ -484,7 +500,7 @@ public class PostService {
   }
 
   private boolean isExpired(Post post) {
-    if (post == null) {
+    if (!expirationEnabled || post == null) {
       return false;
     }
     Instant expiresOn = post.getExpiresOn();

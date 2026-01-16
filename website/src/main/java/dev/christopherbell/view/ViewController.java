@@ -12,13 +12,43 @@ import org.springframework.web.bind.annotation.RequestMapping;
 public class ViewController {
 
   /**
-   * Serves the SPA index page for primary app routes.
+   * Serves the home page.
    *
    * @return {@code index.html}
    */
-  @RequestMapping(value = {"/", "/blog", "/photos", "/wfl"})
+  @RequestMapping(value = "/")
   public String getHomePage() {
     return "index.html";
+  }
+
+  /**
+   * Serves the Blog page.
+   *
+   * @return {@code blog.html}
+   */
+  @GetMapping(value = "/blog")
+  public String getBlogPage() {
+    return "blog.html";
+  }
+
+  /**
+   * Serves the Photos page.
+   *
+   * @return {@code photo/photography.html}
+   */
+  @GetMapping(value = "/photos")
+  public String getPhotosPage() {
+    return "photo/photography.html";
+  }
+
+  /**
+   * Serves the What's For Lunch page.
+   *
+   * @return {@code whatsforlunch.html}
+   */
+  @GetMapping(value = "/wfl")
+  public String getWhatsForLunchPage() {
+    return "whatsforlunch.html";
   }
 
   @RequestMapping(value = "/{path:^(?!api|static|.*\\.).*$}")
