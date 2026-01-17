@@ -88,6 +88,16 @@ body {
     margin-bottom: 1rem;
 }
 
+.post-body {
+    font-size: 1.25rem;
+    line-height: 1.45;
+}
+
+.post-context-text {
+    font-size: 1.1rem;
+    line-height: 1.35;
+}
+
 .home {
     padding: 3rem 0 4rem;
 }
@@ -116,28 +126,28 @@ body {
 }
 
 .flush-green {
-    background-color: #C3D898 !important;
-    border-color: #C3D898 !important;
+    background-color: #C3D898;
+    border-color: #C3D898;
 }
 
 .flush-light-blue {
-    background-color: #69A2B0 !important;
-    border-color: #69A2B0 !important;
+    background-color: #69A2B0;
+    border-color: #69A2B0;
 }
 
 .flush-dark-blue {
-    background-color: #1C3144 !important;
-    border-color: #1C3144 !important;
+    background-color: #1C3144;
+    border-color: #1C3144;
 }
 
 .flush-pink {
-    background-color: #D4ADCF !important;
-    border-color: #D4ADCF !important;
+    background-color: #D4ADCF;
+    border-color: #D4ADCF;
 }
 
 .flush-brown {
-    background-color: #96705B !important;
-    border-color: #96705B !important;
+    background-color: #96705B;
+    border-color: #96705B;
 }
 
 .jumbotron {
@@ -221,23 +231,23 @@ body {
 }
 
 /* Increase gap between root and parent to accommodate connector */
-.root-context.card { margin-bottom: 0.75rem !important; }
+.root-context.card { margin-bottom: 0.75rem; }
 
 /* Feed usernames: blue link without underline by default; underline on hover */
 .list-group-item .fw-semibold > a {
-    text-decoration: none !important;
+    text-decoration: none;
 }
 .list-group-item .fw-semibold > a:hover {
-    text-decoration: underline !important;
+    text-decoration: underline;
 }
 
 /* Post text: no underline; darken entire text on hover of item */
 .post-item .post-link {
-    text-decoration: none !important;
+    text-decoration: none;
 }
 .post-item:hover .post-link {
-    color: #212529 !important; /* dark body color */
-    text-decoration: none !important;
+    color: #212529; /* dark body color */
+    text-decoration: none;
 }
 
 /* Make entire post area feel clickable and provide hover affordance */
@@ -260,8 +270,8 @@ body {
         height: 32px;
     }
 
-    .post-item .fs-5 {
-        font-size: 1rem !important;
+    .post-body {
+        font-size: 1rem;
         line-height: 1.4;
     }
 
