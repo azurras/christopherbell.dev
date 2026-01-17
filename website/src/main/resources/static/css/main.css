@@ -63,6 +63,31 @@ body {
     letter-spacing: 0.12em;
 }
 
+.post-header {
+    flex-wrap: nowrap;
+}
+
+.post-handle {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.post-meta small {
+    white-space: nowrap;
+}
+
+.post-content {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.post-text {
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+}
+
 .home {
     padding: 3rem 0 4rem;
 }
@@ -222,4 +247,25 @@ body {
 }
 .post-item:hover {
     background-color: #f8f9fa; /* subtle hover */
+}
+
+@media (max-width: 576px) {
+    .post-item {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+
+    .post-avatar {
+        width: 32px;
+        height: 32px;
+    }
+
+    .post-item .fs-5 {
+        font-size: 1rem !important;
+        line-height: 1.4;
+    }
+
+    .post-header {
+        align-items: center;
+    }
 }
