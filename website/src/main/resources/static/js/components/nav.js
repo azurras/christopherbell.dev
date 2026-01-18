@@ -74,7 +74,7 @@ class AppNav extends HTMLElement {
                     <a href="/signup" class="btn btn-warning">Sign-up</a>
                 </div>` : `
                 <div class="nav-profile dropdown">
-                    <button type="button" class="avatar-btn" aria-haspopup="true" aria-expanded="false" data-bs-toggle="dropdown">
+                    <button type="button" class="avatar-btn" aria-haspopup="true" aria-expanded="false" data-bs-toggle="dropdown" data-bs-display="static">
                         <span class="avatar-initials">${initials}</span>
                     </button>
                     <div class="dropdown-menu dropdown-menu-end profile-menu">

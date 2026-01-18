@@ -125,6 +125,14 @@ body {
     border-color: #111827;
 }
 
+@media (max-width: 992px) {
+    .nav-profile .dropdown-menu {
+        position: static;
+        margin-top: 0.5rem;
+        min-width: 100%;
+    }
+}
+
 .post-text {
     margin-top: 1rem;
     margin-bottom: 1rem;
