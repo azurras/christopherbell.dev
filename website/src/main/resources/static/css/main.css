@@ -83,6 +83,48 @@ body {
     flex: 1 1 auto;
 }
 
+.back-office .table-responsive {
+    max-height: 70vh;
+    overflow: auto;
+}
+
+.back-office .table td,
+.back-office .table th {
+    white-space: nowrap;
+    padding-right: 1.25rem;
+}
+
+.back-office .table td:last-child,
+.back-office .table th:last-child {
+    padding-right: 0.75rem;
+}
+
+.back-office .card {
+    border-radius: 1rem;
+    border-color: #e5e7eb;
+}
+
+.back-office .card-body {
+    padding: 1.5rem;
+}
+
+.back-office .table-responsive {
+    background: #ffffff;
+}
+
+.back-office-nav .nav-link {
+    color: #111827;
+    border-radius: 999px;
+    padding: 0.4rem 1.1rem;
+    border: 1px solid #e5e7eb;
+}
+
+.back-office-nav .nav-link.active {
+    background: #111827;
+    color: #ffffff;
+    border-color: #111827;
+}
+
 .post-text {
     margin-top: 1rem;
     margin-bottom: 1rem;

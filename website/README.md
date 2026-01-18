@@ -34,3 +34,6 @@ The artifact will be located under `build/libs/`.
 
 ### Environment
 Set `SPRING_ACTIVE_PROFILE=local` for a local development profile and configure any required PostgreSQL connection details in `application.yml`.
+
+### Reporting
+Post reports are stored in the database and visible in Back Office for admins.

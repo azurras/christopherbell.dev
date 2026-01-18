@@ -9,6 +9,8 @@ logging:
 posts:
   expiration:
     enabled: false
+reports:
+  to: report@christopherbell.dev
 blog-properties:
   posts:
     - author: "Test"

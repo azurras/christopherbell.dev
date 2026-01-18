@@ -38,11 +38,11 @@ export function createFeedItem(post, ctx) {
           </div>
           <div class="post-meta ms-auto d-flex align-items-center gap-2 position-relative">
             <small class="text-muted">${when}</small>
-            ${ctx.canDelete(post) ? `
             <button class="btn btn-sm btn-light post-menu-btn" data-post="${post.id}" aria-label="More">⋯</button>
             <div class="post-menu d-none card p-2" style="position:absolute; right:0; top:100%; z-index:1000;">
-              <button class="btn btn-link text-danger p-0 post-delete-btn" data-post="${post.id}">Delete</button>
-            </div>` : ''}
+              <button class="btn btn-link text-danger p-0 post-report-btn" data-post="${post.id}">Report</button>
+              ${ctx.canDelete(post) ? `<button class="btn btn-link text-danger p-0 post-delete-btn" data-post="${post.id}">Delete</button>` : ''}
+            </div>
           </div>
         </div>
       </div>
@@ -241,13 +241,19 @@ export function createFeedItem(post, ctx) {
     });
   }
 
-  // Wire menu toggle and delete
+  // Wire menu toggle, report, and delete
   const menuBtn = item.querySelector('.post-menu-btn');
   const menu = item.querySelector('.post-menu');
   if (menuBtn && menu) {
     menuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       menu.classList.toggle('d-none');
+    });
+    const reportBtn = item.querySelector('.post-report-btn');
+    reportBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu.classList.add('d-none');
+      window.location.href = `/report?postId=${encodeURIComponent(post.id)}`;
     });
     const del = item.querySelector('.post-delete-btn');
     del?.addEventListener('click', async (e) => {

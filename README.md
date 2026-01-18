@@ -35,6 +35,9 @@ Notes:
 - `application-local.yml` sets the server port to `8081`.
 - To override config, use environment variables such as `SPRING_PROFILES_ACTIVE=local` and `SPRING_DATA_MONGODB_URI=...`.
 
+## Reporting
+Post reports are stored in the database and visible in Back Office for admins.
+
 ## Deploy to production
 1. Build static assets and the runnable JAR:
 ```bash

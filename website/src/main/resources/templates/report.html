@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Report Post</title>
+  <link rel="stylesheet" type="text/css" href="/css/main.css"/>
+  <link rel="shortcut icon" href="/images/headers/logo.png"/>
+</head>
+<body>
+  <div id="nav"></div>
+  <main class="container py-4" role="main">
+    <div class="row justify-content-center">
+      <div class="col-12 col-lg-8">
+        <h1 class="display-6 mb-3">Report Post</h1>
+        <div id="reportAlert" class="alert alert-danger d-none" role="alert"></div>
+        <div class="card mb-4">
+          <div class="card-body">
+            <div class="text-muted small">Post</div>
+            <div id="reportPostText" class="post-body">Loading…</div>
+            <div class="text-muted small mt-2">Author</div>
+            <div id="reportPostAuthor">—</div>
+          </div>
+        </div>
+        <form id="reportForm">
+          <div class="mb-3">
+            <label class="form-label">Reason</label>
+            <select id="reportReason" class="form-select" required>
+              <option value="" selected disabled>Select a reason</option>
+              <option value="spam">Spam or misleading</option>
+              <option value="harassment">Harassment or hate</option>
+              <option value="violence">Violence or threat</option>
+              <option value="sexual">Sexual content</option>
+              <option value="copyright">Copyright or impersonation</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="reportDetails" class="form-label">Additional details (optional)</label>
+            <textarea id="reportDetails" class="form-control" rows="4" maxlength="1000"></textarea>
+          </div>
+          <button class="btn btn-danger" type="submit">Submit Report</button>
+        </form>
+      </div>
+    </div>
+  </main>
+  <footer id="footer"></footer>
+  <script type="module" src="/js/app.js"></script>
+  <script type="module" src="/js/report.js"></script>
+</body>
+</html>

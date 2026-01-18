@@ -62,6 +62,16 @@ public class ViewController {
     return "back-office.html";
   }
 
+  /**
+   * Serves the report page.
+   *
+   * @return {@code report.html}
+   */
+  @GetMapping(value = "/report")
+  public String getReportPage() {
+    return "report.html";
+  }
+
 
   /**
    * Serves the Void home page.

@@ -8,6 +8,7 @@ import { authHeaders, fetchJson, formatWhen } from './lib/util.js';
 const content = document.getElementById('backOfficeContent');
 const alertBox = document.getElementById('backOfficeAlert');
 const tableBody = document.querySelector('#backOfficeTable tbody');
+const reportsBody = document.querySelector('#backOfficeReports tbody');
 
 function showAlert(msg) {
   if (!alertBox) return;
@@ -47,6 +48,55 @@ function renderRows(accounts) {
   });
 }
 
+function renderReports(reports) {
+  if (!reportsBody) return;
+  reportsBody.innerHTML = '';
+  if (!reports || reports.length === 0) {
+    const row = document.createElement('tr');
+    row.innerHTML = '<td colspan="8" class="text-muted">No reports found.</td>';
+    reportsBody.appendChild(row);
+    return;
+  }
+  reports.forEach(report => {
+    const row = document.createElement('tr');
+    const status = report.status || 'OPEN';
+    const resolution = report.resolution || '—';
+    const resolvedOn = report.resolvedOn ? formatWhen(report.resolvedOn) : '—';
+    row.innerHTML = `
+      <td>${report.createdOn ? formatWhen(report.createdOn) : '—'}</td>
+      <td>${report.reason || '—'}</td>
+      <td>@${report.reporterUsername || '—'}</td>
+      <td>@${report.reportedUsername || '—'}</td>
+      <td class="text-truncate" style="max-width: 520px;">${report.postText || '—'}</td>
+      <td>${status}</td>
+      <td>${resolution}</td>
+      <td>${resolvedOn}</td>
+      <td>
+        ${status === 'OPEN' ? `
+        <select class="form-select form-select-sm report-action" data-report="${report.id}">
+          <option value="" selected>Choose…</option>
+          <option value="CLOSE_NO_ACTION">Close (no action)</option>
+          <option value="DELETE_POST">Delete post</option>
+          <option value="DELETE_POST_AND_SUSPEND_USER">Delete post + suspend user</option>
+        </select>` : `
+        <select class="form-select form-select-sm report-action" data-report="${report.id}">
+          <option value="" selected>Choose…</option>
+          <option value="REOPEN">Reopen</option>
+        </select>`}
+      </td>
+    `;
+    reportsBody.appendChild(row);
+  });
+}
+
+async function resolveReport(reportId, resolution) {
+  await fetchJson(API.reports.resolve(reportId), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ resolution })
+  });
+}
+
 async function gateBackOffice() {
   const token = localStorage.getItem('cbellLoginToken');
   if (!token) {
@@ -69,6 +119,25 @@ async function gateBackOffice() {
 
     const accounts = await fetchJson(API.accounts.base, { headers: authHeaders() });
     renderRows(accounts || []);
+
+    const reports = await fetchJson(API.reports.list, { headers: authHeaders() });
+    renderReports(reports || []);
+
+    reportsBody?.addEventListener('change', async (e) => {
+      const target = e.target;
+      if (!(target instanceof HTMLSelectElement)) return;
+      if (!target.classList.contains('report-action')) return;
+      const reportId = target.getAttribute('data-report');
+      const resolution = target.value;
+      if (!reportId || !resolution) return;
+      try {
+        await resolveReport(reportId, resolution);
+        const refreshed = await fetchJson(API.reports.list, { headers: authHeaders() });
+        renderReports(refreshed || []);
+      } catch (err) {
+        showAlert(err.message || 'Failed to resolve report.');
+      }
+    });
   } catch (err) {
     if (err?.message) {
       showAlert(err.message);
