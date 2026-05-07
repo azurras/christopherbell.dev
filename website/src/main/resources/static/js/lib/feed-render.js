@@ -19,6 +19,7 @@ export function createFeedItem(post, ctx) {
   const s = ctx.sanitize;
   const when = ctx.formatWhen(post.createdOn || post.lastUpdatedOn);
   const handle = post.username ? `@${s(post.username)}` : '@user';
+  const avatarInitial = (post.username || 'U')[0].toUpperCase();
   const liked = !!post.liked;
   const likes = post.likesCount || 0;
   const repliesCount = post.replyCount || 0;
@@ -26,24 +27,31 @@ export function createFeedItem(post, ctx) {
   const item = document.createElement('div');
   item.className = 'list-group-item py-3 post-item';
   item.innerHTML = `
-    <div class="d-flex w-100 justify-content-between align-items-start">
-      <div class="w-100">
-        <div class="fw-semibold"><a href="/u/${encodeURIComponent(post.username || '')}" class="link-underline link-underline-opacity-0">${handle}</a></div>
-        <p class="mb-1 fs-5"><a href="/p/${encodeURIComponent(post.id)}" class="post-link text-body">${s(post.text)}</a></p>
+    <div class="d-flex w-100">
+      <div class="post-avatar flex-shrink-0 me-1">
+        <span class="post-avatar-text">${avatarInitial}</span>
       </div>
-      <div class="ms-3 text-end flex-shrink-0 position-relative">
-        <small class="text-muted d-block">${when}</small>
-        ${ctx.canDelete(post) ? `
-        <button class="btn btn-sm btn-light post-menu-btn mt-1" data-post="${post.id}" aria-label="More">⋯</button>
-        <div class="post-menu d-none card p-2" style="position:absolute; right:0; top:100%; z-index:1000;">
-          <button class="btn btn-link text-danger p-0 post-delete-btn" data-post="${post.id}">Delete</button>
-        </div>` : ''}
+      <div class="post-content flex-grow-1">
+        <div class="post-header d-flex align-items-center gap-2 w-100">
+          <div class="fw-semibold post-handle">
+            <a href="/u/${encodeURIComponent(post.username || '')}" class="link-underline link-underline-opacity-0">${handle}</a>
+          </div>
+          <div class="post-meta ms-auto d-flex align-items-center gap-2 position-relative">
+            <small class="text-muted">${when}</small>
+            <button class="btn btn-sm btn-light post-menu-btn" data-post="${post.id}" aria-label="More">⋯</button>
+            <div class="post-menu d-none card p-2" style="position:absolute; right:0; top:100%; z-index:1000;">
+              <button class="btn btn-link text-danger p-0 post-report-btn" data-post="${post.id}">Report</button>
+              ${ctx.canDelete(post) ? `<button class="btn btn-link text-danger p-0 post-delete-btn" data-post="${post.id}">Delete</button>` : ''}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
+    <p class="post-text"><a href="/p/${encodeURIComponent(post.id)}" class="post-link text-body post-body">${s(post.text)}</a></p>
     ${post.level && post.level > 0 && post.parentId && !ctx.suppressParentContext ? `<div class="parent-context card mt-2 w-100">
         <div class="card-body py-2">
           <div class="fw-semibold"><a href="/u/" class="link-underline link-underline-opacity-0" data-parent-handle="${post.parentId}">@user</a></div>
-          <p class="mb-0 fs-4 fw-semibold" data-parent="${post.parentId}">Loading…</p>
+          <p class="mb-0 post-context-text fw-semibold" data-parent="${post.parentId}">Loading…</p>
           <a href="/p/${encodeURIComponent(post.parentId)}" class="small">View thread</a>
         </div>
       </div>` : ''}
@@ -158,7 +166,7 @@ export function createFeedItem(post, ctx) {
             <div class="d-flex">
               <div class="flex-grow-1">
                 <div class="small text-muted"><span class="fw-semibold">${who}</span> · ${whenStr}</div>
-                <div>${s(text)}</div>
+                <div class="post-body">${s(text)}</div>
               </div>
             </div>`;
           replies.appendChild(row);
@@ -205,7 +213,7 @@ export function createFeedItem(post, ctx) {
                   <div class="d-flex">
                     <div class="flex-grow-1">
                       <div class="small text-muted"><a href="/u/${encodeURIComponent(r.username || '')}" class="link-underline link-underline-opacity-0 fw-semibold">@${s(r.username || 'user')}</a> · ${ctx.formatWhen(r.createdOn || r.lastUpdatedOn)}</div>
-                      <div><a href="/p/${encodeURIComponent(r.id)}" class="link-underline link-underline-opacity-0 text-body">${s(r.text || '')}</a></div>
+                      <div><a href="/p/${encodeURIComponent(r.id)}" class="link-underline link-underline-opacity-0 text-body post-body">${s(r.text || '')}</a></div>
                     </div>
                   </div>`;
                 replies.appendChild(row);
@@ -233,13 +241,19 @@ export function createFeedItem(post, ctx) {
     });
   }
 
-  // Wire menu toggle and delete
+  // Wire menu toggle, report, and delete
   const menuBtn = item.querySelector('.post-menu-btn');
   const menu = item.querySelector('.post-menu');
   if (menuBtn && menu) {
     menuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       menu.classList.toggle('d-none');
+    });
+    const reportBtn = item.querySelector('.post-report-btn');
+    reportBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu.classList.add('d-none');
+      window.location.href = `/report?postId=${encodeURIComponent(post.id)}`;
     });
     const del = item.querySelector('.post-delete-btn');
     del?.addEventListener('click', async (e) => {

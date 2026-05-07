@@ -1,6 +1,7 @@
 package dev.christopherbell.view;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -12,19 +13,65 @@ import org.springframework.web.bind.annotation.RequestMapping;
 public class ViewController {
 
   /**
-   * Serves the SPA index page for primary app routes.
+   * Serves the home page.
    *
    * @return {@code index.html}
    */
-  @RequestMapping(value = {"/", "/blog", "/photos", "/wfl"})
+  @RequestMapping(value = "/")
   public String getHomePage() {
     return "index.html";
   }
 
-  @RequestMapping(value = "/{path:^(?!api|static|.*\\.).*$}")
-  public String redirect() {
-    return "forward:/index.html";
+  /**
+   * Serves the Blog page.
+   *
+   * @return {@code blog.html}
+   */
+  @GetMapping(value = "/blog")
+  public String getBlogPage() {
+    return "blog.html";
   }
+
+  /**
+   * Serves the Photos page.
+   *
+   * @return {@code photo/photography.html}
+   */
+  @GetMapping(value = "/photos")
+  public String getPhotosPage() {
+    return "photo/photography.html";
+  }
+
+  /**
+   * Serves the What's For Lunch page.
+   *
+   * @return {@code whatsforlunch.html}
+   */
+  @GetMapping(value = "/wfl")
+  public String getWhatsForLunchPage() {
+    return "whatsforlunch.html";
+  }
+
+  /**
+   * Serves the Back Office page shell (role gated on the client).
+   *
+   * @return {@code back-office.html}
+   */
+  @GetMapping(value = "/back-office")
+  public String getBackOfficePage() {
+    return "back-office.html";
+  }
+
+  /**
+   * Serves the report page.
+   *
+   * @return {@code report.html}
+   */
+  @GetMapping(value = "/report")
+  public String getReportPage() {
+    return "report.html";
+  }
+
 
   /**
    * Serves the Void home page.

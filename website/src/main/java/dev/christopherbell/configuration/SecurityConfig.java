@@ -46,10 +46,12 @@ public class SecurityConfig {
       "/login",
       "/photos",
       "/photos/**",
+      "/report",
       "/signup",
       "/thebell/**",
       "/void",
       "/void/**",
+      "/back-office",
       "/wfl"
   };
 

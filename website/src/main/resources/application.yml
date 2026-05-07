@@ -6,6 +6,11 @@ logging:
     root: INFO
     org.springframework: INFO
     dev.christopherbell: INFO
+posts:
+  expiration:
+    enabled: false
+reports:
+  to: report@christopherbell.dev
 blog-properties:
   posts:
     - author: "Test"

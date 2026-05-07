@@ -10,6 +10,11 @@ export const API = {
     create: '/api/accounts/2024-12-15/create',
     me: '/api/accounts/2025-09-03/me',
   },
+  reports: {
+    create: '/api/reports/2025-09-03',
+    list: '/api/reports/2025-09-03',
+    resolve: (id) => `/api/reports/2025-09-03/${encodeURIComponent(id)}/resolve`,
+  },
   posts: {
     base: '/api/posts/2025-09-14',
     feed: '/api/posts/2025-09-14/feed',
@@ -21,4 +26,3 @@ export const API = {
     thread: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}/thread`,
   },
 };
-

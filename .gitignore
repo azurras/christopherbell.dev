@@ -24,6 +24,7 @@ main.js.map
 # Gradle
 .gradle/
 build/
+bin/
 
 # VSCode
 .vscode

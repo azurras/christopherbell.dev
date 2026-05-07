@@ -43,6 +43,11 @@ public class PermissionService {
         .getSubject();
   }
 
+  /** Instance wrapper for resolving the current user id (for testability). */
+  public String getSelfId() {
+    return getSelf();
+  }
+
   public static boolean isAuthenticated(
       AccountLoginRequest accountLoginRequest,
       Account account

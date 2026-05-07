@@ -36,6 +36,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     pubsub.subscribe('auth:logout', () => {
         localStorage.removeItem('cbellLoginToken');
+        localStorage.removeItem('cbellUsername');
+        localStorage.removeItem('cbellRole');
         // Redirect to login for clear feedback
         window.location.href = '/login';
     });
