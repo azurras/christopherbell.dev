@@ -7,7 +7,7 @@ Personal website and application for Christopher Bell. The project combines a Sp
 - `cbell-lib` – Reusable Java library shared across applications.
 
 ## Requirements
-- Java 21 (JDK)
+- Java 21+ (JDK). CI builds with Java 21; the Gradle wrapper is compatible with newer local JDKs such as Java 25.
 - Node.js 18+
 - npm 9+
 - MongoDB
@@ -21,6 +21,11 @@ npm run build
 
 # From the repo root
 ./gradlew :website:build
+```
+
+## Testing
+```bash
+./gradlew test
 ```
 
 ## Run locally

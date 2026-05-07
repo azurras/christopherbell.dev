@@ -20,11 +20,12 @@ dependencies {
     implementation("org.slf4j:slf4j-api:2.0.13")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.1")
 
-    compileOnly("org.projectlombok:lombok:1.18.38")
-    annotationProcessor("org.projectlombok:lombok")
-    testCompileOnly("org.projectlombok:lombok:1.18.38")
-    testAnnotationProcessor("org.projectlombok:lombok")
+    compileOnly("org.projectlombok:lombok:1.18.44")
+    annotationProcessor("org.projectlombok:lombok:1.18.44")
+    testCompileOnly("org.projectlombok:lombok:1.18.44")
+    testAnnotationProcessor("org.projectlombok:lombok:1.18.44")
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks.test {
