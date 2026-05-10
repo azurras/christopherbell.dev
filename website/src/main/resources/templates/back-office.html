@@ -7,18 +7,25 @@
   <link rel="stylesheet" type="text/css" href="/css/main.css"/>
   <link rel="shortcut icon" href="/images/headers/logo.png"/>
 </head>
-<body class="back-office">
+<body class="site-page back-office">
   <div id="nav"></div>
-  <main class="container-fluid py-4 d-none" id="backOfficeContent" role="main">
+  <main class="site-main d-none" id="backOfficeContent" role="main">
+    <section class="site-hero site-hero-office" aria-labelledby="officeTitle">
+      <div class="container-fluid">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <div>
+            <p class="home-kicker">Admin</p>
+            <h1 id="officeTitle">Back Office</h1>
+            <p>Reports, users, and operational cleanup.</p>
+          </div>
+          <span class="badge text-bg-light">ADMIN</span>
+        </div>
+      </div>
+    </section>
+    <section class="site-content">
+    <div class="container-fluid">
     <div class="row">
       <div class="col-12">
-        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-          <div>
-            <h1 class="display-6 mb-1">Back Office</h1>
-            <p class="text-muted mb-0">Admin-only workspace.</p>
-          </div>
-          <span class="badge text-bg-dark">ADMIN</span>
-        </div>
         <div id="backOfficeAlert" class="alert alert-danger d-none" role="alert"></div>
         <ul class="nav nav-pills back-office-nav mb-3" id="backOfficeTabs" role="tablist">
           <li class="nav-item" role="presentation">
@@ -85,6 +92,8 @@
         </div>
       </div>
     </div>
+    </div>
+    </section>
   </main>
   <footer id="footer"></footer>
   <script type="module" src="/js/app.js"></script>

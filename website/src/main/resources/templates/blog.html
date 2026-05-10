@@ -19,16 +19,24 @@
     <link rel="shortcut icon" href="/images/headers/logo.png"/>
 </head>
 
-<body>
+<body class="site-page blog-page">
     <div id="nav"></div>
-    <main role="main">
-        <div class="jumbotron jumbotron-fluid">
+    <main class="site-main" role="main">
+        <section class="site-hero site-hero-blog" aria-labelledby="blogTitle">
             <div class="container">
-                <h1 class="display-3 text-center">Blog</h1>
+                <p class="home-kicker">Notes</p>
+                <h1 id="blogTitle">Blog</h1>
+                <p>Longer thoughts, project notes, and old-school blog energy.</p>
             </div>
-        </div>
+        </section>
+        <section class="site-content">
+            <div class="container">
+                <div class="content-panel">
+                    <div id="blog"></div>
+                </div>
+            </div>
+        </section>
     </main>
-    <div id="blog"></div>
     <footer id="footer"></footer>
 
 </body>

@@ -575,6 +575,233 @@ body {
     }
 }
 
+.site-page {
+    background: #f4f0e8;
+    color: #17202a;
+}
+
+.site-main {
+    min-height: calc(100vh - 56px);
+}
+
+.site-hero {
+    position: relative;
+    overflow: hidden;
+    color: #ffffff;
+    padding: clamp(3.5rem, 8vw, 6rem) 0 clamp(4rem, 8vw, 6.5rem);
+    background:
+        linear-gradient(90deg, rgba(13, 18, 24, 0.84), rgba(13, 18, 24, 0.48)),
+        url("/images/photos/IMG_0257.jpeg") center center / cover no-repeat;
+}
+
+.site-hero::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0;
+    height: 5rem;
+    background: linear-gradient(180deg, rgba(244, 240, 232, 0), #f4f0e8);
+    pointer-events: none;
+}
+
+.site-hero .container,
+.site-hero .container-fluid {
+    position: relative;
+    z-index: 1;
+}
+
+.site-hero h1 {
+    max-width: 780px;
+    font-size: clamp(2.4rem, 6vw, 5.4rem);
+    line-height: 0.95;
+    font-weight: 800;
+    margin-bottom: 0.9rem;
+}
+
+.site-hero p:not(.home-kicker) {
+    max-width: 640px;
+    color: rgba(255, 255, 255, 0.88);
+    font-size: clamp(1.05rem, 2vw, 1.25rem);
+    line-height: 1.48;
+    margin-bottom: 0;
+}
+
+.site-content {
+    padding: clamp(1.5rem, 4vw, 3rem) 0 4rem;
+}
+
+.content-panel,
+.site-page .card {
+    border: 1px solid rgba(23, 32, 42, 0.12);
+    border-radius: 0.5rem;
+    box-shadow: 0 16px 44px rgba(23, 32, 42, 0.10);
+}
+
+.content-panel {
+    background: #ffffff;
+    padding: clamp(1rem, 3vw, 2rem);
+}
+
+.site-page .card {
+    overflow: hidden;
+}
+
+.site-page .btn {
+    border-radius: 0.35rem;
+    font-weight: 700;
+}
+
+.site-page .form-control,
+.site-page .form-select {
+    border-radius: 0.35rem;
+}
+
+.site-page .list-group {
+    border-radius: 0.5rem;
+}
+
+.site-hero-void {
+    background:
+        linear-gradient(90deg, rgba(13, 18, 24, 0.86), rgba(37, 58, 92, 0.52)),
+        url("/images/photos/IMG_0390.jpeg") center center / cover no-repeat;
+}
+
+.site-hero-lunch {
+    background:
+        linear-gradient(90deg, rgba(13, 18, 24, 0.84), rgba(79, 125, 77, 0.56)),
+        url("/images/photos/IMG_0947.jpeg") center center / cover no-repeat;
+}
+
+.site-hero-vin {
+    background:
+        linear-gradient(90deg, rgba(13, 18, 24, 0.86), rgba(122, 64, 95, 0.56)),
+        url("/images/photos/IMG_1668.JPG") center center / cover no-repeat;
+}
+
+.site-hero-blog,
+.site-hero-profile,
+.site-hero-user,
+.site-hero-post {
+    background:
+        linear-gradient(90deg, rgba(13, 18, 24, 0.86), rgba(37, 58, 92, 0.50)),
+        url("/images/photos/IMG_0072.jpeg") center center / cover no-repeat;
+}
+
+.site-hero-photo {
+    background:
+        linear-gradient(90deg, rgba(13, 18, 24, 0.82), rgba(144, 96, 31, 0.42)),
+        url("/images/photos/IMG_0130.jpeg") center center / cover no-repeat;
+}
+
+.site-hero-report,
+.site-hero-office {
+    background:
+        linear-gradient(90deg, rgba(13, 18, 24, 0.88), rgba(122, 64, 95, 0.50)),
+        url("/images/photos/IMG_1854.jpeg") center center / cover no-repeat;
+}
+
+.feed-shell {
+    max-width: 760px;
+    margin: 0 auto 1rem;
+}
+
+.feed-shell:last-child {
+    margin-bottom: 0;
+}
+
+.vin-decoder-page {
+    background: #f4f0e8;
+}
+
+.vin-decoder-shell {
+    margin-top: -3rem;
+    position: relative;
+    z-index: 2;
+}
+
+.vin-decoder-input,
+.vin-result {
+    box-shadow: 0 16px 44px rgba(23, 32, 42, 0.12);
+}
+
+.gallery-panel {
+    padding-left: clamp(1rem, 3vw, 2rem);
+    padding-right: clamp(1rem, 3vw, 2rem);
+}
+
+.gallery-panel img {
+    box-shadow: 0 14px 34px rgba(23, 32, 42, 0.16);
+}
+
+.auth-page {
+    min-height: 100vh;
+    background:
+        linear-gradient(90deg, rgba(13, 18, 24, 0.86), rgba(13, 18, 24, 0.42)),
+        url("/images/photos/IMG_0691.jpeg") center center / cover fixed no-repeat;
+}
+
+.auth-shell {
+    width: min(100% - 2rem, 1120px);
+    min-height: calc(100vh - 56px);
+    margin: 0 auto;
+    display: grid;
+    align-items: center;
+    padding: 3rem 0;
+}
+
+.auth-heading {
+    color: #ffffff;
+    text-align: center;
+    margin-bottom: 1.25rem;
+}
+
+.auth-heading h1 {
+    font-size: clamp(2.3rem, 5vw, 4rem);
+    line-height: 1;
+    font-weight: 800;
+    margin-bottom: 0.75rem;
+}
+
+.auth-heading p:not(.home-kicker) {
+    max-width: 520px;
+    margin: 0 auto;
+    color: rgba(255, 255, 255, 0.84);
+}
+
+.auth-page .card {
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(8px);
+}
+
+.profile-page dl dd {
+    overflow-wrap: anywhere;
+}
+
+.lunch-panel {
+    min-height: 220px;
+    display: grid;
+    place-items: center;
+}
+
+.back-office .site-content {
+    padding-top: 1.5rem;
+}
+
+.back-office .site-hero {
+    padding-top: 2.5rem;
+    padding-bottom: 3.25rem;
+}
+
+@media (max-width: 768px) {
+    .site-hero {
+        padding-top: 3rem;
+        padding-bottom: 4rem;
+    }
+
+    .vin-decoder-shell {
+        margin-top: -2rem;
+    }
+}
+
 .fa-2 {
     font-size: 2em;
 }
