@@ -1,4 +1,4 @@
-package dev.christopherbell.vehicle.model;
+package dev.christopherbell.vehicle.nhtsa.model;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.Instant;

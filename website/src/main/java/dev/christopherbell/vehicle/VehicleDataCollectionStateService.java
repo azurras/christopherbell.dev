@@ -1,8 +1,10 @@
 package dev.christopherbell.vehicle;
 
-import dev.christopherbell.vehicle.model.NhtsaVinImportState;
-import dev.christopherbell.vehicle.model.RandomVinImportState;
 import dev.christopherbell.vehicle.model.VehicleDataCollectionState;
+import dev.christopherbell.vehicle.nhtsa.NhtsaVinImportStateRepository;
+import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
+import dev.christopherbell.vehicle.randomvin.RandomVinImportStateRepository;
+import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
 import java.time.Clock;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +25,11 @@ public class VehicleDataCollectionStateService {
   private final NhtsaVinImportStateRepository nhtsaVinImportStateRepository;
   private final RandomVinImportStateRepository randomVinImportStateRepository;
 
+  /**
+   * Gets persisted state for all vehicle data collection jobs.
+   *
+   * @return the RandomVIN and NHTSA data collection state
+   */
   public VehicleDataCollectionState getState() {
     return VehicleDataCollectionState.builder()
         .nhtsa(nhtsaVinImportStateRepository.findById(NHTSA_STATE_ID)
@@ -32,6 +39,11 @@ public class VehicleDataCollectionStateService {
         .build();
   }
 
+  /**
+   * Builds the default NHTSA state when no persisted state exists yet.
+   *
+   * @return a default NHTSA import state
+   */
   private NhtsaVinImportState defaultNhtsaState() {
     return NhtsaVinImportState.builder()
         .id(NHTSA_STATE_ID)
@@ -44,6 +56,11 @@ public class VehicleDataCollectionStateService {
         .build();
   }
 
+  /**
+   * Builds the default RandomVIN state when no persisted state exists yet.
+   *
+   * @return a default RandomVIN import state
+   */
   private RandomVinImportState defaultRandomVinState() {
     return RandomVinImportState.builder()
         .id(RANDOM_VIN_STATE_ID)

@@ -1,9 +1,10 @@
-package dev.christopherbell.vehicle;
+package dev.christopherbell.vehicle.nhtsa;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
-import dev.christopherbell.vehicle.NhtsaVinClient.NhtsaVinDecodeRequest;
-import dev.christopherbell.vehicle.model.NhtsaVinImportState;
+import dev.christopherbell.vehicle.VehicleRepository;
+import dev.christopherbell.vehicle.nhtsa.NhtsaVinClient.NhtsaVinDecodeRequest;
 import dev.christopherbell.vehicle.model.Vehicle;
+import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
@@ -35,6 +36,14 @@ public class NhtsaVinEnrichmentService {
   private final NhtsaVinImportStateRepository nhtsaVinImportStateRepository;
   private final VehicleRepository vehicleRepository;
 
+  /**
+   * Creates an NHTSA enrichment service.
+   *
+   * @param clock the clock used for deterministic timestamps
+   * @param nhtsaVinClient the client used to decode VIN batches
+   * @param nhtsaVinImportStateRepository the repository used to persist NHTSA import state
+   * @param vehicleRepository the repository used to read and update vehicles
+   */
   public NhtsaVinEnrichmentService(
       Clock clock,
       NhtsaVinClient nhtsaVinClient,
@@ -47,35 +56,55 @@ public class NhtsaVinEnrichmentService {
     this.vehicleRepository = vehicleRepository;
   }
 
+  /**
+   * Enriches all stored VINs that have not already been decoded by NHTSA.
+   */
   @Scheduled(fixedDelayString = "${vehicles.nhtsa-vin.fixed-delay:3600000}")
   public void enrichStoredVins() {
-    var state = currentState();
-    if (isCoolingDown(state)) {
-      log.info("NHTSA VIN enrichment is cooling down until {}.", state.getDisabledUntil());
-      return;
-    }
-    if (isPermanentlyDisabled(state)) {
-      log.info("NHTSA VIN enrichment is permanently disabled after HTTP 403 on {}.", state.getForbiddenOn());
-      return;
-    }
-
-    var dueVehicles = vehicleRepository.findByVinIsNotNull().stream()
-        .filter(vehicle -> !isBlank(vehicle.getVin()))
-        .filter(this::isDueForEnrichment)
-        .toList();
-
-    for (var batch : batches(dueVehicles)) {
-      if (isCoolingDown(state) || isPermanentlyDisabled(state)) {
+    log.info("NHTSA VIN enrichment job started.");
+    try {
+      var state = currentState();
+      if (isCoolingDown(state)) {
+        log.info("NHTSA VIN enrichment is cooling down until {}.", state.getDisabledUntil());
         return;
       }
-      enrichVehicleBatch(state, batch);
+      if (isPermanentlyDisabled(state)) {
+        log.info("NHTSA VIN enrichment is permanently disabled after HTTP 403 on {}.", state.getForbiddenOn());
+        return;
+      }
+
+      var dueVehicles = vehicleRepository.findByVinIsNotNull().stream()
+          .filter(vehicle -> !isBlank(vehicle.getVin()))
+          .filter(this::isDueForEnrichment)
+          .toList();
+
+      for (var batch : batches(dueVehicles)) {
+        if (isCoolingDown(state) || isPermanentlyDisabled(state)) {
+          return;
+        }
+        enrichVehicleBatch(state, batch);
+      }
+    } finally {
+      log.info("NHTSA VIN enrichment job completed.");
     }
   }
 
+  /**
+   * Determines whether a vehicle still needs NHTSA enrichment.
+   *
+   * @param vehicle the vehicle to inspect
+   * @return true when the vehicle has not already been decoded
+   */
   private boolean isDueForEnrichment(Vehicle vehicle) {
     return vehicle.getNhtsaLastDecodedOn() == null;
   }
 
+  /**
+   * Enriches a batch of vehicles with one NHTSA batch decode request.
+   *
+   * @param state the persisted NHTSA import state to update
+   * @param vehicles the vehicles to enrich in one batch
+   */
   private void enrichVehicleBatch(NhtsaVinImportState state, List<Vehicle> vehicles) {
     try {
       recordAttempt(state, vehicles.size());
@@ -83,7 +112,11 @@ public class NhtsaVinEnrichmentService {
       for (var vehicle : vehicles) {
         var decodedValues = decodedValuesByVin.get(normalizeVin(vehicle.getVin()));
         if (decodedValues == null) {
-          log.warn("NHTSA batch response did not include VIN {}.", vehicle.getVin());
+          deleteUnusableVehicle(vehicle, "NHTSA batch response did not include VIN");
+          continue;
+        }
+        if (!hasUsableDecodedValues(decodedValues)) {
+          deleteUnusableVehicle(vehicle, "NHTSA returned no usable data for VIN");
           continue;
         }
 
@@ -105,6 +138,22 @@ public class NhtsaVinEnrichmentService {
     }
   }
 
+  /**
+   * Deletes a vehicle when NHTSA cannot produce usable data for its VIN.
+   *
+   * @param vehicle the vehicle to delete
+   * @param reason the reason to include in logs
+   */
+  private void deleteUnusableVehicle(Vehicle vehicle, String reason) {
+    log.warn("{} {}. Deleting vehicle {}.", reason, vehicle.getVin(), vehicle.getId());
+    vehicleRepository.delete(vehicle);
+  }
+
+  /**
+   * Loads the persisted NHTSA import state or creates an initialized state for today.
+   *
+   * @return the current NHTSA import state
+   */
   private NhtsaVinImportState currentState() {
     var today = LocalDate.now(clock);
     var state = nhtsaVinImportStateRepository.findById(IMPORT_STATE_ID)
@@ -127,14 +176,32 @@ public class NhtsaVinEnrichmentService {
     return state;
   }
 
+  /**
+   * Determines whether NHTSA enrichment is inside a temporary cooldown window.
+   *
+   * @param state the persisted NHTSA import state
+   * @return true when enrichment should be skipped until the cooldown expires
+   */
   private boolean isCoolingDown(NhtsaVinImportState state) {
     return state.getDisabledUntil() != null && state.getDisabledUntil().isAfter(Instant.now(clock));
   }
 
+  /**
+   * Determines whether NHTSA enrichment was permanently disabled after an HTTP 403.
+   *
+   * @param state the persisted NHTSA import state
+   * @return true when no more NHTSA calls should be made
+   */
   private boolean isPermanentlyDisabled(NhtsaVinImportState state) {
     return Boolean.TRUE.equals(state.getPermanentlyDisabled());
   }
 
+  /**
+   * Records one outbound NHTSA batch call and the number of VINs included.
+   *
+   * @param state the persisted NHTSA import state to update
+   * @param vinsProcessed the number of VINs included in the batch request
+   */
   private void recordAttempt(NhtsaVinImportState state, int vinsProcessed) {
     state.setLastAttemptOn(Instant.now(clock));
     state.setCallsToday(Optional.ofNullable(state.getCallsToday()).orElse(0) + 1);
@@ -147,6 +214,12 @@ public class NhtsaVinEnrichmentService {
     nhtsaVinImportStateRepository.save(state);
   }
 
+  /**
+   * Applies NHTSA HTTP failure guards and records the failure in persisted state.
+   *
+   * @param state the persisted NHTSA import state to update
+   * @param e the client exception containing the HTTP status
+   */
   private void handleClientFailure(NhtsaVinImportState state, NhtsaVinClientException e) {
     var now = Instant.now(clock);
     state.setLastFailureOn(now);
@@ -163,18 +236,36 @@ public class NhtsaVinEnrichmentService {
     log.warn("NHTSA batch enrichment failed with HTTP status {}.", e.getStatusCode());
   }
 
+  /**
+   * Splits vehicles into NHTSA-supported batch sizes.
+   *
+   * @param vehicles the vehicles due for enrichment
+   * @return vehicle batches with at most {@value #NHTSA_BATCH_SIZE} entries each
+   */
   private List<List<Vehicle>> batches(List<Vehicle> vehicles) {
     return IntStream.iterate(0, start -> start < vehicles.size(), start -> start + NHTSA_BATCH_SIZE)
         .mapToObj(start -> vehicles.subList(start, Math.min(start + NHTSA_BATCH_SIZE, vehicles.size())))
         .toList();
   }
 
+  /**
+   * Converts vehicles into NHTSA batch decode request entries.
+   *
+   * @param vehicles the vehicles to decode
+   * @return decode request entries for NHTSA
+   */
   private List<NhtsaVinDecodeRequest> toDecodeRequests(List<Vehicle> vehicles) {
     return vehicles.stream()
         .map(vehicle -> new NhtsaVinDecodeRequest(vehicle.getVin(), vehicle.getYear()))
         .toList();
   }
 
+  /**
+   * Indexes NHTSA decoded values by normalized VIN.
+   *
+   * @param decodedValues the NHTSA response rows
+   * @return response rows keyed by normalized VIN
+   */
   private Map<String, Map<String, String>> decodedValuesByVin(List<Map<String, String>> decodedValues) {
     var valuesByVin = new HashMap<String, Map<String, String>>();
     for (var values : decodedValues) {
@@ -186,10 +277,22 @@ public class NhtsaVinEnrichmentService {
     return valuesByVin;
   }
 
+  /**
+   * Normalizes a VIN for matching request and response rows.
+   *
+   * @param vin the VIN to normalize
+   * @return the normalized VIN, or null when no VIN was provided
+   */
   private String normalizeVin(String vin) {
     return vin == null ? null : vin.trim().toUpperCase();
   }
 
+  /**
+   * Applies decoded NHTSA values to a vehicle without overwriting user-entered fields.
+   *
+   * @param vehicle the vehicle to update
+   * @param decodedValues the decoded values returned by NHTSA
+   */
   private void applyDecodedValues(Vehicle vehicle, Map<String, String> decodedValues) {
     var now = Instant.now(clock);
     vehicle.setNhtsaDecodedValues(decodedValues);
@@ -224,6 +327,25 @@ public class NhtsaVinEnrichmentService {
     }
   }
 
+  /**
+   * Determines whether an NHTSA response row contains enough data to keep the vehicle.
+   *
+   * @param decodedValues the decoded values returned by NHTSA
+   * @return true when identifying vehicle data exists
+   */
+  private boolean hasUsableDecodedValues(Map<String, String> decodedValues) {
+    return !isBlank(value(decodedValues, "Make"))
+        || !isBlank(value(decodedValues, "Model"))
+        || !isBlank(value(decodedValues, "ModelYear"))
+        || !isBlank(value(decodedValues, "VehicleType"));
+  }
+
+  /**
+   * Builds a displayable engine description from NHTSA decoded values.
+   *
+   * @param decodedValues the decoded values returned by NHTSA
+   * @return an engine description, or null when no engine data is present
+   */
   private String engine(Map<String, String> decodedValues) {
     var displacement = value(decodedValues, "DisplacementL");
     var cylinders = value(decodedValues, "EngineCylinders");
@@ -246,6 +368,12 @@ public class NhtsaVinEnrichmentService {
     return description;
   }
 
+  /**
+   * Builds a displayable transmission description from NHTSA decoded values.
+   *
+   * @param decodedValues the decoded values returned by NHTSA
+   * @return a transmission description, or null when no transmission data is present
+   */
   private String transmission(Map<String, String> decodedValues) {
     var style = value(decodedValues, "TransmissionStyle");
     var speeds = value(decodedValues, "TransmissionSpeeds");
@@ -258,12 +386,25 @@ public class NhtsaVinEnrichmentService {
     return speeds + "-speed " + style;
   }
 
+  /**
+   * Sets a string field only when the current field value is blank and the new value is present.
+   *
+   * @param currentValue the current vehicle field value
+   * @param newValue the decoded value to apply
+   * @param setter the vehicle setter for the field
+   */
   private void setIfBlank(String currentValue, String newValue, java.util.function.Consumer<String> setter) {
     if (isBlank(currentValue) && !isBlank(newValue)) {
       setter.accept(newValue);
     }
   }
 
+  /**
+   * Parses an integer from a decoded NHTSA value.
+   *
+   * @param value the decoded value to parse
+   * @return the parsed integer, or null when the value is blank or invalid
+   */
   private Integer toInteger(String value) {
     if (isBlank(value)) {
       return null;
@@ -275,10 +416,23 @@ public class NhtsaVinEnrichmentService {
     }
   }
 
+  /**
+   * Reads one decoded value from an NHTSA response row.
+   *
+   * @param decodedValues the decoded values returned by NHTSA
+   * @param key the NHTSA field key
+   * @return the decoded value for the key
+   */
   private String value(Map<String, String> decodedValues, String key) {
     return decodedValues.get(key);
   }
 
+  /**
+   * Determines whether a string is null or blank.
+   *
+   * @param value the value to inspect
+   * @return true when the value is null or blank
+   */
   private boolean isBlank(String value) {
     return value == null || value.isBlank();
   }

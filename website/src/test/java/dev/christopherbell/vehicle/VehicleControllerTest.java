@@ -19,11 +19,14 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.test.TestUtil;
 import dev.christopherbell.permission.PermissionService;
-import dev.christopherbell.vehicle.model.NhtsaVinImportState;
-import dev.christopherbell.vehicle.model.RandomVinImportState;
 import dev.christopherbell.vehicle.model.VehicleCreateRequest;
 import dev.christopherbell.vehicle.model.VehicleDataCollectionState;
 import dev.christopherbell.vehicle.model.VehicleUpdateRequest;
+import dev.christopherbell.vehicle.model.VehicleVinBatchRequest;
+import dev.christopherbell.vehicle.model.VehicleVinRequest;
+import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
+import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
+import dev.christopherbell.vehicle.randomvin.model.RandomVinRobotsPolicyState;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -87,6 +90,87 @@ public class VehicleControllerTest {
   }
 
   @Test
+  @DisplayName("Creates vehicle from VIN when caller has ADMIN authority")
+  @WithMockUser(authorities = {"ADMIN"})
+  public void testCreateVehicleFromVin() throws Exception {
+    var request = """
+        {"vin":"%s"}
+        """.formatted(VehicleStub.VIN);
+    var requestObject = new VehicleVinRequest(VehicleStub.VIN);
+    var response = VehicleStub.getVehicleDetailStub(VehicleStub.ID);
+
+    when(vehicleService.createVehicleFromVin(eq(requestObject))).thenReturn(response);
+
+    mockMvc
+        .perform(post("/api/vehicles" + APIVersion.V20260509 + "/vin")
+            .with(csrf())
+            .content(request)
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isCreated())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.id").value(VehicleStub.ID))
+        .andExpect(jsonPath("$.payload.vin").value(VehicleStub.VIN));
+
+    verify(vehicleService).createVehicleFromVin(eq(requestObject));
+  }
+
+  @Test
+  @DisplayName("Rejects VIN-only vehicle creation without authentication")
+  public void testCreateVehicleFromVin_whenUnauthenticated_Returns401() throws Exception {
+    mockMvc
+        .perform(post("/api/vehicles" + APIVersion.V20260509 + "/vin")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isUnauthorized());
+
+    verifyNoInteractions(vehicleService);
+  }
+
+  @Test
+  @DisplayName("Creates vehicles from VINs when caller has ADMIN authority")
+  @WithMockUser(authorities = {"ADMIN"})
+  public void testCreateVehiclesFromVins() throws Exception {
+    var vin2 = "2FMDK4JCXEBB62196";
+    var request = """
+        {"vins":["%s","%s"]}
+        """.formatted(VehicleStub.VIN, vin2);
+    var requestObject = new VehicleVinBatchRequest(List.of(VehicleStub.VIN, vin2));
+    var response = List.of(
+        VehicleStub.getVehicleDetailStub(VehicleStub.ID),
+        VehicleStub.getVehicleDetailStub(VehicleStub.ID_2)
+    );
+    response.get(1).setVin(vin2);
+
+    when(vehicleService.createVehiclesFromVins(eq(requestObject))).thenReturn(response);
+
+    mockMvc
+        .perform(post("/api/vehicles" + APIVersion.V20260509 + "/vins")
+            .with(csrf())
+            .content(request)
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isCreated())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload[0].vin").value(VehicleStub.VIN))
+        .andExpect(jsonPath("$.payload[1].vin").value(vin2));
+
+    verify(vehicleService).createVehiclesFromVins(eq(requestObject));
+  }
+
+  @Test
+  @DisplayName("Rejects batch VIN vehicle creation without authentication")
+  public void testCreateVehiclesFromVins_whenUnauthenticated_Returns401() throws Exception {
+    mockMvc
+        .perform(post("/api/vehicles" + APIVersion.V20260509 + "/vins")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isUnauthorized());
+
+    verifyNoInteractions(vehicleService);
+  }
+
+  @Test
   @DisplayName("Returns all vehicles")
   @WithMockUser(authorities = {"ADMIN"})
   public void testGetVehicles() throws Exception {
@@ -117,6 +201,11 @@ public class VehicleControllerTest {
             .vinsProcessedToday(1)
             .lifetimeVinsProcessed(4L)
             .notes("VIN data sourced from randomvin.com")
+            .robotsPolicy(RandomVinRobotsPolicyState.builder()
+                .allowed(true)
+                .reason("no_matching_disallow")
+                .failClosed(true)
+                .build())
             .build())
         .nhtsa(NhtsaVinImportState.builder()
             .id("nhtsa")
@@ -138,6 +227,9 @@ public class VehicleControllerTest {
         .andExpect(jsonPath("$.payload.randomVin.lifetimeCalls").value(5))
         .andExpect(jsonPath("$.payload.randomVin.lifetimeVinsProcessed").value(4))
         .andExpect(jsonPath("$.payload.randomVin.notes").value("VIN data sourced from randomvin.com"))
+        .andExpect(jsonPath("$.payload.randomVin.robotsPolicy.allowed").value(true))
+        .andExpect(jsonPath("$.payload.randomVin.robotsPolicy.reason").value("no_matching_disallow"))
+        .andExpect(jsonPath("$.payload.randomVin.robotsPolicy.failClosed").value(true))
         .andExpect(jsonPath("$.payload.nhtsa.id").value("nhtsa"))
         .andExpect(jsonPath("$.payload.nhtsa.lifetimeCalls").value(3))
         .andExpect(jsonPath("$.payload.nhtsa.lifetimeVinsProcessed").value(150))

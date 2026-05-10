@@ -1,6 +1,6 @@
-package dev.christopherbell.vehicle;
+package dev.christopherbell.vehicle.nhtsa;
 
-import dev.christopherbell.vehicle.model.NhtsaVinImportState;
+import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
 /**

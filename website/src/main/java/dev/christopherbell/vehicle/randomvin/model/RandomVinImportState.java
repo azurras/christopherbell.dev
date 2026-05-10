@@ -1,4 +1,4 @@
-package dev.christopherbell.vehicle.model;
+package dev.christopherbell.vehicle.randomvin.model;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.Instant;
@@ -42,5 +42,6 @@ public class RandomVinImportState {
   private Long lifetimeVinsProcessed;
   private String notes;
   private Boolean permanentlyDisabled;
+  private RandomVinRobotsPolicyState robotsPolicy;
   private Integer vinsProcessedToday;
 }

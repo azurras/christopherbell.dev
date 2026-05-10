@@ -15,6 +15,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -30,6 +31,7 @@ import dev.christopherbell.libs.security.UsernameSanitizer;
  * account, and delegates persistence to {@link PostRepository}.</p>
  */
 @Service
+@Slf4j
 public class PostService {
   private final PostRepository postRepository;
   private final AccountRepository accountRepository;
@@ -135,9 +137,6 @@ public class PostService {
         .toList();
   }
 
-  /**
-   * Feed-style posts for the current user including thread metadata.
-   */
   /**
    * Returns the current user's feed (newest first) enriched with thread metadata.
    *
@@ -464,17 +463,22 @@ public class PostService {
 
   @Scheduled(fixedDelayString = "${posts.expiration.cleanup-interval:600000}")
   public void purgeExpiredPosts() {
-    if (!expirationEnabled) {
-      return;
+    log.info("Post expiration cleanup job started.");
+    try {
+      if (!expirationEnabled) {
+        return;
+      }
+      var missing = postRepository.findByExpiresOnIsNull();
+      if (!missing.isEmpty()) {
+        missing.forEach(p -> {
+          refreshExpiration(p);
+          postRepository.save(p);
+        });
+      }
+      postRepository.deleteByExpiresOnLessThanEqual(Instant.now());
+    } finally {
+      log.info("Post expiration cleanup job completed.");
     }
-    var missing = postRepository.findByExpiresOnIsNull();
-    if (!missing.isEmpty()) {
-      missing.forEach(p -> {
-        refreshExpiration(p);
-        postRepository.save(p);
-      });
-    }
-    postRepository.deleteByExpiresOnLessThanEqual(Instant.now());
   }
 
   private static Instant calculateExpiration(Instant createdOn, int likesCount) {

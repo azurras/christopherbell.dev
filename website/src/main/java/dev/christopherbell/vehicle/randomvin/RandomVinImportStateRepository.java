@@ -1,6 +1,6 @@
-package dev.christopherbell.vehicle;
+package dev.christopherbell.vehicle.randomvin;
 
-import dev.christopherbell.vehicle.model.RandomVinImportState;
+import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
 /**

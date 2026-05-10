@@ -4,13 +4,12 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
 import java.util.List;
 import java.util.Optional;
-import java.util.Random;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -18,6 +17,7 @@ import org.springframework.stereotype.Service;
 
 @RequiredArgsConstructor
 @Service
+@Slf4j
 public class RestaurantService {
   private final RestaurantMapper restaurantMapper;
   private final RestaurantRepository restaurantRepository;
@@ -140,16 +140,11 @@ public class RestaurantService {
    */
   @Scheduled(cron = "@midnight")
   public void setRestaurantOfTheDay() {
-  }
-
-  /**
-   * Generates a random number based on the size of the total number of restaurants passed in.
-   *
-   * @param restaurants that we store in our application.yml file
-   * @return a random number between 0 and total number of restaurants in our list.
-   */
-  private int getRandomInt(List<Restaurant> restaurants) {
-    var random = new Random();
-    return random.nextInt(restaurants.size());
+    log.info("Restaurant of the day job started.");
+    try {
+      // TODO: Implement restaurant-of-the-day selection.
+    } finally {
+      log.info("Restaurant of the day job completed.");
+    }
   }
 }
