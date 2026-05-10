@@ -25,18 +25,21 @@ vehicles:
   random-vin:
     enabled: false
     url: https://randomvin.com/getvin.php?type=real
-    fixed-delay: 600000
+    fixed-delay: 1000 #600000
     robots-url: https://randomvin.com/robots.txt
     path: /getvin.php
     user-agent: vinner
     connect-timeout: 10s
     request-timeout: 15s
     cooldown: 24h
-    max-calls-per-day: 50
+    max-calls-per-day: 50000
     robots-fail-closed: true
     state-id: randomvin
     state-note: VIN data sourced from randomvin.com
     legacy-import-note: Imported from randomvin.com
+  vin-decoder:
+    rate-limit-capacity: 20
+    rate-limit-window: 1m
 wfl:
   restaurant-of-the-day:
     enabled: false

@@ -30,4 +30,7 @@ export const API = {
     unreadCount: '/api/notifications/2025-09-14/unread-count',
     markRead: (id) => `/api/notifications/2025-09-14/${encodeURIComponent(id)}/read`,
   },
+  vehicles: {
+    decodeVin: '/api/vehicles/2026-05-09/vin/decode',
+  },
 };

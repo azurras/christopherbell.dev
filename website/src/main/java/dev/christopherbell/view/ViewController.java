@@ -53,6 +53,16 @@ public class ViewController {
   }
 
   /**
+   * Serves the VIN decoder tool.
+   *
+   * @return {@code vin-decoder.html}
+   */
+  @GetMapping(value = "/vin-decoder")
+  public String getVinDecoderPage() {
+    return "vin-decoder.html";
+  }
+
+  /**
    * Serves the Back Office page shell (role gated on the client).
    *
    * @return {@code back-office.html}

@@ -14,6 +14,7 @@ import org.springframework.context.annotation.Configuration;
 public class VehicleProperties {
   private NhtsaVin nhtsaVin = new NhtsaVin();
   private RandomVin randomVin = new RandomVin();
+  private VinDecoder vinDecoder = new VinDecoder();
 
   @Data
   public static class NhtsaVin {
@@ -43,5 +44,11 @@ public class VehicleProperties {
     private String stateId;
     private String stateNote;
     private String legacyImportNote;
+  }
+
+  @Data
+  public static class VinDecoder {
+    private int rateLimitCapacity;
+    private Duration rateLimitWindow;
   }
 }
