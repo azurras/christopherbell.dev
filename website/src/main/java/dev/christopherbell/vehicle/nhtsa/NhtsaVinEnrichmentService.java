@@ -60,6 +60,9 @@ public class NhtsaVinEnrichmentService {
    */
   @Scheduled(fixedDelayString = "${vehicles.nhtsa-vin.fixed-delay}")
   public void enrichStoredVins() {
+    if (!properties.isEnabled()) {
+      return;
+    }
     log.info("NHTSA VIN enrichment job started.");
     try {
       var state = currentState();

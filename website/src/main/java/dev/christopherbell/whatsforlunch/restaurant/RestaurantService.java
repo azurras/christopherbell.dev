@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -21,6 +22,8 @@ import org.springframework.stereotype.Service;
 public class RestaurantService {
   private final RestaurantMapper restaurantMapper;
   private final RestaurantRepository restaurantRepository;
+  @Value("${wfl.restaurant-of-the-day.enabled:false}")
+  private boolean restaurantOfTheDayEnabled;
 
   /**
    * Creates a new restaurant based on the provided request.
@@ -138,8 +141,11 @@ public class RestaurantService {
   /**
    * This is a nightly job that will select a random restaurant per day.
    */
-  @Scheduled(cron = "@midnight")
+  @Scheduled(cron = "${wfl.restaurant-of-the-day.cron}")
   public void setRestaurantOfTheDay() {
+    if (!restaurantOfTheDayEnabled) {
+      return;
+    }
     log.info("Restaurant of the day job started.");
     try {
       // TODO: Implement restaurant-of-the-day selection.

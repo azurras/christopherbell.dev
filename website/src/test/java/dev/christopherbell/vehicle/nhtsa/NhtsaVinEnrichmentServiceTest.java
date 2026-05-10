@@ -370,6 +370,7 @@ public class NhtsaVinEnrichmentServiceTest {
 
   private VehicleProperties vehicleProperties() {
     var properties = new VehicleProperties();
+    properties.getNhtsaVin().setEnabled(true);
     properties.getNhtsaVin().setBatchSize(50);
     properties.getNhtsaVin().setCooldown(Duration.ofHours(24));
     properties.getNhtsaVin().setStateId("nhtsa");
