@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="author" content="Christopher Bell" />
+  <meta name="description" content="VIN decoder powered by NHTSA vPIC" />
+  <title>VIN Decoder</title>
+  <link rel="stylesheet" type="text/css" href="/css/main.css"/>
+  <link rel="shortcut icon" href="/images/headers/logo.png"/>
+</head>
+<body class="vin-decoder-page">
+  <div id="nav"></div>
+  <main class="container py-4" role="main">
+    <div class="vin-decoder-shell">
+      <section class="vin-decoder-input" aria-labelledby="vinDecoderTitle">
+        <div>
+          <p class="home-kicker mb-2">NHTSA vPIC</p>
+          <h1 id="vinDecoderTitle" class="display-6 mb-2">VIN Decoder</h1>
+          <p class="text-muted mb-4">Paste a VIN to decode the vehicle identity, plant details, and raw NHTSA JSON.</p>
+        </div>
+        <form id="vinDecodeForm" class="vin-decode-form">
+          <label for="vinInput" class="form-label">VIN</label>
+          <div class="input-group input-group-lg">
+            <input id="vinInput" class="form-control" type="text" maxlength="17" autocomplete="off" spellcheck="false" placeholder="1HGCM82633A004352" />
+            <button id="vinDecodeButton" class="btn btn-dark" type="submit">Decode</button>
+          </div>
+          <div class="form-text">17 characters, excluding I, O, and Q.</div>
+        </form>
+        <div id="vinDecodeAlert" class="alert alert-danger d-none mt-3" role="alert"></div>
+      </section>
+
+      <section id="vinResult" class="vin-result d-none" aria-live="polite">
+        <div class="vin-summary-grid">
+          <div class="vin-summary-item">
+            <span>Make</span>
+            <strong id="vinMake">-</strong>
+          </div>
+          <div class="vin-summary-item">
+            <span>Model</span>
+            <strong id="vinModel">-</strong>
+          </div>
+          <div class="vin-summary-item">
+            <span>Year</span>
+            <strong id="vinYear">-</strong>
+          </div>
+          <div class="vin-summary-item">
+            <span>Body</span>
+            <strong id="vinBody">-</strong>
+          </div>
+          <div class="vin-summary-item vin-summary-wide">
+            <span>Plant</span>
+            <strong id="vinPlant">-</strong>
+          </div>
+        </div>
+
+        <div class="vin-output-grid">
+          <div class="vin-output-panel">
+            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+              <h2 class="h5 mb-0">JSON Output</h2>
+              <button id="copyJsonButton" class="btn btn-sm btn-outline-secondary" type="button">Copy</button>
+            </div>
+            <pre class="vin-code-output"><code id="vinJsonOutput">{}</code></pre>
+          </div>
+          <div class="vin-output-panel">
+            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+              <h2 class="h5 mb-0">curl Example</h2>
+              <button id="copyCurlButton" class="btn btn-sm btn-outline-secondary" type="button">Copy</button>
+            </div>
+            <pre class="vin-code-output"><code id="vinCurlOutput"></code></pre>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <footer id="footer"></footer>
+  <script type="module" src="/js/app.js"></script>
+  <script type="module" src="/js/vin-decoder.js"></script>
+</body>
+</html>

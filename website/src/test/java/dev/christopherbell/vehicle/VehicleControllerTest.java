@@ -1,5 +1,6 @@
 package dev.christopherbell.vehicle;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -23,6 +24,8 @@ import dev.christopherbell.vehicle.model.VehicleCreateRequest;
 import dev.christopherbell.vehicle.model.VehicleDataCollectionState;
 import dev.christopherbell.vehicle.model.VehicleUpdateRequest;
 import dev.christopherbell.vehicle.model.VehicleVinBatchRequest;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeRequest;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeResponse;
 import dev.christopherbell.vehicle.model.VehicleVinRequest;
 import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
@@ -44,6 +47,7 @@ public class VehicleControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private PermissionService permissionService;
   @MockitoBean private VehicleDataCollectionStateService vehicleDataCollectionStateService;
+  @MockitoBean private VehicleVinDecodeService vehicleVinDecodeService;
   @MockitoBean private VehicleService vehicleService;
 
   @Test
@@ -125,6 +129,46 @@ public class VehicleControllerTest {
         .andExpect(status().isUnauthorized());
 
     verifyNoInteractions(vehicleService);
+  }
+
+  @Test
+  @DisplayName("Decodes VIN through NHTSA wrapper")
+  @WithMockUser
+  public void testDecodeVin() throws Exception {
+    var request = """
+        {"vin":"%s"}
+        """.formatted(VehicleStub.VIN);
+    var requestObject = new VehicleVinDecodeRequest(VehicleStub.VIN);
+    var response = VehicleVinDecodeResponse.builder()
+        .vin(VehicleStub.VIN)
+        .make(VehicleStub.MAKE)
+        .model(VehicleStub.MODEL)
+        .year(VehicleStub.YEAR)
+        .body("Coupe")
+        .plantCity("MARYSVILLE")
+        .plantState("OHIO")
+        .plantCountry("UNITED STATES (USA)")
+        .rawDecodedValues(java.util.Map.of("VIN", VehicleStub.VIN))
+        .build();
+
+    when(vehicleVinDecodeService.decode(eq(requestObject), anyString())).thenReturn(response);
+
+    mockMvc
+        .perform(post("/api/vehicles" + APIVersion.V20260509 + "/vin/decode")
+            .with(csrf())
+            .content(request)
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.vin").value(VehicleStub.VIN))
+        .andExpect(jsonPath("$.payload.make").value(VehicleStub.MAKE))
+        .andExpect(jsonPath("$.payload.model").value(VehicleStub.MODEL))
+        .andExpect(jsonPath("$.payload.year").value(VehicleStub.YEAR))
+        .andExpect(jsonPath("$.payload.body").value("Coupe"))
+        .andExpect(jsonPath("$.payload.plantCity").value("MARYSVILLE"));
+
+    verify(vehicleVinDecodeService).decode(eq(requestObject), eq("account:user"));
   }
 
   @Test

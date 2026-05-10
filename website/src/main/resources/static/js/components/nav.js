@@ -132,6 +132,7 @@ class AppNav extends HTMLElement {
             <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                 <li class="nav-item"><a href="/void" class="nav-link">Void</a></li>
                 <li class="nav-item"><a href="/wfl" class="nav-link">What's For Lunch</a></li>
+                <li class="nav-item"><a href="/vin-decoder" class="nav-link">VIN Decoder</a></li>
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
                 ${!isAuthenticated ? `

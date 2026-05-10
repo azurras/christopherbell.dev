@@ -8,13 +8,17 @@ import dev.christopherbell.vehicle.model.VehicleDataCollectionState;
 import dev.christopherbell.vehicle.model.VehicleDetail;
 import dev.christopherbell.vehicle.model.VehicleUpdateRequest;
 import dev.christopherbell.vehicle.model.VehicleVinBatchRequest;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeRequest;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeResponse;
 import dev.christopherbell.vehicle.model.VehicleVinRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -32,6 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class VehicleController {
   private final VehicleDataCollectionStateService vehicleDataCollectionStateService;
+  private final VehicleVinDecodeService vehicleVinDecodeService;
   private final VehicleService vehicleService;
 
   /**
@@ -80,6 +85,46 @@ public class VehicleController {
             .success(true)
             .build(),
         HttpStatus.CREATED);
+  }
+
+  /**
+   * Decodes a VIN through NHTSA without creating or updating a stored vehicle.
+   *
+   * @param request the VIN decode request body
+   * @return the decoded VIN response
+   * @throws Exception when decoding fails
+   */
+  @PostMapping(
+      value = V20260509 + "/vin/decode",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  public ResponseEntity<Response<VehicleVinDecodeResponse>> decodeVin(
+      @RequestBody VehicleVinDecodeRequest request,
+      HttpServletRequest servletRequest
+  ) throws Exception {
+    return new ResponseEntity<>(
+        Response.<VehicleVinDecodeResponse>builder()
+            .payload(vehicleVinDecodeService.decode(request, clientKey(servletRequest)))
+            .success(true)
+            .build(),
+        HttpStatus.OK);
+  }
+
+  private String clientKey(HttpServletRequest request) {
+    var authentication = SecurityContextHolder.getContext().getAuthentication();
+    if (authentication != null
+        && authentication.isAuthenticated()
+        && authentication.getName() != null
+        && !"anonymousUser".equals(authentication.getName())) {
+      return "account:" + authentication.getName();
+    }
+
+    var forwardedFor = request.getHeader("X-Forwarded-For");
+    if (forwardedFor != null && !forwardedFor.isBlank()) {
+      return "ip:" + forwardedFor.split(",")[0].trim();
+    }
+    return "ip:" + request.getRemoteAddr();
   }
 
   /**
