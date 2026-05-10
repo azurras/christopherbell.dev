@@ -354,22 +354,225 @@ body {
 }
 
 .home {
-    padding: 3rem 0 4rem;
+    background: #f4f0e8;
+    color: #17202a;
+    min-height: calc(100vh - 56px);
+}
+
+.home-hero {
+    min-height: min(72vh, 720px);
+    display: flex;
+    align-items: center;
+    position: relative;
+    background:
+        linear-gradient(90deg, rgba(13, 18, 24, 0.82) 0%, rgba(13, 18, 24, 0.58) 48%, rgba(13, 18, 24, 0.22) 100%),
+        url("/images/photos/IMG_0691.jpeg") center 38% / cover no-repeat;
+    color: #ffffff;
+    isolation: isolate;
+}
+
+.home-hero::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0;
+    height: 7rem;
+    background: linear-gradient(180deg, rgba(244, 240, 232, 0), #f4f0e8);
+    z-index: 1;
+    pointer-events: none;
+}
+
+.home-hero-inner {
+    position: relative;
+    z-index: 2;
+    padding: clamp(4rem, 8vw, 7rem) 1rem clamp(5rem, 9vw, 8rem);
 }
 
 .home-kicker {
-    letter-spacing: 0.4em;
+    letter-spacing: 0.28em;
     text-transform: uppercase;
     font-size: 0.75rem;
-    color: #6c757d;
-    margin-bottom: 0.5rem;
+    font-weight: 700;
+    color: #e7c766;
+    margin-bottom: 0.75rem;
+}
+
+.home-hero h1 {
+    max-width: 760px;
+    font-size: clamp(2.8rem, 7vw, 6.4rem);
+    line-height: 0.95;
+    font-weight: 800;
+    margin-bottom: 1.25rem;
+}
+
+.home-intro {
+    max-width: 620px;
+    color: rgba(255, 255, 255, 0.88);
+    font-size: clamp(1.1rem, 2vw, 1.35rem);
+    line-height: 1.5;
+    margin-bottom: 2rem;
+}
+
+.home-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.home-actions .btn {
+    border-radius: 0.35rem;
+    font-weight: 700;
+    padding-inline: 1.35rem;
+}
+
+.home-destinations {
+    padding: 2.75rem 0 4.5rem;
+}
+
+.home-section-heading {
+    max-width: 760px;
+    margin-bottom: 1.25rem;
+}
+
+.home-section-heading .home-kicker {
+    color: #90601f;
+}
+
+.home-section-heading h2 {
+    font-size: clamp(2rem, 4vw, 3.6rem);
+    line-height: 1;
+    font-weight: 800;
+    margin: 0;
 }
 
 .home-links {
-    display: flex;
-    justify-content: center;
-    margin-top: 2rem;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
     width: 100%;
+}
+
+.home-tile {
+    min-height: 210px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-content: end;
+    gap: 1rem;
+    padding: clamp(1.1rem, 2.5vw, 1.55rem);
+    border: 1px solid rgba(23, 32, 42, 0.12);
+    border-radius: 0.5rem;
+    color: #17202a;
+    background: #ffffff;
+    box-shadow: 0 16px 44px rgba(23, 32, 42, 0.12);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.home-tile:hover,
+.home-tile:focus-visible {
+    color: #17202a;
+    border-color: rgba(23, 32, 42, 0.28);
+    box-shadow: 0 22px 58px rgba(23, 32, 42, 0.18);
+    transform: translateY(-4px);
+}
+
+.home-tile-icon,
+.home-tile-arrow {
+    width: 2.65rem;
+    height: 2.65rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.35rem;
+}
+
+.home-tile-icon {
+    color: #ffffff;
+    font-size: 1.25rem;
+}
+
+.home-tile-arrow {
+    align-self: end;
+    color: rgba(23, 32, 42, 0.65);
+    background: rgba(23, 32, 42, 0.06);
+}
+
+.home-tile-content {
+    min-width: 0;
+}
+
+.home-tile-title,
+.home-tile-text {
+    display: block;
+}
+
+.home-tile-title {
+    font-size: clamp(1.25rem, 2.4vw, 1.75rem);
+    line-height: 1.05;
+    font-weight: 800;
+    margin-bottom: 0.55rem;
+}
+
+.home-tile-text {
+    color: #46515f;
+    line-height: 1.45;
+}
+
+.home-tile-void {
+    background: #fffdf8;
+}
+
+.home-tile-void .home-tile-icon {
+    background: #253a5c;
+}
+
+.home-tile-lunch {
+    background: #f7fbf5;
+}
+
+.home-tile-lunch .home-tile-icon {
+    background: #4f7d4d;
+}
+
+.home-tile-vin {
+    background: #f9f7ff;
+}
+
+.home-tile-vin .home-tile-icon {
+    background: #7a405f;
+}
+
+@media (max-width: 992px) {
+    .home-links {
+        grid-template-columns: 1fr;
+    }
+
+    .home-tile {
+        min-height: 160px;
+    }
+}
+
+@media (max-width: 576px) {
+    .home-hero {
+        min-height: 68vh;
+        background:
+            linear-gradient(180deg, rgba(13, 18, 24, 0.86) 0%, rgba(13, 18, 24, 0.58) 100%),
+            url("/images/photos/IMG_0691.jpeg") center center / cover no-repeat;
+    }
+
+    .home-hero-inner {
+        padding-top: 3.5rem;
+    }
+
+    .home-actions .btn {
+        width: 100%;
+    }
+
+    .home-tile {
+        grid-template-columns: auto 1fr;
+    }
+
+    .home-tile-arrow {
+        display: none;
+    }
 }
 
 .fa-2 {

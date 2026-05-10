@@ -22,43 +22,54 @@
 <body>
     <div id="nav"></div>
     <main role="main" class="home">
-        <div class="container home-container">
-            <header class="home-header text-center">
+        <section class="home-hero" aria-labelledby="homeTitle">
+            <div class="container home-hero-inner">
                 <p class="home-kicker">christopherbell.dev</p>
-                <h1 class="display-4">Home</h1>
-                <p class="lead">Choose a path.</p>
-            </header>
-            <div class="home-links">
-                <div class="container-fluid px-0">
-                    <div class="row g-4">
-                        <div class="col-12 col-md-4">
-                            <a href="/void" class="card text-decoration-none h-100">
-                                <div class="card-body text-center">
-                                    <h3 class="card-title h4 mb-2">Void</h3>
-                                    <p class="card-text text-muted mb-0">Micro posts</p>
-                                </div>
-                            </a>
-                        </div>
-                        <div class="col-12 col-md-4">
-                            <a href="/wfl" class="card text-decoration-none h-100">
-                                <div class="card-body text-center">
-                                    <h3 class="card-title h4 mb-2">What's For Lunch</h3>
-                                    <p class="card-text text-muted mb-0">Restaurants & picks</p>
-                                </div>
-                            </a>
-                        </div>
-                        <div class="col-12 col-md-4">
-                            <a href="/vin-decoder" class="card text-decoration-none h-100">
-                                <div class="card-body text-center">
-                                    <h3 class="card-title h4 mb-2">VIN Decoder</h3>
-                                    <p class="card-text text-muted mb-0">NHTSA wrapper</p>
-                                </div>
-                            </a>
-                        </div>
-                    </div>
+                <h1 id="homeTitle">Small tools, loud opinions, useful detours.</h1>
+                <p class="home-intro">
+                    A working corner of the internet for posts, lunch picks, and practical utilities.
+                </p>
+                <div class="home-actions" aria-label="Primary destinations">
+                    <a href="/void" class="btn btn-light btn-lg">Enter the Void</a>
+                    <a href="/vin-decoder" class="btn btn-outline-light btn-lg">Decode a VIN</a>
                 </div>
             </div>
-        </div>
+        </section>
+
+        <section class="home-destinations" aria-label="Site sections">
+            <div class="container">
+                <div class="home-section-heading">
+                    <p class="home-kicker mb-2">Pick a lane</p>
+                    <h2>Built for quick detours.</h2>
+                </div>
+                <div class="home-links">
+                    <a href="/void" class="home-tile home-tile-void text-decoration-none">
+                        <span class="home-tile-icon" aria-hidden="true"><i class="fa fa-commenting-o"></i></span>
+                        <span class="home-tile-content">
+                            <span class="home-tile-title">Void</span>
+                            <span class="home-tile-text">Micro posts, replies, likes, and the live feed.</span>
+                        </span>
+                        <span class="home-tile-arrow" aria-hidden="true"><i class="fa fa-arrow-right"></i></span>
+                    </a>
+                    <a href="/wfl" class="home-tile home-tile-lunch text-decoration-none">
+                        <span class="home-tile-icon" aria-hidden="true"><i class="fa fa-cutlery"></i></span>
+                        <span class="home-tile-content">
+                            <span class="home-tile-title">What's For Lunch</span>
+                            <span class="home-tile-text">Restaurant ideas and picks when nobody wants to decide.</span>
+                        </span>
+                        <span class="home-tile-arrow" aria-hidden="true"><i class="fa fa-arrow-right"></i></span>
+                    </a>
+                    <a href="/vin-decoder" class="home-tile home-tile-vin text-decoration-none">
+                        <span class="home-tile-icon" aria-hidden="true"><i class="fa fa-car"></i></span>
+                        <span class="home-tile-content">
+                            <span class="home-tile-title">VIN Decoder</span>
+                            <span class="home-tile-text">Paste a VIN and get a clean NHTSA-backed decode.</span>
+                        </span>
+                        <span class="home-tile-arrow" aria-hidden="true"><i class="fa fa-arrow-right"></i></span>
+                    </a>
+                </div>
+            </div>
+        </section>
     </main>
     <footer id="footer"></footer>
 </body>
