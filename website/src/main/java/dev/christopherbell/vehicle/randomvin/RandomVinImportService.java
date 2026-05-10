@@ -3,19 +3,18 @@ package dev.christopherbell.vehicle.randomvin;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.vehicle.VehicleRepository;
 import dev.christopherbell.vehicle.model.Vehicle;
+import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinRobotsPolicyState;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -27,19 +26,14 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class RandomVinImportService {
-  private static final Duration RANDOM_VIN_COOLDOWN = Duration.ofHours(24);
-  private static final int MAX_RANDOM_VIN_CALLS_PER_DAY = 50;
-  private static final String IMPORT_STATE_ID = "randomvin";
-  private static final String IMPORT_STATE_NOTE = "VIN data sourced from randomvin.com";
   private static final Pattern VIN_PATTERN = Pattern.compile("^[A-HJ-NPR-Z0-9]{17}$");
-  private static final String LEGACY_IMPORT_NOTE = "Imported from randomvin.com";
 
   private final RandomVinClient randomVinClient;
   private final RandomVinImportStateRepository randomVinImportStateRepository;
   private final RandomVinRobotsPolicy randomVinRobotsPolicy;
   private final VehicleRepository vehicleRepository;
   private final Clock clock;
-  private final boolean randomVinCollectionEnabled;
+  private final VehicleProperties.RandomVin properties;
 
   /**
    * Creates a RandomVIN import service with its outbound client, state repository, robots policy,
@@ -50,7 +44,7 @@ public class RandomVinImportService {
    * @param randomVinRobotsPolicy the policy checker used to evaluate RandomVIN robots.txt
    * @param vehicleRepository the repository used to persist imported VINs
    * @param clock the clock used for deterministic timestamps
-   * @param randomVinCollectionEnabled whether scheduled RandomVIN collection is enabled
+   * @param vehicleProperties vehicle data collection configuration
    */
   public RandomVinImportService(
       RandomVinClient randomVinClient,
@@ -58,14 +52,14 @@ public class RandomVinImportService {
       RandomVinRobotsPolicy randomVinRobotsPolicy,
       VehicleRepository vehicleRepository,
       Clock clock,
-      @Value("${vehicles.random-vin.enabled:true}") boolean randomVinCollectionEnabled
+      VehicleProperties vehicleProperties
   ) {
     this.randomVinClient = randomVinClient;
     this.randomVinImportStateRepository = randomVinImportStateRepository;
     this.randomVinRobotsPolicy = randomVinRobotsPolicy;
     this.vehicleRepository = vehicleRepository;
     this.clock = clock;
-    this.randomVinCollectionEnabled = randomVinCollectionEnabled;
+    this.properties = vehicleProperties.getRandomVin();
   }
 
   /**
@@ -73,7 +67,7 @@ public class RandomVinImportService {
    */
   @PostConstruct
   public void removeLegacyRandomVinNotes() {
-    vehicleRepository.findByNotes(LEGACY_IMPORT_NOTE).forEach(vehicle -> {
+    vehicleRepository.findByNotes(properties.getLegacyImportNote()).forEach(vehicle -> {
       vehicle.setNotes(null);
       vehicleRepository.save(vehicle);
     });
@@ -82,11 +76,11 @@ public class RandomVinImportService {
   /**
    * Runs one scheduled RandomVIN import attempt when collection is enabled and policy guards pass.
    */
-  @Scheduled(fixedDelayString = "${vehicles.random-vin.fixed-delay:600000}")
+  @Scheduled(fixedDelayString = "${vehicles.random-vin.fixed-delay}")
   public void importRandomVin() {
     log.info("RandomVIN import job started.");
     try {
-      if (!randomVinCollectionEnabled) {
+      if (!properties.isEnabled()) {
         log.debug("RandomVIN collection is disabled.");
         return;
       }
@@ -158,14 +152,14 @@ public class RandomVinImportService {
    */
   private RandomVinImportState currentState() {
     var today = LocalDate.now(clock);
-    var state = randomVinImportStateRepository.findById(IMPORT_STATE_ID)
+    var state = randomVinImportStateRepository.findById(properties.getStateId())
         .orElseGet(() -> RandomVinImportState.builder()
-            .id(IMPORT_STATE_ID)
+            .id(properties.getStateId())
             .callsOnDate(today)
             .callsToday(0)
             .lifetimeCalls(0L)
             .lifetimeVinsProcessed(0L)
-            .notes(IMPORT_STATE_NOTE)
+            .notes(properties.getStateNote())
             .vinsProcessedToday(0)
             .build());
 
@@ -174,7 +168,7 @@ public class RandomVinImportService {
       state.setCallsToday(0);
       state.setVinsProcessedToday(0);
     }
-    state.setNotes(IMPORT_STATE_NOTE);
+    state.setNotes(properties.getStateNote());
 
     return state;
   }
@@ -206,7 +200,7 @@ public class RandomVinImportService {
    * @return true when no more RandomVIN calls should be made today
    */
   private boolean hasReachedDailyCap(RandomVinImportState state) {
-    return Optional.ofNullable(state.getCallsToday()).orElse(0) >= MAX_RANDOM_VIN_CALLS_PER_DAY;
+    return Optional.ofNullable(state.getCallsToday()).orElse(0) >= properties.getMaxCallsPerDay();
   }
 
   /**
@@ -219,7 +213,7 @@ public class RandomVinImportService {
     state.setCallsToday(Optional.ofNullable(state.getCallsToday()).orElse(0) + 1);
     state.setLifetimeCalls(Optional.ofNullable(state.getLifetimeCalls()).orElse(0L) + 1);
     state.setCallsOnDate(LocalDate.now(clock));
-    state.setNotes(IMPORT_STATE_NOTE);
+    state.setNotes(properties.getStateNote());
     randomVinImportStateRepository.save(state);
   }
 
@@ -236,7 +230,7 @@ public class RandomVinImportService {
         .reason(result.reason())
         .failClosed(result.failClosed())
         .build());
-    state.setNotes(IMPORT_STATE_NOTE);
+    state.setNotes(properties.getStateNote());
     randomVinImportStateRepository.save(state);
   }
 
@@ -250,7 +244,7 @@ public class RandomVinImportService {
     state.setVinsProcessedToday(Optional.ofNullable(state.getVinsProcessedToday()).orElse(0) + vinsProcessed);
     state.setLifetimeVinsProcessed(
         Optional.ofNullable(state.getLifetimeVinsProcessed()).orElse(0L) + vinsProcessed);
-    state.setNotes(IMPORT_STATE_NOTE);
+    state.setNotes(properties.getStateNote());
     randomVinImportStateRepository.save(state);
   }
 
@@ -264,13 +258,13 @@ public class RandomVinImportService {
     var now = Instant.now(clock);
     state.setLastFailureOn(now);
     state.setLastFailureStatus(e.getStatusCode());
-    state.setNotes(IMPORT_STATE_NOTE);
+    state.setNotes(properties.getStateNote());
     if (e.getStatusCode() == 403) {
       state.setForbiddenOn(now);
       state.setPermanentlyDisabled(true);
       state.setDisabledUntil(null);
     } else if (e.getStatusCode() == 429) {
-      state.setDisabledUntil(now.plus(RANDOM_VIN_COOLDOWN));
+      state.setDisabledUntil(now.plus(properties.getCooldown()));
     }
     randomVinImportStateRepository.save(state);
     log.warn("RandomVIN import failed with HTTP status {}.", e.getStatusCode());

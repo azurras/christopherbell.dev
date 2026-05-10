@@ -25,4 +25,9 @@ export const API = {
     like: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}/like`,
     thread: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}/thread`,
   },
+  notifications: {
+    base: '/api/notifications/2025-09-14',
+    unreadCount: '/api/notifications/2025-09-14/unread-count',
+    markRead: (id) => `/api/notifications/2025-09-14/${encodeURIComponent(id)}/read`,
+  },
 };

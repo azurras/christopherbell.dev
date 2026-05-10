@@ -1,3 +1,32 @@
+const MENTION_RE = /(^|[^A-Za-z0-9._-])@([A-Za-z0-9._-]{3,32})/g;
+
+function appendTextWithMentionLinks(container, text) {
+  container.textContent = '';
+  const value = text || '';
+  let lastIndex = 0;
+  let match;
+  MENTION_RE.lastIndex = 0;
+  while ((match = MENTION_RE.exec(value)) !== null) {
+    const prefix = match[1] || '';
+    const username = match[2] || '';
+    const mentionStart = match.index + prefix.length;
+    if (mentionStart > lastIndex) {
+      container.appendChild(document.createTextNode(value.slice(lastIndex, mentionStart)));
+    }
+
+    const link = document.createElement('a');
+    link.href = `/u/${encodeURIComponent(username)}`;
+    link.className = 'link-underline link-underline-opacity-0 mention-link';
+    link.textContent = `@${username}`;
+    container.appendChild(link);
+    lastIndex = mentionStart + username.length + 1;
+  }
+
+  if (lastIndex < value.length) {
+    container.appendChild(document.createTextNode(value.slice(lastIndex)));
+  }
+}
+
 /**
  * Create a DOM element representing a post in a feed.
  *
@@ -47,7 +76,7 @@ export function createFeedItem(post, ctx) {
         </div>
       </div>
     </div>
-    <p class="post-text"><a href="/p/${encodeURIComponent(post.id)}" class="post-link text-body post-body">${s(post.text)}</a></p>
+    <p class="post-text post-body"></p>
     ${post.level && post.level > 0 && post.parentId && !ctx.suppressParentContext ? `<div class="parent-context card mt-2 w-100">
         <div class="card-body py-2">
           <div class="fw-semibold"><a href="/u/" class="link-underline link-underline-opacity-0" data-parent-handle="${post.parentId}">@user</a></div>
@@ -79,6 +108,9 @@ export function createFeedItem(post, ctx) {
     </div>
     <div class="replies d-none"></div>
   `;
+
+  const body = item.querySelector('.post-text');
+  if (body) appendTextWithMentionLinks(body, post.text);
 
   // Make the whole item (except action bar and existing links/buttons) navigate to the post
   item.addEventListener('click', (e) => {
@@ -166,9 +198,11 @@ export function createFeedItem(post, ctx) {
             <div class="d-flex">
               <div class="flex-grow-1">
                 <div class="small text-muted"><span class="fw-semibold">${who}</span> · ${whenStr}</div>
-                <div class="post-body">${s(text)}</div>
+                <div class="post-body"></div>
               </div>
             </div>`;
+          const replyBody = row.querySelector('.post-body');
+          if (replyBody) appendTextWithMentionLinks(replyBody, text);
           replies.appendChild(row);
         }
         // Quick inline toast
@@ -213,9 +247,11 @@ export function createFeedItem(post, ctx) {
                   <div class="d-flex">
                     <div class="flex-grow-1">
                       <div class="small text-muted"><a href="/u/${encodeURIComponent(r.username || '')}" class="link-underline link-underline-opacity-0 fw-semibold">@${s(r.username || 'user')}</a> · ${ctx.formatWhen(r.createdOn || r.lastUpdatedOn)}</div>
-                      <div><a href="/p/${encodeURIComponent(r.id)}" class="link-underline link-underline-opacity-0 text-body post-body">${s(r.text || '')}</a></div>
+                      <div class="post-body"></div>
                     </div>
                   </div>`;
+                const replyBody = row.querySelector('.post-body');
+                if (replyBody) appendTextWithMentionLinks(replyBody, r.text || '');
                 replies.appendChild(row);
               }
               // View full thread link

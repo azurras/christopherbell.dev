@@ -4,10 +4,10 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.vehicle.VehicleRepository;
 import dev.christopherbell.vehicle.nhtsa.NhtsaVinClient.NhtsaVinDecodeRequest;
 import dev.christopherbell.vehicle.model.Vehicle;
+import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
 import java.io.IOException;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.HashMap;
@@ -26,14 +26,10 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class NhtsaVinEnrichmentService {
-  private static final Duration NHTSA_COOLDOWN = Duration.ofHours(24);
-  private static final int NHTSA_BATCH_SIZE = 50;
-  private static final String IMPORT_STATE_ID = "nhtsa";
-  private static final String IMPORT_STATE_NOTE = "VIN enrichment data sourced from NHTSA vPIC";
-
   private final Clock clock;
   private final NhtsaVinClient nhtsaVinClient;
   private final NhtsaVinImportStateRepository nhtsaVinImportStateRepository;
+  private final VehicleProperties.NhtsaVin properties;
   private final VehicleRepository vehicleRepository;
 
   /**
@@ -42,24 +38,27 @@ public class NhtsaVinEnrichmentService {
    * @param clock the clock used for deterministic timestamps
    * @param nhtsaVinClient the client used to decode VIN batches
    * @param nhtsaVinImportStateRepository the repository used to persist NHTSA import state
+   * @param vehicleProperties vehicle data collection configuration
    * @param vehicleRepository the repository used to read and update vehicles
    */
   public NhtsaVinEnrichmentService(
       Clock clock,
       NhtsaVinClient nhtsaVinClient,
       NhtsaVinImportStateRepository nhtsaVinImportStateRepository,
+      VehicleProperties vehicleProperties,
       VehicleRepository vehicleRepository
   ) {
     this.clock = clock;
     this.nhtsaVinClient = nhtsaVinClient;
     this.nhtsaVinImportStateRepository = nhtsaVinImportStateRepository;
+    this.properties = vehicleProperties.getNhtsaVin();
     this.vehicleRepository = vehicleRepository;
   }
 
   /**
    * Enriches all stored VINs that have not already been decoded by NHTSA.
    */
-  @Scheduled(fixedDelayString = "${vehicles.nhtsa-vin.fixed-delay:3600000}")
+  @Scheduled(fixedDelayString = "${vehicles.nhtsa-vin.fixed-delay}")
   public void enrichStoredVins() {
     log.info("NHTSA VIN enrichment job started.");
     try {
@@ -156,14 +155,14 @@ public class NhtsaVinEnrichmentService {
    */
   private NhtsaVinImportState currentState() {
     var today = LocalDate.now(clock);
-    var state = nhtsaVinImportStateRepository.findById(IMPORT_STATE_ID)
+    var state = nhtsaVinImportStateRepository.findById(properties.getStateId())
         .orElseGet(() -> NhtsaVinImportState.builder()
-            .id(IMPORT_STATE_ID)
+            .id(properties.getStateId())
             .callsOnDate(today)
             .callsToday(0)
             .lifetimeCalls(0L)
             .lifetimeVinsProcessed(0L)
-            .notes(IMPORT_STATE_NOTE)
+            .notes(properties.getStateNote())
             .vinsProcessedToday(0)
             .build());
 
@@ -172,7 +171,7 @@ public class NhtsaVinEnrichmentService {
       state.setCallsToday(0);
       state.setVinsProcessedToday(0);
     }
-    state.setNotes(IMPORT_STATE_NOTE);
+    state.setNotes(properties.getStateNote());
     return state;
   }
 
@@ -210,7 +209,7 @@ public class NhtsaVinEnrichmentService {
     state.setLifetimeVinsProcessed(
         Optional.ofNullable(state.getLifetimeVinsProcessed()).orElse(0L) + vinsProcessed);
     state.setCallsOnDate(LocalDate.now(clock));
-    state.setNotes(IMPORT_STATE_NOTE);
+    state.setNotes(properties.getStateNote());
     nhtsaVinImportStateRepository.save(state);
   }
 
@@ -224,13 +223,13 @@ public class NhtsaVinEnrichmentService {
     var now = Instant.now(clock);
     state.setLastFailureOn(now);
     state.setLastFailureStatus(e.getStatusCode());
-    state.setNotes(IMPORT_STATE_NOTE);
+    state.setNotes(properties.getStateNote());
     if (e.getStatusCode() == 403) {
       state.setForbiddenOn(now);
       state.setPermanentlyDisabled(true);
       state.setDisabledUntil(null);
     } else if (e.getStatusCode() == 429) {
-      state.setDisabledUntil(now.plus(NHTSA_COOLDOWN));
+      state.setDisabledUntil(now.plus(properties.getCooldown()));
     }
     nhtsaVinImportStateRepository.save(state);
     log.warn("NHTSA batch enrichment failed with HTTP status {}.", e.getStatusCode());
@@ -240,11 +239,12 @@ public class NhtsaVinEnrichmentService {
    * Splits vehicles into NHTSA-supported batch sizes.
    *
    * @param vehicles the vehicles due for enrichment
-   * @return vehicle batches with at most {@value #NHTSA_BATCH_SIZE} entries each
+   * @return vehicle batches with at most the configured batch size entries each
    */
   private List<List<Vehicle>> batches(List<Vehicle> vehicles) {
-    return IntStream.iterate(0, start -> start < vehicles.size(), start -> start + NHTSA_BATCH_SIZE)
-        .mapToObj(start -> vehicles.subList(start, Math.min(start + NHTSA_BATCH_SIZE, vehicles.size())))
+    var batchSize = Math.max(1, properties.getBatchSize());
+    return IntStream.iterate(0, start -> start < vehicles.size(), start -> start + batchSize)
+        .mapToObj(start -> vehicles.subList(start, Math.min(start + batchSize, vehicles.size())))
         .toList();
   }
 

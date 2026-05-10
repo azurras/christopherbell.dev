@@ -12,9 +12,11 @@ import static org.mockito.Mockito.when;
 
 import dev.christopherbell.vehicle.VehicleRepository;
 import dev.christopherbell.vehicle.VehicleStub;
+import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
 import java.io.IOException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -24,7 +26,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
@@ -51,7 +52,7 @@ public class RandomVinImportServiceTest {
         randomVinRobotsPolicy,
         vehicleRepository,
         Clock.fixed(IMPORTED_ON, ZoneOffset.UTC),
-        true
+        vehicleProperties(true)
     );
   }
 
@@ -64,7 +65,7 @@ public class RandomVinImportServiceTest {
         randomVinRobotsPolicy,
         vehicleRepository,
         Clock.fixed(IMPORTED_ON, ZoneOffset.UTC),
-        false
+        vehicleProperties(false)
     );
 
     randomVinImportService.importRandomVin();
@@ -319,6 +320,17 @@ public class RandomVinImportServiceTest {
 
   private void givenNoImportState() {
     when(randomVinImportStateRepository.findById(eq("randomvin"))).thenReturn(Optional.empty());
+  }
+
+  private VehicleProperties vehicleProperties(boolean randomVinEnabled) {
+    var properties = new VehicleProperties();
+    properties.getRandomVin().setEnabled(randomVinEnabled);
+    properties.getRandomVin().setCooldown(Duration.ofHours(24));
+    properties.getRandomVin().setLegacyImportNote("Imported from randomvin.com");
+    properties.getRandomVin().setMaxCallsPerDay(50);
+    properties.getRandomVin().setStateId("randomvin");
+    properties.getRandomVin().setStateNote("VIN data sourced from randomvin.com");
+    return properties;
   }
 
   private void givenRobotsAllowed() throws IOException, InterruptedException {

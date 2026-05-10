@@ -1,12 +1,11 @@
 package dev.christopherbell.vehicle.randomvin;
 
+import dev.christopherbell.vehicle.model.VehicleProperties;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.Duration;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -15,20 +14,22 @@ import org.springframework.stereotype.Component;
 @Component
 public class RandomVinClient {
   private final HttpClient httpClient;
+  private final VehicleProperties.RandomVin properties;
   private final URI randomVinUri;
 
   /**
    * Creates a RandomVIN client for the configured VIN endpoint.
    *
-   * @param randomVinUrl the URL that returns a generated VIN
+   * @param vehicleProperties vehicle data collection configuration
    */
   public RandomVinClient(
-      @Value("${vehicles.random-vin.url:https://randomvin.com/getvin.php?type=real}") String randomVinUrl
+      VehicleProperties vehicleProperties
   ) {
+    this.properties = vehicleProperties.getRandomVin();
     this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
+        .connectTimeout(properties.getConnectTimeout())
         .build();
-    this.randomVinUri = URI.create(randomVinUrl);
+    this.randomVinUri = URI.create(properties.getUrl());
   }
 
   /**
@@ -42,7 +43,7 @@ public class RandomVinClient {
   public String getVin() throws IOException, InterruptedException, RandomVinClientException {
     var request = HttpRequest.newBuilder(randomVinUri)
         .GET()
-        .timeout(Duration.ofSeconds(15))
+        .timeout(properties.getRequestTimeout())
         .header("Accept", "text/plain,text/html")
         .build();
 

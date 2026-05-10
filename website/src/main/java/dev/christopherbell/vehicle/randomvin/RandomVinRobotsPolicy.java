@@ -1,5 +1,6 @@
 package dev.christopherbell.vehicle.randomvin;
 
+import dev.christopherbell.vehicle.model.VehicleProperties;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -10,7 +11,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -18,31 +18,30 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class RandomVinRobotsPolicy {
-  private static final boolean FAIL_CLOSED = true;
-
+  private final boolean failClosed;
   private final HttpClient httpClient;
   private final String robotsUrl;
+  private final Duration requestTimeout;
   private final String targetPath;
   private final String userAgent;
 
   /**
    * Creates a RandomVIN robots.txt policy checker.
    *
-   * @param robotsUrl the RandomVIN robots.txt URL
-   * @param targetPath the RandomVIN path that the importer wants to call
-   * @param userAgent the user agent sent when reading robots.txt and matching user-agent groups
+   * @param vehicleProperties vehicle data collection configuration
    */
   public RandomVinRobotsPolicy(
-      @Value("${vehicles.random-vin.robots-url:https://randomvin.com/robots.txt}") String robotsUrl,
-      @Value("${vehicles.random-vin.path:/getvin.php}") String targetPath,
-      @Value("${vehicles.random-vin.user-agent:christopherbell.dev vehicle data collector}") String userAgent
+      VehicleProperties vehicleProperties
   ) {
+    var properties = vehicleProperties.getRandomVin();
+    this.failClosed = properties.isRobotsFailClosed();
     this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
+        .connectTimeout(properties.getConnectTimeout())
         .build();
-    this.robotsUrl = robotsUrl;
-    this.targetPath = targetPath;
-    this.userAgent = userAgent;
+    this.robotsUrl = properties.getRobotsUrl();
+    this.requestTimeout = properties.getRequestTimeout();
+    this.targetPath = properties.getPath();
+    this.userAgent = properties.getUserAgent();
   }
 
   /**
@@ -53,7 +52,7 @@ public class RandomVinRobotsPolicy {
   public Result evaluate() {
     var request = HttpRequest.newBuilder(URI.create(robotsUrl))
         .GET()
-        .timeout(Duration.ofSeconds(15))
+        .timeout(requestTimeout)
         .header("Accept", "text/plain")
         .header("User-Agent", userAgent)
         .build();
@@ -61,14 +60,14 @@ public class RandomVinRobotsPolicy {
     try {
       var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
-        return Result.denied("robots_fetch_status_" + response.statusCode());
+        return Result.denied("robots_fetch_status_" + response.statusCode(), failClosed);
       }
       return evaluate(response.body());
     } catch (IOException e) {
-      return Result.denied("robots_fetch_failed");
+      return Result.denied("robots_fetch_failed", failClosed);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return Result.denied("robots_fetch_interrupted");
+      return Result.denied("robots_fetch_interrupted", failClosed);
     }
   }
 
@@ -81,7 +80,7 @@ public class RandomVinRobotsPolicy {
   Result evaluate(String robotsText) {
     var groups = parseGroups(robotsText);
     if (groups.isEmpty()) {
-      return Result.allowed("no_user_agent_rules");
+      return Result.allowed("no_user_agent_rules", failClosed);
     }
 
     var applicableGroups = groups.stream()
@@ -89,7 +88,7 @@ public class RandomVinRobotsPolicy {
         .toList();
 
     if (applicableGroups.isEmpty()) {
-      return Result.allowed("no_applicable_user_agent");
+      return Result.allowed("no_applicable_user_agent", failClosed);
     }
 
     var specificGroups = applicableGroups.stream()
@@ -104,7 +103,7 @@ public class RandomVinRobotsPolicy {
         .toList();
 
     if (applicableRules.isEmpty()) {
-      return Result.allowed("no_matching_disallow");
+      return Result.allowed("no_matching_disallow", failClosed);
     }
 
     var longestRule = applicableRules.stream()
@@ -114,10 +113,10 @@ public class RandomVinRobotsPolicy {
         .orElseThrow();
 
     if (longestRule.allow) {
-      return Result.allowed("matching_allow");
+      return Result.allowed("matching_allow", failClosed);
     }
 
-    return Result.denied("matching_disallow");
+    return Result.denied("matching_disallow", failClosed);
   }
 
   /**
@@ -229,8 +228,8 @@ public class RandomVinRobotsPolicy {
      * @param reason the reason code for the allowed decision
      * @return an allowed policy result
      */
-    private static Result allowed(String reason) {
-      return new Result(true, reason, FAIL_CLOSED);
+    private static Result allowed(String reason, boolean failClosed) {
+      return new Result(true, reason, failClosed);
     }
 
     /**
@@ -239,8 +238,8 @@ public class RandomVinRobotsPolicy {
      * @param reason the reason code for the denied decision
      * @return a denied policy result
      */
-    private static Result denied(String reason) {
-      return new Result(false, reason, FAIL_CLOSED);
+    private static Result denied(String reason, boolean failClosed) {
+      return new Result(false, reason, failClosed);
     }
   }
 }
