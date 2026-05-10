@@ -13,9 +13,11 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.vehicle.VehicleRepository;
 import dev.christopherbell.vehicle.VehicleStub;
+import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.nhtsa.NhtsaVinClient.NhtsaVinDecodeRequest;
 import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.HashMap;
@@ -48,6 +50,7 @@ public class NhtsaVinEnrichmentServiceTest {
         Clock.fixed(DECODED_ON, ZoneOffset.UTC),
         nhtsaVinClient,
         nhtsaVinImportStateRepository,
+        vehicleProperties(),
         vehicleRepository
     );
   }
@@ -363,6 +366,15 @@ public class NhtsaVinEnrichmentServiceTest {
 
   private void givenNoNhtsaState() {
     when(nhtsaVinImportStateRepository.findById(eq("nhtsa"))).thenReturn(Optional.empty());
+  }
+
+  private VehicleProperties vehicleProperties() {
+    var properties = new VehicleProperties();
+    properties.getNhtsaVin().setBatchSize(50);
+    properties.getNhtsaVin().setCooldown(Duration.ofHours(24));
+    properties.getNhtsaVin().setStateId("nhtsa");
+    properties.getNhtsaVin().setStateNote("VIN enrichment data sourced from NHTSA vPIC");
+    return properties;
   }
 
   private NhtsaVinImportState emptyNhtsaState() {

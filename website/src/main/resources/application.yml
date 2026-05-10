@@ -9,6 +9,32 @@ logging:
 posts:
   expiration:
     enabled: false
+vehicles:
+  nhtsa-vin:
+    url: https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVINValuesBatch
+    fixed-delay: 3600000
+    connect-timeout: 10s
+    request-timeout: 20s
+    cooldown: 24h
+    batch-size: 50
+    max-batch-size: 50
+    state-id: nhtsa
+    state-note: VIN enrichment data sourced from NHTSA vPIC
+  random-vin:
+    enabled: false
+    url: https://randomvin.com/getvin.php?type=real
+    fixed-delay: 600000
+    robots-url: https://randomvin.com/robots.txt
+    path: /getvin.php
+    user-agent: vinner
+    connect-timeout: 10s
+    request-timeout: 15s
+    cooldown: 24h
+    max-calls-per-day: 50
+    robots-fail-closed: true
+    state-id: randomvin
+    state-note: VIN data sourced from randomvin.com
+    legacy-import-note: Imported from randomvin.com
 reports:
   to: report@christopherbell.dev
 blog-properties:

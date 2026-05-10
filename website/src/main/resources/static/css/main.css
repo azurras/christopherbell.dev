@@ -46,6 +46,113 @@ body {
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.15);
 }
 
+.nav-notifications {
+    position: relative;
+}
+
+.notification-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    background: transparent;
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    position: relative;
+}
+
+.notification-btn:hover,
+.notification-btn:focus-visible {
+    background-color: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.7);
+}
+
+.notification-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: #dc3545;
+    color: #ffffff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 18px;
+}
+
+.notification-panel {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    width: min(340px, calc(100vw - 2rem));
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 0.5rem;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.15);
+    z-index: 1050;
+    overflow: hidden;
+}
+
+.notification-panel-title {
+    padding: 0.75rem 1rem;
+    font-weight: 700;
+    color: #212529;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.notification-empty {
+    padding: 1rem;
+}
+
+.notification-item {
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid #e9ecef;
+    background: #ffffff;
+    color: #212529;
+    display: block;
+    padding: 0.75rem 1rem;
+    text-align: left;
+}
+
+.notification-item:last-child {
+    border-bottom: 0;
+}
+
+.notification-item:hover,
+.notification-item:focus-visible,
+.notification-item.unread {
+    background: #f8f9fa;
+}
+
+.notification-title,
+.notification-text,
+.notification-time {
+    display: block;
+}
+
+.notification-title {
+    font-weight: 700;
+}
+
+.notification-text {
+    color: #495057;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.notification-time {
+    color: #6c757d;
+    font-size: 0.8rem;
+    margin-top: 0.2rem;
+}
+
 .post-avatar {
     width: 44px;
     height: 44px;
@@ -130,6 +237,16 @@ body {
         position: static;
         margin-top: 0.5rem;
         min-width: 100%;
+    }
+
+    .nav-notifications {
+        position: static;
+    }
+
+    .notification-panel {
+        position: static;
+        width: 100%;
+        margin-top: 0.5rem;
     }
 }
 

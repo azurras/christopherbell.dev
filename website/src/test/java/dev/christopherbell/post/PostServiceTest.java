@@ -16,6 +16,7 @@ import dev.christopherbell.account.AccountServiceStub;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.notification.NotificationService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
@@ -40,6 +41,7 @@ public class PostServiceTest {
   @Mock private AccountRepository accountRepository;
   @Mock private PostMapper postMapper;
   @Mock private dev.christopherbell.permission.PermissionService permissionService;
+  @Mock private NotificationService notificationService;
   private PostService postService;
 
   @BeforeEach
@@ -49,6 +51,7 @@ public class PostServiceTest {
         accountRepository,
         postMapper,
         permissionService,
+        notificationService,
         true);
   }
 
@@ -76,8 +79,9 @@ public class PostServiceTest {
     assertEquals("p1", result.id());
     verify(accountRepository).findById(eq(existing.getId()));
     verify(postRepository).save(org.mockito.ArgumentMatchers.any(Post.class));
+    verify(notificationService).createMentionNotifications(eq(post), eq(existing));
     verify(postMapper).toDetail(eq(post));
-    verifyNoMoreInteractions(accountRepository, postRepository, postMapper);
+    verifyNoMoreInteractions(accountRepository, postRepository, postMapper, notificationService);
   }
 
   @Test

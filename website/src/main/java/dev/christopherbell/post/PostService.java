@@ -4,6 +4,7 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.notification.NotificationService;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostCreateRequest;
@@ -37,6 +38,7 @@ public class PostService {
   private final AccountRepository accountRepository;
   private final PostMapper postMapper;
   private final PermissionService permissionService;
+  private final NotificationService notificationService;
   private final boolean expirationEnabled;
 
   private static final int MAX_TEXT_LENGTH = 280;
@@ -48,11 +50,13 @@ public class PostService {
       AccountRepository accountRepository,
       PostMapper postMapper,
       PermissionService permissionService,
+      NotificationService notificationService,
       @Value("${posts.expiration.enabled:false}") boolean expirationEnabled) {
     this.postRepository = postRepository;
     this.accountRepository = accountRepository;
     this.postMapper = postMapper;
     this.permissionService = permissionService;
+    this.notificationService = notificationService;
     this.expirationEnabled = expirationEnabled;
   }
 
@@ -113,6 +117,7 @@ public class PostService {
         .build();
 
     var saved = postRepository.save(post);
+    notificationService.createMentionNotifications(saved, account);
     return postMapper.toDetail(saved);
   }
 

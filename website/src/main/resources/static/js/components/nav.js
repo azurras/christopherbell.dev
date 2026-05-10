@@ -6,21 +6,49 @@
  * is not present on the page.
  */
 import pubsub from './pubsub.js';
+import { API } from '../lib/api.js';
+import { authHeaders, fetchJson, formatWhen, sanitize } from '../lib/util.js';
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text || '';
+    return div.innerHTML;
+}
 
 class AppNav extends HTMLElement {
     /** Lifecycle hook: mount component and subscribe to auth changes. */
     connectedCallback() {
+        this.notifications = this.notifications || [];
+        this.unreadNotifications = this.unreadNotifications || 0;
         this.render();
         this.loadUserInfo();
+        this.loadNotifications();
+        if (!this.notificationPoll) {
+            this.notificationPoll = window.setInterval(() => this.loadNotifications(), 30000);
+        }
         pubsub.subscribe('auth:login', async () => {
             await this.loadUserInfo(true);
+            await this.loadNotifications();
             this.render();
         });
         pubsub.subscribe('auth:logout', () => {
             localStorage.removeItem('cbellUsername');
             localStorage.removeItem('cbellRole');
+            this.notifications = [];
+            this.unreadNotifications = 0;
             this.render();
         });
+    }
+
+    disconnectedCallback() {
+        if (this.notificationPoll) {
+            window.clearInterval(this.notificationPoll);
+            this.notificationPoll = null;
+        }
+        if (this.notificationOutsideClickHandler) {
+            document.removeEventListener('click', this.notificationOutsideClickHandler);
+            this.notificationOutsideClickHandler = null;
+        }
     }
 
     async loadUserInfo(force = false) {
@@ -48,6 +76,43 @@ class AppNav extends HTMLElement {
         }
     }
 
+    async loadNotifications() {
+        const token = localStorage.getItem('cbellLoginToken');
+        if (!token || this.notificationLoadInFlight) return;
+        this.notificationLoadInFlight = true;
+        try {
+            const [items, unread] = await Promise.all([
+                fetchJson(`${API.notifications.base}?limit=10`, { headers: authHeaders() }),
+                fetchJson(API.notifications.unreadCount, { headers: authHeaders() }),
+            ]);
+            this.notifications = Array.isArray(items) ? items : [];
+            this.unreadNotifications = Number(unread || 0);
+            this.render();
+        } catch (_) {
+            // Notifications are additive UI; keep the nav usable if loading fails.
+        } finally {
+            this.notificationLoadInFlight = false;
+        }
+    }
+
+    notificationItemsHtml() {
+        const notifications = this.notifications || [];
+        if (notifications.length === 0) {
+            return '<div class="notification-empty text-muted">No notifications</div>';
+        }
+        return notifications.map(notification => {
+            const unread = !notification.read;
+            const actor = notification.actorUsername ? `@${sanitize(notification.actorUsername)}` : 'Someone';
+            const text = escapeHtml(notification.postText || '');
+            return `
+                <button type="button" class="notification-item ${unread ? 'unread' : ''}" data-notification-id="${notification.id}" data-post-id="${notification.postId || ''}">
+                    <span class="notification-title">${actor} mentioned you</span>
+                    <span class="notification-text">${text}</span>
+                    <span class="notification-time">${formatWhen(notification.createdOn)}</span>
+                </button>`;
+        }).join('');
+    }
+
     /** Render the navbar markup based on authentication state. */
     render() {
         const isAuthenticated = !!localStorage.getItem('cbellLoginToken');
@@ -55,6 +120,7 @@ class AppNav extends HTMLElement {
         const initials = storedName ? storedName[0].toUpperCase() : 'C';
         const profileHref = isAuthenticated ? '/profile' : '/login';
         const isAdmin = (localStorage.getItem('cbellRole') || '') === 'ADMIN';
+        const unread = Number(this.unreadNotifications || 0);
         this.innerHTML = `
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container-fluid">
@@ -73,6 +139,18 @@ class AppNav extends HTMLElement {
                     <a href="/login" class="btn btn-outline-light me-2">Login</a>
                     <a href="/signup" class="btn btn-warning">Sign-up</a>
                 </div>` : `
+                <div class="nav-notifications">
+                    <button type="button" class="notification-btn" aria-haspopup="true" aria-expanded="false" aria-label="Notifications">
+                        <i class="fa fa-bell-o" aria-hidden="true"></i>
+                        ${unread > 0 ? `<span class="notification-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
+                    </button>
+                    <div class="notification-panel d-none">
+                        <div class="notification-panel-title">Notifications</div>
+                        <div class="notification-list">
+                            ${this.notificationItemsHtml()}
+                        </div>
+                    </div>
+                </div>
                 <div class="nav-profile dropdown">
                     <button type="button" class="avatar-btn" aria-haspopup="true" aria-expanded="false" data-bs-toggle="dropdown" data-bs-display="static">
                         <span class="avatar-initials">${initials}</span>
@@ -92,6 +170,47 @@ class AppNav extends HTMLElement {
             logoutBtn.addEventListener('click', () => {
                 pubsub.publish('auth:logout');
             });
+        }
+
+        const notificationBtn = this.querySelector('.notification-btn');
+        const notificationPanel = this.querySelector('.notification-panel');
+        if (this.notificationOutsideClickHandler) {
+            document.removeEventListener('click', this.notificationOutsideClickHandler);
+            this.notificationOutsideClickHandler = null;
+        }
+        if (notificationBtn && notificationPanel) {
+            notificationBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const isShown = !notificationPanel.classList.contains('d-none');
+                notificationPanel.classList.toggle('d-none', isShown);
+                notificationBtn.setAttribute('aria-expanded', String(!isShown));
+            });
+            this.querySelectorAll('.notification-item').forEach(item => {
+                item.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    const notificationId = item.getAttribute('data-notification-id');
+                    const postId = item.getAttribute('data-post-id');
+                    if (notificationId) {
+                        try {
+                            await fetchJson(API.notifications.markRead(notificationId), {
+                                method: 'POST',
+                                headers: authHeaders(),
+                            });
+                        } catch (_) {
+                            // Still allow navigation to the mentioned post.
+                        }
+                    }
+                    if (postId) window.location.href = `/p/${encodeURIComponent(postId)}`;
+                });
+            });
+            this.notificationOutsideClickHandler = (e) => {
+                if (!this.contains(e.target)) {
+                    notificationPanel.classList.add('d-none');
+                    notificationBtn.setAttribute('aria-expanded', 'false');
+                }
+            };
+            document.addEventListener('click', this.notificationOutsideClickHandler);
         }
 
         const avatarBtn = this.querySelector('.avatar-btn');

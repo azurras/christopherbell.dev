@@ -3,6 +3,7 @@ package dev.christopherbell.vehicle.nhtsa;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.vehicle.model.VehicleProperties;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -10,11 +11,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -27,22 +26,24 @@ public class NhtsaVinClient {
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
   private final String baseUrl;
+  private final VehicleProperties.NhtsaVin properties;
 
   /**
    * Creates an NHTSA VIN client for the configured vPIC batch endpoint.
    *
    * @param objectMapper the mapper used to parse NHTSA JSON responses
-   * @param baseUrl the NHTSA batch decode endpoint URL
+   * @param vehicleProperties vehicle data collection configuration
    */
   public NhtsaVinClient(
       ObjectMapper objectMapper,
-      @Value("${vehicles.nhtsa-vin.url:https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVINValuesBatch}") String baseUrl
+      VehicleProperties vehicleProperties
   ) {
+    this.properties = vehicleProperties.getNhtsaVin();
     this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
+        .connectTimeout(properties.getConnectTimeout())
         .build();
     this.objectMapper = objectMapper;
-    this.baseUrl = stripTrailingSlash(baseUrl);
+    this.baseUrl = stripTrailingSlash(properties.getUrl());
   }
 
   /**
@@ -76,14 +77,15 @@ public class NhtsaVinClient {
     if (vins == null || vins.isEmpty()) {
       throw new InvalidRequestException("VIN batch cannot be empty.");
     }
-    if (vins.size() > 50) {
-      throw new InvalidRequestException("VIN batch cannot contain more than 50 VINs.");
+    if (vins.size() > properties.getMaxBatchSize()) {
+      throw new InvalidRequestException(
+          String.format("VIN batch cannot contain more than %s VINs.", properties.getMaxBatchSize()));
     }
 
     var body = "format=json&data=" + URLEncoder.encode(batchData(vins), StandardCharsets.UTF_8);
     var request = HttpRequest.newBuilder(URI.create(baseUrl + "/"))
         .POST(HttpRequest.BodyPublishers.ofString(body))
-        .timeout(Duration.ofSeconds(20))
+        .timeout(properties.getRequestTimeout())
         .header("Accept", "application/json")
         .header("Content-Type", "application/x-www-form-urlencoded")
         .build();
