@@ -58,3 +58,6 @@ chmod +x gradlew
 
 ### Reporting
 Post reports are stored in the database and visible in Back Office for admins.
+
+### Reporting
+Post reports are stored in the database and visible in Back Office for admins.

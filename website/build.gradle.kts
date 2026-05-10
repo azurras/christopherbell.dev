@@ -6,8 +6,8 @@ plugins {
 
 dependencyManagement {
     dependencies {
-        dependency("net.bytebuddy:byte-buddy:1.17.7")
-        dependency("net.bytebuddy:byte-buddy-agent:1.17.7")
+        dependency("net.bytebuddy:byte-buddy:1.18.2")
+        dependency("net.bytebuddy:byte-buddy-agent:1.18.2")
     }
 }
 

@@ -1,0 +1,19 @@
+{
+  "vin": "1HGCM82633A004352",
+  "make": "Honda",
+  "model": "Accord",
+  "year": 2003,
+  "trim": "EX-L",
+  "color": "Silver",
+  "bodyStyle": "Sedan",
+  "fuelType": "Gasoline",
+  "transmission": "Automatic",
+  "drivetrain": "FWD",
+  "engine": "3.0L V6",
+  "licensePlate": "ABC123",
+  "licensePlateState": "IL",
+  "mileage": 126000,
+  "nickname": "Daily",
+  "notes": "Updated mileage",
+  "purchaseDate": "2020-06-15"
+}
