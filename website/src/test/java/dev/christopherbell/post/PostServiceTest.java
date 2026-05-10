@@ -24,14 +24,13 @@ import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -41,7 +40,17 @@ public class PostServiceTest {
   @Mock private AccountRepository accountRepository;
   @Mock private PostMapper postMapper;
   @Mock private dev.christopherbell.permission.PermissionService permissionService;
-  @InjectMocks private PostService postService;
+  private PostService postService;
+
+  @BeforeEach
+  void setUp() {
+    postService = new PostService(
+        postRepository,
+        accountRepository,
+        postMapper,
+        permissionService,
+        true);
+  }
 
   @Test
   @DisplayName("Create: valid -> saves and returns detail")
@@ -270,4 +279,3 @@ public class PostServiceTest {
     assertEquals("user2", result.get(1).username());
   }
 }
-
