@@ -9,8 +9,10 @@ logging:
 posts:
   expiration:
     enabled: false
+    cleanup-interval: 600000
 vehicles:
   nhtsa-vin:
+    enabled: true
     url: https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVINValuesBatch
     fixed-delay: 3600000
     connect-timeout: 10s
@@ -35,6 +37,10 @@ vehicles:
     state-id: randomvin
     state-note: VIN data sourced from randomvin.com
     legacy-import-note: Imported from randomvin.com
+wfl:
+  restaurant-of-the-day:
+    enabled: false
+    cron: "@midnight"
 reports:
   to: report@christopherbell.dev
 blog-properties:

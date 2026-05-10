@@ -466,13 +466,13 @@ public class PostService {
     return postMapper.toDetail(post);
   }
 
-  @Scheduled(fixedDelayString = "${posts.expiration.cleanup-interval:600000}")
+  @Scheduled(fixedDelayString = "${posts.expiration.cleanup-interval}")
   public void purgeExpiredPosts() {
+    if (!expirationEnabled) {
+      return;
+    }
     log.info("Post expiration cleanup job started.");
     try {
-      if (!expirationEnabled) {
-        return;
-      }
       var missing = postRepository.findByExpiresOnIsNull();
       if (!missing.isEmpty()) {
         missing.forEach(p -> {

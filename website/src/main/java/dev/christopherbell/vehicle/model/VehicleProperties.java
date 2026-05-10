@@ -17,6 +17,7 @@ public class VehicleProperties {
 
   @Data
   public static class NhtsaVin {
+    private boolean enabled;
     private String url;
     private Duration connectTimeout;
     private Duration requestTimeout;

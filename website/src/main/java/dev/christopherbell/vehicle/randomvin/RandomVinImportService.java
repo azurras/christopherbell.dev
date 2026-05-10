@@ -78,13 +78,11 @@ public class RandomVinImportService {
    */
   @Scheduled(fixedDelayString = "${vehicles.random-vin.fixed-delay}")
   public void importRandomVin() {
+    if (!properties.isEnabled()) {
+      return;
+    }
     log.info("RandomVIN import job started.");
     try {
-      if (!properties.isEnabled()) {
-        log.debug("RandomVIN collection is disabled.");
-        return;
-      }
-
       var state = currentState();
       if (isCoolingDown(state)) {
         log.info("RandomVIN collection is cooling down until {}.", state.getDisabledUntil());
