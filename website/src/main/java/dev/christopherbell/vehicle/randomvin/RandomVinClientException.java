@@ -1,4 +1,4 @@
-package dev.christopherbell.vehicle;
+package dev.christopherbell.vehicle.randomvin;
 
 /**
  * Exception for non-success RandomVIN HTTP responses.
@@ -6,11 +6,21 @@ package dev.christopherbell.vehicle;
 public class RandomVinClientException extends Exception {
   private final int statusCode;
 
+  /**
+   * Creates an exception for a non-success RandomVIN HTTP status.
+   *
+   * @param statusCode the HTTP status returned by RandomVIN
+   */
   public RandomVinClientException(int statusCode) {
     super("RandomVIN returned HTTP status " + statusCode);
     this.statusCode = statusCode;
   }
 
+  /**
+   * Gets the HTTP status returned by RandomVIN.
+   *
+   * @return the HTTP status code
+   */
   public int getStatusCode() {
     return statusCode;
   }

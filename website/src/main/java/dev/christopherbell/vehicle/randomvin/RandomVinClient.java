@@ -1,4 +1,4 @@
-package dev.christopherbell.vehicle;
+package dev.christopherbell.vehicle.randomvin;
 
 import java.io.IOException;
 import java.net.URI;
@@ -17,6 +17,11 @@ public class RandomVinClient {
   private final HttpClient httpClient;
   private final URI randomVinUri;
 
+  /**
+   * Creates a RandomVIN client for the configured VIN endpoint.
+   *
+   * @param randomVinUrl the URL that returns a generated VIN
+   */
   public RandomVinClient(
       @Value("${vehicles.random-vin.url:https://randomvin.com/getvin.php?type=real}") String randomVinUrl
   ) {
@@ -26,6 +31,14 @@ public class RandomVinClient {
     this.randomVinUri = URI.create(randomVinUrl);
   }
 
+  /**
+   * Fetches one VIN from RandomVIN.
+   *
+   * @return the raw RandomVIN response body
+   * @throws IOException when the HTTP call fails
+   * @throws InterruptedException when the HTTP call is interrupted
+   * @throws RandomVinClientException when RandomVIN returns a non-success HTTP status
+   */
   public String getVin() throws IOException, InterruptedException, RandomVinClientException {
     var request = HttpRequest.newBuilder(randomVinUri)
         .GET()

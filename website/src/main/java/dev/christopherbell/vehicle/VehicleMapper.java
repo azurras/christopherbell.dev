@@ -12,10 +12,28 @@ import org.mapstruct.Mapping;
  */
 @Mapper(componentModel = "spring")
 public interface VehicleMapper {
+  /**
+   * Maps a vehicle entity to API details.
+   *
+   * @param vehicle the vehicle entity
+   * @return the vehicle API details
+   */
   VehicleDetail toVehicleDetail(Vehicle vehicle);
 
+  /**
+   * Maps API details to a vehicle entity.
+   *
+   * @param vehicleDetail the vehicle API details
+   * @return the vehicle entity
+   */
   Vehicle toVehicle(VehicleDetail vehicleDetail);
 
+  /**
+   * Maps a creation request to a vehicle entity.
+   *
+   * @param request the vehicle creation request
+   * @return the vehicle entity
+   */
   @Mapping(target = "id", ignore = true)
   @Mapping(target = "bodyClass", ignore = true)
   @Mapping(target = "createdBy", ignore = true)
@@ -37,6 +55,12 @@ public interface VehicleMapper {
   @Mapping(target = "vehicleType", ignore = true)
   Vehicle toVehicle(VehicleCreateRequest request);
 
+  /**
+   * Maps an update request to a vehicle entity.
+   *
+   * @param request the vehicle update request
+   * @return the vehicle entity
+   */
   @Mapping(target = "id", ignore = true)
   @Mapping(target = "bodyClass", ignore = true)
   @Mapping(target = "createdBy", ignore = true)

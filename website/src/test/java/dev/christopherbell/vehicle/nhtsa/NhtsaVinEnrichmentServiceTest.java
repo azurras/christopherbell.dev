@@ -1,4 +1,4 @@
-package dev.christopherbell.vehicle;
+package dev.christopherbell.vehicle.nhtsa;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -11,8 +11,10 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
-import dev.christopherbell.vehicle.NhtsaVinClient.NhtsaVinDecodeRequest;
-import dev.christopherbell.vehicle.model.NhtsaVinImportState;
+import dev.christopherbell.vehicle.VehicleRepository;
+import dev.christopherbell.vehicle.VehicleStub;
+import dev.christopherbell.vehicle.nhtsa.NhtsaVinClient.NhtsaVinDecodeRequest;
+import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -154,6 +156,40 @@ public class NhtsaVinEnrichmentServiceTest {
     nhtsaVinEnrichmentService.enrichStoredVins();
 
     verify(vehicleRepository).findByVinIsNotNull();
+    verify(nhtsaVinClient).decodeVins(eq(List.of(new NhtsaVinDecodeRequest(VehicleStub.VIN, VehicleStub.YEAR))));
+    verifyNoMoreInteractions(nhtsaVinClient, vehicleRepository);
+  }
+
+  @Test
+  @DisplayName("Deletes vehicle when NHTSA response does not include its VIN")
+  public void testEnrichStoredVins_whenNhtsaDoesNotReturnVin_deletesVehicle() throws Exception {
+    var vehicle = VehicleStub.getVehicleStub(VehicleStub.ID);
+    givenNoNhtsaState();
+    when(vehicleRepository.findByVinIsNotNull()).thenReturn(List.of(vehicle));
+    when(nhtsaVinClient.decodeVins(eq(List.of(new NhtsaVinDecodeRequest(VehicleStub.VIN, VehicleStub.YEAR)))))
+        .thenReturn(List.of(decodedValues("2FMDK4JCXEBB62196")));
+
+    nhtsaVinEnrichmentService.enrichStoredVins();
+
+    verify(vehicleRepository).findByVinIsNotNull();
+    verify(vehicleRepository).delete(eq(vehicle));
+    verify(nhtsaVinClient).decodeVins(eq(List.of(new NhtsaVinDecodeRequest(VehicleStub.VIN, VehicleStub.YEAR))));
+    verifyNoMoreInteractions(nhtsaVinClient, vehicleRepository);
+  }
+
+  @Test
+  @DisplayName("Deletes vehicle when NHTSA returns no usable data")
+  public void testEnrichStoredVins_whenNhtsaReturnsNoUsableData_deletesVehicle() throws Exception {
+    var vehicle = VehicleStub.getVehicleStub(VehicleStub.ID);
+    givenNoNhtsaState();
+    when(vehicleRepository.findByVinIsNotNull()).thenReturn(List.of(vehicle));
+    when(nhtsaVinClient.decodeVins(eq(List.of(new NhtsaVinDecodeRequest(VehicleStub.VIN, VehicleStub.YEAR)))))
+        .thenReturn(List.of(unusableDecodedValues(VehicleStub.VIN)));
+
+    nhtsaVinEnrichmentService.enrichStoredVins();
+
+    verify(vehicleRepository).findByVinIsNotNull();
+    verify(vehicleRepository).delete(eq(vehicle));
     verify(nhtsaVinClient).decodeVins(eq(List.of(new NhtsaVinDecodeRequest(VehicleStub.VIN, VehicleStub.YEAR))));
     verifyNoMoreInteractions(nhtsaVinClient, vehicleRepository);
   }
@@ -313,6 +349,14 @@ public class NhtsaVinEnrichmentServiceTest {
     values.put("TransmissionStyle", "Automatic");
     values.put("Trim", "EX-V6");
     values.put("VehicleType", "PASSENGER CAR");
+    values.put("VIN", vin);
+    return values;
+  }
+
+  private Map<String, String> unusableDecodedValues(String vin) {
+    var values = new HashMap<String, String>();
+    values.put("ErrorCode", "1");
+    values.put("ErrorText", "1 - Check Digit does not calculate properly.");
     values.put("VIN", vin);
     return values;
   }
