@@ -179,6 +179,61 @@ public class PostService {
             .replyCount((int) postRepository.countByParentId(p.getId()))
             .createdOn(p.getCreatedOn())
             .lastUpdatedOn(p.getLastUpdatedOn())
+            .expiresOn(p.getExpiresOn())
+            .build())
+        .toList();
+  }
+
+  /**
+   * Returns feed posts from accounts the current user follows.
+   *
+   * @param before optional exclusive upper bound timestamp for pagination
+   * @param limit maximum number of items to return (1..100)
+   * @return list of followed-account feed items
+   * @throws ResourceNotFoundException if the current account cannot be resolved
+   */
+  public List<PostFeedItem> getFollowingFeed(Instant before, int limit)
+      throws ResourceNotFoundException {
+    String selfId = getSelfId();
+    var self = accountRepository
+        .findById(selfId)
+        .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", selfId)));
+
+    var followingIds = self.getFollowingIds() == null ? List.<String>of() : self.getFollowingIds().stream().toList();
+    if (followingIds.isEmpty()) {
+      return List.of();
+    }
+
+    int pageSize = Math.max(1, Math.min(limit, 100));
+    Pageable page = PageRequest.of(0, pageSize, Sort.by(Sort.Direction.DESC, "createdOn"));
+    List<Post> posts;
+    if (before != null) {
+      posts = postRepository.findByAccountIdInAndCreatedOnLessThanOrderByCreatedOnDesc(followingIds, before, page);
+    } else {
+      posts = postRepository.findByAccountIdInOrderByCreatedOnDesc(followingIds, page);
+    }
+
+    var authors = accountRepository.findAllById(followingIds);
+    var idToUser = authors.stream()
+        .collect(Collectors.toMap(Account::getId, Account::getUsername));
+
+    posts.forEach(this::ensureExpirationSet);
+    return posts.stream()
+        .filter(p -> !isExpired(p))
+        .map(p -> PostFeedItem.builder()
+            .id(p.getId())
+            .accountId(p.getAccountId())
+            .username(idToUser.get(p.getAccountId()))
+            .text(p.getText())
+            .rootId(p.getRootId())
+            .parentId(p.getParentId())
+            .level(p.getLevel())
+            .likesCount(p.getLikesCount())
+            .liked(p.getLikedBy() != null && p.getLikedBy().contains(selfId))
+            .replyCount((int) postRepository.countByParentId(p.getId()))
+            .createdOn(p.getCreatedOn())
+            .lastUpdatedOn(p.getLastUpdatedOn())
+            .expiresOn(p.getExpiresOn())
             .build())
         .toList();
   }
@@ -266,6 +321,7 @@ public class PostService {
             .replyCount((int) postRepository.countByParentId(p.getId()))
             .createdOn(p.getCreatedOn())
             .lastUpdatedOn(p.getLastUpdatedOn())
+            .expiresOn(p.getExpiresOn())
             .build())
         .toList();
   }
@@ -317,6 +373,7 @@ public class PostService {
             .replyCount((int) postRepository.countByParentId(p.getId()))
             .createdOn(p.getCreatedOn())
             .lastUpdatedOn(p.getLastUpdatedOn())
+            .expiresOn(p.getExpiresOn())
             .build())
         .toList();
   }
@@ -350,6 +407,7 @@ public class PostService {
         .replyCount((int) postRepository.countByParentId(post.getId()))
         .createdOn(post.getCreatedOn())
         .lastUpdatedOn(post.getLastUpdatedOn())
+        .expiresOn(post.getExpiresOn())
         .build();
   }
 
@@ -390,6 +448,7 @@ public class PostService {
             .replyCount((int) postRepository.countByParentId(p.getId()))
             .createdOn(p.getCreatedOn())
             .lastUpdatedOn(p.getLastUpdatedOn())
+            .expiresOn(p.getExpiresOn())
             .build())
         .toList();
   }
@@ -437,6 +496,7 @@ public class PostService {
         .replyCount((int) postRepository.countByParentId(post.getId()))
         .createdOn(post.getCreatedOn())
         .lastUpdatedOn(post.getLastUpdatedOn())
+        .expiresOn(post.getExpiresOn())
         .build();
   }
 

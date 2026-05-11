@@ -32,6 +32,7 @@ public class SecurityConfig {
       "/",
       "/api/accounts" + APIVersion.V20241215 + "/login",
       "/api/accounts" + APIVersion.V20241215 + "/create",
+      "GET:/api/accounts" + APIVersion.V20250914 + "/profile/**",
       "/profile",
       "/vin-decoder",
       // Public read-only post APIs (method-scoped)

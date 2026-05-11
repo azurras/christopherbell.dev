@@ -26,5 +26,6 @@ public record PostFeedItem(
     Boolean liked,
     Integer replyCount,
     Instant createdOn,
-    Instant lastUpdatedOn
+    Instant lastUpdatedOn,
+    Instant expiresOn
 ) {}

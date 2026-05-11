@@ -282,4 +282,39 @@ public class PostServiceTest {
     assertEquals("p2", result.get(1).id());
     assertEquals("user2", result.get(1).username());
   }
+
+  @Test
+  @DisplayName("FollowingFeed: returns posts from followed accounts")
+  public void testGetFollowingFeed_returnsFollowedPosts() throws Exception {
+    var self = Account.builder()
+        .id("self")
+        .username("self_user")
+        .followingIds(new HashSet<>(List.of("a1")))
+        .build();
+    var author = Account.builder().id("a1").username("followed").build();
+    var post = Post.builder()
+        .id("p1")
+        .accountId("a1")
+        .text("hello")
+        .createdOn(Instant.now())
+        .likedBy(new HashSet<>())
+        .likesCount(0)
+        .build();
+    var service = spy(postService);
+    doReturn("self").when(service).getSelfId();
+
+    when(accountRepository.findById(eq("self"))).thenReturn(Optional.of(self));
+    when(postRepository.findByAccountIdInOrderByCreatedOnDesc(
+        eq(List.of("a1")),
+        org.mockito.ArgumentMatchers.any(PageRequest.class)))
+        .thenReturn(List.of(post));
+    when(accountRepository.findAllById(eq(List.of("a1")))).thenReturn(List.of(author));
+    when(postRepository.countByParentId(eq("p1"))).thenReturn(0L);
+
+    var result = service.getFollowingFeed(null, 20);
+
+    assertEquals(1, result.size());
+    assertEquals("p1", result.get(0).id());
+    assertEquals("followed", result.get(0).username());
+  }
 }

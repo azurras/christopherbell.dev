@@ -5,6 +5,7 @@ import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
+import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.Role;
@@ -19,7 +20,9 @@ import dev.christopherbell.libs.security.UsernameSanitizer;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -106,6 +109,7 @@ public class AccountService {
         .lastUpdatedOn(Instant.now())
         .role(Role.USER)
         .status(AccountStatus.ACTIVE)
+        .followingIds(new HashSet<>())
         .username(accountCreateRequest.username())
         .build();
   }
@@ -192,6 +196,62 @@ public class AccountService {
   }
 
   /**
+   * Gets a public account profile by username without exposing private fields like email.
+   *
+   * @param username the username to resolve
+   * @return public profile metadata and current viewer follow state
+   * @throws ResourceNotFoundException if no account exists for the username
+   */
+  public AccountProfile getPublicProfile(String username) throws ResourceNotFoundException {
+    var account = findBySanitizedUsername(username);
+    return toPublicProfile(account, getOptionalSelfAccount());
+  }
+
+  /**
+   * Follows the account identified by username for the current user.
+   *
+   * @param username target username to follow
+   * @return updated public profile for the target account
+   * @throws ResourceNotFoundException if the current or target account cannot be found
+   * @throws InvalidRequestException if the caller tries to follow themself
+   */
+  public AccountProfile followAccount(String username)
+      throws ResourceNotFoundException, InvalidRequestException {
+    var self = getSelfEntity();
+    var target = findBySanitizedUsername(username);
+    if (self.getId().equals(target.getId())) {
+      throw new InvalidRequestException("You cannot follow yourself.");
+    }
+    if (self.getFollowingIds() == null) {
+      self.setFollowingIds(new HashSet<>());
+    }
+    self.getFollowingIds().add(target.getId());
+    self.setLastUpdatedOn(Instant.now());
+    accountRepository.save(self);
+    return toPublicProfile(target, Optional.of(self));
+  }
+
+  /**
+   * Unfollows the account identified by username for the current user.
+   *
+   * @param username target username to unfollow
+   * @return updated public profile for the target account
+   * @throws ResourceNotFoundException if the current or target account cannot be found
+   */
+  public AccountProfile unfollowAccount(String username) throws ResourceNotFoundException {
+    var self = getSelfEntity();
+    var target = findBySanitizedUsername(username);
+    if (self.getFollowingIds() == null) {
+      self.setFollowingIds(new HashSet<>());
+    } else {
+      self.getFollowingIds().remove(target.getId());
+    }
+    self.setLastUpdatedOn(Instant.now());
+    accountRepository.save(self);
+    return toPublicProfile(target, Optional.of(self));
+  }
+
+  /**
    * List all accounts in the system.
    *
    * @return a list of all accounts.
@@ -209,15 +269,7 @@ public class AccountService {
    * @throws ResourceNotFoundException if the account cannot be found.
    */
   public AccountDetail getSelfAccount() throws ResourceNotFoundException {
-    var selfId = PermissionService.getSelf();
-    var account =
-        accountRepository
-            .findById(selfId)
-            .orElseThrow(
-                () ->
-                    new ResourceNotFoundException(
-                        String.format("Account with id %s not found.", selfId)));
-    return accountMapper.toAccount(account);
+    return accountMapper.toAccount(getSelfEntity());
   }
 
   /**
@@ -337,5 +389,52 @@ public class AccountService {
     if (owner.isPresent() && !owner.get().getId().equals(selfId)) {
       throw new ResourceExistsException("Username already in use by another account.");
     }
+  }
+
+  private Account findBySanitizedUsername(String username) throws ResourceNotFoundException {
+    var sanitizedUsername = UsernameSanitizer.sanitize(username);
+    return accountRepository
+        .findByUsername(sanitizedUsername)
+        .orElseThrow(
+            () -> new ResourceNotFoundException(
+                String.format("Account with username %s not found.", sanitizedUsername)));
+  }
+
+  private Account getSelfEntity() throws ResourceNotFoundException {
+    var selfId = PermissionService.getSelf();
+    return accountRepository
+        .findById(selfId)
+        .orElseThrow(
+            () -> new ResourceNotFoundException(
+                String.format("Account with id %s not found.", selfId)));
+  }
+
+  private Optional<Account> getOptionalSelfAccount() {
+    try {
+      return Optional.of(getSelfEntity());
+    } catch (Exception ignored) {
+      return Optional.empty();
+    }
+  }
+
+  private AccountProfile toPublicProfile(Account account, Optional<Account> selfAccount) {
+    var self = selfAccount.orElse(null);
+    var following = account.getFollowingIds() != null ? account.getFollowingIds().size() : 0;
+    var followerCount = accountRepository.countByFollowingIdsContaining(account.getId());
+    var followedByMe = self != null
+        && self.getFollowingIds() != null
+        && self.getFollowingIds().contains(account.getId());
+    var isSelf = self != null && self.getId().equals(account.getId());
+    return AccountProfile.builder()
+        .id(account.getId())
+        .username(account.getUsername())
+        .firstName(account.getFirstName())
+        .lastName(account.getLastName())
+        .status(account.getStatus())
+        .followerCount(followerCount)
+        .followingCount(following)
+        .followedByMe(followedByMe)
+        .self(isSelf)
+        .build();
   }
 }

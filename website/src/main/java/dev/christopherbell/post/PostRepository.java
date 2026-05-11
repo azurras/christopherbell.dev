@@ -2,6 +2,7 @@ package dev.christopherbell.post;
 
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -38,6 +39,28 @@ public interface PostRepository extends MongoRepository<Post, String> {
    * @return a page slice of older posts ordered by {@code createdOn} descending
    */
   List<Post> findByAccountIdAndCreatedOnLessThanOrderByCreatedOnDesc(String accountId, Instant before, Pageable pageable);
+
+  /**
+   * Retrieves posts for a set of accounts, newest first, with pagination.
+   *
+   * @param accountIds followed account ids
+   * @param pageable page request
+   * @return posts authored by the provided accounts
+   */
+  List<Post> findByAccountIdInOrderByCreatedOnDesc(Collection<String> accountIds, Pageable pageable);
+
+  /**
+   * Retrieves posts for a set of accounts created before a given time, newest first.
+   *
+   * @param accountIds followed account ids
+   * @param before exclusive upper bound for {@code createdOn}
+   * @param pageable page request
+   * @return posts authored by the provided accounts
+   */
+  List<Post> findByAccountIdInAndCreatedOnLessThanOrderByCreatedOnDesc(
+      Collection<String> accountIds,
+      Instant before,
+      Pageable pageable);
 
   /**
    * Retrieves a page of posts across all accounts ordered by created time descending.

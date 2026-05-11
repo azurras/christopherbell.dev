@@ -14,44 +14,75 @@
       <div class="container">
         <p class="home-kicker">Account</p>
         <h1 id="profileTitle">Profile</h1>
-        <p>Your details and the posts you have put into the feed.</p>
+        <p id="profileHeroMeta">Your details and the posts you have put into the feed.</p>
       </div>
     </section>
     <section class="site-content">
-    <div class="container">
-    <div class="row g-4">
-      <div class="col-12 col-lg-4">
-        <div class="card shadow-sm">
-          <div class="card-body">
-            <h2 class="h5 mb-3">Account</h2>
-            <dl class="row mb-0" id="accountDetails">
-              <dt class="col-sm-4">Username</dt>
-              <dd class="col-sm-8" data-field="username">—</dd>
-              <dt class="col-sm-4">Email</dt>
-              <dd class="col-sm-8" data-field="email">—</dd>
-              <dt class="col-sm-4">Name</dt>
-              <dd class="col-sm-8" data-field="name">—</dd>
-              <dt class="col-sm-4">Role</dt>
-              <dd class="col-sm-8" data-field="role">—</dd>
-              <dt class="col-sm-4">Status</dt>
-              <dd class="col-sm-8" data-field="status">—</dd>
-            </dl>
-          </div>
-        </div>
-      </div>
-      <div class="col-12 col-lg-8">
-        <div class="card shadow-sm">
-          <div class="card-body">
-            <div class="d-flex justify-content-between align-items-center mb-2">
-              <h2 class="h5 mb-0">My Posts</h2>
+      <div class="container">
+        <div id="profileAlert" class="alert alert-danger d-none mb-3" role="alert"></div>
+        <div class="profile-shell">
+          <aside class="profile-overview" aria-label="Account summary">
+            <div class="profile-card">
+              <div class="profile-avatar-lg" id="profileAvatar" aria-hidden="true">?</div>
+              <div class="profile-identity">
+                <p class="profile-label">Signed in as</p>
+                <h2 id="profileHandle">@user</h2>
+                <p id="profileName">Name unavailable</p>
+              </div>
+              <div class="profile-chip-row" aria-label="Account state">
+                <span class="profile-chip" id="profileRole">Role</span>
+                <span class="profile-chip profile-chip-status" id="profileStatus">Status</span>
+              </div>
+              <dl class="profile-detail-grid" id="accountDetails">
+                <div>
+                  <dt>Username</dt>
+                  <dd data-field="username">-</dd>
+                </div>
+                <div>
+                  <dt>Email</dt>
+                  <dd data-field="email">-</dd>
+                </div>
+                <div>
+                  <dt>Name</dt>
+                  <dd data-field="name">-</dd>
+                </div>
+                <div>
+                  <dt>Role</dt>
+                  <dd data-field="role">-</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd data-field="status">-</dd>
+                </div>
+              </dl>
             </div>
-            <div id="postsList" class="list-group list-group-flush"></div>
+            <div class="profile-stat-grid" aria-label="Profile activity">
+              <div class="profile-stat">
+                <span id="profilePostCount">0</span>
+                <small>Posts</small>
+              </div>
+              <div class="profile-stat">
+                <span id="profileReplyCount">0</span>
+                <small>Replies</small>
+              </div>
+              <div class="profile-stat">
+                <span id="profileLikeCount">0</span>
+                <small>Likes</small>
+              </div>
+            </div>
+          </aside>
+          <div class="profile-posts-panel">
+            <div class="profile-posts-header">
+              <div>
+                <p class="profile-label">Personal feed</p>
+                <h2>My Posts</h2>
+              </div>
+              <a class="btn btn-dark btn-sm" href="/void">New post</a>
+            </div>
+            <div id="postsList" class="feed-list profile-feed-list"></div>
           </div>
         </div>
       </div>
-    </div>
-    <div id="profileAlert" class="alert alert-danger d-none mt-3" role="alert"></div>
-    </div>
     </section>
   </main>
   <footer id="footer"></footer>

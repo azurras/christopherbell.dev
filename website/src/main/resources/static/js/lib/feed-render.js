@@ -1,4 +1,5 @@
 const MENTION_RE = /(^|[^A-Za-z0-9._-])@([A-Za-z0-9._-]{3,32})/g;
+const COLLAPSE_AT = 180;
 
 function appendTextWithMentionLinks(container, text) {
   container.textContent = '';
@@ -16,7 +17,7 @@ function appendTextWithMentionLinks(container, text) {
 
     const link = document.createElement('a');
     link.href = `/u/${encodeURIComponent(username)}`;
-    link.className = 'link-underline link-underline-opacity-0 mention-link';
+    link.className = 'mention-link';
     link.textContent = `@${username}`;
     container.appendChild(link);
     lastIndex = mentionStart + username.length + 1;
@@ -25,6 +26,31 @@ function appendTextWithMentionLinks(container, text) {
   if (lastIndex < value.length) {
     container.appendChild(document.createTextNode(value.slice(lastIndex)));
   }
+}
+
+function isRecent(post) {
+  const value = post.createdOn || post.lastUpdatedOn;
+  if (!value) return false;
+  return Date.now() - new Date(value).getTime() < 10 * 60 * 1000;
+}
+
+function expiresSoon(post) {
+  if (!post.expiresOn) return false;
+  const delta = new Date(post.expiresOn).getTime() - Date.now();
+  return delta > 0 && delta < 24 * 60 * 60 * 1000;
+}
+
+function postChips(post, liked) {
+  const chips = [];
+  if (post.level && post.level > 0) chips.push(['reply', 'Reply']);
+  if (liked) chips.push(['liked', 'Liked']);
+  if (isRecent(post)) chips.push(['new', 'New']);
+  if (expiresSoon(post)) chips.push(['expires', 'Expires soon']);
+  return chips.map(([type, label]) => `<span class="post-chip post-chip-${type}">${label}</span>`).join('');
+}
+
+function postPermalink(postId) {
+  return `${window.location.origin}/p/${encodeURIComponent(postId)}`;
 }
 
 /**
@@ -52,65 +78,77 @@ export function createFeedItem(post, ctx) {
   const liked = !!post.liked;
   const likes = post.likesCount || 0;
   const repliesCount = post.replyCount || 0;
+  const shouldCollapse = (post.text || '').length > COLLAPSE_AT;
 
   const item = document.createElement('div');
-  item.className = 'list-group-item py-3 post-item';
+  item.className = `post-item${isRecent(post) ? ' post-item-new' : ''}`;
   item.innerHTML = `
-    <div class="d-flex w-100">
-      <div class="post-avatar flex-shrink-0 me-1">
+    <div class="post-accent" aria-hidden="true"></div>
+    <div class="post-shell">
+      <div class="post-avatar flex-shrink-0">
         <span class="post-avatar-text">${avatarInitial}</span>
       </div>
-      <div class="post-content flex-grow-1">
-        <div class="post-header d-flex align-items-center gap-2 w-100">
-          <div class="fw-semibold post-handle">
-            <a href="/u/${encodeURIComponent(post.username || '')}" class="link-underline link-underline-opacity-0">${handle}</a>
+      <div class="post-content">
+        <div class="post-header">
+          <div class="post-author">
+            <a href="/u/${encodeURIComponent(post.username || '')}" class="post-handle">${handle}</a>
+            <small>${when}</small>
           </div>
-          <div class="post-meta ms-auto d-flex align-items-center gap-2 position-relative">
-            <small class="text-muted">${when}</small>
-            <button class="btn btn-sm btn-light post-menu-btn" data-post="${post.id}" aria-label="More">⋯</button>
-            <div class="post-menu d-none card p-2" style="position:absolute; right:0; top:100%; z-index:1000;">
-              <button class="btn btn-link text-danger p-0 post-report-btn" data-post="${post.id}">Report</button>
-              ${ctx.canDelete(post) ? `<button class="btn btn-link text-danger p-0 post-delete-btn" data-post="${post.id}">Delete</button>` : ''}
+          <div class="post-meta">
+            <div class="post-chips">${postChips(post, liked)}</div>
+            <button class="post-menu-btn" data-post="${post.id}" aria-label="More actions">
+              <i class="fa fa-ellipsis-h" aria-hidden="true"></i>
+            </button>
+            <div class="post-menu d-none">
+              <button class="post-copy-btn" type="button" data-post="${post.id}">Copy link</button>
+              <button class="post-report-btn" type="button" data-post="${post.id}">Report</button>
+              ${ctx.canDelete(post) ? `<button class="post-delete-btn danger" type="button" data-post="${post.id}">Delete</button>` : ''}
             </div>
           </div>
         </div>
-      </div>
-    </div>
-    <p class="post-text post-body"></p>
-    ${post.level && post.level > 0 && post.parentId && !ctx.suppressParentContext ? `<div class="parent-context card mt-2 w-100">
-        <div class="card-body py-2">
-          <div class="fw-semibold"><a href="/u/" class="link-underline link-underline-opacity-0" data-parent-handle="${post.parentId}">@user</a></div>
-          <p class="mb-0 post-context-text fw-semibold" data-parent="${post.parentId}">Loading…</p>
-          <a href="/p/${encodeURIComponent(post.parentId)}" class="small">View thread</a>
+        ${post.level && post.level > 0 && post.parentId && !ctx.suppressParentContext ? `<div class="parent-context inline-context">
+          <div class="context-label">Replying to <a href="/u/" data-parent-handle="${post.parentId}">@user</a></div>
+          <p data-parent="${post.parentId}">Loading context…</p>
+          <a href="/p/${encodeURIComponent(post.parentId)}">View parent</a>
+        </div>` : ''}
+        <div class="post-text-wrap ${shouldCollapse ? 'is-collapsed' : ''}">
+          <p class="post-text post-body"></p>
         </div>
-      </div>` : ''}
-    <div class="d-flex align-items-center gap-4 border-top pt-2 mt-2 post-actions">
-      <button class="btn btn-link btn-sm text-decoration-none text-muted post-reply-btn" data-post="${post.id}" aria-label="Reply">
-        <i class="fa fa-comment-o" aria-hidden="true"></i>
-        <span class="reply-count ms-1">${repliesCount}</span>
-        <span class="visually-hidden">Reply</span>
-      </button>
-      <button class="btn btn-link btn-sm text-decoration-none post-like-btn ${liked ? 'text-danger' : 'text-muted'}" data-post="${post.id}" data-liked="${liked}" aria-label="Like">
-        <i class="fa ${liked ? 'fa-heart' : 'fa-heart-o'}" aria-hidden="true"></i>
-        <span class="like-count ms-1">${likes}</span>
-      </button>
-      <button class="btn btn-link btn-sm text-decoration-none text-muted post-replies-toggle" data-post="${post.id}" aria-expanded="false">
-        <i class="fa fa-comments-o" aria-hidden="true"></i>
-        <span class="toggle-label">Show replies</span>
-      </button>
-    </div>
-    <div class="reply-composer d-none mt-2">
-      <textarea class="form-control reply-text" rows="2" maxlength="280" placeholder="Write a reply..."></textarea>
-      <div class="d-flex justify-content-end gap-2 mt-2">
-        <button class="btn btn-sm btn-secondary reply-cancel" type="button">Cancel</button>
-        <button class="btn btn-sm btn-primary reply-submit" type="button">Reply</button>
+        ${shouldCollapse ? '<button class="post-expand-btn" type="button">Show more</button>' : ''}
+        <div class="post-actions">
+          <button class="post-action post-reply-btn" data-post="${post.id}" aria-label="Reply">
+            <i class="fa fa-comment-o" aria-hidden="true"></i>
+            <span class="reply-count">${repliesCount}</span>
+          </button>
+          <button class="post-action post-like-btn ${liked ? 'is-liked' : ''}" data-post="${post.id}" data-liked="${liked}" aria-label="Like">
+            <i class="fa ${liked ? 'fa-heart' : 'fa-heart-o'}" aria-hidden="true"></i>
+            <span class="like-count">${likes}</span>
+          </button>
+          <button class="post-action post-replies-toggle" data-post="${post.id}" aria-expanded="false">
+            <i class="fa fa-comments-o" aria-hidden="true"></i>
+            <span class="toggle-label">Replies</span>
+          </button>
+        </div>
+        <div class="reply-composer d-none">
+          <textarea class="form-control reply-text" rows="2" maxlength="280" placeholder="Write a reply..."></textarea>
+          <div class="reply-composer-actions">
+            <button class="btn btn-sm btn-outline-secondary reply-cancel" type="button">Cancel</button>
+            <button class="btn btn-sm btn-dark reply-submit" type="button">Reply</button>
+          </div>
+        </div>
+        <div class="replies d-none"></div>
       </div>
     </div>
-    <div class="replies d-none"></div>
   `;
 
   const body = item.querySelector('.post-text');
   if (body) appendTextWithMentionLinks(body, post.text);
+  const expandBtn = item.querySelector('.post-expand-btn');
+  expandBtn?.addEventListener('click', () => {
+    const wrap = item.querySelector('.post-text-wrap');
+    const collapsed = wrap?.classList.toggle('is-collapsed');
+    expandBtn.textContent = collapsed ? 'Show more' : 'Show less';
+  });
 
   // Make the whole item (except action bar and existing links/buttons) navigate to the post
   item.addEventListener('click', (e) => {
@@ -134,8 +172,9 @@ export function createFeedItem(post, ctx) {
         if (countEl) countEl.textContent = updated.likesCount ?? 0;
         const isLiked = !!updated.liked;
         likeBtn.dataset.liked = isLiked;
-        likeBtn.classList.toggle('text-danger', isLiked);
-        likeBtn.classList.toggle('text-muted', !isLiked);
+        likeBtn.classList.toggle('is-liked', isLiked);
+        likeBtn.classList.add('like-pulse');
+        setTimeout(() => likeBtn.classList.remove('like-pulse'), 420);
         const icon = likeBtn.querySelector('i');
         if (icon) {
           icon.classList.toggle('fa-heart', isLiked);
@@ -193,13 +232,11 @@ export function createFeedItem(post, ctx) {
           const who = ctx.currentUserName ? `@${s(ctx.currentUserName)}` : 'You';
           const whenStr = ctx.formatWhen(new Date().toISOString());
           const row = document.createElement('div');
-          row.className = 'mt-2';
+          row.className = 'inline-reply';
           row.innerHTML = `
-            <div class="d-flex">
-              <div class="flex-grow-1">
-                <div class="small text-muted"><span class="fw-semibold">${who}</span> · ${whenStr}</div>
+            <div class="inline-reply-body">
+                <div class="inline-reply-meta"><span>${who}</span> · ${whenStr}</div>
                 <div class="post-body"></div>
-              </div>
             </div>`;
           const replyBody = row.querySelector('.post-body');
           if (replyBody) appendTextWithMentionLinks(replyBody, text);
@@ -207,7 +244,7 @@ export function createFeedItem(post, ctx) {
         }
         // Quick inline toast
         const toast = document.createElement('div');
-        toast.className = 'small text-success mt-1';
+        toast.className = 'feed-toast';
         toast.textContent = 'Reply posted';
         replyBox.parentElement?.insertBefore(toast, replyBox.nextSibling);
         setTimeout(() => toast.remove(), 2000);
@@ -242,13 +279,11 @@ export function createFeedItem(post, ctx) {
             } else {
               for (const r of direct) {
                 const row = document.createElement('div');
-                row.className = 'mt-2';
+                row.className = 'inline-reply';
                 row.innerHTML = `
-                  <div class="d-flex">
-                    <div class="flex-grow-1">
-                      <div class="small text-muted"><a href="/u/${encodeURIComponent(r.username || '')}" class="link-underline link-underline-opacity-0 fw-semibold">@${s(r.username || 'user')}</a> · ${ctx.formatWhen(r.createdOn || r.lastUpdatedOn)}</div>
+                  <div class="inline-reply-body">
+                      <div class="inline-reply-meta"><a href="/u/${encodeURIComponent(r.username || '')}">@${s(r.username || 'user')}</a> · ${ctx.formatWhen(r.createdOn || r.lastUpdatedOn)}</div>
                       <div class="post-body"></div>
-                    </div>
                   </div>`;
                 const replyBody = row.querySelector('.post-body');
                 if (replyBody) appendTextWithMentionLinks(replyBody, r.text || '');
@@ -256,7 +291,7 @@ export function createFeedItem(post, ctx) {
               }
               // View full thread link
               const more = document.createElement('div');
-              more.className = 'mt-2';
+              more.className = 'inline-reply-more';
               more.innerHTML = `<a href="/p/${encodeURIComponent(post.id)}" class="small">View full thread</a>`;
               replies.appendChild(more);
             }
@@ -268,11 +303,11 @@ export function createFeedItem(post, ctx) {
         }
         replies.classList.remove('d-none');
         replToggle.setAttribute('aria-expanded', 'true');
-        if (label) label.textContent = 'Hide replies';
+        if (label) label.textContent = 'Hide';
       } else {
         replies.classList.add('d-none');
         replToggle.setAttribute('aria-expanded', 'false');
-        if (label) label.textContent = 'Show replies';
+        if (label) label.textContent = 'Replies';
       }
     });
   }
@@ -290,6 +325,19 @@ export function createFeedItem(post, ctx) {
       e.stopPropagation();
       menu.classList.add('d-none');
       window.location.href = `/report?postId=${encodeURIComponent(post.id)}`;
+    });
+    const copyBtn = item.querySelector('.post-copy-btn');
+    copyBtn?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      menu.classList.add('d-none');
+      const url = postPermalink(post.id);
+      try {
+        await navigator.clipboard.writeText(url);
+        copyBtn.textContent = 'Copied';
+        setTimeout(() => { copyBtn.textContent = 'Copy link'; }, 1200);
+      } catch (_) {
+        window.prompt('Copy post link', url);
+      }
     });
     const del = item.querySelector('.post-delete-btn');
     del?.addEventListener('click', async (e) => {

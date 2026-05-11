@@ -11,55 +11,113 @@ import { initComposer } from './lib/composer.js';
  * - Wires item actions (reply/like/delete) via feed-render + feed-context
  */
 
-/** Update compose character counter. */
-function updateCounter(el, counter) {
-  const len = (el.value || '').length;
-  counter.textContent = `${len} / 280`;
-}
-
-/** Enable/disable composer controls. */
-function setComposerEnabled(enabled) {
-  const postBtn = document.getElementById('postBtn');
-  const postText = document.getElementById('postText');
-  if (postBtn) postBtn.disabled = !enabled;
-  if (postText) postText.disabled = !enabled;
-}
-
 let USER_STATE = { id: null, role: null, username: null };
 let LATEST_TS = null;
 let SCROLLER = null;
 let RENDER_CTX = null;
+let FEED_ITEMS = [];
+let ACTIVE_FILTER = 'all';
+let ACTIVE_SORT = 'newest';
 
-/** Submit a new top-level post from the composer. */
-async function submitPost() {
-  const postText = document.getElementById('postText');
-  const alert = document.getElementById('homeAlert');
-  if (alert) alert.classList.add('d-none');
-  const text = (postText?.value || '').trim();
-  if (!text) return;
-  if (text.length > 280) {
-    if (alert) {
-      alert.textContent = 'Post text exceeds 280 characters.';
-      alert.classList.remove('d-none');
-    }
+function feedList() {
+  return document.getElementById('feedList');
+}
+
+function showSkeleton() {
+  const list = feedList();
+  if (!list) return;
+  list.innerHTML = Array.from({ length: 4 }).map(() => `
+    <div class="feed-skeleton">
+      <div class="skeleton-avatar"></div>
+      <div class="skeleton-lines">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderEmpty(message = 'Nothing in the Void yet.') {
+  const list = feedList();
+  if (!list) return;
+  list.innerHTML = `
+    <div class="feed-empty-state">
+      <p class="home-kicker mb-2">Quiet</p>
+      <h2>${sanitize(message)}</h2>
+      <p>Start the thread, check back later, or switch filters.</p>
+    </div>
+  `;
+}
+
+function filteredItems() {
+  let items = [...FEED_ITEMS];
+  if (ACTIVE_FILTER === 'mine') {
+    items = items.filter(item => item.accountId === USER_STATE.id || item.username === USER_STATE.username);
+  } else if (ACTIVE_FILTER === 'following') {
+    items = items.filter(item => item.accountId !== USER_STATE.id);
+  } else if (ACTIVE_FILTER === 'replies') {
+    items = items.filter(item => item.level && item.level > 0);
+  }
+
+  if (ACTIVE_SORT === 'active') {
+    items.sort((a, b) => ((b.likesCount || 0) + (b.replyCount || 0)) - ((a.likesCount || 0) + (a.replyCount || 0)));
+  } else if (ACTIVE_SORT === 'expiring') {
+    items.sort((a, b) => {
+      const aTime = a.expiresOn ? new Date(a.expiresOn).getTime() : Number.MAX_SAFE_INTEGER;
+      const bTime = b.expiresOn ? new Date(b.expiresOn).getTime() : Number.MAX_SAFE_INTEGER;
+      return aTime - bTime;
+    });
+  } else {
+    items.sort((a, b) => new Date(b.createdOn || b.lastUpdatedOn) - new Date(a.createdOn || a.lastUpdatedOn));
+  }
+  return items;
+}
+
+function renderFeed() {
+  const list = feedList();
+  if (!list || !RENDER_CTX) return;
+  const items = filteredItems();
+  list.innerHTML = '';
+  if (!items.length) {
+    const message = ACTIVE_FILTER === 'replies'
+        ? 'No replies in this view yet.'
+        : ACTIVE_FILTER === 'following'
+            ? 'No posts from followed accounts yet.'
+        : ACTIVE_FILTER === 'mine'
+            ? 'You have not posted anything yet.'
+            : 'Nothing in the Void yet.';
+    renderEmpty(message);
     return;
   }
-  try {
-    await fetchJson(API.posts.create, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ text })
-    });
-    if (postText) postText.value = '';
-    const counter = document.getElementById('charCount');
-    if (counter && postText) updateCounter(postText, counter);
-    await loadFeed();
-  } catch (err) {
-    if (alert) {
-      alert.textContent = err.message;
-      alert.classList.remove('d-none');
-    }
+  for (const post of items) {
+    list.appendChild(createFeedItem(post, RENDER_CTX));
   }
+}
+
+function optimisticPost(text) {
+  return {
+    id: `optimistic-${Date.now()}`,
+    accountId: USER_STATE.id,
+    username: USER_STATE.username || 'you',
+    text,
+    rootId: null,
+    parentId: null,
+    level: 0,
+    likesCount: 0,
+    liked: false,
+    replyCount: 0,
+    createdOn: new Date().toISOString(),
+    lastUpdatedOn: new Date().toISOString(),
+    optimistic: true,
+  };
+}
+
+async function reloadFeed() {
+  FEED_ITEMS = [];
+  LATEST_TS = null;
+  showSkeleton();
+  SCROLLER?.loadInitial();
 }
 
 /** Wire page once DOM is ready. */
@@ -86,12 +144,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     },
     isLoggedIn,
     onSubmit: async (text) => {
-      await fetchJson(API.posts.create, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text }) });
-      const feedList = document.getElementById('feedList');
-      if (feedList) feedList.innerHTML = '';
-      LATEST_TS = null;
-      SCROLLER?.loadInitial();
+      const optimistic = optimisticPost(text);
+      FEED_ITEMS.unshift(optimistic);
+      renderFeed();
       window.scrollTo({ top: 0, behavior: 'smooth' });
+      try {
+        await fetchJson(API.posts.create, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text }) });
+        await reloadFeed();
+      } catch (err) {
+        FEED_ITEMS = FEED_ITEMS.filter(item => item.id !== optimistic.id);
+        renderFeed();
+        throw err;
+      }
     },
   });
   // Show new posts banner when available
@@ -100,15 +164,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (showBtn) {
     showBtn.addEventListener('click', async () => {
       if (banner) banner.classList.add('d-none');
-      const feedList = document.getElementById('feedList');
-      if (feedList) feedList.innerHTML = '';
-      LATEST_TS = null;
-      SCROLLER?.loadInitial();
+      await reloadFeed();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   }
-  const feedList = document.getElementById('feedList');
-  if (feedList) feedList.innerHTML = '';
+  const filterButtons = document.querySelectorAll('.feed-filter');
+  filterButtons.forEach(button => {
+    button.addEventListener('click', async () => {
+      if (button.disabled) return;
+      ACTIVE_FILTER = button.dataset.filter || 'all';
+      filterButtons.forEach(btn => btn.classList.toggle('active', btn === button));
+      if ((ACTIVE_FILTER === 'mine' || ACTIVE_FILTER === 'following') && !isLoggedIn()) {
+        window.location.href = '/login';
+        return;
+      }
+      await reloadFeed();
+    });
+  });
+  const sortSelect = document.getElementById('feedSort');
+  sortSelect?.addEventListener('change', () => {
+    ACTIVE_SORT = sortSelect.value || 'newest';
+    renderFeed();
+  });
+  showSkeleton();
   RENDER_CTX = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(USER_STATE), currentUserName: USER_STATE?.username || null });
   SCROLLER = createInfiniteScroller({
     thresholdPx: 200,
@@ -117,18 +195,27 @@ document.addEventListener('DOMContentLoaded', async () => {
       const params = new URLSearchParams();
       params.set('limit', String(limit));
       if (before) params.set('before', before);
-      return await fetchJson(`${API.posts.feed}?${params.toString()}`, { headers: authHeaders() });
+      const endpoint = ACTIVE_FILTER === 'mine'
+        ? API.posts.meFeed
+        : ACTIVE_FILTER === 'following'
+            ? API.posts.followingFeed
+            : API.posts.feed;
+      return await fetchJson(`${endpoint}?${params.toString()}`, { headers: authHeaders() });
     },
     onPage: (items) => {
-      if (!items || items.length === 0) return;
+      if (!items || items.length === 0) {
+        renderFeed();
+        return;
+      }
       if (!LATEST_TS) {
         const first = items[0];
         LATEST_TS = first.createdOn || first.lastUpdatedOn;
       }
-      for (const p of items) feedList.appendChild(createFeedItem(p, RENDER_CTX));
+      FEED_ITEMS.push(...items);
+      renderFeed();
     },
     getCursor: (it) => it.createdOn || it.lastUpdatedOn,
-    onEmpty: () => { if (feedList) feedList.innerHTML = '<div class="list-group-item">No posts yet.</div>'; }
+    onEmpty: () => renderFeed()
   });
   SCROLLER.attach();
   SCROLLER.loadInitial();

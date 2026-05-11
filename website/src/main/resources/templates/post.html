@@ -13,34 +13,73 @@
     <section class="site-hero site-hero-post" aria-label="Post thread">
       <div class="container">
         <p class="home-kicker">Thread</p>
-        <h1>Post</h1>
-        <p>Context, replies, and the rest of the conversation.</p>
+        <h1 id="postHeroTitle">Post</h1>
+        <p id="postHeroMeta">Context, replies, and the rest of the conversation.</p>
       </div>
     </section>
     <section class="site-content">
-    <div class="container">
-    <div class="row justify-content-center">
-      <div class="col-12 col-lg-8">
+      <div class="container">
         <div id="postAlert" class="alert alert-danger d-none" role="alert"></div>
-        <div id="rootPost" class="card shadow-sm mb-3"><div class="card-body"></div></div>
-        <div id="replyComposer" class="card shadow-sm mb-3 d-none">
-          <div class="card-body">
-            <h2 class="h6">Reply</h2>
-            <textarea id="replyText" class="form-control" rows="3" maxlength="280" placeholder="Write a reply..."></textarea>
-            <div class="d-flex justify-content-end mt-2">
-              <button id="replyBtn" class="btn btn-primary">Reply</button>
+        <div class="thread-layout">
+          <div class="thread-main">
+            <section id="rootPost" class="thread-root-panel" aria-label="Selected post">
+              <div class="thread-panel-header">
+                <div>
+                  <p class="thread-label">Selected post</p>
+                  <h2>Thread focus</h2>
+                </div>
+                <a class="btn btn-outline-dark btn-sm" href="/void">Back to feed</a>
+              </div>
+              <div class="thread-root-body"></div>
+            </section>
+            <div id="replyComposer" class="thread-composer-panel d-none">
+              <h2>Reply</h2>
+              <textarea id="replyText" class="form-control" rows="3" maxlength="280" placeholder="Write a reply..."></textarea>
+              <div class="d-flex justify-content-end mt-2">
+                <button id="replyBtn" class="btn btn-dark">Reply</button>
+              </div>
             </div>
+            <section class="thread-replies-panel" aria-labelledby="threadRepliesTitle">
+              <div class="thread-panel-header">
+                <div>
+                  <p class="thread-label">Conversation</p>
+                  <h2 id="threadRepliesTitle">Replies</h2>
+                </div>
+                <span class="thread-count-pill" id="threadReplyPill">0 replies</span>
+              </div>
+              <div id="threadList" class="feed-list thread-feed-list"></div>
+            </section>
           </div>
-        </div>
-        <div class="card shadow-sm">
-          <div class="card-body">
-            <h2 class="h6 mb-3">Replies</h2>
-            <div id="threadList" class="list-group list-group-flush"></div>
-          </div>
+          <aside class="thread-side" aria-label="Thread summary">
+            <div class="thread-summary-card">
+              <p class="thread-label">Thread stats</p>
+              <dl>
+                <div>
+                  <dt>Author</dt>
+                  <dd id="threadAuthor">-</dd>
+                </div>
+                <div>
+                  <dt>Posted</dt>
+                  <dd id="threadCreated">-</dd>
+                </div>
+                <div>
+                  <dt>Replies</dt>
+                  <dd id="threadReplyCount">0</dd>
+                </div>
+                <div>
+                  <dt>Likes</dt>
+                  <dd id="threadLikeCount">0</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd><span class="thread-status-pill" id="threadStatus">Live</span></dd>
+                </div>
+              </dl>
+              <a class="thread-jump-link" href="#threadRepliesTitle">Jump to replies</a>
+            </div>
+          </aside>
         </div>
       </div>
-    </div>
-    </div>
     </section>
   </main>
   <footer id="footer"></footer>

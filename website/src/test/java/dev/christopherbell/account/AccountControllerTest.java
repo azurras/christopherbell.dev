@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.account.model.dto.AccountDetail;
+import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.libs.api.APIVersion;
@@ -271,6 +272,79 @@ public class AccountControllerTest {
   }
 
   @Test
+  @DisplayName("Public profile: returns safe profile metadata")
+  @WithMockUser
+  public void testGetPublicProfile_Returns200() throws Exception {
+    var profile = AccountProfile.builder()
+        .id("acc-1")
+        .username("chris")
+        .firstName("Chris")
+        .followerCount(2)
+        .followingCount(3)
+        .followedByMe(false)
+        .self(false)
+        .build();
+    when(accountService.getPublicProfile(eq("chris"))).thenReturn(profile);
+
+    mockMvc
+        .perform(get("/api/accounts" + APIVersion.V20250914 + "/profile/{username}", "chris")
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.username").value("chris"))
+        .andExpect(jsonPath("$.payload.followerCount").value(2))
+        .andExpect(jsonPath("$.payload.followingCount").value(3));
+
+    verify(accountService).getPublicProfile(eq("chris"));
+  }
+
+  @Test
+  @DisplayName("Follow account: USER -> 200 updated profile")
+  @WithMockUser(authorities = {"USER"})
+  public void testFollowAccount_whenUser_Returns200() throws Exception {
+    var profile = AccountProfile.builder()
+        .id("acc-2")
+        .username("target")
+        .followedByMe(true)
+        .followerCount(1)
+        .build();
+    when(accountService.followAccount(eq("target"))).thenReturn(profile);
+
+    mockMvc
+        .perform(post("/api/accounts" + APIVersion.V20250914 + "/profile/{username}/follow", "target")
+            .with(csrf())
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.followedByMe").value(true));
+
+    verify(accountService).followAccount(eq("target"));
+  }
+
+  @Test
+  @DisplayName("Unfollow account: USER -> 200 updated profile")
+  @WithMockUser(authorities = {"USER"})
+  public void testUnfollowAccount_whenUser_Returns200() throws Exception {
+    var profile = AccountProfile.builder()
+        .id("acc-2")
+        .username("target")
+        .followedByMe(false)
+        .followerCount(0)
+        .build();
+    when(accountService.unfollowAccount(eq("target"))).thenReturn(profile);
+
+    mockMvc
+        .perform(delete("/api/accounts" + APIVersion.V20250914 + "/profile/{username}/follow", "target")
+            .with(csrf())
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.followedByMe").value(false));
+
+    verify(accountService).unfollowAccount(eq("target"));
+  }
+
+  @Test
   @DisplayName("testLoginAccount_whenValid_Returns200WithToken")
   @WithMockUser
   public void testLoginAccount_whenValid_Returns200WithToken() throws Exception {
@@ -290,4 +364,3 @@ public class AccountControllerTest {
         .andExpect(jsonPath("$.payload").value("jwt-token"));
   }
 }
-
