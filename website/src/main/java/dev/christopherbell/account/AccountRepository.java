@@ -61,4 +61,12 @@ public interface AccountRepository extends MongoRepository<Account, String> {
    *         if found, or {@link Optional#empty()} if no match exists
    */
   Optional<Account> findByUsername(String username);
+
+  /**
+   * Counts accounts that are following the provided account id.
+   *
+   * @param accountId the followed account id
+   * @return number of follower accounts
+   */
+  long countByFollowingIdsContaining(String accountId);
 }

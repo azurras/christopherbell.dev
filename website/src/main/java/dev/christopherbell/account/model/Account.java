@@ -3,6 +3,7 @@ package dev.christopherbell.account.model;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -70,6 +71,7 @@ public class Account {
   private String passwordHash;
   private Role role;
   private AccountStatus status;
+  private Set<String> followingIds;
 
   @Indexed(unique = true)
   private String username;

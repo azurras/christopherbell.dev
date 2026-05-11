@@ -12,6 +12,8 @@ export const API = {
     login: '/api/accounts/2024-12-15/login',
     create: '/api/accounts/2024-12-15/create',
     me: '/api/accounts/2025-09-03/me',
+    profile: (username) => `/api/accounts/2025-09-14/profile/${encodeURIComponent(username)}`,
+    follow: (username) => `/api/accounts/2025-09-14/profile/${encodeURIComponent(username)}/follow`,
   },
   reports: {
     create: '/api/reports/2025-09-03',
@@ -21,6 +23,7 @@ export const API = {
   posts: {
     base: '/api/posts/2025-09-14',
     feed: '/api/posts/2025-09-14/feed',
+    followingFeed: '/api/posts/2025-09-14/following/feed',
     userFeed: (username) => `/api/posts/2025-09-14/user/${encodeURIComponent(username)}/feed`,
     meFeed: '/api/posts/2025-09-14/me/feed',
     create: '/api/posts/2025-09-14/create',

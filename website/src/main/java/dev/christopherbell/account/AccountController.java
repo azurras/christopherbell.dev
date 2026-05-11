@@ -7,6 +7,7 @@ import static dev.christopherbell.libs.api.APIVersion.V20250914;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.AccountLoginRequest;
+import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
@@ -231,6 +232,71 @@ public class AccountController {
     return new ResponseEntity<>(
         Response.<AccountDetail>builder()
             .payload(accountService.getSelfAccount())
+            .success(true)
+            .build(), HttpStatus.OK);
+  }
+
+  /**
+   * Retrieves public profile metadata for a username.
+   *
+   * @param username the username to retrieve
+   * @return HTTP 200 with public profile metadata
+   * @throws Exception if the account cannot be found
+   */
+  @GetMapping(
+      value = V20250914 + "/profile/{username}",
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  public ResponseEntity<Response<AccountProfile>> getPublicProfile(
+      @PathVariable String username
+  ) throws Exception {
+    return new ResponseEntity<>(
+        Response.<AccountProfile>builder()
+            .payload(accountService.getPublicProfile(username))
+            .success(true)
+            .build(), HttpStatus.OK);
+  }
+
+  /**
+   * Follows an account by username for the authenticated user.
+   *
+   * @param username username to follow
+   * @return HTTP 200 with updated public profile metadata
+   * @throws Exception if the account cannot be followed
+   */
+  @PostMapping(
+      value = V20250914 + "/profile/{username}/follow",
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<AccountProfile>> followAccount(
+      @PathVariable String username
+  ) throws Exception {
+    return new ResponseEntity<>(
+        Response.<AccountProfile>builder()
+            .payload(accountService.followAccount(username))
+            .success(true)
+            .build(), HttpStatus.OK);
+  }
+
+  /**
+   * Unfollows an account by username for the authenticated user.
+   *
+   * @param username username to unfollow
+   * @return HTTP 200 with updated public profile metadata
+   * @throws Exception if the account cannot be unfollowed
+   */
+  @DeleteMapping(
+      value = V20250914 + "/profile/{username}/follow",
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<AccountProfile>> unfollowAccount(
+      @PathVariable String username
+  ) throws Exception {
+    return new ResponseEntity<>(
+        Response.<AccountProfile>builder()
+            .payload(accountService.unfollowAccount(username))
             .success(true)
             .build(), HttpStatus.OK);
   }

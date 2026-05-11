@@ -14,27 +14,52 @@
       <div class="container">
         <p class="home-kicker">Profile</p>
         <h1 id="userHeroTitle">User Feed</h1>
-        <p>Posts from one corner of the Void.</p>
+        <p id="userHeroMeta">Posts from one corner of the Void.</p>
       </div>
     </section>
     <section class="site-content">
-    <div class="container">
-    <div class="row justify-content-center">
-      <div class="col-12 col-lg-8">
-        <div class="d-flex align-items-center mb-3">
-          <div id="userAvatar" class="rounded-circle bg-secondary me-3 d-flex align-items-center justify-content-center text-white fw-semibold" style="width:48px;height:48px;">
-            <span id="userInitials">CB</span>
-          </div>
-          <div>
-            <div id="userHandle" class="h4 mb-0">@user</div>
-            <div id="userMeta" class="text-muted small"></div>
+      <div class="container">
+        <div id="userAlert" class="alert alert-danger d-none mb-3" role="alert"></div>
+        <div class="user-profile-shell">
+          <aside class="profile-overview" aria-label="User summary">
+            <div class="profile-card user-profile-card">
+              <div id="userAvatar" class="profile-avatar-lg" aria-hidden="true">
+                <span id="userInitials">?</span>
+              </div>
+              <div class="profile-identity">
+                <p class="profile-label">Account</p>
+                <h2 id="userHandle">@user</h2>
+                <p id="userMeta">Loading profile...</p>
+              </div>
+              <button id="followBtn" class="btn btn-dark d-none" type="button">Follow</button>
+            </div>
+            <div class="profile-stat-grid" aria-label="User network">
+              <div class="profile-stat">
+                <span id="userPostCount">0</span>
+                <small>Posts shown</small>
+              </div>
+              <div class="profile-stat">
+                <span id="userFollowerCount">0</span>
+                <small>Followers</small>
+              </div>
+              <div class="profile-stat">
+                <span id="userFollowingCount">0</span>
+                <small>Following</small>
+              </div>
+            </div>
+          </aside>
+          <div class="profile-posts-panel">
+            <div class="profile-posts-header">
+              <div>
+                <p class="profile-label">Public feed</p>
+                <h2>Posts</h2>
+              </div>
+              <a class="btn btn-outline-dark btn-sm" href="/void">Back to feed</a>
+            </div>
+            <div id="userFeed" class="feed-list user-feed-list"></div>
           </div>
         </div>
-        <div id="userFeed" class="list-group list-group-flush"></div>
-        <div id="userAlert" class="alert alert-danger d-none mt-3" role="alert"></div>
       </div>
-    </div>
-    </div>
     </section>
   </main>
   <footer id="footer"></footer>

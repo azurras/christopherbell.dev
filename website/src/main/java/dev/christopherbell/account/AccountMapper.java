@@ -23,6 +23,7 @@ public interface AccountMapper {
   @Mapping(target = "loginToken", ignore = true)
   @Mapping(target = "passwordSalt", ignore = true)
   @Mapping(target = "passwordHash", ignore = true)
+  @Mapping(target = "followingIds", ignore = true)
   Account toAccountEntity(AccountDetail accountDetail);
 
   /**

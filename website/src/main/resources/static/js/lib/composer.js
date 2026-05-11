@@ -36,8 +36,25 @@ export function initComposer({ selectors, maxLength = 280, isLoggedIn, onSubmit 
       if (alertEl) { alertEl.textContent = `Post text exceeds ${maxLength} characters.`; alertEl.classList.remove('d-none'); }
       return;
     }
-    await onSubmit(text);
-    reset();
+    try {
+      if (button) button.disabled = true;
+      await onSubmit(text);
+      reset();
+    } catch (err) {
+      if (alertEl) {
+        alertEl.textContent = err.message || 'Unable to submit post.';
+        alertEl.classList.remove('d-none');
+      }
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  function handleKeydown(event) {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      handleSubmit();
+    }
   }
 
   function reset() {
@@ -49,14 +66,15 @@ export function initComposer({ selectors, maxLength = 280, isLoggedIn, onSubmit 
   toggle();
   updateCounter();
   textarea?.addEventListener('input', updateCounter);
+  textarea?.addEventListener('keydown', handleKeydown);
   button?.addEventListener('click', handleSubmit);
 
   return {
     destroy() {
       textarea?.removeEventListener('input', updateCounter);
+      textarea?.removeEventListener('keydown', handleKeydown);
       button?.removeEventListener('click', handleSubmit);
     },
     reset,
   };
 }
-

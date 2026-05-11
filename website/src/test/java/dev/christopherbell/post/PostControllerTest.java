@@ -161,6 +161,24 @@ public class PostControllerTest {
   }
 
   @Test
+  @DisplayName("Following feed: USER -> 200 list")
+  @WithMockUser(authorities = {"USER"})
+  public void testGetFollowingFeed_whenUser_Returns200() throws Exception {
+    var list = List.of(PostFeedItem.builder().id("p1").username("target").text("hello").build());
+    when(postService.getFollowingFeed(eq(null), eq(20))).thenReturn(list);
+
+    mockMvc
+        .perform(get("/api/posts" + APIVersion.V20250914 + "/following/feed")
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload[0].id").value("p1"))
+        .andExpect(jsonPath("$.payload[0].username").value("target"));
+
+    verify(postService).getFollowingFeed(eq(null), eq(20));
+  }
+
+  @Test
   @DisplayName("Get by account: ADMIN -> 200 list")
   @WithMockUser(authorities = {"ADMIN"})
   public void testGetPostsByAccount_whenAdmin_Returns200() throws Exception {
@@ -187,4 +205,3 @@ public class PostControllerTest {
         .andExpect(status().isNotFound());
   }
 }
-

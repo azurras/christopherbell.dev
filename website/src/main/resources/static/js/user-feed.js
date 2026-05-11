@@ -21,53 +21,87 @@ function initialsFromUsername(username) {
   return username[0].toUpperCase();
 }
 
-
-let STATE = { before: null, limit: 20, loading: false, done: false };
 let ME = { id: null, role: null, username: null };
 let SCROLLER = null;
 let RENDER_CTX = null;
+let PROFILE = null;
+let VISIBLE_POSTS = 0;
 
-/**
- * Load the user's feed page slice.
- * @param {boolean} initial whether to reset pagination
- */
-async function loadUserFeed(initial = false) {
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value ?? '';
+}
+
+function fullName(profile) {
+  return [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim();
+}
+
+function renderProfile(profile) {
+  PROFILE = profile;
+  const username = profile?.username || getUsernameFromPath();
+  const handle = username ? `@${username}` : '@user';
+  const name = fullName(profile);
+  setText('userHeroTitle', handle);
+  setText('userHeroMeta', name ? `${name}'s posts and profile activity.` : 'Posts from one corner of the Void.');
+  setText('userHandle', handle);
+  setText('userMeta', name || 'Public profile');
+  setText('userInitials', initialsFromUsername(username));
+  setText('userFollowerCount', String(profile?.followerCount ?? 0));
+  setText('userFollowingCount', String(profile?.followingCount ?? 0));
+  renderFollowButton(profile);
+}
+
+function renderFollowButton(profile) {
+  const button = document.getElementById('followBtn');
+  if (!button) return;
+  if (!profile || profile.self) {
+    button.classList.add('d-none');
+    return;
+  }
+  button.classList.remove('d-none');
+  button.classList.toggle('btn-dark', !profile.followedByMe);
+  button.classList.toggle('btn-outline-dark', !!profile.followedByMe);
+  button.textContent = profile.followedByMe ? 'Following' : 'Follow';
+}
+
+function renderEmptyFeed() {
   const list = document.getElementById('userFeed');
+  if (!list) return;
+  list.innerHTML = `
+    <div class="feed-empty-state user-empty-state">
+      <h2>No posts yet</h2>
+      <p>This profile has not posted anything into the Void yet.</p>
+    </div>`;
+}
+
+function showAlert(message) {
   const alert = document.getElementById('userAlert');
-  const username = getUsernameFromPath();
-  if (!list || !username) return;
-  if (initial) {
-    STATE = { before: null, limit: 20, loading: false, done: false };
-    list.innerHTML = '';
-    document.getElementById('userHandle').textContent = `@${username}`;
+  if (alert) {
+    alert.textContent = message;
+    alert.classList.remove('d-none');
   }
-  if (STATE.loading || STATE.done) return;
-  STATE.loading = true;
+}
+
+async function toggleFollow() {
+  if (!PROFILE) return;
+  if (!isLoggedIn()) {
+    window.location.href = '/login';
+    return;
+  }
+  const button = document.getElementById('followBtn');
   try {
-    const params = new URLSearchParams();
-    params.set('limit', STATE.limit.toString());
-    if (STATE.before) params.set('before', STATE.before);
-    const items = await fetchJson(`${API.posts.userFeed(username)}?${params}`, { headers: authHeaders() });
-    if (!items || items.length === 0) {
-      if (list.children.length === 0) {
-        list.innerHTML = '<div class="list-group-item">No posts yet.</div>';
-      }
-      STATE.done = true;
-      STATE.loading = false;
-      return;
-    }
-    const ctx = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(ME), currentUserName: ME?.username || null });
-    for (const p of items) list.appendChild(createFeedItem({ ...p, username }, ctx));
-    const last = items[items.length - 1];
-    STATE.before = last.createdOn || last.lastUpdatedOn;
-    if (items.length < STATE.limit) STATE.done = true;
+    if (button) button.disabled = true;
+    const method = PROFILE.followedByMe ? 'DELETE' : 'POST';
+    const updated = await fetchJson(API.accounts.follow(PROFILE.username), {
+      method,
+      headers: authHeaders()
+    });
+    renderProfile(updated);
   } catch (err) {
-    if (alert) {
-      alert.textContent = err.message;
-      alert.classList.remove('d-none');
-    }
+    showAlert(err.message);
+  } finally {
+    if (button) button.disabled = false;
   }
-  STATE.loading = false;
 }
 
 /** Wire page once DOM is ready. */
@@ -82,10 +116,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const list = document.getElementById('userFeed');
   const username = getUsernameFromPath();
   if (list && username) {
-    const handle = document.getElementById('userHandle');
-    if (handle) handle.textContent = `@${username}`;
-    const initialsEl = document.getElementById('userInitials');
-    if (initialsEl) initialsEl.textContent = initialsFromUsername(username);
+    try {
+      const profile = await fetchJson(API.accounts.profile(username), { headers: authHeaders() });
+      renderProfile(profile);
+    } catch (err) {
+      showAlert(err.message);
+      renderProfile({ username });
+    }
+    document.getElementById('followBtn')?.addEventListener('click', toggleFollow);
     list.innerHTML = '';
     RENDER_CTX = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(ME), currentUserName: ME?.username || null });
     SCROLLER = createInfiniteScroller({
@@ -99,10 +137,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       },
       onPage: (items) => {
         if (!items || items.length === 0) return;
-        for (const p of items) list.appendChild(createFeedItem({ ...p, username }, RENDER_CTX));
+        VISIBLE_POSTS += items.length;
+        setText('userPostCount', String(VISIBLE_POSTS));
+        for (const p of items) list.appendChild(createFeedItem(p, RENDER_CTX));
       },
       getCursor: (it) => it.createdOn || it.lastUpdatedOn,
-      onEmpty: () => { list.innerHTML = '<div class="list-group-item">No posts yet.</div>'; }
+      onEmpty: renderEmptyFeed
     });
     SCROLLER.attach();
     SCROLLER.loadInitial();
