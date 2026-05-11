@@ -1,5 +1,6 @@
 package dev.christopherbell.report;
 
+import dev.christopherbell.admin.AdminActivityService;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
@@ -15,6 +16,7 @@ import dev.christopherbell.report.model.ReportResolveRequest;
 import dev.christopherbell.report.model.ReportStatus;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +28,7 @@ import org.springframework.stereotype.Service;
 public class ReportService {
   private final PostRepository postRepository;
   private final AccountRepository accountRepository;
+  private final AdminActivityService adminActivityService;
   private final PermissionService permissionService;
   private final ReportRepository reportRepository;
 
@@ -82,20 +85,33 @@ public class ReportService {
       report.setResolution(null);
       report.setResolvedBy(null);
       report.setResolvedOn(null);
-      return reportRepository.save(report);
+      var saved = reportRepository.save(report);
+      recordReportReopened(saved);
+      return saved;
     }
 
     if (report.getStatus() == ReportStatus.RESOLVED) {
       return report;
     }
 
+    var deletedPost = false;
     if (request.resolution() == ReportResolution.DELETE_POST
         || request.resolution() == ReportResolution.DELETE_POST_AND_SUSPEND_USER) {
-      postRepository.findById(report.getPostId()).ifPresent(postRepository::delete);
+      deletedPost = postRepository.findById(report.getPostId())
+          .map(post -> {
+            postRepository.delete(post);
+            return true;
+          })
+          .orElse(false);
     }
 
+    String suspendedUsername = null;
     if (request.resolution() == ReportResolution.DELETE_POST_AND_SUSPEND_USER) {
-      accountRepository.findById(report.getReportedAccountId()).ifPresent(account -> {
+      var suspendedAccount = accountRepository.findById(report.getReportedAccountId());
+      suspendedUsername = suspendedAccount
+          .map(Account::getUsername)
+          .orElse(report.getReportedUsername());
+      suspendedAccount.ifPresent(account -> {
         account.setStatus(AccountStatus.SUSPENDED);
         accountRepository.save(account);
       });
@@ -105,6 +121,68 @@ public class ReportService {
     report.setResolution(request.resolution());
     report.setResolvedBy(permissionService.getSelfId());
     report.setResolvedOn(Instant.now());
-    return reportRepository.save(report);
+    var saved = reportRepository.save(report);
+    recordReportResolved(saved);
+    if (deletedPost) {
+      recordPostDeleted(saved);
+    }
+    if (suspendedUsername != null) {
+      recordUserSuspended(saved, suspendedUsername);
+    }
+    return saved;
+  }
+
+  private void recordReportResolved(PostReport report) {
+    adminActivityService.record(
+        "REPORT_RESOLVED",
+        "REPORT",
+        report.getId(),
+        report.getReason(),
+        "%s resolved report " + report.getId(),
+        Map.of(
+            "reportId", nullSafe(report.getId()),
+            "resolution", report.getResolution() == null ? "" : report.getResolution().name()
+        ));
+  }
+
+  private void recordReportReopened(PostReport report) {
+    adminActivityService.record(
+        "REPORT_REOPENED",
+        "REPORT",
+        report.getId(),
+        report.getReason(),
+        "%s reopened report " + report.getId(),
+        Map.of("reportId", nullSafe(report.getId())));
+  }
+
+  private void recordPostDeleted(PostReport report) {
+    adminActivityService.record(
+        "POST_DELETED",
+        "POST",
+        report.getPostId(),
+        report.getPostText(),
+        "%s deleted post " + report.getPostId(),
+        Map.of(
+            "reportId", nullSafe(report.getId()),
+            "postId", nullSafe(report.getPostId())
+        ));
+  }
+
+  private void recordUserSuspended(PostReport report, String username) {
+    adminActivityService.record(
+        "USER_SUSPENDED",
+        "ACCOUNT",
+        report.getReportedAccountId(),
+        username,
+        "%s suspended user " + username,
+        Map.of(
+            "reportId", nullSafe(report.getId()),
+            "accountId", nullSafe(report.getReportedAccountId()),
+            "username", nullSafe(username)
+        ));
+  }
+
+  private String nullSafe(String value) {
+    return value == null ? "" : value;
   }
 }
