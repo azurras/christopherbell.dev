@@ -11,6 +11,8 @@ public record NotificationDetail(
     String actorUsername,
     String postId,
     String postText,
+    String messageId,
+    String messageText,
     NotificationType notificationType,
     Boolean read,
     Instant createdOn

@@ -104,6 +104,16 @@ public class ViewController {
   }
 
   /**
+   * Serves the private messages page.
+   *
+   * @return {@code messages.html}
+   */
+  @GetMapping(value = "/messages")
+  public String getMessagesPage(HttpServletRequest request) {
+    return "messages.html";
+  }
+
+  /**
    * Serves the login page.
    *
    * @return {@code login.html}

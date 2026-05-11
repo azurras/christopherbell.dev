@@ -103,10 +103,12 @@ class AppNav extends HTMLElement {
         return notifications.map(notification => {
             const unread = !notification.read;
             const actor = notification.actorUsername ? `@${sanitize(notification.actorUsername)}` : 'Someone';
-            const text = escapeHtml(notification.postText || '');
+            const isMessage = notification.notificationType === 'MESSAGE';
+            const text = escapeHtml(isMessage ? notification.messageText || '' : notification.postText || '');
+            const title = isMessage ? `${actor} sent you a message` : `${actor} mentioned you`;
             return `
-                <button type="button" class="notification-item ${unread ? 'unread' : ''}" data-notification-id="${notification.id}" data-post-id="${notification.postId || ''}">
-                    <span class="notification-title">${actor} mentioned you</span>
+                <button type="button" class="notification-item ${unread ? 'unread' : ''}" data-notification-id="${notification.id}" data-post-id="${notification.postId || ''}" data-message-username="${isMessage ? sanitize(notification.actorUsername || '') : ''}">
+                    <span class="notification-title">${title}</span>
                     <span class="notification-text">${text}</span>
                     <span class="notification-time">${formatWhen(notification.createdOn)}</span>
                 </button>`;
@@ -131,6 +133,7 @@ class AppNav extends HTMLElement {
         <div class="navbar-collapse collapse" id="navbarSupportedContent">
             <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                 <li class="nav-item"><a href="/void" class="nav-link">Void</a></li>
+                ${isAuthenticated ? `<li class="nav-item"><a href="/messages" class="nav-link">Messages</a></li>` : ''}
                 <li class="nav-item"><a href="/wfl" class="nav-link">What's For Lunch</a></li>
                 <li class="nav-item"><a href="/vin-decoder" class="nav-link">VIN Decoder</a></li>
             </ul>
@@ -192,6 +195,7 @@ class AppNav extends HTMLElement {
                     e.preventDefault();
                     const notificationId = item.getAttribute('data-notification-id');
                     const postId = item.getAttribute('data-post-id');
+                    const messageUsername = item.getAttribute('data-message-username');
                     if (notificationId) {
                         try {
                             await fetchJson(API.notifications.markRead(notificationId), {
@@ -201,6 +205,10 @@ class AppNav extends HTMLElement {
                         } catch (_) {
                             // Still allow navigation to the mentioned post.
                         }
+                    }
+                    if (messageUsername) {
+                        window.location.href = `/messages?with=${encodeURIComponent(messageUsername)}`;
+                        return;
                     }
                     if (postId) window.location.href = `/p/${encodeURIComponent(postId)}`;
                 });
