@@ -1,8 +1,9 @@
-package dev.christopherbell.notification.model;
+package dev.christopherbell.message.model;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
+import java.util.Set;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -16,19 +17,16 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @NoArgsConstructor
-@Document("notifications")
-public class Notification {
-  private final String type = "notification";
+@Document("messages")
+public class Message {
+  private final String type = "message";
 
   @Id private String id;
-  private String accountId;
-  private String actorAccountId;
-  private String actorUsername;
-  private String postId;
-  private String postText;
-  private String messageId;
-  private String messageText;
-  private NotificationType notificationType;
+  private String conversationKey;
+  private Set<String> participantIds;
+  private String senderAccountId;
+  private String recipientAccountId;
+  private String text;
   private Boolean read;
 
   @JsonFormat(

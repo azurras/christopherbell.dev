@@ -9,6 +9,7 @@ import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.notification.model.NotificationDetail;
 import dev.christopherbell.notification.model.NotificationType;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.message.model.Message;
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import java.util.LinkedHashSet;
@@ -51,6 +52,23 @@ public class NotificationService {
               .createdOn(now)
               .build()));
     }
+  }
+
+  public void createMessageNotification(Message message, Account actor, Account recipient) {
+    if (message == null || actor == null || recipient == null) {
+      return;
+    }
+    notificationRepository.save(Notification.builder()
+        .id(UUID.randomUUID().toString())
+        .accountId(recipient.getId())
+        .actorAccountId(actor.getId())
+        .actorUsername(actor.getUsername())
+        .messageId(message.getId())
+        .messageText(message.getText())
+        .notificationType(NotificationType.MESSAGE)
+        .read(false)
+        .createdOn(Instant.now())
+        .build());
   }
 
   public List<NotificationDetail> getMyNotifications(int limit) {
@@ -110,6 +128,8 @@ public class NotificationService {
         .actorUsername(notification.getActorUsername())
         .postId(notification.getPostId())
         .postText(notification.getPostText())
+        .messageId(notification.getMessageId())
+        .messageText(notification.getMessageText())
         .notificationType(notification.getNotificationType())
         .read(Boolean.TRUE.equals(notification.getRead()))
         .createdOn(notification.getCreatedOn())

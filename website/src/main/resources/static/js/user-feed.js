@@ -49,6 +49,7 @@ function renderProfile(profile) {
   setText('userFollowerCount', String(profile?.followerCount ?? 0));
   setText('userFollowingCount', String(profile?.followingCount ?? 0));
   renderFollowButton(profile);
+  renderMessageLink(profile);
 }
 
 function renderFollowButton(profile) {
@@ -62,6 +63,17 @@ function renderFollowButton(profile) {
   button.classList.toggle('btn-dark', !profile.followedByMe);
   button.classList.toggle('btn-outline-dark', !!profile.followedByMe);
   button.textContent = profile.followedByMe ? 'Following' : 'Follow';
+}
+
+function renderMessageLink(profile) {
+  const link = document.getElementById('messageUserLink');
+  if (!link) return;
+  if (!profile || profile.self) {
+    link.classList.add('d-none');
+    return;
+  }
+  link.href = `/messages?to=${encodeURIComponent(profile.username || '')}`;
+  link.classList.remove('d-none');
 }
 
 function renderEmptyFeed() {

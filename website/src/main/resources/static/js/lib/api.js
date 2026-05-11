@@ -36,6 +36,11 @@ export const API = {
     unreadCount: '/api/notifications/2025-09-14/unread-count',
     markRead: (id) => `/api/notifications/2025-09-14/${encodeURIComponent(id)}/read`,
   },
+  messages: {
+    base: '/api/messages/2025-09-14',
+    conversations: '/api/messages/2025-09-14/conversations',
+    conversation: (username) => `/api/messages/2025-09-14/conversation/${encodeURIComponent(username)}`,
+  },
   vehicles: {
     decodeVin: '/api/vehicles/2026-05-09/vin/decode',
   },
