@@ -2,14 +2,15 @@ package dev.christopherbell.report;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.ArgumentMatchers.any;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
+import dev.christopherbell.admin.AdminActivityService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.PostRepository;
@@ -32,10 +33,16 @@ class ReportServiceTest {
   void submitReport_sendsEmail() throws Exception {
     PostRepository postRepository = Mockito.mock(PostRepository.class);
     AccountRepository accountRepository = Mockito.mock(AccountRepository.class);
+    AdminActivityService adminActivityService = Mockito.mock(AdminActivityService.class);
     PermissionService permissionService = Mockito.mock(PermissionService.class);
     ReportRepository reportRepository = Mockito.mock(ReportRepository.class);
 
-    ReportService service = new ReportService(postRepository, accountRepository, permissionService, reportRepository);
+    ReportService service = new ReportService(
+        postRepository,
+        accountRepository,
+        adminActivityService,
+        permissionService,
+        reportRepository);
 
     ReportCreateRequest request = new ReportCreateRequest("post-1", "spam", "details");
     Post post = Post.builder()
@@ -82,6 +89,7 @@ class ReportServiceTest {
     ReportService service = new ReportService(
         Mockito.mock(PostRepository.class),
         Mockito.mock(AccountRepository.class),
+        Mockito.mock(AdminActivityService.class),
         Mockito.mock(PermissionService.class),
         Mockito.mock(ReportRepository.class)
     );
@@ -95,21 +103,31 @@ class ReportServiceTest {
   void resolveReport_deletesPostAndSuspendsUser() throws Exception {
     PostRepository postRepository = Mockito.mock(PostRepository.class);
     AccountRepository accountRepository = Mockito.mock(AccountRepository.class);
+    AdminActivityService adminActivityService = Mockito.mock(AdminActivityService.class);
     PermissionService permissionService = Mockito.mock(PermissionService.class);
     ReportRepository reportRepository = Mockito.mock(ReportRepository.class);
 
-    ReportService service = new ReportService(postRepository, accountRepository, permissionService, reportRepository);
+    ReportService service = new ReportService(
+        postRepository,
+        accountRepository,
+        adminActivityService,
+        permissionService,
+        reportRepository);
 
     var report = dev.christopherbell.report.model.PostReport.builder()
         .id("r1")
         .postId("p1")
+        .postText("bad post")
         .reportedAccountId("u1")
+        .reportedUsername("reported")
         .status(ReportStatus.OPEN)
         .build();
     var account = Account.builder().id("u1").status(AccountStatus.ACTIVE).build();
+    var post = Post.builder().id("p1").text("bad post").accountId("u1").build();
 
     when(reportRepository.findById("r1")).thenReturn(Optional.of(report));
     when(permissionService.getSelfId()).thenReturn("admin-1");
+    when(postRepository.findById("p1")).thenReturn(Optional.of(post));
     when(accountRepository.findById("u1")).thenReturn(Optional.of(account));
     when(reportRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -117,5 +135,26 @@ class ReportServiceTest {
 
     verify(postRepository).findById("p1");
     verify(accountRepository).save(account);
+    verify(adminActivityService).record(
+        eq("REPORT_RESOLVED"),
+        eq("REPORT"),
+        eq("r1"),
+        any(),
+        any(),
+        any());
+    verify(adminActivityService).record(
+        eq("POST_DELETED"),
+        eq("POST"),
+        eq("p1"),
+        any(),
+        any(),
+        any());
+    verify(adminActivityService).record(
+        eq("USER_SUSPENDED"),
+        eq("ACCOUNT"),
+        eq("u1"),
+        any(),
+        any(),
+        any());
   }
 }

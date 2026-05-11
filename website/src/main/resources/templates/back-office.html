@@ -22,79 +22,93 @@
         </div>
       </div>
     </section>
-    <section class="site-content">
-    <div class="container-fluid">
-    <div class="row">
-      <div class="col-12">
+    <section class="site-content back-office-content">
+      <div class="container-fluid">
         <div id="backOfficeAlert" class="alert alert-danger d-none" role="alert"></div>
-        <ul class="nav nav-pills back-office-nav mb-3" id="backOfficeTabs" role="tablist">
-          <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="tab-reports" data-bs-toggle="pill" data-bs-target="#panel-reports" type="button" role="tab">Reports</button>
-          </li>
-          <li class="nav-item" role="presentation">
-            <button class="nav-link" id="tab-users" data-bs-toggle="pill" data-bs-target="#panel-users" type="button" role="tab">Users</button>
-          </li>
-        </ul>
-        <div class="tab-content">
-          <div class="tab-pane fade show active" id="panel-reports" role="tabpanel">
-            <div class="card">
-              <div class="card-body">
-                <div class="table-responsive">
-                  <table class="table table-sm align-middle mb-0 table-striped" id="backOfficeReports">
-                    <thead>
-                      <tr>
-                        <th>Created</th>
-                        <th>Reason</th>
-                        <th>Reporter</th>
-                        <th>Reported</th>
-                        <th>Post</th>
-                        <th>Status</th>
-                        <th>Resolution</th>
-                        <th>Resolved On</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody></tbody>
-                  </table>
+        <div class="admin-metrics" aria-label="Back office summary">
+          <article class="admin-metric">
+            <span>Total Reports</span>
+            <strong id="metricTotalReports">—</strong>
+          </article>
+          <article class="admin-metric metric-open">
+            <span>Open Reports</span>
+            <strong id="metricOpenReports">—</strong>
+          </article>
+          <article class="admin-metric metric-pending">
+            <span>Pending Users</span>
+            <strong id="metricPendingUsers">—</strong>
+          </article>
+          <article class="admin-metric metric-suspended">
+            <span>Suspended Users</span>
+            <strong id="metricSuspendedUsers">—</strong>
+          </article>
+          <article class="admin-metric">
+            <span>Recent Activity</span>
+            <strong id="metricRecentActivity">—</strong>
+          </article>
+        </div>
+
+        <div class="admin-dashboard-grid">
+          <section class="admin-workspace" aria-label="Work queues">
+            <ul class="nav nav-pills back-office-nav mb-3" id="backOfficeTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-reports" data-bs-toggle="pill" data-bs-target="#panel-reports" type="button" role="tab">Reports</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-users" data-bs-toggle="pill" data-bs-target="#panel-users" type="button" role="tab">Users</button>
+              </li>
+            </ul>
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="panel-reports" role="tabpanel">
+                <div class="queue-panel">
+                  <div class="queue-panel-header">
+                    <div>
+                      <p class="home-kicker mb-1">Moderation</p>
+                      <h2>Report Queue</h2>
+                    </div>
+                    <span class="queue-count" id="reportQueueCount">—</span>
+                  </div>
+                  <div id="reportQueue" class="queue-list" aria-live="polite"></div>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="panel-users" role="tabpanel">
+                <div class="queue-panel">
+                  <div class="queue-panel-header">
+                    <div>
+                      <p class="home-kicker mb-1">Accounts</p>
+                      <h2>User Queue</h2>
+                    </div>
+                    <span class="queue-count" id="userQueueCount">—</span>
+                  </div>
+                  <div id="userQueue" class="queue-list" aria-live="polite"></div>
                 </div>
               </div>
             </div>
-          </div>
-          <div class="tab-pane fade" id="panel-users" role="tabpanel">
-            <div class="card">
-              <div class="card-body">
-                <div class="table-responsive">
-                  <table class="table table-sm align-middle mb-0 table-striped" id="backOfficeTable">
-                    <thead>
-                      <tr>
-                        <th>Username</th>
-                        <th>Name</th>
-                        <th>Email</th>
-                        <th>Role</th>
-                        <th>Status</th>
-                        <th>Approved</th>
-                        <th>Created</th>
-                        <th>Last Login</th>
-                        <th>Updated</th>
-                        <th>ID</th>
-                        <th>Type</th>
-                        <th>Approved By</th>
-                        <th>Created By</th>
-                        <th>Last Modified By</th>
-                      </tr>
-                    </thead>
-                    <tbody></tbody>
-                  </table>
-                </div>
+          </section>
+
+          <aside class="activity-panel" aria-label="Recent activity">
+            <div class="queue-panel-header">
+              <div>
+                <p class="home-kicker mb-1">Audit</p>
+                <h2>Recent Activity</h2>
               </div>
             </div>
-          </div>
+            <div id="activityList" class="activity-list" aria-live="polite"></div>
+          </aside>
         </div>
       </div>
-    </div>
-    </div>
     </section>
   </main>
+  <aside id="backOfficeDrawer" class="back-office-drawer d-none" aria-hidden="true" aria-labelledby="drawerTitle">
+    <div class="drawer-header">
+      <div>
+        <p id="drawerKicker" class="home-kicker mb-1">Details</p>
+        <h2 id="drawerTitle">Select an item</h2>
+      </div>
+      <button id="drawerClose" class="btn btn-sm btn-outline-secondary" type="button" aria-label="Close details">Close</button>
+    </div>
+    <div id="drawerBody" class="drawer-body"></div>
+  </aside>
   <footer id="footer"></footer>
   <script type="module" src="/js/app.js"></script>
   <script type="module" src="/js/back-office.js"></script>

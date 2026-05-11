@@ -4,6 +4,9 @@
  * Keep endpoints here to avoid repetition and make upgrades simple.
  */
 export const API = {
+  admin: {
+    activity: '/api/admin/activity/2026-05-09',
+  },
   accounts: {
     base: '/api/accounts/2024-12-15',
     login: '/api/accounts/2024-12-15/login',
