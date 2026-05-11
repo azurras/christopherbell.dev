@@ -14,6 +14,7 @@ import dev.christopherbell.vehicle.model.VehicleVinRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -34,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 @RequestMapping("/api/vehicles")
 @RestController
+@Slf4j
 public class VehicleController {
   private final VehicleDataCollectionStateService vehicleDataCollectionStateService;
   private final VehicleVinDecodeService vehicleVinDecodeService;
@@ -103,15 +105,18 @@ public class VehicleController {
       @RequestBody VehicleVinDecodeRequest request,
       HttpServletRequest servletRequest
   ) throws Exception {
+    var clientIp = clientIp(servletRequest);
+    var clientKey = clientKey(servletRequest, clientIp);
+    log.info("VIN decoder used from ip={} clientKey={}.", clientIp, clientKey);
     return new ResponseEntity<>(
         Response.<VehicleVinDecodeResponse>builder()
-            .payload(vehicleVinDecodeService.decode(request, clientKey(servletRequest)))
+            .payload(vehicleVinDecodeService.decode(request, clientKey))
             .success(true)
             .build(),
         HttpStatus.OK);
   }
 
-  private String clientKey(HttpServletRequest request) {
+  private String clientKey(HttpServletRequest request, String clientIp) {
     var authentication = SecurityContextHolder.getContext().getAuthentication();
     if (authentication != null
         && authentication.isAuthenticated()
@@ -120,11 +125,15 @@ public class VehicleController {
       return "account:" + authentication.getName();
     }
 
+    return "ip:" + clientIp;
+  }
+
+  private String clientIp(HttpServletRequest request) {
     var forwardedFor = request.getHeader("X-Forwarded-For");
     if (forwardedFor != null && !forwardedFor.isBlank()) {
-      return "ip:" + forwardedFor.split(",")[0].trim();
+      return forwardedFor.split(",")[0].trim();
     }
-    return "ip:" + request.getRemoteAddr();
+    return request.getRemoteAddr();
   }
 
   /**
