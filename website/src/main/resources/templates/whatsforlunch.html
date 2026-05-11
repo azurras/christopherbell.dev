@@ -19,15 +19,23 @@
     <link rel="shortcut icon" href="/images/headers/logo.png"/>
 </head>
 
-<body>
+<body class="site-page lunch-page">
     <div id="nav"></div>
-    <main role="main">
-        <div class="jumbotron jumbotron-fluid">
+    <main class="site-main" role="main">
+        <section class="site-hero site-hero-lunch" aria-labelledby="lunchTitle">
             <div class="container">
-                <h1 class="display-3 text-center">What's For Lunch?</h1>
-                <div id="whats-for-lunch"></div>
+                <p class="home-kicker">Decision support</p>
+                <h1 id="lunchTitle">What's For Lunch?</h1>
+                <p>Restaurant picks for the moment when everybody is hungry and nobody has a plan.</p>
             </div>
-        </div>
+        </section>
+        <section class="site-content">
+            <div class="container">
+                <div class="content-panel lunch-panel">
+                    <div id="whats-for-lunch"></div>
+                </div>
+            </div>
+        </section>
     </main>
     <footer id="footer"></footer>
 </body>

@@ -19,13 +19,19 @@
     <link rel="shortcut icon" href="/images/headers/logo.png"/>
 </head>
 
-<body>
+<body class="site-page photo-page">
     <div id="nav"></div>
-    <main>
-        <section class="py-5 text-center main-color">
-            <h1 class="fw-light">Photo Gallery</h1>
+    <main class="site-main">
+        <section class="site-hero site-hero-photo" aria-labelledby="photoTitle">
+            <div class="container">
+                <p class="home-kicker">Gallery</p>
+                <h1 id="photoTitle">Photo Gallery</h1>
+                <p>Places, streets, skylines, and other things worth keeping around.</p>
+            </div>
         </section>
-        <div class="bg-light py-5" id="gallery"></div>
+        <section class="site-content">
+            <div class="container-fluid gallery-panel" id="gallery"></div>
+        </section>
     </main>
     <footer id="footer"></footer>
 </body>

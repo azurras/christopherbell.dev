@@ -7,14 +7,18 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   <link rel="stylesheet" type="text/css" href="/css/main.css"/>
 </head>
-<body>
+<body class="site-page auth-page">
   <div id="nav"></div>
-  <main class="container py-5" role="main">
+  <main class="auth-shell" role="main">
     <div class="row justify-content-center">
       <div class="col-12 col-md-8 col-lg-6">
+        <div class="auth-heading">
+          <p class="home-kicker">Welcome back</p>
+          <h1>Sign in</h1>
+          <p>Get back to posting, profile tools, and the admin bits if you have access.</p>
+        </div>
         <div class="card shadow-sm">
           <div class="card-body p-4">
-            <h1 class="h3 mb-3 text-center">Sign in</h1>
             <div id="loginAlert" class="alert alert-danger d-none" role="alert"></div>
             <form id="loginForm" novalidate>
               <div class="mb-3">
@@ -41,4 +45,3 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
   </body>
 </html>
-
