@@ -56,9 +56,14 @@ export async function fetchJson(url, options = {}) {
   return data.payload ?? data;
 }
 
-/** Escape angle brackets for safe HTML text injection. */
+/** Escape HTML metacharacters for safe text and attribute injection. */
 export function sanitize(text) {
-  return String(text ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /** Convert an ISO datetime (or now) into a localized string. */
