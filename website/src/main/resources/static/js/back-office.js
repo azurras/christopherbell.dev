@@ -14,10 +14,18 @@ const drawerBody = document.getElementById('drawerBody');
 const drawerClose = document.getElementById('drawerClose');
 const drawerKicker = document.getElementById('drawerKicker');
 const drawerTitle = document.getElementById('drawerTitle');
+const wflOperationStatus = document.getElementById('wflOperationStatus');
+const vehicleOperationStatus = document.getElementById('vehicleOperationStatus');
+const contentOperationStatus = document.getElementById('contentOperationStatus');
+const vehicleVinForm = document.getElementById('vehicleVinForm');
+const vehicleVinBatchForm = document.getElementById('vehicleVinBatchForm');
 
 let accounts = [];
 let reports = [];
 let activities = [];
+let restaurants = [];
+let vehicles = [];
+let blogPosts = [];
 
 function showAlert(msg) {
   if (!alertBox) return;
@@ -33,11 +41,20 @@ function setLoading() {
   renderState(reportQueue, 'Loading reports…');
   renderState(userQueue, 'Loading users…');
   renderState(activityList, 'Loading activity…');
+  renderOperationResult(wflOperationStatus, 'Restaurant counts have not been loaded yet.');
+  renderOperationResult(vehicleOperationStatus, 'Vehicle state has not been loaded yet.');
+  renderOperationResult(contentOperationStatus, 'Content data has not been loaded yet.');
 }
 
 function renderState(container, message) {
   if (!container) return;
   container.innerHTML = `<div class="empty-state">${sanitize(message)}</div>`;
+}
+
+function renderOperationResult(container, content, tone = 'neutral') {
+  if (!container) return;
+  container.className = `operation-result operation-${tone}`;
+  container.innerHTML = content;
 }
 
 function statusClass(status) {
@@ -174,9 +191,35 @@ function renderUsers() {
             <span>${sanitize(account.role || 'USER')}</span>
           </div>
         </div>
+        <div class="queue-actions">
+          ${userActionSelect(account)}
+        </div>
       </article>
     `;
   }).join('');
+}
+
+function userActionSelect(account) {
+  const status = (account.status || '').toUpperCase();
+  const options = [];
+  if (!account.isApproved) {
+    options.push('<option value="APPROVE">Approve</option>');
+  }
+  if (status !== 'SUSPENDED') {
+    options.push('<option value="SUSPEND">Suspend</option>');
+  }
+  if (status !== 'ACTIVE' || !account.isApproved) {
+    options.push('<option value="ACTIVATE">Activate</option>');
+  }
+  if (!options.length) {
+    return '<span class="queue-age">No actions</span>';
+  }
+  return `
+    <select class="form-select form-select-sm user-action" data-account="${sanitize(account.id || '')}" aria-label="User action">
+      <option value="" selected>Action…</option>
+      ${options.join('')}
+    </select>
+  `;
 }
 
 function renderActivity() {
@@ -271,6 +314,11 @@ function userDetails(account) {
       ${detailRow('Updated', account.lastUpdatedOn ? formatWhen(account.lastUpdatedOn) : '—')}
       ${detailRow('ID', account.id)}
     </div>
+    <div class="detail-section">
+      ${userActionSelect(account)}
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-user-posts="${sanitize(account.id || '')}">Load User Posts</button>
+      <div id="drawerUserPosts" class="operation-result">Posts have not been loaded.</div>
+    </div>
   `;
 }
 
@@ -279,6 +327,22 @@ async function resolveReport(reportId, resolution) {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ resolution })
+  });
+}
+
+async function updateAccount(accountId, patch) {
+  return fetchJson(API.accounts.update, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify({ id: accountId, ...patch }),
+  });
+}
+
+async function approveAccount(accountId) {
+  return fetchJson(API.accounts.approve(accountId), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: '{}',
   });
 }
 
@@ -298,6 +362,167 @@ async function refreshDashboard() {
   renderActivity();
 }
 
+function wflCountsMarkup() {
+  const withCoordinates = restaurants.filter(restaurant =>
+    restaurant.address
+    && typeof restaurant.address.latitude === 'number'
+    && typeof restaurant.address.longitude === 'number').length;
+  const withoutCoordinates = Math.max(0, restaurants.length - withCoordinates);
+  return `
+    <div class="operation-stat-grid">
+      <span><strong>${restaurants.length}</strong>Total restaurants</span>
+      <span><strong>${withCoordinates}</strong>With coordinates</span>
+      <span><strong>${withoutCoordinates}</strong>Missing coordinates</span>
+    </div>
+  `;
+}
+
+function resultSummary(result, labels) {
+  return `
+    <div class="operation-stat-grid">
+      ${labels.map(([key, label]) => `<span><strong>${sanitize(result?.[key] ?? 0)}</strong>${sanitize(label)}</span>`).join('')}
+    </div>
+  `;
+}
+
+async function loadWflCounts() {
+  restaurants = await fetchJson(API.whatsForLunch.restaurants, { headers: authHeaders() }) || [];
+  renderOperationResult(wflOperationStatus, wflCountsMarkup(), 'success');
+}
+
+async function getWflCountsMarkup() {
+  restaurants = await fetchJson(API.whatsForLunch.restaurants, { headers: authHeaders() }) || [];
+  return wflCountsMarkup();
+}
+
+async function importRestaurants(button) {
+  button.disabled = true;
+  renderOperationResult(wflOperationStatus, 'Importing restaurants from OpenStreetMap…');
+  try {
+    const result = await fetchJson(API.whatsForLunch.importOpenStreetMap, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    renderOperationResult(wflOperationStatus, `
+      <p class="operation-message">Import complete.</p>
+      ${resultSummary(result, [
+        ['fetched', 'Fetched'],
+        ['imported', 'Imported'],
+        ['updated', 'Updated'],
+        ['skippedExisting', 'Skipped existing'],
+        ['skippedInvalid', 'Skipped invalid'],
+      ])}
+      ${await getWflCountsMarkup()}
+    `, 'success');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function dedupeRestaurants(button) {
+  button.disabled = true;
+  renderOperationResult(wflOperationStatus, 'Removing duplicate restaurant names…');
+  try {
+    const result = await fetchJson(API.whatsForLunch.dedupeNames, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    renderOperationResult(wflOperationStatus, `
+      <p class="operation-message">Duplicate cleanup complete.</p>
+      ${resultSummary(result, [
+        ['duplicateGroups', 'Duplicate groups'],
+        ['deleted', 'Deleted'],
+        ['updatedSurvivors', 'Updated survivors'],
+      ])}
+      ${await getWflCountsMarkup()}
+    `, 'success');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function vehicleStateMarkup(state) {
+  return `<pre class="operation-pre">${sanitize(JSON.stringify(state || {}, null, 2))}</pre>`;
+}
+
+async function loadVehicleState() {
+  const state = await fetchJson(API.vehicles.dataCollectionState, { headers: authHeaders() });
+  renderOperationResult(vehicleOperationStatus, vehicleStateMarkup(state), 'success');
+}
+
+async function loadVehicleCount() {
+  vehicles = await fetchJson(API.vehicles.base, { headers: authHeaders() }) || [];
+  renderOperationResult(vehicleOperationStatus, `
+    <div class="operation-stat-grid">
+      <span><strong>${vehicles.length}</strong>Stored vehicles</span>
+    </div>
+  `, 'success');
+}
+
+async function createVehicleFromVin(vin) {
+  const vehicle = await fetchJson(API.vehicles.createFromVin, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ vin }),
+  });
+  renderOperationResult(vehicleOperationStatus, `
+    <p class="operation-message">Vehicle created.</p>
+    ${detailRow('VIN', vehicle.vin)}
+    ${detailRow('Vehicle', [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' '))}
+    ${detailRow('ID', vehicle.id)}
+  `, 'success');
+}
+
+async function createVehiclesFromVins(vins) {
+  const created = await fetchJson(API.vehicles.createFromVins, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ vins }),
+  });
+  renderOperationResult(vehicleOperationStatus, `
+    <p class="operation-message">Batch import complete.</p>
+    <div class="operation-stat-grid">
+      <span><strong>${created?.length || 0}</strong>Created vehicles</span>
+    </div>
+  `, 'success');
+}
+
+async function loadBlogPosts() {
+  const response = await fetchJson(API.blog.posts, { headers: authHeaders() });
+  blogPosts = response?.posts || [];
+  const postList = blogPosts.slice(0, 5).map(post => `
+    <li>
+      <strong>${sanitize(post.title || post.id || 'Untitled')}</strong>
+      <span>${sanitize(post.id || '')}</span>
+    </li>
+  `).join('');
+  renderOperationResult(contentOperationStatus, `
+    <div class="operation-stat-grid">
+      <span><strong>${blogPosts.length}</strong>Blog posts</span>
+    </div>
+    ${postList ? `<ul class="operation-list">${postList}</ul>` : ''}
+  `, 'success');
+}
+
+async function loadUserPosts(accountId) {
+  const target = document.getElementById('drawerUserPosts');
+  if (!target) return;
+  renderOperationResult(target, 'Loading posts…');
+  const posts = await fetchJson(API.posts.byAccount(accountId), { headers: authHeaders() }) || [];
+  const postList = posts.slice(0, 8).map(post => `
+    <li>
+      <strong>${sanitize(post.content || post.text || post.id || 'Post')}</strong>
+      <span>${post.createdOn ? sanitize(formatWhen(post.createdOn)) : sanitize(post.id || '')}</span>
+    </li>
+  `).join('');
+  renderOperationResult(target, `
+    <div class="operation-stat-grid">
+      <span><strong>${posts.length}</strong>User posts</span>
+    </div>
+    ${postList ? `<ul class="operation-list">${postList}</ul>` : ''}
+  `, 'success');
+}
+
 async function handleReportAction(target) {
   const reportId = target.getAttribute('data-report');
   const resolution = target.value;
@@ -315,10 +540,73 @@ async function handleReportAction(target) {
   }
 }
 
+async function handleUserAction(target) {
+  const accountId = target.getAttribute('data-account');
+  const action = target.value;
+  if (!accountId || !action) return;
+
+  target.disabled = true;
+  try {
+    if (action === 'APPROVE') {
+      await approveAccount(accountId);
+    } else if (action === 'SUSPEND') {
+      await updateAccount(accountId, { status: 'SUSPENDED' });
+    } else if (action === 'ACTIVATE') {
+      await updateAccount(accountId, { status: 'ACTIVE', isApproved: true });
+    }
+    await refreshDashboard();
+    closeDrawer();
+  } catch (err) {
+    showAlert(err.message || 'Failed to update user.');
+  } finally {
+    target.disabled = false;
+  }
+}
+
+async function handleOperation(button) {
+  const operation = button.getAttribute('data-operation');
+  clearAlert();
+  try {
+    if (operation === 'wfl-import') {
+      await importRestaurants(button);
+    } else if (operation === 'wfl-dedupe') {
+      await dedupeRestaurants(button);
+    } else if (operation === 'wfl-load') {
+      button.disabled = true;
+      await loadWflCounts();
+    } else if (operation === 'vehicle-state') {
+      button.disabled = true;
+      await loadVehicleState();
+    } else if (operation === 'vehicle-load') {
+      button.disabled = true;
+      await loadVehicleCount();
+    } else if (operation === 'blog-load') {
+      button.disabled = true;
+      await loadBlogPosts();
+    }
+  } catch (err) {
+    showAlert(err.message || 'Operation failed.');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function wireEvents() {
   document.addEventListener('click', (event) => {
     const action = event.target;
-    if (action instanceof HTMLSelectElement && action.classList.contains('report-action')) {
+    const operationButton = action.closest?.('[data-operation]');
+    if (operationButton instanceof HTMLButtonElement) {
+      handleOperation(operationButton);
+      return;
+    }
+
+    const userPostsButton = action.closest?.('[data-user-posts]');
+    if (userPostsButton instanceof HTMLButtonElement) {
+      loadUserPosts(userPostsButton.getAttribute('data-user-posts'));
+      return;
+    }
+
+    if (action.closest?.('.queue-actions')) {
       return;
     }
 
@@ -338,8 +626,42 @@ function wireEvents() {
   document.addEventListener('change', async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLSelectElement)) return;
-    if (!target.classList.contains('report-action')) return;
-    await handleReportAction(target);
+    if (target.classList.contains('report-action')) {
+      await handleReportAction(target);
+    } else if (target.classList.contains('user-action')) {
+      await handleUserAction(target);
+    }
+  });
+
+  vehicleVinForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearAlert();
+    const input = vehicleVinForm.querySelector('[name="vin"]');
+    const vin = input?.value?.trim();
+    if (!vin) return;
+    try {
+      await createVehicleFromVin(vin);
+      vehicleVinForm.reset();
+    } catch (err) {
+      showAlert(err.message || 'Failed to create vehicle.');
+    }
+  });
+
+  vehicleVinBatchForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearAlert();
+    const input = vehicleVinBatchForm.querySelector('[name="vins"]');
+    const vins = (input?.value || '')
+        .split(/\s+/)
+        .map(value => value.trim())
+        .filter(Boolean);
+    if (!vins.length) return;
+    try {
+      await createVehiclesFromVins(vins);
+      vehicleVinBatchForm.reset();
+    } catch (err) {
+      showAlert(err.message || 'Failed to create vehicle batch.');
+    }
   });
 
   drawerClose?.addEventListener('click', closeDrawer);

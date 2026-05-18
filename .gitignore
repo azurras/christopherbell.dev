@@ -52,6 +52,11 @@ yarn.lock
 # Log file
 *.log
 
+# Local secrets
+.env
+.env.*
+!.env.example
+
 # BlueJ files
 *.ctxt
 

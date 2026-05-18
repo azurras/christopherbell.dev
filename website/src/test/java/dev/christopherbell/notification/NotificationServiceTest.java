@@ -30,9 +30,9 @@ class NotificationServiceTest {
     var service = new NotificationService(notificationRepository, accountRepository);
     var actor = Account.builder().id("actor").username("writer").build();
     var mentioned = Account.builder().id("mentioned").username("reader").build();
-    var post = Post.builder().id("post-1").text("hello @reader").build();
+    var post = Post.builder().id("post-1").text("hello @Reader").build();
 
-    when(accountRepository.findByUsername("reader")).thenReturn(Optional.of(mentioned));
+    when(accountRepository.findByUsernameIgnoreCase("Reader")).thenReturn(Optional.of(mentioned));
 
     service.createMentionNotifications(post, actor);
 
@@ -43,7 +43,7 @@ class NotificationServiceTest {
     assertEquals("actor", notification.getActorAccountId());
     assertEquals("writer", notification.getActorUsername());
     assertEquals("post-1", notification.getPostId());
-    assertEquals("hello @reader", notification.getPostText());
+    assertEquals("hello @Reader", notification.getPostText());
     assertEquals(NotificationType.MENTION, notification.getNotificationType());
     assertEquals(false, notification.getRead());
   }
@@ -55,11 +55,11 @@ class NotificationServiceTest {
     var actor = Account.builder().id("actor").username("writer").build();
     var post = Post.builder().id("post-1").text("@writer @writer").build();
 
-    when(accountRepository.findByUsername("writer")).thenReturn(Optional.of(actor));
+    when(accountRepository.findByUsernameIgnoreCase("writer")).thenReturn(Optional.of(actor));
 
     service.createMentionNotifications(post, actor);
 
-    verify(accountRepository).findByUsername("writer");
+    verify(accountRepository).findByUsernameIgnoreCase("writer");
     verify(notificationRepository, never()).save(any(Notification.class));
   }
 }

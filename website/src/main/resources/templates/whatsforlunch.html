@@ -6,17 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="author" content="Christopher Bell (cbell7@icloud.com)" />
     <meta name="keywords" content="cbell,blog" />
-    <meta name="description" content="CB | WFL" />
-    <meta property="og:title" content="CB | WFL" />
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="" />
-    <meta property="og:image" content="/images/headers/logo.png" />
-    <meta property="og:description" content="CB | WFL" />
+    <th:block th:replace="~{fragments/social-preview :: socialPreview(${socialTitle}, 'Restaurant picks for the moment when everybody is hungry and nobody has a plan.', 'https://www.christopherbell.dev/wfl', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
 
     <title>CB | What's For Lunch?</title>
 
     <link rel="stylesheet" type="text/css" href="/css/main.css"/>
-    <link rel="shortcut icon" href="/images/headers/logo.png"/>
 </head>
 
 <body class="site-page lunch-page">
@@ -41,5 +35,6 @@
 </body>
 
 <script type="module" src="/js/app.js"></script>
+<script type="module" src="/js/whats-for-lunch.js"></script>
 
 </html>

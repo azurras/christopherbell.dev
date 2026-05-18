@@ -16,6 +16,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountProfile;
+import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
+import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.libs.api.APIVersion;
@@ -278,7 +280,6 @@ public class AccountControllerTest {
     var profile = AccountProfile.builder()
         .id("acc-1")
         .username("chris")
-        .firstName("Chris")
         .followerCount(2)
         .followingCount(3)
         .followedByMe(false)
@@ -292,6 +293,8 @@ public class AccountControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.username").value("chris"))
+        .andExpect(jsonPath("$.payload.firstName").doesNotExist())
+        .andExpect(jsonPath("$.payload.lastName").doesNotExist())
         .andExpect(jsonPath("$.payload.followerCount").value(2))
         .andExpect(jsonPath("$.payload.followingCount").value(3));
 
@@ -362,5 +365,46 @@ public class AccountControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload").value("jwt-token"));
+  }
+
+  @Test
+  @DisplayName("Password reset request returns generic success")
+  @WithMockUser
+  public void testRequestPasswordReset_ReturnsGenericSuccess() throws Exception {
+    var json = "{\"email\":\"user@example.com\"}";
+
+    mockMvc
+        .perform(
+            post("/api/accounts" + APIVersion.V20241215 + "/password-reset/request")
+                .with(csrf())
+                .content(json)
+                .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload").value("If an account exists for that email, a password reset link has been sent."));
+
+    verify(accountService).requestPasswordReset(
+        eq(new AccountPasswordResetRequest("user@example.com")),
+        eq("http://localhost"));
+  }
+
+  @Test
+  @DisplayName("Password reset confirm returns success")
+  @WithMockUser
+  public void testResetPassword_ReturnsSuccess() throws Exception {
+    var json = "{\"token\":\"reset-token\",\"password\":\"new-password\"}";
+    var request = new AccountPasswordResetConfirmRequest("reset-token", "new-password");
+
+    mockMvc
+        .perform(
+            post("/api/accounts" + APIVersion.V20241215 + "/password-reset/confirm")
+                .with(csrf())
+                .content(json)
+                .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload").value("Your password has been reset."));
+
+    verify(accountService).resetPassword(eq(request));
   }
 }

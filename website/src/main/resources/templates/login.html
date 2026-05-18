@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Login', 'Sign in to the Void on christopherbell.dev.', 'https://www.christopherbell.dev/login', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
   <title>Login</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   <link rel="stylesheet" type="text/css" href="/css/main.css"/>
@@ -28,6 +29,7 @@
               <div class="mb-3">
                 <label for="password" class="form-label">Password</label>
                 <input type="password" class="form-control" id="password" placeholder="••••••••" required />
+                <div class="form-text"><a href="/forgot-password">Forgot password?</a></div>
               </div>
               <div class="d-grid gap-2">
                 <button id="loginBtn" type="submit" class="btn btn-primary">Login</button>

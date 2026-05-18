@@ -4,6 +4,8 @@
     "street1": "104 N Railroad Ave",
     "city": "Pflugerville",
     "country": "USA",
+    "latitude": 30.4423,
+    "longitude": -97.62,
     "state": "TX",
     "postalCode": "78660"
   },

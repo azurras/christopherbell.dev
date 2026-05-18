@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Back Office', 'Administrative tools for christopherbell.dev.', 'https://www.christopherbell.dev/back-office', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
   <title>Back Office</title>
   <link rel="stylesheet" type="text/css" href="/css/main.css"/>
-  <link rel="shortcut icon" href="/images/headers/logo.png"/>
 </head>
 <body class="site-page back-office">
   <div id="nav"></div>
@@ -57,6 +57,9 @@
               <li class="nav-item" role="presentation">
                 <button class="nav-link" id="tab-users" data-bs-toggle="pill" data-bs-target="#panel-users" type="button" role="tab">Users</button>
               </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-operations" data-bs-toggle="pill" data-bs-target="#panel-operations" type="button" role="tab">Operations</button>
+              </li>
             </ul>
             <div class="tab-content">
               <div class="tab-pane fade show active" id="panel-reports" role="tabpanel">
@@ -81,6 +84,63 @@
                     <span class="queue-count" id="userQueueCount">—</span>
                   </div>
                   <div id="userQueue" class="queue-list" aria-live="polite"></div>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="panel-operations" role="tabpanel">
+                <div class="operations-grid" id="operationsPanel" aria-live="polite">
+                  <section class="operation-panel" aria-labelledby="wflToolsTitle">
+                    <div class="queue-panel-header">
+                      <div>
+                        <p class="home-kicker mb-1">What's For Lunch</p>
+                        <h2 id="wflToolsTitle">Restaurant Data</h2>
+                      </div>
+                    </div>
+                    <div class="operation-actions">
+                      <button type="button" class="btn btn-primary operation-button" data-operation="wfl-import">Import Restaurants</button>
+                      <button type="button" class="btn btn-outline-secondary operation-button" data-operation="wfl-dedupe">Remove Duplicate Names</button>
+                      <button type="button" class="btn btn-outline-secondary operation-button" data-operation="wfl-load">Refresh Counts</button>
+                    </div>
+                    <div id="wflOperationStatus" class="operation-result">Restaurant counts have not been loaded yet.</div>
+                  </section>
+
+                  <section class="operation-panel" aria-labelledby="vehicleToolsTitle">
+                    <div class="queue-panel-header">
+                      <div>
+                        <p class="home-kicker mb-1">Vehicles</p>
+                        <h2 id="vehicleToolsTitle">VIN Data</h2>
+                      </div>
+                    </div>
+                    <form class="operation-form" id="vehicleVinForm">
+                      <label class="form-label" for="vehicleVinInput">Create Vehicle From VIN</label>
+                      <div class="input-group">
+                        <input class="form-control" id="vehicleVinInput" name="vin" autocomplete="off" maxlength="17" placeholder="17-character VIN" />
+                        <button class="btn btn-primary" type="submit">Create Vehicle From VIN</button>
+                      </div>
+                    </form>
+                    <form class="operation-form" id="vehicleVinBatchForm">
+                      <label class="form-label" for="vehicleVinBatchInput">Create Vehicles From VINs</label>
+                      <textarea class="form-control" id="vehicleVinBatchInput" name="vins" rows="4" placeholder="One VIN per line"></textarea>
+                      <button class="btn btn-outline-primary mt-2" type="submit">Create Vehicles From VINs</button>
+                    </form>
+                    <div class="operation-actions">
+                      <button type="button" class="btn btn-outline-secondary operation-button" data-operation="vehicle-state">Refresh Data State</button>
+                      <button type="button" class="btn btn-outline-secondary operation-button" data-operation="vehicle-load">Refresh Vehicle Count</button>
+                    </div>
+                    <div id="vehicleOperationStatus" class="operation-result">Vehicle state has not been loaded yet.</div>
+                  </section>
+
+                  <section class="operation-panel" aria-labelledby="contentToolsTitle">
+                    <div class="queue-panel-header">
+                      <div>
+                        <p class="home-kicker mb-1">Content</p>
+                        <h2 id="contentToolsTitle">Admin Reads</h2>
+                      </div>
+                    </div>
+                    <div class="operation-actions">
+                      <button type="button" class="btn btn-outline-secondary operation-button" data-operation="blog-load">Load Blog Posts</button>
+                    </div>
+                    <div id="contentOperationStatus" class="operation-result">Content data has not been loaded yet.</div>
+                  </section>
                 </div>
               </div>
             </div>

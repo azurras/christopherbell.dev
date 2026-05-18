@@ -59,6 +59,7 @@ form?.addEventListener('submit', async (e) => {
     await fetchJson(API.reports.create, {
       method: 'POST',
       headers: authHeaders(),
+      redirectOnUnauthorized: true,
       body: JSON.stringify({ postId, reason, details })
     });
     window.location.replace('/void');

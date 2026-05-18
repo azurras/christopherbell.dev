@@ -38,7 +38,7 @@ public class NotificationService {
 
     var now = Instant.now();
     for (var username : extractMentionUsernames(post.getText())) {
-      accountRepository.findByUsername(username)
+      accountRepository.findByUsernameIgnoreCase(username)
           .filter(account -> !account.getId().equals(actor.getId()))
           .ifPresent(account -> notificationRepository.save(Notification.builder()
               .id(UUID.randomUUID().toString())

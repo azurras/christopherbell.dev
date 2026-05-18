@@ -3,6 +3,8 @@ package dev.christopherbell.account;
 import com.mongodb.MongoWriteException;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
+import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.dto.AccountProfile;
@@ -17,9 +19,15 @@ import dev.christopherbell.libs.security.EmailSanitizer;
 import dev.christopherbell.libs.security.PasswordUtil;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.libs.security.UsernameSanitizer;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -37,8 +45,12 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 public class AccountService {
+  private static final Duration PASSWORD_RESET_TTL = Duration.ofHours(1);
+  private static final int PASSWORD_RESET_TOKEN_BYTES = 32;
+
   private final AccountMapper accountMapper;
   private final AccountRepository accountRepository;
+  private final PasswordResetNotificationService passwordResetNotificationService;
 
   /**
    * Approves an account by setting its approvedBy field to the current user's ID and changing its
@@ -102,7 +114,7 @@ public class AccountService {
         .id(String.valueOf(UUID.randomUUID()))
         .approvedBy(null)
         .createdOn(Instant.now())
-        .email(accountCreateRequest.email())
+        .email(EmailSanitizer.sanitize(accountCreateRequest.email()))
         .firstName(accountCreateRequest.firstName())
         .isApproved(true)
         .lastName(accountCreateRequest.lastName())
@@ -110,7 +122,7 @@ public class AccountService {
         .role(Role.USER)
         .status(AccountStatus.ACTIVE)
         .followingIds(new HashSet<>())
-        .username(accountCreateRequest.username())
+        .username(UsernameSanitizer.sanitize(accountCreateRequest.username()))
         .build();
   }
 
@@ -146,7 +158,7 @@ public class AccountService {
     var sanitizedEmail = EmailSanitizer.sanitize(email);
     var account =
         accountRepository
-            .findByEmail(sanitizedEmail)
+            .findByEmailIgnoreCase(sanitizedEmail)
             .orElseThrow(
                 () ->
                     new ResourceNotFoundException(
@@ -285,7 +297,7 @@ public class AccountService {
       var sanitizedEmail = EmailSanitizer.sanitize(email);
       var account =
           accountRepository
-              .findByEmail(sanitizedEmail)
+              .findByEmailIgnoreCase(sanitizedEmail)
               .orElseThrow(
                   () ->
                       new ResourceNotFoundException(
@@ -307,6 +319,81 @@ public class AccountService {
       }
     } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
       throw new InvalidTokenException("Error validating password: " + e.getMessage(), e);
+    }
+  }
+
+  /**
+   * Requests a password reset. The response is intentionally generic so callers cannot enumerate
+   * registered email addresses.
+   *
+   * @param request request containing the account email address
+   * @param baseUrl absolute application base URL used to build the reset link
+   */
+  public void requestPasswordReset(AccountPasswordResetRequest request, String baseUrl) {
+    if (request == null || request.email() == null || request.email().isBlank()) {
+      return;
+    }
+
+    Account account;
+    try {
+      var sanitizedEmail = EmailSanitizer.sanitize(request.email());
+      account = accountRepository.findByEmailIgnoreCase(sanitizedEmail).orElse(null);
+    } catch (IllegalArgumentException e) {
+      return;
+    }
+    if (account == null) {
+      return;
+    }
+
+    log.info("Password reset requested for account id: {}", account.getId());
+    var token = generatePasswordResetToken();
+    account.setPasswordResetTokenHash(hashPasswordResetToken(token));
+    account.setPasswordResetTokenExpiresOn(Instant.now().plus(PASSWORD_RESET_TTL));
+    accountRepository.save(account);
+
+    var resetUrl = buildPasswordResetUrl(baseUrl, token);
+    passwordResetNotificationService.sendPasswordReset(account, resetUrl);
+  }
+
+  /**
+   * Completes a password reset by validating the supplied reset token and replacing the password.
+   *
+   * @param request reset token and new password
+   * @throws InvalidRequestException if the request is malformed
+   * @throws InvalidTokenException if the token is missing, invalid, or expired
+   */
+  public void resetPassword(AccountPasswordResetConfirmRequest request)
+      throws InvalidRequestException, InvalidTokenException {
+    if (request == null || request.token() == null || request.token().isBlank()) {
+      throw new InvalidTokenException("Password reset token is invalid or expired.");
+    }
+    if (request.password() == null || request.password().isBlank()) {
+      throw new InvalidRequestException("Password cannot be null or blank.");
+    }
+
+    var tokenHash = hashPasswordResetToken(request.token());
+    var account = accountRepository
+        .findByPasswordResetTokenHash(tokenHash)
+        .orElseThrow(() -> new InvalidTokenException("Password reset token is invalid or expired."));
+
+    if (account.getPasswordResetTokenExpiresOn() == null
+        || account.getPasswordResetTokenExpiresOn().isBefore(Instant.now())) {
+      clearPasswordResetToken(account);
+      accountRepository.save(account);
+      throw new InvalidTokenException("Password reset token is invalid or expired.");
+    }
+
+    try {
+      var salt = PasswordUtil.generateSalt();
+      var hash = PasswordUtil.hashPassword(request.password(), salt);
+      account.setPasswordSalt(salt);
+      account.setPasswordHash(hash);
+      clearPasswordResetToken(account);
+      account.setLastUpdatedOn(Instant.now());
+      accountRepository.save(account);
+      log.info("Password reset completed for account id: {}", account.getId());
+    } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
+      throw new InvalidTokenException("Error resetting password: " + e.getMessage(), e);
     }
   }
 
@@ -377,7 +464,7 @@ public class AccountService {
   }
 
   private void ensureEmailUniqueForUpdate(String email, String selfId) throws ResourceExistsException {
-    var owner = accountRepository.findByEmail(email);
+    var owner = accountRepository.findByEmailIgnoreCase(email);
     if (owner.isPresent() && !owner.get().getId().equals(selfId)) {
       throw new ResourceExistsException("Email already in use by another account.");
     }
@@ -385,10 +472,37 @@ public class AccountService {
 
   private void ensureUsernameUniqueForUpdate(String username, String selfId)
       throws ResourceExistsException {
-    var owner = accountRepository.findByUsername(username);
+    var owner = accountRepository.findByUsernameIgnoreCase(username);
     if (owner.isPresent() && !owner.get().getId().equals(selfId)) {
       throw new ResourceExistsException("Username already in use by another account.");
     }
+  }
+
+  private String generatePasswordResetToken() {
+    var bytes = new byte[PASSWORD_RESET_TOKEN_BYTES];
+    new SecureRandom().nextBytes(bytes);
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+  }
+
+  private String hashPasswordResetToken(String token) {
+    try {
+      var digest = MessageDigest.getInstance("SHA-256");
+      var hash = digest.digest(token.getBytes(StandardCharsets.UTF_8));
+      return Base64.getEncoder().encodeToString(hash);
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 is not available.", e);
+    }
+  }
+
+  private String buildPasswordResetUrl(String baseUrl, String token) {
+    var safeBaseUrl = (baseUrl == null || baseUrl.isBlank()) ? "" : baseUrl.strip();
+    var encodedToken = URLEncoder.encode(token, StandardCharsets.UTF_8);
+    return safeBaseUrl + "/reset-password?token=" + encodedToken;
+  }
+
+  private void clearPasswordResetToken(Account account) {
+    account.setPasswordResetTokenHash(null);
+    account.setPasswordResetTokenExpiresOn(null);
   }
 
   private Account findBySanitizedUsername(String username) throws ResourceNotFoundException {
@@ -428,8 +542,6 @@ public class AccountService {
     return AccountProfile.builder()
         .id(account.getId())
         .username(account.getUsername())
-        .firstName(account.getFirstName())
-        .lastName(account.getLastName())
         .status(account.getStatus())
         .followerCount(followerCount)
         .followingCount(following)

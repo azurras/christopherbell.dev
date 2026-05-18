@@ -7,10 +7,13 @@ import static dev.christopherbell.libs.api.APIVersion.V20250914;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.AccountLoginRequest;
+import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
+import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -323,6 +326,52 @@ public class AccountController {
   }
 
   /**
+   * Requests a password reset link for an email address. The response remains generic to avoid
+   * disclosing whether an account exists.
+   *
+   * @param requestBody email address to reset
+   * @param servletRequest current HTTP request for building the reset URL
+   * @return HTTP 200 with a generic confirmation message
+   */
+  @PostMapping(
+      value = V20241215 + "/password-reset/request",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  public ResponseEntity<Response<String>> requestPasswordReset(
+      @RequestBody AccountPasswordResetRequest requestBody,
+      HttpServletRequest servletRequest
+  ) {
+    accountService.requestPasswordReset(requestBody, getBaseUrl(servletRequest));
+    return new ResponseEntity<>(Response.<String>builder()
+        .payload("If an account exists for that email, a password reset link has been sent.")
+        .success(true)
+        .build(), HttpStatus.OK);
+  }
+
+  /**
+   * Resets an account password using a valid reset token.
+   *
+   * @param request password reset token and new password
+   * @return HTTP 200 with a confirmation message
+   * @throws Exception if the token is invalid or the request is malformed
+   */
+  @PostMapping(
+      value = V20241215 + "/password-reset/confirm",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  public ResponseEntity<Response<String>> resetPassword(
+      @RequestBody AccountPasswordResetConfirmRequest request
+  ) throws Exception {
+    accountService.resetPassword(request);
+    return new ResponseEntity<>(Response.<String>builder()
+        .payload("Your password has been reset.")
+        .success(true)
+        .build(), HttpStatus.OK);
+  }
+
+  /**
    * Updates an existing account.
    *
    * <p>Requires {@code ADMIN} authority.</p>
@@ -345,5 +394,18 @@ public class AccountController {
             .payload(accountService.updateAccount(request))
             .success(true)
             .build(), HttpStatus.ACCEPTED);
+  }
+
+  private String getBaseUrl(HttpServletRequest request) {
+    var forwardedProto = request.getHeader("X-Forwarded-Proto");
+    var forwardedHost = request.getHeader("X-Forwarded-Host");
+    if (forwardedProto != null && !forwardedProto.isBlank()
+        && forwardedHost != null && !forwardedHost.isBlank()) {
+      return forwardedProto + "://" + forwardedHost;
+    }
+
+    var url = request.getRequestURL();
+    var uri = request.getRequestURI();
+    return url.substring(0, url.length() - uri.length());
   }
 }

@@ -69,6 +69,9 @@ public class Account {
   private String loginToken;
   private String passwordSalt;
   private String passwordHash;
+  @Indexed
+  private String passwordResetTokenHash;
+  private Instant passwordResetTokenExpiresOn;
   private Role role;
   private AccountStatus status;
   private Set<String> followingIds;

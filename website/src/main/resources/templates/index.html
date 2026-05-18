@@ -6,17 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="author" content="Christopher Bell" />
     <meta name="keywords" content="cbell,blog" />
-    <meta name="description" content="CB | Home" />
-    <meta property="og:title" content="CB | Home" />
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://www.christopherbell.dev/" />
-    <meta property="og:image" content="/images/headers/logo.png" />
-    <meta property="og:description" content="CB | Home" />
+    <th:block th:replace="~{fragments/social-preview :: socialPreview('christopherbell.dev', 'A working corner of the internet for Void posts, lunch picks, and practical utilities.', 'https://www.christopherbell.dev/', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
 
     <title>CB | Home</title>
 
     <link rel="stylesheet" type="text/css" href="/css/main.css"/>
-    <link rel="shortcut icon" href="/images/headers/logo.png"/>
 </head>
 
 <body>
@@ -29,10 +23,6 @@
                 <p class="home-intro">
                     A working corner of the internet for posts, lunch picks, and practical utilities.
                 </p>
-                <div class="home-actions" aria-label="Primary destinations">
-                    <a href="/void" class="btn btn-light btn-lg">Enter the Void</a>
-                    <a href="/vin-decoder" class="btn btn-outline-light btn-lg">Decode a VIN</a>
-                </div>
             </div>
         </section>
 

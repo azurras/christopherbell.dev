@@ -32,19 +32,14 @@ function setText(id, value) {
   if (el) el.textContent = value ?? '';
 }
 
-function fullName(profile) {
-  return [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim();
-}
-
 function renderProfile(profile) {
   PROFILE = profile;
   const username = profile?.username || getUsernameFromPath();
   const handle = username ? `@${username}` : '@user';
-  const name = fullName(profile);
   setText('userHeroTitle', handle);
-  setText('userHeroMeta', name ? `${name}'s posts and profile activity.` : 'Posts from one corner of the Void.');
+  setText('userHeroMeta', `${handle}'s posts and profile activity.`);
   setText('userHandle', handle);
-  setText('userMeta', name || 'Public profile');
+  setText('userMeta', handle);
   setText('userInitials', initialsFromUsername(username));
   setText('userFollowerCount', String(profile?.followerCount ?? 0));
   setText('userFollowingCount', String(profile?.followingCount ?? 0));

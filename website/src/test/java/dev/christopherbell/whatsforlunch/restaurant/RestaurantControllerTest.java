@@ -21,6 +21,8 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.libs.test.TestUtil;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeResult;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -333,6 +335,145 @@ public class RestaurantControllerTest {
         .andExpect(status().isUnauthorized());
 
     verifyNoInteractions(restaurantService);
+  }
+
+  @Test
+  @DisplayName("Should get today's lunch picks without ADMIN authority.")
+  @WithMockUser
+  public void testGetTodaysLunchPicks_Returns200() throws Exception {
+    var restaurant1 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    var restaurant2 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID_2);
+    when(restaurantService.getTodaysLunchPicks()).thenReturn(List.of(restaurant1, restaurant2));
+
+    mockMvc
+        .perform(
+            get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/today")
+                .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload").isArray())
+        .andExpect(jsonPath("$.payload[0].id").value(RestaurantStub.ID))
+        .andExpect(jsonPath("$.payload[1].id").value(RestaurantStub.ID_2));
+
+    verify(restaurantService).getTodaysLunchPicks();
+  }
+
+  @Test
+  @DisplayName("Should get nearby lunch picks without ADMIN authority.")
+  @WithMockUser
+  public void testGetNearbyLunchPicks_Returns200() throws Exception {
+    var restaurant1 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    var restaurant2 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID_2);
+    when(restaurantService.getNearbyLunchPicks(eq(30.2672), eq(-97.7431)))
+        .thenReturn(List.of(restaurant1, restaurant2));
+
+    mockMvc
+        .perform(
+            get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/nearby")
+                .param("latitude", "30.2672")
+                .param("longitude", "-97.7431")
+                .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload").isArray())
+        .andExpect(jsonPath("$.payload[0].id").value(RestaurantStub.ID))
+        .andExpect(jsonPath("$.payload[1].id").value(RestaurantStub.ID_2));
+
+    verify(restaurantService).getNearbyLunchPicks(eq(30.2672), eq(-97.7431));
+  }
+
+  @Test
+  @DisplayName("Should delete today's lunch pick and return replacement list when caller has ADMIN role.")
+  @WithMockUser(authorities = {"ADMIN"})
+  public void testDeleteRestaurantFromTodaysLunchPicks_whenAdmin_ReturnsUpdatedPicks()
+      throws Exception {
+    var restaurant1 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID_2);
+    var restaurant2 = RestaurantStub.getRestaurantDetailStub("replacement");
+    when(restaurantService.deleteRestaurantFromTodaysLunchPicks(eq(RestaurantStub.ID)))
+        .thenReturn(List.of(restaurant1, restaurant2));
+
+    mockMvc
+        .perform(
+            delete("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/today/" + RestaurantStub.ID)
+                .with(csrf())
+                .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload").isArray())
+        .andExpect(jsonPath("$.payload[0].id").value(RestaurantStub.ID_2))
+        .andExpect(jsonPath("$.payload[1].id").value("replacement"));
+
+    verify(restaurantService).deleteRestaurantFromTodaysLunchPicks(eq(RestaurantStub.ID));
+  }
+
+  @Test
+  @DisplayName("Should import OpenStreetMap restaurants when caller has ADMIN role.")
+  @WithMockUser(authorities = {"ADMIN"})
+  public void testImportOpenStreetMapRestaurants_whenAdmin_Returns200() throws Exception {
+    var result = RestaurantImportResult.builder()
+        .source("openstreetmap")
+        .fetched(10)
+        .imported(7)
+        .updated(2)
+        .skippedExisting(2)
+        .skippedInvalid(1)
+        .build();
+    when(restaurantService.importAustinMetroRestaurantsFromOpenStreetMap()).thenReturn(result);
+
+    mockMvc
+        .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/import/openstreetmap")
+            .with(csrf())
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.source").value("openstreetmap"))
+        .andExpect(jsonPath("$.payload.fetched").value(10))
+        .andExpect(jsonPath("$.payload.imported").value(7))
+        .andExpect(jsonPath("$.payload.updated").value(2))
+        .andExpect(jsonPath("$.payload.skippedExisting").value(2))
+        .andExpect(jsonPath("$.payload.skippedInvalid").value(1));
+
+    verify(restaurantService).importAustinMetroRestaurantsFromOpenStreetMap();
+  }
+
+  @Test
+  @DisplayName("Should reject OpenStreetMap import without authentication.")
+  public void testImportOpenStreetMapRestaurants_whenUnauthenticated_Returns401() throws Exception {
+    mockMvc
+        .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/import/openstreetmap")
+            .with(csrf())
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isUnauthorized());
+
+    verifyNoInteractions(restaurantService);
+  }
+
+  @Test
+  @DisplayName("Should dedupe restaurant names when caller has ADMIN role.")
+  @WithMockUser(authorities = {"ADMIN"})
+  public void testRemoveDuplicateNamedRestaurants_whenAdmin_Returns200() throws Exception {
+    var result = RestaurantDedupeResult.builder()
+        .duplicateGroups(1)
+        .deleted(2)
+        .updatedSurvivors(1)
+        .keptRestaurantIds(List.of("austin-id"))
+        .deletedRestaurantIds(List.of("pflugerville-id", "cedar-park-id"))
+        .build();
+    when(restaurantService.removeDuplicateNamedRestaurants()).thenReturn(result);
+
+    mockMvc
+        .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/dedupe-names")
+            .with(csrf())
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.duplicateGroups").value(1))
+        .andExpect(jsonPath("$.payload.deleted").value(2))
+        .andExpect(jsonPath("$.payload.updatedSurvivors").value(1))
+        .andExpect(jsonPath("$.payload.keptRestaurantIds[0]").value("austin-id"))
+        .andExpect(jsonPath("$.payload.deletedRestaurantIds[0]").value("pflugerville-id"));
+
+    verify(restaurantService).removeDuplicateNamedRestaurants();
   }
 
   @Test

@@ -92,7 +92,10 @@ function renderMessages(messages) {
 }
 
 async function loadConversations() {
-  CONVERSATIONS = await fetchJson(`${API.messages.conversations}?limit=30`, { headers: authHeaders() });
+  CONVERSATIONS = await fetchJson(`${API.messages.conversations}?limit=30`, {
+    headers: authHeaders(),
+    redirectOnUnauthorized: true,
+  });
   renderConversations();
 }
 
@@ -110,7 +113,8 @@ async function openConversation(username) {
   document.getElementById('messageForm')?.classList.remove('d-none');
   renderConversations();
   const messages = await fetchJson(`${API.messages.conversation(ACTIVE_USERNAME)}?limit=100`, {
-    headers: authHeaders()
+    headers: authHeaders(),
+    redirectOnUnauthorized: true,
   });
   renderMessages(messages || []);
   await loadConversations();
@@ -131,6 +135,7 @@ async function sendActiveMessage() {
     await fetchJson(API.messages.base, {
       method: 'POST',
       headers: authHeaders(),
+      redirectOnUnauthorized: true,
       body: JSON.stringify({ recipientUsername: ACTIVE_USERNAME, text })
     });
     if (textarea) textarea.value = '';

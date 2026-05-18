@@ -6,3 +6,17 @@ spring:
       database: christopherbell
       uri: mongodb://localhost:27017
       auto-index-creation: true
+  mail:
+    host: smtp.resend.com
+    port: 587
+    username: resend
+    password: ${RESEND_API_KEY}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+app:
+  mail:
+    from: ${APP_MAIL_FROM:noreply@christopherbell.dev}
