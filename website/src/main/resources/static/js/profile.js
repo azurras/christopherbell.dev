@@ -122,9 +122,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const alert = alertBox();
   alert?.classList.add('d-none');
   try {
-    const me = await fetchJson(API.accounts.me, { headers: authHeaders() });
+    const me = await fetchJson(API.accounts.me, {
+      headers: authHeaders(),
+      redirectOnUnauthorized: true,
+    });
     renderAccount(me);
-    const posts = await fetchJson(`${API.posts.meFeed}?limit=20`, { headers: authHeaders() });
+    const posts = await fetchJson(`${API.posts.meFeed}?limit=20`, {
+      headers: authHeaders(),
+      redirectOnUnauthorized: true,
+    });
     renderStats(posts);
     renderPosts(posts, me?.username);
   } catch (err) {

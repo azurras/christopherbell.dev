@@ -47,6 +47,24 @@ public interface AccountRepository extends MongoRepository<Account, String> {
   Optional<Account> findByEmail(String email);
 
   /**
+   * Retrieves an {@link Account} by email address without considering letter case.
+   *
+   * @param email the email address to look up (must not be {@code null})
+   * @return an {@link Optional} containing the matching {@link Account}
+   *         if found, or {@link Optional#empty()} if no match exists
+   */
+  Optional<Account> findByEmailIgnoreCase(String email);
+
+  /**
+   * Retrieves an {@link Account} by the stored password reset token hash.
+   *
+   * @param passwordResetTokenHash the hashed password reset token
+   * @return an {@link Optional} containing the matching {@link Account}
+   *         if found, or {@link Optional#empty()} if no match exists
+   */
+  Optional<Account> findByPasswordResetTokenHash(String passwordResetTokenHash);
+
+  /**
    * Finds an {@link Account} by its unique username.
    *
    * <p>
@@ -61,6 +79,14 @@ public interface AccountRepository extends MongoRepository<Account, String> {
    *         if found, or {@link Optional#empty()} if no match exists
    */
   Optional<Account> findByUsername(String username);
+
+  /**
+   * Finds an {@link Account} by username without considering letter case.
+   *
+   * @param username the username to search for (must not be null)
+   * @return an {@link Optional} containing the matching account if found
+   */
+  Optional<Account> findByUsernameIgnoreCase(String username);
 
   /**
    * Counts accounts that are following the provided account id.

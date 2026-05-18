@@ -10,8 +10,6 @@ import lombok.Builder;
 public record AccountProfile(
     String id,
     String username,
-    String firstName,
-    String lastName,
     AccountStatus status,
     long followerCount,
     long followingCount,

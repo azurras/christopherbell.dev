@@ -1,4 +1,8 @@
 spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
   profiles:
     default: local
 logging:
@@ -42,8 +46,19 @@ vehicles:
     rate-limit-window: 1m
 wfl:
   restaurant-of-the-day:
-    enabled: false
-    cron: "@midnight"
+    enabled: true
+    cron: "0 0 0 * * *"
+    zone: America/Chicago
+    pick-count: 3
+    austin-metro-cities: Austin,Round Rock,Cedar Park,Georgetown,Pflugerville,Leander,Hutto,Manor,Buda,Kyle,Bee Cave,Lakeway,Dripping Springs,Bastrop,San Marcos
+  restaurant-import:
+    osm:
+      endpoint: https://overpass-api.de/api/interpreter
+      # South,west,north,east around the Austin metro.
+      bbox: 29.95,-98.25,30.75,-97.15
+      timeout-seconds: 60
+      result-limit: 5000
+      include-fast-food: true
 reports:
   to: report@christopherbell.dev
 blog-properties:

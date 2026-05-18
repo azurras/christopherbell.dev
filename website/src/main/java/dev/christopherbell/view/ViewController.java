@@ -1,9 +1,10 @@
 package dev.christopherbell.view;
 
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.ui.Model;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 
 /**
@@ -48,7 +49,8 @@ public class ViewController {
    * @return {@code whatsforlunch.html}
    */
   @GetMapping(value = "/wfl")
-  public String getWhatsForLunchPage() {
+  public String getWhatsForLunchPage(Model model) {
+    model.addAttribute("socialTitle", "CB | What's For Lunch?");
     return "whatsforlunch.html";
   }
 
@@ -124,6 +126,26 @@ public class ViewController {
   }
 
   /**
+   * Serves the forgot password page.
+   *
+   * @return {@code forgot-password.html}
+   */
+  @GetMapping(value = "/forgot-password")
+  public String getForgotPasswordPage(HttpServletRequest request) {
+    return "forgot-password.html";
+  }
+
+  /**
+   * Serves the reset password page.
+   *
+   * @return {@code reset-password.html}
+   */
+  @GetMapping(value = "/reset-password")
+  public String getResetPasswordPage(HttpServletRequest request) {
+    return "reset-password.html";
+  }
+
+  /**
    * Serves the sign-up page.
    *
    * @return {@code signup.html}
@@ -137,7 +159,9 @@ public class ViewController {
    * Serves a public user profile/feed page by username.
    */
   @GetMapping(value = "/u/{username}")
-  public String getPublicUserPage(HttpServletRequest request) {
+  public String getPublicUserPage(
+      @PathVariable String username, HttpServletRequest request, Model model) {
+    model.addAttribute("socialUrl", "https://www.christopherbell.dev/u/" + username);
     return "user.html";
   }
 
@@ -183,7 +207,9 @@ public class ViewController {
 
   /** Serves an individual post page by id. */
   @GetMapping(value = "/p/{postId}")
-  public String getPostPage(HttpServletRequest request) {
+  public String getPostPage(
+      @PathVariable String postId, HttpServletRequest request, Model model) {
+    model.addAttribute("socialUrl", "https://www.christopherbell.dev/p/" + postId);
     return "post.html";
   }
 }

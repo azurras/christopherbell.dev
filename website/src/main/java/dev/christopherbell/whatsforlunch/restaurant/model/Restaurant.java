@@ -11,6 +11,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
@@ -44,6 +45,11 @@ public class Restaurant {
   private Instant lastUpdatedOn;
 
   private String name;
+
+  @Indexed(unique = true, sparse = true)
+  private String normalizedName;
+  private String cuisine;
   private String phoneNumber;
+  private String sourceAmenity;
   private String website;
 }

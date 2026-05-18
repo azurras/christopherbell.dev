@@ -42,6 +42,7 @@ public interface RestaurantMapper {
    * @return a new {@link Restaurant} entity corresponding to the provided DTO,
    *         or {@code null} if the input is {@code null}
    */
+  @Mapping(target = "normalizedName", ignore = true)
   Restaurant toRestaurant(RestaurantDetail restaurantDetail);
 
   /**
@@ -62,6 +63,9 @@ public interface RestaurantMapper {
   @Mapping(target = "createdOn", ignore = true)
   @Mapping(target = "lastModifiedBy", ignore = true)
   @Mapping(target = "lastUpdatedOn", ignore = true)
+  @Mapping(target = "normalizedName", ignore = true)
+  @Mapping(target = "cuisine", ignore = true)
+  @Mapping(target = "sourceAmenity", ignore = true)
   Restaurant toRestaurant(RestaurantCreateRequest request);
 
   /**
@@ -80,5 +84,8 @@ public interface RestaurantMapper {
   @Mapping(target = "createdOn", ignore = true)
   @Mapping(target = "lastModifiedBy", ignore = true)
   @Mapping(target = "lastUpdatedOn", ignore = true)
+  @Mapping(target = "normalizedName", ignore = true)
+  @Mapping(target = "cuisine", ignore = true)
+  @Mapping(target = "sourceAmenity", ignore = true)
   Restaurant toRestaurant(RestaurantUpdateRequest request);
 }

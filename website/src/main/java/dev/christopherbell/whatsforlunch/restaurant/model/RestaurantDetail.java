@@ -28,8 +28,10 @@ public class RestaurantDetail {
   @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "uuuu-MM-dd'T'HH:mm:ss.SSS'Z'", timezone = "UTC")
   private Instant lastUpdatedOn;
 
+  private String cuisine;
   private String name;
   private String phoneNumber;
+  private String sourceAmenity;
   private String type;
   private String website;
 }

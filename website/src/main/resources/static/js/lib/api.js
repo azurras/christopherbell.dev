@@ -11,6 +11,10 @@ export const API = {
     base: '/api/accounts/2024-12-15',
     login: '/api/accounts/2024-12-15/login',
     create: '/api/accounts/2024-12-15/create',
+    approve: (id) => `/api/accounts/2025-09-03/approve/${encodeURIComponent(id)}`,
+    update: '/api/accounts/2025-09-14',
+    passwordResetRequest: '/api/accounts/2024-12-15/password-reset/request',
+    passwordResetConfirm: '/api/accounts/2024-12-15/password-reset/confirm',
     me: '/api/accounts/2025-09-03/me',
     profile: (username) => `/api/accounts/2025-09-14/profile/${encodeURIComponent(username)}`,
     follow: (username) => `/api/accounts/2025-09-14/profile/${encodeURIComponent(username)}/follow`,
@@ -30,6 +34,7 @@ export const API = {
     byId: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}`,
     like: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}/like`,
     thread: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}/thread`,
+    byAccount: (accountId) => `/api/posts/2025-09-14/account/${encodeURIComponent(accountId)}`,
   },
   notifications: {
     base: '/api/notifications/2025-09-14',
@@ -41,7 +46,29 @@ export const API = {
     conversations: '/api/messages/2025-09-14/conversations',
     conversation: (username) => `/api/messages/2025-09-14/conversation/${encodeURIComponent(username)}`,
   },
+  whatsForLunch: {
+    restaurants: '/api/whatsforlunch/restaurant/2025-09-12',
+    today: '/api/whatsforlunch/restaurant/2026-05-17/today',
+    nearby: ({ latitude, longitude }) => {
+      const params = new URLSearchParams({
+        latitude: String(latitude),
+        longitude: String(longitude),
+      });
+      return `/api/whatsforlunch/restaurant/2026-05-17/nearby?${params}`;
+    },
+    deleteRestaurant: (id) => `/api/whatsforlunch/restaurant/2025-09-13/${encodeURIComponent(id)}`,
+    deleteTodayPick: (id) => `/api/whatsforlunch/restaurant/2026-05-17/today/${encodeURIComponent(id)}`,
+    importOpenStreetMap: '/api/whatsforlunch/restaurant/2026-05-17/import/openstreetmap',
+    dedupeNames: '/api/whatsforlunch/restaurant/2026-05-17/dedupe-names',
+  },
   vehicles: {
+    base: '/api/vehicles/2026-05-09',
+    createFromVin: '/api/vehicles/2026-05-09/vin',
+    createFromVins: '/api/vehicles/2026-05-09/vins',
+    dataCollectionState: '/api/vehicles/2026-05-09/data-collection-state',
     decodeVin: '/api/vehicles/2026-05-09/vin/decode',
+  },
+  blog: {
+    posts: '/api/blog/v1/posts',
   },
 };

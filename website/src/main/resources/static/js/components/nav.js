@@ -49,6 +49,18 @@ class AppNav extends HTMLElement {
             document.removeEventListener('click', this.notificationOutsideClickHandler);
             this.notificationOutsideClickHandler = null;
         }
+        if (this.toolsOutsideClickHandler) {
+            document.removeEventListener('click', this.toolsOutsideClickHandler);
+            this.toolsOutsideClickHandler = null;
+        }
+        if (this.toolsDropdownInstance) {
+            this.toolsDropdownInstance.dispose();
+            this.toolsDropdownInstance = null;
+        }
+        if (this.dropdownInstance) {
+            this.dropdownInstance.dispose();
+            this.dropdownInstance = null;
+        }
     }
 
     async loadUserInfo(force = false) {
@@ -134,8 +146,13 @@ class AppNav extends HTMLElement {
             <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                 <li class="nav-item"><a href="/void" class="nav-link">Void</a></li>
                 ${isAuthenticated ? `<li class="nav-item"><a href="/messages" class="nav-link">Messages</a></li>` : ''}
-                <li class="nav-item"><a href="/wfl" class="nav-link">What's For Lunch</a></li>
-                <li class="nav-item"><a href="/vin-decoder" class="nav-link">VIN Decoder</a></li>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="toolsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">Tools</a>
+                    <ul class="dropdown-menu tools-menu" aria-labelledby="toolsDropdown">
+                        <li><a class="dropdown-item" href="/wfl">What's For Lunch</a></li>
+                        <li><a class="dropdown-item" href="/vin-decoder">VIN Decoder</a></li>
+                    </ul>
+                </li>
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
                 ${!isAuthenticated ? `
@@ -222,9 +239,40 @@ class AppNav extends HTMLElement {
             document.addEventListener('click', this.notificationOutsideClickHandler);
         }
 
+        const hasBootstrap = typeof window !== 'undefined' && window.bootstrap && window.bootstrap.Dropdown;
+        const toolsBtn = this.querySelector('#toolsDropdown');
+        const toolsMenu = this.querySelector('.tools-menu');
+        if (this.toolsOutsideClickHandler) {
+            document.removeEventListener('click', this.toolsOutsideClickHandler);
+            this.toolsOutsideClickHandler = null;
+        }
+        if (toolsBtn && toolsMenu && hasBootstrap) {
+            if (this.toolsDropdownInstance) {
+                this.toolsDropdownInstance.dispose();
+            }
+            this.toolsDropdownInstance = new window.bootstrap.Dropdown(toolsBtn);
+        }
+        if (toolsBtn && toolsMenu && !hasBootstrap) {
+            if (this.toolsOutsideClickHandler) {
+                document.removeEventListener('click', this.toolsOutsideClickHandler);
+            }
+            toolsBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const isShown = toolsMenu.classList.contains('show');
+                toolsMenu.classList.toggle('show', !isShown);
+                toolsBtn.setAttribute('aria-expanded', String(!isShown));
+            });
+            this.toolsOutsideClickHandler = (e) => {
+                if (!this.contains(e.target)) {
+                    toolsMenu.classList.remove('show');
+                    toolsBtn.setAttribute('aria-expanded', 'false');
+                }
+            };
+            document.addEventListener('click', this.toolsOutsideClickHandler);
+        }
+
         const avatarBtn = this.querySelector('.avatar-btn');
         const profileMenu = this.querySelector('.profile-menu');
-        const hasBootstrap = typeof window !== 'undefined' && window.bootstrap && window.bootstrap.Dropdown;
         if (avatarBtn && profileMenu && hasBootstrap) {
             if (this.dropdownInstance) {
                 this.dropdownInstance.dispose();

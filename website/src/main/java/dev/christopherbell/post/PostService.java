@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +43,8 @@ public class PostService {
   private final boolean expirationEnabled;
 
   private static final int MAX_TEXT_LENGTH = 280;
+  private static final int MIN_FEED_LIMIT = 1;
+  private static final int MAX_FEED_LIMIT = 100;
   private static final Duration BASE_LIFESPAN = Duration.ofHours(24);
   private static final Duration EXTENSION_PER_LIKE = Duration.ofHours(24);
 
@@ -156,8 +159,7 @@ public class PostService {
         .findById(selfId)
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", selfId)));
 
-    int pageSize = Math.max(1, Math.min(limit, 100));
-    Pageable page = PageRequest.of(0, pageSize, Sort.by(Sort.Direction.DESC, "createdOn"));
+    Pageable page = newFeedPage(limit);
     List<Post> posts;
     if (before != null) {
       posts = postRepository.findByAccountIdAndCreatedOnLessThanOrderByCreatedOnDesc(selfId, before, page);
@@ -168,19 +170,7 @@ public class PostService {
     posts.forEach(this::ensureExpirationSet);
     return posts.stream()
         .filter(p -> !isExpired(p))
-        .map(p -> PostFeedItem.builder()
-            .id(p.getId())
-            .accountId(p.getAccountId())
-            .username(account.getUsername())
-            .text(p.getText())
-            .rootId(p.getRootId())
-            .parentId(p.getParentId())
-            .level(p.getLevel())
-            .replyCount((int) postRepository.countByParentId(p.getId()))
-            .createdOn(p.getCreatedOn())
-            .lastUpdatedOn(p.getLastUpdatedOn())
-            .expiresOn(p.getExpiresOn())
-            .build())
+        .map(p -> toFeedItem(p, account.getUsername(), selfId))
         .toList();
   }
 
@@ -204,8 +194,7 @@ public class PostService {
       return List.of();
     }
 
-    int pageSize = Math.max(1, Math.min(limit, 100));
-    Pageable page = PageRequest.of(0, pageSize, Sort.by(Sort.Direction.DESC, "createdOn"));
+    Pageable page = newFeedPage(limit);
     List<Post> posts;
     if (before != null) {
       posts = postRepository.findByAccountIdInAndCreatedOnLessThanOrderByCreatedOnDesc(followingIds, before, page);
@@ -213,28 +202,12 @@ public class PostService {
       posts = postRepository.findByAccountIdInOrderByCreatedOnDesc(followingIds, page);
     }
 
-    var authors = accountRepository.findAllById(followingIds);
-    var idToUser = authors.stream()
-        .collect(Collectors.toMap(Account::getId, Account::getUsername));
+    var idToUser = usernamesByAccountId(followingIds);
 
     posts.forEach(this::ensureExpirationSet);
     return posts.stream()
         .filter(p -> !isExpired(p))
-        .map(p -> PostFeedItem.builder()
-            .id(p.getId())
-            .accountId(p.getAccountId())
-            .username(idToUser.get(p.getAccountId()))
-            .text(p.getText())
-            .rootId(p.getRootId())
-            .parentId(p.getParentId())
-            .level(p.getLevel())
-            .likesCount(p.getLikesCount())
-            .liked(p.getLikedBy() != null && p.getLikedBy().contains(selfId))
-            .replyCount((int) postRepository.countByParentId(p.getId()))
-            .createdOn(p.getCreatedOn())
-            .lastUpdatedOn(p.getLastUpdatedOn())
-            .expiresOn(p.getExpiresOn())
-            .build())
+        .map(p -> toFeedItem(p, idToUser.get(p.getAccountId()), selfId))
         .toList();
   }
 
@@ -272,11 +245,6 @@ public class PostService {
   }
 
   /**
-   * Returns a global feed of posts (all users), newest first.
-   * If {@code before} is provided, returns posts strictly older than that timestamp.
-   * The {@code limit} is capped between 1 and 100; default callers should use 20.
-   */
-  /**
    * Returns a global feed across all users (newest first) with optional cursor.
    *
    * @param before optional exclusive upper bound timestamp for pagination
@@ -284,8 +252,7 @@ public class PostService {
    * @return list of global feed items
    */
   public List<PostFeedItem> getGlobalFeed(Instant before, int limit) {
-    int pageSize = Math.max(1, Math.min(limit, 100));
-    Pageable page = PageRequest.of(0, pageSize, Sort.by(Sort.Direction.DESC, "createdOn"));
+    Pageable page = newFeedPage(limit);
 
     List<Post> posts;
     if (before != null) {
@@ -294,41 +261,17 @@ public class PostService {
       posts = postRepository.findAll(page).getContent();
     }
 
-    // Resolve usernames for authors in batch
     var authorIds = posts.stream().map(Post::getAccountId).distinct().toList();
-    var authors = accountRepository.findAllById(authorIds);
-    var idToUser = authors.stream()
-        .collect(Collectors.toMap(Account::getId, Account::getUsername));
-
-    // Determine current user if any
-    String selfId = null;
-    try { selfId = getSelfId(); } catch (Exception ignored) {}
-    final String currentUserId = selfId;
+    var idToUser = usernamesByAccountId(authorIds);
+    String selfId = getSelfIdOrNull();
 
     posts.forEach(this::ensureExpirationSet);
     return posts.stream()
         .filter(p -> !isExpired(p))
-        .map(p -> PostFeedItem.builder()
-            .id(p.getId())
-            .accountId(p.getAccountId())
-            .username(idToUser.get(p.getAccountId()))
-            .text(p.getText())
-            .rootId(p.getRootId())
-            .parentId(p.getParentId())
-            .level(p.getLevel())
-            .likesCount(p.getLikesCount())
-            .liked(currentUserId != null && p.getLikedBy() != null && p.getLikedBy().contains(currentUserId))
-            .replyCount((int) postRepository.countByParentId(p.getId()))
-            .createdOn(p.getCreatedOn())
-            .lastUpdatedOn(p.getLastUpdatedOn())
-            .expiresOn(p.getExpiresOn())
-            .build())
+        .map(p -> toFeedItem(p, idToUser.get(p.getAccountId()), selfId))
         .toList();
   }
 
-  /**
-   * Returns a user-specific feed (by username), newest first, with optional time cursor.
-   */
   /**
    * Returns a user-specific feed for the given username.
    *
@@ -345,8 +288,7 @@ public class PostService {
         .orElseThrow(() -> new ResourceNotFoundException(
             String.format("Account with username %s not found.", sanitized)));
 
-    int pageSize = Math.max(1, Math.min(limit, 100));
-    Pageable page = PageRequest.of(0, pageSize, Sort.by(Sort.Direction.DESC, "createdOn"));
+    Pageable page = newFeedPage(limit);
     List<Post> posts;
     if (before != null) {
       posts = postRepository.findByAccountIdAndCreatedOnLessThanOrderByCreatedOnDesc(account.getId(), before, page);
@@ -354,27 +296,11 @@ public class PostService {
       posts = postRepository.findByAccountIdOrderByCreatedOnDesc(account.getId(), page);
     }
 
-    String selfId = null;
-    try { selfId = getSelfId(); } catch (Exception ignored) {}
-    final String currentUserId = selfId;
+    String selfId = getSelfIdOrNull();
     posts.forEach(this::ensureExpirationSet);
     return posts.stream()
         .filter(p -> !isExpired(p))
-        .map(p -> PostFeedItem.builder()
-            .id(p.getId())
-            .accountId(p.getAccountId())
-            .username(account.getUsername())
-            .text(p.getText())
-            .rootId(p.getRootId())
-            .parentId(p.getParentId())
-            .level(p.getLevel())
-            .likesCount(p.getLikesCount())
-            .liked(currentUserId != null && p.getLikedBy() != null && p.getLikedBy().contains(currentUserId))
-            .replyCount((int) postRepository.countByParentId(p.getId()))
-            .createdOn(p.getCreatedOn())
-            .lastUpdatedOn(p.getLastUpdatedOn())
-            .expiresOn(p.getExpiresOn())
-            .build())
+        .map(p -> toFeedItem(p, account.getUsername(), selfId))
         .toList();
   }
 
@@ -391,24 +317,9 @@ public class PostService {
     ensureActive(post);
     var author = accountRepository.findById(post.getAccountId())
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", post.getAccountId())));
-    String selfId = null;
-    try { selfId = getSelfId(); } catch (Exception ignored) {}
+    String selfId = getSelfIdOrNull();
     ensureExpirationSet(post);
-    return PostFeedItem.builder()
-        .id(post.getId())
-        .accountId(post.getAccountId())
-        .username(author.getUsername())
-        .text(post.getText())
-        .rootId(post.getRootId())
-        .parentId(post.getParentId())
-        .level(post.getLevel())
-        .likesCount(post.getLikesCount())
-        .liked(selfId != null && post.getLikedBy() != null && post.getLikedBy().contains(selfId))
-        .replyCount((int) postRepository.countByParentId(post.getId()))
-        .createdOn(post.getCreatedOn())
-        .lastUpdatedOn(post.getLastUpdatedOn())
-        .expiresOn(post.getExpiresOn())
-        .build();
+    return toFeedItem(post, author.getUsername(), selfId);
   }
 
   /**
@@ -424,32 +335,13 @@ public class PostService {
     ensureActive(post);
     var rootId = post.getRootId() != null ? post.getRootId() : post.getId();
     var posts = postRepository.findByRootIdOrderByCreatedOnAsc(rootId);
-    // Map usernames
     var authorIds = posts.stream().map(Post::getAccountId).distinct().toList();
-    var authors = accountRepository.findAllById(authorIds);
-    var idToUser = authors.stream()
-        .collect(java.util.stream.Collectors.toMap(Account::getId, Account::getUsername));
-    String selfId = null;
-    try { selfId = getSelfId(); } catch (Exception ignored) {}
-    final String currentUserId = selfId;
+    var idToUser = usernamesByAccountId(authorIds);
+    String selfId = getSelfIdOrNull();
     posts.forEach(this::ensureExpirationSet);
     return posts.stream()
         .filter(p -> !isExpired(p))
-        .map(p -> PostFeedItem.builder()
-            .id(p.getId())
-            .accountId(p.getAccountId())
-            .username(idToUser.get(p.getAccountId()))
-            .text(p.getText())
-            .rootId(p.getRootId())
-            .parentId(p.getParentId())
-            .level(p.getLevel())
-            .likesCount(p.getLikesCount())
-            .liked(currentUserId != null && p.getLikedBy() != null && p.getLikedBy().contains(currentUserId))
-            .replyCount((int) postRepository.countByParentId(p.getId()))
-            .createdOn(p.getCreatedOn())
-            .lastUpdatedOn(p.getLastUpdatedOn())
-            .expiresOn(p.getExpiresOn())
-            .build())
+        .map(p -> toFeedItem(p, idToUser.get(p.getAccountId()), selfId))
         .toList();
   }
 
@@ -483,21 +375,7 @@ public class PostService {
     postRepository.save(post);
     var author = accountRepository.findById(post.getAccountId())
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", post.getAccountId())));
-    return PostFeedItem.builder()
-        .id(post.getId())
-        .accountId(post.getAccountId())
-        .username(author.getUsername())
-        .text(post.getText())
-        .rootId(post.getRootId())
-        .parentId(post.getParentId())
-        .level(post.getLevel())
-        .likesCount(post.getLikesCount())
-        .liked(liked)
-        .replyCount((int) postRepository.countByParentId(post.getId()))
-        .createdOn(post.getCreatedOn())
-        .lastUpdatedOn(post.getLastUpdatedOn())
-        .expiresOn(post.getExpiresOn())
-        .build();
+    return toFeedItem(post, author.getUsername(), liked ? selfId : null);
   }
 
   /**
@@ -544,6 +422,71 @@ public class PostService {
     } finally {
       log.info("Post expiration cleanup job completed.");
     }
+  }
+
+  /**
+   * Builds a bounded first-page request for feed endpoints.
+   *
+   * <p>All feed APIs use the same newest-first pagination contract, so keeping
+   * this in one place prevents each endpoint from drifting on limit bounds or
+   * sort field.</p>
+   */
+  private Pageable newFeedPage(int requestedLimit) {
+    int pageSize = Math.max(MIN_FEED_LIMIT, Math.min(requestedLimit, MAX_FEED_LIMIT));
+    return PageRequest.of(0, pageSize, Sort.by(Sort.Direction.DESC, "createdOn"));
+  }
+
+  /**
+   * Resolves account ids to usernames in one repository call.
+   *
+   * <p>Feed rendering needs usernames, but posts only store author ids. This
+   * helper keeps the batch lookup explicit and avoids N+1 account queries.</p>
+   */
+  private Map<String, String> usernamesByAccountId(List<String> accountIds) {
+    return accountRepository.findAllById(accountIds).stream()
+        .collect(Collectors.toMap(Account::getId, Account::getUsername));
+  }
+
+  /**
+   * Returns the current account id when a request is authenticated.
+   *
+   * <p>Public feed routes are useful to anonymous visitors, so a missing or
+   * invalid JWT should only disable viewer-specific fields like {@code liked}.
+   * Authenticated write paths still call {@link #getSelfId()} directly.</p>
+   */
+  private String getSelfIdOrNull() {
+    try {
+      return getSelfId();
+    } catch (Exception ignored) {
+      return null;
+    }
+  }
+
+  /**
+   * Maps a persisted post into the shared feed DTO.
+   *
+   * <p>This is intentionally the only builder for feed items so likes, reply
+   * counts, expiration timestamps, and viewer-specific liked state remain
+   * consistent across global, user, following, thread, and single-post views.</p>
+   */
+  private PostFeedItem toFeedItem(Post post, String username, String currentUserId) {
+    return PostFeedItem.builder()
+        .id(post.getId())
+        .accountId(post.getAccountId())
+        .username(username)
+        .text(post.getText())
+        .rootId(post.getRootId())
+        .parentId(post.getParentId())
+        .level(post.getLevel())
+        .likesCount(post.getLikesCount())
+        .liked(currentUserId != null
+            && post.getLikedBy() != null
+            && post.getLikedBy().contains(currentUserId))
+        .replyCount((int) postRepository.countByParentId(post.getId()))
+        .createdOn(post.getCreatedOn())
+        .lastUpdatedOn(post.getLastUpdatedOn())
+        .expiresOn(post.getExpiresOn())
+        .build();
   }
 
   private static Instant calculateExpiration(Instant createdOn, int likesCount) {

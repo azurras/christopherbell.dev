@@ -4,7 +4,9 @@ import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeResult;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -107,6 +110,93 @@ public class RestaurantController {
     var response = restaurantService.getRestaurants();
     return new ResponseEntity<>(
         Response.<List<RestaurantDetail>>builder()
+            .payload(response)
+            .success(true)
+            .build(), HttpStatus.OK);
+  }
+
+  /**
+   * Gets today's public lunch picks.
+   *
+   * @return HTTP 200 with up to three Austin metro restaurant picks
+   */
+  @GetMapping(value = APIVersion.V20260517 + "/today", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<Response<List<RestaurantDetail>>> getTodaysLunchPicks() {
+    var response = restaurantService.getTodaysLunchPicks();
+    return new ResponseEntity<>(
+        Response.<List<RestaurantDetail>>builder()
+            .payload(response)
+            .success(true)
+            .build(), HttpStatus.OK);
+  }
+
+  /**
+   * Gets fresh public lunch picks near a user's browser-provided location.
+   *
+   * @param latitude user latitude
+   * @param longitude user longitude
+   * @return HTTP 200 with up to three nearby restaurant picks
+   */
+  @GetMapping(value = APIVersion.V20260517 + "/nearby", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<Response<List<RestaurantDetail>>> getNearbyLunchPicks(
+      @RequestParam double latitude,
+      @RequestParam double longitude
+  ) throws Exception {
+    var response = restaurantService.getNearbyLunchPicks(latitude, longitude);
+    return new ResponseEntity<>(
+        Response.<List<RestaurantDetail>>builder()
+            .payload(response)
+            .success(true)
+            .build(), HttpStatus.OK);
+  }
+
+  /**
+   * Deletes a restaurant from today's lunch picks and replaces it when possible.
+   *
+   * @param id the restaurant ID to delete
+   * @return HTTP 200 with today's updated lunch picks
+   */
+  @DeleteMapping(value = APIVersion.V20260517 + "/today/{id}", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  public ResponseEntity<Response<List<RestaurantDetail>>> deleteRestaurantFromTodaysLunchPicks(
+      @PathVariable String id
+  ) throws Exception {
+    var response = restaurantService.deleteRestaurantFromTodaysLunchPicks(id);
+    return new ResponseEntity<>(
+        Response.<List<RestaurantDetail>>builder()
+            .payload(response)
+            .success(true)
+            .build(), HttpStatus.OK);
+  }
+
+  /**
+   * Imports Austin metro restaurants from OpenStreetMap.
+   *
+   * @return HTTP 200 with import counts
+   */
+  @PostMapping(value = APIVersion.V20260517 + "/import/openstreetmap", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  public ResponseEntity<Response<RestaurantImportResult>> importOpenStreetMapRestaurants()
+      throws Exception {
+    var response = restaurantService.importAustinMetroRestaurantsFromOpenStreetMap();
+    return new ResponseEntity<>(
+        Response.<RestaurantImportResult>builder()
+            .payload(response)
+            .success(true)
+            .build(), HttpStatus.OK);
+  }
+
+  /**
+   * Removes duplicate restaurant names, keeping the Austin record when available.
+   *
+   * @return HTTP 200 with cleanup counts
+   */
+  @PostMapping(value = APIVersion.V20260517 + "/dedupe-names", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  public ResponseEntity<Response<RestaurantDedupeResult>> removeDuplicateNamedRestaurants() {
+    var response = restaurantService.removeDuplicateNamedRestaurants();
+    return new ResponseEntity<>(
+        Response.<RestaurantDedupeResult>builder()
             .payload(response)
             .success(true)
             .build(), HttpStatus.OK);

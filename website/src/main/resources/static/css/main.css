@@ -412,18 +412,6 @@ body {
     margin-bottom: 2rem;
 }
 
-.home-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-}
-
-.home-actions .btn {
-    border-radius: 0.35rem;
-    font-weight: 700;
-    padding-inline: 1.35rem;
-}
-
 .home-destinations {
     padding: 2.75rem 0 4.5rem;
 }
@@ -455,7 +443,7 @@ body {
     min-height: 210px;
     display: grid;
     grid-template-columns: auto 1fr auto;
-    align-content: end;
+    align-items: start;
     gap: 1rem;
     padding: clamp(1.1rem, 2.5vw, 1.55rem);
     border: 1px solid rgba(23, 32, 42, 0.12);
@@ -490,7 +478,6 @@ body {
 }
 
 .home-tile-arrow {
-    align-self: end;
     color: rgba(23, 32, 42, 0.65);
     background: rgba(23, 32, 42, 0.06);
 }
@@ -560,10 +547,6 @@ body {
 
     .home-hero-inner {
         padding-top: 3.5rem;
-    }
-
-    .home-actions .btn {
-        width: 100%;
     }
 
     .home-tile {
@@ -784,8 +767,101 @@ body {
 
 .lunch-panel {
     min-height: 220px;
+}
+
+.lunch-toolbar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.lunch-toolbar p {
+    margin: 0;
+    color: rgba(23, 32, 42, 0.72);
+}
+
+.lunch-support-note {
+    margin-top: 0.3rem !important;
+    font-size: 0.9rem;
+}
+
+.lunch-picks {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.lunch-pick {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.85rem;
+    min-height: 160px;
+    padding: 1rem;
+    border: 1px solid rgba(23, 32, 42, 0.12);
+    border-radius: 0.5rem;
+    background: #fbfcf8;
+}
+
+.lunch-pick-rank {
+    width: 2.25rem;
+    height: 2.25rem;
     display: grid;
     place-items: center;
+    border-radius: 999px;
+    background: #4f7d4d;
+    color: #ffffff;
+    font-weight: 800;
+}
+
+.lunch-pick-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.lunch-pick-body h2 {
+    font-size: 1.15rem;
+    margin-bottom: 0.5rem;
+    overflow-wrap: anywhere;
+}
+
+.lunch-pick-delete {
+    flex: 0 0 auto;
+}
+
+.lunch-pick-body p,
+.lunch-empty p {
+    color: rgba(23, 32, 42, 0.72);
+}
+
+.lunch-pick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.85rem;
+}
+
+.lunch-empty {
+    min-height: 180px;
+    display: grid;
+    place-items: center;
+    text-align: center;
+}
+
+@media (max-width: 900px) {
+    .lunch-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .lunch-picks {
+        grid-template-columns: 1fr;
+    }
 }
 
 .back-office .site-content {
@@ -889,6 +965,91 @@ body {
 .activity-list {
     display: grid;
     gap: 0.75rem;
+}
+
+.operations-grid {
+    display: grid;
+    gap: 1rem;
+}
+
+.operation-panel {
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    background: #fffdf8;
+    padding: 1rem;
+}
+
+.operation-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin-bottom: 1rem;
+}
+
+.operation-form {
+    margin-bottom: 1rem;
+}
+
+.operation-result {
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    background: #fbfcfd;
+    color: #46515f;
+    padding: 0.85rem;
+    overflow-wrap: anywhere;
+}
+
+.operation-success {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+    color: #14532d;
+}
+
+.operation-message {
+    margin-bottom: 0.75rem;
+    font-weight: 700;
+}
+
+.operation-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.65rem;
+}
+
+.operation-stat-grid span {
+    display: block;
+    border: 1px solid rgba(23, 32, 42, 0.10);
+    border-radius: 0.5rem;
+    background: rgba(255, 255, 255, 0.72);
+    padding: 0.7rem;
+    color: #46515f;
+    font-size: 0.86rem;
+}
+
+.operation-stat-grid strong {
+    display: block;
+    color: #17202a;
+    font-size: 1.5rem;
+    line-height: 1;
+    margin-bottom: 0.25rem;
+}
+
+.operation-pre {
+    margin: 0;
+    white-space: pre-wrap;
+}
+
+.operation-list {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0.85rem 0 0;
+    padding-left: 1.1rem;
+}
+
+.operation-list span {
+    display: block;
+    color: #64748b;
+    font-size: 0.82rem;
 }
 
 .queue-card {
@@ -1144,6 +1305,10 @@ body {
         width: 100%;
     }
 
+    .operation-stat-grid {
+        grid-template-columns: 1fr;
+    }
+
     .detail-row {
         grid-template-columns: 1fr;
     }
@@ -1335,6 +1500,7 @@ body {
 .feed-toolbar,
 .post-header {
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 1rem;
 }
 
@@ -1500,6 +1666,7 @@ body {
 }
 
 .post-author {
+    flex: 1 1 12rem;
     min-width: 0;
 }
 
@@ -1511,9 +1678,14 @@ body {
 
 .post-handle {
     display: inline-block;
+    max-width: 100%;
     color: #17202a;
     font-weight: 900;
+    overflow: hidden;
+    text-overflow: ellipsis;
     text-decoration: none;
+    vertical-align: bottom;
+    white-space: nowrap;
 }
 
 .post-handle:hover {
@@ -1523,7 +1695,11 @@ body {
 
 .post-meta {
     position: relative;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
     gap: 0.45rem;
+    justify-content: flex-end;
+    min-width: 0;
 }
 
 .post-chips {
@@ -1531,6 +1707,7 @@ body {
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 0.35rem;
+    min-width: 0;
 }
 
 .post-chip {
@@ -1679,6 +1856,7 @@ body {
 }
 
 .post-actions {
+    flex-wrap: wrap;
     gap: 0.55rem;
     border-top: 1px solid #eef0f3;
     margin-top: 0.95rem;
@@ -1835,12 +2013,14 @@ body {
     grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
     gap: 1.25rem;
     align-items: start;
+    min-width: 0;
 }
 
 .profile-overview,
 .thread-side {
     display: grid;
     gap: 1rem;
+    min-width: 0;
 }
 
 .profile-card,
@@ -1859,6 +2039,7 @@ body {
     display: grid;
     gap: 1rem;
     padding: 1.15rem;
+    min-width: 0;
 }
 
 .profile-avatar-lg {
@@ -1892,11 +2073,14 @@ body {
     font-weight: 900;
     letter-spacing: 0;
     margin-bottom: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .profile-identity p:last-child {
     color: #46515f;
     margin-bottom: 0;
+    overflow-wrap: anywhere;
 }
 
 .profile-chip-row {
@@ -1918,6 +2102,8 @@ body {
     font-weight: 900;
     padding: 0.28rem 0.65rem;
     text-transform: uppercase;
+    max-width: 100%;
+    overflow-wrap: anywhere;
 }
 
 .profile-chip-status.is-active,
@@ -1980,6 +2166,7 @@ body {
     background: #fffdf8;
     box-shadow: 0 12px 28px rgba(23, 32, 42, 0.08);
     padding: 0.85rem;
+    min-width: 0;
 }
 
 .profile-stat span {
@@ -1991,14 +2178,17 @@ body {
 }
 
 .profile-stat small {
+    display: block;
     color: #6b7280;
     font-weight: 800;
+    overflow-wrap: anywhere;
 }
 
 .profile-posts-panel,
 .thread-root-panel,
 .thread-replies-panel {
     padding: 1rem;
+    min-width: 0;
 }
 
 .profile-posts-header,
@@ -2006,10 +2196,16 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 1rem;
     border-bottom: 1px solid #eef0f3;
     margin-bottom: 1rem;
     padding-bottom: 0.85rem;
+}
+
+.profile-posts-header > div,
+.thread-panel-header > div {
+    min-width: 0;
 }
 
 .profile-feed-list,
@@ -2038,6 +2234,7 @@ body {
     grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
     gap: 1.25rem;
     align-items: start;
+    min-width: 0;
 }
 
 .messages-panel {
@@ -2046,12 +2243,14 @@ body {
     background: rgba(255, 255, 255, 0.98);
     box-shadow: 0 18px 48px rgba(23, 32, 42, 0.11);
     padding: 1rem;
+    min-width: 0;
 }
 
 .messages-panel-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 1rem;
     border-bottom: 1px solid #eef0f3;
     margin-bottom: 1rem;
@@ -2062,12 +2261,25 @@ body {
     color: #17202a;
     font-weight: 900;
     margin-bottom: 0;
+    overflow-wrap: anywhere;
+}
+
+.messages-panel-header > div {
+    min-width: 0;
 }
 
 .message-new-form {
     border-bottom: 1px solid #eef0f3;
     margin-bottom: 0.75rem;
     padding-bottom: 0.85rem;
+}
+
+.message-new-form .input-group {
+    flex-wrap: nowrap;
+}
+
+.message-new-form .form-control {
+    min-width: 0;
 }
 
 .conversation-list,
@@ -2088,6 +2300,7 @@ body {
     background: #fbfcfd;
     padding: 0.75rem;
     text-align: left;
+    min-width: 0;
 }
 
 .conversation-row:hover,
@@ -2106,6 +2319,7 @@ body {
     background: #17202a;
     color: #ffffff;
     font-weight: 900;
+    flex: 0 0 auto;
 }
 
 .conversation-main {
@@ -2130,6 +2344,15 @@ body {
     display: grid;
     justify-items: end;
     gap: 0.25rem;
+    min-width: 0;
+    max-width: 8.5rem;
+}
+
+.conversation-meta small {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .conversation-unread {
@@ -2168,6 +2391,7 @@ body {
     border-radius: 0.5rem;
     background: #fbfcfd;
     padding: 0.75rem;
+    min-width: 0;
 }
 
 .message-bubble-row.is-mine .message-bubble {
@@ -2178,11 +2402,18 @@ body {
 .message-bubble-meta {
     display: flex;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 0.75rem;
     color: #6b7280;
     font-size: 0.78rem;
     font-weight: 800;
     margin-bottom: 0.35rem;
+}
+
+.message-bubble-meta span,
+.message-bubble-meta time {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .message-bubble p {
@@ -2202,6 +2433,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 1rem;
     margin-top: 0.75rem;
 }
@@ -2336,10 +2568,15 @@ body {
     100% { background-position: -200% 0; }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 992px) {
     .profile-shell,
     .user-profile-shell,
-    .messages-shell,
+    .messages-shell {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
     .thread-layout {
         grid-template-columns: 1fr;
     }
@@ -2348,14 +2585,29 @@ body {
         width: 100%;
     }
 
+    .conversation-row {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .conversation-meta {
+        grid-column: 2;
+        justify-items: start;
+        max-width: 100%;
+    }
+
     .thread-side {
         position: static;
     }
 
     .profile-posts-header,
+    .messages-panel-header,
     .thread-panel-header {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .messages-panel-header .btn {
+        width: 100%;
     }
 
     .profile-stat-grid {
@@ -2382,13 +2634,68 @@ body {
 
     .post-shell {
         grid-template-columns: 1fr;
+        gap: 0;
     }
 
     .post-avatar {
         display: none;
     }
 
+    .post-author {
+        flex: 0 1 auto;
+        width: 100%;
+    }
+
     .post-meta {
-        justify-content: space-between;
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .post-chips {
+        justify-content: flex-start;
+    }
+}
+
+@media (max-width: 576px) {
+    .feed-list {
+        gap: 0.7rem;
+    }
+
+    .post-item {
+        border-left-width: 4px;
+        padding: 0.75rem;
+    }
+
+    .post-header {
+        gap: 0.45rem;
+    }
+
+    .post-author small {
+        font-size: 0.76rem;
+    }
+
+    .post-text-wrap {
+        margin-top: 0.55rem;
+    }
+
+    .post-body {
+        font-size: 0.98rem;
+        line-height: 1.42;
+    }
+
+    .post-actions {
+        gap: 0.4rem;
+        margin-top: 0.65rem;
+        padding-top: 0.55rem;
+    }
+
+    .post-action {
+        min-height: 1.85rem;
+        padding: 0.22rem 0.58rem;
+    }
+
+    .inline-context {
+        margin-top: 0.55rem;
+        padding: 0.6rem;
     }
 }

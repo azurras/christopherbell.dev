@@ -2,7 +2,9 @@ package dev.christopherbell.account;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
@@ -11,17 +13,28 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountLoginRequest;
+import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
+import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.AccountDetail;
+import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.libs.security.PasswordUtil;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.Base64;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -30,6 +43,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 public class AccountServiceTest {
   @Mock private AccountMapper accountMapper;
   @Mock private AccountRepository accountRepository;
+  @Mock private PasswordResetNotificationService passwordResetNotificationService;
   @InjectMocks private AccountService accountService;
 
   @Test
@@ -44,14 +58,14 @@ public class AccountServiceTest {
     var entity = AccountServiceStub.getAccountWhenExistsStub();
     var detail = AccountDetail.builder().id(entity.getId()).email(entity.getEmail()).build();
 
-    when(accountRepository.findByEmail(eq("old@example.com")))
+    when(accountRepository.findByEmailIgnoreCase(eq("old@example.com")))
         .thenReturn(Optional.of(entity));
     when(accountMapper.toAccount(eq(entity))).thenReturn(detail);
 
-    var result = accountService.getAccountByEmail("old@example.com");
+    var result = accountService.getAccountByEmail("Old@Example.com");
 
     assertEquals(detail, result);
-    verify(accountRepository).findByEmail(eq("old@example.com"));
+    verify(accountRepository).findByEmailIgnoreCase(eq("old@example.com"));
     verify(accountMapper).toAccount(eq(entity));
     verifyNoMoreInteractions(accountRepository, accountMapper);
   }
@@ -59,12 +73,126 @@ public class AccountServiceTest {
   @Test
   @DisplayName("GetByEmail: not found -> throws 404")
   public void testGetAccountByEmail_whenNotFound_Throws404() {
-    when(accountRepository.findByEmail(eq("missing@example.com")))
+    when(accountRepository.findByEmailIgnoreCase(eq("missing@example.com")))
         .thenReturn(Optional.empty());
 
-    assertThrows(ResourceNotFoundException.class, () -> accountService.getAccountByEmail("missing@example.com"));
-    verify(accountRepository).findByEmail(eq("missing@example.com"));
+    assertThrows(ResourceNotFoundException.class, () -> accountService.getAccountByEmail("Missing@Example.com"));
+    verify(accountRepository).findByEmailIgnoreCase(eq("missing@example.com"));
     verifyNoMoreInteractions(accountRepository);
+  }
+
+  @Test
+  @DisplayName("Create entity: normalizes email casing and sanitizes username")
+  public void testCreateAccountEntity_whenEmailMixedCase_normalizesEmailAndSanitizesUsername() {
+    var request = AccountCreateRequest.builder()
+        .email("Chris@Example.com")
+        .firstName("Chris")
+        .lastName("Bell")
+        .password("pass")
+        .username("Chris.Bell  ")
+        .build();
+
+    var account = accountService.createAccountEntity(request);
+
+    assertEquals("chris@example.com", account.getEmail());
+    assertEquals("Chris.Bell", account.getUsername());
+  }
+
+  @Test
+  @DisplayName("Login: mixed-case email uses case-insensitive normalized lookup")
+  public void testLoginAccount_whenEmailCaseDiffers_authenticates() throws Exception {
+    var password = "CorrectHorseBatteryStaple";
+    var salt = PasswordUtil.generateSalt();
+    var account = Account.builder()
+        .id("acc-login")
+        .email("User@Example.com")
+        .passwordSalt(salt)
+        .passwordHash(PasswordUtil.hashPassword(password, salt))
+        .role(Role.USER)
+        .status(AccountStatus.ACTIVE)
+        .build();
+
+    when(accountRepository.findByEmailIgnoreCase(eq("user@example.com")))
+        .thenReturn(Optional.of(account));
+    when(accountRepository.save(eq(account))).thenReturn(account);
+
+    var token = accountService.loginAccount(new AccountLoginRequest("USER@example.com", password));
+
+    assertNotNull(token);
+    verify(accountRepository).findByEmailIgnoreCase(eq("user@example.com"));
+    verify(accountRepository).save(eq(account));
+    verifyNoMoreInteractions(accountRepository);
+  }
+
+  @Test
+  @DisplayName("Password reset request: existing email stores token and sends link")
+  public void testRequestPasswordReset_whenAccountExists_storesTokenAndSendsLink() {
+    var account = AccountServiceStub.getAccountWhenExistsStub();
+    when(accountRepository.findByEmailIgnoreCase(eq("old@example.com")))
+        .thenReturn(Optional.of(account));
+    when(accountRepository.save(eq(account))).thenReturn(account);
+
+    accountService.requestPasswordReset(
+        new AccountPasswordResetRequest("Old@Example.com"),
+        "https://example.com");
+
+    assertNotNull(account.getPasswordResetTokenHash());
+    assertNotNull(account.getPasswordResetTokenExpiresOn());
+    var resetUrl = ArgumentCaptor.forClass(String.class);
+    verify(accountRepository).findByEmailIgnoreCase(eq("old@example.com"));
+    verify(accountRepository).save(eq(account));
+    verify(passwordResetNotificationService).sendPasswordReset(eq(account), resetUrl.capture());
+    org.junit.jupiter.api.Assertions.assertTrue(
+        resetUrl.getValue().startsWith("https://example.com/reset-password?token="));
+  }
+
+  @Test
+  @DisplayName("Password reset request: unknown email returns generically without sending")
+  public void testRequestPasswordReset_whenAccountMissing_doesNotSend() {
+    when(accountRepository.findByEmailIgnoreCase(eq("missing@example.com")))
+        .thenReturn(Optional.empty());
+
+    accountService.requestPasswordReset(
+        new AccountPasswordResetRequest("Missing@Example.com"),
+        "https://example.com");
+
+    verify(accountRepository).findByEmailIgnoreCase(eq("missing@example.com"));
+    verifyNoMoreInteractions(accountRepository, passwordResetNotificationService);
+  }
+
+  @Test
+  @DisplayName("Password reset confirm: valid token updates password and clears token")
+  public void testResetPassword_whenTokenValid_updatesPasswordAndClearsToken() throws Exception {
+    var token = "valid-reset-token";
+    var tokenHash = hashResetToken(token);
+    var account = AccountServiceStub.getAccountWhenExistsStub();
+    account.setPasswordResetTokenHash(tokenHash);
+    account.setPasswordResetTokenExpiresOn(Instant.now().plusSeconds(3600));
+
+    when(accountRepository.findByPasswordResetTokenHash(eq(tokenHash)))
+        .thenReturn(Optional.of(account));
+    when(accountRepository.save(eq(account))).thenReturn(account);
+
+    accountService.resetPassword(new AccountPasswordResetConfirmRequest(token, "new-password"));
+
+    assertNull(account.getPasswordResetTokenHash());
+    assertNull(account.getPasswordResetTokenExpiresOn());
+    org.junit.jupiter.api.Assertions.assertTrue(
+        PasswordUtil.verifyPassword("new-password", account.getPasswordSalt(), account.getPasswordHash()));
+    verify(accountRepository).findByPasswordResetTokenHash(eq(tokenHash));
+    verify(accountRepository).save(eq(account));
+    verifyNoMoreInteractions(accountRepository);
+  }
+
+  @Test
+  @DisplayName("Password reset confirm: invalid token throws InvalidTokenException")
+  public void testResetPassword_whenTokenInvalid_throwsInvalidTokenException() {
+    when(accountRepository.findByPasswordResetTokenHash(anyString()))
+        .thenReturn(Optional.empty());
+
+    assertThrows(
+        InvalidTokenException.class,
+        () -> accountService.resetPassword(new AccountPasswordResetConfirmRequest("bad-token", "new-password")));
   }
 
   @Test
@@ -149,7 +277,7 @@ public class AccountServiceTest {
   public void testApproveAccount_whenFound_ApprovesAndReturnsDetail() throws Exception {
     var entity = AccountServiceStub.getAccountWhenExistsStub();
     var approved = AccountDetail.builder().id(entity.getId()).build();
-    var service = spy(new AccountService(accountMapper, accountRepository));
+    var service = spy(new AccountService(accountMapper, accountRepository, passwordResetNotificationService));
 
     doReturn(AccountDetail.builder().id("self-1").build()).when(service).getSelfAccount();
     when(accountRepository.findById(eq(AccountServiceStub.ID))).thenReturn(Optional.of(entity));
@@ -205,9 +333,9 @@ public class AccountServiceTest {
     when(accountRepository.findById(eq(AccountServiceStub.ID)))
         .thenReturn(Optional.of(existing));
     // No conflicts for new email/username
-    when(accountRepository.findByEmail(eq("chris@example.com")))
+    when(accountRepository.findByEmailIgnoreCase(eq("chris@example.com")))
         .thenReturn(Optional.empty());
-    when(accountRepository.findByUsername(eq("Chris.Bell")))
+    when(accountRepository.findByUsernameIgnoreCase(eq("Chris.Bell")))
         .thenReturn(Optional.empty());
     when(accountRepository.save(eq(existing))).thenReturn(existing);
 
@@ -235,8 +363,8 @@ public class AccountServiceTest {
     assertEquals(AccountStatus.ACTIVE, result.getStatus());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verify(accountRepository).findByEmail(eq("chris@example.com"));
-    verify(accountRepository).findByUsername(eq("Chris.Bell"));
+    verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
+    verify(accountRepository).findByUsernameIgnoreCase(eq("Chris.Bell"));
     verify(accountRepository).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
@@ -396,13 +524,13 @@ public class AccountServiceTest {
 
     when(accountRepository.findById(eq(AccountServiceStub.ID)))
         .thenReturn(Optional.of(existing));
-    when(accountRepository.findByEmail(eq("chris@example.com")))
+    when(accountRepository.findByEmailIgnoreCase(eq("chris@example.com")))
         .thenReturn(Optional.of(other));
 
     assertThrows(ResourceExistsException.class, () -> accountService.updateAccount(request));
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verify(accountRepository).findByEmail(eq("chris@example.com"));
+    verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
     verifyNoMoreInteractions(accountRepository);
   }
 
@@ -421,16 +549,22 @@ public class AccountServiceTest {
 
     when(accountRepository.findById(eq(AccountServiceStub.ID)))
         .thenReturn(Optional.of(existing));
-    when(accountRepository.findByEmail(eq("chris@example.com")))
+    when(accountRepository.findByEmailIgnoreCase(eq("chris@example.com")))
         .thenReturn(Optional.empty());
-    when(accountRepository.findByUsername(eq("Chris.Bell")))
+    when(accountRepository.findByUsernameIgnoreCase(eq("Chris.Bell")))
         .thenReturn(Optional.of(other));
 
     assertThrows(ResourceExistsException.class, () -> accountService.updateAccount(request));
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verify(accountRepository).findByEmail(eq("chris@example.com"));
-    verify(accountRepository).findByUsername(eq("Chris.Bell"));
+    verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
+    verify(accountRepository).findByUsernameIgnoreCase(eq("Chris.Bell"));
     verifyNoMoreInteractions(accountRepository);
+  }
+
+  private String hashResetToken(String token) throws Exception {
+    var digest = MessageDigest.getInstance("SHA-256");
+    var hash = digest.digest(token.getBytes(StandardCharsets.UTF_8));
+    return Base64.getEncoder().encodeToString(hash);
   }
 }

@@ -17,6 +17,8 @@ public class RestaurantStub {
   public static final String POSTAL_CODE = "78660";
   public static final String PHONE_NUMBER = "512-969-5012";
   public static final String WEBSITE = "https://www.pflugervilletacohouse.com";
+  public static final double LATITUDE = 30.4423;
+  public static final double LONGITUDE = -97.6200;
 
   public static RestaurantCreateRequest getRestaurantCreateRequestStub() {
     return RestaurantCreateRequest.builder()
@@ -62,6 +64,8 @@ public class RestaurantStub {
         .city(CITY)
         .state(STATE)
         .country(COUNTRY)
+        .latitude(LATITUDE)
+        .longitude(LONGITUDE)
         .postalCode(POSTAL_CODE)
         .build();
   }

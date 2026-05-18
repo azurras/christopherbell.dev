@@ -49,6 +49,14 @@ The artifact will be located under `website/build/libs/`.
 ### Environment
 Set `SPRING_PROFILES_ACTIVE=local` for a local development profile and configure any required MongoDB connection details in `application.yml`.
 
+Password reset emails use Spring Mail. In production, set:
+```bash
+export RESEND_API_KEY='re_your_new_resend_key'
+export APP_MAIL_FROM='noreply@your-verified-domain.com'
+```
+
+Resend SMTP requires a verified sending domain. The committed config uses `smtp.resend.com:587`, username `resend`, and the API key from `RESEND_API_KEY`.
+
 ### WSL
 If WSL reports `bad interpreter: /bin/sh^M`, convert the wrapper to Unix line endings and make it executable:
 ```bash
@@ -59,5 +67,20 @@ chmod +x gradlew
 ### Reporting
 Post reports are stored in the database and visible in Back Office for admins.
 
-### Reporting
-Post reports are stored in the database and visible in Back Office for admins.
+### What's For Lunch Data
+Restaurants can be imported from OpenStreetMap through the Overpass API. This is an admin-only,
+manual import so the app does not repeatedly hit the public Overpass service.
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <admin-token>" \
+  http://localhost:8080/api/whatsforlunch/restaurant/2026-05-17/import/openstreetmap
+```
+
+OpenStreetMap data is imported by OSM element id and skipped on later imports if it already exists.
+To clean up existing duplicate restaurant names, keeping the Austin record when one exists:
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <admin-token>" \
+  http://localhost:8080/api/whatsforlunch/restaurant/2026-05-17/dedupe-names
+```
