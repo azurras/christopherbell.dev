@@ -1,4 +1,4 @@
-import { authHeaders, fetchJson, sanitize, isLoggedIn, formatWhen } from './lib/util.js';
+import { authHeaders, fetchJson, sanitize, isLoggedIn, formatWhen, loginRedirectUrl } from './lib/util.js';
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
 import { makeRendererContext } from './lib/feed-context.js';
@@ -116,7 +116,7 @@ function renderPosts(posts, username) {
 document.addEventListener('DOMContentLoaded', async () => {
   if (!isLoggedIn()) {
     // Must be logged in
-    window.location.href = '/login';
+    window.location.href = loginRedirectUrl();
     return;
   }
   const alert = alertBox();

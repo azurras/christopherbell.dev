@@ -2,5 +2,6 @@ package dev.christopherbell.notification.model;
 
 public enum NotificationType {
   MENTION,
-  MESSAGE
+  MESSAGE,
+  WFL_SESSION
 }

@@ -28,6 +28,8 @@ public class Notification {
   private String postText;
   private String messageId;
   private String messageText;
+  private String whatsForLunchSessionId;
+  private String whatsForLunchSessionText;
   private NotificationType notificationType;
   private Boolean read;
 

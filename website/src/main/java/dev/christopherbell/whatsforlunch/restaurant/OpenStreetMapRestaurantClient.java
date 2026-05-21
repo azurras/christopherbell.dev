@@ -24,31 +24,17 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class OpenStreetMapRestaurantClient {
-  private static final List<String> FAST_FOOD_NAME_PARTS = List.of(
-      "arbys",
-      "burger king",
-      "chick-fil-a",
-      "chipotle",
-      "domino's",
-      "dominos",
-      "jack in the box",
-      "jimmy john",
-      "kfc",
-      "mcdonald",
-      "panda express",
-      "pizza hut",
-      "popeyes",
-      "sonic",
-      "subway",
-      "taco bell",
-      "wendy's",
-      "whataburger"
+  private static final String DEFAULT_IMPORT_BBOXES = String.join(";",
+      "29.95,-98.25,30.75,-97.15", // Austin
+      "37.20,-122.65,38.20,-121.65", // San Francisco Bay Area
+      "29.70,-90.45,30.25,-89.65", // New Orleans
+      "32.45,-97.35,33.15,-96.35" // Dallas
   );
 
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
   private final String endpoint;
-  private final String bbox;
+  private final String bboxes;
   private final int timeoutSeconds;
   private final int resultLimit;
   private final boolean includeFastFood;
@@ -56,14 +42,14 @@ public class OpenStreetMapRestaurantClient {
   public OpenStreetMapRestaurantClient(
       ObjectMapper objectMapper,
       @Value("${wfl.restaurant-import.osm.endpoint:https://overpass-api.de/api/interpreter}") String endpoint,
-      @Value("${wfl.restaurant-import.osm.bbox:29.95,-98.25,30.75,-97.15}") String bbox,
+      @Value("${wfl.restaurant-import.osm.bbox:}") String bboxes,
       @Value("${wfl.restaurant-import.osm.timeout-seconds:60}") int timeoutSeconds,
-      @Value("${wfl.restaurant-import.osm.result-limit:5000}") int resultLimit,
+      @Value("${wfl.restaurant-import.osm.result-limit:20000}") int resultLimit,
       @Value("${wfl.restaurant-import.osm.include-fast-food:true}") boolean includeFastFood
   ) {
     this.objectMapper = objectMapper;
     this.endpoint = endpoint;
-    this.bbox = bbox;
+    this.bboxes = bboxes;
     this.timeoutSeconds = timeoutSeconds;
     this.resultLimit = resultLimit;
     this.includeFastFood = includeFastFood;
@@ -72,7 +58,7 @@ public class OpenStreetMapRestaurantClient {
         .build();
   }
 
-  public List<Restaurant> getAustinMetroRestaurants()
+  public List<Restaurant> getConfiguredMetroRestaurants()
       throws IOException, InterruptedException {
     var query = buildQuery();
     var request = HttpRequest.newBuilder(URI.create(endpoint))
@@ -95,15 +81,30 @@ public class OpenStreetMapRestaurantClient {
     var amenityPattern = includeFastFood
         ? "^(restaurant|cafe|food_court|fast_food)$"
         : "^(restaurant|cafe|food_court)$";
+    var clauses = String.join("\n", importBoundingBoxes().stream()
+        .map(bbox -> """
+              node["amenity"~"%s"]["name"](%s);
+              way["amenity"~"%s"]["name"](%s);
+              relation["amenity"~"%s"]["name"](%s);
+            """.formatted(amenityPattern, bbox, amenityPattern, bbox, amenityPattern, bbox))
+        .toList());
     return """
         [out:json][timeout:%d];
         (
-          node["amenity"~"%s"]["name"](%s);
-          way["amenity"~"%s"]["name"](%s);
-          relation["amenity"~"%s"]["name"](%s);
+        %s
         );
         out center %d;
-        """.formatted(timeoutSeconds, amenityPattern, bbox, amenityPattern, bbox, amenityPattern, bbox, resultLimit);
+        """.formatted(timeoutSeconds, clauses, resultLimit);
+  }
+
+  private List<String> importBoundingBoxes() {
+    var configured = List.of((bboxes == null ? "" : bboxes).split(";")).stream()
+        .map(String::strip)
+        .filter(bbox -> !bbox.isBlank())
+        .toList();
+    return configured.isEmpty()
+        ? List.of(DEFAULT_IMPORT_BBOXES.split(";"))
+        : configured;
   }
 
   private List<Restaurant> parseRestaurants(String body) throws IOException {
@@ -117,9 +118,7 @@ public class OpenStreetMapRestaurantClient {
     for (JsonNode element : elements) {
       toRestaurant(element).ifPresent(restaurants::add);
     }
-    restaurants.sort(Comparator
-        .comparingInt(this::restaurantPreferenceRank)
-        .thenComparing(restaurant -> normalize(restaurant.getName())));
+    restaurants.sort(Comparator.comparing(restaurant -> normalize(restaurant.getName())));
     return restaurants;
   }
 
@@ -135,7 +134,7 @@ public class OpenStreetMapRestaurantClient {
         .name(name.strip())
         .address(Address.builder()
             .street1(street1(tags))
-            .city(defaultText(text(tags, "addr:city"), "Austin Metro"))
+            .city(defaultText(text(tags, "addr:city"), "Imported Metro"))
             .state(defaultText(text(tags, "addr:state"), "TX"))
             .country(defaultText(text(tags, "addr:country"), "US"))
             .latitude(coordinate(element, "lat"))
@@ -147,18 +146,6 @@ public class OpenStreetMapRestaurantClient {
         .sourceAmenity(text(tags, "amenity"))
         .website(firstText(tags, "contact:website", "website"))
         .build());
-  }
-
-  private int restaurantPreferenceRank(Restaurant restaurant) {
-    return isFastFood(restaurant) ? 1 : 0;
-  }
-
-  private boolean isFastFood(Restaurant restaurant) {
-    if ("fast_food".equalsIgnoreCase(restaurant.getSourceAmenity())) {
-      return true;
-    }
-    var normalizedName = normalize(restaurant.getName());
-    return FAST_FOOD_NAME_PARTS.stream().anyMatch(normalizedName::contains);
   }
 
   private String street1(JsonNode tags) {

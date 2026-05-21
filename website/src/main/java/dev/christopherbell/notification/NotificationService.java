@@ -11,6 +11,7 @@ import dev.christopherbell.notification.model.NotificationType;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.post.model.Post;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -66,6 +67,27 @@ public class NotificationService {
         .messageId(message.getId())
         .messageText(message.getText())
         .notificationType(NotificationType.MESSAGE)
+        .read(false)
+        .createdOn(Instant.now())
+        .build());
+  }
+
+  public void createWhatsForLunchSessionInvite(
+      WhatsForLunchSession session,
+      Account actor,
+      Account recipient
+  ) {
+    if (session == null || actor == null || recipient == null) {
+      return;
+    }
+    notificationRepository.save(Notification.builder()
+        .id(UUID.randomUUID().toString())
+        .accountId(recipient.getId())
+        .actorAccountId(actor.getId())
+        .actorUsername(actor.getUsername())
+        .whatsForLunchSessionId(session.getId())
+        .whatsForLunchSessionText("Vote on today's lunch picks.")
+        .notificationType(NotificationType.WFL_SESSION)
         .read(false)
         .createdOn(Instant.now())
         .build());
@@ -130,6 +152,8 @@ public class NotificationService {
         .postText(notification.getPostText())
         .messageId(notification.getMessageId())
         .messageText(notification.getMessageText())
+        .whatsForLunchSessionId(notification.getWhatsForLunchSessionId())
+        .whatsForLunchSessionText(notification.getWhatsForLunchSessionText())
         .notificationType(notification.getNotificationType())
         .read(Boolean.TRUE.equals(notification.getRead()))
         .createdOn(notification.getCreatedOn())

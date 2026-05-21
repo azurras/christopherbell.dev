@@ -31,6 +31,10 @@ public class RestaurantDetail {
   private String cuisine;
   private String name;
   private String phoneNumber;
+  private Integer ratingCount;
+  private Integer ratingSum;
+  private Integer myRating;
+  private Boolean myFavorite;
   private String sourceAmenity;
   private String type;
   private String website;

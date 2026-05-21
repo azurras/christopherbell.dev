@@ -49,13 +49,39 @@ export const API = {
   whatsForLunch: {
     restaurants: '/api/whatsforlunch/restaurant/2025-09-12',
     today: '/api/whatsforlunch/restaurant/2026-05-17/today',
-    nearby: ({ latitude, longitude }) => {
+    nearby: ({ latitude, longitude }, cuisines = [], radiusMiles = 15, useSavedPreferences = false) => {
       const params = new URLSearchParams({
         latitude: String(latitude),
         longitude: String(longitude),
+        radiusMiles: String(radiusMiles),
+        useSavedPreferences: String(useSavedPreferences),
+      });
+      cuisines.forEach((cuisine) => {
+        if (cuisine) params.append('cuisine', cuisine);
       });
       return `/api/whatsforlunch/restaurant/2026-05-17/nearby?${params}`;
     },
+    nearbyByZip: (zipCode, cuisines = [], radiusMiles = 15, useSavedPreferences = false) => {
+      const params = new URLSearchParams({
+        radiusMiles: String(radiusMiles),
+        useSavedPreferences: String(useSavedPreferences),
+      });
+      cuisines.forEach((cuisine) => {
+        if (cuisine) params.append('cuisine', cuisine);
+      });
+      return `/api/whatsforlunch/restaurant/2026-05-17/nearby/zip/${encodeURIComponent(zipCode)}?${params}`;
+    },
+    preferences: '/api/whatsforlunch/restaurant/2026-05-17/preferences',
+    restaurant: (id) => `/api/whatsforlunch/restaurant/2026-05-17/profile/${encodeURIComponent(id)}`,
+    sessions: '/api/whatsforlunch/restaurant/2026-05-17/sessions',
+    session: (id) => `/api/whatsforlunch/restaurant/2026-05-17/sessions/${encodeURIComponent(id)}`,
+    sessionJoin: (id) => `/api/whatsforlunch/restaurant/2026-05-17/sessions/${encodeURIComponent(id)}/join`,
+    sessionVote: (id) => `/api/whatsforlunch/restaurant/2026-05-17/sessions/${encodeURIComponent(id)}/vote`,
+    sessionRestaurants: (id) => `/api/whatsforlunch/restaurant/2026-05-17/sessions/${encodeURIComponent(id)}/restaurants`,
+    rateRestaurant: '/api/whatsforlunch/restaurant/2026-05-17/rating',
+    favorites: '/api/whatsforlunch/restaurant/2026-05-17/favorites',
+    favoriteRestaurant: '/api/whatsforlunch/restaurant/2026-05-17/favorite',
+    topRated: (limit = 10) => `/api/whatsforlunch/restaurant/2026-05-17/top-rated?limit=${encodeURIComponent(limit)}`,
     deleteRestaurant: (id) => `/api/whatsforlunch/restaurant/2025-09-13/${encodeURIComponent(id)}`,
     deleteTodayPick: (id) => `/api/whatsforlunch/restaurant/2026-05-17/today/${encodeURIComponent(id)}`,
     importOpenStreetMap: '/api/whatsforlunch/restaurant/2026-05-17/import/openstreetmap',

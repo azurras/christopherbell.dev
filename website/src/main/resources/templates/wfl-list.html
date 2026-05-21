@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="author" content="Christopher Bell (cbell7@icloud.com)" />
+    <th:block th:replace="~{fragments/social-preview :: socialPreview(${socialTitle}, ${listDescription}, 'https://www.christopherbell.dev/wfl', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
+
+    <title th:text="${socialTitle}">CB | What's For Lunch</title>
+
+    <link rel="stylesheet" type="text/css" href="/css/main.css"/>
+</head>
+
+<body class="site-page lunch-page">
+    <div id="nav"></div>
+    <main class="site-main" role="main">
+        <section class="site-hero site-hero-lunch" aria-labelledby="wflListTitle">
+            <div class="container">
+                <p class="home-kicker">What's For Lunch</p>
+                <h1 id="wflListTitle" th:text="${listTitle}">Restaurants</h1>
+                <p th:text="${listDescription}">Restaurant lists from What's For Lunch.</p>
+            </div>
+        </section>
+        <section class="site-content">
+            <div class="container">
+                <div class="content-panel lunch-panel">
+                    <div id="wfl-list"
+                         th:attr="data-list-mode=${listMode},data-list-title=${listTitle}"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+    <footer id="footer"></footer>
+</body>
+
+<script type="module" src="/js/app.js"></script>
+<script type="module" src="/js/wfl-list.js"></script>
+
+</html>

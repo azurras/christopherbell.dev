@@ -2,12 +2,18 @@
  * Login page behavior.
  *
  * Submits credentials to the login API, stores JWT on success, and
- * redirects to the home page. Redirects authenticated users away.
+ * redirects to a safe local target. Redirects authenticated users away.
  */
 import pubsub from '../components/pubsub.js';
 import { API } from '../lib/api.js';
+import { safeRedirectTarget } from '../lib/util.js';
 
 const alertBox = () => document.getElementById('loginAlert');
+
+function redirectTarget() {
+  const target = new URLSearchParams(window.location.search).get('redirect') || '/';
+  return safeRedirectTarget(target);
+}
 
 /**
  * Perform login against the API.
@@ -31,9 +37,9 @@ async function login(email, password) {
 
 /** Wire form submit and redirect rules once DOM is ready. */
 document.addEventListener('DOMContentLoaded', () => {
-  // If already logged in, redirect to home
+  // If already logged in, redirect to the requested local page.
   if (localStorage.getItem('cbellLoginToken')) {
-    window.location.href = '/';
+    window.location.href = redirectTarget();
     return;
   }
   const form = document.getElementById('loginForm');
@@ -49,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const token = await login(email, password);
       localStorage.setItem('cbellLoginToken', token);
       pubsub.publish('auth:login');
-      window.location.href = '/';
+      window.location.href = redirectTarget();
     } catch (err) {
       if (alert) {
         alert.textContent = err.message;

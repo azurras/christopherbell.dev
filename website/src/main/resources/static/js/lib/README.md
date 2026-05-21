@@ -6,7 +6,7 @@ Owns reusable browser-side modules that are not tied to one page.
 
 - `api.js` defines API paths, including grouped admin-facing routes used by the Back Office.
 - `util.js` owns auth storage helpers, request headers, JSON response handling,
-  formatting, sanitizing, and small DOM utilities.
+  formatting, sanitizing, shared mention linking, and small DOM utilities.
 - `composer.js` initializes reusable post composer behavior.
 - `feed-context.js` builds the context object used by feed rendering.
 - `feed-render.js` renders post cards, mention links, likes, replies, menus, and
@@ -29,9 +29,22 @@ Owns reusable browser-side modules that are not tied to one page.
 - Prefer explicit context objects over hidden imports for behavior that varies by
   page, such as delete permissions or reply handlers.
 - Shared modules should be safe to import on any page.
+- `getAuthToken` normalizes the stored JWT, rejects expired or malformed tokens,
+  and clears unusable values so the app never sends an empty or stale
+  `Authorization: Bearer` header.
+- `getAuthClaims` exposes decoded JWT claims for non-authoritative UI decisions
+  such as whether a page should render signed-in controls. Server endpoints must
+  still enforce permissions.
+- `authHeaders` accepts optional extra headers and merges them with the
+  normalized bearer token so page modules do not hand-build auth headers.
 - `fetchJson` clears stale auth state on `401` but only redirects when the caller
   passes `redirectOnUnauthorized: true`. Public tools and nav background fetches
   should not opt into redirects.
+- `currentRedirectTarget`, `safeRedirectTarget`, and `loginRedirectUrl` preserve
+  the page a visitor was trying to use before authentication. They only allow
+  same-origin paths and fall back to `/` from auth pages to avoid redirect loops.
+- `linkMentions` and `appendTextWithMentionLinks` escape user-authored text and
+  convert valid `@username` mentions into `/u/{username}` profile links.
 
 ## Update This Doc
 

@@ -15,6 +15,9 @@ Owns site styling for server-rendered pages and frontend components.
 - Current templates should use `main.css` unless they are intentionally part of a
   legacy area.
 - Shared components and page modules rely on stable class names in `main.css`.
+- WFL uses shared lunch classes for picks, restaurant profiles, favorites, and
+  top-rated lists, plus `wfl-secondary-nav` for local WFL navigation and
+  `lunch-controls` for the filters, location, and Lunch with Friends control tabs.
 - Responsive rules live near the related component styles when possible. Broad
   page-level breakpoints are kept at the end of `main.css`.
 

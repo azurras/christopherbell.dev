@@ -16,7 +16,9 @@ Owns browser behavior for account access pages.
 - API requests use shared helpers from `../lib/api.js` so endpoint paths and
   response parsing stay consistent with the rest of the app.
 - Successful auth actions update local auth state and redirect through normal
-  browser navigation.
+  browser navigation. Login and signup preserve safe local `redirect` query
+  targets so protected pages, feed actions, reports, messages, profiles, and
+  shared WFL session links can return users to the page that requested login.
 
 ## Design Notes
 
@@ -27,5 +29,5 @@ Owns browser behavior for account access pages.
 
 ## Update This Doc
 
-Update this README when auth page behavior, reset-token handling, stored auth
-state, or auth API contracts change.
+Update this README when auth page behavior, redirect handling, reset-token
+handling, stored auth state, or auth API contracts change.

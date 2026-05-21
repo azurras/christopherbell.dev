@@ -7,7 +7,7 @@
  */
 import pubsub from './pubsub.js';
 import { API } from '../lib/api.js';
-import { authHeaders, fetchJson, formatWhen, sanitize } from '../lib/util.js';
+import { authHeaders, fetchJson, formatWhen, getAuthToken, loginRedirectUrl, sanitize } from '../lib/util.js';
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -64,7 +64,7 @@ class AppNav extends HTMLElement {
     }
 
     async loadUserInfo(force = false) {
-        const token = localStorage.getItem('cbellLoginToken');
+        const token = getAuthToken();
         if (!token) return;
         if (!force && localStorage.getItem('cbellRole') && localStorage.getItem('cbellUsername')) {
             return;
@@ -89,7 +89,7 @@ class AppNav extends HTMLElement {
     }
 
     async loadNotifications() {
-        const token = localStorage.getItem('cbellLoginToken');
+        const token = getAuthToken();
         if (!token || this.notificationLoadInFlight) return;
         this.notificationLoadInFlight = true;
         try {
@@ -116,10 +116,15 @@ class AppNav extends HTMLElement {
             const unread = !notification.read;
             const actor = notification.actorUsername ? `@${sanitize(notification.actorUsername)}` : 'Someone';
             const isMessage = notification.notificationType === 'MESSAGE';
-            const text = escapeHtml(isMessage ? notification.messageText || '' : notification.postText || '');
-            const title = isMessage ? `${actor} sent you a message` : `${actor} mentioned you`;
+            const isWflSession = notification.notificationType === 'WFL_SESSION';
+            const text = escapeHtml(isWflSession
+                ? notification.whatsForLunchSessionText || ''
+                : isMessage ? notification.messageText || '' : notification.postText || '');
+            const title = isWflSession
+                ? `${actor} invited you to lunch`
+                : isMessage ? `${actor} sent you a message` : `${actor} mentioned you`;
             return `
-                <button type="button" class="notification-item ${unread ? 'unread' : ''}" data-notification-id="${notification.id}" data-post-id="${notification.postId || ''}" data-message-username="${isMessage ? sanitize(notification.actorUsername || '') : ''}">
+                <button type="button" class="notification-item ${unread ? 'unread' : ''}" data-notification-id="${notification.id}" data-post-id="${notification.postId || ''}" data-message-username="${isMessage ? sanitize(notification.actorUsername || '') : ''}" data-wfl-session-id="${isWflSession ? sanitize(notification.whatsForLunchSessionId || '') : ''}">
                     <span class="notification-title">${title}</span>
                     <span class="notification-text">${text}</span>
                     <span class="notification-time">${formatWhen(notification.createdOn)}</span>
@@ -129,10 +134,11 @@ class AppNav extends HTMLElement {
 
     /** Render the navbar markup based on authentication state. */
     render() {
-        const isAuthenticated = !!localStorage.getItem('cbellLoginToken');
+        const isAuthenticated = !!getAuthToken();
         const storedName = (localStorage.getItem('cbellUsername') || '').trim();
         const initials = storedName ? storedName[0].toUpperCase() : 'C';
-        const profileHref = isAuthenticated ? '/profile' : '/login';
+        const loginHref = loginRedirectUrl();
+        const profileHref = isAuthenticated ? '/profile' : loginHref;
         const isAdmin = (localStorage.getItem('cbellRole') || '') === 'ADMIN';
         const unread = Number(this.unreadNotifications || 0);
         this.innerHTML = `
@@ -145,11 +151,11 @@ class AppNav extends HTMLElement {
         <div class="navbar-collapse collapse" id="navbarSupportedContent">
             <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                 <li class="nav-item"><a href="/void" class="nav-link">Void</a></li>
+                <li class="nav-item"><a href="/wfl" class="nav-link">What's For Lunch</a></li>
                 ${isAuthenticated ? `<li class="nav-item"><a href="/messages" class="nav-link">Messages</a></li>` : ''}
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" id="toolsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">Tools</a>
                     <ul class="dropdown-menu tools-menu" aria-labelledby="toolsDropdown">
-                        <li><a class="dropdown-item" href="/wfl">What's For Lunch</a></li>
                         <li><a class="dropdown-item" href="/vin-decoder">VIN Decoder</a></li>
                     </ul>
                 </li>
@@ -157,7 +163,7 @@ class AppNav extends HTMLElement {
             <div class="d-flex align-items-center gap-2 ms-auto">
                 ${!isAuthenticated ? `
                 <div class="d-lg-flex">
-                    <a href="/login" class="btn btn-outline-light me-2">Login</a>
+                    <a href="${loginHref}" class="btn btn-outline-light me-2">Login</a>
                     <a href="/signup" class="btn btn-warning">Sign-up</a>
                 </div>` : `
                 <div class="nav-notifications">
@@ -213,6 +219,7 @@ class AppNav extends HTMLElement {
                     const notificationId = item.getAttribute('data-notification-id');
                     const postId = item.getAttribute('data-post-id');
                     const messageUsername = item.getAttribute('data-message-username');
+                    const wflSessionId = item.getAttribute('data-wfl-session-id');
                     if (notificationId) {
                         try {
                             await fetchJson(API.notifications.markRead(notificationId), {
@@ -225,6 +232,10 @@ class AppNav extends HTMLElement {
                     }
                     if (messageUsername) {
                         window.location.href = `/messages?with=${encodeURIComponent(messageUsername)}`;
+                        return;
+                    }
+                    if (wflSessionId) {
+                        window.location.href = `/wfl?session=${encodeURIComponent(wflSessionId)}`;
                         return;
                     }
                     if (postId) window.location.href = `/p/${encodeURIComponent(postId)}`;

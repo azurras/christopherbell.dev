@@ -11,6 +11,7 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.notification.model.NotificationType;
 import dev.christopherbell.post.model.Post;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -61,5 +62,26 @@ class NotificationServiceTest {
 
     verify(accountRepository).findByUsernameIgnoreCase("writer");
     verify(notificationRepository, never()).save(any(Notification.class));
+  }
+
+  @Test
+  @DisplayName("WFL session invite notifications link to the shared session")
+  void testCreateWhatsForLunchSessionInvite_savesSessionNotification() {
+    var service = new NotificationService(notificationRepository, accountRepository);
+    var actor = Account.builder().id("actor").username("owner").build();
+    var recipient = Account.builder().id("recipient").username("friend").build();
+    var session = WhatsForLunchSession.builder().id("session-1").build();
+
+    service.createWhatsForLunchSessionInvite(session, actor, recipient);
+
+    var captor = ArgumentCaptor.forClass(Notification.class);
+    verify(notificationRepository).save(captor.capture());
+    var notification = captor.getValue();
+    assertEquals("recipient", notification.getAccountId());
+    assertEquals("actor", notification.getActorAccountId());
+    assertEquals("owner", notification.getActorUsername());
+    assertEquals("session-1", notification.getWhatsForLunchSessionId());
+    assertEquals(NotificationType.WFL_SESSION, notification.getNotificationType());
+    assertEquals(false, notification.getRead());
   }
 }

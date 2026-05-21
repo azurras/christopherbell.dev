@@ -5,7 +5,13 @@
  * Redirects authenticated users away.
  */
 import { API } from '../lib/api.js';
+import { safeRedirectTarget } from '../lib/util.js';
 const alertBox = () => document.getElementById('signupAlert');
+
+function redirectTarget() {
+  const target = new URLSearchParams(window.location.search).get('redirect') || '/';
+  return safeRedirectTarget(target);
+}
 
 /**
  * Create a new account via API.
@@ -28,9 +34,9 @@ async function signup(payload) {
 
 /** Wire form submit and redirect rules once DOM is ready. */
 document.addEventListener('DOMContentLoaded', () => {
-  // If already logged in, redirect to home
+  // If already logged in, redirect to the requested local page.
   if (localStorage.getItem('cbellLoginToken')) {
-    window.location.href = '/';
+    window.location.href = redirectTarget();
     return;
   }
   const form = document.getElementById('signupForm');
@@ -49,7 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
     alert?.classList.add('d-none');
     try {
       await signup(payload);
-      window.location.href = '/login';
+      window.location.href = `/login?redirect=${encodeURIComponent(redirectTarget())}`;
     } catch (err) {
       if (alert) {
         alert.textContent = err.message;

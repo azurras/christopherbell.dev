@@ -769,13 +769,58 @@ body {
     min-height: 220px;
 }
 
+.wfl-secondary-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.wfl-secondary-nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.25rem;
+    padding: 0.35rem 0.8rem;
+    border: 1px solid rgba(23, 32, 42, 0.14);
+    border-radius: 0.5rem;
+    color: rgba(23, 32, 42, 0.76);
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.wfl-secondary-nav a:hover,
+.wfl-secondary-nav a:focus-visible,
+.wfl-secondary-nav a.active {
+    border-color: #4f7d4d;
+    background: #eef6ed;
+    color: #244323;
+}
+
+.wfl-list-heading {
+    margin-bottom: 1rem;
+}
+
+.wfl-list-heading h2 {
+    margin-bottom: 0.25rem;
+    font-size: 1.35rem;
+}
+
+.wfl-list-heading p {
+    margin: 0;
+    color: rgba(23, 32, 42, 0.72);
+}
+
 .lunch-toolbar {
     width: 100%;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem);
     align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
+    gap: 1rem;
     margin-bottom: 1rem;
+    padding: 1rem;
+    border: 1px solid rgba(23, 32, 42, 0.1);
+    border-radius: 0.5rem;
+    background: #ffffff;
 }
 
 .lunch-toolbar p {
@@ -783,16 +828,218 @@ body {
     color: rgba(23, 32, 42, 0.72);
 }
 
-.lunch-support-note {
-    margin-top: 0.3rem !important;
+.lunch-primary-refresh {
+    min-height: 3.35rem;
+    font-size: 1.08rem;
+    font-weight: 800;
+}
+
+.lunch-controls {
+    width: 100%;
+    margin-bottom: 1rem;
+}
+
+.lunch-tools-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    padding: 0.45rem;
+    border: 1px solid rgba(23, 32, 42, 0.1);
+    border-radius: 0.5rem;
+    background: #ffffff;
+}
+
+.lunch-tool-tab {
+    min-height: 2.25rem;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid rgba(23, 32, 42, 0.14);
+    border-radius: 0.4rem;
+    background: #f8faf6;
+    color: rgba(23, 32, 42, 0.76);
+    font-size: 0.92rem;
+    font-weight: 800;
+}
+
+.lunch-tool-tab.active {
+    border-color: rgba(47, 111, 78, 0.7);
+    background: #e8f3ec;
+    color: #244634;
+}
+
+.lunch-control-panel {
+    width: 100%;
+    margin-bottom: 0;
+    padding: 0.9rem;
+    border: 1px solid rgba(23, 32, 42, 0.1);
+    border-radius: 0.5rem;
+    background: #ffffff;
+}
+
+.lunch-control-heading {
+    margin-bottom: 0.75rem;
+}
+
+.lunch-control-heading h2 {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+}
+
+.lunch-control-heading p {
+    margin: 0;
+    color: rgba(23, 32, 42, 0.68);
+    font-size: 0.92rem;
+}
+
+.lunch-location-controls,
+.lunch-zip-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.lunch-zip-input {
+    width: 8.5rem;
+}
+
+.lunch-filters {
+    background: #f8faf6;
+}
+
+.lunch-radius-control {
+    display: grid;
+    gap: 0.35rem;
+    max-width: 12rem;
+    margin-bottom: 0.75rem;
+    color: rgba(23, 32, 42, 0.76);
     font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.lunch-filter-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.lunch-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 2.1rem;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid rgba(23, 32, 42, 0.16);
+    border-radius: 999px;
+    background: #ffffff;
+    color: rgba(23, 32, 42, 0.82);
+    cursor: pointer;
+    font-size: 0.92rem;
+}
+
+.lunch-filter input {
+    margin: 0;
+}
+
+.lunch-filter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.lunch-filter-status {
+    min-height: 1.25rem;
+    margin: 0.5rem 0 0;
+    color: rgba(23, 32, 42, 0.72);
+    font-size: 0.9rem;
+}
+
+.lunch-session-panel {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding: 0.9rem;
+    border: 1px solid rgba(23, 32, 42, 0.1);
+    border-radius: 0.5rem;
+    background: #ffffff;
+}
+
+.lunch-controls .lunch-session-panel {
+    margin-bottom: 0;
+}
+
+.lunch-session-panel h2 {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+}
+
+.lunch-session-panel p {
+    margin: 0 0 0.5rem;
+    color: rgba(23, 32, 42, 0.72);
+}
+
+.lunch-session-status {
+    min-height: 1.2rem;
+    font-size: 0.9rem;
+}
+
+.lunch-session-tools {
+    grid-column: 1 / -1;
+}
+
+.lunch-session-actions {
+    margin-top: 0.6rem;
+}
+
+.lunch-session-link,
+.lunch-session-invitees {
+    max-width: 28rem;
 }
 
 .lunch-picks {
     width: 100%;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     gap: 1rem;
+}
+
+.lunch-picks-loading {
+    min-height: 13rem;
+    place-items: center;
+}
+
+.lunch-loading-state {
+    display: grid;
+    justify-items: center;
+    gap: 0.75rem;
+    padding: 2rem;
+    color: rgba(23, 32, 42, 0.72);
+    text-align: center;
+}
+
+.lunch-loading-state p {
+    margin: 0;
+    font-weight: 800;
+}
+
+.lunch-loading-wheel {
+    width: 2.4rem;
+    height: 2.4rem;
+    border: 0.28rem solid rgba(47, 111, 78, 0.18);
+    border-top-color: #2f6f4e;
+    border-radius: 999px;
+    animation: lunch-spin 0.75s linear infinite;
+}
+
+@keyframes lunch-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .lunch-pick {
@@ -804,6 +1051,14 @@ body {
     border: 1px solid rgba(23, 32, 42, 0.12);
     border-radius: 0.5rem;
     background: #fbfcf8;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.lunch-pick:hover,
+.lunch-pick:focus-within {
+    border-color: rgba(79, 125, 77, 0.38);
+    box-shadow: 0 0.75rem 1.5rem rgba(23, 32, 42, 0.08);
 }
 
 .lunch-pick-rank {
@@ -830,13 +1085,79 @@ body {
     overflow-wrap: anywhere;
 }
 
+.lunch-pick-body h2 a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.lunch-pick-body h2 a:hover,
+.lunch-pick-body h2 a:focus-visible {
+    text-decoration: underline;
+}
+
 .lunch-pick-delete {
     flex: 0 0 auto;
+}
+
+.lunch-cuisine {
+    display: inline-block;
+    margin-bottom: 0.5rem;
+    color: #3d663b;
+    font-size: 0.9rem;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.lunch-rating-summary {
+    margin-bottom: 0.45rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.lunch-rating-summary p {
+    margin: 0 0 0.15rem;
+}
+
+.lunch-rating-shell {
+    display: grid;
+    justify-items: start;
+    gap: 0.5rem;
+    margin-bottom: 0.65rem;
+}
+
+.lunch-rating-control {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.lunch-rating-button {
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid rgba(23, 32, 42, 0.18);
+    border-radius: 999px;
+    background: #ffffff;
+    color: rgba(23, 32, 42, 0.78);
+    font-weight: 800;
+}
+
+.lunch-rating-button:hover,
+.lunch-rating-button:focus-visible,
+.lunch-rating-button.active {
+    border-color: #4f7d4d;
+    background: #4f7d4d;
+    color: #ffffff;
 }
 
 .lunch-pick-body p,
 .lunch-empty p {
     color: rgba(23, 32, 42, 0.72);
+}
+
+.lunch-session-voters {
+    min-height: 1.25rem;
+    margin-bottom: 0;
+    font-size: 0.88rem;
 }
 
 .lunch-pick-actions {
@@ -853,14 +1174,65 @@ body {
     text-align: center;
 }
 
+.restaurant-profile {
+    display: grid;
+    gap: 1rem;
+}
+
+.restaurant-profile h2 {
+    margin-bottom: 0.5rem;
+}
+
+.restaurant-profile-rating {
+    margin-bottom: 0.5rem;
+    font-weight: 800;
+}
+
+.restaurant-profile-rating p {
+    margin: 0 0 0.15rem;
+}
+
+.restaurant-detail-list {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0;
+}
+
+.restaurant-detail-list div {
+    display: grid;
+    gap: 0.2rem;
+}
+
+.restaurant-detail-list dt {
+    color: rgba(23, 32, 42, 0.58);
+    font-size: 0.85rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.restaurant-detail-list dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
 @media (max-width: 900px) {
     .lunch-toolbar {
         align-items: flex-start;
-        flex-direction: column;
+        grid-template-columns: 1fr;
+    }
+
+    .lunch-location-controls,
+    .lunch-zip-form {
+        justify-content: flex-start;
     }
 
     .lunch-picks {
         grid-template-columns: 1fr;
+    }
+
+    .lunch-session-panel {
+        grid-template-columns: 1fr;
+        align-items: stretch;
     }
 }
 
