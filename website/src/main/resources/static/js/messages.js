@@ -1,5 +1,5 @@
 import { API } from './lib/api.js';
-import { authHeaders, fetchJson, formatWhen, isLoggedIn, sanitize } from './lib/util.js';
+import { appendTextWithMentionLinks, authHeaders, fetchJson, formatWhen, isLoggedIn, sanitize, loginRedirectUrl } from './lib/util.js';
 
 let ACTIVE_USERNAME = null;
 let CONVERSATIONS = [];
@@ -85,7 +85,7 @@ function renderMessages(messages) {
         </div>
         <p></p>
       </div>`;
-    row.querySelector('p').textContent = message.text || '';
+    appendTextWithMentionLinks(row.querySelector('p'), message.text || '');
     list.appendChild(row);
   }
   list.scrollTop = list.scrollHeight;
@@ -150,7 +150,7 @@ async function sendActiveMessage() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   if (!isLoggedIn()) {
-    window.location.href = '/login';
+    window.location.href = loginRedirectUrl();
     return;
   }
 

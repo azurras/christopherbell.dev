@@ -13,6 +13,8 @@ public record NotificationDetail(
     String postText,
     String messageId,
     String messageText,
+    String whatsForLunchSessionId,
+    String whatsForLunchSessionText,
     NotificationType notificationType,
     Boolean read,
     Instant createdOn

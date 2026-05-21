@@ -22,9 +22,26 @@ Owns browser-side behavior for server-rendered pages.
   selectors, callbacks, or small context objects from page modules.
 - API calls go through `lib/api.js` so auth headers, response parsing, and
   endpoint paths stay consistent.
-- `whats-for-lunch.js` requests browser geolocation, loads three restaurants
-  within fifteen miles from the WFL nearby API, and re-queries after refresh or
-  admin delete actions.
+- `lib/util.js` owns shared `@username` mention linking; page modules should use
+  it before rendering user-authored text so profile links behave consistently.
+- `whats-for-lunch.js` lets visitors choose browser geolocation or a ZIP code,
+  keeps cuisine and radius filters hidden behind an obvious toggle by default,
+  keeps "Try 3 more" as the primary page action, groups filters, location, and
+  Lunch with Friends tools into a secondary tabbed control area, loads three restaurants
+  from the WFL nearby API, preserves the current three picks across page
+  refreshes as a solo session, saves filters for signed-in users, creates
+  shareable voting sessions for logged-in users, polls active sessions for
+  restaurant/vote changes, links vote usernames to public profiles, lets session-link visitors join after authentication,
+  lets signed-in users rate restaurants with whole-number buttons, lets signed-in
+  users favorite restaurants, links cards to restaurant profile pages, replaces
+  the card list with a loading wheel while "Try 3 more" fetches new picks, and
+  only re-queries when the user clicks "Try 3 more", applies filters, changes
+  ZIP/location, or an admin deletes a restaurant.
+- `restaurant-profile.js` renders the public WFL restaurant profile page from
+  the restaurant detail API, including aggregate rating, personal rating, and
+  favorite state when the visitor is signed in.
+- `wfl-list.js` renders the WFL secondary pages for favorites and the public top
+  10 rated restaurants.
 - `back-office.js` gates the Back Office to admins, renders report/user queues,
   and exposes practical admin operations such as WFL import/dedupe and vehicle
   VIN maintenance.

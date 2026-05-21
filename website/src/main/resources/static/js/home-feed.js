@@ -1,4 +1,4 @@
-import { authHeaders, fetchJson, sanitize, isLoggedIn, formatWhen, closeOnOutside } from './lib/util.js';
+import { authHeaders, fetchJson, sanitize, isLoggedIn, formatWhen, closeOnOutside, loginRedirectUrl } from './lib/util.js';
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
 import { canDeleteFor, makeRendererContext } from './lib/feed-context.js';
@@ -175,7 +175,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       ACTIVE_FILTER = button.dataset.filter || 'all';
       filterButtons.forEach(btn => btn.classList.toggle('active', btn === button));
       if ((ACTIVE_FILTER === 'mine' || ACTIVE_FILTER === 'following') && !isLoggedIn()) {
-        window.location.href = '/login';
+        window.location.href = loginRedirectUrl();
         return;
       }
       await reloadFeed();

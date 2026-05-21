@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WFL Controls Mockups</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #eef1ed;
+      color: #17202a;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(1220px, calc(100vw - 32px));
+      margin: 28px auto;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    .intro {
+      margin: 0 0 20px;
+      color: rgba(23, 32, 42, 0.68);
+      line-height: 1.45;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      align-items: start;
+    }
+
+    .option {
+      border: 1px solid rgba(23, 32, 42, 0.12);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 12px 32px rgba(23, 32, 42, 0.08);
+      overflow: hidden;
+    }
+
+    .option header {
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(23, 32, 42, 0.1);
+      background: #fafbf8;
+    }
+
+    .option h2 {
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    .option .note {
+      margin: 5px 0 0;
+      color: rgba(23, 32, 42, 0.62);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .page {
+      padding: 16px;
+      background: #f5f7f2;
+    }
+
+    .subnav {
+      display: flex;
+      gap: 8px;
+      padding: 8px;
+      margin-bottom: 12px;
+      border: 1px solid rgba(23, 32, 42, 0.1);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .tab {
+      min-height: 34px;
+      padding: 7px 11px;
+      border: 1px solid rgba(23, 32, 42, 0.12);
+      border-radius: 6px;
+      background: #f7f8f5;
+      color: rgba(23, 32, 42, 0.76);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .tab.active {
+      border-color: #2f6f4e;
+      background: #e9f3ed;
+      color: #244634;
+    }
+
+    .hero-action {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding: 18px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid rgba(23, 32, 42, 0.1);
+    }
+
+    .status {
+      margin: 0;
+      color: rgba(23, 32, 42, 0.68);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .try {
+      width: 100%;
+      min-height: 54px;
+      border: 0;
+      border-radius: 8px;
+      background: #2f6f4e;
+      color: #fff;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0;
+      box-shadow: 0 10px 20px rgba(47, 111, 78, 0.24);
+    }
+
+    .drawer {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid rgba(23, 32, 42, 0.1);
+    }
+
+    .drawer h3 {
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .input,
+    .select,
+    .small-btn {
+      min-height: 34px;
+      border: 1px solid rgba(23, 32, 42, 0.16);
+      border-radius: 6px;
+      background: #fff;
+      padding: 7px 9px;
+      font-size: 13px;
+    }
+
+    .small-btn {
+      font-weight: 700;
+    }
+
+    .muted-btn {
+      background: #f7f8f5;
+    }
+
+    .cards {
+      display: grid;
+      gap: 10px;
+    }
+
+    .pick {
+      display: grid;
+      grid-template-columns: 36px 1fr;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid rgba(23, 32, 42, 0.1);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .rank {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: #17202a;
+      color: #fff;
+      font-weight: 800;
+    }
+
+    .pick h4 {
+      margin: 0 0 4px;
+      font-size: 15px;
+    }
+
+    .pick p {
+      margin: 0;
+      color: rgba(23, 32, 42, 0.62);
+      font-size: 12px;
+    }
+
+    .pill-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      padding: 6px 8px;
+      border-radius: 999px;
+      background: #f0f3ed;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .split-action {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+      padding: 16px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid rgba(23, 32, 42, 0.1);
+    }
+
+    .split-action .try {
+      width: 168px;
+    }
+
+    .compact-bar {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding: 10px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid rgba(23, 32, 42, 0.1);
+    }
+
+    .compact-tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 980px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>WFL Control Layout Directions</h1>
+    <p class="intro">Goal: make “Try 3 More” the obvious primary action again while grouping filters, ZIP/location, and sessions into a secondary control layer.</p>
+
+    <div class="grid">
+      <section class="option">
+        <header>
+          <h2>A. Recommended: Big Primary Action + Sub Sub Nav</h2>
+          <p class="note">The refresh button gets its own prominent band. The secondary tools sit below it as tabs/drawers.</p>
+        </header>
+        <div class="page">
+          <div class="hero-action">
+            <p class="status">Showing 3 suggestions within 15 miles. Austin metro only.</p>
+            <button class="try">Try 3 More</button>
+          </div>
+          <nav class="subnav">
+            <button class="tab active">Filters</button>
+            <button class="tab">Location</button>
+            <button class="tab">Session</button>
+          </nav>
+          <div class="drawer">
+            <h3>Filters</h3>
+            <div class="row">
+              <select class="select"><option>15 miles</option></select>
+              <span class="pill">Mexican</span>
+              <span class="pill">BBQ</span>
+              <button class="small-btn muted-btn">Apply</button>
+            </div>
+          </div>
+          <div class="cards">
+            <div class="pick"><div class="rank">1</div><div><h4>El Mercado</h4><p>Mexican · South Austin</p></div></div>
+            <div class="pick"><div class="rank">2</div><div><h4>Little Deli</h4><p>Pizza · Windsor Park</p></div></div>
+            <div class="pick"><div class="rank">3</div><div><h4>Thai Fresh</h4><p>Thai · Bouldin Creek</p></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="option">
+        <header>
+          <h2>B. Sticky Control Bar</h2>
+          <p class="note">The main action lives in a persistent bar above the cards. Tools are compact buttons in the same row.</p>
+        </header>
+        <div class="page">
+          <div class="split-action">
+            <div>
+              <p class="status">Showing 3 suggestions within 15 miles.</p>
+              <div class="pill-row">
+                <span class="pill">Filters</span>
+                <span class="pill">ZIP / Location</span>
+                <span class="pill">Session</span>
+              </div>
+            </div>
+            <button class="try">Try 3 More</button>
+          </div>
+          <div class="drawer">
+            <h3>Location</h3>
+            <div class="row">
+              <input class="input" value="78701">
+              <button class="small-btn">Use ZIP</button>
+              <button class="small-btn muted-btn">Use my location</button>
+            </div>
+          </div>
+          <div class="cards">
+            <div class="pick"><div class="rank">1</div><div><h4>El Mercado</h4><p>Mexican · South Austin</p></div></div>
+            <div class="pick"><div class="rank">2</div><div><h4>Little Deli</h4><p>Pizza · Windsor Park</p></div></div>
+            <div class="pick"><div class="rank">3</div><div><h4>Thai Fresh</h4><p>Thai · Bouldin Creek</p></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="option">
+        <header>
+          <h2>C. Compact Toolbar First</h2>
+          <p class="note">Everything is condensed into a tool surface. Efficient, but the primary action is less dominant.</p>
+        </header>
+        <div class="page">
+          <div class="compact-bar">
+            <button class="try">Try 3 More</button>
+            <div class="compact-tabs">
+              <button class="tab active">Filters</button>
+              <button class="tab">ZIP</button>
+              <button class="tab">Use location</button>
+              <button class="tab">Session</button>
+            </div>
+          </div>
+          <div class="drawer">
+            <h3>Session</h3>
+            <p class="status">Shared with @friend. Updates poll automatically.</p>
+            <button class="small-btn muted-btn">Copy link</button>
+          </div>
+          <div class="cards">
+            <div class="pick"><div class="rank">1</div><div><h4>El Mercado</h4><p>Mexican · South Austin</p></div></div>
+            <div class="pick"><div class="rank">2</div><div><h4>Little Deli</h4><p>Pizza · Windsor Park</p></div></div>
+            <div class="pick"><div class="rank">3</div><div><h4>Thai Fresh</h4><p>Thai · Bouldin Creek</p></div></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

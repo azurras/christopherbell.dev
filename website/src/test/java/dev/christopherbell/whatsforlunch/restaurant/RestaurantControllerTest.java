@@ -22,7 +22,16 @@ import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.libs.test.TestUtil;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeResult;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingSetRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceDetail;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionVoteRequest;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,8 +48,9 @@ import org.springframework.test.web.servlet.MockMvc;
 public class RestaurantControllerTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
-  @MockitoBean private PermissionService permissionService;
+  @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private RestaurantService restaurantService;
+  @MockitoBean private WhatsForLunchSessionService whatsForLunchSessionService;
 
   @Test
   @DisplayName("Should create a restaurant when caller has ADMIN role.")
@@ -244,6 +254,29 @@ public class RestaurantControllerTest {
   }
 
   @Test
+  @DisplayName("Should get public restaurant profile by id without ADMIN role.")
+  @WithMockUser
+  public void testGetPublicRestaurantById_Returns200() throws Exception {
+    var restaurantDetail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    restaurantDetail.setRatingSum(5);
+    restaurantDetail.setRatingCount(1);
+    when(restaurantService.getRestaurantById(eq(RestaurantStub.ID)))
+        .thenReturn(restaurantDetail);
+
+    mockMvc
+        .perform(
+            get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/profile/" + RestaurantStub.ID)
+                .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.id").value(RestaurantStub.ID))
+        .andExpect(jsonPath("$.payload.ratingSum").value(5))
+        .andExpect(jsonPath("$.payload.ratingCount").value(1));
+
+    verify(restaurantService).getRestaurantById(eq(RestaurantStub.ID));
+  }
+
+  @Test
   @DisplayName("Should throw ResourceNotFoundException when restaurant does not exist.")
   @WithMockUser(authorities = {"ADMIN"})
   public void testGetAllRestaurantById_whenResourceNotFoundExceptionIsThrown() throws Exception {
@@ -364,7 +397,7 @@ public class RestaurantControllerTest {
   public void testGetNearbyLunchPicks_Returns200() throws Exception {
     var restaurant1 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
     var restaurant2 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID_2);
-    when(restaurantService.getNearbyLunchPicks(eq(30.2672), eq(-97.7431)))
+    when(restaurantService.getNearbyLunchPicks(eq(30.2672), eq(-97.7431), eq(10), eq(List.of("mexican")), eq(false)))
         .thenReturn(List.of(restaurant1, restaurant2));
 
     mockMvc
@@ -372,6 +405,9 @@ public class RestaurantControllerTest {
             get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/nearby")
                 .param("latitude", "30.2672")
                 .param("longitude", "-97.7431")
+                .param("radiusMiles", "10")
+                .param("cuisine", "mexican")
+                .param("useSavedPreferences", "false")
                 .accept(MediaType.APPLICATION_JSON))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
@@ -379,7 +415,370 @@ public class RestaurantControllerTest {
         .andExpect(jsonPath("$.payload[0].id").value(RestaurantStub.ID))
         .andExpect(jsonPath("$.payload[1].id").value(RestaurantStub.ID_2));
 
-    verify(restaurantService).getNearbyLunchPicks(eq(30.2672), eq(-97.7431));
+    verify(restaurantService).getNearbyLunchPicks(eq(30.2672), eq(-97.7431), eq(10), eq(List.of("mexican")), eq(false));
+  }
+
+  @Test
+  @DisplayName("Should get nearby lunch picks by ZIP code without ADMIN authority.")
+  @WithMockUser
+  public void testGetNearbyLunchPicksByZipCode_Returns200() throws Exception {
+    var restaurant1 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    when(restaurantService.getNearbyLunchPicksByZipCode(eq("78701"), eq(10), eq(List.of("thai")), eq(false)))
+        .thenReturn(List.of(restaurant1));
+
+    mockMvc
+        .perform(
+            get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/nearby/zip/{zipCode}", "78701")
+                .param("radiusMiles", "10")
+                .param("cuisine", "thai")
+                .param("useSavedPreferences", "false")
+                .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload[0].id").value(RestaurantStub.ID));
+
+    verify(restaurantService).getNearbyLunchPicksByZipCode(eq("78701"), eq(10), eq(List.of("thai")), eq(false));
+  }
+
+  @Test
+  @DisplayName("Should get WFL preferences when caller has USER role.")
+  @WithMockUser(authorities = {"USER"})
+  public void testGetMyPreferences_whenUser_Returns200() throws Exception {
+    when(restaurantService.getPreferencesForCurrentViewer())
+        .thenReturn(WhatsForLunchPreferenceDetail.builder()
+            .cuisines(List.of("mexican", "thai"))
+            .radiusMiles(10)
+            .build());
+
+    mockMvc
+        .perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/preferences")
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.cuisines[0]").value("mexican"))
+        .andExpect(jsonPath("$.payload.cuisines[1]").value("thai"))
+        .andExpect(jsonPath("$.payload.radiusMiles").value(10));
+
+    verify(restaurantService).getPreferencesForCurrentViewer();
+  }
+
+  @Test
+  @DisplayName("Should save WFL preferences when caller has USER role.")
+  @WithMockUser(authorities = {"USER"})
+  public void testUpdateMyPreferences_whenUser_Returns200() throws Exception {
+    var request = new WhatsForLunchPreferenceRequest(List.of("mexican", "thai"), 5);
+    when(restaurantService.updateMyPreferences(eq(request)))
+        .thenReturn(WhatsForLunchPreferenceDetail.builder()
+            .cuisines(List.of("mexican", "thai"))
+            .radiusMiles(5)
+            .build());
+
+    mockMvc
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/preferences")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content("{\"cuisines\":[\"mexican\",\"thai\"],\"radiusMiles\":5}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.cuisines[0]").value("mexican"))
+        .andExpect(jsonPath("$.payload.cuisines[1]").value("thai"))
+        .andExpect(jsonPath("$.payload.radiusMiles").value(5));
+
+    verify(restaurantService).updateMyPreferences(eq(request));
+  }
+
+  @Test
+  @DisplayName("Should reject WFL preference save without authentication.")
+  public void testUpdateMyPreferences_whenUnauthenticated_Returns401() throws Exception {
+    mockMvc
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/preferences")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content("{\"cuisines\":[\"mexican\"]}"))
+        .andExpect(status().isUnauthorized());
+
+    verifyNoInteractions(restaurantService);
+  }
+
+  @Test
+  @DisplayName("Should rate a restaurant when caller has USER role.")
+  @WithMockUser(authorities = {"USER"})
+  public void testRateRestaurant_whenUser_ReturnsUpdatedRatingTotals() throws Exception {
+    var request = new RestaurantRatingRequest(5);
+    var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    detail.setRatingSum(9);
+    detail.setRatingCount(2);
+    detail.setMyRating(5);
+    when(restaurantService.rateRestaurant(eq(RestaurantStub.ID), eq(request))).thenReturn(detail);
+
+    mockMvc
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/" + RestaurantStub.ID + "/rating")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content("{\"rating\":5}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.ratingSum").value(9))
+        .andExpect(jsonPath("$.payload.ratingCount").value(2))
+        .andExpect(jsonPath("$.payload.myRating").value(5));
+
+    verify(restaurantService).rateRestaurant(eq(RestaurantStub.ID), eq(request));
+  }
+
+  @Test
+  @DisplayName("Should rate a restaurant when caller has Spring ROLE_USER authority.")
+  @WithMockUser(authorities = {"ROLE_USER"})
+  public void testRateRestaurant_whenSpringRoleUser_ReturnsUpdatedRatingTotals() throws Exception {
+    var request = new RestaurantRatingRequest(4);
+    var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    detail.setRatingSum(4);
+    detail.setRatingCount(1);
+    detail.setMyRating(4);
+    when(restaurantService.rateRestaurant(eq(RestaurantStub.ID), eq(request))).thenReturn(detail);
+
+    mockMvc
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/" + RestaurantStub.ID + "/rating")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content("{\"rating\":4}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.ratingSum").value(4))
+        .andExpect(jsonPath("$.payload.ratingCount").value(1))
+        .andExpect(jsonPath("$.payload.myRating").value(4));
+
+    verify(restaurantService).rateRestaurant(eq(RestaurantStub.ID), eq(request));
+  }
+
+  @Test
+  @DisplayName("Should rate an OpenStreetMap restaurant through body-based rating endpoint.")
+  @WithMockUser(authorities = {"USER"})
+  public void testRateRestaurantWithBody_whenOpenStreetMapId_ReturnsUpdatedRatingTotals() throws Exception {
+    var restaurantId = "osm:way:55591510";
+    var request = new RestaurantRatingSetRequest(restaurantId, 3);
+    var serviceRequest = new RestaurantRatingRequest(3);
+    var detail = RestaurantStub.getRestaurantDetailStub(restaurantId);
+    detail.setRatingSum(3);
+    detail.setRatingCount(1);
+    detail.setMyRating(3);
+    when(restaurantService.rateRestaurant(eq(restaurantId), eq(serviceRequest))).thenReturn(detail);
+
+    mockMvc
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/rating")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.id").value(restaurantId))
+        .andExpect(jsonPath("$.payload.ratingSum").value(3))
+        .andExpect(jsonPath("$.payload.ratingCount").value(1))
+        .andExpect(jsonPath("$.payload.myRating").value(3));
+
+    verify(restaurantService).rateRestaurant(eq(restaurantId), eq(serviceRequest));
+  }
+
+  @Test
+  @DisplayName("Should reject restaurant ratings without authentication.")
+  public void testRateRestaurant_whenUnauthenticated_Returns401() throws Exception {
+    mockMvc
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/" + RestaurantStub.ID + "/rating")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content("{\"rating\":5}"))
+        .andExpect(status().isUnauthorized());
+
+    verifyNoInteractions(restaurantService);
+  }
+
+  @Test
+  @DisplayName("Should list favorite restaurants when caller is authenticated.")
+  @WithMockUser(authorities = {"USER"})
+  public void testGetMyFavoriteRestaurants_whenUser_ReturnsFavorites() throws Exception {
+    var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    detail.setMyFavorite(true);
+    when(restaurantService.getMyFavoriteRestaurants()).thenReturn(List.of(detail));
+
+    mockMvc
+        .perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/favorites")
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload[0].id").value(RestaurantStub.ID))
+        .andExpect(jsonPath("$.payload[0].myFavorite").value(true));
+
+    verify(restaurantService).getMyFavoriteRestaurants();
+  }
+
+  @Test
+  @DisplayName("Should favorite a restaurant when caller is authenticated.")
+  @WithMockUser(authorities = {"USER"})
+  public void testFavoriteRestaurant_whenUser_ReturnsUpdatedRestaurant() throws Exception {
+    var request = new RestaurantFavoriteRequest(RestaurantStub.ID);
+    var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    detail.setMyFavorite(true);
+    when(restaurantService.favoriteRestaurant(eq(request))).thenReturn(detail);
+
+    mockMvc
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/favorite")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.myFavorite").value(true));
+
+    verify(restaurantService).favoriteRestaurant(eq(request));
+  }
+
+  @Test
+  @DisplayName("Should unfavorite a restaurant when caller is authenticated.")
+  @WithMockUser(authorities = {"USER"})
+  public void testUnfavoriteRestaurant_whenUser_ReturnsUpdatedRestaurant() throws Exception {
+    var request = new RestaurantFavoriteRequest(RestaurantStub.ID);
+    var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    detail.setMyFavorite(false);
+    when(restaurantService.unfavoriteRestaurant(eq(request))).thenReturn(detail);
+
+    mockMvc
+        .perform(delete("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/favorite")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.myFavorite").value(false));
+
+    verify(restaurantService).unfavoriteRestaurant(eq(request));
+  }
+
+  @Test
+  @DisplayName("Should list top-rated restaurants.")
+  @WithMockUser
+  public void testGetTopRatedRestaurants_ReturnsRatedRestaurants() throws Exception {
+    var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    detail.setRatingSum(10);
+    detail.setRatingCount(2);
+    when(restaurantService.getTopRatedRestaurants(eq(10))).thenReturn(List.of(detail));
+
+    mockMvc
+        .perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-rated")
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload[0].ratingSum").value(10))
+        .andExpect(jsonPath("$.payload[0].ratingCount").value(2));
+
+    verify(restaurantService).getTopRatedRestaurants(eq(10));
+  }
+
+  @Test
+  @DisplayName("Should create a shared WFL session when caller has USER role.")
+  @WithMockUser(authorities = {"USER"})
+  public void testCreateSession_whenUser_Returns201() throws Exception {
+    var request = new WhatsForLunchSessionCreateRequest(
+        List.of(RestaurantStub.ID, RestaurantStub.ID_2, "restaurant-3"),
+        List.of("friend"));
+    var detail = WhatsForLunchSessionDetail.builder()
+        .id("session-1")
+        .createdByUsername("owner")
+        .participantUsernames(List.of("owner", "friend"))
+        .restaurants(List.of(RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID)))
+        .build();
+    when(whatsForLunchSessionService.createSession(eq(request))).thenReturn(detail);
+
+    mockMvc
+        .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/sessions")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.id").value("session-1"))
+        .andExpect(jsonPath("$.payload.participantUsernames[1]").value("friend"));
+
+    verify(whatsForLunchSessionService).createSession(eq(request));
+  }
+
+  @Test
+  @DisplayName("Should join a shared WFL session from a link when caller has USER role.")
+  @WithMockUser(authorities = {"USER"})
+  public void testJoinSession_whenUser_Returns200() throws Exception {
+    var detail = WhatsForLunchSessionDetail.builder()
+        .id("session-1")
+        .participantUsernames(List.of("owner", "friend"))
+        .build();
+    when(whatsForLunchSessionService.joinSession(eq("session-1"))).thenReturn(detail);
+
+    mockMvc
+        .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/sessions/session-1/join")
+            .with(csrf())
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.id").value("session-1"))
+        .andExpect(jsonPath("$.payload.participantUsernames[1]").value("friend"));
+
+    verify(whatsForLunchSessionService).joinSession(eq("session-1"));
+  }
+
+  @Test
+  @DisplayName("Should vote in a shared WFL session when caller has USER role.")
+  @WithMockUser(authorities = {"USER"})
+  public void testVoteInSession_whenUser_Returns200() throws Exception {
+    var request = new WhatsForLunchSessionVoteRequest(RestaurantStub.ID);
+    var detail = WhatsForLunchSessionDetail.builder()
+        .id("session-1")
+        .myVoteRestaurantId(RestaurantStub.ID)
+        .build();
+    when(whatsForLunchSessionService.vote(eq("session-1"), eq(request))).thenReturn(detail);
+
+    mockMvc
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/sessions/session-1/vote")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.myVoteRestaurantId").value(RestaurantStub.ID));
+
+    verify(whatsForLunchSessionService).vote(eq("session-1"), eq(request));
+  }
+
+  @Test
+  @DisplayName("Should replace restaurants in a shared WFL session when caller has USER role.")
+  @WithMockUser(authorities = {"USER"})
+  public void testUpdateSessionRestaurants_whenUser_Returns200() throws Exception {
+    var request = new WhatsForLunchSessionRestaurantsRequest(
+        List.of(RestaurantStub.ID, RestaurantStub.ID_2, "restaurant-3"));
+    var detail = WhatsForLunchSessionDetail.builder()
+        .id("session-1")
+        .restaurants(List.of(RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID)))
+        .build();
+    when(whatsForLunchSessionService.updateRestaurants(eq("session-1"), eq(request))).thenReturn(detail);
+
+    mockMvc
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/sessions/session-1/restaurants")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.id").value("session-1"))
+        .andExpect(jsonPath("$.payload.restaurants[0].id").value(RestaurantStub.ID));
+
+    verify(whatsForLunchSessionService).updateRestaurants(eq("session-1"), eq(request));
   }
 
   @Test
@@ -418,7 +817,7 @@ public class RestaurantControllerTest {
         .skippedExisting(2)
         .skippedInvalid(1)
         .build();
-    when(restaurantService.importAustinMetroRestaurantsFromOpenStreetMap()).thenReturn(result);
+    when(restaurantService.importConfiguredMetroRestaurantsFromOpenStreetMap()).thenReturn(result);
 
     mockMvc
         .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/import/openstreetmap")
@@ -433,7 +832,7 @@ public class RestaurantControllerTest {
         .andExpect(jsonPath("$.payload.skippedExisting").value(2))
         .andExpect(jsonPath("$.payload.skippedInvalid").value(1));
 
-    verify(restaurantService).importAustinMetroRestaurantsFromOpenStreetMap();
+    verify(restaurantService).importConfiguredMetroRestaurantsFromOpenStreetMap();
   }
 
   @Test

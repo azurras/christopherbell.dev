@@ -12,31 +12,40 @@ import io.jsonwebtoken.security.Keys;
 import java.security.Key;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.UUID;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
-@AllArgsConstructor
 @Service
 @Slf4j
 public class PermissionService {
 
-  private static final String SECRET_KEY = generateKey();
+  private static final String LOCAL_DEV_SECRET =
+      "local-development-jwt-secret-change-me-at-least-32-bytes";
   private static final long EXPIRATION_TIME = 3600_000; // 1 hour in milliseconds
-  private static final Key KEY = Keys.hmacShaKeyFor(SECRET_KEY.getBytes());
+  private static volatile Key key = buildKey(resolveSecret(null));
+
+  /**
+   * Applies the configured JWT secret after Spring property binding.
+   *
+   * @param jwtSecret configured app.jwt.secret value
+   */
+  @Value("${app.jwt.secret:}")
+  void setJwtSecret(String jwtSecret) {
+    configureSigningKey(jwtSecret);
+  }
 
   public static String getSelf() {
     var authentication = SecurityContextHolder.getContext().getAuthentication();
     String token = (String) authentication.getCredentials();
     return  Jwts.parser()
-        .setSigningKey(KEY)
+        .setSigningKey(key)
         .build()
         .parseClaimsJws(token)
         .getBody()
@@ -74,7 +83,7 @@ public class PermissionService {
         .subject(account.getId())
         .issuedAt(new Date())
         .expiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
-        .signWith(KEY)
+        .signWith(key)
         .compact();
   }
 
@@ -88,29 +97,58 @@ public class PermissionService {
     var jwt = stripBearer(token);
 
     return Jwts.parser()
-        .setSigningKey(KEY)
+        .setSigningKey(key)
         .build()
         .parseClaimsJws(jwt)
         .getBody();
   }
 
   /**
-   * Generates a key for creating JWTs on application startup.
+   * Configures the signing key from a stable secret.
    *
-   * @return return key in string form.
+   * @param secret configured secret, or blank to resolve the environment/default fallback
    */
-  public static String generateKey() {
-    try {
-      KeyGenerator keyGen = KeyGenerator.getInstance("HmacSHA256");
-      keyGen.init(256);
-      SecretKey secretKey = keyGen.generateKey();
-      var base64Key = Base64.getEncoder().encodeToString(secretKey.getEncoded());
-      System.out.println("Generated Key: " + base64Key);
-      return base64Key;
-    } catch (Exception e) {
-      log.error(e.getMessage(), e);
-      return "";
+  static void configureSigningKey(String secret) {
+    key = buildKey(resolveSecret(secret));
+  }
+
+  private static String resolveSecret(String configuredSecret) {
+    if (hasText(configuredSecret)) {
+      return configuredSecret.trim();
     }
+    var appJwtSecret = System.getenv("APP_JWT_SECRET");
+    if (hasText(appJwtSecret)) {
+      return appJwtSecret.trim();
+    }
+    var jwtSecret = System.getenv("JWT_SECRET");
+    if (hasText(jwtSecret)) {
+      return jwtSecret.trim();
+    }
+    return LOCAL_DEV_SECRET;
+  }
+
+  private static Key buildKey(String secret) {
+    byte[] bytes = decodeBase64Secret(secret);
+    if (bytes == null) {
+      bytes = secret.getBytes(StandardCharsets.UTF_8);
+    }
+    if (bytes.length < 32) {
+      throw new IllegalStateException("JWT secret must be at least 32 bytes for HS256 signing.");
+    }
+    return Keys.hmacShaKeyFor(bytes);
+  }
+
+  private static byte[] decodeBase64Secret(String secret) {
+    try {
+      var decoded = Base64.getDecoder().decode(secret);
+      return decoded.length >= 32 ? decoded : null;
+    } catch (IllegalArgumentException e) {
+      return null;
+    }
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.trim().isEmpty();
   }
 
   /**

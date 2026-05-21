@@ -47,17 +47,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
    */
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
-    boolean isPublic = skipMatchers.stream().anyMatch(matcher -> matcher.matches(request));
-    // If request carries a Bearer token, do not skip — authenticate even on public routes
-    String auth = request.getHeader("Authorization");
-    boolean hasBearer = auth != null && auth.startsWith("Bearer ");
-    return isPublic && !hasBearer;
+    // If request carries a Bearer token, do not skip: valid tokens can still personalize public routes.
+    return isPublicRequest(request) && !hasBearerToken(request);
   }
 
   @Override
   protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
       throws ServletException, IOException {
 
+    boolean publicRequest = isPublicRequest(request);
     String token = resolveToken(request);
     if (token == null) {
       // No token: continue as anonymous; downstream security will enforce access rules
@@ -75,9 +73,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
       }
     } catch (Exception e) {
-      // Invalid token
-      response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+      if (publicRequest) {
+        SecurityContextHolder.clearContext();
+        chain.doFilter(request, response);
+      } else {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+      }
     }
+  }
+
+  private boolean isPublicRequest(HttpServletRequest request) {
+    return skipMatchers.stream().anyMatch(matcher -> matcher.matches(request));
+  }
+
+  private boolean hasBearerToken(HttpServletRequest request) {
+    String auth = request.getHeader("Authorization");
+    return auth != null && auth.startsWith("Bearer ");
   }
 
   /**

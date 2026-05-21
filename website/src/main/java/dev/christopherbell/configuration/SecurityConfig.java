@@ -35,13 +35,17 @@ public class SecurityConfig {
       "/api/accounts" + APIVersion.V20241215 + "/password-reset/request",
       "/api/accounts" + APIVersion.V20241215 + "/password-reset/confirm",
       "GET:/api/accounts" + APIVersion.V20250914 + "/profile/**",
+      "/favicon.ico",
       "/profile",
       "/vin-decoder",
       // Public read-only post APIs (method-scoped)
       "POST:/api/vehicles" + APIVersion.V20260509 + "/vin/decode",
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/today",
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/nearby",
-      "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/**",
+      "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/nearby/zip/**",
+      "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/profile/**",
+      "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/preferences",
+      "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-rated",
       "GET:/api/posts" + APIVersion.V20250914 + "/feed",
       "GET:/api/posts" + APIVersion.V20250914 + "/user/**",
       "GET:/api/posts" + APIVersion.V20250914 + "/*/thread",
@@ -63,7 +67,10 @@ public class SecurityConfig {
       "/void",
       "/void/**",
       "/back-office",
-      "/wfl"
+      "/wfl",
+      "/wfl/favorites",
+      "/wfl/top-rated",
+      "/wfl/restaurants/**"
   };
 
   /**

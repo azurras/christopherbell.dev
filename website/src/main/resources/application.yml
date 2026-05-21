@@ -10,6 +10,9 @@ logging:
     root: INFO
     org.springframework: INFO
     dev.christopherbell: INFO
+app:
+  jwt:
+    secret: ${APP_JWT_SECRET:local-development-jwt-secret-change-me-at-least-32-bytes}
 posts:
   expiration:
     enabled: false
@@ -50,14 +53,18 @@ wfl:
     cron: "0 0 0 * * *"
     zone: America/Chicago
     pick-count: 3
-    austin-metro-cities: Austin,Round Rock,Cedar Park,Georgetown,Pflugerville,Leander,Hutto,Manor,Buda,Kyle,Bee Cave,Lakeway,Dripping Springs,Bastrop,San Marcos
+    supported-metro-cities: Austin,Round Rock,Cedar Park,Georgetown,Pflugerville,Leander,Hutto,Manor,Buda,Kyle,Bee Cave,Lakeway,Dripping Springs,Bastrop,San Marcos,San Francisco,Oakland,Berkeley,San Jose,San Mateo,Palo Alto,Mountain View,Sunnyvale,Santa Clara,Fremont,Hayward,Richmond,Walnut Creek,Redwood City,Daly City,New Orleans,Metairie,Kenner,Gretna,Harvey,Westwego,Chalmette,Slidell,Dallas,Irving,Garland,Richardson,Plano,Mesquite,Carrollton,Grand Prairie,Addison
   restaurant-import:
+    monthly:
+      enabled: true
+      cron: "0 0 3 15 * *"
+      zone: America/Chicago
     osm:
       endpoint: https://overpass-api.de/api/interpreter
-      # South,west,north,east around the Austin metro.
-      bbox: 29.95,-98.25,30.75,-97.15
+      # Semicolon-separated south,west,north,east boxes for Austin, SF Bay Area, New Orleans, and Dallas.
+      bbox: 29.95,-98.25,30.75,-97.15;37.20,-122.65,38.20,-121.65;29.70,-90.45,30.25,-89.65;32.45,-97.35,33.15,-96.35
       timeout-seconds: 60
-      result-limit: 5000
+      result-limit: 20000
       include-fast-food: true
 reports:
   to: report@christopherbell.dev

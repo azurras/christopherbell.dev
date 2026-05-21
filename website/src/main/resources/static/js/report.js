@@ -3,7 +3,7 @@
  * Requires authentication to submit reports.
  */
 import { API } from './lib/api.js';
-import { authHeaders, fetchJson, sanitize } from './lib/util.js';
+import { appendTextWithMentionLinks, authHeaders, fetchJson, isLoggedIn, loginRedirectUrl } from './lib/util.js';
 
 const alertBox = document.getElementById('reportAlert');
 const postTextEl = document.getElementById('reportPostText');
@@ -23,14 +23,19 @@ function getPostId() {
 
 async function loadPost(postId) {
   const post = await fetchJson(API.posts.byId(postId), { headers: authHeaders() });
-  if (postTextEl) postTextEl.textContent = sanitize(post.text || '');
-  if (postAuthorEl) postAuthorEl.textContent = post.username ? `@${sanitize(post.username)}` : '—';
+  appendTextWithMentionLinks(postTextEl, post.text || '');
+  if (postAuthorEl) {
+    if (post.username) {
+      appendTextWithMentionLinks(postAuthorEl, `@${post.username}`);
+    } else {
+      postAuthorEl.textContent = '-';
+    }
+  }
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const token = localStorage.getItem('cbellLoginToken');
-  if (!token) {
-    window.location.replace('/login');
+  if (!isLoggedIn()) {
+    window.location.replace(loginRedirectUrl());
     return;
   }
   const postId = getPostId();

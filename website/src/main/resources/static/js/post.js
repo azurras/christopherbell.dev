@@ -1,4 +1,4 @@
-import { sanitize, authHeaders, fetchJson, isLoggedIn, formatWhen, closeOnOutside } from './lib/util.js';
+import { appendTextWithMentionLinks, sanitize, authHeaders, fetchJson, isLoggedIn, formatWhen, closeOnOutside } from './lib/util.js';
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
 import { makeRendererContext, canDeleteFor } from './lib/feed-context.js';
@@ -20,7 +20,7 @@ function statusFor(post) {
 
 function renderThreadSummary(post, directReplies) {
   const author = post.username ? `@${post.username}` : '@user';
-  setText('threadAuthor', author);
+  appendTextWithMentionLinks(document.getElementById('threadAuthor'), author);
   setText('threadCreated', formatWhen(post.createdOn || post.lastUpdatedOn));
   setText('threadReplyCount', String(directReplies.length));
   setText('threadLikeCount', String(post.likesCount || 0));
@@ -66,7 +66,7 @@ async function fillContext(root, kind, postId) {
       handleEl.textContent = username ? `@${username}` : '@user';
       handleEl.setAttribute('href', `/u/${encodeURIComponent(username)}`);
     }
-    if (textEl) textEl.textContent = context.text || '';
+    appendTextWithMentionLinks(textEl, context.text || '');
   } catch (_) {
     const textEl = root.querySelector(`[data-context-kind="${kind}"] [data-context-text]`);
     if (textEl) textEl.textContent = 'Context unavailable';

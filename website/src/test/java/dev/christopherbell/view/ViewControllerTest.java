@@ -56,6 +56,36 @@ public class ViewControllerTest {
   }
 
   @Test
+  @DisplayName("WFL restaurant page renders social preview metadata")
+  public void getWhatsForLunchRestaurantPage_rendersSocialPreviewMetadata() throws Exception {
+    mockMvc
+        .perform(get("/wfl/restaurants/restaurant-123"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("CB | Restaurant")))
+        .andExpect(content().string(containsString("https://www.christopherbell.dev/wfl/restaurants/restaurant-123")));
+  }
+
+  @Test
+  @DisplayName("WFL favorites page renders the list app mount")
+  public void getWhatsForLunchFavoritesPage_rendersListMount() throws Exception {
+    mockMvc
+        .perform(get("/wfl/favorites"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("CB | Favorite Restaurants")))
+        .andExpect(content().string(containsString("data-list-mode=\"favorites\"")));
+  }
+
+  @Test
+  @DisplayName("WFL top-rated page renders the list app mount")
+  public void getWhatsForLunchTopRatedPage_rendersListMount() throws Exception {
+    mockMvc
+        .perform(get("/wfl/top-rated"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("CB | Top Rated Restaurants")))
+        .andExpect(content().string(containsString("data-list-mode=\"top-rated\"")));
+  }
+
+  @Test
   @DisplayName("Public user page renders canonical username social URL")
   public void getPublicUserPage_rendersUsernameSocialUrl() throws Exception {
     mockMvc

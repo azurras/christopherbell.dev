@@ -18,5 +18,7 @@ spring:
           starttls:
             enable: true
 app:
+  jwt:
+    secret: ${APP_JWT_SECRET:}
   mail:
     from: ${APP_MAIL_FROM:noreply@christopherbell.dev}

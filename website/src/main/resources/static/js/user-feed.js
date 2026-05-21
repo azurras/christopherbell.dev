@@ -1,4 +1,4 @@
-import { fetchJson, sanitize, authHeaders, isLoggedIn, formatWhen, closeOnOutside } from './lib/util.js';
+import { fetchJson, sanitize, authHeaders, isLoggedIn, formatWhen, closeOnOutside, loginRedirectUrl } from './lib/util.js';
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
 /**
@@ -92,7 +92,7 @@ function showAlert(message) {
 async function toggleFollow() {
   if (!PROFILE) return;
   if (!isLoggedIn()) {
-    window.location.href = '/login';
+    window.location.href = loginRedirectUrl();
     return;
   }
   const button = document.getElementById('followBtn');

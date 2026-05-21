@@ -1,32 +1,6 @@
-const MENTION_RE = /(^|[^A-Za-z0-9._-])@([A-Za-z0-9._-]{3,32})/g;
+import { appendTextWithMentionLinks, loginRedirectUrl } from './util.js';
+
 const COLLAPSE_AT = 180;
-
-function appendTextWithMentionLinks(container, text) {
-  container.textContent = '';
-  const value = text || '';
-  let lastIndex = 0;
-  let match;
-  MENTION_RE.lastIndex = 0;
-  while ((match = MENTION_RE.exec(value)) !== null) {
-    const prefix = match[1] || '';
-    const username = match[2] || '';
-    const mentionStart = match.index + prefix.length;
-    if (mentionStart > lastIndex) {
-      container.appendChild(document.createTextNode(value.slice(lastIndex, mentionStart)));
-    }
-
-    const link = document.createElement('a');
-    link.href = `/u/${encodeURIComponent(username)}`;
-    link.className = 'mention-link';
-    link.textContent = `@${username}`;
-    container.appendChild(link);
-    lastIndex = mentionStart + username.length + 1;
-  }
-
-  if (lastIndex < value.length) {
-    container.appendChild(document.createTextNode(value.slice(lastIndex)));
-  }
-}
 
 function isRecent(post) {
   const value = post.createdOn || post.lastUpdatedOn;
@@ -165,7 +139,7 @@ export function createFeedItem(post, ctx) {
   const likeBtn = item.querySelector('.post-like-btn');
   if (likeBtn) {
     likeBtn.addEventListener('click', async () => {
-      if (!ctx.isLoggedIn()) { window.location.href = '/login'; return; }
+      if (!ctx.isLoggedIn()) { window.location.href = loginRedirectUrl(); return; }
       try {
         const updated = await ctx.onLike(post.id);
         const countEl = likeBtn.querySelector('.like-count');
@@ -195,7 +169,7 @@ export function createFeedItem(post, ctx) {
   const replyCancel = item.querySelector('.reply-cancel');
   if (replyBtn && replyBox && replyText && replySubmit && replyCancel) {
     replyBtn.addEventListener('click', () => {
-      if (!ctx.isLoggedIn()) { window.location.href = '/login'; return; }
+      if (!ctx.isLoggedIn()) { window.location.href = loginRedirectUrl(); return; }
       replyBox.classList.toggle('d-none');
       if (!replyBox.classList.contains('d-none')) {
         setTimeout(() => replyText.focus(), 0);
@@ -206,7 +180,7 @@ export function createFeedItem(post, ctx) {
       replyBox.classList.add('d-none');
     });
     replySubmit.addEventListener('click', async () => {
-      if (!ctx.isLoggedIn()) { window.location.href = '/login'; return; }
+      if (!ctx.isLoggedIn()) { window.location.href = loginRedirectUrl(); return; }
       const text = (replyText.value || '').trim();
       if (!text) return;
       try {
@@ -367,7 +341,7 @@ export function createFeedItem(post, ctx) {
             handleEl.textContent = h;
             handleEl.setAttribute('href', `/u/${encodeURIComponent(parent.username || '')}`);
           }
-          ctxEl.textContent = parent.text ? `${parent.text}` : '';
+          appendTextWithMentionLinks(ctxEl, parent.text || '');
         } catch (e) {
           ctxEl.textContent = 'Context unavailable';
         }

@@ -7,6 +7,7 @@ Owns notification persistence and response records.
 - `Notification` is the Mongo-backed notification entity.
 - `NotificationDetail` is the API response shape rendered by the nav.
 - `NotificationType` constrains supported notification reasons.
+- WFL session fields store the session id and short invite text used by the nav.
 
 ## Design Notes
 

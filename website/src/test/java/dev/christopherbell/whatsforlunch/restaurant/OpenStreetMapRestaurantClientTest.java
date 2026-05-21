@@ -2,6 +2,7 @@ package dev.christopherbell.whatsforlunch.restaurant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -72,7 +73,7 @@ class OpenStreetMapRestaurantClientTest {
   }
 
   @Test
-  void parseRestaurants_defaultsMissingAddressCityToAustinMetro() throws Exception {
+  void parseRestaurants_defaultsMissingAddressCityToImportedMetro() throws Exception {
     var client = new OpenStreetMapRestaurantClient(
         new ObjectMapper(),
         "https://example.com",
@@ -107,7 +108,7 @@ class OpenStreetMapRestaurantClientTest {
     assertEquals(1, restaurants.size());
     var restaurant = restaurants.getFirst();
     assertEquals("osm:way:789", restaurant.getId());
-    assertEquals("Austin Metro", restaurant.getAddress().getCity());
+    assertEquals("Imported Metro", restaurant.getAddress().getCity());
     assertEquals("TX", restaurant.getAddress().getState());
     assertEquals(30.3001, restaurant.getAddress().getLatitude());
     assertEquals(-97.7002, restaurant.getAddress().getLongitude());
@@ -115,7 +116,7 @@ class OpenStreetMapRestaurantClientTest {
   }
 
   @Test
-  void parseRestaurants_sortsFastFoodAfterRestaurants() throws Exception {
+  void parseRestaurants_sortsByNameWithoutFastFoodPenalty() throws Exception {
     var client = new OpenStreetMapRestaurantClient(
         new ObjectMapper(),
         "https://example.com",
@@ -132,7 +133,7 @@ class OpenStreetMapRestaurantClientTest {
               "type": "node",
               "id": 1,
               "tags": {
-                "name": "Taco Bell",
+                "name": "A Taco Bell",
                 "amenity": "fast_food"
               }
             },
@@ -140,7 +141,7 @@ class OpenStreetMapRestaurantClientTest {
               "type": "node",
               "id": 2,
               "tags": {
-                "name": "Austin Bistro",
+                "name": "Z Bistro",
                 "amenity": "restaurant"
               }
             }
@@ -153,7 +154,28 @@ class OpenStreetMapRestaurantClientTest {
         method.invoke(client, body);
 
     assertEquals(2, restaurants.size());
-    assertEquals("Austin Bistro", restaurants.getFirst().getName());
-    assertEquals("Taco Bell", restaurants.get(1).getName());
+    assertEquals("A Taco Bell", restaurants.getFirst().getName());
+    assertEquals("Z Bistro", restaurants.get(1).getName());
+  }
+
+  @Test
+  void buildQuery_includesAllConfiguredMetroBoundingBoxes() throws Exception {
+    var client = new OpenStreetMapRestaurantClient(
+        new ObjectMapper(),
+        "https://example.com",
+        "29.95,-98.25,30.75,-97.15;37.20,-122.65,38.20,-121.65;29.70,-90.45,30.25,-89.65;32.45,-97.35,33.15,-96.35",
+        25,
+        500,
+        true);
+    var method = OpenStreetMapRestaurantClient.class.getDeclaredMethod("buildQuery");
+    method.setAccessible(true);
+
+    var query = (String) method.invoke(client);
+
+    assertTrue(query.contains("29.95,-98.25,30.75,-97.15"));
+    assertTrue(query.contains("37.20,-122.65,38.20,-121.65"));
+    assertTrue(query.contains("29.70,-90.45,30.25,-89.65"));
+    assertTrue(query.contains("32.45,-97.35,33.15,-96.35"));
+    assertTrue(query.contains("fast_food"));
   }
 }
