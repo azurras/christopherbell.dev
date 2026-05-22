@@ -10,6 +10,7 @@ import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
+import java.util.ArrayList;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
@@ -40,6 +41,7 @@ public class PostService {
   private final PostMapper postMapper;
   private final PermissionService permissionService;
   private final NotificationService notificationService;
+  private final PostLinkPreviewService postLinkPreviewService;
   private final boolean expirationEnabled;
 
   private static final int MAX_TEXT_LENGTH = 280;
@@ -54,12 +56,14 @@ public class PostService {
       PostMapper postMapper,
       PermissionService permissionService,
       NotificationService notificationService,
+      PostLinkPreviewService postLinkPreviewService,
       @Value("${posts.expiration.enabled:false}") boolean expirationEnabled) {
     this.postRepository = postRepository;
     this.accountRepository = accountRepository;
     this.postMapper = postMapper;
     this.permissionService = permissionService;
     this.notificationService = notificationService;
+    this.postLinkPreviewService = postLinkPreviewService;
     this.expirationEnabled = expirationEnabled;
   }
 
@@ -117,6 +121,7 @@ public class PostService {
         .createdOn(now)
         .lastUpdatedOn(now)
         .expiresOn(expirationEnabled ? calculateExpiration(now, 0) : null)
+        .linkPreviews(postLinkPreviewService.resolveForText(text))
         .build();
 
     var saved = postRepository.save(post);
@@ -359,6 +364,7 @@ public class PostService {
     var post = postRepository.findById(postId)
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Post with id %s not found.", postId)));
     ensureActive(post);
+    var threadRoot = activeThreadRootForReply(post);
     if (post.getLikedBy() == null) post.setLikedBy(new HashSet<>());
     boolean liked;
     if (post.getLikedBy().contains(selfId)) {
@@ -373,6 +379,7 @@ public class PostService {
     post.setLastUpdatedOn(Instant.now());
     refreshExpiration(post);
     postRepository.save(post);
+    refreshThreadRootExpiration(threadRoot, liked ? 1 : -1);
     var author = accountRepository.findById(post.getAccountId())
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", post.getAccountId())));
     return toFeedItem(post, author.getUsername(), liked ? selfId : null);
@@ -400,7 +407,7 @@ public class PostService {
       throw new InvalidRequestException("Not authorized to delete this post.");
     }
 
-    postRepository.delete(post);
+    deletePostTree(post);
     return postMapper.toDetail(post);
   }
 
@@ -418,7 +425,7 @@ public class PostService {
           postRepository.save(p);
         });
       }
-      postRepository.deleteByExpiresOnLessThanEqual(Instant.now());
+      postRepository.findByExpiresOnLessThanEqual(Instant.now()).forEach(this::deletePostTree);
     } finally {
       log.info("Post expiration cleanup job completed.");
     }
@@ -475,6 +482,7 @@ public class PostService {
         .accountId(post.getAccountId())
         .username(username)
         .text(post.getText())
+        .linkPreviews(post.getLinkPreviews())
         .rootId(post.getRootId())
         .parentId(post.getParentId())
         .level(post.getLevel())
@@ -500,7 +508,8 @@ public class PostService {
       return;
     }
     int likes = post.getLikesCount() != null ? post.getLikesCount() : 0;
-    post.setExpiresOn(calculateExpiration(post.getCreatedOn(), likes));
+    int replyLikes = post.getThreadReplyLikesCount() != null ? post.getThreadReplyLikesCount() : 0;
+    post.setExpiresOn(calculateExpiration(post.getCreatedOn(), likes + replyLikes));
   }
 
   private void ensureExpirationSet(Post post) {
@@ -522,8 +531,61 @@ public class PostService {
   private void ensureActive(Post post) throws ResourceNotFoundException {
     ensureExpirationSet(post);
     if (isExpired(post)) {
-      postRepository.delete(post);
+      deletePostTree(post);
       throw new ResourceNotFoundException(String.format("Post with id %s not found.", post.getId()));
     }
+  }
+
+  private Post activeThreadRootForReply(Post post) throws ResourceNotFoundException {
+    if (post == null || post.getParentId() == null || post.getParentId().isBlank()) {
+      return null;
+    }
+    var rootId = post.getRootId();
+    if (rootId == null || rootId.isBlank() || rootId.equals(post.getId())) {
+      return null;
+    }
+    var root = postRepository.findById(rootId)
+        .orElseThrow(() -> new ResourceNotFoundException(String.format("Post with id %s not found.", rootId)));
+    ensureActive(root);
+    return root;
+  }
+
+  private void refreshThreadRootExpiration(Post threadRoot, int replyLikeDelta) {
+    if (!expirationEnabled || threadRoot == null || replyLikeDelta == 0) {
+      return;
+    }
+    var count = threadRoot.getThreadReplyLikesCount() != null ? threadRoot.getThreadReplyLikesCount() : 0;
+    threadRoot.setThreadReplyLikesCount(Math.max(0, count + replyLikeDelta));
+    threadRoot.setLastUpdatedOn(Instant.now());
+    refreshExpiration(threadRoot);
+    postRepository.save(threadRoot);
+  }
+
+  private void deletePostTree(Post post) {
+    if (post == null) {
+      return;
+    }
+    var rootId = post.getRootId() != null && !post.getRootId().isBlank()
+        ? post.getRootId()
+        : post.getId();
+    var thread = new ArrayList<>(postRepository.findByRootIdOrderByCreatedOnAsc(rootId));
+    if (thread.stream().noneMatch(candidate -> candidate.getId().equals(post.getId()))) {
+      thread.add(post);
+    }
+
+    var idsToDelete = new HashSet<String>();
+    idsToDelete.add(post.getId());
+    var subtree = new ArrayList<Post>();
+    for (Post candidate : thread) {
+      if (idsToDelete.contains(candidate.getId())
+          || (candidate.getParentId() != null && idsToDelete.contains(candidate.getParentId()))) {
+        idsToDelete.add(candidate.getId());
+        subtree.add(candidate);
+      }
+    }
+    if (subtree.isEmpty()) {
+      subtree.add(post);
+    }
+    postRepository.deleteAll(subtree);
   }
 }

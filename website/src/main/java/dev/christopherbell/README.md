@@ -5,7 +5,8 @@ Owns the Spring Boot web application.
 ## Package Shape
 
 - Feature packages live directly under `dev.christopherbell`: `account`,
-  `post`, `message`, `notification`, `vehicle`, `whatsforlunch`, and similar.
+  `location`, `post`, `message`, `notification`, `vehicle`, `whatsforlunch`,
+  and similar.
 - Each feature package owns its controller, service, repository, mapper, model
   types, and package README when those concepts exist.
 - Cross-cutting web infrastructure lives in `configuration`.

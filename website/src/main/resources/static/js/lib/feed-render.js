@@ -1,5 +1,59 @@
 import { appendTextWithMentionLinks, loginRedirectUrl } from './util.js';
 
+const LIFESPAN_TICK_MS = 1000;
+const EXPIRY_ANIMATION_MS = 560;
+
+export function remainingLifespanMs(expiresOn, now = Date.now()) {
+  if (!expiresOn) return null;
+  const delta = new Date(expiresOn).getTime() - now;
+  if (!Number.isFinite(delta)) return null;
+  return Math.max(0, delta);
+}
+
+export function formatLifespanCountdown(expiresOn, now = Date.now()) {
+  const remaining = remainingLifespanMs(expiresOn, now);
+  if (remaining === null) return '';
+
+  const totalSeconds = Math.max(0, Math.ceil(remaining / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const clock = [hours, minutes, seconds].map(value => String(value).padStart(2, '0')).join(':');
+  return days > 0 ? `${days}d ${clock}` : clock;
+}
+
+export function linkPreviewCardMarkup(preview, sanitize) {
+  if (!preview?.url || typeof sanitize !== 'function') return '';
+
+  const domain = preview.domain || previewDomain(preview.url) || preview.url;
+  const title = preview.title || domain;
+  if (!title) return '';
+
+  const image = preview.imageUrl
+    ? `<span class="post-link-preview-image"><img src="${sanitize(preview.imageUrl)}" alt=""></span>`
+    : '';
+  const description = preview.description
+    ? `<span class="post-link-preview-description">${sanitize(preview.description)}</span>`
+    : '';
+  return `<a class="post-link-preview${image ? '' : ' post-link-preview-no-image'}" href="${sanitize(preview.url)}" target="_blank" rel="noopener noreferrer">
+    ${image}
+    <span class="post-link-preview-copy">
+      <span class="post-link-preview-domain">${sanitize(domain)}</span>
+      <span class="post-link-preview-title">${sanitize(title)}</span>
+      ${description}
+    </span>
+  </a>`;
+}
+
+function previewDomain(url) {
+  try {
+    return new URL(url).hostname;
+  } catch (_) {
+    return '';
+  }
+}
+
 const COLLAPSE_AT = 180;
 
 function isRecent(post) {
@@ -8,10 +62,10 @@ function isRecent(post) {
   return Date.now() - new Date(value).getTime() < 10 * 60 * 1000;
 }
 
-function expiresSoon(post) {
+export function expiresSoon(post, now = Date.now()) {
   if (!post.expiresOn) return false;
-  const delta = new Date(post.expiresOn).getTime() - Date.now();
-  return delta > 0 && delta < 24 * 60 * 60 * 1000;
+  const delta = new Date(post.expiresOn).getTime() - now;
+  return delta > 0 && delta <= 12 * 60 * 60 * 1000;
 }
 
 function postChips(post, liked) {
@@ -27,20 +81,131 @@ function postPermalink(postId) {
   return `${window.location.origin}/p/${encodeURIComponent(postId)}`;
 }
 
+function expireFeedItem(item, post, ctx) {
+  if (item.dataset.expiring === 'true') return null;
+  item.dataset.expiring = 'true';
+  item.classList.add('post-item-expiring');
+
+  return window.setTimeout(() => {
+    if (typeof ctx.onExpire === 'function') {
+      ctx.onExpire(post, item);
+      return;
+    }
+    item.remove();
+  }, EXPIRY_ANIMATION_MS);
+}
+
+function startLifespanTimer(item, post, ctx) {
+  let label = item.querySelector('[data-post-lifespan]');
+  let expiresOn = post.expiresOn || null;
+  let intervalId = null;
+  let expiryTimeoutId = null;
+  let wasConnected = item.isConnected;
+
+  const ensureLabel = () => {
+    if (label) return label;
+    const author = item.querySelector('.post-author');
+    if (!author) return null;
+
+    label = document.createElement('span');
+    label.className = 'post-lifespan';
+    label.setAttribute('data-post-lifespan', '');
+    label.setAttribute('aria-label', 'Post lifespan remaining');
+    author.appendChild(label);
+    return label;
+  };
+
+  const stop = () => {
+    if (intervalId !== null) {
+      window.clearInterval(intervalId);
+      intervalId = null;
+    }
+  };
+
+  const cancelExpiry = () => {
+    if (expiryTimeoutId === null) return;
+    window.clearTimeout(expiryTimeoutId);
+    expiryTimeoutId = null;
+    delete item.dataset.expiring;
+    item.classList.remove('post-item-expiring');
+  };
+
+  const tick = () => {
+    if (item.isConnected) {
+      wasConnected = true;
+    } else if (wasConnected) {
+      stop();
+      return false;
+    }
+
+    const remaining = remainingLifespanMs(expiresOn);
+    if (remaining === null) {
+      if (label) {
+        label.textContent = '';
+        label.classList.add('d-none');
+      }
+      stop();
+      return false;
+    }
+
+    const currentLabel = ensureLabel();
+    if (!currentLabel) {
+      stop();
+      return false;
+    }
+
+    currentLabel.classList.remove('d-none');
+    currentLabel.textContent = formatLifespanCountdown(expiresOn);
+    currentLabel.classList.toggle('is-ending', remaining <= 60 * 60 * 1000);
+
+    if (remaining === 0) {
+      stop();
+      if (expiryTimeoutId === null) {
+        expiryTimeoutId = expireFeedItem(item, post, ctx);
+      }
+      return false;
+    }
+
+    return true;
+  };
+
+  if (tick()) {
+    intervalId = window.setInterval(tick, LIFESPAN_TICK_MS);
+  }
+
+  return {
+    update(nextExpiresOn) {
+      if (!nextExpiresOn) return;
+
+      const remaining = remainingLifespanMs(nextExpiresOn);
+      expiresOn = nextExpiresOn;
+      post.expiresOn = nextExpiresOn;
+      if (remaining !== null && remaining > 0) {
+        cancelExpiry();
+      }
+      if (tick() && intervalId === null) {
+        intervalId = window.setInterval(tick, LIFESPAN_TICK_MS);
+      }
+    },
+    stop
+  };
+}
+
 /**
  * Create a DOM element representing a post in a feed.
  *
  * The caller supplies minimal callbacks to keep this module focused on
  * rendering and simple event wiring.
  *
- * @param {object} post feed item ({ id, username, accountId, text, createdOn, lastUpdatedOn, level, rootId, likesCount, liked })
+ * @param {object} post feed item ({ id, username, accountId, text, createdOn, lastUpdatedOn, expiresOn, level, rootId, likesCount, liked })
  * @param {object} ctx  context with small helpers:
  *  - sanitize(text): string
  *  - formatWhen(iso): string
  *  - isLoggedIn(): boolean
  *  - canDelete(post): boolean
- *  - onLike(postId): Promise<{likesCount:number, liked:boolean}>
+ *  - onLike(postId): Promise<{likesCount:number, liked:boolean, expiresOn?:string}>
  *  - onDelete(postId): Promise<void>
+ *  - onExpire(post, item): void (optional)
  *  - fetchRoot(rootId): Promise<{username:string, text:string}>
  * @returns {HTMLElement}
  */
@@ -53,6 +218,10 @@ export function createFeedItem(post, ctx) {
   const likes = post.likesCount || 0;
   const repliesCount = post.replyCount || 0;
   const shouldCollapse = (post.text || '').length > COLLAPSE_AT;
+  const previewMarkup = (post.linkPreviews || [])
+    .map(preview => linkPreviewCardMarkup(preview, s))
+    .filter(Boolean)
+    .join('');
 
   const item = document.createElement('div');
   item.className = `post-item${isRecent(post) ? ' post-item-new' : ''}`;
@@ -67,6 +236,7 @@ export function createFeedItem(post, ctx) {
           <div class="post-author">
             <a href="/u/${encodeURIComponent(post.username || '')}" class="post-handle">${handle}</a>
             <small>${when}</small>
+            ${post.expiresOn ? '<span class="post-lifespan" data-post-lifespan aria-label="Post lifespan remaining"></span>' : ''}
           </div>
           <div class="post-meta">
             <div class="post-chips">${postChips(post, liked)}</div>
@@ -89,6 +259,7 @@ export function createFeedItem(post, ctx) {
           <p class="post-text post-body"></p>
         </div>
         ${shouldCollapse ? '<button class="post-expand-btn" type="button">Show more</button>' : ''}
+        ${previewMarkup ? `<div class="post-link-previews">${previewMarkup}</div>` : ''}
         <div class="post-actions">
           <button class="post-action post-reply-btn" data-post="${post.id}" aria-label="Reply">
             <i class="fa fa-comment-o" aria-hidden="true"></i>
@@ -117,6 +288,7 @@ export function createFeedItem(post, ctx) {
 
   const body = item.querySelector('.post-text');
   if (body) appendTextWithMentionLinks(body, post.text);
+  const lifespanTimer = startLifespanTimer(item, post, ctx);
   const expandBtn = item.querySelector('.post-expand-btn');
   expandBtn?.addEventListener('click', () => {
     const wrap = item.querySelector('.post-text-wrap');
@@ -153,6 +325,9 @@ export function createFeedItem(post, ctx) {
         if (icon) {
           icon.classList.toggle('fa-heart', isLiked);
           icon.classList.toggle('fa-heart-o', !isLiked);
+        }
+        if (updated.expiresOn) {
+          lifespanTimer.update(updated.expiresOn);
         }
         // Server is source of truth for liked state
       } catch (err) {

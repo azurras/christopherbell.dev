@@ -34,6 +34,7 @@ this app.
     |   |-- admin/                # Back Office activity and admin views
     |   |-- blog/                 # Config-backed blog content
     |   |-- configuration/        # Security, filters, app configuration
+    |   |-- location/             # Imported ZIP coordinate reference data
     |   |-- message/              # Direct messages
     |   |-- notification/         # Notifications and mention alerts
     |   |-- photo/                # Photo gallery data
@@ -258,9 +259,26 @@ is admin-only and can be triggered from Back Office. The default import coverage
 includes Austin, the San Francisco Bay Area, New Orleans, and Dallas.
 
 The public WFL page asks for the browser location or a ZIP code and returns up
-to three restaurant suggestions within the selected radius. The endpoint depends
-on saved restaurant coordinates, so run the import when local data is empty or
-missing coordinates.
+to three restaurant suggestions within the selected radius. Browser-location
+searches use the provided coordinates; ZIP searches resolve the radius origin
+from imported Location Census ZIP Code Tabulation Area coordinates. Both paths
+still depend on saved restaurant coordinates, so run the import when local data
+is empty or missing coordinates.
+
+## Location ZIP Data
+
+Location owns the reusable Census ZCTA coordinate reference data. Public lookups
+use `GET /api/location/zip/{zipCode}` after an admin imports the bundled Census
+dataset. The payload includes source and source year because the coordinates are
+Census internal points, not USPS delivery geometry.
+
+Import or refresh ZIP coordinates from Back Office or with:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <admin-token>" \
+  http://localhost:8081/api/location/zip/import/census
+```
 
 Admin endpoints:
 

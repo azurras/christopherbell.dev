@@ -43,6 +43,25 @@ function renderThreadSummary(post, directReplies) {
   }
 }
 
+function renderExpiredRootState(root) {
+  root.innerHTML = `
+    <div class="thread-expired-state" role="status">
+      <p class="thread-label">Signal lost</p>
+      <h2>This post expired in the Void.</h2>
+      <p>The thread context may still show active replies until their own lifespan ends.</p>
+      <a class="btn btn-outline-light btn-sm" href="/void">Back to feed</a>
+    </div>`;
+
+  const heroMeta = document.getElementById('postHeroMeta');
+  if (heroMeta) heroMeta.textContent = 'The selected post reached the end of its lifespan.';
+
+  const statusEl = document.getElementById('threadStatus');
+  if (statusEl) {
+    statusEl.textContent = 'Expired';
+    statusEl.className = 'thread-status-pill is-expired';
+  }
+}
+
 function contextCard(kind, postId) {
   return `
     <div class="thread-context-card" data-context-kind="${kind}">
@@ -92,7 +111,17 @@ function renderRoot(post, currentUser) {
   }
   if (contextStack.children.length > 0) root.appendChild(contextStack);
 
-  const ctx = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(currentUser), currentUserName: currentUser?.username || null, suppressParentContext: true });
+  const ctx = makeRendererContext({
+    fetchJson,
+    authHeaders,
+    sanitize,
+    formatWhen,
+    isLoggedIn,
+    canDelete: canDeleteFor(currentUser),
+    currentUserName: currentUser?.username || null,
+    suppressParentContext: true,
+    onExpire: () => renderExpiredRootState(root)
+  });
   root.appendChild(createFeedItem(post, ctx));
 
   if (post.parentId) {

@@ -15,6 +15,7 @@ const drawerClose = document.getElementById('drawerClose');
 const drawerKicker = document.getElementById('drawerKicker');
 const drawerTitle = document.getElementById('drawerTitle');
 const wflOperationStatus = document.getElementById('wflOperationStatus');
+const locationOperationStatus = document.getElementById('locationOperationStatus');
 const vehicleOperationStatus = document.getElementById('vehicleOperationStatus');
 const contentOperationStatus = document.getElementById('contentOperationStatus');
 const vehicleVinForm = document.getElementById('vehicleVinForm');
@@ -42,6 +43,7 @@ function setLoading() {
   renderState(userQueue, 'Loading users…');
   renderState(activityList, 'Loading activity…');
   renderOperationResult(wflOperationStatus, 'Restaurant counts have not been loaded yet.');
+  renderOperationResult(locationOperationStatus, 'Census ZIP coordinates have not been imported in this session.');
   renderOperationResult(vehicleOperationStatus, 'Vehicle state has not been loaded yet.');
   renderOperationResult(contentOperationStatus, 'Content data has not been loaded yet.');
 }
@@ -441,6 +443,30 @@ async function dedupeRestaurants(button) {
   }
 }
 
+async function importZipCoordinates(button) {
+  button.disabled = true;
+  renderOperationResult(locationOperationStatus, 'Importing Census ZIP coordinates…');
+  try {
+    const result = await fetchJson(API.location.importCensusZipCoordinates, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    renderOperationResult(locationOperationStatus, `
+      <p class="operation-message">ZIP coordinate import complete.</p>
+      <p class="operation-message">${sanitize(result.source || 'Source')} ${sanitize(result.sourceYear || '')}</p>
+      ${resultSummary(result, [
+        ['processed', 'Processed'],
+        ['created', 'Created'],
+        ['updated', 'Updated'],
+        ['unchanged', 'Unchanged'],
+        ['deleted', 'Deleted'],
+      ])}
+    `, 'success');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function vehicleStateMarkup(state) {
   return `<pre class="operation-pre">${sanitize(JSON.stringify(state || {}, null, 2))}</pre>`;
 }
@@ -574,6 +600,8 @@ async function handleOperation(button) {
     } else if (operation === 'wfl-load') {
       button.disabled = true;
       await loadWflCounts();
+    } else if (operation === 'location-zip-import') {
+      await importZipCoordinates(button);
     } else if (operation === 'vehicle-state') {
       button.disabled = true;
       await loadVehicleState();

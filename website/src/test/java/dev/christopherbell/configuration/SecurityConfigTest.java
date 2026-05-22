@@ -33,6 +33,16 @@ class SecurityConfigTest {
     assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request)));
   }
 
+  @Test
+  @DisplayName("Location ZIP coordinate endpoint is public")
+  void publicMatchers_whenLocationZipRequested_matchesWithoutAuthentication() throws Exception {
+    var path = "/api/location/zip/78701";
+    var request = new MockHttpServletRequest("GET", path);
+    request.setServletPath(path);
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request)));
+  }
+
   @SuppressWarnings("unchecked")
   private List<RequestMatcher> publicMatchers() throws Exception {
     Method method = SecurityConfig.class.getDeclaredMethod("publicMatchersList");

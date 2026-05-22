@@ -40,6 +40,7 @@ public class SecurityConfig {
       "/vin-decoder",
       // Public read-only post APIs (method-scoped)
       "POST:/api/vehicles" + APIVersion.V20260509 + "/vin/decode",
+      "GET:/api/location/zip/**",
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/today",
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/nearby",
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/nearby/zip/**",

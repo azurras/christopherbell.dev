@@ -3,6 +3,7 @@ package dev.christopherbell.post.model;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -69,4 +70,8 @@ public class Post {
   private Set<String> likedBy;
   /** Precomputed number of likes for display (kept in sync with {@link #likedBy}). */
   private Integer likesCount;
+  /** Reply likes that extend this thread root without changing its own like count. */
+  private Integer threadReplyLikesCount;
+  /** Rich previews resolved from web links in {@link #text}. */
+  private List<PostLinkPreview> linkPreviews;
 }
