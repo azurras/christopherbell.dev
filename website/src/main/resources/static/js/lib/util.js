@@ -7,6 +7,8 @@
 
 const AUTH_REDIRECT_FALLBACK_PATHS = new Set(['/login', '/signup', '/forgot-password', '/reset-password']);
 const USERNAME_MENTION_RE = /(^|[^A-Za-z0-9._@-])@([A-Za-z0-9](?:[A-Za-z0-9._-]{1,30}[A-Za-z0-9])?)(?=$|[^A-Za-z0-9_-])/g;
+const WEB_URL_RE = /\bhttps?:\/\/[^\s<>()]+/gi;
+const URL_TRAILING_PUNCTUATION = /[.,!?;:]$/;
 
 function decodeJwtPayload(token) {
   const payload = token.split('.')[1] || '';
@@ -181,15 +183,12 @@ export function linkMentions(text) {
   const value = String(text ?? '');
   let html = '';
   let lastIndex = 0;
-  USERNAME_MENTION_RE.lastIndex = 0;
-  let match;
-  while ((match = USERNAME_MENTION_RE.exec(value)) !== null) {
-    const prefix = match[1] || '';
-    const username = match[2] || '';
-    const mentionStart = match.index + prefix.length;
-    html += sanitize(value.slice(lastIndex, mentionStart));
-    html += `<a href="${mentionProfileUrl(username)}" class="mention-link">@${sanitize(username)}</a>`;
-    lastIndex = mentionStart + username.length + 1;
+  for (const link of textLinks(value)) {
+    html += sanitize(value.slice(lastIndex, link.start));
+    html += link.type === 'mention'
+      ? `<a href="${mentionProfileUrl(link.username)}" class="mention-link">@${sanitize(link.username)}</a>`
+      : `<a href="${sanitize(link.url)}" class="text-link" target="_blank" rel="noopener noreferrer">${sanitize(link.url)}</a>`;
+    lastIndex = link.end;
   }
   return html + sanitize(value.slice(lastIndex));
 }
@@ -200,27 +199,66 @@ export function appendTextWithMentionLinks(container, text) {
   container.textContent = '';
   const value = String(text ?? '');
   let lastIndex = 0;
-  USERNAME_MENTION_RE.lastIndex = 0;
-  let match;
-  while ((match = USERNAME_MENTION_RE.exec(value)) !== null) {
-    const prefix = match[1] || '';
-    const username = match[2] || '';
-    const mentionStart = match.index + prefix.length;
-    if (mentionStart > lastIndex) {
-      container.appendChild(document.createTextNode(value.slice(lastIndex, mentionStart)));
+  for (const linkMatch of textLinks(value)) {
+    if (linkMatch.start > lastIndex) {
+      container.appendChild(document.createTextNode(value.slice(lastIndex, linkMatch.start)));
     }
 
     const link = document.createElement('a');
-    link.href = mentionProfileUrl(username);
-    link.className = 'mention-link';
-    link.textContent = `@${username}`;
+    if (linkMatch.type === 'mention') {
+      link.href = mentionProfileUrl(linkMatch.username);
+      link.className = 'mention-link';
+      link.textContent = `@${linkMatch.username}`;
+    } else {
+      link.href = linkMatch.url;
+      link.className = 'text-link';
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = linkMatch.url;
+    }
     container.appendChild(link);
-    lastIndex = mentionStart + username.length + 1;
+    lastIndex = linkMatch.end;
   }
 
   if (lastIndex < value.length) {
     container.appendChild(document.createTextNode(value.slice(lastIndex)));
   }
+}
+
+function textLinks(value) {
+  const links = [];
+  USERNAME_MENTION_RE.lastIndex = 0;
+  let match;
+  while ((match = USERNAME_MENTION_RE.exec(value)) !== null) {
+    const prefix = match[1] || '';
+    const username = match[2] || '';
+    const start = match.index + prefix.length;
+    links.push({ type: 'mention', start, end: start + username.length + 1, username });
+  }
+
+  WEB_URL_RE.lastIndex = 0;
+  while ((match = WEB_URL_RE.exec(value)) !== null) {
+    const url = trimUrlPunctuation(match[0]);
+    if (!url) continue;
+    links.push({ type: 'url', start: match.index, end: match.index + url.length, url });
+  }
+
+  let lastEnd = -1;
+  return links
+    .sort((left, right) => left.start - right.start || left.end - right.end)
+    .filter(link => {
+      if (link.start < lastEnd) return false;
+      lastEnd = link.end;
+      return true;
+    });
+}
+
+function trimUrlPunctuation(url) {
+  let value = String(url || '');
+  while (URL_TRAILING_PUNCTUATION.test(value)) {
+    value = value.slice(0, -1);
+  }
+  return value;
 }
 
 /** Convert an ISO datetime (or now) into a localized string. */

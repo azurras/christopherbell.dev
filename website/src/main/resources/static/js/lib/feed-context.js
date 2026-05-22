@@ -33,7 +33,7 @@ export function canDeleteFor(currentUser) {
  * Build an onLike action that posts to the API and returns updated like state.
  * @param {(url:string, options?:object)=>Promise<object>} fetchJson
  * @param {()=>object} authHeaders
- * @returns {(postId:string)=>Promise<{likesCount:number, liked:boolean}>}
+ * @returns {(postId:string)=>Promise<{likesCount:number, liked:boolean, expiresOn?:string}>}
  */
 export function onLikeAction(fetchJson, authHeaders) {
   return (postId) => fetchJson(API.posts.like(postId), { method: 'POST', headers: authHeaders() });
@@ -83,7 +83,17 @@ export function createThreadFetcher(fetchJson, authHeaders) {
  *  - currentUserName: string|null
  * @returns {object} ctx for createFeedItem
  */
-export function makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete, currentUserName, suppressParentContext = false }) {
+export function makeRendererContext({
+  fetchJson,
+  authHeaders,
+  sanitize,
+  formatWhen,
+  isLoggedIn,
+  canDelete,
+  currentUserName,
+  suppressParentContext = false,
+  onExpire = null
+}) {
   const fetchPost = createRootFetcher(fetchJson);
   return {
     sanitize,
@@ -98,5 +108,6 @@ export function makeRendererContext({ fetchJson, authHeaders, sanitize, formatWh
     onReply: onReplyAction(fetchJson, authHeaders),
     currentUserName: currentUserName || null,
     suppressParentContext,
+    onExpire
   };
 }

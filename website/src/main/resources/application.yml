@@ -15,7 +15,7 @@ app:
     secret: ${APP_JWT_SECRET:local-development-jwt-secret-change-me-at-least-32-bytes}
 posts:
   expiration:
-    enabled: false
+    enabled: true
     cleanup-interval: 600000
 vehicles:
   nhtsa-vin:

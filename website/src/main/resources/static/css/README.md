@@ -18,6 +18,9 @@ Owns site styling for server-rendered pages and frontend components.
 - WFL uses shared lunch classes for picks, restaurant profiles, favorites, and
   top-rated lists, plus `wfl-secondary-nav` for local WFL navigation and
   `lunch-controls` for the filters, location, and Lunch with Friends control tabs.
+- Void-related templates opt into `void-shell-page`; `main.css` owns the Lost
+  Signal shell, Void-aware nav/footer treatment, shared lifespan countdown
+  styling, rich post link preview cards, and expiry motion for those pages.
 - Responsive rules live near the related component styles when possible. Broad
   page-level breakpoints are kept at the end of `main.css`.
 

@@ -84,3 +84,13 @@ curl -X POST \
   -H "Authorization: Bearer <admin-token>" \
   http://localhost:8080/api/whatsforlunch/restaurant/2026-05-17/dedupe-names
 ```
+
+ZIP-based WFL searches use imported Location Census ZCTA coordinates as their
+radius origins. The public one-ZIP lookup is `GET /api/location/zip/{zipCode}`.
+Seed or refresh the Location rows from Back Office or with:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <admin-token>" \
+  http://localhost:8080/api/location/zip/import/census
+```

@@ -3,6 +3,8 @@ package dev.christopherbell.whatsforlunch.restaurant;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.location.ZipCoordinateService;
+import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
@@ -38,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -61,6 +64,7 @@ public class RestaurantServiceTest {
   @Mock private RestaurantRatingRepository restaurantRatingRepository;
   @Mock private RestaurantRepository restaurantRepository;
   @Mock private WhatsForLunchPreferenceRepository whatsForLunchPreferenceRepository;
+  @Mock private ZipCoordinateService zipCoordinateService;
   @InjectMocks private RestaurantService restaurantService;
 
   @Test
@@ -199,7 +203,7 @@ public class RestaurantServiceTest {
     var eastAustinDetail = RestaurantStub.getRestaurantDetailStub("east-austin");
     var southAustinDetail = RestaurantStub.getRestaurantDetailStub("south-austin");
 
-    when(restaurantRepository.findAll()).thenReturn(List.of(austin, eastAustin, southAustin, dallas));
+    stubCoordinateCandidates(List.of(austin, eastAustin, southAustin, dallas));
     when(restaurantMapper.toRestaurantDetail(eq(austin))).thenReturn(austinDetail);
     when(restaurantMapper.toRestaurantDetail(eq(eastAustin))).thenReturn(eastAustinDetail);
     when(restaurantMapper.toRestaurantDetail(eq(southAustin))).thenReturn(southAustinDetail);
@@ -209,7 +213,27 @@ public class RestaurantServiceTest {
 
     assertEquals(3, result.size());
     assertTrue(ids.containsAll(List.of("austin", "east-austin", "south-austin")));
-    verify(restaurantRepository).findAll();
+    verify(restaurantRepository).findByCoordinateBounds(anyDouble(), anyDouble(), anyDouble(), anyDouble());
+  }
+
+  @Test
+  @DisplayName("Nearby lunch picks: load coordinate candidates from repository bounds")
+  public void testGetNearbyLunchPicks_queriesCoordinateBoundsInsteadOfWholeCollection() throws Exception {
+    when(restaurantRepository.findByCoordinateBounds(
+        anyDouble(),
+        anyDouble(),
+        anyDouble(),
+        anyDouble()))
+        .thenReturn(List.of());
+
+    restaurantService.getNearbyLunchPicks(30.2672, -97.7431, 15, List.of(), false);
+
+    verify(restaurantRepository).findByCoordinateBounds(
+        anyDouble(),
+        anyDouble(),
+        anyDouble(),
+        anyDouble());
+    verify(restaurantRepository, never()).findAll();
   }
 
   @Test
@@ -222,13 +246,13 @@ public class RestaurantServiceTest {
     sushi.setCuisine("japanese");
     var tacoDetail = RestaurantStub.getRestaurantDetailStub("tacos");
 
-    when(restaurantRepository.findAll()).thenReturn(List.of(tacos, sushi));
+    stubCoordinateCandidates(List.of(tacos, sushi));
     when(restaurantMapper.toRestaurantDetail(eq(tacos))).thenReturn(tacoDetail);
 
     var result = restaurantService.getNearbyLunchPicks(30.2672, -97.7431, 15, List.of("Mexican"), false);
 
     assertEquals(List.of(tacoDetail), result);
-    verify(restaurantRepository).findAll();
+    verify(restaurantRepository).findByCoordinateBounds(anyDouble(), anyDouble(), anyDouble(), anyDouble());
     verify(restaurantMapper).toRestaurantDetail(eq(tacos));
     verifyNoInteractions(whatsForLunchPreferenceRepository);
   }
@@ -250,7 +274,7 @@ public class RestaurantServiceTest {
             .cuisines(List.of("japanese"))
             .radiusMiles(15)
             .build()));
-    when(restaurantRepository.findAll()).thenReturn(List.of(tacos, sushi));
+    stubCoordinateCandidates(List.of(tacos, sushi));
     when(restaurantMapper.toRestaurantDetail(eq(sushi))).thenReturn(sushiDetail);
 
     var result = restaurantService.getNearbyLunchPicks(30.2672, -97.7431, List.of());
@@ -268,7 +292,7 @@ public class RestaurantServiceTest {
     tacos.setCuisine("mexican");
     var tacoDetail = RestaurantStub.getRestaurantDetailStub("tacos");
 
-    when(restaurantRepository.findAll()).thenReturn(List.of(tacos));
+    stubCoordinateCandidates(List.of(tacos));
     when(restaurantMapper.toRestaurantDetail(eq(tacos))).thenReturn(tacoDetail);
 
     var result = restaurantService.getNearbyLunchPicks(30.2672, -97.7431, null, List.of(), false);
@@ -285,7 +309,7 @@ public class RestaurantServiceTest {
     var farther = nearbyRestaurant("farther", "Farther Tacos", 30.4423, -97.6200);
     var closeDetail = RestaurantStub.getRestaurantDetailStub("close");
 
-    when(restaurantRepository.findAll()).thenReturn(List.of(close, farther));
+    stubCoordinateCandidates(List.of(close, farther));
     when(restaurantMapper.toRestaurantDetail(eq(close))).thenReturn(closeDetail);
 
     var result = restaurantService.getNearbyLunchPicks(30.2672, -97.7431, 1, List.of(), false);
@@ -295,19 +319,18 @@ public class RestaurantServiceTest {
   }
 
   @Test
-  @DisplayName("Nearby lunch picks: ZIP code uses saved restaurant coordinates as the origin")
-  public void testGetNearbyLunchPicksByZipCode_whenZipMatchesRestaurants_ReturnsNearbyRestaurants()
+  @DisplayName("Nearby lunch picks: ZIP code uses the ZIP coordinate origin")
+  public void testGetNearbyLunchPicksByZipCode_whenZipCoordinatesResolve_ReturnsNearbyRestaurants()
       throws Exception {
     var zipCenter = nearbyRestaurant("zip-center", "Downtown Tacos", 30.2672, -97.7431);
-    zipCenter.getAddress().setPostalCode("78701");
     var nearby = nearbyRestaurant("nearby", "Nearby Noodles", 30.2680, -97.7440);
-    nearby.getAddress().setPostalCode("78702");
     var dallas = nearbyRestaurant("dallas", "Dallas Lunch", 32.7767, -96.7970);
-    dallas.getAddress().setPostalCode("75201");
     var zipDetail = RestaurantStub.getRestaurantDetailStub("zip-center");
     var nearbyDetail = RestaurantStub.getRestaurantDetailStub("nearby");
 
-    when(restaurantRepository.findAll()).thenReturn(List.of(zipCenter, nearby, dallas));
+    when(zipCoordinateService.getZipCoordinate(eq("78701")))
+        .thenReturn(zipCoordinate("78701", 30.2672, -97.7431));
+    stubCoordinateCandidates(List.of(zipCenter, nearby, dallas));
     when(restaurantMapper.toRestaurantDetail(eq(zipCenter))).thenReturn(zipDetail);
     when(restaurantMapper.toRestaurantDetail(eq(nearby))).thenReturn(nearbyDetail);
 
@@ -316,7 +339,55 @@ public class RestaurantServiceTest {
 
     assertEquals(2, result.size());
     assertTrue(ids.containsAll(List.of("zip-center", "nearby")));
+    verify(zipCoordinateService).getZipCoordinate(eq("78701"));
     verifyNoInteractions(whatsForLunchPreferenceRepository);
+  }
+
+  @Test
+  @DisplayName("Nearby lunch picks: ZIP origin resolves before nearby candidates")
+  public void testGetNearbyLunchPicksByZipCode_resolvesZipOriginBeforeNearbyCandidates() throws Exception {
+    var zipCenter = nearbyRestaurant("zip-center", "Downtown Tacos", 30.2672, -97.7431);
+
+    when(zipCoordinateService.getZipCoordinate(eq("78701")))
+        .thenReturn(zipCoordinate("78701", 30.2672, -97.7431));
+    when(restaurantRepository.findByCoordinateBounds(
+        anyDouble(),
+        anyDouble(),
+        anyDouble(),
+        anyDouble()))
+        .thenReturn(List.of(zipCenter));
+    when(restaurantMapper.toRestaurantDetail(eq(zipCenter)))
+        .thenReturn(RestaurantStub.getRestaurantDetailStub("zip-center"));
+
+    restaurantService.getNearbyLunchPicksByZipCode("78701", 15, List.of(), false);
+
+    verify(zipCoordinateService).getZipCoordinate(eq("78701"));
+    verify(restaurantRepository).findByCoordinateBounds(
+        anyDouble(),
+        anyDouble(),
+        anyDouble(),
+        anyDouble());
+    verify(restaurantRepository, never()).findAll();
+  }
+
+  @Test
+  @DisplayName("Nearby lunch picks: unknown ZIP coordinate origins are rejected")
+  public void testGetNearbyLunchPicksByZipCode_whenZipCoordinatesDoNotResolve_throws()
+      throws Exception {
+    when(zipCoordinateService.getZipCoordinate(eq("78701")))
+        .thenThrow(new ResourceNotFoundException("ZIP coordinate not found."));
+
+    var ex = assertThrows(
+        InvalidRequestException.class,
+        () -> restaurantService.getNearbyLunchPicksByZipCode("78701", 15, List.of(), false));
+
+    assertTrue(ex.getMessage().contains("ZIP code"));
+    verify(zipCoordinateService).getZipCoordinate(eq("78701"));
+    verify(restaurantRepository, never()).findByCoordinateBounds(
+        anyDouble(),
+        anyDouble(),
+        anyDouble(),
+        anyDouble());
   }
 
   @Test
@@ -334,7 +405,7 @@ public class RestaurantServiceTest {
             .cuisines(List.of())
             .radiusMiles(1)
             .build()));
-    when(restaurantRepository.findAll()).thenReturn(List.of(close, farther));
+    stubCoordinateCandidates(List.of(close, farther));
     when(restaurantMapper.toRestaurantDetail(eq(close))).thenReturn(closeDetail);
 
     var result = restaurantService.getNearbyLunchPicks(30.2672, -97.7431, List.of());
@@ -991,6 +1062,25 @@ public class RestaurantServiceTest {
 
     verify(restaurantRepository).findById(eq(RestaurantStub.ID));
     verifyNoMoreInteractions(restaurantMapper, restaurantRepository);
+  }
+
+  private void stubCoordinateCandidates(List<Restaurant> restaurants) {
+    when(restaurantRepository.findByCoordinateBounds(
+        anyDouble(),
+        anyDouble(),
+        anyDouble(),
+        anyDouble()))
+        .thenReturn(restaurants);
+  }
+
+  private ZipCoordinateDetail zipCoordinate(String zipCode, double latitude, double longitude) {
+    return ZipCoordinateDetail.builder()
+        .zipCode(zipCode)
+        .latitude(latitude)
+        .longitude(longitude)
+        .source("Census Gazetteer ZCTA")
+        .sourceYear(2025)
+        .build();
   }
 
   private Restaurant nearbyRestaurant(String id, String name, double latitude, double longitude) {

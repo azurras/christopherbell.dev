@@ -11,6 +11,8 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -21,6 +23,11 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Builder
 @Data
 @NoArgsConstructor
+@CompoundIndexes({
+    @CompoundIndex(
+        name = "restaurant_coordinate_bounds",
+        def = "{'address.latitude': 1, 'address.longitude': 1}")
+})
 @Document("whatsforlunch")
 public class Restaurant {
   private final String type = "restaurant";

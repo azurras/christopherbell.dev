@@ -17,7 +17,7 @@ Owns the data model and APIs for What's For Lunch restaurants.
 ## Location Picks
 
 - `GET /api/whatsforlunch/restaurant/2026-05-17/nearby` accepts browser latitude and longitude.
-- `GET /api/whatsforlunch/restaurant/2026-05-17/nearby/zip/{zipCode}` accepts a 5-digit ZIP code and derives the search origin from saved restaurant coordinates in that ZIP code.
+- `GET /api/whatsforlunch/restaurant/2026-05-17/nearby/zip/{zipCode}` accepts a 5-digit ZIP code and uses imported Location Census ZCTA coordinates as the search origin.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/profile/{id}` returns a public restaurant profile used by `/wfl/restaurants/{id}`.
 - `/wfl/favorites` lists the signed-in user's favorited restaurants.
 - `/wfl/top-rated` lists the public top 10 rated restaurants.
@@ -27,7 +27,11 @@ Owns the data model and APIs for What's For Lunch restaurants.
 - Signed-in members can save default cuisine filters with `PUT /api/whatsforlunch/restaurant/2026-05-17/preferences`. Member write endpoints require an authenticated JWT; admin-only endpoints still use explicit `ADMIN` authority checks.
 - Signed-in users can also save their preferred radius with the same preferences endpoint.
 - Saved filters and radius are used only when a nearby request does not provide explicit values and does not set `useSavedPreferences=false`.
-- Nearby picks are filtered to restaurants with saved coordinates inside the selected radius.
+- Nearby picks query coordinate candidates inside a coarse Mongo bounding box, then
+  apply the exact selected-radius check in the service before returning results.
+- ZIP nearby picks ask the Location ZIP coordinate service for a persisted
+  Census Gazetteer ZCTA internal point, then query nearby restaurant coordinates
+  by radius.
 - Each nearby request shuffles candidates again and returns up to three spots. Fast-food restaurants are eligible without a ranking penalty.
 - The browser keeps the current three picks as a solo WFL session across page refreshes. Logged-in users persist that solo session in the backend session collection; anonymous users keep the same picks in local browser storage.
 - Clicking "Try 3 more" clears the current solo session and requests a new set of restaurants. In a shared session it replaces the session's restaurants for every participant.

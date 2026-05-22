@@ -8,14 +8,19 @@ Owns Void post persistence and API records.
 - `PostCreateRequest` carries create-post and create-reply input.
 - `PostDetail` is the basic post response shape.
 - `PostFeedItem` is the enriched feed/thread response shape.
+- `PostLinkPreview` stores fetched metadata for a URL mentioned in a post.
 
 ## Design Notes
 
 - Replies are posts with `parentId`, `rootId`, and `level`; this keeps thread
   storage simple and avoids a separate reply entity.
 - `PostFeedItem` includes denormalized read-time fields such as username,
-  liked-state, and reply count because feed rendering needs them together.
+  liked-state, reply count, and stored link previews because feed rendering
+  needs them together.
 - Like state stores account ids so toggles are idempotent per user.
+- Thread roots store reply-like extension counts separately from their own
+  visible like counts so reply engagement can extend parent lifespan without
+  falsifying the root post's likes.
 
 ## Update This Doc
 

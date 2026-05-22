@@ -1,6 +1,7 @@
 package dev.christopherbell.post.model;
 
 import java.time.Instant;
+import java.util.List;
 import lombok.Builder;
 
 /**
@@ -19,6 +20,7 @@ public record PostFeedItem(
     String accountId,
     String username,
     String text,
+    List<PostLinkPreview> linkPreviews,
     String rootId,
     String parentId,
     Integer level,

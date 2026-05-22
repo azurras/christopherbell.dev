@@ -20,10 +20,13 @@ Owns browser-side behavior for server-rendered pages.
   to `lib` or `components`.
 - Shared modules should not assume a specific page exists. They should accept
   selectors, callbacks, or small context objects from page modules.
+- The Void feed toolbar keeps the primary feed filter surface to `All` and
+  `Following`; profile and thread pages handle personal post and reply views.
 - API calls go through `lib/api.js` so auth headers, response parsing, and
   endpoint paths stay consistent.
-- `lib/util.js` owns shared `@username` mention linking; page modules should use
-  it before rendering user-authored text so profile links behave consistently.
+- `lib/util.js` owns shared `@username` mention and HTTP/HTTPS URL linking;
+  page modules should use it before rendering user-authored text so profile and
+  external links behave consistently.
 - `whats-for-lunch.js` lets visitors choose browser geolocation or a ZIP code,
   keeps cuisine and radius filters hidden behind an obvious toggle by default,
   keeps "Try 3 more" as the primary page action, groups filters, location, and
@@ -43,8 +46,8 @@ Owns browser-side behavior for server-rendered pages.
 - `wfl-list.js` renders the WFL secondary pages for favorites and the public top
   10 rated restaurants.
 - `back-office.js` gates the Back Office to admins, renders report/user queues,
-  and exposes practical admin operations such as WFL import/dedupe and vehicle
-  VIN maintenance.
+  and exposes practical admin operations such as Location Census ZIP coordinate
+  import, WFL import/dedupe, and vehicle VIN maintenance.
 
 ## Design Notes
 

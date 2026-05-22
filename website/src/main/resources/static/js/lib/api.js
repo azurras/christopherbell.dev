@@ -41,6 +41,10 @@ export const API = {
     unreadCount: '/api/notifications/2025-09-14/unread-count',
     markRead: (id) => `/api/notifications/2025-09-14/${encodeURIComponent(id)}/read`,
   },
+  location: {
+    zipCoordinate: (zipCode) => `/api/location/zip/${encodeURIComponent(zipCode)}`,
+    importCensusZipCoordinates: '/api/location/zip/import/census',
+  },
   messages: {
     base: '/api/messages/2025-09-14',
     conversations: '/api/messages/2025-09-14/conversations',

@@ -15,6 +15,7 @@ Useful feature docs:
 - `website/src/main/java/dev/christopherbell/account/README.md`
 - `website/src/main/java/dev/christopherbell/admin/README.md`
 - `website/src/main/java/dev/christopherbell/configuration/README.md`
+- `website/src/main/java/dev/christopherbell/location/README.md`
 - `website/src/main/java/dev/christopherbell/post/README.md`
 - `website/src/main/java/dev/christopherbell/report/README.md`
 - `website/src/main/java/dev/christopherbell/vehicle/README.md`

@@ -32,6 +32,7 @@ import org.springframework.data.domain.PageRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -42,6 +43,7 @@ public class PostServiceTest {
   @Mock private PostMapper postMapper;
   @Mock private dev.christopherbell.permission.PermissionService permissionService;
   @Mock private NotificationService notificationService;
+  @Mock private PostLinkPreviewService postLinkPreviewService;
   private PostService postService;
 
   @BeforeEach
@@ -52,6 +54,7 @@ public class PostServiceTest {
         postMapper,
         permissionService,
         notificationService,
+        postLinkPreviewService,
         true);
   }
 
@@ -82,6 +85,49 @@ public class PostServiceTest {
     verify(notificationService).createMentionNotifications(eq(post), eq(existing));
     verify(postMapper).toDetail(eq(post));
     verifyNoMoreInteractions(accountRepository, postRepository, postMapper, notificationService);
+  }
+
+  @Test
+  @DisplayName("Create assigns the 24 hour base expiration when expiration is enabled")
+  public void testCreatePost_whenExpirationEnabled_AssignsBaseLifespan() throws Exception {
+    var existing = AccountServiceStub.getAccountWhenExistsStub();
+    var service = spy(postService);
+    doReturn(existing.getId()).when(service).getSelfId();
+    when(accountRepository.findById(eq(existing.getId()))).thenReturn(Optional.of(existing));
+    when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(postMapper.toDetail(any(Post.class))).thenReturn(PostDetail.builder().id("p1").build());
+
+    service.createPost(PostCreateRequest.builder().text("still here").build());
+
+    var savedPost = ArgumentCaptor.forClass(Post.class);
+    verify(postRepository).save(savedPost.capture());
+    assertEquals(
+        savedPost.getValue().getCreatedOn().plus(Duration.ofHours(24)),
+        savedPost.getValue().getExpiresOn());
+  }
+
+  @Test
+  @DisplayName("Create stores previews resolved from post links")
+  public void testCreatePost_whenTextHasLinks_StoresResolvedPreviews() throws Exception {
+    var existing = AccountServiceStub.getAccountWhenExistsStub();
+    var service = spy(postService);
+    doReturn(existing.getId()).when(service).getSelfId();
+    when(accountRepository.findById(eq(existing.getId()))).thenReturn(Optional.of(existing));
+    when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(postMapper.toDetail(any(Post.class))).thenReturn(PostDetail.builder().id("p1").build());
+    var preview = dev.christopherbell.post.model.PostLinkPreview.builder()
+        .url("https://example.com/lunch")
+        .domain("example.com")
+        .title("Lunch")
+        .build();
+    when(postLinkPreviewService.resolveForText(eq("Go https://example.com/lunch")))
+        .thenReturn(List.of(preview));
+
+    service.createPost(PostCreateRequest.builder().text("Go https://example.com/lunch").build());
+
+    var savedPost = ArgumentCaptor.forClass(Post.class);
+    verify(postRepository).save(savedPost.capture());
+    assertEquals(List.of(preview), savedPost.getValue().getLinkPreviews());
   }
 
   @Test
@@ -123,18 +169,32 @@ public class PostServiceTest {
 
     var expiredParent = Post.builder()
         .id("parent")
+        .rootId("root")
+        .parentId("root")
         .accountId("other")
         .text("old")
         .createdOn(Instant.now().minus(Duration.ofHours(48)))
         .lastUpdatedOn(Instant.now().minus(Duration.ofHours(48)))
         .expiresOn(Instant.now().minus(Duration.ofHours(1)))
         .build();
+    var child = Post.builder()
+        .id("child")
+        .rootId("root")
+        .parentId("parent")
+        .accountId("other")
+        .text("older reply")
+        .createdOn(Instant.now().minus(Duration.ofHours(47)))
+        .lastUpdatedOn(Instant.now().minus(Duration.ofHours(47)))
+        .expiresOn(Instant.now().plus(Duration.ofHours(1)))
+        .build();
     when(postRepository.findById(eq("parent"))).thenReturn(Optional.of(expiredParent));
+    when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root")))
+        .thenReturn(List.of(expiredParent, child));
 
     var request = PostCreateRequest.builder().text("child").parentId("parent").build();
 
     assertThrows(ResourceNotFoundException.class, () -> service.createPost(request));
-    verify(postRepository).delete(eq(expiredParent));
+    verify(postRepository).deleteAll(eq(List.of(expiredParent, child)));
   }
 
   @Test
@@ -242,6 +302,47 @@ public class PostServiceTest {
   }
 
   @Test
+  @DisplayName("Toggle like on a reply extends the thread root lifespan")
+  public void testToggleLike_whenReplyLiked_ExtendsThreadRootExpiration() throws Exception {
+    var author = Account.builder().id("author").username("author").build();
+    var service = spy(postService);
+    doReturn("liker").when(service).getSelfId();
+    var rootCreated = Instant.now().minus(Duration.ofHours(2));
+    var replyCreated = Instant.now().minus(Duration.ofHours(1));
+    var root = Post.builder()
+        .id("root")
+        .rootId("root")
+        .accountId(author.getId())
+        .createdOn(rootCreated)
+        .lastUpdatedOn(rootCreated)
+        .likedBy(new HashSet<>())
+        .likesCount(0)
+        .expiresOn(rootCreated.plus(Duration.ofHours(24)))
+        .build();
+    var reply = Post.builder()
+        .id("reply")
+        .rootId("root")
+        .parentId("root")
+        .accountId(author.getId())
+        .createdOn(replyCreated)
+        .lastUpdatedOn(replyCreated)
+        .likedBy(new HashSet<>())
+        .likesCount(0)
+        .expiresOn(replyCreated.plus(Duration.ofHours(24)))
+        .build();
+    when(postRepository.findById(eq("reply"))).thenReturn(Optional.of(reply));
+    when(postRepository.findById(eq("root"))).thenReturn(Optional.of(root));
+    when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(accountRepository.findById(eq(author.getId()))).thenReturn(Optional.of(author));
+    when(postRepository.countByParentId(eq("reply"))).thenReturn(0L);
+
+    service.toggleLike("reply");
+
+    assertEquals(rootCreated.plus(Duration.ofHours(48)), root.getExpiresOn());
+    verify(postRepository).save(eq(root));
+  }
+
+  @Test
   @DisplayName("Cleanup job assigns expirations before purging")
   public void testPurgeExpiredPosts_backfillsMissingExpiration() {
     var stale = Post.builder()
@@ -256,14 +357,48 @@ public class PostServiceTest {
 
     verify(postRepository).findByExpiresOnIsNull();
     verify(postRepository).save(eq(stale));
-    verify(postRepository).deleteByExpiresOnLessThanEqual(org.mockito.ArgumentMatchers.any(Instant.class));
+    verify(postRepository).findByExpiresOnLessThanEqual(org.mockito.ArgumentMatchers.any(Instant.class));
     assertNotNull(stale.getExpiresOn());
+  }
+
+  @Test
+  @DisplayName("Cleanup job removes descendants when a parent expires")
+  public void testPurgeExpiredPosts_deletesExpiredPostTree() {
+    var parent = Post.builder()
+        .id("parent")
+        .rootId("root")
+        .parentId("root")
+        .expiresOn(Instant.now().minus(Duration.ofMinutes(1)))
+        .build();
+    var child = Post.builder()
+        .id("child")
+        .rootId("root")
+        .parentId("parent")
+        .expiresOn(Instant.now().plus(Duration.ofHours(1)))
+        .build();
+    when(postRepository.findByExpiresOnLessThanEqual(any(Instant.class))).thenReturn(List.of(parent));
+    when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root"))).thenReturn(List.of(parent, child));
+
+    postService.purgeExpiredPosts();
+
+    verify(postRepository).deleteAll(eq(List.of(parent, child)));
   }
 
   @Test
   @DisplayName("GlobalFeed: returns newest posts with usernames")
   public void testGetGlobalFeed_returnsMappedItems() {
-    var p1 = Post.builder().id("p1").accountId("a1").text("t1").createdOn(Instant.now()).build();
+    var preview = dev.christopherbell.post.model.PostLinkPreview.builder()
+        .url("https://example.com")
+        .domain("example.com")
+        .title("Example")
+        .build();
+    var p1 = Post.builder()
+        .id("p1")
+        .accountId("a1")
+        .text("t1")
+        .createdOn(Instant.now())
+        .linkPreviews(List.of(preview))
+        .build();
     var p2 = Post.builder().id("p2").accountId("a2").text("t2").createdOn(Instant.now()).build();
     Page<Post> page = new PageImpl<>(List.of(p1, p2), PageRequest.of(0, 20), 2);
 
@@ -279,6 +414,7 @@ public class PostServiceTest {
     assertEquals(2, result.size());
     assertEquals("p1", result.get(0).id());
     assertEquals("user1", result.get(0).username());
+    assertEquals(List.of(preview), result.get(0).linkPreviews());
     assertEquals("p2", result.get(1).id());
     assertEquals("user2", result.get(1).username());
   }

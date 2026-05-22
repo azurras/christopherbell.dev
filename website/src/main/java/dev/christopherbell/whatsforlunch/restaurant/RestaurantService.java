@@ -3,6 +3,8 @@ package dev.christopherbell.whatsforlunch.restaurant;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.location.ZipCoordinateService;
+import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
@@ -74,6 +76,7 @@ public class RestaurantService {
   private final RestaurantRatingRepository restaurantRatingRepository;
   private final RestaurantRepository restaurantRepository;
   private final WhatsForLunchPreferenceRepository whatsForLunchPreferenceRepository;
+  private final ZipCoordinateService zipCoordinateService;
 
   @Value("${wfl.restaurant-of-the-day.enabled:false}")
   private boolean restaurantOfTheDayEnabled;
@@ -218,7 +221,7 @@ public class RestaurantService {
     var preference = resolvePreference(useSavedPreferences);
     var cuisineFilters = resolveCuisineFilters(requestedCuisines, preference, useSavedPreferences);
     var radiusMiles = resolveRadiusMiles(requestedRadiusMiles, preference, useSavedPreferences);
-    var restaurants = Optional.ofNullable(restaurantRepository.findAll()).orElseGet(List::of);
+    var restaurants = getNearbyCandidateRestaurants(latitude, longitude, radiusMiles);
 
     return getNearbyLunchPicksFromRestaurants(latitude, longitude, cuisineFilters, radiusMiles, restaurants);
   }
@@ -226,8 +229,8 @@ public class RestaurantService {
   /**
    * Gets three fresh lunch picks near a user-entered ZIP code.
    *
-   * <p>The ZIP origin is inferred from saved restaurant coordinates in that ZIP code, keeping the
-   * lookup local to the imported restaurant dataset.</p>
+   * <p>The ZIP origin comes from persisted Location Census ZIP coordinates before restaurant
+   * candidates are loaded for the selected radius.</p>
    *
    * @param zipCode user ZIP code
    * @param requestedRadiusMiles optional nearby search radius
@@ -245,9 +248,18 @@ public class RestaurantService {
     var preference = resolvePreference(useSavedPreferences);
     var cuisineFilters = resolveCuisineFilters(requestedCuisines, preference, useSavedPreferences);
     var radiusMiles = resolveRadiusMiles(requestedRadiusMiles, preference, useSavedPreferences);
-    var restaurants = Optional.ofNullable(restaurantRepository.findAll()).orElseGet(List::of);
-    var origin = zipCodeOrigin(normalizedZipCode, restaurants);
+    var origin = getZipCoordinateOrigin(normalizedZipCode);
+    var restaurants = getNearbyCandidateRestaurants(origin.latitude(), origin.longitude(), radiusMiles);
     return getNearbyLunchPicksFromRestaurants(origin.latitude(), origin.longitude(), cuisineFilters, radiusMiles, restaurants);
+  }
+
+  private ZipCoordinateDetail getZipCoordinateOrigin(String zipCode)
+      throws InvalidRequestException {
+    try {
+      return zipCoordinateService.getZipCoordinate(zipCode);
+    } catch (ResourceNotFoundException e) {
+      throw new InvalidRequestException("ZIP code must match an imported US ZIP coordinate.", e);
+    }
   }
 
   private List<RestaurantDetail> getNearbyLunchPicksFromRestaurants(
@@ -1271,29 +1283,6 @@ public class RestaurantService {
         && isValidCoordinate(restaurant.getAddress().getLongitude(), -180.0, 180.0);
   }
 
-  private LocationOrigin zipCodeOrigin(String zipCode, List<Restaurant> restaurants)
-      throws InvalidRequestException {
-    var matches = Optional.ofNullable(restaurants).orElseGet(List::of).stream()
-        .filter(this::hasCoordinates)
-        .filter(restaurant -> zipCode.equals(normalizePostalCode(restaurant.getAddress().getPostalCode())))
-        .toList();
-    if (matches.isEmpty()) {
-      throw new InvalidRequestException("ZIP code must match a saved restaurant with coordinates.");
-    }
-
-    var latitude = matches.stream()
-        .map(Restaurant::getAddress)
-        .mapToDouble(address -> address.getLatitude())
-        .average()
-        .orElseThrow();
-    var longitude = matches.stream()
-        .map(Restaurant::getAddress)
-        .mapToDouble(address -> address.getLongitude())
-        .average()
-        .orElseThrow();
-    return new LocationOrigin(latitude, longitude);
-  }
-
   private String normalizeZipCode(String zipCode) throws InvalidRequestException {
     var normalized = normalizePostalCode(zipCode);
     if (normalized.isBlank()) {
@@ -1316,7 +1305,48 @@ public class RestaurantService {
     return "";
   }
 
-  private record LocationOrigin(double latitude, double longitude) {}
+  private List<Restaurant> getNearbyCandidateRestaurants(
+      double latitude,
+      double longitude,
+      int radiusMiles
+  ) {
+    var bounds = coordinateBounds(latitude, longitude, radiusMiles);
+    return Optional.ofNullable(restaurantRepository.findByCoordinateBounds(
+        bounds.minLatitude(),
+        bounds.maxLatitude(),
+        bounds.minLongitude(),
+        bounds.maxLongitude()))
+        .orElseGet(List::of);
+  }
+
+  private CoordinateBounds coordinateBounds(double latitude, double longitude, int radiusMiles) {
+    var latitudeDelta = Math.toDegrees(radiusMiles / EARTH_RADIUS_MILES);
+    var minLatitude = clamp(latitude - latitudeDelta, -90.0, 90.0);
+    var maxLatitude = clamp(latitude + latitudeDelta, -90.0, 90.0);
+    var cosine = Math.abs(Math.cos(Math.toRadians(latitude)));
+    if (cosine < 0.000001) {
+      return new CoordinateBounds(minLatitude, maxLatitude, -180.0, 180.0);
+    }
+
+    var longitudeDelta = Math.toDegrees(radiusMiles / (EARTH_RADIUS_MILES * cosine));
+    var minLongitude = longitude - longitudeDelta;
+    var maxLongitude = longitude + longitudeDelta;
+    if (minLongitude < -180.0 || maxLongitude > 180.0) {
+      return new CoordinateBounds(minLatitude, maxLatitude, -180.0, 180.0);
+    }
+    return new CoordinateBounds(minLatitude, maxLatitude, minLongitude, maxLongitude);
+  }
+
+  private record CoordinateBounds(
+      double minLatitude,
+      double maxLatitude,
+      double minLongitude,
+      double maxLongitude
+  ) {}
+
+  private double clamp(double value, double min, double max) {
+    return Math.max(min, Math.min(value, max));
+  }
 
   private boolean isValidCoordinate(Double value, double min, double max) {
     return value != null && !value.isNaN() && !value.isInfinite() && value >= min && value <= max;

@@ -8,6 +8,7 @@ Owns Void posts and feed behavior.
 - Global, following, user, and current-user feeds.
 - Like toggling and post expiration behavior.
 - Mention detection and notification handoff.
+- Stored rich metadata for HTTP and HTTPS links mentioned in posts.
 - Post DTOs and persistence models under `model`.
 
 ## How It Works
@@ -31,10 +32,18 @@ Owns Void posts and feed behavior.
 - Public reads tolerate anonymous callers. Missing auth only disables
   viewer-specific fields like `liked`; write operations still require a resolved
   current account.
-- Expiration is optional via configuration. When enabled, missing expiration
-  timestamps are repaired on read and during cleanup so older data remains usable.
+- Expiration is enabled by default. New posts start with a 24-hour lifespan,
+  each active like adds 24 hours from the post creation timestamp, and removing
+  a like removes that extension. Missing expiration timestamps are repaired on
+  read and during cleanup so older data remains usable.
 - Replies are stored as regular posts with `parentId`, `rootId`, and `level`.
   The root id lets thread reads avoid recursive traversal.
+- Reply expiration and deletion remove that reply subtree so descendants do not
+  survive a missing parent. Likes on replies also extend the thread root
+  lifespan by 24 hours per active reply like.
+- Post creation extracts each distinct HTTP or HTTPS URL from text and stores
+  fetched link preview metadata on the post. A preview fetch failure leaves the
+  post intact; shared browser rendering still makes the raw URL clickable.
 
 ## Update This Doc
 
