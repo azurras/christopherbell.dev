@@ -7,7 +7,9 @@ Owns browser-side behavior for server-rendered pages.
 - Page entry modules such as `home-feed.js`, `messages.js`, `profile.js`,
   `post.js`, `user-feed.js`, `vin-decoder.js`, and `whats-for-lunch.js`.
 - `app.js`, which wires shared page chrome and auth-aware behavior.
-- `components`, which contains reusable web components and cross-page UI pieces.
+- `components`, which contains reusable web components and cross-page UI pieces,
+  including the auth-aware nav where Messages stays visible and routes signed-out
+  users through login with a return target.
 - `lib`, which contains shared API, feed, composer, infinite-scroll, and utility
   helpers.
 - `auth`, which contains login, signup, forgot-password, and reset-password page
@@ -20,6 +22,9 @@ Owns browser-side behavior for server-rendered pages.
   to `lib` or `components`.
 - Shared modules should not assume a specific page exists. They should accept
   selectors, callbacks, or small context objects from page modules.
+- `messages.js` renders the `/messages` Signal Bridge interactions: conversation
+  list state, selected private thread, safe message body rendering, character
+  counter, send action, unread-first conversation rows, and login redirect.
 - The Void feed toolbar keeps the primary feed filter surface to `All` and
   `Following`; profile and thread pages handle personal post and reply views.
 - API calls go through `lib/api.js` so auth headers, response parsing, and
@@ -43,6 +48,10 @@ Owns browser-side behavior for server-rendered pages.
 - `restaurant-profile.js` renders the public WFL restaurant profile page from
   the restaurant detail API, including aggregate rating, personal rating, and
   favorite state when the visitor is signed in.
+- `post.js` renders the `/p/{id}` Spectral Thread page. It loads the selected
+  post and thread data, fills root/parent context echoes, applies selected-post
+  detail styling through the shared feed renderer, wires the compact reply
+  composer, and renders direct replies as a timeline.
 - `wfl-list.js` renders the WFL secondary pages for favorites and the public top
   10 rated restaurants.
 - `back-office.js` gates the Back Office to admins, renders report/user queues,

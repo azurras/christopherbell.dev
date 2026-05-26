@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
@@ -94,6 +95,7 @@ public class PostService {
     String parentId = request.parentId();
     String rootId;
     Integer level;
+    Instant inheritedReplyExpiration = null;
     if (parentId != null && !parentId.isBlank()) {
       var parent = postRepository.findById(parentId)
           .orElseThrow(() -> new ResourceNotFoundException(
@@ -101,6 +103,7 @@ public class PostService {
       ensureActive(parent);
       rootId = parent.getRootId() != null ? parent.getRootId() : parent.getId();
       level = (parent.getLevel() != null ? parent.getLevel() : 0) + 1;
+      inheritedReplyExpiration = rootExpirationFor(parent, rootId);
     } else {
       rootId = null; // set to self after ID gen
       level = 0;
@@ -120,11 +123,12 @@ public class PostService {
         .likesCount(0)
         .createdOn(now)
         .lastUpdatedOn(now)
-        .expiresOn(expirationEnabled ? calculateExpiration(now, 0) : null)
+        .expiresOn(expirationEnabled ? expirationForNewPost(now, inheritedReplyExpiration) : null)
         .linkPreviews(postLinkPreviewService.resolveForText(text))
         .build();
 
     var saved = postRepository.save(post);
+    refreshThreadRootExpirationForNewReply(saved);
     notificationService.createMentionNotifications(saved, account);
     return postMapper.toDetail(saved);
   }
@@ -379,6 +383,7 @@ public class PostService {
     post.setLastUpdatedOn(Instant.now());
     refreshExpiration(post);
     postRepository.save(post);
+    synchronizeReplyExpirations(post);
     refreshThreadRootExpiration(threadRoot, liked ? 1 : -1);
     var author = accountRepository.findById(post.getAccountId())
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", post.getAccountId())));
@@ -503,21 +508,40 @@ public class PostService {
     return base.plus(BASE_LIFESPAN).plus(EXTENSION_PER_LIKE.multipliedBy(likeCount));
   }
 
+  private static Instant expirationForNewPost(Instant createdOn, Instant inheritedReplyExpiration) {
+    return inheritedReplyExpiration != null ? inheritedReplyExpiration : calculateExpiration(createdOn, 0);
+  }
+
   private void refreshExpiration(Post post) {
     if (!expirationEnabled || post == null) {
       return;
     }
+    if (isReply(post)) {
+      setReplyExpirationFromRoot(post);
+      return;
+    }
     int likes = post.getLikesCount() != null ? post.getLikesCount() : 0;
     int replyLikes = post.getThreadReplyLikesCount() != null ? post.getThreadReplyLikesCount() : 0;
-    post.setExpiresOn(calculateExpiration(post.getCreatedOn(), likes + replyLikes));
+    int replies = threadReplyCount(post);
+    post.setExpiresOn(calculateExpiration(post.getCreatedOn(), likes + replyLikes + replies));
   }
 
   private void ensureExpirationSet(Post post) {
-    if (!expirationEnabled || post == null || post.getExpiresOn() != null) {
+    if (!expirationEnabled || post == null) {
       return;
     }
+    if (isReply(post)) {
+      if (setReplyExpirationFromRoot(post)) {
+        postRepository.save(post);
+      }
+      return;
+    }
+    var previousExpiration = post.getExpiresOn();
     refreshExpiration(post);
-    postRepository.save(post);
+    if (!Objects.equals(previousExpiration, post.getExpiresOn())) {
+      postRepository.save(post);
+      synchronizeReplyExpirations(post);
+    }
   }
 
   private boolean isExpired(Post post) {
@@ -530,6 +554,9 @@ public class PostService {
 
   private void ensureActive(Post post) throws ResourceNotFoundException {
     ensureExpirationSet(post);
+    if (isReply(post)) {
+      setReplyExpirationFromRoot(post);
+    }
     if (isExpired(post)) {
       deletePostTree(post);
       throw new ResourceNotFoundException(String.format("Post with id %s not found.", post.getId()));
@@ -559,6 +586,97 @@ public class PostService {
     threadRoot.setLastUpdatedOn(Instant.now());
     refreshExpiration(threadRoot);
     postRepository.save(threadRoot);
+    synchronizeReplyExpirations(threadRoot);
+  }
+
+  private void refreshThreadRootExpirationForNewReply(Post reply) throws ResourceNotFoundException {
+    if (!expirationEnabled || !isReply(reply)) {
+      return;
+    }
+    activeThreadRootForReply(reply);
+  }
+
+  private boolean isReply(Post post) {
+    return post != null && post.getParentId() != null && !post.getParentId().isBlank();
+  }
+
+  private int threadReplyCount(Post post) {
+    if (post == null || isReply(post)) {
+      return 0;
+    }
+    var rootId = post.getRootId() != null && !post.getRootId().isBlank()
+        ? post.getRootId()
+        : post.getId();
+    if (rootId == null || rootId.isBlank()) {
+      return 0;
+    }
+    return (int) postRepository.findByRootIdOrderByCreatedOnAsc(rootId).stream()
+        .filter(this::isReply)
+        .count();
+  }
+
+  /**
+   * Returns the root expiration a new reply should inherit.
+   *
+   * <p>Nested replies point at their immediate parent, but all expiration math
+   * belongs to the thread root so the full conversation disappears together.</p>
+   */
+  private Instant rootExpirationFor(Post post, String rootId) throws ResourceNotFoundException {
+    if (!expirationEnabled || post == null) {
+      return null;
+    }
+    if (post.getId() != null && post.getId().equals(rootId)) {
+      return post.getExpiresOn();
+    }
+    var root = postRepository.findById(rootId)
+        .orElseThrow(() -> new ResourceNotFoundException(String.format("Post with id %s not found.", rootId)));
+    ensureActive(root);
+    return root.getExpiresOn();
+  }
+
+  /**
+   * Aligns an existing reply with its thread root expiration.
+   *
+   * <p>Older reply documents may already have an independent expiration. Reads
+   * call this helper so those documents converge without a one-off migration.</p>
+   */
+  private boolean setReplyExpirationFromRoot(Post reply) {
+    if (!expirationEnabled || !isReply(reply)) {
+      return false;
+    }
+    var rootId = reply.getRootId();
+    if (rootId == null || rootId.isBlank() || rootId.equals(reply.getId())) {
+      return false;
+    }
+    var rootExpiration = postRepository.findById(rootId).map(Post::getExpiresOn);
+    if (rootExpiration.isEmpty() || rootExpiration.get() == null || rootExpiration.get().equals(reply.getExpiresOn())) {
+      return false;
+    }
+    reply.setExpiresOn(rootExpiration.get());
+    return true;
+  }
+
+  /**
+   * Pushes the current root expiration through every nested reply.
+   *
+   * <p>Root likes and reply likes both change the root lifespan. Saving the
+   * synchronized timestamp keeps future feed and cleanup reads simple.</p>
+   */
+  private void synchronizeReplyExpirations(Post post) {
+    if (!expirationEnabled || post == null || isReply(post)) {
+      return;
+    }
+    var rootId = post.getRootId() != null && !post.getRootId().isBlank()
+        ? post.getRootId()
+        : post.getId();
+    var rootExpiration = post.getExpiresOn();
+    postRepository.findByRootIdOrderByCreatedOnAsc(rootId).stream()
+        .filter(this::isReply)
+        .filter(reply -> rootExpiration != null && !rootExpiration.equals(reply.getExpiresOn()))
+        .forEach(reply -> {
+          reply.setExpiresOn(rootExpiration);
+          postRepository.save(reply);
+        });
   }
 
   private void deletePostTree(Post post) {

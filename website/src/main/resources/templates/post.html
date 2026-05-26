@@ -10,76 +10,46 @@
 </head>
 <body class="site-page void-shell-page post-page">
   <div id="nav"></div>
-  <main class="site-main" role="main">
-    <section class="site-hero site-hero-post" aria-label="Post thread">
-      <div class="container">
-        <p class="home-kicker">Thread</p>
-        <h1 id="postHeroTitle">Post</h1>
-        <p id="postHeroMeta">Context, replies, and the rest of the conversation.</p>
-      </div>
-    </section>
-    <section class="site-content">
-      <div class="container">
-        <div id="postAlert" class="alert alert-danger d-none" role="alert"></div>
-        <div class="thread-layout">
-          <div class="thread-main">
-            <section id="rootPost" class="thread-root-panel" aria-label="Selected post">
-              <div class="thread-panel-header">
-                <div>
-                  <p class="thread-label">Selected post</p>
-                  <h2>Thread focus</h2>
-                </div>
-                <a class="btn btn-outline-dark btn-sm" href="/void">Back to feed</a>
-              </div>
-              <div class="thread-root-body"></div>
-            </section>
-            <div id="replyComposer" class="thread-composer-panel d-none">
-              <h2>Reply</h2>
-              <textarea id="replyText" class="form-control" rows="3" maxlength="280" placeholder="Write a reply..."></textarea>
-              <div class="d-flex justify-content-end mt-2">
-                <button id="replyBtn" class="btn btn-dark">Reply</button>
-              </div>
-            </div>
-            <section class="thread-replies-panel" aria-labelledby="threadRepliesTitle">
-              <div class="thread-panel-header">
-                <div>
-                  <p class="thread-label">Conversation</p>
-                  <h2 id="threadRepliesTitle">Replies</h2>
-                </div>
-                <span class="thread-count-pill" id="threadReplyPill">0 replies</span>
-              </div>
-              <div id="threadList" class="feed-list thread-feed-list"></div>
-            </section>
+  <main class="site-main void-thread-page" role="main">
+    <section class="void-thread-shell" aria-label="Post thread">
+      <div class="void-thread-container">
+        <header class="void-thread-topbar">
+          <a class="void-thread-back" href="/void" aria-label="Back to the Void feed">←</a>
+          <div class="void-thread-heading">
+            <h1 id="postHeroTitle">Post</h1>
+            <p id="postHeroMeta">Loading thread signal...</p>
           </div>
-          <aside class="thread-side" aria-label="Thread summary">
-            <div class="thread-summary-card">
-              <p class="thread-label">Thread stats</p>
-              <dl>
-                <div>
-                  <dt>Author</dt>
-                  <dd id="threadAuthor">-</dd>
-                </div>
-                <div>
-                  <dt>Posted</dt>
-                  <dd id="threadCreated">-</dd>
-                </div>
-                <div>
-                  <dt>Replies</dt>
-                  <dd id="threadReplyCount">0</dd>
-                </div>
-                <div>
-                  <dt>Likes</dt>
-                  <dd id="threadLikeCount">0</dd>
-                </div>
-                <div>
-                  <dt>Status</dt>
-                  <dd><span class="thread-status-pill" id="threadStatus">Live</span></dd>
-                </div>
-              </dl>
-              <a class="thread-jump-link" href="#threadRepliesTitle">Jump to replies</a>
+          <span class="thread-status-pill is-live" id="threadStatus">Live</span>
+        </header>
+
+        <div id="postAlert" class="alert alert-danger d-none" role="alert"></div>
+
+        <section id="rootPost" class="void-thread-focus" aria-label="Selected post">
+          <div class="thread-root-body"></div>
+        </section>
+
+        <section id="replyComposer" class="void-thread-composer d-none" aria-label="Reply composer">
+          <div class="void-thread-composer-avatar" aria-hidden="true">Y</div>
+          <div class="void-thread-composer-main">
+            <label class="visually-hidden" for="replyText">Write a reply</label>
+            <textarea id="replyText" class="form-control" rows="2" maxlength="280" placeholder="Post your reply"></textarea>
+            <div class="void-thread-composer-actions">
+              <span id="replyComposerMeta">Replies extend the signal.</span>
+              <button id="replyBtn" class="btn btn-dark">Reply</button>
             </div>
-          </aside>
-        </div>
+          </div>
+        </section>
+
+        <section class="void-thread-replies" aria-labelledby="threadRepliesTitle">
+          <div class="void-thread-section-header">
+            <div>
+              <p class="thread-label">Conversation</p>
+              <h2 id="threadRepliesTitle">Replies</h2>
+            </div>
+            <span class="thread-count-pill" id="threadReplyPill">0 replies</span>
+          </div>
+          <div id="threadList" class="feed-list thread-feed-list void-thread-list"></div>
+        </section>
       </div>
     </section>
   </main>

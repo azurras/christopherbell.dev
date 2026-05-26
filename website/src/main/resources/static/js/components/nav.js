@@ -15,6 +15,11 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+/** Resolve the Messages nav target while preserving post-login return behavior. */
+export function messagesNavHref(isAuthenticated) {
+    return isAuthenticated ? '/messages' : loginRedirectUrl('/messages');
+}
+
 class AppNav extends HTMLElement {
     /** Lifecycle hook: mount component and subscribe to auth changes. */
     connectedCallback() {
@@ -138,6 +143,7 @@ class AppNav extends HTMLElement {
         const storedName = (localStorage.getItem('cbellUsername') || '').trim();
         const initials = storedName ? storedName[0].toUpperCase() : 'C';
         const loginHref = loginRedirectUrl();
+        const messagesHref = messagesNavHref(isAuthenticated);
         const profileHref = isAuthenticated ? '/profile' : loginHref;
         const isAdmin = (localStorage.getItem('cbellRole') || '') === 'ADMIN';
         const unread = Number(this.unreadNotifications || 0);
@@ -151,8 +157,8 @@ class AppNav extends HTMLElement {
         <div class="navbar-collapse collapse" id="navbarSupportedContent">
             <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                 <li class="nav-item"><a href="/void" class="nav-link">Void</a></li>
+                <li class="nav-item"><a href="${messagesHref}" class="nav-link">Messages</a></li>
                 <li class="nav-item"><a href="/wfl" class="nav-link">What's For Lunch</a></li>
-                ${isAuthenticated ? `<li class="nav-item"><a href="/messages" class="nav-link">Messages</a></li>` : ''}
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" id="toolsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">Tools</a>
                     <ul class="dropdown-menu tools-menu" aria-labelledby="toolsDropdown">

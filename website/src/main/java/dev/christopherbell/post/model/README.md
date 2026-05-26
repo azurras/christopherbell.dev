@@ -21,6 +21,9 @@ Owns Void post persistence and API records.
 - Thread roots store reply-like extension counts separately from their own
   visible like counts so reply engagement can extend parent lifespan without
   falsifying the root post's likes.
+- Reply count is computed from `rootId` and `parentId` when expiration is
+  refreshed. It is not stored on `Post`, which keeps reply creation and subtree
+  deletion from drifting a denormalized counter.
 
 ## Update This Doc
 
