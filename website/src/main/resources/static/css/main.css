@@ -3156,6 +3156,51 @@ body {
     color: #ffffff;
 }
 
+.void-messages-page {
+    background:
+        radial-gradient(circle at 18% 8%, rgba(222, 177, 95, 0.12), transparent 24rem),
+        radial-gradient(circle at 82% 16%, rgba(117, 202, 185, 0.14), transparent 28rem),
+        linear-gradient(180deg, #081018 0%, #101820 42%, #070b10 100%);
+    min-height: 100vh;
+}
+
+.void-messages-shell {
+    padding: clamp(0.85rem, 2vw, 1.5rem) 0 clamp(2rem, 5vw, 4rem);
+}
+
+.void-messages-container {
+    width: min(100% - 1.5rem, 1180px);
+    margin: 0 auto;
+}
+
+.void-messages-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    border: 1px solid rgba(128, 190, 185, 0.18);
+    border-radius: 0.5rem;
+    background: rgba(7, 12, 18, 0.76);
+    box-shadow: 0 22px 58px rgba(0, 0, 0, 0.32);
+    margin-bottom: 1rem;
+    padding: clamp(1rem, 3vw, 1.35rem);
+}
+
+.void-messages-header h1 {
+    color: #edf4f5;
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 950;
+    letter-spacing: 0;
+    line-height: 0.95;
+    margin: 0;
+}
+
+.void-messages-header p:last-child {
+    color: rgba(201, 216, 221, 0.72);
+    font-weight: 800;
+    margin: 0.5rem 0 0;
+}
+
 .messages-shell {
     display: grid;
     grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
@@ -3237,6 +3282,16 @@ body {
     background: #fffdf8;
 }
 
+.conversation-row.is-unread {
+    border-left-color: #be123c;
+    background: #fff7f8;
+}
+
+.conversation-row.is-unread .conversation-main strong,
+.conversation-row.is-unread .conversation-main small {
+    font-weight: 900;
+}
+
 .conversation-avatar {
     width: 40px;
     height: 40px;
@@ -3262,24 +3317,8 @@ body {
 }
 
 .conversation-main small,
-.conversation-meta small,
 .conversation-empty {
     color: #6b7280;
-}
-
-.conversation-meta {
-    display: grid;
-    justify-items: end;
-    gap: 0.25rem;
-    min-width: 0;
-    max-width: 8.5rem;
-}
-
-.conversation-meta small {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .conversation-unread {
@@ -3363,6 +3402,142 @@ body {
     flex-wrap: wrap;
     gap: 1rem;
     margin-top: 0.75rem;
+}
+
+.void-messages-bridge {
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+}
+
+.void-messages-page .messages-panel {
+    border-color: rgba(128, 190, 185, 0.2);
+    background: rgba(7, 12, 18, 0.78);
+    box-shadow: 0 22px 58px rgba(0, 0, 0, 0.34);
+    color: #e6edf2;
+}
+
+.void-messages-rail .messages-panel {
+    border-radius: 1rem 0.35rem 0.35rem 1rem;
+}
+
+.void-messages-thread {
+    border-radius: 0.35rem 1rem 1rem 0.35rem;
+}
+
+.void-messages-page .messages-panel-header {
+    border-color: rgba(128, 190, 185, 0.16);
+}
+
+.void-messages-page .messages-panel-header h2 {
+    color: #edf4f5;
+}
+
+.void-messages-page .profile-label,
+.void-messages-page .form-label,
+.void-messages-page .conversation-main small,
+.void-messages-page .conversation-empty {
+    color: rgba(201, 216, 221, 0.68);
+}
+
+.void-messages-page .message-new-form {
+    border-color: rgba(128, 190, 185, 0.16);
+}
+
+.void-messages-page .input-group-text,
+.void-messages-page .message-new-form .form-control,
+.void-messages-page .message-form .form-control {
+    border-color: rgba(128, 190, 185, 0.22);
+    background: rgba(4, 9, 14, 0.68);
+    color: #edf4f5;
+}
+
+.void-messages-page .message-new-form .form-control::placeholder,
+.void-messages-page .message-form .form-control::placeholder {
+    color: rgba(201, 216, 221, 0.52);
+}
+
+.void-messages-page .message-new-form .form-control:focus,
+.void-messages-page .message-form .form-control:focus {
+    border-color: #75cab9;
+    box-shadow: 0 0 0 0.2rem rgba(117, 202, 185, 0.15);
+}
+
+.void-messages-page .conversation-row {
+    border-color: rgba(128, 190, 185, 0.16);
+    background: rgba(4, 9, 14, 0.6);
+    color: #e6edf2;
+}
+
+.void-messages-page .conversation-row:hover,
+.void-messages-page .conversation-row:focus-visible,
+.void-messages-page .conversation-row.active {
+    border-left-color: #75cab9;
+    background: linear-gradient(90deg, rgba(117, 202, 185, 0.15), rgba(4, 9, 14, 0.72));
+}
+
+.void-messages-page .conversation-row.is-unread {
+    border-color: rgba(222, 177, 95, 0.42);
+    border-left-color: #deb15f;
+    background: linear-gradient(90deg, rgba(222, 177, 95, 0.18), rgba(4, 9, 14, 0.74));
+    box-shadow: inset 0 0 0 1px rgba(222, 177, 95, 0.08);
+}
+
+.void-messages-page .conversation-row.is-unread:hover,
+.void-messages-page .conversation-row.is-unread:focus-visible,
+.void-messages-page .conversation-row.is-unread.active {
+    border-left-color: #deb15f;
+    background: linear-gradient(90deg, rgba(222, 177, 95, 0.24), rgba(117, 202, 185, 0.1));
+}
+
+.void-messages-page .conversation-main strong {
+    color: #edf4f5;
+}
+
+.void-messages-page .conversation-avatar {
+    border-radius: 999px;
+    background: linear-gradient(135deg, #75cab9, #deb15f);
+    color: #061016;
+    box-shadow: 0 0 0 4px rgba(8, 16, 22, 0.72);
+}
+
+.void-messages-page .conversation-unread {
+    background: #75cab9;
+    color: #061016;
+}
+
+.void-messages-page .message-list {
+    scrollbar-color: rgba(117, 202, 185, 0.44) rgba(4, 9, 14, 0.62);
+}
+
+.void-messages-page .message-bubble {
+    border-color: rgba(128, 190, 185, 0.22);
+    border-radius: 1rem 1rem 1rem 0.25rem;
+    background: rgba(12, 21, 27, 0.9);
+    color: #edf4f5;
+}
+
+.void-messages-page .message-bubble-row.is-mine .message-bubble {
+    border-color: rgba(222, 177, 95, 0.28);
+    border-radius: 1rem 1rem 0.25rem 1rem;
+    background: rgba(222, 177, 95, 0.14);
+}
+
+.void-messages-page .message-bubble-meta {
+    color: rgba(201, 216, 221, 0.64);
+}
+
+.void-messages-page .message-bubble p {
+    color: #edf4f5;
+}
+
+.void-messages-page .message-form {
+    border-color: rgba(128, 190, 185, 0.16);
+}
+
+.void-messages-page .feed-empty-state {
+    border-color: rgba(128, 190, 185, 0.18);
+    background: rgba(4, 9, 14, 0.62);
+    box-shadow: none;
+    color: #edf4f5;
 }
 
 .thread-layout {
@@ -3473,6 +3648,343 @@ body {
     color: #17202a;
 }
 
+.void-thread-page {
+    background:
+        radial-gradient(circle at 74% 0%, rgba(117, 202, 185, 0.14), transparent 28rem),
+        linear-gradient(180deg, #081018 0%, #101820 42%, #070b10 100%);
+    min-height: 100vh;
+}
+
+.void-thread-shell {
+    padding: clamp(0.75rem, 2vw, 1.25rem) 0 clamp(2rem, 5vw, 4rem);
+}
+
+.void-thread-container {
+    width: min(100%, 720px);
+    margin: 0 auto;
+    border-inline: 1px solid rgba(128, 190, 185, 0.16);
+    background: rgba(7, 12, 18, 0.74);
+    min-height: calc(100vh - 4rem);
+}
+
+.void-thread-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: grid;
+    grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    align-items: center;
+    border-bottom: 1px solid rgba(128, 190, 185, 0.16);
+    background: rgba(7, 12, 18, 0.9);
+    backdrop-filter: blur(14px);
+    padding: 0.75rem 1rem;
+}
+
+.void-thread-back {
+    display: grid;
+    place-items: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border: 1px solid rgba(158, 225, 210, 0.34);
+    border-radius: 999px;
+    color: #9ee1d2;
+    font-size: 1.15rem;
+    font-weight: 900;
+    text-decoration: none;
+}
+
+.void-thread-back:hover,
+.void-thread-back:focus-visible {
+    background: rgba(117, 202, 185, 0.14);
+    color: #edf4f5;
+}
+
+.void-thread-heading {
+    min-width: 0;
+}
+
+.void-thread-heading h1 {
+    color: #edf4f5;
+    font-size: 1.05rem;
+    font-weight: 900;
+    margin: 0;
+}
+
+.void-thread-heading p {
+    color: rgba(201, 216, 221, 0.68);
+    font-size: 0.82rem;
+    font-weight: 800;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.void-thread-focus {
+    border-bottom: 1px solid rgba(128, 190, 185, 0.18);
+}
+
+.void-thread-focus .thread-root-body {
+    gap: 0;
+}
+
+.void-thread-focus .thread-context-stack {
+    gap: 0;
+}
+
+.void-thread-focus .thread-context-stack::before {
+    display: none;
+}
+
+.void-context-echo {
+    display: grid;
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    gap: 0.75rem;
+    border-bottom: 1px solid rgba(128, 190, 185, 0.12);
+    color: inherit;
+    padding: 0.8rem 1rem;
+    text-decoration: none;
+}
+
+.void-context-echo:hover,
+.void-context-echo:focus-visible {
+    background: rgba(117, 202, 185, 0.08);
+    color: inherit;
+}
+
+.void-context-line {
+    justify-self: center;
+    width: 2px;
+    min-height: 3rem;
+    background: linear-gradient(180deg, rgba(222, 177, 95, 0.1), rgba(158, 225, 210, 0.55));
+}
+
+.void-context-copy {
+    display: grid;
+    gap: 0.18rem;
+    min-width: 0;
+}
+
+.void-context-label,
+.void-context-handle {
+    color: rgba(222, 177, 95, 0.76);
+    font-size: 0.75rem;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.void-context-handle {
+    color: rgba(201, 216, 221, 0.68);
+    text-transform: none;
+}
+
+.void-context-text {
+    color: rgba(237, 244, 245, 0.78);
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
+.void-shell-page .void-thread-selected-post,
+.void-thread-selected-post {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: clamp(1rem, 3vw, 1.25rem);
+}
+
+.void-shell-page .void-thread-selected-post:hover,
+.void-shell-page .void-thread-selected-post:focus-within,
+.void-thread-selected-post:hover,
+.void-thread-selected-post:focus-within {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    transform: none;
+}
+
+.void-thread-selected-post .post-body {
+    font-size: clamp(1.18rem, 2.6vw, 1.55rem);
+    line-height: 1.38;
+}
+
+.void-thread-page .post-shell {
+    background:
+        linear-gradient(135deg, rgba(20, 39, 45, 0.24), transparent 44%),
+        repeating-linear-gradient(90deg, rgba(222, 177, 95, 0.025) 0 1px, transparent 1px 42px);
+}
+
+.void-thread-page .post-avatar {
+    background: linear-gradient(135deg, #1d383e, #6c4e36);
+    box-shadow: 0 0 0 5px rgba(8, 16, 22, 0.96);
+}
+
+.void-thread-page .post-handle,
+.void-thread-page .post-expand-btn {
+    color: #9ee1d2;
+}
+
+.void-thread-page .post-handle:hover,
+.void-thread-page .post-expand-btn:hover,
+.void-thread-page .post-expand-btn:focus-visible {
+    color: #cff4eb;
+}
+
+.void-thread-page .post-author small,
+.void-thread-page .post-meta {
+    color: rgba(201, 216, 221, 0.66);
+}
+
+.void-thread-page .post-actions {
+    border-color: rgba(128, 190, 185, 0.18);
+}
+
+.void-thread-page .post-menu-btn,
+.void-thread-page .post-action {
+    background: rgba(4, 9, 14, 0.68);
+    border-color: rgba(128, 190, 185, 0.22);
+    color: rgba(230, 237, 242, 0.82);
+}
+
+.void-thread-page .post-action:hover,
+.void-thread-page .post-action:focus-visible {
+    background: rgba(117, 202, 185, 0.15);
+    border-color: rgba(117, 202, 185, 0.42);
+    color: #ffffff;
+}
+
+.void-thread-page .post-link-preview {
+    background: rgba(4, 9, 14, 0.56);
+    border-color: rgba(128, 190, 185, 0.22);
+    color: #edf4f5;
+}
+
+.void-thread-page .post-link-preview-domain,
+.void-thread-page .post-link-preview-description {
+    color: #9db0b9;
+}
+
+.void-thread-page .post-link-preview-title {
+    color: #edf4f5;
+}
+
+.void-thread-composer {
+    display: grid;
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+    gap: 0.75rem;
+    border-bottom: 1px solid rgba(128, 190, 185, 0.16);
+    padding: 0.9rem 1rem;
+}
+
+.void-thread-composer-avatar {
+    display: grid;
+    place-items: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #75cab9, #deb15f);
+    color: #061016;
+    font-weight: 950;
+}
+
+.void-thread-composer-main {
+    min-width: 0;
+}
+
+.void-thread-composer .form-control {
+    border: 1px solid rgba(128, 190, 185, 0.22);
+    border-radius: 0.75rem;
+    background: rgba(4, 9, 14, 0.64);
+    color: #edf4f5;
+}
+
+.void-thread-composer .form-control::placeholder {
+    color: rgba(201, 216, 221, 0.52);
+}
+
+.void-thread-composer .form-control:focus {
+    border-color: #75cab9;
+    box-shadow: 0 0 0 0.2rem rgba(117, 202, 185, 0.15);
+}
+
+.void-thread-composer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.65rem;
+}
+
+.void-thread-composer-actions span {
+    color: rgba(201, 216, 221, 0.66);
+    font-size: 0.82rem;
+    font-weight: 800;
+}
+
+.void-thread-replies {
+    min-width: 0;
+}
+
+.void-thread-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    border-bottom: 1px solid rgba(128, 190, 185, 0.16);
+    padding: 0.9rem 1rem;
+}
+
+.void-thread-section-header h2 {
+    color: #edf4f5;
+    font-size: 1rem;
+    font-weight: 900;
+    margin: 0;
+}
+
+.void-thread-list {
+    gap: 0;
+}
+
+.void-thread-list::before {
+    left: 2.45rem;
+    top: 1rem;
+    bottom: 1rem;
+    background: linear-gradient(180deg, rgba(117, 202, 185, 0), rgba(117, 202, 185, 0.34), rgba(222, 177, 95, 0.18), rgba(117, 202, 185, 0));
+}
+
+.void-shell-page .void-thread-list .post-item,
+.void-thread-list .post-item {
+    border: 0;
+    border-bottom: 1px solid rgba(128, 190, 185, 0.14);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: #e6edf2;
+    padding: 1rem;
+}
+
+.void-shell-page .void-thread-list .post-item:hover,
+.void-shell-page .void-thread-list .post-item:focus-within,
+.void-thread-list .post-item:hover,
+.void-thread-list .post-item:focus-within {
+    background: rgba(117, 202, 185, 0.08);
+    border-color: rgba(128, 190, 185, 0.2);
+    box-shadow: none;
+    transform: none;
+}
+
+.void-thread-list .thread-empty-state {
+    border: 0;
+    border-bottom: 1px solid rgba(128, 190, 185, 0.14);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: #edf4f5;
+    padding: 1rem;
+}
+
 @keyframes postInserted {
     0% {
         box-shadow: 0 0 0 0 rgba(37, 58, 92, 0.28);
@@ -3526,8 +4038,42 @@ body {
 }
 
 @media (max-width: 768px) {
+    .void-thread-container {
+        border-inline: 0;
+        min-height: 100vh;
+    }
+
+    .void-thread-topbar {
+        grid-template-columns: 2.25rem minmax(0, 1fr);
+    }
+
+    .void-thread-topbar .thread-status-pill {
+        grid-column: 2;
+        justify-self: start;
+    }
+
+    .void-thread-section-header,
+    .void-thread-composer-actions {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
     .thread-layout {
         grid-template-columns: 1fr;
+    }
+
+    .void-messages-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .void-messages-bridge {
+        grid-template-columns: 1fr;
+    }
+
+    .void-messages-rail .messages-panel,
+    .void-messages-thread {
+        border-radius: 0.5rem;
     }
 
     .message-bubble {
@@ -3538,10 +4084,9 @@ body {
         grid-template-columns: auto minmax(0, 1fr);
     }
 
-    .conversation-meta {
+    .conversation-unread {
         grid-column: 2;
-        justify-items: start;
-        max-width: 100%;
+        justify-self: start;
     }
 
     .thread-side {
@@ -3581,6 +4126,11 @@ body {
         display: none;
     }
 
+    .void-thread-list::before {
+        display: block;
+        left: 2.1rem;
+    }
+
     .post-shell {
         grid-template-columns: 1fr;
         gap: 0;
@@ -3588,6 +4138,19 @@ body {
 
     .post-avatar {
         display: none;
+    }
+
+    .void-thread-list .post-shell,
+    .void-thread-selected-post .post-shell {
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 0.75rem;
+    }
+
+    .void-thread-list .post-avatar,
+    .void-thread-selected-post .post-avatar {
+        display: inline-flex;
+        width: 40px;
+        height: 40px;
     }
 
     .post-author {
@@ -3606,6 +4169,14 @@ body {
 }
 
 @media (max-width: 576px) {
+    .void-messages-container {
+        width: min(100% - 0.75rem, 1180px);
+    }
+
+    .void-messages-page .message-bubble {
+        width: min(90%, 620px);
+    }
+
     .feed-list {
         gap: 0.7rem;
     }

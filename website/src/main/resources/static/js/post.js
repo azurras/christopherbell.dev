@@ -1,4 +1,4 @@
-import { appendTextWithMentionLinks, sanitize, authHeaders, fetchJson, isLoggedIn, formatWhen, closeOnOutside } from './lib/util.js';
+import { sanitize, authHeaders, fetchJson, isLoggedIn, formatWhen, closeOnOutside } from './lib/util.js';
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
 import { makeRendererContext, canDeleteFor } from './lib/feed-context.js';
@@ -20,10 +20,6 @@ function statusFor(post) {
 
 function renderThreadSummary(post, directReplies) {
   const author = post.username ? `@${post.username}` : '@user';
-  appendTextWithMentionLinks(document.getElementById('threadAuthor'), author);
-  setText('threadCreated', formatWhen(post.createdOn || post.lastUpdatedOn));
-  setText('threadReplyCount', String(directReplies.length));
-  setText('threadLikeCount', String(post.likesCount || 0));
   setText('threadReplyPill', `${directReplies.length} ${directReplies.length === 1 ? 'reply' : 'replies'}`);
 
   const status = statusFor(post);
@@ -34,12 +30,11 @@ function renderThreadSummary(post, directReplies) {
   }
 
   const heroTitle = document.getElementById('postHeroTitle');
-  if (heroTitle) heroTitle.textContent = `${author}'s post`;
+  if (heroTitle) heroTitle.textContent = 'Post';
+
   const heroMeta = document.getElementById('postHeroMeta');
   if (heroMeta) {
-    heroMeta.textContent = directReplies.length > 0
-      ? `${directReplies.length} ${directReplies.length === 1 ? 'reply' : 'replies'} in this conversation.`
-      : 'No replies yet. Start the conversation from the post actions.';
+    heroMeta.textContent = `${author} · ${directReplies.length} ${directReplies.length === 1 ? 'reply' : 'replies'}`;
   }
 }
 
@@ -64,14 +59,14 @@ function renderExpiredRootState(root) {
 
 function contextCard(kind, postId) {
   return `
-    <div class="thread-context-card" data-context-kind="${kind}">
-      <div>
-        <span>${kind === 'root' ? 'Thread root' : 'In reply to'}</span>
-        <a href="/u/" data-context-handle>@user</a>
-      </div>
-      <p data-context-text>Loading context...</p>
-      <a href="/p/${encodeURIComponent(postId)}">View ${kind === 'root' ? 'root' : 'parent'}</a>
-    </div>`;
+    <a class="void-context-echo" href="/p/${encodeURIComponent(postId)}" data-context-kind="${kind}">
+      <span class="void-context-line" aria-hidden="true"></span>
+      <span class="void-context-copy">
+        <span class="void-context-label">${kind === 'root' ? 'Thread root' : 'In reply to'}</span>
+        <span class="void-context-handle" data-context-handle>@user</span>
+        <span class="void-context-text" data-context-text>Loading context...</span>
+      </span>
+    </a>`;
 }
 
 async function fillContext(root, kind, postId) {
@@ -83,9 +78,8 @@ async function fillContext(root, kind, postId) {
     if (handleEl) {
       const username = context.username || '';
       handleEl.textContent = username ? `@${username}` : '@user';
-      handleEl.setAttribute('href', `/u/${encodeURIComponent(username)}`);
     }
-    appendTextWithMentionLinks(textEl, context.text || '');
+    if (textEl) textEl.textContent = context.text || '';
   } catch (_) {
     const textEl = root.querySelector(`[data-context-kind="${kind}"] [data-context-text]`);
     if (textEl) textEl.textContent = 'Context unavailable';
@@ -122,7 +116,9 @@ function renderRoot(post, currentUser) {
     suppressParentContext: true,
     onExpire: () => renderExpiredRootState(root)
   });
-  root.appendChild(createFeedItem(post, ctx));
+  const focusedPost = createFeedItem(post, ctx);
+  focusedPost.classList.add('void-thread-selected-post');
+  root.appendChild(focusedPost);
 
   if (post.parentId) {
     fillContext(root, 'parent', post.parentId);
@@ -130,6 +126,53 @@ function renderRoot(post, currentUser) {
 
   if (post.rootId && post.rootId !== post.id && post.rootId !== post.parentId) {
     fillContext(root, 'root', post.rootId);
+  }
+}
+
+function showReplyComposer(currentUser) {
+  const composer = document.getElementById('replyComposer');
+  const meta = document.getElementById('replyComposerMeta');
+  if (!composer) return;
+
+  composer.classList.remove('d-none');
+  if (meta) {
+    meta.textContent = currentUser ? 'Replies extend the signal.' : 'Log in to reply.';
+  }
+
+  const replyButton = document.getElementById('replyBtn');
+  const replyText = document.getElementById('replyText');
+  if (!currentUser) {
+    replyText?.setAttribute('disabled', 'disabled');
+    replyButton?.setAttribute('disabled', 'disabled');
+  } else {
+    replyText?.removeAttribute('disabled');
+    replyButton?.removeAttribute('disabled');
+  }
+}
+
+async function submitReply(parentId) {
+  const replyText = document.getElementById('replyText');
+  const replyButton = document.getElementById('replyBtn');
+  const alert = document.getElementById('postAlert');
+  const text = replyText?.value?.trim() || '';
+  if (!text) return;
+
+  replyButton?.setAttribute('disabled', 'disabled');
+  if (alert) alert.classList.add('d-none');
+  try {
+    await fetchJson(API.posts.create, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ text, parentId })
+    });
+    window.location.reload();
+  } catch (err) {
+    if (alert) {
+      alert.textContent = err.message || 'Could not post reply.';
+      alert.classList.remove('d-none');
+    }
+  } finally {
+    replyButton?.removeAttribute('disabled');
   }
 }
 
@@ -173,10 +216,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       try { me = await fetchJson(API.accounts.me, { headers: authHeaders() }); } catch (_) {}
     }
     renderRoot(post, me);
+    showReplyComposer(me);
+    document.getElementById('replyBtn')?.addEventListener('click', () => submitReply(id));
     const directReplies = renderThread(thread, me, id) || [];
     renderThreadSummary(post, directReplies);
-    // The inline reply composer is available under the root; no need to show the top card.
-    // If desired, we could still expose #replyComposer; keeping it hidden for a cleaner UI.
   } catch (err) {
     if (alert) { alert.textContent = err.message; alert.classList.remove('d-none'); }
   }

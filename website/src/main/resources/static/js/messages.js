@@ -4,6 +4,24 @@ import { appendTextWithMentionLinks, authHeaders, fetchJson, formatWhen, isLogge
 let ACTIVE_USERNAME = null;
 let CONVERSATIONS = [];
 
+export function conversationRowMarkup(conversation, activeUsername) {
+  const username = conversation.username || '';
+  const active = username === activeUsername;
+  const unread = Number(conversation.unreadCount || 0);
+  const rowClasses = ['conversation-row'];
+  if (active) rowClasses.push('active');
+  if (unread > 0) rowClasses.push('is-unread');
+  return `
+      <button class="${rowClasses.join(' ')}" type="button" data-username="${sanitize(username)}">
+        <span class="conversation-avatar">${sanitize((username || '?')[0].toUpperCase())}</span>
+        <span class="conversation-main">
+          <strong>@${sanitize(username || 'unknown')}</strong>
+          <small>${sanitize(conversation.latestText || 'No message text')}</small>
+        </span>
+        ${unread > 0 ? `<span class="conversation-unread" aria-label="${unread} unread messages">${unread > 9 ? '9+' : unread}</span>` : ''}
+      </button>`;
+}
+
 function alertBox() {
   return document.getElementById('messagesAlert');
 }
@@ -36,27 +54,11 @@ function renderConversations() {
   if (!CONVERSATIONS.length) {
     list.innerHTML = `
       <div class="conversation-empty">
-        No messages yet.
+        No signals yet. Start one with a username.
       </div>`;
     return;
   }
-  list.innerHTML = CONVERSATIONS.map(conversation => {
-    const username = conversation.username || '';
-    const active = username === ACTIVE_USERNAME;
-    const unread = Number(conversation.unreadCount || 0);
-    return `
-      <button class="conversation-row ${active ? 'active' : ''}" type="button" data-username="${sanitize(username)}">
-        <span class="conversation-avatar">${sanitize((username || '?')[0].toUpperCase())}</span>
-        <span class="conversation-main">
-          <strong>@${sanitize(username || 'unknown')}</strong>
-          <small>${sanitize(conversation.latestText || 'No message text')}</small>
-        </span>
-        <span class="conversation-meta">
-          ${unread > 0 ? `<span class="conversation-unread">${unread > 9 ? '9+' : unread}</span>` : ''}
-          <small>${conversation.lastMessageOn ? formatWhen(conversation.lastMessageOn) : ''}</small>
-        </span>
-      </button>`;
-  }).join('');
+  list.innerHTML = CONVERSATIONS.map(conversation => conversationRowMarkup(conversation, ACTIVE_USERNAME)).join('');
   list.querySelectorAll('.conversation-row').forEach(row => {
     row.addEventListener('click', () => openConversation(row.dataset.username));
   });
@@ -68,7 +70,7 @@ function renderMessages(messages) {
   if (!messages.length) {
     list.innerHTML = `
       <div class="feed-empty-state message-empty-state">
-        <h2>No messages yet</h2>
+        <h2>No signals yet</h2>
         <p>Send the first private message in this conversation.</p>
       </div>`;
     return;

@@ -9,6 +9,9 @@ Owns Void posts and feed behavior.
 - Like toggling and post expiration behavior.
 - Mention detection and notification handoff.
 - Stored rich metadata for HTTP and HTTPS links mentioned in posts.
+- The `/p/{id}` post detail page, which renders a single-column Spectral Thread
+  view for the selected post, its root/parent context, compact reply composer,
+  and direct replies.
 - Post DTOs and persistence models under `model`.
 
 ## How It Works
@@ -32,19 +35,29 @@ Owns Void posts and feed behavior.
 - Public reads tolerate anonymous callers. Missing auth only disables
   viewer-specific fields like `liked`; write operations still require a resolved
   current account.
-- Expiration is enabled by default. New posts start with a 24-hour lifespan,
-  each active like adds 24 hours from the post creation timestamp, and removing
-  a like removes that extension. Missing expiration timestamps are repaired on
-  read and during cleanup so older data remains usable.
+- Expiration is enabled by default. New root posts start with a 24-hour
+  lifespan. Root likes, every reply in the thread, and every active like on a
+  reply each add another 24 hours from the root post creation timestamp.
+  Removing a like removes that like's extension. Missing or stale expiration
+  timestamps are repaired on read and during cleanup so older data remains
+  usable.
 - Replies are stored as regular posts with `parentId`, `rootId`, and `level`.
   The root id lets thread reads avoid recursive traversal.
-- Reply expiration and deletion remove that reply subtree so descendants do not
-  survive a missing parent. Likes on replies also extend the thread root
-  lifespan by 24 hours per active reply like.
+- Replies inherit the thread root expiration so every nested reply lives exactly
+  as long as the parent thread. Reads repair older reply documents that still
+  carry their own shorter expiration. Any reply creation or like change that
+  extends or shortens the root lifespan synchronizes that expiration across the
+  full reply tree. Reply deletion still removes that reply subtree so descendants
+  do not survive a missing parent.
 - Post creation extracts each distinct HTTP or HTTPS URL from text and stores
   fetched link preview metadata on the post. A preview fetch failure leaves the
   post intact; shared browser rendering still makes the raw URL clickable.
+- Post detail pages reuse the shared feed renderer so actions, author links,
+  link previews, expiration state, and delete permissions stay consistent with
+  feed cards. Page-specific JavaScript adds quieter root/parent "context echoes"
+  above the selected post and highlights the selected post without changing the
+  API contract.
 
 ## Update This Doc
 
-Update this README when feed ordering, expiration rules, reply/thread behavior, mention behavior, or post API contracts change.
+Update this README when feed ordering, expiration rules, reply/thread behavior, mention behavior, post detail rendering, or post API contracts change.

@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -22,6 +23,7 @@ import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -198,6 +200,100 @@ public class PostServiceTest {
   }
 
   @Test
+  @DisplayName("Create reply extends the thread root expiration")
+  public void testCreatePost_whenReply_ExtendsThreadRootExpiration() throws Exception {
+    var existing = AccountServiceStub.getAccountWhenExistsStub();
+    var service = spy(postService);
+    doReturn(existing.getId()).when(service).getSelfId();
+    when(accountRepository.findById(eq(existing.getId()))).thenReturn(Optional.of(existing));
+
+    var rootCreated = Instant.now().minus(Duration.ofHours(2));
+    var rootExpiration = rootCreated.plus(Duration.ofHours(24));
+    var root = Post.builder()
+        .id("root")
+        .rootId("root")
+        .accountId("other")
+        .text("root")
+        .createdOn(rootCreated)
+        .lastUpdatedOn(rootCreated)
+        .expiresOn(rootExpiration)
+        .build();
+    var savedPosts = new ArrayList<Post>();
+    when(postRepository.findById(eq("root"))).thenReturn(Optional.of(root));
+    when(postRepository.save(any(Post.class))).thenAnswer(invocation -> {
+      Post saved = invocation.getArgument(0);
+      savedPosts.add(saved);
+      return saved;
+    });
+    when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root")))
+        .thenAnswer(invocation -> savedPosts.stream()
+            .filter(this::isReply)
+            .collect(() -> new ArrayList<>(List.of(root)), ArrayList::add, ArrayList::addAll));
+    when(postMapper.toDetail(any(Post.class))).thenReturn(PostDetail.builder().id("reply").build());
+
+    service.createPost(PostCreateRequest.builder().text("reply").parentId("root").build());
+
+    var reply = savedPosts.stream().filter(this::isReply).findFirst().orElseThrow();
+    var expectedExpiration = rootCreated.plus(Duration.ofHours(48));
+    assertEquals(expectedExpiration, root.getExpiresOn());
+    assertEquals(expectedExpiration, reply.getExpiresOn());
+  }
+
+  @Test
+  @DisplayName("Create nested reply extends the thread root expiration")
+  public void testCreatePost_whenNestedReply_ExtendsThreadRootExpiration() throws Exception {
+    var existing = AccountServiceStub.getAccountWhenExistsStub();
+    var service = spy(postService);
+    doReturn(existing.getId()).when(service).getSelfId();
+    when(accountRepository.findById(eq(existing.getId()))).thenReturn(Optional.of(existing));
+
+    var rootCreated = Instant.now().minus(Duration.ofHours(3));
+    var root = Post.builder()
+        .id("root")
+        .rootId("root")
+        .accountId("other")
+        .text("root")
+        .createdOn(rootCreated)
+        .lastUpdatedOn(rootCreated)
+        .expiresOn(rootCreated.plus(Duration.ofHours(48)))
+        .build();
+    var child = Post.builder()
+        .id("child")
+        .rootId("root")
+        .parentId("root")
+        .accountId("other")
+        .text("child")
+        .createdOn(rootCreated.plus(Duration.ofMinutes(10)))
+        .lastUpdatedOn(rootCreated.plus(Duration.ofMinutes(10)))
+        .expiresOn(rootCreated.plus(Duration.ofHours(48)))
+        .build();
+    var savedPosts = new ArrayList<Post>();
+    when(postRepository.findById(eq("child"))).thenReturn(Optional.of(child));
+    when(postRepository.findById(eq("root"))).thenReturn(Optional.of(root));
+    when(postRepository.save(any(Post.class))).thenAnswer(invocation -> {
+      Post saved = invocation.getArgument(0);
+      savedPosts.add(saved);
+      return saved;
+    });
+    when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root")))
+        .thenAnswer(invocation -> savedPosts.stream()
+            .filter(this::isReply)
+            .collect(() -> new ArrayList<>(List.of(root, child)), ArrayList::add, ArrayList::addAll));
+    when(postMapper.toDetail(any(Post.class))).thenReturn(PostDetail.builder().id("grandchild").build());
+
+    service.createPost(PostCreateRequest.builder().text("grandchild").parentId("child").build());
+
+    var grandchild = savedPosts.stream()
+        .filter(post -> "child".equals(post.getParentId()))
+        .findFirst()
+        .orElseThrow();
+    var expectedExpiration = rootCreated.plus(Duration.ofHours(72));
+    assertEquals(expectedExpiration, root.getExpiresOn());
+    assertEquals(expectedExpiration, child.getExpiresOn());
+    assertEquals(expectedExpiration, grandchild.getExpiresOn());
+  }
+
+  @Test
   @DisplayName("GetMy: returns mapped list")
   public void testGetMyPosts_whenSome_ReturnsList() throws Exception {
     var existing = AccountServiceStub.getAccountWhenExistsStub();
@@ -258,6 +354,7 @@ public class PostServiceTest {
 
     verify(accountRepository).findById(eq(existing.getId()));
     verify(postRepository).findByAccountIdOrderByCreatedOnDesc(eq(existing.getId()));
+    verify(postRepository, atLeastOnce()).findByRootIdOrderByCreatedOnAsc(eq("p1"));
     verify(postRepository).save(eq(p1));
     verify(postMapper).toDetail(eq(p1));
     verifyNoMoreInteractions(accountRepository, postRepository, postMapper);
@@ -335,11 +432,65 @@ public class PostServiceTest {
     when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
     when(accountRepository.findById(eq(author.getId()))).thenReturn(Optional.of(author));
     when(postRepository.countByParentId(eq("reply"))).thenReturn(0L);
+    when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root"))).thenReturn(List.of(root, reply));
 
     service.toggleLike("reply");
 
-    assertEquals(rootCreated.plus(Duration.ofHours(48)), root.getExpiresOn());
-    verify(postRepository).save(eq(root));
+    assertEquals(rootCreated.plus(Duration.ofHours(72)), root.getExpiresOn());
+    assertEquals(rootCreated.plus(Duration.ofHours(72)), reply.getExpiresOn());
+    verify(postRepository, atLeastOnce()).save(eq(root));
+  }
+
+  @Test
+  @DisplayName("Toggle like on root synchronizes deep reply expiration")
+  public void testToggleLike_whenRootLiked_SynchronizesNestedReplyExpiration() throws Exception {
+    var author = Account.builder().id("author").username("author").build();
+    var service = spy(postService);
+    doReturn("liker").when(service).getSelfId();
+    var rootCreated = Instant.now().minus(Duration.ofHours(2));
+    var originalExpiration = rootCreated.plus(Duration.ofHours(24));
+    var root = Post.builder()
+        .id("root")
+        .rootId("root")
+        .accountId(author.getId())
+        .createdOn(rootCreated)
+        .lastUpdatedOn(rootCreated)
+        .likedBy(new HashSet<>())
+        .likesCount(0)
+        .expiresOn(originalExpiration)
+        .build();
+    var child = Post.builder()
+        .id("child")
+        .rootId("root")
+        .parentId("root")
+        .accountId(author.getId())
+        .createdOn(rootCreated.plus(Duration.ofMinutes(10)))
+        .lastUpdatedOn(rootCreated.plus(Duration.ofMinutes(10)))
+        .expiresOn(originalExpiration)
+        .build();
+    var grandchild = Post.builder()
+        .id("grandchild")
+        .rootId("root")
+        .parentId("child")
+        .accountId(author.getId())
+        .createdOn(rootCreated.plus(Duration.ofMinutes(20)))
+        .lastUpdatedOn(rootCreated.plus(Duration.ofMinutes(20)))
+        .expiresOn(originalExpiration)
+        .build();
+    when(postRepository.findById(eq("root"))).thenReturn(Optional.of(root));
+    when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(accountRepository.findById(eq(author.getId()))).thenReturn(Optional.of(author));
+    when(postRepository.countByParentId(eq("root"))).thenReturn(1L);
+    when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root"))).thenReturn(List.of(root, child, grandchild));
+
+    service.toggleLike("root");
+
+    var expectedExpiration = rootCreated.plus(Duration.ofHours(96));
+    assertEquals(expectedExpiration, root.getExpiresOn());
+    assertEquals(expectedExpiration, child.getExpiresOn());
+    assertEquals(expectedExpiration, grandchild.getExpiresOn());
+    verify(postRepository, atLeastOnce()).save(eq(child));
+    verify(postRepository, atLeastOnce()).save(eq(grandchild));
   }
 
   @Test
@@ -452,5 +603,9 @@ public class PostServiceTest {
     assertEquals(1, result.size());
     assertEquals("p1", result.get(0).id());
     assertEquals("followed", result.get(0).username());
+  }
+
+  private boolean isReply(Post post) {
+    return post != null && post.getParentId() != null && !post.getParentId().isBlank();
   }
 }

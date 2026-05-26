@@ -15,12 +15,21 @@ Owns site styling for server-rendered pages and frontend components.
 - Current templates should use `main.css` unless they are intentionally part of a
   legacy area.
 - Shared components and page modules rely on stable class names in `main.css`.
+- Messages uses `.void-messages-*` classes in `main.css` for the Signal Bridge
+  layout: dark conversation rail, private thread panel, directional message
+  bubbles, unread conversation highlighting, and responsive one-column behavior.
 - WFL uses shared lunch classes for picks, restaurant profiles, favorites, and
   top-rated lists, plus `wfl-secondary-nav` for local WFL navigation and
   `lunch-controls` for the filters, location, and Lunch with Friends control tabs.
 - Void-related templates opt into `void-shell-page`; `main.css` owns the Lost
   Signal shell, Void-aware nav/footer treatment, shared lifespan countdown
   styling, rich post link preview cards, and expiry motion for those pages.
+- The `/p/{id}` post detail page adds the `void-thread-*` class family for the
+  Spectral Thread layout: a centered single-column shell, sticky topbar, muted
+  root/parent context echoes, selected-post hierarchy, compact reply composer,
+  and reply timeline connector. Mobile rules intentionally restore the avatar
+  column and connector for this page after the broader feed mobile rules hide
+  them elsewhere.
 - Responsive rules live near the related component styles when possible. Broad
   page-level breakpoints are kept at the end of `main.css`.
 

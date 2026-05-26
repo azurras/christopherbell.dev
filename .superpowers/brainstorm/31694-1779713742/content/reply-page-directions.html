@@ -1,0 +1,399 @@
+<h2>Reply Page Direction</h2>
+<p class="subtitle">Three ways to make post/reply pages feel more like X/Twitter while keeping the Void identity.</p>
+
+<style>
+  .void-options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .void-option {
+    cursor: pointer;
+  }
+
+  .void-phone {
+    width: 100%;
+    min-height: 560px;
+    border: 1px solid rgba(132, 207, 191, 0.25);
+    border-radius: 18px;
+    background:
+      radial-gradient(circle at 85% 0%, rgba(117, 202, 185, 0.22), transparent 30%),
+      linear-gradient(180deg, #081018 0%, #101820 42%, #070b10 100%);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+    overflow: hidden;
+    color: #edf4f5;
+  }
+
+  .void-topbar {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) 36px;
+    align-items: center;
+    border-bottom: 1px solid rgba(132, 207, 191, 0.18);
+    padding: 12px 14px;
+    backdrop-filter: blur(12px);
+    background: rgba(8, 16, 24, 0.84);
+  }
+
+  .void-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(158, 225, 210, 0.35);
+    color: #9ee1d2;
+    font-weight: 900;
+  }
+
+  .void-title strong,
+  .void-title span {
+    display: block;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .void-title strong {
+    color: #f7fbfb;
+    font-size: 15px;
+  }
+
+  .void-title span {
+    color: rgba(201, 216, 221, 0.65);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .void-post {
+    border-bottom: 1px solid rgba(132, 207, 191, 0.16);
+    padding: 14px 16px;
+  }
+
+  .void-post.focus {
+    padding: 18px 16px 12px;
+  }
+
+  .void-user {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+  }
+
+  .void-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(135deg, #75cab9, #deb15f);
+    color: #061016;
+    font-weight: 950;
+  }
+
+  .void-name {
+    color: #f7fbfb;
+    font-size: 14px;
+    font-weight: 900;
+  }
+
+  .void-handle {
+    color: rgba(201, 216, 221, 0.62);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .void-text {
+    color: #edf4f5;
+    font-size: 16px;
+    line-height: 1.35;
+    margin: 10px 0 12px;
+  }
+
+  .void-post.focus .void-text {
+    font-size: 22px;
+    line-height: 1.32;
+  }
+
+  .void-meta,
+  .void-actions,
+  .void-context {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    color: rgba(201, 216, 221, 0.66);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .void-actions {
+    justify-content: space-between;
+    border-top: 1px solid rgba(132, 207, 191, 0.14);
+    margin-top: 12px;
+    padding-top: 10px;
+  }
+
+  .void-action {
+    color: #9ee1d2;
+  }
+
+  .void-reply {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 10px;
+    position: relative;
+  }
+
+  .void-reply::before {
+    content: "";
+    position: absolute;
+    left: 20px;
+    top: -16px;
+    bottom: calc(100% - 2px);
+    width: 2px;
+    background: linear-gradient(180deg, rgba(158, 225, 210, 0), rgba(158, 225, 210, 0.55));
+  }
+
+  .void-reply-body {
+    min-width: 0;
+  }
+
+  .void-reply-text {
+    color: #e4edf0;
+    font-size: 14px;
+    line-height: 1.35;
+    margin: 4px 0 8px;
+  }
+
+  .void-chip-row {
+    display: flex;
+    gap: 8px;
+    margin: 14px 0 0;
+  }
+
+  .void-chip {
+    border: 1px solid rgba(222, 177, 95, 0.28);
+    border-radius: 999px;
+    background: rgba(222, 177, 95, 0.12);
+    color: #f0d39b;
+    font-size: 11px;
+    font-weight: 900;
+    padding: 5px 9px;
+  }
+
+  .void-compose {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    border-bottom: 1px solid rgba(132, 207, 191, 0.16);
+    padding: 12px 16px;
+  }
+
+  .void-input {
+    border: 1px solid rgba(132, 207, 191, 0.22);
+    border-radius: 999px;
+    color: rgba(237, 244, 245, 0.64);
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .void-button {
+    border-radius: 999px;
+    background: #75cab9;
+    color: #061016;
+    font-size: 12px;
+    font-weight: 950;
+    padding: 8px 12px;
+  }
+
+  .void-split-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 110px;
+  }
+
+  .void-side {
+    border-left: 1px solid rgba(132, 207, 191, 0.16);
+    padding: 14px 10px;
+    background: rgba(4, 9, 14, 0.35);
+  }
+
+  .void-stat {
+    border-bottom: 1px solid rgba(132, 207, 191, 0.14);
+    padding: 10px 0;
+  }
+
+  .void-stat strong,
+  .void-stat span {
+    display: block;
+  }
+
+  .void-stat strong {
+    color: #edf4f5;
+    font-size: 17px;
+  }
+
+  .void-stat span {
+    color: rgba(201, 216, 221, 0.62);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .void-ghost {
+    margin: 14px 16px 0;
+    border: 1px dashed rgba(158, 225, 210, 0.26);
+    border-radius: 12px;
+    background: rgba(117, 202, 185, 0.07);
+    padding: 12px;
+    color: rgba(237, 244, 245, 0.7);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  @media (max-width: 1100px) {
+    .void-options {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<div class="void-options">
+  <div class="card void-option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="void-phone">
+        <div class="void-topbar">
+          <div class="void-icon">←</div>
+          <div class="void-title"><strong>Post</strong><span>6 replies · live signal</span></div>
+          <div class="void-icon">⋯</div>
+        </div>
+        <div class="void-post focus">
+          <div class="void-user">
+            <div class="void-avatar">C</div>
+            <div>
+              <div class="void-name">christopher</div>
+              <div class="void-handle">@cbell · 2h</div>
+            </div>
+          </div>
+          <div class="void-text">The Void should feel quiet, fast, and a little uncanny without getting in the way.</div>
+          <div class="void-meta"><span>10:42 AM</span><span>May 25, 2026</span><span>expires in 3d</span></div>
+          <div class="void-actions"><span>6 replies</span><span>11 likes</span><span class="void-action">Reply</span></div>
+        </div>
+        <div class="void-compose">
+          <div class="void-avatar" style="width:36px;height:36px;">Y</div>
+          <div class="void-input">Post your reply</div>
+          <div class="void-button">Reply</div>
+        </div>
+        <div class="void-post">
+          <div class="void-reply">
+            <div class="void-avatar">A</div>
+            <div class="void-reply-body">
+              <div><span class="void-name">alex</span> <span class="void-handle">@alex · 18m</span></div>
+              <div class="void-reply-text">This reads like Twitter, but the expiration chip makes it feel native to the Void.</div>
+              <div class="void-context"><span>↩ 2</span><span>♡ 5</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="void-post">
+          <div class="void-reply">
+            <div class="void-avatar">M</div>
+            <div class="void-reply-body">
+              <div><span class="void-name">morgan</span> <span class="void-handle">@morgan · 4m</span></div>
+              <div class="void-reply-text">Keep the linework and make the replies feel like one continuous signal.</div>
+              <div class="void-context"><span>↩ 1</span><span>♡ 3</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Pure Timeline</h3>
+      <p>Closest to X: single column, sticky-style header, big focused post, inline reply composer, replies stacked below.</p>
+    </div>
+  </div>
+
+  <div class="card void-option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="void-phone">
+        <div class="void-topbar">
+          <div class="void-icon">←</div>
+          <div class="void-title"><strong>Signal Thread</strong><span>focus + stats</span></div>
+          <div class="void-icon">⋯</div>
+        </div>
+        <div class="void-split-body">
+          <div>
+            <div class="void-post focus">
+              <div class="void-user">
+                <div class="void-avatar">C</div>
+                <div><div class="void-name">christopher</div><div class="void-handle">@cbell · 2h</div></div>
+              </div>
+              <div class="void-text">Same X backbone, but the Void stats stay visible as a quiet side rail.</div>
+              <div class="void-chip-row"><span class="void-chip">Live</span><span class="void-chip">+4d from replies</span></div>
+            </div>
+            <div class="void-compose">
+              <div class="void-avatar" style="width:36px;height:36px;">Y</div>
+              <div class="void-input">Post your reply</div>
+              <div class="void-button">Reply</div>
+            </div>
+            <div class="void-post">
+              <div class="void-reply">
+                <div class="void-avatar">S</div>
+                <div class="void-reply-body">
+                  <div><span class="void-name">sam</span> <span class="void-handle">@sam · 22m</span></div>
+                  <div class="void-reply-text">The sidebar helps explain the lifespan rules without a separate card wall.</div>
+                  <div class="void-context"><span>↩ 4</span><span>♡ 8</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="void-side">
+            <div class="void-stat"><strong>6</strong><span>Replies</span></div>
+            <div class="void-stat"><strong>11</strong><span>Likes</span></div>
+            <div class="void-stat"><strong>3d</strong><span>Signal</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Timeline + Signal Rail</h3>
+      <p>X-style thread core with a small Void rail for lifespan, replies, likes, and status. More distinctive, slightly less pure.</p>
+    </div>
+  </div>
+
+  <div class="card void-option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="void-phone">
+        <div class="void-topbar">
+          <div class="void-icon">←</div>
+          <div class="void-title"><strong>Void Thread</strong><span>context layers</span></div>
+          <div class="void-icon">⋯</div>
+        </div>
+        <div class="void-ghost">Ancestor context fades above the selected post, like an older signal still barely visible.</div>
+        <div class="void-post focus">
+          <div class="void-user">
+            <div class="void-avatar">C</div>
+            <div><div class="void-name">christopher</div><div class="void-handle">@cbell · selected</div></div>
+          </div>
+          <div class="void-text">Focused post stays Twitter-like, but context cards and replies feel more spectral.</div>
+          <div class="void-actions"><span>Thread root</span><span>11 likes</span><span class="void-action">Reply</span></div>
+        </div>
+        <div class="void-post">
+          <div class="void-reply">
+            <div class="void-avatar">J</div>
+            <div class="void-reply-body">
+              <div><span class="void-name">jules</span> <span class="void-handle">@jules · now</span></div>
+              <div class="void-reply-text">This has the most identity, but it is farther from X.</div>
+              <div class="void-context"><span>signal extended</span><span>♡ 2</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="void-ghost">More replies load as the signal resolves.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. Spectral Thread</h3>
+      <p>Most Void-forward: X-inspired focused post, but context and replies lean into fading signal and layered thread context.</p>
+    </div>
+  </div>
+</div>
