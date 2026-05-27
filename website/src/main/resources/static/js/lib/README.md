@@ -13,6 +13,8 @@ Owns reusable browser-side modules that are not tied to one page.
   previews, shared lifespan countdowns, expiry removal motion, likes, replies,
   menus, and inline reply composers.
 - `infinite.js` owns reusable cursor-based infinite scrolling.
+- `notifications.js` owns notification display text, notification routing, recent
+  dropdown limiting, and browser-notification selection helpers.
 - `util.js` contains small formatting and escaping helpers.
 
 ## How It Works

@@ -13,6 +13,7 @@ import java.security.Key;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
@@ -28,7 +29,7 @@ public class PermissionService {
 
   private static final String LOCAL_DEV_SECRET =
       "local-development-jwt-secret-change-me-at-least-32-bytes";
-  private static final long EXPIRATION_TIME = 3600_000; // 1 hour in milliseconds
+  private static final long EXPIRATION_TIME = Duration.ofDays(1).toMillis();
   private static volatile Key key = buildKey(resolveSecret(null));
 
   /**

@@ -2,6 +2,7 @@ package dev.christopherbell.message;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.UsernameSanitizer;
@@ -47,6 +48,7 @@ public class MessageService {
     }
 
     var sender = getSelfAccount();
+    ensureActiveSender(sender);
     var recipient = accountRepository
         .findByUsername(UsernameSanitizer.sanitize(request.recipientUsername()))
         .orElseThrow(() -> new ResourceNotFoundException(
@@ -145,6 +147,12 @@ public class MessageService {
 
   String getSelfId() {
     return PermissionService.getSelf();
+  }
+
+  private static void ensureActiveSender(Account sender) throws InvalidRequestException {
+    if (sender.getStatus() == AccountStatus.SUSPENDED) {
+      throw new InvalidRequestException("Suspended accounts cannot send messages.");
+    }
   }
 
   private static String conversationKey(String firstAccountId, String secondAccountId) {

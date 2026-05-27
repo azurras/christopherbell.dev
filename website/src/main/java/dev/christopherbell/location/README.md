@@ -11,10 +11,14 @@ Owns reusable Location reference data and APIs.
   refreshes Census ZIP coordinate rows by ZIP key.
 - `LocationController`, which exposes the public ZIP lookup endpoint and the
   admin Census import endpoint.
+- The `/zip-coordinates` tool page, which exposes the public lookup endpoint for
+  manual ZIP coordinate checks.
 
 ## ZIP Coordinates
 
 - `GET /api/location/zip/{zipCode}` returns one imported ZIP coordinate.
+- The Tools dropdown links to `/zip-coordinates` for a browser UI around this
+  endpoint.
 - Lookup accepts five-digit ZIP input or ZIP+4 input normalized to the first
   five digits.
 - The public payload returns source and source year because imported rows are

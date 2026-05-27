@@ -8,6 +8,8 @@ Owns back-office administration views and activity summaries.
 - Admin-facing DTOs under `model`.
 - Cross-feature moderation/admin summaries, such as reports and recent operational state.
 - Back Office work queues for reports and users.
+- Back Office user moderation actions, including approval, suspension,
+  activation, and role promotion through the account update API.
 - Back Office operations for Location Census ZIP coordinate imports, What's For
   Lunch imports/dedupe, vehicle VIN admin actions, vehicle collection state, and
   admin-only content reads.

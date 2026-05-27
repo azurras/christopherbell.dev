@@ -38,6 +38,7 @@ public class SecurityConfig {
       "/favicon.ico",
       "/profile",
       "/vin-decoder",
+      "/zip-coordinates",
       // Public read-only post APIs (method-scoped)
       "POST:/api/vehicles" + APIVersion.V20260509 + "/vin/decode",
       "GET:/api/location/zip/**",
@@ -60,6 +61,7 @@ public class SecurityConfig {
       "/forgot-password",
       "/reset-password",
       "/messages",
+      "/notifications",
       "/photos",
       "/photos/**",
       "/report",

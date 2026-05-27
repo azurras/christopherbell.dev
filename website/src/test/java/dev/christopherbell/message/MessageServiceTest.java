@@ -5,12 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.message.model.MessageCreateRequest;
@@ -68,6 +70,23 @@ public class MessageServiceTest {
         .recipientUsername("chris")
         .text("hello")
         .build()));
+  }
+
+  @Test
+  public void sendMessage_rejectsSuspendedSender() throws Exception {
+    var sender = Account.builder().id("sender").username("chris").status(AccountStatus.SUSPENDED).build();
+    var service = spy(new MessageService(messageRepository, accountRepository, notificationService));
+    doReturn(sender.getId()).when(service).getSelfId();
+
+    when(accountRepository.findById(eq(sender.getId()))).thenReturn(Optional.of(sender));
+
+    assertThrows(InvalidRequestException.class, () -> service.sendMessage(MessageCreateRequest.builder()
+        .recipientUsername("alex")
+        .text("hello")
+        .build()));
+
+    verify(messageRepository, never()).save(any(Message.class));
+    verify(notificationService, never()).createMessageNotification(any(Message.class), any(Account.class), any(Account.class));
   }
 
   @Test

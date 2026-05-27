@@ -1,6 +1,7 @@
 package dev.christopherbell.post;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.account.model.Account;
@@ -90,17 +91,22 @@ public class PostService {
     var account = accountRepository
         .findById(selfId)
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", selfId)));
+    ensureActiveAuthor(account);
     var now = Instant.now();
     // Thread metadata
     String parentId = request.parentId();
     String rootId;
     Integer level;
     Instant inheritedReplyExpiration = null;
+    Account parentAuthor = null;
     if (parentId != null && !parentId.isBlank()) {
       var parent = postRepository.findById(parentId)
           .orElseThrow(() -> new ResourceNotFoundException(
               String.format("Parent post with id %s not found.", parentId)));
       ensureActive(parent);
+      if (!account.getId().equals(parent.getAccountId())) {
+        parentAuthor = accountRepository.findById(parent.getAccountId()).orElse(null);
+      }
       rootId = parent.getRootId() != null ? parent.getRootId() : parent.getId();
       level = (parent.getLevel() != null ? parent.getLevel() : 0) + 1;
       inheritedReplyExpiration = rootExpirationFor(parent, rootId);
@@ -130,6 +136,9 @@ public class PostService {
     var saved = postRepository.save(post);
     refreshThreadRootExpirationForNewReply(saved);
     notificationService.createMentionNotifications(saved, account);
+    if (parentAuthor != null) {
+      notificationService.createPostCommentNotification(saved, account, parentAuthor);
+    }
     return postMapper.toDetail(saved);
   }
 
@@ -251,6 +260,12 @@ public class PostService {
    */
   String getSelfId() {
     return PermissionService.getSelf();
+  }
+
+  private static void ensureActiveAuthor(Account account) throws InvalidRequestException {
+    if (account.getStatus() == AccountStatus.SUSPENDED) {
+      throw new InvalidRequestException("Suspended accounts cannot create posts.");
+    }
   }
 
   /**
@@ -387,6 +402,10 @@ public class PostService {
     refreshThreadRootExpiration(threadRoot, liked ? 1 : -1);
     var author = accountRepository.findById(post.getAccountId())
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", post.getAccountId())));
+    if (liked && !selfId.equals(author.getId())) {
+      accountRepository.findById(selfId)
+          .ifPresent(actor -> notificationService.createPostLikeNotification(post, actor, author));
+    }
     return toFeedItem(post, author.getUsername(), liked ? selfId : null);
   }
 

@@ -72,6 +72,14 @@ public class NotificationService {
         .build());
   }
 
+  public void createPostLikeNotification(Post post, Account actor, Account recipient) {
+    createPostNotification(post, actor, recipient, NotificationType.LIKE);
+  }
+
+  public void createPostCommentNotification(Post reply, Account actor, Account recipient) {
+    createPostNotification(reply, actor, recipient, NotificationType.COMMENT);
+  }
+
   public void createWhatsForLunchSessionInvite(
       WhatsForLunchSession session,
       Account actor,
@@ -140,6 +148,32 @@ public class NotificationService {
       }
     }
     return usernames;
+  }
+
+  private void createPostNotification(
+      Post post,
+      Account actor,
+      Account recipient,
+      NotificationType notificationType
+  ) {
+    if (post == null || actor == null || recipient == null || notificationType == null) {
+      return;
+    }
+    if (actor.getId() != null && actor.getId().equals(recipient.getId())) {
+      return;
+    }
+
+    notificationRepository.save(Notification.builder()
+        .id(UUID.randomUUID().toString())
+        .accountId(recipient.getId())
+        .actorAccountId(actor.getId())
+        .actorUsername(actor.getUsername())
+        .postId(post.getId())
+        .postText(post.getText())
+        .notificationType(notificationType)
+        .read(false)
+        .createdOn(Instant.now())
+        .build());
   }
 
   private NotificationDetail toDetail(Notification notification) {

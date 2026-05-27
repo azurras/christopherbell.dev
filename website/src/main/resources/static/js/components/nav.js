@@ -8,6 +8,16 @@
 import pubsub from './pubsub.js';
 import { API } from '../lib/api.js';
 import { authHeaders, fetchJson, formatWhen, getAuthToken, loginRedirectUrl, sanitize } from '../lib/util.js';
+import {
+    browserNotificationsToShow,
+    notificationTargetUrl,
+    notificationText,
+    notificationTitle,
+    recentNotifications
+} from '../lib/notifications.js';
+
+const BROWSER_NOTIFICATION_SEEN_KEY = 'cbellBrowserNotificationSeenIds';
+const BROWSER_NOTIFICATION_SEEDED_KEY = 'cbellBrowserNotificationSeenSeeded';
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -18,6 +28,57 @@ function escapeHtml(text) {
 /** Resolve the Messages nav target while preserving post-login return behavior. */
 export function messagesNavHref(isAuthenticated) {
     return isAuthenticated ? '/messages' : loginRedirectUrl('/messages');
+}
+
+/** Secondary tools shown under the Tools dropdown. */
+export function toolsMenuItems() {
+    return [
+        { href: '/wfl', label: "What's For Lunch" },
+        { href: '/vin-decoder', label: 'VIN Decoder' },
+        { href: '/zip-coordinates', label: 'ZIP Coordinates' },
+    ];
+}
+
+/** Primary nav destinations shown directly in the console rail. */
+export function topLevelNavItems(isAuthenticated) {
+    return [
+        { href: '/void', label: 'Feed' },
+        { href: messagesNavHref(isAuthenticated), label: 'Messages' },
+    ];
+}
+
+/** Determine whether a nav href represents the current browser route. */
+export function isActiveNavHref(href, pathname = window.location.pathname) {
+    const currentPath = String(pathname || '/').replace(/\/+$/, '') || '/';
+    const targetPath = String(href || '').split('?')[0].replace(/\/+$/, '') || '/';
+    if (targetPath === '/void') {
+        return currentPath === '/void' || currentPath.startsWith('/p/');
+    }
+    if (targetPath === '/messages') {
+        return currentPath === '/messages';
+    }
+    return currentPath === targetPath || currentPath.startsWith(`${targetPath}/`);
+}
+
+function activeClass(href, pathname = window.location.pathname) {
+    return isActiveNavHref(href, pathname) ? ' active' : '';
+}
+
+function ariaCurrent(href, pathname = window.location.pathname) {
+    return isActiveNavHref(href, pathname) ? ' aria-current="page"' : '';
+}
+
+/** Close a nav-controlled panel and reset the trigger's expanded state. */
+export function hideNavPanel(panel, trigger, openClass = 'show', hiddenClass = '') {
+    if (panel) {
+        if (hiddenClass) {
+            panel.classList.add(hiddenClass);
+        }
+        panel.classList.remove(openClass);
+    }
+    if (trigger) {
+        trigger.setAttribute('aria-expanded', 'false');
+    }
 }
 
 class AppNav extends HTMLElement {
@@ -104,6 +165,7 @@ class AppNav extends HTMLElement {
             ]);
             this.notifications = Array.isArray(items) ? items : [];
             this.unreadNotifications = Number(unread || 0);
+            this.showBrowserNotifications(this.notifications);
             this.render();
         } catch (_) {
             // Notifications are additive UI; keep the nav usable if loading fails.
@@ -112,24 +174,83 @@ class AppNav extends HTMLElement {
         }
     }
 
+    notificationPermissionStatus() {
+        if (typeof window === 'undefined' || !('Notification' in window)) {
+            return 'unsupported';
+        }
+        return window.Notification.permission;
+    }
+
+    notificationPermissionHtml() {
+        const status = this.notificationPermissionStatus();
+        if (status === 'unsupported') {
+            return '';
+        }
+        if (status === 'granted') {
+            return '<span class="notification-browser-status">Browser alerts on</span>';
+        }
+        if (status === 'denied') {
+            return '<span class="notification-browser-status">Browser alerts blocked</span>';
+        }
+        return '<button type="button" class="notification-enable-btn">Enable browser alerts</button>';
+    }
+
+    seenBrowserNotificationIds() {
+        try {
+            return new Set(JSON.parse(localStorage.getItem(BROWSER_NOTIFICATION_SEEN_KEY) || '[]'));
+        } catch (_) {
+            return new Set();
+        }
+    }
+
+    saveSeenBrowserNotificationIds(ids) {
+        localStorage.setItem(BROWSER_NOTIFICATION_SEEN_KEY, JSON.stringify([...ids].slice(-100)));
+    }
+
+    seedBrowserNotificationIds(notifications) {
+        const ids = new Set((notifications || []).map(notification => notification.id).filter(Boolean));
+        this.saveSeenBrowserNotificationIds(ids);
+        localStorage.setItem(BROWSER_NOTIFICATION_SEEDED_KEY, 'true');
+    }
+
+    showBrowserNotifications(notifications) {
+        if (this.notificationPermissionStatus() !== 'granted') {
+            return;
+        }
+        if (localStorage.getItem(BROWSER_NOTIFICATION_SEEDED_KEY) !== 'true') {
+            this.seedBrowserNotificationIds(notifications);
+            return;
+        }
+
+        const seenIds = this.seenBrowserNotificationIds();
+        const toShow = browserNotificationsToShow(notifications, seenIds);
+        toShow.forEach(notification => {
+            seenIds.add(notification.id);
+            const alert = new window.Notification(notificationTitle(notification), {
+                body: notificationText(notification),
+                tag: notification.id,
+            });
+            alert.onclick = () => {
+                window.focus?.();
+                window.location.href = notificationTargetUrl(notification);
+                alert.close?.();
+            };
+        });
+        this.saveSeenBrowserNotificationIds(seenIds);
+    }
+
     notificationItemsHtml() {
-        const notifications = this.notifications || [];
+        const notifications = recentNotifications(this.notifications || []);
         if (notifications.length === 0) {
             return '<div class="notification-empty text-muted">No notifications</div>';
         }
         return notifications.map(notification => {
             const unread = !notification.read;
-            const actor = notification.actorUsername ? `@${sanitize(notification.actorUsername)}` : 'Someone';
-            const isMessage = notification.notificationType === 'MESSAGE';
-            const isWflSession = notification.notificationType === 'WFL_SESSION';
-            const text = escapeHtml(isWflSession
-                ? notification.whatsForLunchSessionText || ''
-                : isMessage ? notification.messageText || '' : notification.postText || '');
-            const title = isWflSession
-                ? `${actor} invited you to lunch`
-                : isMessage ? `${actor} sent you a message` : `${actor} mentioned you`;
+            const text = escapeHtml(notificationText(notification));
+            const title = escapeHtml(notificationTitle(notification));
+            const targetUrl = sanitize(notificationTargetUrl(notification));
             return `
-                <button type="button" class="notification-item ${unread ? 'unread' : ''}" data-notification-id="${notification.id}" data-post-id="${notification.postId || ''}" data-message-username="${isMessage ? sanitize(notification.actorUsername || '') : ''}" data-wfl-session-id="${isWflSession ? sanitize(notification.whatsForLunchSessionId || '') : ''}">
+                <button type="button" class="notification-item ${unread ? 'unread' : ''}" data-notification-id="${sanitize(notification.id || '')}" data-target-url="${targetUrl}">
                     <span class="notification-title">${title}</span>
                     <span class="notification-text">${text}</span>
                     <span class="notification-time">${formatWhen(notification.createdOn)}</span>
@@ -147,30 +268,37 @@ class AppNav extends HTMLElement {
         const profileHref = isAuthenticated ? '/profile' : loginHref;
         const isAdmin = (localStorage.getItem('cbellRole') || '') === 'ADMIN';
         const unread = Number(this.unreadNotifications || 0);
+        const currentPath = window.location.pathname;
+        const toolsActive = toolsMenuItems().some(item => isActiveNavHref(item.href, currentPath));
         this.innerHTML = `
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-    <div class="container-fluid">
-        <a href="/" class="navbar-brand">Home</a>
+<nav class="navbar navbar-expand-lg navbar-dark void-console-nav">
+    <div class="void-nav-status-row">
+        <span class="void-signal-online"><span class="void-signal-dot" aria-hidden="true"></span>Signal Online</span>
+        <span class="void-channel-label">Void channel / public</span>
+    </div>
+    <div class="container-fluid void-nav-row">
+        <a href="/" class="navbar-brand void-nav-brand" aria-label="Void home">
+            <span class="void-brand-mark" aria-hidden="true">V</span>
+            <span>Void</span>
+        </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
         </button>
         <div class="navbar-collapse collapse" id="navbarSupportedContent">
             <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-                <li class="nav-item"><a href="/void" class="nav-link">Void</a></li>
-                <li class="nav-item"><a href="${messagesHref}" class="nav-link">Messages</a></li>
-                <li class="nav-item"><a href="/wfl" class="nav-link">What's For Lunch</a></li>
+                ${topLevelNavItems(isAuthenticated).map(item => `<li class="nav-item"><a href="${item.href}" class="nav-link${activeClass(item.href, currentPath)}"${ariaCurrent(item.href, currentPath)}>${item.label}</a></li>`).join('')}
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" id="toolsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">Tools</a>
+                    <a class="nav-link dropdown-toggle${toolsActive ? ' active' : ''}" href="#" id="toolsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"${toolsActive ? ' aria-current="page"' : ''}>Tools</a>
                     <ul class="dropdown-menu tools-menu" aria-labelledby="toolsDropdown">
-                        <li><a class="dropdown-item" href="/vin-decoder">VIN Decoder</a></li>
+                        ${toolsMenuItems().map(item => `<li><a class="dropdown-item${activeClass(item.href, currentPath)}" href="${item.href}"${ariaCurrent(item.href, currentPath)}>${item.label}</a></li>`).join('')}
                     </ul>
                 </li>
             </ul>
             <div class="d-flex align-items-center gap-2 ms-auto">
                 ${!isAuthenticated ? `
-                <div class="d-lg-flex">
-                    <a href="${loginHref}" class="btn btn-outline-light me-2">Login</a>
-                    <a href="/signup" class="btn btn-warning">Sign-up</a>
+                <div class="d-lg-flex void-auth-actions">
+                    <a href="${loginHref}" class="btn btn-outline-light me-2 void-login-action">Login</a>
+                    <a href="/signup" class="btn btn-warning void-signup-action">Sign-up</a>
                 </div>` : `
                 <div class="nav-notifications">
                     <button type="button" class="notification-btn" aria-haspopup="true" aria-expanded="false" aria-label="Notifications">
@@ -178,7 +306,11 @@ class AppNav extends HTMLElement {
                         ${unread > 0 ? `<span class="notification-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
                     </button>
                     <div class="notification-panel d-none">
-                        <div class="notification-panel-title">Notifications</div>
+                        <div class="notification-panel-title">
+                            <span>Notifications</span>
+                            <a href="/notifications">View all</a>
+                        </div>
+                        ${this.notificationPermissionHtml()}
                         <div class="notification-list">
                             ${this.notificationItemsHtml()}
                         </div>
@@ -215,6 +347,10 @@ class AppNav extends HTMLElement {
             notificationBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                const profileMenu = this.querySelector('.profile-menu');
+                const avatarBtn = this.querySelector('.avatar-btn');
+                hideNavPanel(profileMenu, avatarBtn);
+                this.dropdownInstance?.hide?.();
                 const isShown = !notificationPanel.classList.contains('d-none');
                 notificationPanel.classList.toggle('d-none', isShown);
                 notificationBtn.setAttribute('aria-expanded', String(!isShown));
@@ -223,9 +359,7 @@ class AppNav extends HTMLElement {
                 item.addEventListener('click', async (e) => {
                     e.preventDefault();
                     const notificationId = item.getAttribute('data-notification-id');
-                    const postId = item.getAttribute('data-post-id');
-                    const messageUsername = item.getAttribute('data-message-username');
-                    const wflSessionId = item.getAttribute('data-wfl-session-id');
+                    const targetUrl = item.getAttribute('data-target-url') || '/notifications';
                     if (notificationId) {
                         try {
                             await fetchJson(API.notifications.markRead(notificationId), {
@@ -236,21 +370,23 @@ class AppNav extends HTMLElement {
                             // Still allow navigation to the mentioned post.
                         }
                     }
-                    if (messageUsername) {
-                        window.location.href = `/messages?with=${encodeURIComponent(messageUsername)}`;
-                        return;
-                    }
-                    if (wflSessionId) {
-                        window.location.href = `/wfl?session=${encodeURIComponent(wflSessionId)}`;
-                        return;
-                    }
-                    if (postId) window.location.href = `/p/${encodeURIComponent(postId)}`;
+                    window.location.href = targetUrl;
                 });
             });
+            const enableBrowserNotifications = this.querySelector('.notification-enable-btn');
+            if (enableBrowserNotifications) {
+                enableBrowserNotifications.addEventListener('click', async () => {
+                    if (this.notificationPermissionStatus() !== 'default') return;
+                    const result = await window.Notification.requestPermission();
+                    if (result === 'granted') {
+                        this.seedBrowserNotificationIds(this.notifications || []);
+                    }
+                    this.render();
+                });
+            }
             this.notificationOutsideClickHandler = (e) => {
                 if (!this.contains(e.target)) {
-                    notificationPanel.classList.add('d-none');
-                    notificationBtn.setAttribute('aria-expanded', 'false');
+                    hideNavPanel(notificationPanel, notificationBtn, 'show', 'd-none');
                 }
             };
             document.addEventListener('click', this.notificationOutsideClickHandler);
@@ -295,6 +431,11 @@ class AppNav extends HTMLElement {
                 this.dropdownInstance.dispose();
             }
             this.dropdownInstance = new window.bootstrap.Dropdown(avatarBtn);
+            avatarBtn.addEventListener('click', () => {
+                const notificationPanel = this.querySelector('.notification-panel');
+                const notificationBtn = this.querySelector('.notification-btn');
+                hideNavPanel(notificationPanel, notificationBtn, 'show', 'd-none');
+            });
         }
         if (avatarBtn && profileMenu && !hasBootstrap) {
             if (this.outsideClickHandler) {
@@ -302,6 +443,9 @@ class AppNav extends HTMLElement {
             }
             avatarBtn.addEventListener('click', (e) => {
                 e.preventDefault();
+                const notificationPanel = this.querySelector('.notification-panel');
+                const notificationBtn = this.querySelector('.notification-btn');
+                hideNavPanel(notificationPanel, notificationBtn, 'show', 'd-none');
                 const isShown = profileMenu.classList.contains('show');
                 profileMenu.classList.toggle('show', !isShown);
                 avatarBtn.setAttribute('aria-expanded', String(!isShown));

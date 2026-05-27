@@ -109,6 +109,16 @@ public class ViewController {
   }
 
   /**
+   * Serves the ZIP coordinate lookup tool.
+   *
+   * @return {@code zip-coordinates.html}
+   */
+  @GetMapping(value = "/zip-coordinates")
+  public String getZipCoordinatesPage() {
+    return "zip-coordinates.html";
+  }
+
+  /**
    * Serves the Back Office page shell (role gated on the client).
    *
    * @return {@code back-office.html}
@@ -157,6 +167,16 @@ public class ViewController {
   @GetMapping(value = "/messages")
   public String getMessagesPage(HttpServletRequest request) {
     return "messages.html";
+  }
+
+  /**
+   * Serves the signed-in user's notification center page.
+   *
+   * @return {@code notifications.html}
+   */
+  @GetMapping(value = "/notifications")
+  public String getNotificationsPage(HttpServletRequest request) {
+    return "notifications.html";
   }
 
   /**

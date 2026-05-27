@@ -13,51 +13,36 @@
     <link rel="stylesheet" type="text/css" href="/css/main.css"/>
 </head>
 
-<body>
+<body class="site-page void-shell-page home-page">
     <div id="nav"></div>
-    <main role="main" class="home">
-        <section class="home-hero" aria-labelledby="homeTitle">
-            <div class="container home-hero-inner">
-                <p class="home-kicker">christopherbell.dev</p>
-                <h1 id="homeTitle">Small tools, loud opinions, useful detours.</h1>
-                <p class="home-intro">
-                    A working corner of the internet for posts, lunch picks, and practical utilities.
-                </p>
-            </div>
-        </section>
+    <main role="main" class="site-main home-void-gateway">
+        <section class="home-void-shell" aria-labelledby="homeTitle">
+            <div class="container home-void-hero">
+                <div class="home-void-copy">
+                    <p class="home-kicker">christopherbell.dev</p>
+                    <h1 id="homeTitle">Drop into the Void.</h1>
+                    <p class="home-intro">
+                        The Void is the front door here: short posts, replies, signals, and the latest noise from the feed.
+                    </p>
+                    <a class="btn btn-primary home-void-primary" href="/void">
+                        Enter Void
+                        <i class="fa fa-arrow-right" aria-hidden="true"></i>
+                    </a>
+                </div>
 
-        <section class="home-destinations" aria-label="Site sections">
-            <div class="container">
-                <div class="home-section-heading">
-                    <p class="home-kicker mb-2">Pick a lane</p>
-                    <h2>Built for quick detours.</h2>
-                </div>
-                <div class="home-links">
-                    <a href="/void" class="home-tile home-tile-void text-decoration-none">
-                        <span class="home-tile-icon" aria-hidden="true"><i class="fa fa-commenting-o"></i></span>
-                        <span class="home-tile-content">
-                            <span class="home-tile-title">Void</span>
-                            <span class="home-tile-text">Micro posts, replies, likes, and the live feed.</span>
-                        </span>
-                        <span class="home-tile-arrow" aria-hidden="true"><i class="fa fa-arrow-right"></i></span>
-                    </a>
-                    <a href="/wfl" class="home-tile home-tile-lunch text-decoration-none">
-                        <span class="home-tile-icon" aria-hidden="true"><i class="fa fa-cutlery"></i></span>
-                        <span class="home-tile-content">
-                            <span class="home-tile-title">What's For Lunch</span>
-                            <span class="home-tile-text">Restaurant ideas and picks when nobody wants to decide.</span>
-                        </span>
-                        <span class="home-tile-arrow" aria-hidden="true"><i class="fa fa-arrow-right"></i></span>
-                    </a>
-                    <a href="/vin-decoder" class="home-tile home-tile-vin text-decoration-none">
-                        <span class="home-tile-icon" aria-hidden="true"><i class="fa fa-car"></i></span>
-                        <span class="home-tile-content">
-                            <span class="home-tile-title">VIN Decoder</span>
-                            <span class="home-tile-text">Paste a VIN and get a clean NHTSA-backed decode.</span>
-                        </span>
-                        <span class="home-tile-arrow" aria-hidden="true"><i class="fa fa-arrow-right"></i></span>
-                    </a>
-                </div>
+                <aside class="home-void-signal-panel" aria-label="Void signals">
+                    <div class="home-void-panel-header">
+                        <span class="thread-status-pill is-live">Live</span>
+                        <span>Signal Rail</span>
+                    </div>
+                    <div id="homeActivePost" class="home-void-active" aria-live="polite">
+                        <div class="home-void-empty">
+                            <span class="home-void-eyebrow">Finding signal</span>
+                            <strong>Loading the most active post.</strong>
+                            <span>The rail updates every few seconds.</span>
+                        </div>
+                    </div>
+                </aside>
             </div>
         </section>
     </main>
@@ -65,5 +50,6 @@
 </body>
 
 <script type="module" src="/js/app.js"></script>
+<script type="module" src="/js/home.js"></script>
 
 </html>

@@ -34,7 +34,8 @@ Owns Void posts and feed behavior.
   responses resolve usernames at read time.
 - Public reads tolerate anonymous callers. Missing auth only disables
   viewer-specific fields like `liked`; write operations still require a resolved
-  current account.
+  current account. Suspended accounts cannot create new posts, which prevents
+  already-issued sessions from posting after suspension.
 - Expiration is enabled by default. New root posts start with a 24-hour
   lifespan. Root likes, every reply in the thread, and every active like on a
   reply each add another 24 hours from the root post creation timestamp.

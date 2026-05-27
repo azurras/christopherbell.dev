@@ -8,6 +8,8 @@ Owns user account lifecycle and authentication-adjacent account behavior.
 - Case-insensitive email normalization and lookup for sign-up, login, and password reset.
 - Username sanitization on account creation/update and case-insensitive username uniqueness checks.
 - Public profiles expose usernames and counts only; first and last names stay private to account detail APIs.
+- Admin account updates can change account status and promote roles when the
+  Back Office user queue needs to grant moderator or administrator privileges.
 - Password reset request/confirmation endpoints and token handling.
 - Mail notification handoff for password reset links.
 - Account DTOs and persistence models under `model`.

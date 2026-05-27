@@ -9,6 +9,8 @@ Owns direct user-to-user messaging.
   browser assets own the conversation rail and private thread rendering.
 - Conversation listing and individual conversation retrieval.
 - Read-state updates for incoming messages.
+- Send permissions reject suspended sender accounts, so suspended users cannot
+  continue sending direct messages with an existing session.
 - Message notification creation through the notification package.
 - Message DTOs and persistence models under `model`.
 

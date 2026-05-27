@@ -2,6 +2,7 @@
  * Back Office access guard + admin dashboard.
  */
 import { API } from './lib/api.js';
+import { promotedRoleForAction, rolePromotionOptions } from './lib/back-office-users.js';
 import { authHeaders, fetchJson, formatWhen, sanitize } from './lib/util.js';
 
 const content = document.getElementById('backOfficeContent');
@@ -204,6 +205,9 @@ function renderUsers() {
 function userActionSelect(account) {
   const status = (account.status || '').toUpperCase();
   const options = [];
+  rolePromotionOptions(account).forEach(option => {
+    options.push(`<option value="${sanitize(option.value)}">${sanitize(option.label)}</option>`);
+  });
   if (!account.isApproved) {
     options.push('<option value="APPROVE">Approve</option>');
   }
@@ -579,6 +583,11 @@ async function handleUserAction(target) {
       await updateAccount(accountId, { status: 'SUSPENDED' });
     } else if (action === 'ACTIVATE') {
       await updateAccount(accountId, { status: 'ACTIVE', isApproved: true });
+    } else {
+      const role = promotedRoleForAction(action);
+      if (role) {
+        await updateAccount(accountId, { role });
+      }
     }
     await refreshDashboard();
     closeDrawer();

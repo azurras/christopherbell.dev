@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
@@ -15,6 +16,7 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.AccountServiceStub;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.notification.NotificationService;
@@ -162,6 +164,26 @@ public class PostServiceTest {
   }
 
   @Test
+  @DisplayName("Create: suspended account -> 400 InvalidRequestException")
+  public void testCreatePost_whenAccountSuspended_Throws400() {
+    var suspended = Account.builder()
+        .id("suspended")
+        .username("silent")
+        .status(AccountStatus.SUSPENDED)
+        .build();
+    var service = spy(postService);
+    doReturn(suspended.getId()).when(service).getSelfId();
+    when(accountRepository.findById(eq(suspended.getId()))).thenReturn(Optional.of(suspended));
+
+    assertThrows(InvalidRequestException.class, () -> service.createPost(PostCreateRequest.builder()
+        .text("hello")
+        .build()));
+
+    verify(postRepository, never()).save(any(Post.class));
+    verify(notificationService, never()).createMentionNotifications(any(Post.class), any(Account.class));
+  }
+
+  @Test
   @DisplayName("Create reply: parent expired -> 404 and cleanup")
   public void testCreatePost_whenParentExpired_Throws404() throws Exception {
     var existing = AccountServiceStub.getAccountWhenExistsStub();
@@ -237,6 +259,39 @@ public class PostServiceTest {
     var expectedExpiration = rootCreated.plus(Duration.ofHours(48));
     assertEquals(expectedExpiration, root.getExpiresOn());
     assertEquals(expectedExpiration, reply.getExpiresOn());
+  }
+
+  @Test
+  @DisplayName("Create reply notifies the parent post owner")
+  public void testCreatePost_whenReply_NotifiesParentOwner() throws Exception {
+    var replier = Account.builder().id("replier").username("replier").build();
+    var parentAuthor = Account.builder().id("author").username("author").build();
+    var service = spy(postService);
+    doReturn(replier.getId()).when(service).getSelfId();
+    when(accountRepository.findById(eq(replier.getId()))).thenReturn(Optional.of(replier));
+    when(accountRepository.findById(eq(parentAuthor.getId()))).thenReturn(Optional.of(parentAuthor));
+
+    var parent = Post.builder()
+        .id("parent")
+        .rootId("parent")
+        .accountId(parentAuthor.getId())
+        .text("parent text")
+        .createdOn(Instant.now().minus(Duration.ofMinutes(10)))
+        .lastUpdatedOn(Instant.now().minus(Duration.ofMinutes(10)))
+        .expiresOn(Instant.now().plus(Duration.ofHours(24)))
+        .build();
+    when(postRepository.findById(eq("parent"))).thenReturn(Optional.of(parent));
+    when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("parent"))).thenReturn(List.of(parent));
+    when(postMapper.toDetail(any(Post.class))).thenReturn(PostDetail.builder().id("reply").build());
+
+    service.createPost(PostCreateRequest.builder().text("reply text").parentId("parent").build());
+
+    var replyCaptor = ArgumentCaptor.forClass(Post.class);
+    verify(notificationService)
+        .createPostCommentNotification(replyCaptor.capture(), eq(replier), eq(parentAuthor));
+    assertEquals("reply text", replyCaptor.getValue().getText());
+    assertEquals("parent", replyCaptor.getValue().getParentId());
   }
 
   @Test
@@ -364,6 +419,7 @@ public class PostServiceTest {
   @DisplayName("Toggle like adjusts expiration window")
   public void testToggleLike_updatesExpirationWithLikes() throws Exception {
     var author = Account.builder().id("author").username("author").build();
+    var liker = Account.builder().id("liker").username("liker").build();
     var likerId = "liker";
     var service = spy(postService);
     doReturn(likerId).when(service).getSelfId();
@@ -382,6 +438,7 @@ public class PostServiceTest {
 
     when(postRepository.findById(eq("p1"))).thenReturn(Optional.of(post));
     when(accountRepository.findById(eq(author.getId()))).thenReturn(Optional.of(author));
+    when(accountRepository.findById(eq(liker.getId()))).thenReturn(Optional.of(liker));
     when(postRepository.save(org.mockito.ArgumentMatchers.any(Post.class))).thenReturn(post);
     when(postRepository.countByParentId(eq("p1"))).thenReturn(0L);
 
@@ -396,6 +453,7 @@ public class PostServiceTest {
     assertEquals(created.plus(Duration.ofHours(24)), post.getExpiresOn());
     assertNotNull(unlikedItem);
     assertEquals(false, unlikedItem.liked());
+    verify(notificationService).createPostLikeNotification(eq(post), eq(liker), eq(author));
   }
 
   @Test
