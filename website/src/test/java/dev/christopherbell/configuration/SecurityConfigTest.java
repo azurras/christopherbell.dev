@@ -2,6 +2,7 @@ package dev.christopherbell.configuration;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.christopherbell.configuration.security.SecurityConfig;
 import java.lang.reflect.Method;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;

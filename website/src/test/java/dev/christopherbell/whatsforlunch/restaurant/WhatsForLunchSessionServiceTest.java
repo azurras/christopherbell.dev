@@ -10,13 +10,17 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
-import dev.christopherbell.notification.NotificationService;
+import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionVoteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
+import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionRepository;
+import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionService;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -31,7 +35,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class WhatsForLunchSessionServiceTest {
   @Mock private AccountRepository accountRepository;
-  @Mock private NotificationService notificationService;
+  @Mock private NotificationDeliveryService notificationDeliveryService;
   @Mock private PermissionService permissionService;
   @Mock private RestaurantMapper restaurantMapper;
   @Mock private RestaurantFavoriteRepository restaurantFavoriteRepository;
@@ -69,7 +73,7 @@ class WhatsForLunchSessionServiceTest {
     verify(sessionRepository).save(captor.capture());
     assertEquals(List.of("owner-id", "friend-id"), captor.getValue().getParticipantAccountIds());
     assertEquals(List.of("restaurant-1", "restaurant-2", "restaurant-3"), captor.getValue().getRestaurantIds());
-    verify(notificationService).createWhatsForLunchSessionInvite(any(WhatsForLunchSession.class), eq(creator), eq(friend));
+    verify(notificationDeliveryService).createWhatsForLunchSessionInvite(any(WhatsForLunchSession.class), eq(creator), eq(friend));
   }
 
   @Test

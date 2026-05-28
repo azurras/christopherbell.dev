@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.vehicle.model.VehicleProperties;
+import dev.christopherbell.vehicle.nhtsa.decode.NhtsaVinClient;
+import dev.christopherbell.vehicle.nhtsa.decode.NhtsaVinClientException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;

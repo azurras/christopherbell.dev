@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
+import dev.christopherbell.notification.inbox.NotificationInboxService;
 import dev.christopherbell.notification.model.NotificationDetail;
 import dev.christopherbell.notification.model.NotificationType;
 import java.time.Instant;
@@ -29,13 +30,13 @@ import org.springframework.test.web.servlet.MockMvc;
 @Import(ControllerExceptionHandler.class)
 class NotificationControllerTest {
   @Autowired private MockMvc mockMvc;
-  @MockitoBean private NotificationService notificationService;
+  @MockitoBean private NotificationInboxService notificationInboxService;
 
   @Test
   @DisplayName("Get notifications: user -> 200 with requested limit")
   @WithMockUser(authorities = {"USER"})
   void getMyNotifications_whenUser_returnsNotifications() throws Exception {
-    when(notificationService.getMyNotifications(eq(10))).thenReturn(List.of(detail("notification-1")));
+    when(notificationInboxService.getMyNotifications(eq(10))).thenReturn(List.of(detail("notification-1")));
 
     mockMvc.perform(get("/api/notifications" + APIVersion.V20250914)
             .param("limit", "10"))
@@ -44,7 +45,7 @@ class NotificationControllerTest {
         .andExpect(jsonPath("$.payload[0].id").value("notification-1"))
         .andExpect(jsonPath("$.payload[0].notificationType").value("MENTION"));
 
-    verify(notificationService).getMyNotifications(eq(10));
+    verify(notificationInboxService).getMyNotifications(eq(10));
   }
 
   @Test
@@ -53,21 +54,21 @@ class NotificationControllerTest {
     mockMvc.perform(get("/api/notifications" + APIVersion.V20250914))
         .andExpect(status().isUnauthorized());
 
-    verifyNoInteractions(notificationService);
+    verifyNoInteractions(notificationInboxService);
   }
 
   @Test
   @DisplayName("Unread count: user -> 200 with count")
   @WithMockUser(authorities = {"USER"})
   void countMyUnreadNotifications_whenUser_returnsCount() throws Exception {
-    when(notificationService.countMyUnreadNotifications()).thenReturn(3L);
+    when(notificationInboxService.countMyUnreadNotifications()).thenReturn(3L);
 
     mockMvc.perform(get("/api/notifications" + APIVersion.V20250914 + "/unread-count"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload").value(3));
 
-    verify(notificationService).countMyUnreadNotifications();
+    verify(notificationInboxService).countMyUnreadNotifications();
   }
 
   @Test
@@ -80,7 +81,7 @@ class NotificationControllerTest {
         .read(true)
         .createdOn(Instant.parse("2026-05-18T15:00:00Z"))
         .build();
-    when(notificationService.markRead(eq("notification-1"))).thenReturn(updated);
+    when(notificationInboxService.markRead(eq("notification-1"))).thenReturn(updated);
 
     mockMvc.perform(post("/api/notifications" + APIVersion.V20250914 + "/{notificationId}/read", "notification-1")
             .with(csrf()))
@@ -89,7 +90,7 @@ class NotificationControllerTest {
         .andExpect(jsonPath("$.payload.id").value("notification-1"))
         .andExpect(jsonPath("$.payload.read").value(true));
 
-    verify(notificationService).markRead(eq("notification-1"));
+    verify(notificationInboxService).markRead(eq("notification-1"));
   }
 
   @Test
@@ -99,7 +100,7 @@ class NotificationControllerTest {
             .with(csrf()))
         .andExpect(status().isUnauthorized());
 
-    verifyNoInteractions(notificationService);
+    verifyNoInteractions(notificationInboxService);
   }
 
   private NotificationDetail detail(String id) {

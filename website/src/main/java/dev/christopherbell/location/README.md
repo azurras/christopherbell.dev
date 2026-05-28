@@ -4,12 +4,13 @@ Owns reusable Location reference data and APIs.
 
 ## What Lives Here
 
+- ZIP coordinate APIs, imports, parsing, and persistence under `zip`.
 - Census ZIP Code Tabulation Area coordinate persistence in MongoDB.
-- `ZipCoordinateGazetteerReader`, which parses the bundled Census Gazetteer
+- `zip.ZipCoordinateGazetteerReader`, which parses the bundled Census Gazetteer
   resource before imports mutate stored coordinates.
-- `ZipCoordinateService`, which validates ZIP and ZIP+4 lookup input and
+- `zip.ZipCoordinateService`, which validates ZIP and ZIP+4 lookup input and
   refreshes Census ZIP coordinate rows by ZIP key.
-- `LocationController`, which exposes the public ZIP lookup endpoint and the
+- `zip.LocationController`, which exposes the public ZIP lookup endpoint and the
   admin Census import endpoint.
 - The `/zip-coordinates` tool page, which exposes the public lookup endpoint for
   manual ZIP coordinate checks.

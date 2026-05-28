@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.vehicle.model.VehicleProperties;
+import dev.christopherbell.vehicle.randomvin.importing.RandomVinClient;
+import dev.christopherbell.vehicle.randomvin.importing.RandomVinClientException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;

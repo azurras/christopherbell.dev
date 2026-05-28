@@ -33,6 +33,7 @@ import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCr
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionVoteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionService;
 import lombok.RequiredArgsConstructor;
 
 /**

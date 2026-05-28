@@ -5,7 +5,11 @@ Owns server-side routing for HTML pages.
 ## What Lives Here
 
 - Spring MVC routes that return Thymeleaf templates.
-- Public page routes such as the Void-first home gateway, Void, What's For Lunch, WFL restaurant profiles, VIN Decoder, ZIP Coordinates, auth pages, profile, notifications, reports, and Back Office.
+- `account` serves login, signup, password reset, and Void auth pages.
+- `content` serves the home gateway, blog, photos, reports, Back Office, and The Bell pages.
+- `tools` serves VIN Decoder and ZIP Coordinates pages.
+- `voidroutes` serves Void, profile, messages, notifications, public user feeds, and post pages.
+- `wfl` serves What's For Lunch, WFL restaurant profiles, favorites, and top-rated lists.
 - Route names used by the frontend navigation.
 - Dynamic public profile and post routes attach canonical social preview URLs for link unfurlers.
 - The `/` home route renders `index.html` as a Void gateway, with `/void` as the primary action and a live Signal Rail showing the five most active posts from the public feed.

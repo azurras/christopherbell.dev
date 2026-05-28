@@ -1,5 +1,6 @@
 package dev.christopherbell.location;
 
+import dev.christopherbell.location.zip.ZipCoordinateGazetteerReader;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

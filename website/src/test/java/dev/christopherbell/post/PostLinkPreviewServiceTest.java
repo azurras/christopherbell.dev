@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.post.model.PostLinkPreview;
+import dev.christopherbell.post.preview.PostLinkPreviewClient;
+import dev.christopherbell.post.preview.PostLinkPreviewService;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;

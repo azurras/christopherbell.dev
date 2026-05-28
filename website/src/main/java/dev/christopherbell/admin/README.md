@@ -1,10 +1,10 @@
 # Admin
 
-Owns back-office administration views and activity summaries.
+Owns back-office administration views and cross-feature admin operations.
 
 ## What Lives Here
 
-- Admin activity aggregation used by the Back Office UI.
+- Admin activity recording and reads live under `activity`.
 - Admin-facing DTOs under `model`.
 - Cross-feature moderation/admin summaries, such as reports and recent operational state.
 - Back Office work queues for reports and users.

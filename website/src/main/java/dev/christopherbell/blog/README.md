@@ -8,6 +8,12 @@ Owns read-only blog post serving.
 - Blog DTO/model classes under `model`.
 - Blog content is configured from application properties rather than authored through an admin UI.
 
+## Package Shape
+
+This package intentionally stays flat while it only owns blog list/detail reads.
+Create a `content` subpackage if authoring, indexing, or multiple content
+providers are added.
+
 ## Update This Doc
 
 Update this README when blog source data, routing, response fields, or rendering assumptions change.

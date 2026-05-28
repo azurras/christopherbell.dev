@@ -6,6 +6,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import dev.christopherbell.view.account.AccountViewController;
+import dev.christopherbell.view.content.ContentViewController;
+import dev.christopherbell.view.tools.ToolsViewController;
+import dev.christopherbell.view.voidroutes.VoidViewController;
+import dev.christopherbell.view.wfl.WhatsForLunchViewController;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,7 +18,13 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest(ViewController.class)
+@WebMvcTest(controllers = {
+    AccountViewController.class,
+    ContentViewController.class,
+    ToolsViewController.class,
+    VoidViewController.class,
+    WhatsForLunchViewController.class
+})
 @AutoConfigureMockMvc(addFilters = false)
 public class ViewControllerTest {
   @Autowired private MockMvc mockMvc;

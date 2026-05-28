@@ -10,10 +10,15 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
-import dev.christopherbell.vehicle.VehicleRepository;
 import dev.christopherbell.vehicle.VehicleStub;
+import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.VehicleProperties;
+import dev.christopherbell.vehicle.randomvin.importing.RandomVinClient;
+import dev.christopherbell.vehicle.randomvin.importing.RandomVinClientException;
+import dev.christopherbell.vehicle.randomvin.importing.RandomVinImportService;
+import dev.christopherbell.vehicle.randomvin.importing.RandomVinImportStateRepository;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
+import dev.christopherbell.vehicle.randomvin.policy.RandomVinRobotsPolicy;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;

@@ -2,6 +2,8 @@ package dev.christopherbell.vehicle;
 
 import dev.christopherbell.libs.api.model.Message;
 import dev.christopherbell.libs.api.model.Response;
+import dev.christopherbell.vehicle.nhtsa.decode.VehicleVinDecodeRateLimitException;
+import dev.christopherbell.vehicle.nhtsa.decode.VehicleVinDecodeUnavailableException;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ExceptionHandler;

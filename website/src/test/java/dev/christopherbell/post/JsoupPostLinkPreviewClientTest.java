@@ -2,6 +2,7 @@ package dev.christopherbell.post;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import dev.christopherbell.post.preview.JsoupPostLinkPreviewClient;
 import java.net.URI;
 import org.jsoup.Jsoup;
 import org.junit.jupiter.api.Test;

@@ -4,11 +4,14 @@ Owns in-app notifications.
 
 ## What Lives Here
 
+- `NotificationService`, a thin facade retained for existing notification call sites.
+- Delivery behavior under `delivery`.
 - Mention notifications created from posts and replies using case-insensitive username lookup.
 - Like notifications created when another member likes a user's post.
 - Comment notifications created when another member replies to a user's post.
 - WFL session invite notifications that route invited members back to the shared session.
 - Message notifications created from direct messages.
+- Inbox behavior under `inbox`.
 - Unread counts, notification listing, and mark-read behavior.
 - The notification center page and nav dropdown consume the same notification API.
 - Notification models under `model`.

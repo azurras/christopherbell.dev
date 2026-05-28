@@ -6,12 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.account.auth.AccountAuthenticationService;
+import dev.christopherbell.account.follow.AccountFollowService;
+import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
@@ -21,6 +23,9 @@ import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.passwordreset.PasswordResetNotificationService;
+import dev.christopherbell.account.passwordreset.PasswordResetService;
+import dev.christopherbell.account.profile.AccountProfileService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
@@ -31,20 +36,39 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 @ExtendWith(MockitoExtension.class)
 public class AccountServiceTest {
   @Mock private AccountMapper accountMapper;
   @Mock private AccountRepository accountRepository;
   @Mock private PasswordResetNotificationService passwordResetNotificationService;
-  @InjectMocks private AccountService accountService;
+  private AccountService accountService;
+
+  @BeforeEach
+  void setUp() {
+    var authenticationService = new AccountAuthenticationService(accountRepository);
+    var passwordResetService = new PasswordResetService(accountRepository, passwordResetNotificationService);
+    var profileService = new AccountProfileService(accountRepository, accountMapper);
+    var followService = new AccountFollowService(accountRepository, profileService);
+    var moderationService = new AccountModerationService(accountRepository, accountMapper);
+    accountService = new AccountService(
+        accountMapper,
+        accountRepository,
+        authenticationService,
+        passwordResetService,
+        profileService,
+        followService,
+        moderationService);
+  }
 
   @Test
   @DisplayName("Update: null request -> 400 InvalidRequestException")
@@ -122,6 +146,73 @@ public class AccountServiceTest {
     verify(accountRepository).findByEmailIgnoreCase(eq("user@example.com"));
     verify(accountRepository).save(eq(account));
     verifyNoMoreInteractions(accountRepository);
+  }
+
+  @Test
+  @DisplayName("Login: suspended account -> AccountNotActiveException")
+  public void testLoginAccount_whenAccountSuspended_throwsAccountNotActiveException() throws Exception {
+    var password = "CorrectHorseBatteryStaple";
+    var salt = PasswordUtil.generateSalt();
+    var account = Account.builder()
+        .id("acc-suspended")
+        .email("user@example.com")
+        .passwordSalt(salt)
+        .passwordHash(PasswordUtil.hashPassword(password, salt))
+        .role(Role.USER)
+        .status(AccountStatus.SUSPENDED)
+        .build();
+
+    when(accountRepository.findByEmailIgnoreCase(eq("user@example.com")))
+        .thenReturn(Optional.of(account));
+
+    assertThrows(
+        AccountNotActiveException.class,
+        () -> accountService.loginAccount(new AccountLoginRequest("USER@example.com", password)));
+
+    verify(accountRepository).findByEmailIgnoreCase(eq("user@example.com"));
+    verify(accountRepository, never()).save(eq(account));
+    verifyNoMoreInteractions(accountRepository);
+  }
+
+  @Test
+  @DisplayName("Follow account: current user follows target")
+  public void testFollowAccount_whenValid_addsTargetToFollowingSet() throws Exception {
+    var self = Account.builder()
+        .id("self")
+        .username("self")
+        .role(Role.USER)
+        .followingIds(new java.util.HashSet<>())
+        .build();
+    var target = Account.builder()
+        .id("target")
+        .username("target")
+        .role(Role.USER)
+        .followingIds(new java.util.HashSet<>())
+        .build();
+    var token = dev.christopherbell.permission.PermissionService.generateToken(self);
+    SecurityContextHolder.getContext()
+        .setAuthentication(new UsernamePasswordAuthenticationToken("self", token));
+
+    try {
+      when(accountRepository.findById(eq("self"))).thenReturn(Optional.of(self));
+      when(accountRepository.findByUsername(eq("target"))).thenReturn(Optional.of(target));
+      when(accountRepository.countByFollowingIdsContaining(eq("target"))).thenReturn(1L);
+      when(accountRepository.save(eq(self))).thenReturn(self);
+
+      var profile = accountService.followAccount("target");
+
+      org.junit.jupiter.api.Assertions.assertTrue(self.getFollowingIds().contains("target"));
+      assertEquals("target", profile.username());
+      assertEquals(1L, profile.followerCount());
+      org.junit.jupiter.api.Assertions.assertTrue(profile.followedByMe());
+      verify(accountRepository).findById(eq("self"));
+      verify(accountRepository).findByUsername(eq("target"));
+      verify(accountRepository).save(eq(self));
+      verify(accountRepository).countByFollowingIdsContaining(eq("target"));
+      verifyNoMoreInteractions(accountRepository);
+    } finally {
+      SecurityContextHolder.clearContext();
+    }
   }
 
   @Test
@@ -277,19 +368,25 @@ public class AccountServiceTest {
   public void testApproveAccount_whenFound_ApprovesAndReturnsDetail() throws Exception {
     var entity = AccountServiceStub.getAccountWhenExistsStub();
     var approved = AccountDetail.builder().id(entity.getId()).build();
-    var service = spy(new AccountService(accountMapper, accountRepository, passwordResetNotificationService));
-
-    doReturn(AccountDetail.builder().id("self-1").build()).when(service).getSelfAccount();
+    var self = Account.builder().id("self-1").role(Role.ADMIN).build();
+    var token = dev.christopherbell.permission.PermissionService.generateToken(self);
+    SecurityContextHolder.getContext()
+        .setAuthentication(new UsernamePasswordAuthenticationToken("self-1", token));
     when(accountRepository.findById(eq(AccountServiceStub.ID))).thenReturn(Optional.of(entity));
     when(accountRepository.save(eq(entity))).thenReturn(entity);
     when(accountMapper.toAccount(eq(entity))).thenReturn(approved);
 
-    var result = service.approveAccount(AccountServiceStub.ID);
+    try {
+      var result = accountService.approveAccount(AccountServiceStub.ID);
 
-    assertEquals(approved, result);
-    verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verify(accountRepository).save(eq(entity));
-    verify(accountMapper).toAccount(eq(entity));
+      assertEquals(approved, result);
+      assertEquals("self-1", entity.getApprovedBy());
+      verify(accountRepository).findById(eq(AccountServiceStub.ID));
+      verify(accountRepository).save(eq(entity));
+      verify(accountMapper).toAccount(eq(entity));
+    } finally {
+      SecurityContextHolder.clearContext();
+    }
   }
 
   @Test

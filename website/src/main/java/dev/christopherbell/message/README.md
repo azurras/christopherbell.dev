@@ -4,11 +4,11 @@ Owns direct user-to-user messaging.
 
 ## What Lives Here
 
-- Sending messages between accounts.
+- `MessageService`, a thin facade that keeps the controller-facing service surface stable.
+- Sending messages between accounts under `delivery`.
 - Message API behavior that backs the `/messages` Signal Bridge page, while
   browser assets own the conversation rail and private thread rendering.
-- Conversation listing and individual conversation retrieval.
-- Read-state updates for incoming messages.
+- Conversation listing, individual conversation retrieval, and read-state updates under `conversation`.
 - Send permissions reject suspended sender accounts, so suspended users cannot
   continue sending direct messages with an existing session.
 - Message notification creation through the notification package.

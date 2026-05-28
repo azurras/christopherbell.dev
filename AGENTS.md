@@ -58,6 +58,17 @@ node --check website/src/main/resources/static/js/back-office.js
 ## Architecture Rules
 
 - Keep backend code organized by feature package, not by technical layer.
+- Respect the current small subfeature package layout. Before adding or moving
+  code, look for the narrowest existing package that owns that behavior, such
+  as `account.passwordreset`, `post.preview`, `vehicle.vin`, or
+  `whatsforlunch.restaurant.session`.
+- Do not add new behavior to an old broad package root when a focused
+  subfeature package already exists. Package roots should stay as facades,
+  thin controllers, shared models, or stable entry points only.
+- Create a new subfeature package when a change introduces a distinct
+  responsibility that would otherwise make an existing service/controller grow
+  into a god class. Keep package names domain-specific and update the owning
+  package README in the same change.
 - Controllers should stay thin. Put business rules in services.
 - Prefer small, single-purpose methods that follow KISS. Extract helper methods
   when they make the main flow easier to read, but do not create abstractions

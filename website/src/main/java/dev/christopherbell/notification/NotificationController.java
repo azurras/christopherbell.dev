@@ -3,6 +3,7 @@ package dev.christopherbell.notification;
 import static dev.christopherbell.libs.api.APIVersion.V20250914;
 
 import dev.christopherbell.libs.api.model.Response;
+import dev.christopherbell.notification.inbox.NotificationInboxService;
 import dev.christopherbell.notification.model.NotificationDetail;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/notifications")
 @RestController
 public class NotificationController {
-  private final NotificationService notificationService;
+  private final NotificationInboxService notificationInboxService;
 
   @GetMapping(value = V20250914, produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
@@ -30,7 +31,7 @@ public class NotificationController {
   ) {
     return new ResponseEntity<>(
         Response.<List<NotificationDetail>>builder()
-            .payload(notificationService.getMyNotifications(limit))
+            .payload(notificationInboxService.getMyNotifications(limit))
             .success(true)
             .build(),
         HttpStatus.OK);
@@ -41,7 +42,7 @@ public class NotificationController {
   public ResponseEntity<Response<Long>> countMyUnreadNotifications() {
     return new ResponseEntity<>(
         Response.<Long>builder()
-            .payload(notificationService.countMyUnreadNotifications())
+            .payload(notificationInboxService.countMyUnreadNotifications())
             .success(true)
             .build(),
         HttpStatus.OK);
@@ -53,7 +54,7 @@ public class NotificationController {
       throws Exception {
     return new ResponseEntity<>(
         Response.<NotificationDetail>builder()
-            .payload(notificationService.markRead(notificationId))
+            .payload(notificationInboxService.markRead(notificationId))
             .success(true)
             .build(),
         HttpStatus.OK);

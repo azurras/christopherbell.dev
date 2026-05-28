@@ -1,11 +1,13 @@
 package dev.christopherbell.location;
 
-import dev.christopherbell.configuration.SecurityConfig;
+import dev.christopherbell.configuration.security.SecurityConfig;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.location.model.ZipCoordinateImportResult;
+import dev.christopherbell.location.zip.LocationController;
+import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.permission.PermissionService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
