@@ -10,15 +10,17 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
-import dev.christopherbell.admin.AdminActivityService;
+import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
+import dev.christopherbell.report.moderation.ReportModerationService;
 import dev.christopherbell.report.model.ReportCreateRequest;
 import dev.christopherbell.report.model.ReportResolution;
 import dev.christopherbell.report.model.ReportResolveRequest;
 import dev.christopherbell.report.model.ReportStatus;
+import dev.christopherbell.report.submission.ReportSubmissionService;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -38,11 +40,17 @@ class ReportServiceTest {
     ReportRepository reportRepository = Mockito.mock(ReportRepository.class);
 
     ReportService service = new ReportService(
-        postRepository,
-        accountRepository,
-        adminActivityService,
-        permissionService,
-        reportRepository);
+        new ReportSubmissionService(
+            postRepository,
+            accountRepository,
+            permissionService,
+            reportRepository),
+        new ReportModerationService(
+            postRepository,
+            accountRepository,
+            adminActivityService,
+            permissionService,
+            reportRepository));
 
     ReportCreateRequest request = new ReportCreateRequest("post-1", "spam", "details");
     Post post = Post.builder()
@@ -87,11 +95,12 @@ class ReportServiceTest {
   @DisplayName("Submit report rejects missing post id")
   void submitReport_missingPostId() {
     ReportService service = new ReportService(
-        Mockito.mock(PostRepository.class),
-        Mockito.mock(AccountRepository.class),
-        Mockito.mock(AdminActivityService.class),
-        Mockito.mock(PermissionService.class),
-        Mockito.mock(ReportRepository.class)
+        new ReportSubmissionService(
+            Mockito.mock(PostRepository.class),
+            Mockito.mock(AccountRepository.class),
+            Mockito.mock(PermissionService.class),
+            Mockito.mock(ReportRepository.class)),
+        Mockito.mock(ReportModerationService.class)
     );
 
     assertThrows(InvalidRequestException.class,
@@ -108,11 +117,13 @@ class ReportServiceTest {
     ReportRepository reportRepository = Mockito.mock(ReportRepository.class);
 
     ReportService service = new ReportService(
-        postRepository,
-        accountRepository,
-        adminActivityService,
-        permissionService,
-        reportRepository);
+        Mockito.mock(ReportSubmissionService.class),
+        new ReportModerationService(
+            postRepository,
+            accountRepository,
+            adminActivityService,
+            permissionService,
+            reportRepository));
 
     var report = dev.christopherbell.report.model.PostReport.builder()
         .id("r1")

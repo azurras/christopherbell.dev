@@ -2,6 +2,7 @@ package dev.christopherbell.configuration;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.christopherbell.configuration.security.SecurityConfig;
 import java.lang.reflect.Method;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -37,6 +38,26 @@ class SecurityConfigTest {
   @DisplayName("Location ZIP coordinate endpoint is public")
   void publicMatchers_whenLocationZipRequested_matchesWithoutAuthentication() throws Exception {
     var path = "/api/location/zip/78701";
+    var request = new MockHttpServletRequest("GET", path);
+    request.setServletPath(path);
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request)));
+  }
+
+  @Test
+  @DisplayName("ZIP coordinate tool page is public")
+  void publicMatchers_whenZipCoordinateToolRequested_matchesWithoutAuthentication() throws Exception {
+    var path = "/zip-coordinates";
+    var request = new MockHttpServletRequest("GET", path);
+    request.setServletPath(path);
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request)));
+  }
+
+  @Test
+  @DisplayName("Notifications page shell is public")
+  void publicMatchers_whenNotificationsPageRequested_matchesWithoutAuthentication() throws Exception {
+    var path = "/notifications";
     var request = new MockHttpServletRequest("GET", path);
     request.setServletPath(path);
 

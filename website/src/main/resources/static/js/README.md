@@ -5,7 +5,8 @@ Owns browser-side behavior for server-rendered pages.
 ## What Lives Here
 
 - Page entry modules such as `home-feed.js`, `messages.js`, `profile.js`,
-  `post.js`, `user-feed.js`, `vin-decoder.js`, and `whats-for-lunch.js`.
+  `post.js`, `user-feed.js`, `vin-decoder.js`, `zip-coordinates.js`, and
+  `whats-for-lunch.js`.
 - `app.js`, which wires shared page chrome and auth-aware behavior.
 - `components`, which contains reusable web components and cross-page UI pieces,
   including the auth-aware nav where Messages stays visible and routes signed-out
@@ -20,11 +21,17 @@ Owns browser-side behavior for server-rendered pages.
 - Templates load one page entry module after `app.js`.
 - Page modules should own DOM selectors for that page and delegate reusable work
   to `lib` or `components`.
+- `home.js` renders the `/` homepage Signal Rail. It polls the public Void feed
+  every five seconds, picks the five posts with the highest likes plus direct
+  replies, and links each snapshot to that post page.
 - Shared modules should not assume a specific page exists. They should accept
   selectors, callbacks, or small context objects from page modules.
 - `messages.js` renders the `/messages` Signal Bridge interactions: conversation
   list state, selected private thread, safe message body rendering, character
   counter, send action, unread-first conversation rows, and login redirect.
+- `notifications.js` renders the `/notifications` Signal Log page for signed-in
+  users, showing the full notification list and routing each item through the
+  same mark-read behavior used by the nav dropdown.
 - The Void feed toolbar keeps the primary feed filter surface to `All` and
   `Following`; profile and thread pages handle personal post and reply views.
 - API calls go through `lib/api.js` so auth headers, response parsing, and
@@ -48,6 +55,9 @@ Owns browser-side behavior for server-rendered pages.
 - `restaurant-profile.js` renders the public WFL restaurant profile page from
   the restaurant detail API, including aggregate rating, personal rating, and
   favorite state when the visitor is signed in.
+- `zip-coordinates.js` renders the Tools ZIP coordinate lookup page around
+  `GET /api/location/zip/{zipCode}`, including ZIP normalization, inline errors,
+  result fields, and copyable API/curl output.
 - `post.js` renders the `/p/{id}` Spectral Thread page. It loads the selected
   post and thread data, fills root/parent context echoes, applies selected-post
   detail styling through the shared feed renderer, wires the compact reply
@@ -55,8 +65,9 @@ Owns browser-side behavior for server-rendered pages.
 - `wfl-list.js` renders the WFL secondary pages for favorites and the public top
   10 rated restaurants.
 - `back-office.js` gates the Back Office to admins, renders report/user queues,
-  and exposes practical admin operations such as Location Census ZIP coordinate
-  import, WFL import/dedupe, and vehicle VIN maintenance.
+  supports user approval/status changes/role promotion, and exposes practical
+  admin operations such as Location Census ZIP coordinate import, WFL
+  import/dedupe, and vehicle VIN maintenance.
 
 ## Design Notes
 

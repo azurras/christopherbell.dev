@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.Role;
+import dev.christopherbell.configuration.security.JwtAuthenticationFilter;
 import dev.christopherbell.permission.PermissionService;
 import jakarta.servlet.ServletException;
 import java.io.IOException;

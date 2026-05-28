@@ -7,10 +7,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.vehicle.core.VehicleDataCollectionStateService;
 import dev.christopherbell.vehicle.model.VehicleProperties;
-import dev.christopherbell.vehicle.nhtsa.NhtsaVinImportStateRepository;
+import dev.christopherbell.vehicle.nhtsa.enrichment.NhtsaVinImportStateRepository;
 import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
-import dev.christopherbell.vehicle.randomvin.RandomVinImportStateRepository;
+import dev.christopherbell.vehicle.randomvin.importing.RandomVinImportStateRepository;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
 import java.time.Clock;
 import java.time.Instant;

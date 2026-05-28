@@ -3,6 +3,7 @@ package dev.christopherbell.vehicle;
 import static dev.christopherbell.libs.api.APIVersion.V20260509;
 
 import dev.christopherbell.libs.api.model.Response;
+import dev.christopherbell.vehicle.core.VehicleDataCollectionStateService;
 import dev.christopherbell.vehicle.model.VehicleCreateRequest;
 import dev.christopherbell.vehicle.model.VehicleDataCollectionState;
 import dev.christopherbell.vehicle.model.VehicleDetail;
@@ -11,6 +12,7 @@ import dev.christopherbell.vehicle.model.VehicleVinBatchRequest;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeRequest;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeResponse;
 import dev.christopherbell.vehicle.model.VehicleVinRequest;
+import dev.christopherbell.vehicle.nhtsa.decode.VehicleVinDecodeService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import lombok.RequiredArgsConstructor;

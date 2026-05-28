@@ -8,8 +8,11 @@ import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.notification.delivery.NotificationDeliveryService;
+import dev.christopherbell.notification.inbox.NotificationInboxService;
 import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.notification.model.NotificationType;
+import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import java.util.Optional;
@@ -24,11 +27,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class NotificationServiceTest {
   @Mock private NotificationRepository notificationRepository;
   @Mock private AccountRepository accountRepository;
+  @Mock private PermissionService permissionService;
 
   @Test
   @DisplayName("Mention notifications are created for existing mentioned users")
   void testCreateMentionNotifications_whenMentionedUserExists_savesNotification() {
-    var service = new NotificationService(notificationRepository, accountRepository);
+    var service = service();
     var actor = Account.builder().id("actor").username("writer").build();
     var mentioned = Account.builder().id("mentioned").username("reader").build();
     var post = Post.builder().id("post-1").text("hello @Reader").build();
@@ -52,7 +56,7 @@ class NotificationServiceTest {
   @Test
   @DisplayName("Mention notifications skip duplicate and self mentions")
   void testCreateMentionNotifications_whenDuplicateAndSelfMention_skipsExtraNotifications() {
-    var service = new NotificationService(notificationRepository, accountRepository);
+    var service = service();
     var actor = Account.builder().id("actor").username("writer").build();
     var post = Post.builder().id("post-1").text("@writer @writer").build();
 
@@ -67,7 +71,7 @@ class NotificationServiceTest {
   @Test
   @DisplayName("WFL session invite notifications link to the shared session")
   void testCreateWhatsForLunchSessionInvite_savesSessionNotification() {
-    var service = new NotificationService(notificationRepository, accountRepository);
+    var service = service();
     var actor = Account.builder().id("actor").username("owner").build();
     var recipient = Account.builder().id("recipient").username("friend").build();
     var session = WhatsForLunchSession.builder().id("session-1").build();
@@ -83,5 +87,79 @@ class NotificationServiceTest {
     assertEquals("session-1", notification.getWhatsForLunchSessionId());
     assertEquals(NotificationType.WFL_SESSION, notification.getNotificationType());
     assertEquals(false, notification.getRead());
+  }
+
+  @Test
+  @DisplayName("Post like notifications route back to the liked post")
+  void testCreatePostLikeNotification_savesPostOwnerNotification() {
+    var service = service();
+    var actor = Account.builder().id("actor").username("liker").build();
+    var recipient = Account.builder().id("recipient").username("writer").build();
+    var post = Post.builder().id("post-1").accountId("recipient").text("hello void").build();
+
+    service.createPostLikeNotification(post, actor, recipient);
+
+    var captor = ArgumentCaptor.forClass(Notification.class);
+    verify(notificationRepository).save(captor.capture());
+    var notification = captor.getValue();
+    assertEquals("recipient", notification.getAccountId());
+    assertEquals("actor", notification.getActorAccountId());
+    assertEquals("liker", notification.getActorUsername());
+    assertEquals("post-1", notification.getPostId());
+    assertEquals("hello void", notification.getPostText());
+    assertEquals(NotificationType.LIKE, notification.getNotificationType());
+    assertEquals(false, notification.getRead());
+  }
+
+  @Test
+  @DisplayName("Post like notifications skip self likes")
+  void testCreatePostLikeNotification_whenSelfLike_skipsNotification() {
+    var service = service();
+    var actor = Account.builder().id("actor").username("writer").build();
+    var post = Post.builder().id("post-1").accountId("actor").text("hello void").build();
+
+    service.createPostLikeNotification(post, actor, actor);
+
+    verify(notificationRepository, never()).save(any(Notification.class));
+  }
+
+  @Test
+  @DisplayName("Post comment notifications route to the new reply")
+  void testCreatePostCommentNotification_savesParentOwnerNotification() {
+    var service = service();
+    var actor = Account.builder().id("actor").username("replier").build();
+    var recipient = Account.builder().id("recipient").username("writer").build();
+    var reply = Post.builder().id("reply-1").parentId("post-1").accountId("actor").text("reply text").build();
+
+    service.createPostCommentNotification(reply, actor, recipient);
+
+    var captor = ArgumentCaptor.forClass(Notification.class);
+    verify(notificationRepository).save(captor.capture());
+    var notification = captor.getValue();
+    assertEquals("recipient", notification.getAccountId());
+    assertEquals("actor", notification.getActorAccountId());
+    assertEquals("replier", notification.getActorUsername());
+    assertEquals("reply-1", notification.getPostId());
+    assertEquals("reply text", notification.getPostText());
+    assertEquals(NotificationType.COMMENT, notification.getNotificationType());
+    assertEquals(false, notification.getRead());
+  }
+
+  @Test
+  @DisplayName("Post comment notifications skip self replies")
+  void testCreatePostCommentNotification_whenSelfReply_skipsNotification() {
+    var service = service();
+    var actor = Account.builder().id("actor").username("writer").build();
+    var reply = Post.builder().id("reply-1").parentId("post-1").accountId("actor").text("reply text").build();
+
+    service.createPostCommentNotification(reply, actor, actor);
+
+    verify(notificationRepository, never()).save(any(Notification.class));
+  }
+
+  private NotificationService service() {
+    return new NotificationService(
+        new NotificationDeliveryService(notificationRepository, accountRepository),
+        new NotificationInboxService(notificationRepository, permissionService));
   }
 }

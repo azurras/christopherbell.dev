@@ -4,11 +4,14 @@ Owns Void posts and feed behavior.
 
 ## What Lives Here
 
-- Post creation, replies, thread retrieval, and feed APIs.
-- Global, following, user, and current-user feeds.
-- Like toggling and post expiration behavior.
-- Mention detection and notification handoff.
-- Stored rich metadata for HTTP and HTTPS links mentioned in posts.
+- `PostController` owns the HTTP contract and keeps request parsing thin.
+- `PostService` is a facade that keeps controller-facing methods stable.
+- Post creation and reply persistence live under `creation`.
+- Global, following, user, and current-user feeds live under `feed`.
+- Single-post and thread retrieval live under `thread`.
+- Like toggling and delete authorization live under `interaction`.
+- Lifespan calculation, expiration repair, reply synchronization, and cleanup live under `expiration`.
+- Stored rich metadata for HTTP and HTTPS links mentioned in posts lives under `preview`.
 - The `/p/{id}` post detail page, which renders a single-column Spectral Thread
   view for the selected post, its root/parent context, compact reply composer,
   and direct replies.
@@ -16,14 +19,13 @@ Owns Void posts and feed behavior.
 
 ## How It Works
 
-- `PostController` owns the HTTP contract and keeps request parsing thin.
-- `PostService` owns business rules: text validation, reply hierarchy, expiration,
-  author lookup, like state, and delete authorization.
+- `PostService` delegates business rules to subfeature services so creation,
+  feeds, threads, interactions, expiration, and link previews can change independently.
 - `PostRepository` is the Mongo boundary. Service code asks it for already-sorted
   post sets instead of sorting in memory.
 - `PostMapper` maps persistence entities to detail DTOs when feed-specific
   fields are not needed.
-- Feed endpoints all use the same private service helpers for page sizing,
+- Feed endpoints use the feed service for page sizing,
   author username lookup, current-viewer like state, and `PostFeedItem` creation.
   This keeps global, following, user, thread, and single-post views behaviorally
   consistent.
@@ -34,7 +36,8 @@ Owns Void posts and feed behavior.
   responses resolve usernames at read time.
 - Public reads tolerate anonymous callers. Missing auth only disables
   viewer-specific fields like `liked`; write operations still require a resolved
-  current account.
+  current account. Suspended accounts cannot create new posts, which prevents
+  already-issued sessions from posting after suspension.
 - Expiration is enabled by default. New root posts start with a 24-hour
   lifespan. Root likes, every reply in the thread, and every active like on a
   reply each add another 24 hours from the root post creation timestamp.

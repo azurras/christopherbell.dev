@@ -1,10 +1,16 @@
 package dev.christopherbell.view;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import dev.christopherbell.view.account.AccountViewController;
+import dev.christopherbell.view.content.ContentViewController;
+import dev.christopherbell.view.tools.ToolsViewController;
+import dev.christopherbell.view.voidroutes.VoidViewController;
+import dev.christopherbell.view.wfl.WhatsForLunchViewController;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,7 +18,13 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest(ViewController.class)
+@WebMvcTest(controllers = {
+    AccountViewController.class,
+    ContentViewController.class,
+    ToolsViewController.class,
+    VoidViewController.class,
+    WhatsForLunchViewController.class
+})
 @AutoConfigureMockMvc(addFilters = false)
 public class ViewControllerTest {
   @Autowired private MockMvc mockMvc;
@@ -29,7 +41,13 @@ public class ViewControllerTest {
                 .string(
                     containsString(
                         "https://www.christopherbell.dev/images/previews/christopherbell-dev.png")))
-        .andExpect(content().string(containsString("The Void preview for christopherbell.dev")));
+        .andExpect(content().string(containsString("The Void preview for christopherbell.dev")))
+        .andExpect(content().string(containsString("Drop into the Void.")))
+        .andExpect(content().string(containsString("Enter Void")))
+        .andExpect(content().string(containsString("home-void-gateway")))
+        .andExpect(content().string(containsString("homeActivePost")))
+        .andExpect(content().string(containsString("Signal Rail")))
+        .andExpect(content().string(not(containsString("Secondary signals"))));
   }
 
   @Test
@@ -83,6 +101,27 @@ public class ViewControllerTest {
         .andExpect(status().isOk())
         .andExpect(content().string(containsString("CB | Top Rated Restaurants")))
         .andExpect(content().string(containsString("data-list-mode=\"top-rated\"")));
+  }
+
+  @Test
+  @DisplayName("ZIP coordinate tool renders the lookup app mount")
+  public void getZipCoordinatesPage_rendersLookupMount() throws Exception {
+    mockMvc
+        .perform(get("/zip-coordinates"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("CB | ZIP Coordinates")))
+        .andExpect(content().string(containsString("id=\"zipCoordinateForm\"")));
+  }
+
+  @Test
+  @DisplayName("Notifications page renders the notification list app mount")
+  public void getNotificationsPage_rendersNotificationListMount() throws Exception {
+    mockMvc
+        .perform(get("/notifications"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("CB | Notifications")))
+        .andExpect(content().string(containsString("id=\"notificationsPage\"")))
+        .andExpect(content().string(containsString("/js/notifications.js")));
   }
 
   @Test

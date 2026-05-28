@@ -13,7 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.Role;
-import dev.christopherbell.configuration.SecurityConfig;
+import dev.christopherbell.configuration.security.SecurityConfig;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.permission.PermissionService;
@@ -24,6 +24,7 @@ import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingReques
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingSetRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
+import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionService;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

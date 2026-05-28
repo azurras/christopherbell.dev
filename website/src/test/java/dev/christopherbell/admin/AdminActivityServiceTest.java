@@ -9,6 +9,8 @@ import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.admin.activity.AdminActivityRepository;
+import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.admin.model.AdminActivity;
 import dev.christopherbell.permission.PermissionService;
 import java.time.Clock;

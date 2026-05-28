@@ -1,162 +1,67 @@
 package dev.christopherbell.notification;
 
-import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
-import dev.christopherbell.libs.security.UsernameSanitizer;
-import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.notification.model.NotificationDetail;
-import dev.christopherbell.notification.model.NotificationType;
-import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.notification.delivery.NotificationDeliveryService;
+import dev.christopherbell.notification.inbox.NotificationInboxService;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
-import java.time.Instant;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.UUID;
-import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
+/** Facade kept for existing notification callers while subfeatures own behavior. */
 @RequiredArgsConstructor
 @Service
 public class NotificationService {
-  private static final Pattern MENTION_PATTERN =
-      Pattern.compile("(?<![A-Za-z0-9._-])@([A-Za-z0-9._-]{3,32})");
+  private final NotificationDeliveryService notificationDeliveryService;
+  private final NotificationInboxService notificationInboxService;
 
-  private final NotificationRepository notificationRepository;
-  private final AccountRepository accountRepository;
-
+  /** Delegates mention notification creation to the delivery subfeature. */
   public void createMentionNotifications(Post post, Account actor) {
-    if (post == null || actor == null || post.getText() == null) {
-      return;
-    }
-
-    var now = Instant.now();
-    for (var username : extractMentionUsernames(post.getText())) {
-      accountRepository.findByUsernameIgnoreCase(username)
-          .filter(account -> !account.getId().equals(actor.getId()))
-          .ifPresent(account -> notificationRepository.save(Notification.builder()
-              .id(UUID.randomUUID().toString())
-              .accountId(account.getId())
-              .actorAccountId(actor.getId())
-              .actorUsername(actor.getUsername())
-              .postId(post.getId())
-              .postText(post.getText())
-              .notificationType(NotificationType.MENTION)
-              .read(false)
-              .createdOn(now)
-              .build()));
-    }
+    notificationDeliveryService.createMentionNotifications(post, actor);
   }
 
+  /** Delegates message notification creation to the delivery subfeature. */
   public void createMessageNotification(Message message, Account actor, Account recipient) {
-    if (message == null || actor == null || recipient == null) {
-      return;
-    }
-    notificationRepository.save(Notification.builder()
-        .id(UUID.randomUUID().toString())
-        .accountId(recipient.getId())
-        .actorAccountId(actor.getId())
-        .actorUsername(actor.getUsername())
-        .messageId(message.getId())
-        .messageText(message.getText())
-        .notificationType(NotificationType.MESSAGE)
-        .read(false)
-        .createdOn(Instant.now())
-        .build());
+    notificationDeliveryService.createMessageNotification(message, actor, recipient);
   }
 
+  /** Delegates post-like notification creation to the delivery subfeature. */
+  public void createPostLikeNotification(Post post, Account actor, Account recipient) {
+    notificationDeliveryService.createPostLikeNotification(post, actor, recipient);
+  }
+
+  /** Delegates post-comment notification creation to the delivery subfeature. */
+  public void createPostCommentNotification(Post reply, Account actor, Account recipient) {
+    notificationDeliveryService.createPostCommentNotification(reply, actor, recipient);
+  }
+
+  /** Delegates WFL session invite notification creation to the delivery subfeature. */
   public void createWhatsForLunchSessionInvite(
       WhatsForLunchSession session,
       Account actor,
       Account recipient
   ) {
-    if (session == null || actor == null || recipient == null) {
-      return;
-    }
-    notificationRepository.save(Notification.builder()
-        .id(UUID.randomUUID().toString())
-        .accountId(recipient.getId())
-        .actorAccountId(actor.getId())
-        .actorUsername(actor.getUsername())
-        .whatsForLunchSessionId(session.getId())
-        .whatsForLunchSessionText("Vote on today's lunch picks.")
-        .notificationType(NotificationType.WFL_SESSION)
-        .read(false)
-        .createdOn(Instant.now())
-        .build());
+    notificationDeliveryService.createWhatsForLunchSessionInvite(session, actor, recipient);
   }
 
+  /** Delegates inbox notification reads to the inbox subfeature. */
   public List<NotificationDetail> getMyNotifications(int limit) {
-    String selfId = PermissionService.getSelf();
-    int pageSize = Math.max(1, Math.min(limit, 50));
-    var page = PageRequest.of(0, pageSize, Sort.by(Sort.Direction.DESC, "createdOn"));
-    return notificationRepository.findByAccountIdOrderByCreatedOnDesc(selfId, page).stream()
-        .map(this::toDetail)
-        .toList();
+    return notificationInboxService.getMyNotifications(limit);
   }
 
+  /** Delegates unread-count reads to the inbox subfeature. */
   public long countMyUnreadNotifications() {
-    return notificationRepository.countByAccountIdAndReadFalse(PermissionService.getSelf());
+    return notificationInboxService.countMyUnreadNotifications();
   }
 
+  /** Delegates mark-read updates to the inbox subfeature. */
   public NotificationDetail markRead(String notificationId)
       throws InvalidRequestException, ResourceNotFoundException {
-    if (notificationId == null || notificationId.isBlank()) {
-      throw new InvalidRequestException("Notification id cannot be null or blank.");
-    }
-
-    String selfId = PermissionService.getSelf();
-    var notification = notificationRepository.findById(notificationId)
-        .orElseThrow(() -> new ResourceNotFoundException(
-            String.format("Notification with id %s not found.", notificationId)));
-    if (!selfId.equals(notification.getAccountId())) {
-      throw new ResourceNotFoundException(
-          String.format("Notification with id %s not found.", notificationId));
-    }
-
-    notification.setRead(true);
-    return toDetail(notificationRepository.save(notification));
-  }
-
-  static Set<String> extractMentionUsernames(String text) {
-    var usernames = new LinkedHashSet<String>();
-    if (text == null || text.isBlank()) {
-      return usernames;
-    }
-
-    var matcher = MENTION_PATTERN.matcher(text);
-    while (matcher.find()) {
-      try {
-        usernames.add(UsernameSanitizer.sanitize(matcher.group(1)));
-      } catch (IllegalArgumentException ignored) {
-        // Ignore invalid mention-like tokens.
-      }
-    }
-    return usernames;
-  }
-
-  private NotificationDetail toDetail(Notification notification) {
-    return NotificationDetail.builder()
-        .id(notification.getId())
-        .accountId(notification.getAccountId())
-        .actorAccountId(notification.getActorAccountId())
-        .actorUsername(notification.getActorUsername())
-        .postId(notification.getPostId())
-        .postText(notification.getPostText())
-        .messageId(notification.getMessageId())
-        .messageText(notification.getMessageText())
-        .whatsForLunchSessionId(notification.getWhatsForLunchSessionId())
-        .whatsForLunchSessionText(notification.getWhatsForLunchSessionText())
-        .notificationType(notification.getNotificationType())
-        .read(Boolean.TRUE.equals(notification.getRead()))
-        .createdOn(notification.getCreatedOn())
-        .build();
+    return notificationInboxService.markRead(notificationId);
   }
 }

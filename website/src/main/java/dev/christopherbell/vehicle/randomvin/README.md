@@ -4,10 +4,10 @@ Owns opportunistic VIN discovery from randomvin.com.
 
 ## What Lives Here
 
-- RandomVIN client access and robots-policy enforcement.
-- Import throttling, daily caps, cooldowns, and permanent-disable behavior.
-- Duplicate VIN prevention and minimal vehicle creation from imported VINs.
-- Cleanup for legacy RandomVIN import notes.
+- `importing` owns RandomVIN client access, import throttling, daily caps, cooldowns, permanent-disable behavior, duplicate VIN prevention, and minimal vehicle creation.
+- `policy` owns robots.txt fetch and policy evaluation.
+- `model` owns RandomVIN import state and robots policy state records.
+- Legacy RandomVIN import note cleanup runs from the importing service.
 
 ## Update This Doc
 

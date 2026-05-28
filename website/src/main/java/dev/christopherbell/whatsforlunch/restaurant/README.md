@@ -6,10 +6,10 @@ Owns the data model and APIs for What's For Lunch restaurants.
 
 - Restaurant create/read/update/delete APIs.
 - Public nearby lunch picks, legacy daily lunch picks, and admin-only maintenance endpoints.
-- User WFL preferences for saved cuisine filters.
-- Shared WFL sessions where logged-in members see the same three restaurants and vote.
-- Whole-number restaurant ratings from logged-in members, plus public rating totals.
-- Favorite restaurants for logged-in members and a public top-rated restaurant list.
+- User WFL preferences for saved cuisine filters. Preference persistence lives in `preference`.
+- Shared WFL sessions where logged-in members see the same three restaurants and vote. Session orchestration lives in `session`.
+- Whole-number restaurant ratings from logged-in members, plus public rating totals. Rating persistence lives in `rating`.
+- Favorite restaurants for logged-in members and a public top-rated restaurant list. Favorite persistence lives in `favorite`.
 - Daily pick persistence and replacement behavior after admin deletion.
 - OpenStreetMap import with coordinates, same-name/address updates, duplicate-name protection, duplicate cleanup, monthly scheduling, and startup catch-up when the previous month was missed.
 - Restaurant DTOs, import summaries, daily pick models, and repository interfaces.

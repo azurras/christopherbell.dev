@@ -11,10 +11,14 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
-import dev.christopherbell.vehicle.VehicleRepository;
 import dev.christopherbell.vehicle.VehicleStub;
+import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.VehicleProperties;
-import dev.christopherbell.vehicle.nhtsa.NhtsaVinClient.NhtsaVinDecodeRequest;
+import dev.christopherbell.vehicle.nhtsa.decode.NhtsaVinClient;
+import dev.christopherbell.vehicle.nhtsa.decode.NhtsaVinClient.NhtsaVinDecodeRequest;
+import dev.christopherbell.vehicle.nhtsa.decode.NhtsaVinClientException;
+import dev.christopherbell.vehicle.nhtsa.enrichment.NhtsaVinEnrichmentService;
+import dev.christopherbell.vehicle.nhtsa.enrichment.NhtsaVinImportStateRepository;
 import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
 import java.time.Clock;
 import java.time.Duration;

@@ -16,15 +16,19 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.vehicle.core.VehicleCrudService;
+import dev.christopherbell.vehicle.core.VehicleMapper;
+import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.VehicleVinBatchRequest;
 import dev.christopherbell.vehicle.model.VehicleVinRequest;
+import dev.christopherbell.vehicle.vin.VehicleVinService;
 import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
@@ -38,7 +42,14 @@ public class VehicleServiceTest {
   @Mock private Clock clock;
   @Mock private VehicleMapper vehicleMapper;
   @Mock private VehicleRepository vehicleRepository;
-  @InjectMocks private VehicleService vehicleService;
+  private VehicleService vehicleService;
+
+  @BeforeEach
+  public void setUp() {
+    vehicleService = new VehicleService(
+        new VehicleCrudService(vehicleMapper, vehicleRepository),
+        new VehicleVinService(clock, vehicleMapper, vehicleRepository));
+  }
 
   @Test
   @DisplayName("Creates vehicle with generated UUID id")

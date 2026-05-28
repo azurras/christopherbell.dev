@@ -70,6 +70,20 @@ class PermissionServiceTest {
   }
 
   @Test
+  @DisplayName("Generated login tokens expire after one day")
+  void generateToken_setsOneDayExpiration() {
+    var token = PermissionService.generateToken(Account.builder()
+        .id("account-1")
+        .role(Role.USER)
+        .build());
+
+    var claims = PermissionService.validateToken(token);
+    var tokenLifetimeMillis = claims.getExpiration().getTime() - claims.getIssuedAt().getTime();
+
+    assertEquals(86_400_000L, tokenLifetimeMillis);
+  }
+
+  @Test
   @DisplayName("Approved accounts pass and unapproved accounts throw")
   void isAccountApproved_validatesApprovalFlag() throws Exception {
     assertTrue(PermissionService.isAccountApproved(Account.builder().isApproved(true).build()));

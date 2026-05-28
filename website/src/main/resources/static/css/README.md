@@ -15,12 +15,23 @@ Owns site styling for server-rendered pages and frontend components.
 - Current templates should use `main.css` unless they are intentionally part of a
   legacy area.
 - Shared components and page modules rely on stable class names in `main.css`.
+- The shared nav uses `.void-console-nav` classes for the Signal Online status
+  row, Void brand mark, compact nav pills, auth actions, dark dropdowns, and
+  notification/profile menu styling. The green `.void-signal-dot` uses a slow
+  blink animation to read like an old router status light.
+- The home page uses `.home-void-*` classes for the Void-first gateway, primary
+  `/void` call to action, and live five-item Signal Rail.
 - Messages uses `.void-messages-*` classes in `main.css` for the Signal Bridge
   layout: dark conversation rail, private thread panel, directional message
   bubbles, unread conversation highlighting, and responsive one-column behavior.
+- Notifications uses `.notification-center-*` classes for the full Signal Log
+  page. The nav bell keeps only the three most recent notifications and uses the
+  compact notification dropdown rules near the shared nav styles.
 - WFL uses shared lunch classes for picks, restaurant profiles, favorites, and
   top-rated lists, plus `wfl-secondary-nav` for local WFL navigation and
   `lunch-controls` for the filters, location, and Lunch with Friends control tabs.
+- ZIP Coordinates uses `.zip-coordinate-*` classes in `main.css` for its
+  Void-inspired lookup shell, result grid, and copyable endpoint output.
 - Void-related templates opt into `void-shell-page`; `main.css` owns the Lost
   Signal shell, Void-aware nav/footer treatment, shared lifespan countdown
   styling, rich post link preview cards, and expiry motion for those pages.

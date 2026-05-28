@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.christopherbell.vehicle.model.VehicleProperties;
+import dev.christopherbell.vehicle.randomvin.policy.RandomVinRobotsPolicy;
 import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
