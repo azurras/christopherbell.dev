@@ -11,6 +11,7 @@ import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.dto.AccountProfile;
+import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.Role;
@@ -29,8 +30,10 @@ import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
@@ -42,6 +45,11 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 public class AccountService {
+  private static final int DEFAULT_USERNAME_SUGGESTION_LIMIT = 8;
+  private static final int MAX_USERNAME_SUGGESTION_LIMIT = 12;
+  private static final int MAX_USERNAME_SEARCH_PREFIX_LENGTH = 32;
+  private static final Pattern USERNAME_SEARCH_INVALID_CHARS = Pattern.compile("[^a-zA-Z0-9._-]");
+
   private final AccountMapper accountMapper;
   private final AccountRepository accountRepository;
   private final AccountAuthenticationService accountAuthenticationService;
@@ -248,6 +256,36 @@ public class AccountService {
   }
 
   /**
+   * Searches active accounts by username prefix for recipient autocomplete.
+   *
+   * @param usernamePrefix partial username typed by the caller
+   * @param requestedLimit maximum number of suggestions requested by the caller
+   * @return public-safe username suggestions excluding the current account
+   * @throws ResourceNotFoundException if the current account cannot be resolved
+   */
+  public List<AccountUsernameSuggestion> searchUsernameSuggestions(
+      String usernamePrefix,
+      Integer requestedLimit
+  ) throws ResourceNotFoundException {
+    var prefix = sanitizeUsernameSearchPrefix(usernamePrefix);
+    if (prefix.isBlank()) {
+      return List.of();
+    }
+
+    var self = accountProfileService.getSelfEntity();
+    var page = PageRequest.of(0, normalizeUsernameSuggestionLimit(requestedLimit));
+    return accountRepository
+        .findByUsernameStartingWithIgnoreCaseAndStatusOrderByUsernameAsc(
+            prefix,
+            AccountStatus.ACTIVE,
+            page)
+        .stream()
+        .filter(account -> !self.getId().equals(account.getId()))
+        .map(account -> new AccountUsernameSuggestion(account.getUsername()))
+        .toList();
+  }
+
+  /**
    * Validates login information from a request and returns a JWT if it is correct.
    *
    * @param accountLoginRequest - account for which the requester wishes to gain access to.
@@ -256,6 +294,23 @@ public class AccountService {
    */
   public String loginAccount(AccountLoginRequest accountLoginRequest) throws Exception {
     return accountAuthenticationService.loginAccount(accountLoginRequest);
+  }
+
+  private String sanitizeUsernameSearchPrefix(String usernamePrefix) {
+    var cleaned = USERNAME_SEARCH_INVALID_CHARS
+        .matcher(String.valueOf(usernamePrefix == null ? "" : usernamePrefix).strip())
+        .replaceAll("");
+    if (cleaned.length() <= MAX_USERNAME_SEARCH_PREFIX_LENGTH) {
+      return cleaned;
+    }
+    return cleaned.substring(0, MAX_USERNAME_SEARCH_PREFIX_LENGTH);
+  }
+
+  private int normalizeUsernameSuggestionLimit(Integer requestedLimit) {
+    if (requestedLimit == null || requestedLimit < 1) {
+      return DEFAULT_USERNAME_SUGGESTION_LIMIT;
+    }
+    return Math.min(requestedLimit, MAX_USERNAME_SUGGESTION_LIMIT);
   }
 
   /**

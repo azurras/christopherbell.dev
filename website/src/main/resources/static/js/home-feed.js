@@ -4,6 +4,8 @@ import { createFeedItem } from './lib/feed-render.js';
 import { canDeleteFor, makeRendererContext } from './lib/feed-context.js';
 import { createInfiniteScroller } from './lib/infinite.js';
 import { initComposer } from './lib/composer.js';
+import { initPostImageLightbox } from './lib/image-lightbox.js';
+import { initLazyMedia } from './lib/lazy-media.js';
 /**
  * Home feed page script.
  * - Renders global feed with infinite scroll and 15s polling
@@ -93,6 +95,7 @@ function renderFeed() {
   for (const post of items) {
     list.appendChild(createFeedItem(post, RENDER_CTX));
   }
+  initLazyMedia(list);
 }
 
 function optimisticPost(text) {
@@ -122,6 +125,8 @@ async function reloadFeed() {
 
 /** Wire page once DOM is ready. */
 document.addEventListener('DOMContentLoaded', async () => {
+  initPostImageLightbox();
+
   // Load current user to determine delete permissions before first render
   const token = localStorage.getItem('cbellLoginToken');
   if (token) {
@@ -141,6 +146,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       counter: '#charCount',
       button: '#postBtn',
       alert: '#homeAlert',
+      preview: '#composerPreview',
     },
     isLoggedIn,
     onSubmit: async (text) => {

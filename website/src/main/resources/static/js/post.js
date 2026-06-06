@@ -2,6 +2,21 @@ import { sanitize, authHeaders, fetchJson, isLoggedIn, formatWhen, closeOnOutsid
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
 import { makeRendererContext, canDeleteFor } from './lib/feed-context.js';
+import { initPostImageLightbox } from './lib/image-lightbox.js';
+import { initLazyMedia } from './lib/lazy-media.js';
+import {
+  newestReplyInThread,
+  renderThreadNavigation,
+  replyIdsWithChildren,
+  visibleThreadAfterCollapsedBranches
+} from './lib/thread-navigation.js';
+
+let collapsedBranches = new Set();
+let currentPost = null;
+let currentPostId = null;
+let currentThread = [];
+let currentUser = null;
+
 /** Extract the post id from the /p/{id} path. */
 function getPostId() { const m = location.pathname.match(/\/p\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; }
 
@@ -117,8 +132,10 @@ function renderRoot(post, currentUser) {
     onExpire: () => renderExpiredRootState(root)
   });
   const focusedPost = createFeedItem(post, ctx);
+  focusedPost.dataset.postId = post.id;
   focusedPost.classList.add('void-thread-selected-post');
   root.appendChild(focusedPost);
+  initLazyMedia(root);
 
   if (post.parentId) {
     fillContext(root, 'parent', post.parentId);
@@ -176,6 +193,95 @@ async function submitReply(parentId) {
   }
 }
 
+function cssString(value) {
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function scrollToPost(postId) {
+  const target = document.querySelector(`[data-post-id="${cssString(postId)}"]`);
+  if (!target) return false;
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  return true;
+}
+
+function numericLevel(post) {
+  const level = Number(post?.level || 0);
+  return Number.isFinite(level) && level > 0 ? level : 0;
+}
+
+function descendantPostsForCurrent(visibleThread, currentId) {
+  const byId = new Map(currentThread.filter(post => post?.id).map(post => [post.id, post]));
+  return visibleThread.filter(post => {
+    if (!post?.id || post.id === currentId) return false;
+    let parentId = post.parentId || null;
+    while (parentId) {
+      if (parentId === currentId) return true;
+      parentId = byId.get(parentId)?.parentId || null;
+    }
+    return false;
+  });
+}
+
+function branchTools(post, childIds, relativeDepth) {
+  const row = document.createElement('div');
+  row.className = 'void-thread-row-tools';
+
+  const depthLabel = document.createElement('span');
+  depthLabel.className = 'void-thread-depth-label';
+  depthLabel.textContent = `Reply depth ${Math.max(1, relativeDepth)}`;
+  row.appendChild(depthLabel);
+
+  if (childIds.has(post.id)) {
+    const collapsed = collapsedBranches.has(post.id);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'void-thread-collapse';
+    button.dataset.collapseThread = post.id;
+    button.setAttribute('aria-expanded', String(!collapsed));
+    button.textContent = collapsed ? 'Expand branch' : 'Collapse branch';
+    row.appendChild(button);
+  }
+
+  return row;
+}
+
+function decorateReplyItem(item, post, childIds, selectedLevel) {
+  const relativeDepth = Math.max(1, numericLevel(post) - selectedLevel);
+  item.dataset.postId = post.id;
+  item.style.setProperty('--thread-depth', String(Math.min(relativeDepth - 1, 5)));
+
+  const content = item.querySelector('.post-content');
+  if (!content) return;
+  content.insertBefore(branchTools(post, childIds, relativeDepth), content.firstChild);
+}
+
+function rerenderThreadReplies() {
+  if (!currentPost || !currentPostId) return;
+  const directReplies = renderThread(currentThread, currentUser, currentPostId) || [];
+  renderThreadSummary(currentPost, directReplies);
+}
+
+function newestReplyForCurrentPost() {
+  if (!currentPostId) return null;
+  return newestReplyInThread(descendantPostsForCurrent(currentThread, currentPostId));
+}
+
+function wireThreadControls() {
+  document.getElementById('jumpNewestReply')?.addEventListener('click', () => {
+    const newest = newestReplyForCurrentPost();
+    if (!newest?.id) return;
+    if (scrollToPost(newest.id)) return;
+    collapsedBranches.clear();
+    rerenderThreadReplies();
+    requestAnimationFrame(() => scrollToPost(newest.id));
+  });
+
+  document.getElementById('expandAllReplies')?.addEventListener('click', () => {
+    collapsedBranches.clear();
+    rerenderThreadReplies();
+  });
+}
+
 /**
  * Render the replies list, excluding the currentId item if present.
  * @param {Array} items thread feed items
@@ -186,8 +292,11 @@ function renderThread(items, currentUser, currentId) {
   const list = document.getElementById('threadList');
   if (!list) return;
   list.innerHTML = '';
-  const directReplies = (items || []).filter(p => p.parentId === currentId);
-  if (directReplies.length === 0) {
+  const thread = Array.isArray(items) ? items : [];
+  const directReplies = thread.filter(p => p.parentId === currentId);
+  const visibleThread = visibleThreadAfterCollapsedBranches(thread, collapsedBranches);
+  const visibleReplies = descendantPostsForCurrent(visibleThread, currentId);
+  if (visibleReplies.length === 0) {
     list.innerHTML = `
       <div class="feed-empty-state thread-empty-state">
         <h2>No replies yet</h2>
@@ -196,15 +305,47 @@ function renderThread(items, currentUser, currentId) {
     return directReplies;
   }
   const ctx = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(currentUser), currentUserName: currentUser?.username || null, suppressParentContext: true });
-  for (const p of directReplies) list.appendChild(createFeedItem(p, ctx));
+  const childIds = replyIdsWithChildren(thread);
+  const selectedLevel = numericLevel(thread.find(post => post?.id === currentId));
+  for (const p of visibleReplies) {
+    const item = createFeedItem(p, ctx);
+    decorateReplyItem(item, p, childIds, selectedLevel);
+    list.appendChild(item);
+  }
+  initLazyMedia(list);
+  list.querySelectorAll('[data-collapse-thread]').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const postId = button.dataset.collapseThread;
+      if (!postId) return;
+      if (collapsedBranches.has(postId)) {
+        collapsedBranches.delete(postId);
+      } else {
+        collapsedBranches.add(postId);
+      }
+      rerenderThreadReplies();
+      requestAnimationFrame(() => scrollToPost(postId));
+    });
+  });
   return directReplies;
+}
+
+function renderNavigation(items, currentId) {
+  const nav = document.getElementById('threadNavigation');
+  if (!nav) return;
+  nav.innerHTML = renderThreadNavigation(items, currentId);
+  nav.classList.toggle('d-none', !nav.innerHTML.trim());
 }
 
 /** Wire page once DOM is ready. */
 document.addEventListener('DOMContentLoaded', async () => {
+  initPostImageLightbox();
+
   closeOnOutside('.post-menu');
   const id = getPostId();
   if (!id) return;
+  currentPostId = id;
+  wireThreadControls();
   const alert = document.getElementById('postAlert');
   try {
     const [post, thread] = await Promise.all([
@@ -215,10 +356,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (localStorage.getItem('cbellLoginToken')) {
       try { me = await fetchJson(API.accounts.me, { headers: authHeaders() }); } catch (_) {}
     }
+    currentPost = post;
+    currentThread = Array.isArray(thread) ? thread : [];
+    currentUser = me;
+    collapsedBranches = new Set();
+
     renderRoot(post, me);
     showReplyComposer(me);
     document.getElementById('replyBtn')?.addEventListener('click', () => submitReply(id));
-    const directReplies = renderThread(thread, me, id) || [];
+    renderNavigation(currentThread, id);
+    const directReplies = renderThread(currentThread, me, id) || [];
     renderThreadSummary(post, directReplies);
   } catch (err) {
     if (alert) { alert.textContent = err.message; alert.classList.remove('d-none'); }

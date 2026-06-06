@@ -33,6 +33,7 @@ this app.
     |   |-- account/              # Signup, login, profiles, password reset
     |   |-- admin/                # Back Office activity and admin views
     |   |-- blog/                 # Config-backed blog content
+    |   |-- canesboxtracker/      # Raising Canes Box Index weekly price tracker
     |   |-- configuration/        # Security, filters, app configuration
     |   |-- location/             # Imported ZIP coordinate reference data
     |   |-- message/              # Direct messages
@@ -249,8 +250,28 @@ When adding a public API endpoint, update both:
 - Reports: users can report posts; admins resolve reports in Back Office.
 - Back Office: admin queues and operations.
 - Vehicles: VIN decoding, stored vehicles, NHTSA enrichment.
+- Raising Canes Box Index: verified weekly Box Combo prices across configured metros.
 - What's For Lunch: multi-metro restaurant import and nearby lunch suggestions.
 - Photos and blog: content configured through application properties.
+
+## Raising Canes Box Index
+
+Raising Canes Box Index is a public Tool at `/canes-box-tracker`. A scheduled job
+samples the configured store closest to each selected metro center once a week,
+stores the per-metro results in MongoDB, and exposes chart history through
+`GET /api/canes-box-tracker/2026-06-04/history`. The page shows a large percent
+index comparing the latest verified weekly average with the previous verified
+priced week.
+
+Metro targets and the weekly schedule live under `canes-box-tracker` in
+`application.yml`. The collector uses the official ordering API and admin
+manual verification as reliable index sources. Public menu fallback URLs are
+disabled by default because third-party menu pages can be stale; when enabled for
+diagnostics, those matches stay provisional until an admin reviews them in Back
+Office. Failed/rejected samples stay visible as excluded datapoints instead of
+being averaged or fabricated. Public fallback prices below
+`minimum-public-menu-price` are rejected as stale third-party menu data before
+they appear on the tracker.
 
 ## What's For Lunch Data
 

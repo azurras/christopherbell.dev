@@ -1,6 +1,7 @@
 package dev.christopherbell.vehicle.nhtsa;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -34,11 +35,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 /**
  * Unit tests for {@link NhtsaVinEnrichmentService}.
  */
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 @DisplayName("NhtsaVinEnrichmentService unit tests")
 public class NhtsaVinEnrichmentServiceTest {
   private static final Instant DECODED_ON = Instant.parse("2026-01-18T02:30:00.809Z");
@@ -236,7 +239,7 @@ public class NhtsaVinEnrichmentServiceTest {
 
   @Test
   @DisplayName("Skips vehicles that have already been enriched")
-  public void testEnrichStoredVins_whenVinWasAlreadyDecoded_skipsVehicle() {
+  public void testEnrichStoredVins_whenVinWasAlreadyDecoded_skipsVehicle(CapturedOutput output) {
     var vehicle = VehicleStub.getVehicleStub(VehicleStub.ID);
     vehicle.setNhtsaLastDecodedOn(DECODED_ON.minusSeconds(7200));
     givenNoNhtsaState();
@@ -246,6 +249,8 @@ public class NhtsaVinEnrichmentServiceTest {
 
     verify(vehicleRepository).findByVinIsNotNull();
     verifyNoMoreInteractions(nhtsaVinClient, vehicleRepository);
+    assertFalse(output.getOut().contains("NHTSA VIN enrichment job started."));
+    assertFalse(output.getOut().contains("NHTSA VIN enrichment job completed."));
   }
 
   @Test

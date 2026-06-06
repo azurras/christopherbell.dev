@@ -1,7 +1,26 @@
+import { imageFallbackMarkup } from './image-lightbox.js';
+import { lazyIframeMarkup } from './lazy-media.js';
 import { appendTextWithMentionLinks, loginRedirectUrl } from './util.js';
 
 const LIFESPAN_TICK_MS = 1000;
 const EXPIRY_ANIMATION_MS = 560;
+const WEB_URL_RE = /\bhttps?:\/\/[^\s<>()]+/gi;
+const URL_TRAILING_PUNCTUATION = /[.,!?;:]$/;
+const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+const DIRECT_IMAGE_EXT_RE = /\.(jpe?g|png|gif|webp|avif)$/i;
+const DIRECT_GIF_EXT_RE = /\.gif$/i;
+const DIRECT_IMAGE_QUERY_KEYS = ['format', 'fm'];
+const DIRECT_IMAGE_FORMATS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif']);
+const SPOTIFY_TYPES = new Set(['track', 'album', 'playlist', 'episode', 'show']);
+const YOUTUBE_HOSTS = new Set([
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'music.youtube.com',
+  'youtube-nocookie.com',
+  'www.youtube-nocookie.com'
+]);
+let postMenuEscapeHandlerInitialized = false;
 
 export function remainingLifespanMs(expiresOn, now = Date.now()) {
   if (!expiresOn) return null;
@@ -44,6 +63,259 @@ export function linkPreviewCardMarkup(preview, sanitize) {
       ${description}
     </span>
   </a>`;
+}
+
+/** Build a privacy-enhanced YouTube embed URL for supported video links. */
+export function youtubeEmbedUrl(url) {
+  try {
+    const parsed = new URL(trimUrlPunctuation(url));
+    const host = parsed.hostname.toLowerCase();
+    let videoId = '';
+
+    if (host === 'youtu.be') {
+      videoId = parsed.pathname.split('/').filter(Boolean)[0] || '';
+    } else if (YOUTUBE_HOSTS.has(host)) {
+      const pathParts = parsed.pathname.split('/').filter(Boolean);
+      if (parsed.pathname === '/watch') {
+        videoId = parsed.searchParams.get('v') || '';
+      } else if (['embed', 'shorts', 'live'].includes(pathParts[0])) {
+        videoId = pathParts[1] || '';
+      }
+    }
+
+    return YOUTUBE_VIDEO_ID_RE.test(videoId)
+      ? `https://www.youtube-nocookie.com/embed/${videoId}`
+      : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+/** Extract distinct YouTube embeds from post text and stored link previews. */
+export function youtubeEmbedUrlsForPost(post) {
+  const urls = new Set();
+  for (const url of urlsFromText(post?.text)) {
+    const embedUrl = youtubeEmbedUrl(url);
+    if (embedUrl) urls.add(embedUrl);
+  }
+  for (const preview of post?.linkPreviews || []) {
+    const embedUrl = youtubeEmbedUrl(preview?.url);
+    if (embedUrl) urls.add(embedUrl);
+  }
+  return [...urls];
+}
+
+/** Return a direct image URL for supported image links. */
+export function directImageUrl(url) {
+  try {
+    const trimmed = trimUrlPunctuation(url);
+    const parsed = new URL(trimmed);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    if (DIRECT_IMAGE_EXT_RE.test(parsed.pathname)) return parsed.href;
+    return hasImageQueryFormat(parsed) ? parsed.href : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+/** Return a direct animated GIF URL when the link clearly points at GIF media. */
+export function directGifUrl(url) {
+  try {
+    const trimmed = trimUrlPunctuation(url);
+    const parsed = new URL(trimmed);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    if (DIRECT_GIF_EXT_RE.test(parsed.pathname)) return parsed.href;
+    return hasGifQueryFormat(parsed) ? parsed.href : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function hasImageQueryFormat(parsed) {
+  return DIRECT_IMAGE_QUERY_KEYS
+    .map(key => parsed.searchParams.get(key))
+    .filter(Boolean)
+    .some(value => DIRECT_IMAGE_FORMATS.has(value.toLowerCase()));
+}
+
+function hasGifQueryFormat(parsed) {
+  return DIRECT_IMAGE_QUERY_KEYS
+    .map(key => parsed.searchParams.get(key))
+    .filter(Boolean)
+    .some(value => value.toLowerCase() === 'gif');
+}
+
+/** Build a Spotify iframe URL for allowlisted Spotify content links. */
+export function spotifyEmbedUrl(url) {
+  try {
+    const parsed = new URL(trimUrlPunctuation(url));
+    if (parsed.hostname.toLowerCase() !== 'open.spotify.com') return '';
+    const [type, id] = parsed.pathname.split('/').filter(Boolean);
+    if (!SPOTIFY_TYPES.has(type) || !id) return '';
+    return `https://open.spotify.com/embed/${type}/${id}`;
+  } catch (_) {
+    return '';
+  }
+}
+
+/** Build a SoundCloud widget iframe URL for public SoundCloud links. */
+export function soundCloudEmbedUrl(url) {
+  try {
+    const trimmed = trimUrlPunctuation(url);
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (!['soundcloud.com', 'www.soundcloud.com'].includes(host)) return '';
+    return `https://w.soundcloud.com/player/?url=${encodeURIComponent(trimmed)}`;
+  } catch (_) {
+    return '';
+  }
+}
+
+/** Return first-party card data for GitHub repository, issue, and pull request links. */
+export function githubCardDetail(url) {
+  try {
+    const parsed = new URL(trimUrlPunctuation(url));
+    if (parsed.hostname.toLowerCase() !== 'github.com') return null;
+    const [owner, repo, kind, number] = parsed.pathname.split('/').filter(Boolean);
+    if (!owner || !repo) return null;
+
+    let label = 'Repository';
+    let suffix = '';
+    if (kind === 'issues' && number) {
+      label = `Issue #${number}`;
+      suffix = `/issues/${number}`;
+    } else if (kind === 'pull' && number) {
+      label = `Pull request #${number}`;
+      suffix = `/pull/${number}`;
+    } else if (kind) {
+      return null;
+    }
+
+    return {
+      href: `https://github.com/${owner}/${repo}${suffix}`,
+      owner,
+      repo,
+      label,
+      title: `${owner}/${repo}`
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function richEmbedForUrl(url) {
+  const youtube = youtubeEmbedUrl(url);
+  if (youtube) return { type: 'youtube', key: `youtube:${youtube}`, sourceUrl: trimUrlPunctuation(url), src: youtube };
+
+  const gif = directGifUrl(url);
+  if (gif) return { type: 'gif', key: `gif:${gif}`, sourceUrl: trimUrlPunctuation(url), src: gif };
+
+  const image = directImageUrl(url);
+  if (image) return { type: 'image', key: `image:${image}`, sourceUrl: trimUrlPunctuation(url), src: image };
+
+  const spotify = spotifyEmbedUrl(url);
+  if (spotify) return { type: 'spotify', key: `spotify:${spotify}`, sourceUrl: trimUrlPunctuation(url), src: spotify };
+
+  const soundcloud = soundCloudEmbedUrl(url);
+  if (soundcloud) return { type: 'soundcloud', key: `soundcloud:${soundcloud}`, sourceUrl: trimUrlPunctuation(url), src: soundcloud };
+
+  const github = githubCardDetail(url);
+  if (github) return { type: 'github', key: `github:${github.href}`, sourceUrl: trimUrlPunctuation(url), ...github };
+
+  return null;
+}
+
+/** Extract rich embeds from post text and stored link previews. */
+export function richEmbedsForPost(post) {
+  const embeds = [];
+  const seen = new Set();
+  const urls = [
+    ...urlsFromText(post?.text),
+    ...(post?.linkPreviews || []).map(preview => preview?.url).filter(Boolean)
+  ];
+
+  for (const url of urls) {
+    const embed = richEmbedForUrl(url);
+    if (!embed || seen.has(embed.key)) continue;
+    seen.add(embed.key);
+    embeds.push(embed);
+  }
+
+  return embeds;
+}
+
+export function richEmbedMarkupForPost(post, sanitize) {
+  if (typeof sanitize !== 'function') return '';
+
+  const embeds = richEmbedsForPost(post);
+  const imageEmbeds = embeds.filter(embed => embed.type === 'image' || embed.type === 'gif');
+  const imageMarkup = imageEmbeds.length
+    ? `<div class="post-rich-embeds-images" data-image-count="${imageEmbeds.length}">
+      ${imageEmbeds.map(embed => {
+        const isGif = embed.type === 'gif';
+        return `<button type="button" class="post-rich-image-trigger${isGif ? ' post-rich-gif-trigger' : ''}" data-post-image-src="${sanitize(embed.src)}">
+        <img class="post-rich-image" src="${sanitize(embed.src)}" alt="${isGif ? 'Animated GIF' : 'Post image'}" loading="lazy">
+        ${isGif ? '<span class="post-rich-gif-badge">GIF</span>' : ''}
+      </button>`;
+      }).join('')}
+    </div>`
+    : '';
+
+  const providerMarkup = embeds
+    .filter(embed => embed.type !== 'image' && embed.type !== 'gif')
+    .map((embed, index) => {
+      if (embed.type === 'github') {
+        return `<a class="post-rich-embed post-rich-card-github" href="${sanitize(embed.href)}" target="_blank" rel="noopener noreferrer">
+          <span class="post-rich-provider">GitHub</span>
+          <span class="post-rich-title">${sanitize(embed.title)}</span>
+          <span class="post-rich-detail">${sanitize(embed.label)}</span>
+        </a>`;
+      }
+
+      const provider = embed.type === 'youtube'
+        ? 'YouTube'
+        : embed.type === 'spotify'
+          ? 'Spotify'
+          : 'SoundCloud';
+      const allow = embed.type === 'youtube'
+        ? 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share'
+        : 'autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture';
+
+      return `<div class="post-rich-embed post-rich-embed-${embed.type}">
+      ${lazyIframeMarkup({
+        className: 'post-rich-iframe',
+        src: embed.src,
+        title: `${provider} embed ${index + 1}`,
+        allow
+      }, sanitize)}
+      </div>`;
+    })
+    .join('');
+  const markup = `${imageMarkup}${providerMarkup}`;
+  return markup ? `<div class="post-rich-embeds">${markup}</div>` : '';
+}
+
+function hasRichEmbedForPreview(preview) {
+  return !!richEmbedForUrl(preview?.url);
+}
+
+function urlsFromText(text) {
+  const urls = [];
+  WEB_URL_RE.lastIndex = 0;
+  let match;
+  while ((match = WEB_URL_RE.exec(String(text ?? ''))) !== null) {
+    const url = trimUrlPunctuation(match[0]);
+    if (url) urls.push(url);
+  }
+  return urls;
+}
+
+function trimUrlPunctuation(url) {
+  let value = String(url || '');
+  while (URL_TRAILING_PUNCTUATION.test(value)) {
+    value = value.slice(0, -1);
+  }
+  return value;
 }
 
 function previewDomain(url) {
@@ -210,6 +482,7 @@ function startLifespanTimer(item, post, ctx) {
  * @returns {HTMLElement}
  */
 export function createFeedItem(post, ctx) {
+  ensurePostMenuEscapeHandler();
   const s = ctx.sanitize;
   const when = ctx.formatWhen(post.createdOn || post.lastUpdatedOn);
   const handle = post.username ? `@${s(post.username)}` : '@user';
@@ -219,9 +492,11 @@ export function createFeedItem(post, ctx) {
   const repliesCount = post.replyCount || 0;
   const shouldCollapse = (post.text || '').length > COLLAPSE_AT;
   const previewMarkup = (post.linkPreviews || [])
+    .filter(preview => !hasRichEmbedForPreview(preview))
     .map(preview => linkPreviewCardMarkup(preview, s))
     .filter(Boolean)
     .join('');
+  const richEmbedMarkup = richEmbedMarkupForPost(post, s);
 
   const item = document.createElement('div');
   item.className = `post-item${isRecent(post) ? ' post-item-new' : ''}`;
@@ -246,6 +521,7 @@ export function createFeedItem(post, ctx) {
             <div class="post-menu d-none">
               <button class="post-copy-btn" type="button" data-post="${post.id}">Copy link</button>
               <button class="post-report-btn" type="button" data-post="${post.id}">Report</button>
+              ${ctx.isLoggedIn() && typeof ctx.onHideThread === 'function' ? `<button class="post-hide-thread-btn" type="button" data-post="${post.id}">Hide thread</button>` : ''}
               ${ctx.canDelete(post) ? `<button class="post-delete-btn danger" type="button" data-post="${post.id}">Delete</button>` : ''}
             </div>
           </div>
@@ -259,6 +535,7 @@ export function createFeedItem(post, ctx) {
           <p class="post-text post-body"></p>
         </div>
         ${shouldCollapse ? '<button class="post-expand-btn" type="button">Show more</button>' : ''}
+        ${richEmbedMarkup}
         ${previewMarkup ? `<div class="post-link-previews">${previewMarkup}</div>` : ''}
         <div class="post-actions">
           <button class="post-action post-reply-btn" data-post="${post.id}" aria-label="Reply">
@@ -288,6 +565,14 @@ export function createFeedItem(post, ctx) {
 
   const body = item.querySelector('.post-text');
   if (body) appendTextWithMentionLinks(body, post.text);
+  for (const image of item.querySelectorAll('.post-rich-image')) {
+    image.addEventListener('error', () => {
+      const src = image.getAttribute('src') || '';
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = imageFallbackMarkup(src);
+      image.closest('.post-rich-image-trigger')?.replaceWith(wrapper.firstElementChild);
+    }, { once: true });
+  }
   const lifespanTimer = startLifespanTimer(item, post, ctx);
   const expandBtn = item.querySelector('.post-expand-btn');
   expandBtn?.addEventListener('click', () => {
@@ -500,6 +785,20 @@ export function createFeedItem(post, ctx) {
         alert(err.message);
       }
     });
+    const hideThreadBtn = item.querySelector('.post-hide-thread-btn');
+    hideThreadBtn?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (typeof ctx.onHideThread !== 'function') return;
+      menu.classList.add('d-none');
+      try {
+        hideThreadBtn.disabled = true;
+        await ctx.onHideThread(post.id);
+        item.remove();
+      } catch (err) {
+        hideThreadBtn.disabled = false;
+        alert(err.message);
+      }
+    });
   }
 
   // Fill parent context
@@ -525,4 +824,13 @@ export function createFeedItem(post, ctx) {
   }
 
   return item;
+}
+
+function ensurePostMenuEscapeHandler() {
+  if (postMenuEscapeHandlerInitialized || typeof document === 'undefined') return;
+  postMenuEscapeHandlerInitialized = true;
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    document.querySelectorAll('.post-menu').forEach(menu => menu.classList.add('d-none'));
+  });
 }

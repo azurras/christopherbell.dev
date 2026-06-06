@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.trust.AccountTrustService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.message.conversation.ConversationService;
 import dev.christopherbell.message.delivery.MessageDeliveryService;
@@ -34,6 +35,7 @@ public class MessageServiceTest {
   @Mock private AccountRepository accountRepository;
   @Mock private NotificationDeliveryService notificationDeliveryService;
   @Mock private PermissionService permissionService;
+  @Mock private AccountTrustService accountTrustService;
 
   @Test
   public void sendMessage_savesMessageAndNotifiesRecipient() throws Exception {
@@ -92,6 +94,26 @@ public class MessageServiceTest {
   }
 
   @Test
+  public void sendMessage_rejectsBlockedRelationship() throws Exception {
+    var sender = Account.builder().id("sender").username("chris").build();
+    var recipient = Account.builder().id("recipient").username("alex").build();
+    var service = service();
+
+    when(permissionService.getSelfId()).thenReturn(sender.getId());
+    when(accountRepository.findById(eq(sender.getId()))).thenReturn(Optional.of(sender));
+    when(accountRepository.findByUsername(eq("alex"))).thenReturn(Optional.of(recipient));
+    when(accountTrustService.isBlockedEitherDirection("sender", "recipient")).thenReturn(true);
+
+    assertThrows(InvalidRequestException.class, () -> service.sendMessage(MessageCreateRequest.builder()
+        .recipientUsername("alex")
+        .text("hello")
+        .build()));
+
+    verify(messageRepository, never()).save(any(Message.class));
+    verify(notificationDeliveryService, never()).createMessageNotification(any(Message.class), any(Account.class), any(Account.class));
+  }
+
+  @Test
   public void getConversation_marksIncomingMessagesRead() throws Exception {
     var self = Account.builder().id("self").username("self").build();
     var other = Account.builder().id("other").username("alex").build();
@@ -124,7 +146,12 @@ public class MessageServiceTest {
 
   private MessageService service() {
     return new MessageService(
-        new MessageDeliveryService(messageRepository, accountRepository, notificationDeliveryService, permissionService),
+        new MessageDeliveryService(
+            messageRepository,
+            accountRepository,
+            notificationDeliveryService,
+            permissionService,
+            accountTrustService),
         new ConversationService(messageRepository, accountRepository, permissionService));
   }
 }

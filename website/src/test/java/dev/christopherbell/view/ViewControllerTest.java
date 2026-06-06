@@ -104,6 +104,25 @@ public class ViewControllerTest {
   }
 
   @Test
+  @DisplayName("Raising Canes Box Index tool renders the chart app mount")
+  public void getCanesBoxTrackerPage_rendersTrackerMount() throws Exception {
+    mockMvc
+        .perform(get("/canes-box-tracker"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("CB | Raising Canes Box Index")))
+        .andExpect(content().string(containsString("id=\"canesBoxChart\"")));
+  }
+
+  @Test
+  @DisplayName("Raising Canes Box Index tool renders when requested with a trailing slash")
+  public void getCanesBoxTrackerPageWithTrailingSlash_rendersTrackerMount() throws Exception {
+    mockMvc
+        .perform(get("/canes-box-tracker/"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("id=\"canesBoxChart\"")));
+  }
+
+  @Test
   @DisplayName("ZIP coordinate tool renders the lookup app mount")
   public void getZipCoordinatesPage_rendersLookupMount() throws Exception {
     mockMvc

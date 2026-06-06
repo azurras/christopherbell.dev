@@ -35,12 +35,19 @@
               <div class="user-profile-actions">
                 <button id="followBtn" class="btn btn-dark d-none" type="button">Follow</button>
                 <a id="messageUserLink" class="btn btn-outline-dark d-none" href="/messages">Message</a>
+                <button id="muteUserBtn" class="btn btn-outline-dark d-none" type="button">Mute</button>
+                <button id="blockUserBtn" class="btn btn-outline-danger d-none" type="button">Block</button>
               </div>
+              <p id="userTrustStatus" class="profile-trust-status d-none" aria-live="polite"></p>
             </div>
             <div class="profile-stat-grid" aria-label="User network">
               <div class="profile-stat">
                 <span id="userPostCount">0</span>
-                <small>Posts shown</small>
+                <small>Posts</small>
+              </div>
+              <div class="profile-stat">
+                <span id="userReplyCount">0</span>
+                <small>Replies</small>
               </div>
               <div class="profile-stat">
                 <span id="userFollowerCount">0</span>

@@ -8,6 +8,7 @@ import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.UsernameSanitizer;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.post.PostRepository;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Service;
 public class AccountProfileService {
   private final AccountRepository accountRepository;
   private final AccountMapper accountMapper;
+  private final PostRepository postRepository;
 
   /**
    * Returns public profile metadata for a username.
@@ -68,6 +70,8 @@ public class AccountProfileService {
         .status(account.getStatus())
         .followerCount(followerCount)
         .followingCount(following)
+        .postCount(postRepository.countByAccountIdAndParentIdIsNull(account.getId()))
+        .replyCount(postRepository.countByAccountIdAndParentIdIsNotNull(account.getId()))
         .followedByMe(followedByMe)
         .self(isSelf)
         .build();

@@ -4,17 +4,33 @@ Owns reusable browser-side modules that are not tied to one page.
 
 ## What Lives Here
 
-- `api.js` defines API paths, including grouped admin-facing routes used by the Back Office.
+- `api.js` defines API paths, including grouped admin-facing routes used by the
+  Back Office, account username search used by Messages autocomplete, account
+  trust routes, hidden-thread routes, and public Tool APIs such as Raising Canes
+  Box Index history.
 - `util.js` owns auth storage helpers, request headers, JSON response handling,
   formatting, sanitizing, shared mention/URL linking, and small DOM utilities.
 - `composer.js` initializes reusable post composer behavior.
-- `feed-context.js` builds the context object used by feed rendering.
+- `composer-preview.js` turns draft post text into a live, sanitized preview
+  using the same mention linking and rich embed rendering as feed cards.
+- `feed-context.js` builds the context object used by feed rendering, including
+  the current page's hide-thread action.
 - `feed-render.js` renders post cards, mention/external links, stored rich link
-  previews, shared lifespan countdowns, expiry removal motion, likes, replies,
-  menus, and inline reply composers.
+  previews, allowlisted rich media/cards, grouped direct image embeds, shared
+  lifespan countdowns, expiry removal motion, likes, replies, menus, and inline
+  reply composers.
+- `image-lightbox.js` owns the shared post-image preview dialog and broken-image
+  fallback markup used by feed-rendering pages.
 - `infinite.js` owns reusable cursor-based infinite scrolling.
+- `lazy-media.js` owns deferred iframe markup and viewport-based activation for
+  rich media embeds.
 - `notifications.js` owns notification display text, notification routing, recent
-  dropdown limiting, and browser-notification selection helpers.
+  dropdown limiting, browser-notification selection helpers, and pure helpers
+  for rendering/reading notification category toggles.
+- `profile-stats.js` normalizes safe public profile activity counts before page
+  modules render them.
+- `thread-navigation.js` builds the post-detail Signal Rail model and markup
+  from the full thread payload without depending on page DOM state.
 - `util.js` contains small formatting and escaping helpers.
 
 ## How It Works
@@ -24,6 +40,10 @@ Owns reusable browser-side modules that are not tied to one page.
   dependency direction from page -> library.
 - Feed rendering is intentionally centralized so post cards behave the same on
   home, profile, user feed, and thread pages.
+- Feed card menus show the hide-thread action only when the page context
+  provides the callback and the visitor is signed in.
+- Browser notification helpers accept the saved preference response. Missing
+  preferences mean all categories are enabled, matching backend defaults.
 
 ## Design Notes
 
@@ -49,11 +69,33 @@ Owns reusable browser-side modules that are not tied to one page.
 - `linkMentions` and `appendTextWithMentionLinks` escape user-authored text,
   convert valid `@username` mentions into `/u/{username}` profile links, and
   make HTTP/HTTPS URLs clickable external links.
+- Composer previews are browser-only renderings of the current draft. They do
+  not create stored preview metadata; submit still sends only the trimmed text.
 - Shared lifespan timers use server-returned `expiresOn`. Like handlers must
   retarget countdowns from the updated feed item instead of applying browser-side
   extension math.
 - Shared feed chips only label posts as `Expires soon` during their final
   12 hours.
+- Shared feed rendering detects allowlisted rich URLs in post text and stored
+  link previews, deduplicates them, and renders richer UI while keeping the
+  original text URL clickable. Supported rich providers are YouTube
+  `youtube-nocookie.com` embeds, direct image URLs with an image extension or
+  explicit image-format query such as `format=jpg` or `fm=webp`, direct animated
+  GIF URLs such as `.gif`, `format=gif`, or `fm=gif`, Spotify embeds, SoundCloud
+  widget embeds, and first-party GitHub repository/issue/pull-request cards.
+- Direct image and animated GIF rich embeds render as a grouped image grid. GIFs
+  keep browser-native animation through `<img>` and receive a visible `GIF`
+  badge. Page modules that render feed cards should call
+  `initPostImageLightbox()` once so image triggers open the shared dialog and
+  image load failures can show the fallback source link.
+- Rich iframe embeds render with `data-src` first. Page modules that render feed
+  cards should call `initLazyMedia(root)` after cards are appended so iframes
+  activate near the viewport, with an immediate fallback when
+  `IntersectionObserver` is unavailable.
+- Thread navigation helpers accept the already-loaded thread feed items and
+  return previous/next links plus a sanitized nested Signal Rail. They also
+  expose newest-reply and collapsed-branch helpers so page modules can add
+  thread controls without rebuilding thread maps inline.
 
 ## Update This Doc
 

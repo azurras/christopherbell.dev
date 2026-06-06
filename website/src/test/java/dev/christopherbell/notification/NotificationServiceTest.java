@@ -12,6 +12,7 @@ import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.notification.inbox.NotificationInboxService;
 import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.notification.model.NotificationType;
+import dev.christopherbell.notification.preference.NotificationPreferenceService;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
@@ -28,6 +29,7 @@ class NotificationServiceTest {
   @Mock private NotificationRepository notificationRepository;
   @Mock private AccountRepository accountRepository;
   @Mock private PermissionService permissionService;
+  @Mock private NotificationPreferenceService notificationPreferenceService;
 
   @Test
   @DisplayName("Mention notifications are created for existing mentioned users")
@@ -38,6 +40,7 @@ class NotificationServiceTest {
     var post = Post.builder().id("post-1").text("hello @Reader").build();
 
     when(accountRepository.findByUsernameIgnoreCase("Reader")).thenReturn(Optional.of(mentioned));
+    when(notificationPreferenceService.shouldDeliver("mentioned", NotificationType.MENTION)).thenReturn(true);
 
     service.createMentionNotifications(post, actor);
 
@@ -75,6 +78,7 @@ class NotificationServiceTest {
     var actor = Account.builder().id("actor").username("owner").build();
     var recipient = Account.builder().id("recipient").username("friend").build();
     var session = WhatsForLunchSession.builder().id("session-1").build();
+    when(notificationPreferenceService.shouldDeliver("recipient", NotificationType.WFL_SESSION)).thenReturn(true);
 
     service.createWhatsForLunchSessionInvite(session, actor, recipient);
 
@@ -96,6 +100,7 @@ class NotificationServiceTest {
     var actor = Account.builder().id("actor").username("liker").build();
     var recipient = Account.builder().id("recipient").username("writer").build();
     var post = Post.builder().id("post-1").accountId("recipient").text("hello void").build();
+    when(notificationPreferenceService.shouldDeliver("recipient", NotificationType.LIKE)).thenReturn(true);
 
     service.createPostLikeNotification(post, actor, recipient);
 
@@ -130,6 +135,7 @@ class NotificationServiceTest {
     var actor = Account.builder().id("actor").username("replier").build();
     var recipient = Account.builder().id("recipient").username("writer").build();
     var reply = Post.builder().id("reply-1").parentId("post-1").accountId("actor").text("reply text").build();
+    when(notificationPreferenceService.shouldDeliver("recipient", NotificationType.COMMENT)).thenReturn(true);
 
     service.createPostCommentNotification(reply, actor, recipient);
 
@@ -157,9 +163,23 @@ class NotificationServiceTest {
     verify(notificationRepository, never()).save(any(Notification.class));
   }
 
+  @Test
+  @DisplayName("Post like notifications skip when recipient disabled likes")
+  void testCreatePostLikeNotification_whenLikesDisabled_skipsNotification() {
+    var service = service();
+    var actor = Account.builder().id("actor").username("liker").build();
+    var recipient = Account.builder().id("recipient").username("writer").build();
+    var post = Post.builder().id("post-1").accountId("recipient").text("hello void").build();
+    when(notificationPreferenceService.shouldDeliver("recipient", NotificationType.LIKE)).thenReturn(false);
+
+    service.createPostLikeNotification(post, actor, recipient);
+
+    verify(notificationRepository, never()).save(any(Notification.class));
+  }
+
   private NotificationService service() {
     return new NotificationService(
-        new NotificationDeliveryService(notificationRepository, accountRepository),
+        new NotificationDeliveryService(notificationRepository, accountRepository, notificationPreferenceService),
         new NotificationInboxService(notificationRepository, permissionService));
   }
 }

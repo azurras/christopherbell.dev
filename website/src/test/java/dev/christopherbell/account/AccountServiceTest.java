@@ -31,10 +31,12 @@ import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.PasswordUtil;
+import dev.christopherbell.post.PostRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -43,6 +45,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -51,13 +54,14 @@ public class AccountServiceTest {
   @Mock private AccountMapper accountMapper;
   @Mock private AccountRepository accountRepository;
   @Mock private PasswordResetNotificationService passwordResetNotificationService;
+  @Mock private PostRepository postRepository;
   private AccountService accountService;
 
   @BeforeEach
   void setUp() {
     var authenticationService = new AccountAuthenticationService(accountRepository);
     var passwordResetService = new PasswordResetService(accountRepository, passwordResetNotificationService);
-    var profileService = new AccountProfileService(accountRepository, accountMapper);
+    var profileService = new AccountProfileService(accountRepository, accountMapper, postRepository);
     var followService = new AccountFollowService(accountRepository, profileService);
     var moderationService = new AccountModerationService(accountRepository, accountMapper);
     accountService = new AccountService(
@@ -209,10 +213,90 @@ public class AccountServiceTest {
       verify(accountRepository).findByUsername(eq("target"));
       verify(accountRepository).save(eq(self));
       verify(accountRepository).countByFollowingIdsContaining(eq("target"));
+      verify(postRepository).countByAccountIdAndParentIdIsNull(eq("target"));
+      verify(postRepository).countByAccountIdAndParentIdIsNotNull(eq("target"));
       verifyNoMoreInteractions(accountRepository);
     } finally {
       SecurityContextHolder.clearContext();
     }
+  }
+
+  @Test
+  @DisplayName("Public profile includes safe activity stats")
+  public void testGetPublicProfile_includesSafeActivityStats() throws Exception {
+    var account = Account.builder()
+        .id("target")
+        .username("target")
+        .role(Role.USER)
+        .followingIds(new java.util.HashSet<>())
+        .build();
+
+    when(accountRepository.findByUsername(eq("target"))).thenReturn(Optional.of(account));
+    when(accountRepository.countByFollowingIdsContaining(eq("target"))).thenReturn(2L);
+    when(postRepository.countByAccountIdAndParentIdIsNull(eq("target"))).thenReturn(3L);
+    when(postRepository.countByAccountIdAndParentIdIsNotNull(eq("target"))).thenReturn(5L);
+
+    var profile = accountService.getPublicProfile("target");
+
+    assertEquals(3, profile.postCount());
+    assertEquals(5, profile.replyCount());
+    assertEquals(2, profile.followerCount());
+  }
+
+  @Test
+  @DisplayName("Username suggestions: searches active accounts by prefix and excludes self")
+  public void testSearchUsernameSuggestions_whenMatches_returnsActiveNonSelfUsernames() throws Exception {
+    var self = Account.builder()
+        .id("self")
+        .username("alex")
+        .role(Role.USER)
+        .status(AccountStatus.ACTIVE)
+        .build();
+    var alice = Account.builder()
+        .id("alice-id")
+        .username("alice")
+        .role(Role.USER)
+        .status(AccountStatus.ACTIVE)
+        .build();
+    var alina = Account.builder()
+        .id("alina-id")
+        .username("alina")
+        .role(Role.USER)
+        .status(AccountStatus.ACTIVE)
+        .build();
+    var token = dev.christopherbell.permission.PermissionService.generateToken(self);
+    SecurityContextHolder.getContext()
+        .setAuthentication(new UsernamePasswordAuthenticationToken("self", token));
+
+    try {
+      when(accountRepository.findById(eq("self"))).thenReturn(Optional.of(self));
+      when(accountRepository.findByUsernameStartingWithIgnoreCaseAndStatusOrderByUsernameAsc(
+          eq("ali"),
+          eq(AccountStatus.ACTIVE),
+          eq(PageRequest.of(0, 5))))
+          .thenReturn(List.of(alice, alina, self));
+
+      var suggestions = accountService.searchUsernameSuggestions(" ali ", 5);
+
+      assertEquals(List.of("alice", "alina"), suggestions.stream().map(s -> s.username()).toList());
+      verify(accountRepository).findById(eq("self"));
+      verify(accountRepository).findByUsernameStartingWithIgnoreCaseAndStatusOrderByUsernameAsc(
+          eq("ali"),
+          eq(AccountStatus.ACTIVE),
+          eq(PageRequest.of(0, 5)));
+      verifyNoMoreInteractions(accountRepository);
+    } finally {
+      SecurityContextHolder.clearContext();
+    }
+  }
+
+  @Test
+  @DisplayName("Username suggestions: blank prefix returns empty list without repository search")
+  public void testSearchUsernameSuggestions_whenBlank_returnsEmptyList() throws Exception {
+    var suggestions = accountService.searchUsernameSuggestions(" ", 5);
+
+    assertEquals(List.of(), suggestions);
+    verifyNoMoreInteractions(accountRepository);
   }
 
   @Test

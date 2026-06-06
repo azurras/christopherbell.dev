@@ -10,3 +10,5 @@ Owns scheduled enrichment of stored vehicles from NHTSA data.
 - Deletion of stored vehicle records when NHTSA cannot return usable data.
 
 Keep one-off public VIN decode requests in `vehicle.nhtsa.decode`.
+
+The scheduled enrichment job stays quiet at info level when no VINs are due. It logs actual enrichment, deletion, and failure events rather than every scheduler start and completion.

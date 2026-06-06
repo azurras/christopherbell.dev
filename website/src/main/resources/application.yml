@@ -17,6 +17,166 @@ posts:
   expiration:
     enabled: true
     cleanup-interval: 600000
+canes-box-tracker:
+  enabled: true
+  item-name: The Box Combo
+  api-base-url: https://nomnom-prod-api.raisingcanes.com
+  graph-ql-url: https://gateway.raisingcanes.com/v2/api/v1
+  official-search-radius-miles: 25
+  official-search-limit: 5
+  public-menu-fallback-enabled: false
+  minimum-public-menu-price: 10.00
+  connect-timeout: 10s
+  request-timeout: 20s
+  collection:
+    cron: "0 0 6 * * MON"
+    zone: America/Chicago
+  metros:
+    - metro-name: New York-Newark-Jersey City
+      city: New York
+      state: NY
+      latitude: 40.7128
+      longitude: -74.0060
+      restaurant-ref: ny/new-york/1501-broadway
+      restaurant-name: Times Square
+      address: 1501 Broadway, New York, NY
+      source-url: https://locations.raisingcanes.com/ny/new-york/1501-broadway
+    - metro-name: Los Angeles-Long Beach-Anaheim
+      city: Los Angeles
+      state: CA
+      latitude: 34.0522
+      longitude: -118.2437
+      restaurant-ref: ca/los-angeles/900-w.-olympic-blvd
+      restaurant-name: LA Live
+      address: 900 W. Olympic Blvd, Los Angeles, CA
+      source-url: https://locations.raisingcanes.com/ca/los-angeles/900-w.-olympic-blvd
+      fallback-menu-url: https://www.allmenus.com/ca/long-beach/782015-raising-canes/menu/
+    - metro-name: Chicago-Naperville-Elgin
+      city: Chicago
+      state: IL
+      latitude: 41.8781
+      longitude: -87.6298
+      restaurant-ref: il/chicago/2-n.-michigan-ave.
+      restaurant-name: Chicago Michigan Ave
+      address: 2 N. Michigan Ave, Chicago, IL
+      source-url: https://locations.raisingcanes.com/il/chicago/2-n.-michigan-ave.
+      fallback-menu-url: https://www.allmenus.com/il/chicago/656427-raising-canes-chicken-fingers/menu/
+    - metro-name: Dallas-Fort Worth-Arlington
+      city: Dallas
+      state: TX
+      latitude: 32.7767
+      longitude: -96.7970
+      restaurant-ref: tx/dallas/5201-ross-ave
+      restaurant-name: Ross & Moser
+      address: 5201 Ross Ave, Dallas, TX
+      source-url: https://locations.raisingcanes.com/tx/dallas/5201-ross-ave
+      fallback-menu-url: https://www.allmenus.com/tx/dallas/712674-raising-canes/menu/
+    - metro-name: Houston-The Woodlands-Sugar Land
+      city: Houston
+      state: TX
+      latitude: 29.7604
+      longitude: -95.3698
+      restaurant-ref: tx/houston/3007-ella-blvd
+      restaurant-name: Ella Blvd
+      address: 3007 Ella Blvd, Houston, TX
+      source-url: https://locations.raisingcanes.com/tx/houston/3007-ella-blvd
+      fallback-menu-url: https://www.allmenus.com/tx/houston/791139-raising-canes-chicken-fingers/menu/
+    - metro-name: Washington-Arlington-Alexandria
+      city: Washington
+      state: DC
+      latitude: 38.9072
+      longitude: -77.0369
+      restaurant-ref: dc/washington/1400-14th-st-nw
+      restaurant-name: 14th Street NW
+      address: 1400 14th St NW, Washington, DC
+      source-url: https://locations.raisingcanes.com/dc/washington/1400-14th-st-nw
+    - metro-name: Atlanta-Sandy Springs-Roswell
+      city: Atlanta
+      state: GA
+      latitude: 33.7490
+      longitude: -84.3880
+      restaurant-ref: ga/atlanta/550-10th-street-nw
+      restaurant-name: 10th Street NW
+      address: 550 10th Street NW, Atlanta, GA
+      source-url: https://locations.raisingcanes.com/ga/atlanta/550-10th-street-nw
+    - metro-name: Miami-Fort Lauderdale-West Palm Beach
+      city: Miami
+      state: FL
+      latitude: 25.7617
+      longitude: -80.1918
+      restaurant-ref: fl/miami/351-lincoln-road
+      restaurant-name: Lincoln Road
+      address: 351 Lincoln Road, Miami, FL
+      source-url: https://locations.raisingcanes.com/fl/miami/351-lincoln-road
+    - metro-name: Phoenix-Mesa-Chandler
+      city: Phoenix
+      state: AZ
+      latitude: 33.4484
+      longitude: -112.0740
+      restaurant-ref: az/phoenix/2715-w.-peoria-ave.
+      restaurant-name: Peoria Ave
+      address: 2715 W. Peoria Ave, Phoenix, AZ
+      source-url: https://locations.raisingcanes.com/az/phoenix/2715-w.-peoria-ave.
+      fallback-menu-url: https://www.allmenus.com/az/phoenix/606439-raising-canes-chicken-fingers-e-cactus-rd/menu/
+    - metro-name: Riverside-San Bernardino-Ontario
+      city: Riverside
+      state: CA
+      latitude: 33.9806
+      longitude: -117.3755
+      restaurant-ref: ca/riverside/11066-magnolia-ave.
+      restaurant-name: Magnolia Ave
+      address: 11066 Magnolia Ave, Riverside, CA
+      source-url: https://locations.raisingcanes.com/ca/riverside/11066-magnolia-ave.
+      fallback-menu-url: https://www.allmenus.com/ca/riverside/686357-raising-canes-chicken-fingers/menu/
+    - metro-name: Philadelphia-Camden-Wilmington
+      city: Philadelphia
+      state: PA
+      latitude: 39.9526
+      longitude: -75.1652
+      restaurant-ref: pa/philadelphia/3925-walnut-st
+      restaurant-name: University City
+      address: 3925 Walnut St, Philadelphia, PA
+      source-url: https://locations.raisingcanes.com/pa/philadelphia/3925-walnut-st
+    - metro-name: San Antonio-New Braunfels
+      city: San Antonio
+      state: TX
+      latitude: 29.4241
+      longitude: -98.4936
+      restaurant-ref: tx/san-antonio/11310-culebra-rd
+      restaurant-name: Culebra Rd
+      address: 11310 Culebra Rd, San Antonio, TX
+      source-url: https://locations.raisingcanes.com/tx/san-antonio/11310-culebra-rd
+      fallback-menu-url: https://www.allmenus.com/tx/san-antonio/439156-raising-canes/menu/
+    - metro-name: San Diego-Chula Vista-Carlsbad
+      city: San Diego
+      state: CA
+      latitude: 32.7157
+      longitude: -117.1611
+      restaurant-ref: ca/san-diego/12665-poway-rd
+      restaurant-name: Poway Rd
+      address: 12665 Poway Rd, San Diego, CA
+      source-url: https://locations.raisingcanes.com/ca/san-diego/12665-poway-rd
+      fallback-menu-url: https://www.allmenus.com/ca/santee/721294-raising-canes-chicken-fingers/menu/
+    - metro-name: Austin-Round Rock-Georgetown
+      city: Austin
+      state: TX
+      latitude: 30.2672
+      longitude: -97.7431
+      restaurant-ref: tx/austin/415-w.-martin-luther-king-jr.-blvd.
+      restaurant-name: MLK Blvd
+      address: 415 W. Martin Luther King Jr. Blvd, Austin, TX
+      source-url: https://locations.raisingcanes.com/tx/austin/415-w.-martin-luther-king-jr.-blvd.
+      fallback-menu-url: https://www.allmenus.com/tx/austin/660824-raising-canes-chicken-fingers/menu/
+    - metro-name: Las Vegas-Henderson-Paradise
+      city: Las Vegas
+      state: NV
+      latitude: 36.1699
+      longitude: -115.1398
+      restaurant-ref: nv/las-vegas/3717-las-vegas-blvd-south
+      restaurant-name: Las Vegas Blvd
+      address: 3717 Las Vegas Blvd South, Las Vegas, NV
+      source-url: https://locations.raisingcanes.com/nv/las-vegas/3717-las-vegas-blvd-south
+      fallback-menu-url: https://www.allmenus.com/nv/las-vegas/376512-raising-canes/menu/
 vehicles:
   nhtsa-vin:
     enabled: true

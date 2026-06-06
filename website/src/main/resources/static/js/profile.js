@@ -2,6 +2,9 @@ import { authHeaders, fetchJson, sanitize, isLoggedIn, formatWhen, loginRedirect
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
 import { makeRendererContext } from './lib/feed-context.js';
+import { initPostImageLightbox } from './lib/image-lightbox.js';
+import { initLazyMedia } from './lib/lazy-media.js';
+import { profileActivityStats } from './lib/profile-stats.js';
 
 /** Get the alert element for error display. */
 const alertBox = () => document.getElementById('profileAlert');
@@ -58,17 +61,22 @@ function renderAccount(detail) {
   set('status', detail.status);
 }
 
-function renderStats(posts) {
+function renderStats(profile, posts) {
   const items = Array.isArray(posts) ? posts : [];
-  const replies = items.filter(post => post.level && post.level > 0).length;
-  const likes = items.reduce((sum, post) => sum + (post.likesCount || 0), 0);
+  const stats = profileActivityStats({
+    postCount: profile?.postCount ?? items.length,
+    replyCount: profile?.replyCount ?? items.filter(post => post.level && post.level > 0).length,
+    followerCount: profile?.followerCount ?? 0,
+    followingCount: profile?.followingCount ?? 0
+  });
   const set = (id, value) => {
     const el = document.getElementById(id);
     if (el) el.textContent = String(value);
   };
-  set('profilePostCount', items.length);
-  set('profileReplyCount', replies);
-  set('profileLikeCount', likes);
+  set('profilePostCount', stats.postCount);
+  set('profileReplyCount', stats.replyCount);
+  set('profileFollowerCount', stats.followerCount);
+  set('profileFollowingCount', stats.followingCount);
 }
 
 const ROOT_CACHE = {};
@@ -110,10 +118,13 @@ function renderPosts(posts, username) {
     const el = createFeedItem({ ...p, username }, ctx);
     container.appendChild(el);
   }
+  initLazyMedia(container);
 }
 
 /** Wire page once DOM is ready. */
 document.addEventListener('DOMContentLoaded', async () => {
+  initPostImageLightbox();
+
   if (!isLoggedIn()) {
     // Must be logged in
     window.location.href = loginRedirectUrl();
@@ -131,7 +142,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       headers: authHeaders(),
       redirectOnUnauthorized: true,
     });
-    renderStats(posts);
+    const publicProfile = me?.username
+      ? await fetchJson(API.accounts.profile(me.username), { headers: authHeaders() })
+      : null;
+    renderStats(publicProfile, posts);
     renderPosts(posts, me?.username);
   } catch (err) {
     if (alert) {

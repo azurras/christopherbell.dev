@@ -54,6 +54,13 @@ test('tools menu exposes ZIP coordinate lookup', () => {
   );
 });
 
+test('tools menu stays alphabetized by label', () => {
+  assert.deepEqual(
+    toolsMenuItems().map((item) => item.label),
+    ['Raising Canes Box Index', 'VIN Decoder', "What's For Lunch", 'ZIP Coordinates']
+  );
+});
+
 test('void nav uses Feed as the primary Void link', () => {
   assert.deepEqual(
     topLevelNavItems(true).find((item) => item.href === '/void'),

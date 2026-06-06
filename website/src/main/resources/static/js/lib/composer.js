@@ -1,8 +1,11 @@
+import { composerPreviewMarkup, composerPreviewModel } from './composer-preview.js';
+import { sanitize } from './util.js';
+
 /**
  * Initialize a simple post composer.
  *
  * @param {object} opts
- *  - selectors: { composer:'#composer', prompt:'#composerPrompt', textarea:'#postText', counter:'#charCount', button:'#postBtn', alert:'#homeAlert' }
+ *  - selectors: { composer:'#composer', prompt:'#composerPrompt', textarea:'#postText', counter:'#charCount', button:'#postBtn', alert:'#homeAlert', preview:'#composerPreview' }
  *  - maxLength: number (default 280)
  *  - isLoggedIn: ()=>boolean
  *  - onSubmit: (text:string)=>Promise<void>
@@ -15,6 +18,7 @@ export function initComposer({ selectors, maxLength = 280, isLoggedIn, onSubmit 
   const counter = document.querySelector(selectors.counter);
   const button = document.querySelector(selectors.button);
   const alertEl = document.querySelector(selectors.alert);
+  const preview = selectors.preview ? document.querySelector(selectors.preview) : null;
 
   function toggle() {
     const auth = isLoggedIn();
@@ -23,9 +27,15 @@ export function initComposer({ selectors, maxLength = 280, isLoggedIn, onSubmit 
   }
 
   function updateCounter() {
-    if (!counter || !textarea) return;
-    const len = (textarea.value || '').length;
-    counter.textContent = `${len} / ${maxLength}`;
+    if (!textarea) return;
+    const model = composerPreviewModel(textarea.value || '', maxLength);
+    if (counter) counter.textContent = `${model.length} / ${maxLength}`;
+    updatePreview(model);
+  }
+
+  function updatePreview(model = composerPreviewModel(textarea?.value || '', maxLength)) {
+    if (!preview || !textarea) return;
+    preview.innerHTML = composerPreviewMarkup(model, sanitize);
   }
 
   async function handleSubmit() {

@@ -1,5 +1,6 @@
 package dev.christopherbell.report;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -22,6 +23,7 @@ import dev.christopherbell.report.model.ReportResolveRequest;
 import dev.christopherbell.report.model.ReportStatus;
 import dev.christopherbell.report.submission.ReportSubmissionService;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -105,6 +107,34 @@ class ReportServiceTest {
 
     assertThrows(InvalidRequestException.class,
         () -> service.submitReport(new ReportCreateRequest("", "spam", null)));
+  }
+
+  @Test
+  @DisplayName("Report queue includes repeat report context for the reported account")
+  void getReports_includesRepeatReportContext() {
+    ReportRepository reportRepository = Mockito.mock(ReportRepository.class);
+    var service = new ReportService(
+        Mockito.mock(ReportSubmissionService.class),
+        new ReportModerationService(
+            Mockito.mock(PostRepository.class),
+            Mockito.mock(AccountRepository.class),
+            Mockito.mock(AdminActivityService.class),
+            Mockito.mock(PermissionService.class),
+            reportRepository));
+    var report = dev.christopherbell.report.model.PostReport.builder()
+        .id("r1")
+        .reportedAccountId("reported-1")
+        .status(ReportStatus.OPEN)
+        .build();
+
+    when(reportRepository.findAllByOrderByCreatedOnDesc()).thenReturn(List.of(report));
+    when(reportRepository.countByReportedAccountIdAndStatus("reported-1", ReportStatus.OPEN)).thenReturn(2L);
+    when(reportRepository.countByReportedAccountIdAndStatus("reported-1", ReportStatus.RESOLVED)).thenReturn(3L);
+
+    var reports = service.getReports();
+
+    assertEquals(2L, reports.get(0).getOpenReportsForAccount());
+    assertEquals(3L, reports.get(0).getResolvedReportsForAccount());
   }
 
   @Test

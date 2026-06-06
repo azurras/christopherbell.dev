@@ -33,8 +33,9 @@ export function messagesNavHref(isAuthenticated) {
 /** Secondary tools shown under the Tools dropdown. */
 export function toolsMenuItems() {
     return [
-        { href: '/wfl', label: "What's For Lunch" },
+        { href: '/canes-box-tracker', label: 'Raising Canes Box Index' },
         { href: '/vin-decoder', label: 'VIN Decoder' },
+        { href: '/wfl', label: "What's For Lunch" },
         { href: '/zip-coordinates', label: 'ZIP Coordinates' },
     ];
 }
@@ -85,6 +86,7 @@ class AppNav extends HTMLElement {
     /** Lifecycle hook: mount component and subscribe to auth changes. */
     connectedCallback() {
         this.notifications = this.notifications || [];
+        this.notificationPreferences = this.notificationPreferences || null;
         this.unreadNotifications = this.unreadNotifications || 0;
         this.render();
         this.loadUserInfo();
@@ -101,6 +103,7 @@ class AppNav extends HTMLElement {
             localStorage.removeItem('cbellUsername');
             localStorage.removeItem('cbellRole');
             this.notifications = [];
+            this.notificationPreferences = null;
             this.unreadNotifications = 0;
             this.render();
         });
@@ -164,6 +167,7 @@ class AppNav extends HTMLElement {
                 fetchJson(API.notifications.unreadCount, { headers: authHeaders() }),
             ]);
             this.notifications = Array.isArray(items) ? items : [];
+            this.notificationPreferences = await this.loadNotificationPreferences();
             this.unreadNotifications = Number(unread || 0);
             this.showBrowserNotifications(this.notifications);
             this.render();
@@ -171,6 +175,14 @@ class AppNav extends HTMLElement {
             // Notifications are additive UI; keep the nav usable if loading fails.
         } finally {
             this.notificationLoadInFlight = false;
+        }
+    }
+
+    async loadNotificationPreferences() {
+        try {
+            return await fetchJson(API.notifications.preferences, { headers: authHeaders() });
+        } catch (_) {
+            return null;
         }
     }
 
@@ -223,7 +235,7 @@ class AppNav extends HTMLElement {
         }
 
         const seenIds = this.seenBrowserNotificationIds();
-        const toShow = browserNotificationsToShow(notifications, seenIds);
+        const toShow = browserNotificationsToShow(notifications, seenIds, this.notificationPreferences);
         toShow.forEach(notification => {
             seenIds.add(notification.id);
             const alert = new window.Notification(notificationTitle(notification), {

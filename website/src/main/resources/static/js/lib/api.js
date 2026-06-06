@@ -7,6 +7,15 @@ export const API = {
   admin: {
     activity: '/api/admin/activity/2026-05-09',
   },
+  canesBoxTracker: {
+    history: '/api/canes-box-tracker/2026-06-04/history',
+    collect: '/api/canes-box-tracker/2026-06-04/collect',
+    approveMetro: (weekStartDate, metroName) =>
+      `/api/canes-box-tracker/2026-06-04/${encodeURIComponent(weekStartDate)}/metros/${encodeURIComponent(metroName)}/approve`,
+    rejectMetro: (weekStartDate, metroName) =>
+      `/api/canes-box-tracker/2026-06-04/${encodeURIComponent(weekStartDate)}/metros/${encodeURIComponent(metroName)}/reject`,
+    manualPrice: '/api/canes-box-tracker/2026-06-04/manual-prices',
+  },
   accounts: {
     base: '/api/accounts/2024-12-15',
     login: '/api/accounts/2024-12-15/login',
@@ -18,6 +27,15 @@ export const API = {
     me: '/api/accounts/2025-09-03/me',
     profile: (username) => `/api/accounts/2025-09-14/profile/${encodeURIComponent(username)}`,
     follow: (username) => `/api/accounts/2025-09-14/profile/${encodeURIComponent(username)}/follow`,
+    setTrust: (username) => `/api/accounts/2026-06-02/trust/${encodeURIComponent(username)}`,
+    clearTrust: (username, type) => `/api/accounts/2026-06-02/trust/${encodeURIComponent(username)}/${encodeURIComponent(type)}`,
+    search: (username, limit = 8) => {
+      const params = new URLSearchParams({
+        username: String(username || ''),
+        limit: String(limit),
+      });
+      return `/api/accounts/2025-09-14/search?${params}`;
+    },
   },
   reports: {
     create: '/api/reports/2025-09-03',
@@ -35,10 +53,13 @@ export const API = {
     like: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}/like`,
     thread: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}/thread`,
     byAccount: (accountId) => `/api/posts/2025-09-14/account/${encodeURIComponent(accountId)}`,
+    hideThread: (id) => `/api/posts/2026-06-02/${encodeURIComponent(id)}/hide-thread`,
+    unhideThread: (rootId) => `/api/posts/2026-06-02/${encodeURIComponent(rootId)}/hide-thread`,
   },
   notifications: {
     base: '/api/notifications/2025-09-14',
     unreadCount: '/api/notifications/2025-09-14/unread-count',
+    preferences: '/api/notifications/2025-09-14/preferences',
     markRead: (id) => `/api/notifications/2025-09-14/${encodeURIComponent(id)}/read`,
   },
   location: {

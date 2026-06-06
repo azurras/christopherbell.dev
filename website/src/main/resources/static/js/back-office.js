@@ -2,6 +2,7 @@
  * Back Office access guard + admin dashboard.
  */
 import { API } from './lib/api.js';
+import { canesBoxIndexResultMarkup } from './lib/back-office-canes-box-index.js';
 import { promotedRoleForAction, rolePromotionOptions } from './lib/back-office-users.js';
 import { authHeaders, fetchJson, formatWhen, sanitize } from './lib/util.js';
 
@@ -16,6 +17,8 @@ const drawerClose = document.getElementById('drawerClose');
 const drawerKicker = document.getElementById('drawerKicker');
 const drawerTitle = document.getElementById('drawerTitle');
 const wflOperationStatus = document.getElementById('wflOperationStatus');
+const canesBoxIndexOperationStatus = document.getElementById('canesBoxIndexOperationStatus');
+const canesBoxManualPriceForm = document.getElementById('canesBoxManualPriceForm');
 const locationOperationStatus = document.getElementById('locationOperationStatus');
 const vehicleOperationStatus = document.getElementById('vehicleOperationStatus');
 const contentOperationStatus = document.getElementById('contentOperationStatus');
@@ -44,6 +47,7 @@ function setLoading() {
   renderState(userQueue, 'Loading users…');
   renderState(activityList, 'Loading activity…');
   renderOperationResult(wflOperationStatus, 'Restaurant counts have not been loaded yet.');
+  renderOperationResult(canesBoxIndexOperationStatus, 'Raising Canes Box Index has not been pulled in this session.');
   renderOperationResult(locationOperationStatus, 'Census ZIP coordinates have not been imported in this session.');
   renderOperationResult(vehicleOperationStatus, 'Vehicle state has not been loaded yet.');
   renderOperationResult(contentOperationStatus, 'Content data has not been loaded yet.');
@@ -142,6 +146,7 @@ function renderReports() {
           <div class="queue-meta">
             <span>Reporter @${sanitize(report.reporterUsername || 'unknown')}</span>
             <span>Reported @${sanitize(report.reportedUsername || 'unknown')}</span>
+            <span>${sanitize(repeatReportSummary(report))}</span>
           </div>
         </div>
         <div class="queue-actions">
@@ -168,6 +173,12 @@ function reportActionSelect(report) {
       ${options}
     </select>
   `;
+}
+
+function repeatReportSummary(report) {
+  const open = report.openReportsForAccount ?? 0;
+  const resolved = report.resolvedReportsForAccount ?? 0;
+  return `${open} open / ${resolved} resolved reports for account`;
 }
 
 function renderUsers() {
@@ -289,6 +300,8 @@ function reportDetails(report) {
       ${detailRow('Reason', report.reason)}
       ${detailRow('Reporter', `@${report.reporterUsername || 'unknown'}`)}
       ${detailRow('Reported', `@${report.reportedUsername || 'unknown'}`)}
+      ${detailRow('Open reports for account', report.openReportsForAccount ?? 0)}
+      ${detailRow('Resolved reports for account', report.resolvedReportsForAccount ?? 0)}
       ${detailRow('Created', report.createdOn ? formatWhen(report.createdOn) : '—')}
       ${detailRow('Resolved', report.resolvedOn ? formatWhen(report.resolvedOn) : '—')}
       ${detailRow('Resolution', report.resolution)}
@@ -445,6 +458,63 @@ async function dedupeRestaurants(button) {
   } finally {
     button.disabled = false;
   }
+}
+
+async function collectCanesBoxIndex(button) {
+  button.disabled = true;
+  renderOperationResult(canesBoxIndexOperationStatus, 'Pulling a new Raising Canes Box Index data point…');
+  try {
+    const result = await fetchJson(API.canesBoxTracker.collect, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    renderOperationResult(canesBoxIndexOperationStatus, canesBoxIndexResultMarkup(result), 'success');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function reviewCanesBoxMetro(button) {
+  const action = button.getAttribute('data-canes-box-review');
+  const weekStartDate = button.getAttribute('data-week-start-date');
+  const metroName = button.getAttribute('data-metro-name');
+  if (!action || !weekStartDate || !metroName) return;
+  button.disabled = true;
+  const note = window.prompt(`${action === 'approve' ? 'Approve' : 'Reject'} ${metroName}: review note`) || '';
+  try {
+    const url = action === 'approve'
+      ? API.canesBoxTracker.approveMetro(weekStartDate, metroName)
+      : API.canesBoxTracker.rejectMetro(weekStartDate, metroName);
+    const result = await fetchJson(url, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ note }),
+    });
+    renderOperationResult(canesBoxIndexOperationStatus, canesBoxIndexResultMarkup(result), 'success');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function saveManualCanesBoxPrice(form) {
+  const data = new FormData(form);
+  const payload = {
+    metroName: String(data.get('metroName') || '').trim(),
+    price: Number(data.get('price')),
+    sourceUrl: String(data.get('sourceUrl') || '').trim(),
+    note: String(data.get('note') || '').trim(),
+  };
+  if (!payload.metroName || !payload.price || !payload.sourceUrl) {
+    showAlert('Metro, price, and evidence URL are required.');
+    return;
+  }
+  const result = await fetchJson(API.canesBoxTracker.manualPrice, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  form.reset();
+  renderOperationResult(canesBoxIndexOperationStatus, canesBoxIndexResultMarkup(result), 'success');
 }
 
 async function importZipCoordinates(button) {
@@ -609,6 +679,8 @@ async function handleOperation(button) {
     } else if (operation === 'wfl-load') {
       button.disabled = true;
       await loadWflCounts();
+    } else if (operation === 'canes-box-index-collect') {
+      await collectCanesBoxIndex(button);
     } else if (operation === 'location-zip-import') {
       await importZipCoordinates(button);
     } else if (operation === 'vehicle-state') {
@@ -634,6 +706,12 @@ function wireEvents() {
     const operationButton = action.closest?.('[data-operation]');
     if (operationButton instanceof HTMLButtonElement) {
       handleOperation(operationButton);
+      return;
+    }
+
+    const canesReviewButton = action.closest?.('[data-canes-box-review]');
+    if (canesReviewButton instanceof HTMLButtonElement) {
+      reviewCanesBoxMetro(canesReviewButton).catch(err => showAlert(err.message || 'Failed to review price.'));
       return;
     }
 
@@ -681,6 +759,16 @@ function wireEvents() {
       vehicleVinForm.reset();
     } catch (err) {
       showAlert(err.message || 'Failed to create vehicle.');
+    }
+  });
+
+  canesBoxManualPriceForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearAlert();
+    try {
+      await saveManualCanesBoxPrice(canesBoxManualPriceForm);
+    } catch (err) {
+      showAlert(err.message || 'Failed to save manual price.');
     }
   });
 
