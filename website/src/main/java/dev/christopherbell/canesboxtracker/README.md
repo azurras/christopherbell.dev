@@ -57,9 +57,14 @@ the same week replaces that week's stored result.
 ## Configuration
 
 Metro targets live in `application.yml` under `canes-box-tracker.metros` so the
-selected store refs can be corrected without changing Java code. Each target
-stores the metro, city center coordinates, restaurant ref, restaurant name,
-address, official source URL, and optional `fallback-menu-url`.
+selected store refs can be corrected without changing Java code. The default
+set tracks the 25 highest-population U.S. metropolitan statistical areas where
+the official Cane's location search returns a production online-orderable store
+near the metro center. Rank changes should be based on the current Census metro
+population estimates, and store inclusion should be verified against the
+official Cane's ordering API before updating configuration. Each target stores
+the metro, city center coordinates, restaurant ref, restaurant name, address,
+official source URL, and optional `fallback-menu-url`.
 
 The primary official source is the Cane's GraphQL gateway configured by
 `graph-ql-url`. Requests mirror the public ordering app headers and only query
