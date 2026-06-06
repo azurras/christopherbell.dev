@@ -17,6 +17,246 @@ posts:
   expiration:
     enabled: true
     cleanup-interval: 600000
+canes-box-tracker:
+  enabled: true
+  item-name: The Box Combo
+  api-base-url: https://nomnom-prod-api.raisingcanes.com
+  graph-ql-url: https://gateway.raisingcanes.com/v2/api/v1
+  official-search-radius-miles: 25
+  official-search-limit: 5
+  public-menu-fallback-enabled: false
+  minimum-public-menu-price: 10.00
+  connect-timeout: 10s
+  request-timeout: 20s
+  collection:
+    cron: "0 0 6 * * MON"
+    zone: America/Chicago
+  metros:
+    - metro-name: New York-Newark-Jersey City
+      city: New York
+      state: NY
+      latitude: 40.7128
+      longitude: -74.0060
+      restaurant-ref: raising-canes-879
+      restaurant-name: "Raising Cane's #879"
+      address: 20 Astor Place, New York, NY 10003
+      source-url: https://order.raisingcanes.com/location/raising-canes-879/menu
+    - metro-name: Los Angeles-Long Beach-Anaheim
+      city: Los Angeles
+      state: CA
+      latitude: 34.0522
+      longitude: -118.2437
+      restaurant-ref: raising-canes-1022
+      restaurant-name: "Raising Cane's #1022"
+      address: 5795 Bickett Street, Huntington Park, CA 90255
+      source-url: https://order.raisingcanes.com/location/raising-canes-1022/menu
+    - metro-name: Chicago-Naperville-Elgin
+      city: Chicago
+      state: IL
+      latitude: 41.8781
+      longitude: -87.6298
+      restaurant-ref: raising-canes-892-2
+      restaurant-name: "Raising Cane's #892"
+      address: 2 N Michigan, Chicago, IL 60602
+      source-url: https://order.raisingcanes.com/location/raising-canes-892-2/menu
+    - metro-name: Dallas-Fort Worth-Arlington
+      city: Dallas
+      state: TX
+      latitude: 32.7767
+      longitude: -96.7970
+      restaurant-ref: raising-canes-286
+      restaurant-name: "Raising Cane's #286"
+      address: 5201 Ross Ave, Dallas, TX 75206
+      source-url: https://order.raisingcanes.com/location/raising-canes-286/menu
+    - metro-name: Houston-Pasadena-The Woodlands
+      city: Houston
+      state: TX
+      latitude: 29.7604
+      longitude: -95.3698
+      restaurant-ref: raising-canes-153
+      restaurant-name: "Raising Cane's #153"
+      address: 1902 Westheimer Rd, Houston, TX 77098
+      source-url: https://order.raisingcanes.com/location/raising-canes-153/menu
+    - metro-name: Atlanta-Sandy Springs-Roswell
+      city: Atlanta
+      state: GA
+      latitude: 33.7490
+      longitude: -84.3880
+      restaurant-ref: raising-canes-1123
+      restaurant-name: "Raising Cane's #1123"
+      address: 2110 Pleasant Hill Road, Duluth, GA 30096
+      source-url: https://order.raisingcanes.com/location/raising-canes-1123/menu
+    - metro-name: Washington-Arlington-Alexandria
+      city: Washington
+      state: DC
+      latitude: 38.9072
+      longitude: -77.0369
+      restaurant-ref: raising-canes-1320
+      restaurant-name: "Raising Cane's #1320"
+      address: 722 7th St NW, Washington, DC 20001
+      source-url: https://order.raisingcanes.com/location/raising-canes-1320/menu
+    - metro-name: Miami-Fort Lauderdale-West Palm Beach
+      city: Miami
+      state: FL
+      latitude: 25.7617
+      longitude: -80.1918
+      restaurant-ref: raising-canes-1170
+      restaurant-name: "Raising Cane's #1170"
+      address: 3600 SW 22nd St, Miami, FL 33145
+      source-url: https://order.raisingcanes.com/location/raising-canes-1170/menu
+    - metro-name: Philadelphia-Camden-Wilmington
+      city: Philadelphia
+      state: PA
+      latitude: 39.9526
+      longitude: -75.1652
+      restaurant-ref: raising-canes-707
+      restaurant-name: "Raising Cane's #707"
+      address: 3925 Walnut Street, Philadelphia, PA 19104
+      source-url: https://order.raisingcanes.com/location/raising-canes-707/menu
+    - metro-name: Phoenix-Mesa-Chandler
+      city: Phoenix
+      state: AZ
+      latitude: 33.4484
+      longitude: -112.0740
+      restaurant-ref: raising-canes-955
+      restaurant-name: "Raising Cane's #955"
+      address: 710 East Indian School Road, Phoenix, AZ 85014
+      source-url: https://order.raisingcanes.com/location/raising-canes-955/menu
+    - metro-name: Boston-Cambridge-Newton
+      city: Boston
+      state: MA
+      latitude: 42.3601
+      longitude: -71.0589
+      restaurant-ref: raising-canes-1070-2
+      restaurant-name: "Raising Cane's #1070"
+      address: 101 Arch Street Suite 105, Boston, MA 02110
+      source-url: https://order.raisingcanes.com/location/raising-canes-1070-2/menu
+    - metro-name: Riverside-San Bernardino-Ontario
+      city: Riverside
+      state: CA
+      latitude: 33.9806
+      longitude: -117.3755
+      restaurant-ref: raising-canes-0820
+      restaurant-name: "Raising Cane's #820"
+      address: 4110 Central Ave, Riverside, CA 92506
+      source-url: https://order.raisingcanes.com/location/raising-canes-0820/menu
+    - metro-name: San Francisco-Oakland-Fremont
+      city: San Francisco
+      state: CA
+      latitude: 37.7749
+      longitude: -122.4194
+      restaurant-ref: raising-canes-0941
+      restaurant-name: "Raising Cane's #941"
+      address: 123 Colma Boulevard, Colma, CA 94014
+      source-url: https://order.raisingcanes.com/location/raising-canes-0941/menu
+    - metro-name: Detroit-Warren-Dearborn
+      city: Detroit
+      state: MI
+      latitude: 42.3314
+      longitude: -83.0458
+      restaurant-ref: raising-canes-1059
+      restaurant-name: "Raising Cane's #1059"
+      address: 44218 Ford Road, Canton, MI 48187
+      source-url: https://order.raisingcanes.com/location/raising-canes-1059/menu
+    - metro-name: Seattle-Tacoma-Bellevue
+      city: Seattle
+      state: WA
+      latitude: 47.6062
+      longitude: -122.3321
+      restaurant-ref: raising-canes-1110
+      restaurant-name: "Raising Cane's #1110"
+      address: 4345 University Way NE, Seattle, WA 98105
+      source-url: https://order.raisingcanes.com/location/raising-canes-1110/menu
+    - metro-name: Minneapolis-St. Paul-Bloomington
+      city: Minneapolis
+      state: MN
+      latitude: 44.9778
+      longitude: -93.2650
+      restaurant-ref: raising-canes-1238
+      restaurant-name: "Raising Cane's #1238"
+      address: 302 15th Ave. S.E. (Dinkytown), Minneapolis, MN 55414
+      source-url: https://order.raisingcanes.com/location/raising-canes-1238/menu
+    - metro-name: Tampa-St. Petersburg-Clearwater
+      city: Tampa
+      state: FL
+      latitude: 27.9506
+      longitude: -82.4572
+      restaurant-ref: raising-canes-849-2
+      restaurant-name: "Raising Cane's #849"
+      address: 2525 Gulf to Bay Blvd, Clearwater, FL 33765
+      source-url: https://order.raisingcanes.com/location/raising-canes-849-2/menu
+    - metro-name: San Diego-Chula Vista-Carlsbad
+      city: San Diego
+      state: CA
+      latitude: 32.7157
+      longitude: -117.1611
+      restaurant-ref: raising-canes-1007
+      restaurant-name: "Raising Cane's #1007"
+      address: 3720 Camino Del Rio W, San Diego, CA 92110
+      source-url: https://order.raisingcanes.com/location/raising-canes-1007/menu
+    - metro-name: Denver-Aurora-Centennial
+      city: Denver
+      state: CO
+      latitude: 39.7392
+      longitude: -104.9903
+      restaurant-ref: raising-canes-401
+      restaurant-name: "Raising Cane's #401"
+      address: 1190 South Colorado Boulevard, Denver, CO 80246
+      source-url: https://order.raisingcanes.com/location/raising-canes-401/menu
+    - metro-name: Orlando-Kissimmee-Sanford
+      city: Orlando
+      state: FL
+      latitude: 28.5383
+      longitude: -81.3792
+      restaurant-ref: raising-canes-1048
+      restaurant-name: "Raising Cane's #1048"
+      address: 100 S. Semoran Blvd., Winter Park, FL 32792
+      source-url: https://order.raisingcanes.com/location/raising-canes-1048/menu
+    - metro-name: Charlotte-Concord-Gastonia
+      city: Charlotte
+      state: NC
+      latitude: 35.2271
+      longitude: -80.8431
+      restaurant-ref: raising-canes-1366
+      restaurant-name: "Raising Cane's #1366"
+      address: 520 John Ross Pkwy, Rock Hill, SC 29730
+      source-url: https://order.raisingcanes.com/location/raising-canes-1366/menu
+    - metro-name: Baltimore-Columbia-Towson
+      city: Baltimore
+      state: MD
+      latitude: 39.2904
+      longitude: -76.6122
+      restaurant-ref: raising-canes-0905
+      restaurant-name: "Raising Cane's #905"
+      address: 6801 Ritchie Hwy, Glen Burnie, MD 21061
+      source-url: https://order.raisingcanes.com/location/raising-canes-0905/menu
+    - metro-name: St. Louis
+      city: St. Louis
+      state: MO
+      latitude: 38.6270
+      longitude: -90.1994
+      restaurant-ref: raising-canes-372
+      restaurant-name: "Raising Cane's #372"
+      address: 805 South Vandeventer Ave, St. Louis, MO 63110
+      source-url: https://order.raisingcanes.com/location/raising-canes-372/menu
+    - metro-name: San Antonio-New Braunfels
+      city: San Antonio
+      state: TX
+      latitude: 29.4241
+      longitude: -98.4936
+      restaurant-ref: raising-canes-516
+      restaurant-name: "Raising Cane's #516"
+      address: 106 Saint Cloud Rd, San Antonio, TX 78228
+      source-url: https://order.raisingcanes.com/location/raising-canes-516/menu
+    - metro-name: Austin-Round Rock-San Marcos
+      city: Austin
+      state: TX
+      latitude: 30.2672
+      longitude: -97.7431
+      restaurant-ref: raising-canes-140
+      restaurant-name: "Raising Cane's #140"
+      address: 415 West Martin Luther King Blvd, Austin, TX 78701
+      source-url: https://order.raisingcanes.com/location/raising-canes-140/menu
 vehicles:
   nhtsa-vin:
     enabled: true

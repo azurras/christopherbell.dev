@@ -3,6 +3,10 @@ import { appendTextWithMentionLinks, authHeaders, fetchJson, formatWhen, isLogge
 
 let ACTIVE_USERNAME = null;
 let CONVERSATIONS = [];
+let suggestionTimer = null;
+let suggestionRequest = null;
+const MESSAGE_SUGGESTION_LIMIT = 8;
+const MESSAGE_SUGGESTION_DEBOUNCE_MS = 200;
 
 export function conversationRowMarkup(conversation, activeUsername) {
   const username = conversation.username || '';
@@ -22,6 +26,24 @@ export function conversationRowMarkup(conversation, activeUsername) {
       </button>`;
 }
 
+export function shouldFetchMessageSuggestions(value) {
+  return String(value || '').trim().length > 0;
+}
+
+export function messageSuggestionListMarkup(suggestions) {
+  if (!Array.isArray(suggestions) || suggestions.length === 0) {
+    return '<div class="message-suggestion-empty">No matching handles</div>';
+  }
+
+  return suggestions.map(suggestion => {
+    const username = suggestion?.username || '';
+    return `<button class="message-suggestion-option" type="button" role="option" data-username="${sanitize(username)}">
+      <span class="message-suggestion-avatar">${sanitize((username || '?')[0].toUpperCase())}</span>
+      <span>@${sanitize(username)}</span>
+    </button>`;
+  }).join('');
+}
+
 function alertBox() {
   return document.getElementById('messagesAlert');
 }
@@ -37,6 +59,33 @@ function clearAlert() {
   alertBox()?.classList.add('d-none');
 }
 
+function suggestionBox() {
+  return document.getElementById('recipientSuggestions');
+}
+
+function clearRecipientSuggestions() {
+  const box = suggestionBox();
+  if (!box) return;
+  box.innerHTML = '';
+  box.classList.add('d-none');
+}
+
+function renderRecipientSuggestions(suggestions) {
+  const box = suggestionBox();
+  if (!box) return;
+  box.innerHTML = messageSuggestionListMarkup(suggestions);
+  box.classList.remove('d-none');
+  box.querySelectorAll('[data-username]').forEach(option => {
+    option.addEventListener('click', async () => {
+      const username = option.dataset.username || '';
+      const input = document.getElementById('recipientHandle');
+      if (input) input.value = username;
+      clearRecipientSuggestions();
+      await openConversation(username);
+    });
+  });
+}
+
 function getInitialTarget() {
   const params = new URLSearchParams(window.location.search);
   return params.get('with') || params.get('to');
@@ -48,13 +97,41 @@ function updateCounter() {
   if (count) count.textContent = `${text.length} / 1000`;
 }
 
+async function loadRecipientSuggestions(value) {
+  const prefix = String(value || '').trim();
+  if (!shouldFetchMessageSuggestions(prefix)) {
+    clearRecipientSuggestions();
+    return;
+  }
+
+  suggestionRequest?.abort();
+  suggestionRequest = new AbortController();
+  try {
+    const suggestions = await fetchJson(API.accounts.search(prefix, MESSAGE_SUGGESTION_LIMIT), {
+      headers: authHeaders(),
+      redirectOnUnauthorized: true,
+      signal: suggestionRequest.signal,
+    });
+    renderRecipientSuggestions(suggestions || []);
+  } catch (err) {
+    if (err.name !== 'AbortError') clearRecipientSuggestions();
+  }
+}
+
+function scheduleRecipientSuggestionLoad(value) {
+  window.clearTimeout(suggestionTimer);
+  suggestionTimer = window.setTimeout(
+      () => loadRecipientSuggestions(value),
+      MESSAGE_SUGGESTION_DEBOUNCE_MS);
+}
+
 function renderConversations() {
   const list = document.getElementById('conversationList');
   if (!list) return;
   if (!CONVERSATIONS.length) {
     list.innerHTML = `
       <div class="conversation-empty">
-        No signals yet. Start one with a username.
+        No signals yet. Start one with a handle.
       </div>`;
     return;
   }
@@ -104,6 +181,7 @@ async function loadConversations() {
 async function openConversation(username) {
   if (!username) return;
   clearAlert();
+  clearRecipientSuggestions();
   ACTIVE_USERNAME = username.trim().replace(/^@/, '');
   const title = document.getElementById('conversationTitle');
   if (title) title.textContent = `@${ACTIVE_USERNAME}`;
@@ -157,13 +235,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   document.getElementById('messageText')?.addEventListener('input', updateCounter);
+  document.getElementById('recipientHandle')?.addEventListener('input', (event) => {
+    scheduleRecipientSuggestionLoad(event.target.value);
+  });
   document.getElementById('messageForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     await sendActiveMessage();
   });
   document.getElementById('newConversationForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const username = document.getElementById('recipientUsername')?.value || '';
+    const username = document.getElementById('recipientHandle')?.value || '';
     await openConversation(username);
   });
 
@@ -171,7 +252,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadConversations();
     const target = getInitialTarget();
     if (target) {
-      const input = document.getElementById('recipientUsername');
+      const input = document.getElementById('recipientHandle');
       if (input) input.value = target.replace(/^@/, '');
       await openConversation(target);
     }

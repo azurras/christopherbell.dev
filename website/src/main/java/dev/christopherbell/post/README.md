@@ -11,6 +11,7 @@ Owns Void posts and feed behavior.
 - Single-post and thread retrieval live under `thread`.
 - Like toggling and delete authorization live under `interaction`.
 - Lifespan calculation, expiration repair, reply synchronization, and cleanup live under `expiration`.
+- Per-account hidden thread roots live under `hide`.
 - Stored rich metadata for HTTP and HTTPS links mentioned in posts lives under `preview`.
 - The `/p/{id}` post detail page, which renders a single-column Spectral Thread
   view for the selected post, its root/parent context, compact reply composer,
@@ -29,6 +30,8 @@ Owns Void posts and feed behavior.
   author username lookup, current-viewer like state, and `PostFeedItem` creation.
   This keeps global, following, user, thread, and single-post views behaviorally
   consistent.
+- Signed-in global, following, and public user feed reads omit posts from
+  muted/blocked accounts and omit any thread root the viewer has hidden.
 
 ## Design Notes
 
@@ -54,12 +57,28 @@ Owns Void posts and feed behavior.
   do not survive a missing parent.
 - Post creation extracts each distinct HTTP or HTTPS URL from text and stores
   fetched link preview metadata on the post. A preview fetch failure leaves the
-  post intact; shared browser rendering still makes the raw URL clickable.
+  post intact; shared browser rendering still makes the raw URL clickable. The
+  shared feed renderer upgrades allowlisted providers into richer cards without
+  changing stored post text: YouTube uses `youtube-nocookie.com`, direct image
+  URLs render as a lazy grouped image grid when the URL has a supported image
+  extension or an explicit image-format query such as `format=jpg` or
+  `fm=webp`, Spotify and SoundCloud use provider iframe embeds, and GitHub
+  repository/issue/pull-request links render as first-party styled anchor cards.
+  Feed pages initialize a shared image lightbox so direct image links can be
+  previewed in-place and broken external images keep a source link available.
+- The Void composer preview is browser-only and reuses the shared mention/link
+  and rich media rendering logic. It does not persist preview-only data; post
+  creation still stores the submitted text and server-resolved link previews.
 - Post detail pages reuse the shared feed renderer so actions, author links,
   link previews, expiration state, and delete permissions stay consistent with
   feed cards. Page-specific JavaScript adds quieter root/parent "context echoes"
-  above the selected post and highlights the selected post without changing the
-  API contract.
+  above the selected post, highlights the selected post, renders a nested Signal
+  Rail from the existing full-thread payload, adds previous/next thread
+  navigation, lets readers jump to the newest reply, and lets readers collapse
+  or expand reply branches without changing the API contract.
+- Feed-card menus can hide a thread for the current account. The hidden-thread
+  package stores the root post id, so hiding a reply removes that whole thread
+  from later feed reads.
 
 ## Update This Doc
 

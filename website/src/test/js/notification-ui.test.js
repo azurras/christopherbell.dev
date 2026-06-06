@@ -3,6 +3,8 @@ import test from 'node:test';
 
 const {
   browserNotificationsToShow,
+  notificationPreferencePayload,
+  notificationSettingsMarkup,
   notificationTargetUrl,
   notificationText,
   notificationTitle,
@@ -59,4 +61,61 @@ test('browser notification selection skips read, seen, and missing-id notificati
     browserNotificationsToShow(notifications, new Set(['seen-unread'])).map(notification => notification.id),
     ['new-unread']
   );
+});
+
+test('browser notification selection respects disabled categories', () => {
+  const notifications = [
+    { id: 'like', read: false, notificationType: 'LIKE' },
+    { id: 'comment', read: false, notificationType: 'COMMENT' },
+    { id: 'message', read: false, notificationType: 'MESSAGE' }
+  ];
+
+  assert.deepEqual(
+    browserNotificationsToShow(notifications, new Set(), {
+      likes: false,
+      comments: true,
+      messages: false
+    }).map(notification => notification.id),
+    ['comment']
+  );
+});
+
+test('notificationSettingsMarkup renders all category toggles', () => {
+  const markup = notificationSettingsMarkup({
+    mentions: true,
+    likes: false,
+    comments: true,
+    messages: true,
+    wflSessions: false
+  });
+
+  assert.match(markup, /data-notification-setting="mentions"/);
+  assert.match(markup, /data-notification-setting="likes"/);
+  assert.match(markup, /data-notification-setting="comments"/);
+  assert.match(markup, /data-notification-setting="messages"/);
+  assert.match(markup, /data-notification-setting="wflSessions"/);
+  assert.match(markup, /checked/);
+});
+
+test('notificationPreferencePayload reads checkbox settings from a form root', () => {
+  const root = {
+    querySelector(selector) {
+      const key = selector.match(/\[data-notification-setting="([^"]+)"\]/)?.[1];
+      return {
+        mentions: { checked: false },
+        likes: { checked: true },
+        comments: { checked: false },
+        messages: { checked: true },
+        wflSessions: { checked: false }
+      }[key] || null;
+    }
+  };
+
+  assert.deepEqual(notificationPreferencePayload(root), {
+    mentions: false,
+    likes: true,
+    comments: false,
+    messages: true,
+    wflSessions: false
+  });
 });

@@ -7,6 +7,7 @@ import dev.christopherbell.message.model.Message;
 import dev.christopherbell.notification.NotificationRepository;
 import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.notification.model.NotificationType;
+import dev.christopherbell.notification.preference.NotificationPreferenceService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import java.time.Instant;
@@ -26,6 +27,7 @@ public class NotificationDeliveryService {
 
   private final NotificationRepository notificationRepository;
   private final AccountRepository accountRepository;
+  private final NotificationPreferenceService notificationPreferenceService;
 
   /** Creates mention notifications for valid mentioned usernames in a post. */
   public void createMentionNotifications(Post post, Account actor) {
@@ -37,6 +39,7 @@ public class NotificationDeliveryService {
     for (var username : extractMentionUsernames(post.getText())) {
       accountRepository.findByUsernameIgnoreCase(username)
           .filter(account -> !account.getId().equals(actor.getId()))
+          .filter(account -> shouldDeliver(account.getId(), NotificationType.MENTION))
           .ifPresent(account -> notificationRepository.save(Notification.builder()
               .id(UUID.randomUUID().toString())
               .accountId(account.getId())
@@ -54,6 +57,9 @@ public class NotificationDeliveryService {
   /** Creates a direct-message notification for the message recipient. */
   public void createMessageNotification(Message message, Account actor, Account recipient) {
     if (message == null || actor == null || recipient == null) {
+      return;
+    }
+    if (!shouldDeliver(recipient.getId(), NotificationType.MESSAGE)) {
       return;
     }
     notificationRepository.save(Notification.builder()
@@ -86,6 +92,9 @@ public class NotificationDeliveryService {
       Account recipient
   ) {
     if (session == null || actor == null || recipient == null) {
+      return;
+    }
+    if (!shouldDeliver(recipient.getId(), NotificationType.WFL_SESSION)) {
       return;
     }
     notificationRepository.save(Notification.builder()
@@ -130,6 +139,9 @@ public class NotificationDeliveryService {
     if (actor.getId() != null && actor.getId().equals(recipient.getId())) {
       return;
     }
+    if (!shouldDeliver(recipient.getId(), notificationType)) {
+      return;
+    }
 
     notificationRepository.save(Notification.builder()
         .id(UUID.randomUUID().toString())
@@ -142,5 +154,9 @@ public class NotificationDeliveryService {
         .read(false)
         .createdOn(Instant.now())
         .build());
+  }
+
+  private boolean shouldDeliver(String accountId, NotificationType notificationType) {
+    return notificationPreferenceService.shouldDeliver(accountId, notificationType);
   }
 }

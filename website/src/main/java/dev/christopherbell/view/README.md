@@ -7,7 +7,7 @@ Owns server-side routing for HTML pages.
 - Spring MVC routes that return Thymeleaf templates.
 - `account` serves login, signup, password reset, and Void auth pages.
 - `content` serves the home gateway, blog, photos, reports, Back Office, and The Bell pages.
-- `tools` serves VIN Decoder and ZIP Coordinates pages.
+- `tools` serves Raising Canes Box Index, VIN Decoder, and ZIP Coordinates pages.
 - `voidroutes` serves Void, profile, messages, notifications, public user feeds, and post pages.
 - `wfl` serves What's For Lunch, WFL restaurant profiles, favorites, and top-rated lists.
 - Route names used by the frontend navigation.

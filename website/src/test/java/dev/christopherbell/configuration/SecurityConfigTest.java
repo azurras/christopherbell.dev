@@ -55,6 +55,26 @@ class SecurityConfigTest {
   }
 
   @Test
+  @DisplayName("Cane's Box Tracker tool page is public")
+  void publicMatchers_whenCanesBoxTrackerToolRequested_matchesWithoutAuthentication() throws Exception {
+    var path = "/canes-box-tracker";
+    var request = new MockHttpServletRequest("GET", path);
+    request.setServletPath(path);
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request)));
+  }
+
+  @Test
+  @DisplayName("Cane's Box Tracker tool page is public with a trailing slash")
+  void publicMatchers_whenCanesBoxTrackerToolTrailingSlashRequested_matchesWithoutAuthentication() throws Exception {
+    var path = "/canes-box-tracker/";
+    var request = new MockHttpServletRequest("GET", path);
+    request.setServletPath(path);
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request)));
+  }
+
+  @Test
   @DisplayName("Notifications page shell is public")
   void publicMatchers_whenNotificationsPageRequested_matchesWithoutAuthentication() throws Exception {
     var path = "/notifications";

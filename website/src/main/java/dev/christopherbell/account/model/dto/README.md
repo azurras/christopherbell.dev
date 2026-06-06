@@ -8,6 +8,8 @@ Owns account API shapes that leave or enter the account feature.
 - `AccountUpdateRequest` describes admin/profile account update input.
 - `AccountDetail` is the full account detail response for authorized callers.
 - `AccountProfile` is the intentionally smaller public profile response.
+- `AccountUsernameSuggestion` is the public-safe username-only response for
+  signed-in autocomplete controls.
 
 ## Design Notes
 

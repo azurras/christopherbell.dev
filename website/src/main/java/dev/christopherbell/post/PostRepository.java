@@ -83,4 +83,11 @@ public interface PostRepository extends MongoRepository<Post, String> {
 
   /** Finds posts that have not been assigned an expiration timestamp yet. */
   List<Post> findByExpiresOnIsNull();
+
+  /** Count root posts authored by an account. */
+  long countByAccountIdAndParentIdIsNull(String accountId);
+
+  /** Count reply posts authored by an account. */
+  long countByAccountIdAndParentIdIsNotNull(String accountId);
+
 }

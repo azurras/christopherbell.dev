@@ -7,6 +7,7 @@ Owns public profile and self-account read behavior.
 - Username-based public profile lookup.
 - Public profile shaping that avoids exposing first name, last name, or email.
 - Current-viewer follow state and follower/following counts.
+- Safe public activity and network stats: root posts, replies, followers, and following.
 - Authenticated self-account detail lookup for account API responses.
 
 ## Update This Doc

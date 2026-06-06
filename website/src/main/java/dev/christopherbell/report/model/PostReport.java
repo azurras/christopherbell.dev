@@ -37,6 +37,8 @@ public class PostReport {
   private ReportStatus status;
   private ReportResolution resolution;
   private String resolvedBy;
+  private Long openReportsForAccount;
+  private Long resolvedReportsForAccount;
 
   @JsonFormat(
       shape = JsonFormat.Shape.STRING,

@@ -33,13 +33,14 @@
                   <h2>Conversations</h2>
                 </div>
               </div>
-              <form id="newConversationForm" class="message-new-form">
-                <label class="form-label" for="recipientUsername">Open a private signal</label>
+              <form id="newConversationForm" class="message-new-form" autocomplete="off">
+                <label class="form-label" for="recipientHandle">Open a private signal</label>
                 <div class="input-group">
                   <span class="input-group-text">@</span>
-                  <input id="recipientUsername" class="form-control" autocomplete="off" placeholder="username" />
+                  <input id="recipientHandle" class="form-control" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="handle" />
                   <button class="btn btn-dark" type="submit">Open</button>
                 </div>
+                <div id="recipientSuggestions" class="message-suggestions d-none" role="listbox" aria-label="Possible message recipients"></div>
               </form>
               <div id="conversationList" class="conversation-list"></div>
             </div>
@@ -56,7 +57,7 @@
             <div id="messageList" class="message-list">
               <div class="feed-empty-state message-empty-state">
                 <h2>No signal selected</h2>
-                <p>Open a conversation or start one with a username.</p>
+                <p>Open a conversation or start one with a handle.</p>
               </div>
             </div>
             <form id="messageForm" class="message-form d-none">

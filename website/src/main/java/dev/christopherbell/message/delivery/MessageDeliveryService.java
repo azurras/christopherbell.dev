@@ -3,6 +3,7 @@ package dev.christopherbell.message.delivery;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.trust.AccountTrustService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.UsernameSanitizer;
@@ -30,6 +31,7 @@ public class MessageDeliveryService {
   private final AccountRepository accountRepository;
   private final NotificationDeliveryService notificationDeliveryService;
   private final PermissionService permissionService;
+  private final AccountTrustService accountTrustService;
 
   /**
    * Sends one direct message from the current account to another account.
@@ -46,6 +48,9 @@ public class MessageDeliveryService {
             String.format("Account with username %s not found.", request.recipientUsername())));
     if (sender.getId().equals(recipient.getId())) {
       throw new InvalidRequestException("You cannot message yourself.");
+    }
+    if (accountTrustService.isBlockedEitherDirection(sender.getId(), recipient.getId())) {
+      throw new InvalidRequestException("Messages are not available between these accounts.");
     }
 
     var message = Message.builder()

@@ -6,11 +6,19 @@
  */
 import { API } from './lib/api.js';
 import { authHeaders, fetchJson, formatWhen, getAuthToken, loginRedirectUrl, sanitize } from './lib/util.js';
-import { notificationTargetUrl, notificationText, notificationTitle } from './lib/notifications.js';
+import {
+  notificationPreferencePayload,
+  notificationSettingsMarkup,
+  notificationTargetUrl,
+  notificationText,
+  notificationTitle
+} from './lib/notifications.js';
 
 const page = document.getElementById('notificationsPage');
 const list = document.getElementById('notificationsList');
 const alertBox = document.getElementById('notificationsAlert');
+const settingsForm = document.getElementById('notificationSettingsForm');
+const settingsStatus = document.getElementById('notificationSettingsStatus');
 
 function showError(message) {
   if (!alertBox) return;
@@ -24,6 +32,11 @@ function clearError() {
   alertBox.classList.add('d-none');
 }
 
+function setSettingsStatus(message) {
+  if (!settingsStatus) return;
+  settingsStatus.textContent = message || '';
+}
+
 function notificationItemHtml(notification) {
   const unread = !notification.read;
   return `
@@ -35,6 +48,46 @@ function notificationItemHtml(notification) {
       </span>
       <time>${formatWhen(notification.createdOn)}</time>
     </button>`;
+}
+
+function renderNotificationSettings(preferences) {
+  if (!settingsForm) return;
+  settingsForm.innerHTML = notificationSettingsMarkup(preferences);
+  settingsForm.querySelectorAll('[data-notification-setting]').forEach(input => {
+    input.addEventListener('change', saveNotificationSettings);
+  });
+}
+
+async function loadNotificationSettings() {
+  if (!settingsForm) return;
+  setSettingsStatus('Loading settings...');
+  try {
+    const preferences = await fetchJson(API.notifications.preferences, {
+      headers: authHeaders(),
+      redirectOnUnauthorized: true,
+    });
+    renderNotificationSettings(preferences);
+    setSettingsStatus('');
+  } catch (error) {
+    setSettingsStatus(error.message || 'Could not load notification settings.');
+  }
+}
+
+async function saveNotificationSettings() {
+  if (!settingsForm) return;
+  setSettingsStatus('Saving settings...');
+  try {
+    const preferences = await fetchJson(API.notifications.preferences, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(notificationPreferencePayload(settingsForm)),
+      redirectOnUnauthorized: true,
+    });
+    renderNotificationSettings(preferences);
+    setSettingsStatus('Settings saved.');
+  } catch (error) {
+    setSettingsStatus(error.message || 'Could not save notification settings.');
+  }
 }
 
 function renderNotifications(notifications) {
@@ -77,10 +130,13 @@ async function loadNotifications() {
   }
   clearError();
   try {
-    const notifications = await fetchJson(`${API.notifications.base}?limit=50`, {
-      headers: authHeaders(),
-      redirectOnUnauthorized: true,
-    });
+    const [notifications] = await Promise.all([
+      fetchJson(`${API.notifications.base}?limit=50`, {
+        headers: authHeaders(),
+        redirectOnUnauthorized: true,
+      }),
+      loadNotificationSettings()
+    ]);
     renderNotifications(notifications);
   } catch (error) {
     showError(error.message || 'Could not load notifications.');

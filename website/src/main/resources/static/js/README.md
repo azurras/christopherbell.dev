@@ -28,12 +28,22 @@ Owns browser-side behavior for server-rendered pages.
   selectors, callbacks, or small context objects from page modules.
 - `messages.js` renders the `/messages` Signal Bridge interactions: conversation
   list state, selected private thread, safe message body rendering, character
-  counter, send action, unread-first conversation rows, and login redirect.
+  counter, send action, unread-first conversation rows, a handle-based
+  conversation starter that avoids password-manager username heuristics,
+  debounced username autocomplete against the account search API, and login
+  redirect.
 - `notifications.js` renders the `/notifications` Signal Log page for signed-in
-  users, showing the full notification list and routing each item through the
-  same mark-read behavior used by the nav dropdown.
+  users, showing notification category settings, the full notification list, and
+  routing each item through the same mark-read behavior used by the nav dropdown.
+- `components/nav.js` loads notification preferences with the compact
+  notification list so browser alerts skip categories the user has disabled.
+- Public profile pages render API-provided activity stats through
+  `lib/profile-stats.js` so counts do not depend on how many feed cards have
+  been loaded in the browser.
 - The Void feed toolbar keeps the primary feed filter surface to `All` and
   `Following`; profile and thread pages handle personal post and reply views.
+- `home-feed.js` wires the signed-in Void composer preview mount. The preview is
+  rendered client-side from draft text and does not store preview-only data.
 - API calls go through `lib/api.js` so auth headers, response parsing, and
   endpoint paths stay consistent.
 - `lib/util.js` owns shared `@username` mention and HTTP/HTTPS URL linking;
@@ -58,16 +68,30 @@ Owns browser-side behavior for server-rendered pages.
 - `zip-coordinates.js` renders the Tools ZIP coordinate lookup page around
   `GET /api/location/zip/{zipCode}`, including ZIP normalization, inline errors,
   result fields, and copyable API/curl output.
+- `canes-box-tracker.js` renders the Tools Raising Canes Box Index page around
+  the public history API, including the large percent index, verified latest
+  average price, data-quality counts, metro sample status/source/quality, and a
+  lightweight inline SVG trend chart.
 - `post.js` renders the `/p/{id}` Spectral Thread page. It loads the selected
   post and thread data, fills root/parent context echoes, applies selected-post
-  detail styling through the shared feed renderer, wires the compact reply
-  composer, and renders direct replies as a timeline.
+  detail styling through the shared feed renderer, renders the nested Signal
+  Rail and previous/next thread links through `lib/thread-navigation.js`, wires
+  newest-reply jumping and collapsible reply branches, wires the compact reply
+  composer, and renders replies as a timeline.
+- Feed-rendering pages initialize `lib/image-lightbox.js` so direct image and
+  animated GIF links open in a shared preview dialog and broken external images
+  fall back to a source link instead of leaving empty space.
+- Feed-rendering pages initialize `lib/lazy-media.js` after rendering post
+  cards so rich iframes defer their `src` until they are near the viewport.
 - `wfl-list.js` renders the WFL secondary pages for favorites and the public top
   10 rated restaurants.
-- `back-office.js` gates the Back Office to admins, renders report/user queues,
-  supports user approval/status changes/role promotion, and exposes practical
-  admin operations such as Location Census ZIP coordinate import, WFL
-  import/dedupe, and vehicle VIN maintenance.
+- `user-feed.js` renders public profiles and exposes signed-in mute/block
+  actions for other users.
+- `back-office.js` gates the Back Office to admins, renders report/user queues
+  with repeat-report context, supports user approval/status changes/role
+  promotion, and exposes practical admin operations such as Location Census ZIP
+  coordinate import, WFL import/dedupe, Raising Canes Box Index collection and
+  datapoint review, and vehicle VIN maintenance.
 
 ## Design Notes
 

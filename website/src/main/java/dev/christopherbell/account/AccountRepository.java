@@ -1,7 +1,10 @@
 package dev.christopherbell.account;
 
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountStatus;
+import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
@@ -87,6 +90,19 @@ public interface AccountRepository extends MongoRepository<Account, String> {
    * @return an {@link Optional} containing the matching account if found
    */
   Optional<Account> findByUsernameIgnoreCase(String username);
+
+  /**
+   * Finds active account suggestions whose usernames start with a prefix.
+   *
+   * @param usernamePrefix username prefix typed by the caller
+   * @param status account status to include
+   * @param pageable result cap and paging information
+   * @return matching accounts sorted by username
+   */
+  List<Account> findByUsernameStartingWithIgnoreCaseAndStatusOrderByUsernameAsc(
+      String usernamePrefix,
+      AccountStatus status,
+      Pageable pageable);
 
   /**
    * Counts accounts that are following the provided account id.

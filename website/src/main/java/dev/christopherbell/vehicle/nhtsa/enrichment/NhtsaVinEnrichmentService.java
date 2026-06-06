@@ -65,31 +65,26 @@ public class NhtsaVinEnrichmentService {
     if (!properties.isEnabled()) {
       return;
     }
-    log.info("NHTSA VIN enrichment job started.");
-    try {
-      var state = currentState();
-      if (isCoolingDown(state)) {
-        log.info("NHTSA VIN enrichment is cooling down until {}.", state.getDisabledUntil());
+    var state = currentState();
+    if (isCoolingDown(state)) {
+      log.debug("NHTSA VIN enrichment is cooling down until {}.", state.getDisabledUntil());
+      return;
+    }
+    if (isPermanentlyDisabled(state)) {
+      log.debug("NHTSA VIN enrichment is permanently disabled after HTTP 403 on {}.", state.getForbiddenOn());
+      return;
+    }
+
+    var dueVehicles = vehicleRepository.findByVinIsNotNull().stream()
+        .filter(vehicle -> !isBlank(vehicle.getVin()))
+        .filter(this::isDueForEnrichment)
+        .toList();
+
+    for (var batch : batches(dueVehicles)) {
+      if (isCoolingDown(state) || isPermanentlyDisabled(state)) {
         return;
       }
-      if (isPermanentlyDisabled(state)) {
-        log.info("NHTSA VIN enrichment is permanently disabled after HTTP 403 on {}.", state.getForbiddenOn());
-        return;
-      }
-
-      var dueVehicles = vehicleRepository.findByVinIsNotNull().stream()
-          .filter(vehicle -> !isBlank(vehicle.getVin()))
-          .filter(this::isDueForEnrichment)
-          .toList();
-
-      for (var batch : batches(dueVehicles)) {
-        if (isCoolingDown(state) || isPermanentlyDisabled(state)) {
-          return;
-        }
-        enrichVehicleBatch(state, batch);
-      }
-    } finally {
-      log.info("NHTSA VIN enrichment job completed.");
+      enrichVehicleBatch(state, batch);
     }
   }
 

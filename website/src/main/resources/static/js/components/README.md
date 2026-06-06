@@ -9,8 +9,8 @@ Owns reusable browser-side components shared across pages.
   most recent notifications in the bell dropdown, can request browser
   notifications while the site is open, routes WFL session invite notifications
   back to `/wfl?session=...`, presents the Void feed as the top-level `Feed`
-  destination, and exposes the Tools dropdown for What's For Lunch, VIN Decoder,
-  and ZIP Coordinates.
+  destination, and exposes the alphabetized Tools dropdown for Raising Canes Box
+  Index, VIN Decoder, What's For Lunch, and ZIP Coordinates.
 - The notification bell and profile menu are mutually exclusive; opening one
   closes the other so the nav never stacks those popups.
 - The shared nav uses the Void console treatment: a `Signal Online` status row, Void brand mark, compact signal-style links, and dark dropdown/notification/profile menus.

@@ -1,6 +1,9 @@
 import { fetchJson, sanitize, authHeaders, isLoggedIn, formatWhen, closeOnOutside, loginRedirectUrl } from './lib/util.js';
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
+import { initPostImageLightbox } from './lib/image-lightbox.js';
+import { initLazyMedia } from './lib/lazy-media.js';
+import { profileActivityStats } from './lib/profile-stats.js';
 /**
  * User feed page script.
  * - Resolves username from URL and loads their posts
@@ -25,7 +28,6 @@ let ME = { id: null, role: null, username: null };
 let SCROLLER = null;
 let RENDER_CTX = null;
 let PROFILE = null;
-let VISIBLE_POSTS = 0;
 
 function setText(id, value) {
   const el = document.getElementById(id);
@@ -41,10 +43,18 @@ function renderProfile(profile) {
   setText('userHandle', handle);
   setText('userMeta', handle);
   setText('userInitials', initialsFromUsername(username));
-  setText('userFollowerCount', String(profile?.followerCount ?? 0));
-  setText('userFollowingCount', String(profile?.followingCount ?? 0));
+  renderActivityStats(profile);
   renderFollowButton(profile);
   renderMessageLink(profile);
+  renderTrustButtons(profile);
+}
+
+function renderActivityStats(profile) {
+  const stats = profileActivityStats(profile);
+  setText('userPostCount', String(stats.postCount));
+  setText('userReplyCount', String(stats.replyCount));
+  setText('userFollowerCount', String(stats.followerCount));
+  setText('userFollowingCount', String(stats.followingCount));
 }
 
 function renderFollowButton(profile) {
@@ -69,6 +79,25 @@ function renderMessageLink(profile) {
   }
   link.href = `/messages?to=${encodeURIComponent(profile.username || '')}`;
   link.classList.remove('d-none');
+}
+
+function renderTrustButtons(profile) {
+  for (const id of ['muteUserBtn', 'blockUserBtn']) {
+    const button = document.getElementById(id);
+    if (!button) continue;
+    if (!profile || profile.self) {
+      button.classList.add('d-none');
+    } else {
+      button.classList.remove('d-none');
+    }
+  }
+}
+
+function showTrustStatus(message) {
+  const status = document.getElementById('userTrustStatus');
+  if (!status) return;
+  status.textContent = message;
+  status.classList.remove('d-none');
 }
 
 function renderEmptyFeed() {
@@ -111,8 +140,36 @@ async function toggleFollow() {
   }
 }
 
+async function setTrust(type) {
+  if (!PROFILE) return;
+  if (!isLoggedIn()) {
+    window.location.href = loginRedirectUrl();
+    return;
+  }
+  const button = type === 'BLOCK'
+    ? document.getElementById('blockUserBtn')
+    : document.getElementById('muteUserBtn');
+  try {
+    if (button) button.disabled = true;
+    await fetchJson(API.accounts.setTrust(PROFILE.username), {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({ type })
+    });
+    showTrustStatus(type === 'BLOCK'
+      ? `@${PROFILE.username} is blocked. They cannot message you.`
+      : `@${PROFILE.username} is muted. Their posts are hidden from your feeds.`);
+  } catch (err) {
+    showAlert(err.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 /** Wire page once DOM is ready. */
 document.addEventListener('DOMContentLoaded', async () => {
+  initPostImageLightbox();
+
   // Try to resolve current user to determine delete permissions
   if (localStorage.getItem('cbellLoginToken')) {
     try {
@@ -131,6 +188,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       renderProfile({ username });
     }
     document.getElementById('followBtn')?.addEventListener('click', toggleFollow);
+    document.getElementById('muteUserBtn')?.addEventListener('click', () => setTrust('MUTE'));
+    document.getElementById('blockUserBtn')?.addEventListener('click', () => setTrust('BLOCK'));
     list.innerHTML = '';
     RENDER_CTX = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(ME), currentUserName: ME?.username || null });
     SCROLLER = createInfiniteScroller({
@@ -144,9 +203,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       },
       onPage: (items) => {
         if (!items || items.length === 0) return;
-        VISIBLE_POSTS += items.length;
-        setText('userPostCount', String(VISIBLE_POSTS));
         for (const p of items) list.appendChild(createFeedItem(p, RENDER_CTX));
+        initLazyMedia(list);
       },
       getCursor: (it) => it.createdOn || it.lastUpdatedOn,
       onEmpty: renderEmptyFeed

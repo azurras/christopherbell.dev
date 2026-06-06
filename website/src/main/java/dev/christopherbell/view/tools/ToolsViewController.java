@@ -10,6 +10,16 @@ import org.springframework.web.bind.annotation.GetMapping;
 public class ToolsViewController {
 
   /**
+   * Serves the Cane's Box Tracker tool.
+   *
+   * @return {@code canes-box-tracker.html}
+   */
+  @GetMapping(value = {"/canes-box-tracker", "/canes-box-tracker/"})
+  public String getCanesBoxTrackerPage() {
+    return "canes-box-tracker.html";
+  }
+
+  /**
    * Serves the VIN decoder tool.
    *
    * @return {@code vin-decoder.html}

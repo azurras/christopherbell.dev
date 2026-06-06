@@ -2,18 +2,21 @@ package dev.christopherbell.post.feed;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.trust.AccountTrustService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.UsernameSanitizer;
 import dev.christopherbell.post.PostMapper;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.expiration.PostExpirationService;
+import dev.christopherbell.post.hide.HiddenPostThreadService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -32,6 +35,8 @@ public class PostFeedService {
   private final AccountRepository accountRepository;
   private final PostMapper postMapper;
   private final PostExpirationService postExpirationService;
+  private final AccountTrustService accountTrustService;
+  private final HiddenPostThreadService hiddenPostThreadService;
 
   public List<PostDetail> getMyPosts(String selfId) throws ResourceNotFoundException {
     accountRepository
@@ -80,9 +85,11 @@ public class PostFeedService {
         : postRepository.findByAccountIdInOrderByCreatedOnDesc(followingIds, page);
 
     var idToUser = usernamesByAccountId(followingIds);
+    var hidden = hiddenFor(selfId);
     posts.forEach(postExpirationService::ensureExpirationSet);
     return posts.stream()
         .filter(p -> !postExpirationService.isExpired(p))
+        .filter(p -> isVisibleToSelf(p, hidden))
         .map(p -> toFeedItem(p, idToUser.get(p.getAccountId()), selfId))
         .toList();
   }
@@ -112,9 +119,11 @@ public class PostFeedService {
 
     var authorIds = posts.stream().map(Post::getAccountId).distinct().toList();
     var idToUser = usernamesByAccountId(authorIds);
+    var hidden = hiddenFor(selfId);
     posts.forEach(postExpirationService::ensureExpirationSet);
     return posts.stream()
         .filter(p -> !postExpirationService.isExpired(p))
+        .filter(p -> isVisibleToSelf(p, hidden))
         .map(p -> toFeedItem(p, idToUser.get(p.getAccountId()), selfId))
         .toList();
   }
@@ -132,8 +141,10 @@ public class PostFeedService {
         : postRepository.findByAccountIdOrderByCreatedOnDesc(account.getId(), page);
 
     posts.forEach(postExpirationService::ensureExpirationSet);
+    var hidden = hiddenFor(selfId);
     return posts.stream()
         .filter(p -> !postExpirationService.isExpired(p))
+        .filter(p -> isVisibleToSelf(p, hidden))
         .map(p -> toFeedItem(p, account.getUsername(), selfId))
         .toList();
   }
@@ -147,6 +158,22 @@ public class PostFeedService {
     return accountRepository.findAllById(accountIds).stream()
         .collect(Collectors.toMap(Account::getId, Account::getUsername));
   }
+
+  private HiddenFeedState hiddenFor(String selfId) {
+    if (selfId == null || selfId.isBlank()) {
+      return new HiddenFeedState(Set.of(), Set.of());
+    }
+    return new HiddenFeedState(
+        accountTrustService.hiddenAccountIdsForSelf(),
+        hiddenPostThreadService.hiddenRootIdsForSelf());
+  }
+
+  private boolean isVisibleToSelf(Post post, HiddenFeedState hidden) {
+    var rootId = post.getRootId() == null ? post.getId() : post.getRootId();
+    return !hidden.accountIds().contains(post.getAccountId()) && !hidden.rootIds().contains(rootId);
+  }
+
+  private record HiddenFeedState(Set<String> accountIds, Set<String> rootIds) {}
 
   private PostFeedItem toFeedItem(Post post, String username, String currentUserId) {
     return PostFeedItem.builder()

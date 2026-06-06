@@ -4,7 +4,9 @@ Owns direct-message creation.
 
 ## What Lives Here
 
-- `MessageDeliveryService` validates send requests, checks sender status, creates messages, and hands notification creation to the notification package.
+- `MessageDeliveryService` validates send requests, checks sender status,
+  rejects blocked account pairs, creates messages, and hands notification
+  creation to the notification package.
 
 ## Design Notes
 

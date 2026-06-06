@@ -13,6 +13,8 @@ public record AccountProfile(
     AccountStatus status,
     long followerCount,
     long followingCount,
+    long postCount,
+    long replyCount,
     boolean followedByMe,
     boolean self
 ) {}

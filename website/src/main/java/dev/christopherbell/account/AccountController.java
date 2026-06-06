@@ -10,6 +10,7 @@ import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.dto.AccountProfile;
+import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
@@ -27,6 +28,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.PutMapping;
 
@@ -256,6 +258,30 @@ public class AccountController {
     return new ResponseEntity<>(
         Response.<AccountProfile>builder()
             .payload(accountService.getPublicProfile(username))
+            .success(true)
+            .build(), HttpStatus.OK);
+  }
+
+  /**
+   * Searches active accounts by username prefix for signed-in recipient pickers.
+   *
+   * @param username partial username typed by the caller
+   * @param limit maximum number of suggestions to return
+   * @return HTTP 200 with public-safe username suggestions
+   * @throws Exception if the current caller cannot be resolved
+   */
+  @GetMapping(
+      value = V20250914 + "/search",
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<List<AccountUsernameSuggestion>>> searchAccountsByUsername(
+      @RequestParam(name = "username", required = false) String username,
+      @RequestParam(name = "limit", required = false) Integer limit
+  ) throws Exception {
+    return new ResponseEntity<>(
+        Response.<List<AccountUsernameSuggestion>>builder()
+            .payload(accountService.searchUsernameSuggestions(username, limit))
             .success(true)
             .build(), HttpStatus.OK);
   }

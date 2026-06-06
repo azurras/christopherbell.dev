@@ -11,4 +11,5 @@ import org.springframework.data.mongodb.repository.MongoRepository;
 public interface ReportRepository extends MongoRepository<PostReport, String> {
   List<PostReport> findByStatusOrderByCreatedOnDesc(ReportStatus status);
   List<PostReport> findAllByOrderByCreatedOnDesc();
+  long countByReportedAccountIdAndStatus(String reportedAccountId, ReportStatus status);
 }

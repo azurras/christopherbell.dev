@@ -36,7 +36,9 @@ public class ReportModerationService {
    * Returns reports in the order admins need to review them.
    */
   public List<PostReport> getReports() {
-    return reportRepository.findAllByOrderByCreatedOnDesc();
+    return reportRepository.findAllByOrderByCreatedOnDesc().stream()
+        .peek(this::includeRepeatReportContext)
+        .toList();
   }
 
   /**
@@ -55,6 +57,7 @@ public class ReportModerationService {
     }
 
     if (report.getStatus() == ReportStatus.RESOLVED) {
+      includeRepeatReportContext(report);
       return report;
     }
 
@@ -66,6 +69,7 @@ public class ReportModerationService {
     report.setResolvedBy(permissionService.getSelfId());
     report.setResolvedOn(Instant.now());
     PostReport saved = reportRepository.save(report);
+    includeRepeatReportContext(saved);
     recordReportResolved(saved);
     if (deletedPost) {
       recordPostDeleted(saved);
@@ -92,8 +96,21 @@ public class ReportModerationService {
     report.setResolvedBy(null);
     report.setResolvedOn(null);
     PostReport saved = reportRepository.save(report);
+    includeRepeatReportContext(saved);
     recordReportReopened(saved);
     return saved;
+  }
+
+  private void includeRepeatReportContext(PostReport report) {
+    if (report == null || report.getReportedAccountId() == null || report.getReportedAccountId().isBlank()) {
+      return;
+    }
+    report.setOpenReportsForAccount(reportRepository.countByReportedAccountIdAndStatus(
+        report.getReportedAccountId(),
+        ReportStatus.OPEN));
+    report.setResolvedReportsForAccount(reportRepository.countByReportedAccountIdAndStatus(
+        report.getReportedAccountId(),
+        ReportStatus.RESOLVED));
   }
 
   private boolean deletePostIfRequested(PostReport report, ReportResolution resolution) {

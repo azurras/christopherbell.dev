@@ -116,6 +116,37 @@
                     <div id="locationOperationStatus" class="operation-result">Census ZIP coordinates have not been imported in this session.</div>
                   </section>
 
+                  <section class="operation-panel" aria-labelledby="canesBoxIndexToolsTitle">
+                    <div class="queue-panel-header">
+                      <div>
+                        <p class="home-kicker mb-1">Raising Canes</p>
+                        <h2 id="canesBoxIndexToolsTitle">Box Index Data</h2>
+                      </div>
+                    </div>
+                    <div class="operation-actions">
+                      <button type="button" class="btn btn-primary operation-button" data-operation="canes-box-index-collect">Pull New Data Point</button>
+                    </div>
+                    <form class="operation-form mt-3" id="canesBoxManualPriceForm">
+                      <label class="form-label" for="canesBoxManualMetro">Manual Verified Price</label>
+                      <div class="row g-2">
+                        <div class="col-md-4">
+                          <input class="form-control" id="canesBoxManualMetro" name="metroName" autocomplete="off" placeholder="Metro name" required />
+                        </div>
+                        <div class="col-md-2">
+                          <input class="form-control" name="price" inputmode="decimal" placeholder="12.99" required />
+                        </div>
+                        <div class="col-md-4">
+                          <input class="form-control" name="sourceUrl" inputmode="url" placeholder="Evidence URL" required />
+                        </div>
+                        <div class="col-md-2">
+                          <button class="btn btn-outline-light w-100" type="submit">Save</button>
+                        </div>
+                      </div>
+                      <textarea class="form-control mt-2" name="note" rows="2" placeholder="Verification note"></textarea>
+                    </form>
+                    <div id="canesBoxIndexOperationStatus" class="operation-result">Raising Canes Box Index has not been pulled in this session.</div>
+                  </section>
+
                   <section class="operation-panel" aria-labelledby="vehicleToolsTitle">
                     <div class="queue-panel-header">
                       <div>

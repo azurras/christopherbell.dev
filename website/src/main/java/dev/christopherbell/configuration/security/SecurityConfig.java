@@ -39,9 +39,12 @@ public class SecurityConfig {
       "GET:/api/accounts" + APIVersion.V20250914 + "/profile/**",
       "/favicon.ico",
       "/profile",
+      "/canes-box-tracker",
+      "/canes-box-tracker/**",
       "/vin-decoder",
       "/zip-coordinates",
       // Public read-only post APIs (method-scoped)
+      "GET:/api/canes-box-tracker" + APIVersion.V20260604 + "/history",
       "POST:/api/vehicles" + APIVersion.V20260509 + "/vin/decode",
       "GET:/api/location/zip/**",
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/today",

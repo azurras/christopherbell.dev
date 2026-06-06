@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountProfile;
+import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.AccountStatus;
@@ -27,6 +28,7 @@ import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.test.TestUtil;
 import dev.christopherbell.permission.PermissionService;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -282,6 +284,8 @@ public class AccountControllerTest {
         .username("chris")
         .followerCount(2)
         .followingCount(3)
+        .postCount(4)
+        .replyCount(5)
         .followedByMe(false)
         .self(false)
         .build();
@@ -296,9 +300,44 @@ public class AccountControllerTest {
         .andExpect(jsonPath("$.payload.firstName").doesNotExist())
         .andExpect(jsonPath("$.payload.lastName").doesNotExist())
         .andExpect(jsonPath("$.payload.followerCount").value(2))
-        .andExpect(jsonPath("$.payload.followingCount").value(3));
+        .andExpect(jsonPath("$.payload.followingCount").value(3))
+        .andExpect(jsonPath("$.payload.postCount").value(4))
+        .andExpect(jsonPath("$.payload.replyCount").value(5))
+        .andExpect(jsonPath("$.payload.totalLikesReceived").doesNotExist());
 
     verify(accountService).getPublicProfile(eq("chris"));
+  }
+
+  @Test
+  @DisplayName("Username search: USER -> returns public-safe suggestions")
+  @WithMockUser(authorities = {"USER"})
+  public void testSearchAccountsByUsername_whenUser_ReturnsSuggestions() throws Exception {
+    when(accountService.searchUsernameSuggestions(eq("ali"), eq(5)))
+        .thenReturn(List.of(new AccountUsernameSuggestion("alice")));
+
+    mockMvc
+        .perform(get("/api/accounts" + APIVersion.V20250914 + "/search")
+            .queryParam("username", "ali")
+            .queryParam("limit", "5")
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload[0].username").value("alice"))
+        .andExpect(jsonPath("$.payload[0].email").doesNotExist());
+
+    verify(accountService).searchUsernameSuggestions(eq("ali"), eq(5));
+  }
+
+  @Test
+  @DisplayName("Username search: anonymous -> 401")
+  public void testSearchAccountsByUsername_whenAnonymous_Returns401() throws Exception {
+    mockMvc
+        .perform(get("/api/accounts" + APIVersion.V20250914 + "/search")
+            .queryParam("username", "ali")
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isUnauthorized());
+
+    verifyNoInteractions(accountService);
   }
 
   @Test

@@ -6,9 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -17,12 +18,14 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.AccountServiceStub;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.trust.AccountTrustService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.post.creation.PostCreationService;
 import dev.christopherbell.post.expiration.PostExpirationService;
 import dev.christopherbell.post.feed.PostFeedService;
+import dev.christopherbell.post.hide.HiddenPostThreadService;
 import dev.christopherbell.post.interaction.PostInteractionService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostCreateRequest;
@@ -35,6 +38,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -54,12 +58,16 @@ public class PostServiceTest {
   @Mock private dev.christopherbell.permission.PermissionService permissionService;
   @Mock private NotificationDeliveryService notificationDeliveryService;
   @Mock private PostLinkPreviewService postLinkPreviewService;
+  @Mock private AccountTrustService accountTrustService;
+  @Mock private HiddenPostThreadService hiddenPostThreadService;
   private PostService postService;
   private PostExpirationService postExpirationService;
 
   @BeforeEach
   void setUp() {
     postExpirationService = new PostExpirationService(postRepository, true);
+    lenient().when(accountTrustService.hiddenAccountIdsForSelf()).thenReturn(Set.of());
+    lenient().when(hiddenPostThreadService.hiddenRootIdsForSelf()).thenReturn(Set.of());
     postService = new PostService(
         permissionService,
         new PostCreationService(
@@ -69,7 +77,13 @@ public class PostServiceTest {
             notificationDeliveryService,
             postLinkPreviewService,
             postExpirationService),
-        new PostFeedService(postRepository, accountRepository, postMapper, postExpirationService),
+        new PostFeedService(
+            postRepository,
+            accountRepository,
+            postMapper,
+            postExpirationService,
+            accountTrustService,
+            hiddenPostThreadService),
         new PostThreadService(postRepository, accountRepository, postExpirationService),
         new PostInteractionService(
             postRepository,
@@ -643,6 +657,55 @@ public class PostServiceTest {
     assertEquals(List.of(preview), result.get(0).linkPreviews());
     assertEquals("p2", result.get(1).id());
     assertEquals("user2", result.get(1).username());
+  }
+
+  @Test
+  @DisplayName("GlobalFeed: hides muted accounts and hidden threads for signed-in users")
+  public void testGetGlobalFeed_filtersMutedAccountsAndHiddenThreads() {
+    var created = Instant.now().minus(Duration.ofMinutes(5));
+    var visible = Post.builder()
+        .id("visible")
+        .accountId("visible-account")
+        .text("shown")
+        .createdOn(created)
+        .expiresOn(created.plus(Duration.ofHours(24)))
+        .build();
+    var muted = Post.builder()
+        .id("muted")
+        .accountId("muted-account")
+        .text("muted")
+        .createdOn(created)
+        .expiresOn(created.plus(Duration.ofHours(24)))
+        .build();
+    var hiddenReply = Post.builder()
+        .id("hidden-reply")
+        .rootId("hidden-root")
+        .parentId("hidden-root")
+        .accountId("other-account")
+        .text("hidden")
+        .createdOn(created)
+        .expiresOn(created.plus(Duration.ofHours(24)))
+        .build();
+    Page<Post> page = new PageImpl<>(List.of(visible, muted, hiddenReply), PageRequest.of(0, 20), 3);
+    var service = spy(postService);
+
+    doReturn("self").when(service).getSelfId();
+    when(accountTrustService.hiddenAccountIdsForSelf()).thenReturn(Set.of("muted-account"));
+    when(hiddenPostThreadService.hiddenRootIdsForSelf()).thenReturn(Set.of("hidden-root"));
+    when(postRepository.findAll(org.mockito.ArgumentMatchers.any(org.springframework.data.domain.Pageable.class)))
+        .thenReturn(page);
+    when(accountRepository.findAllById(eq(List.of("visible-account", "muted-account", "other-account"))))
+        .thenReturn(List.of(
+            Account.builder().id("visible-account").username("visibleUser").build(),
+            Account.builder().id("muted-account").username("mutedUser").build(),
+            Account.builder().id("other-account").username("otherUser").build()));
+    when(postRepository.countByParentId(eq("visible"))).thenReturn(0L);
+
+    var result = service.getGlobalFeed(null, 20);
+
+    assertEquals(1, result.size());
+    assertEquals("visible", result.get(0).id());
+    assertEquals("visibleUser", result.get(0).username());
   }
 
   @Test

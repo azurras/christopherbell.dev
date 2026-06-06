@@ -220,18 +220,19 @@ public class PostExpirationService {
     if (!expirationEnabled) {
       return;
     }
-    log.info("Post expiration cleanup job started.");
-    try {
-      var missing = postRepository.findByExpiresOnIsNull();
-      if (!missing.isEmpty()) {
-        missing.forEach(p -> {
-          refreshExpiration(p);
-          postRepository.save(p);
-        });
-      }
-      postRepository.findByExpiresOnLessThanEqual(Instant.now()).forEach(this::deletePostTree);
-    } finally {
-      log.info("Post expiration cleanup job completed.");
+    var missing = postRepository.findByExpiresOnIsNull();
+    if (!missing.isEmpty()) {
+      missing.forEach(p -> {
+        refreshExpiration(p);
+        postRepository.save(p);
+      });
+      log.info("Post expiration cleanup repaired {} posts missing expiration timestamps.", missing.size());
+    }
+
+    var expired = postRepository.findByExpiresOnLessThanEqual(Instant.now());
+    if (!expired.isEmpty()) {
+      expired.forEach(this::deletePostTree);
+      log.info("Post expiration cleanup deleted {} expired post trees.", expired.size());
     }
   }
 

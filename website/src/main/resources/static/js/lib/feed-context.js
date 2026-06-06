@@ -63,6 +63,11 @@ export function onReplyAction(fetchJson, authHeaders) {
   });
 }
 
+/** Build an action that hides a full post thread for the current user. */
+export function onHideThreadAction(fetchJson, authHeaders) {
+  return (postId) => fetchJson(API.posts.hideThread(postId), { method: 'PUT', headers: authHeaders() });
+}
+
 /**
  * Build a thread fetcher for a given post id.
  * Returns the flat thread list (root first, then replies).
@@ -106,6 +111,7 @@ export function makeRendererContext({
     onLike: onLikeAction(fetchJson, authHeaders),
     onDelete: onDeleteAction(fetchJson, authHeaders),
     onReply: onReplyAction(fetchJson, authHeaders),
+    onHideThread: onHideThreadAction(fetchJson, authHeaders),
     currentUserName: currentUserName || null,
     suppressParentContext,
     onExpire

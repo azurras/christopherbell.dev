@@ -7,14 +7,19 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.notification.inbox.NotificationInboxService;
 import dev.christopherbell.notification.model.NotificationDetail;
+import dev.christopherbell.notification.model.NotificationPreferenceDetail;
+import dev.christopherbell.notification.model.NotificationPreferenceUpdateRequest;
 import dev.christopherbell.notification.model.NotificationType;
+import dev.christopherbell.notification.preference.NotificationPreferenceService;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -31,6 +36,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class NotificationControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private NotificationInboxService notificationInboxService;
+  @MockitoBean private NotificationPreferenceService notificationPreferenceService;
 
   @Test
   @DisplayName("Get notifications: user -> 200 with requested limit")
@@ -103,6 +109,81 @@ class NotificationControllerTest {
     verifyNoInteractions(notificationInboxService);
   }
 
+  @Test
+  @DisplayName("Get notification preferences: user -> 200 with settings")
+  @WithMockUser(authorities = {"USER"})
+  void getNotificationPreferences_whenUser_returnsPreferences() throws Exception {
+    when(notificationPreferenceService.getMyPreferences()).thenReturn(preferences());
+
+    mockMvc.perform(get("/api/notifications" + APIVersion.V20250914 + "/preferences"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.mentions").value(true))
+        .andExpect(jsonPath("$.payload.likes").value(false))
+        .andExpect(jsonPath("$.payload.comments").value(true))
+        .andExpect(jsonPath("$.payload.messages").value(true))
+        .andExpect(jsonPath("$.payload.wflSessions").value(false));
+
+    verify(notificationPreferenceService).getMyPreferences();
+  }
+
+  @Test
+  @DisplayName("Update notification preferences: user -> 200 with saved settings")
+  @WithMockUser(authorities = {"USER"})
+  void updateNotificationPreferences_whenUser_returnsSavedPreferences() throws Exception {
+    when(notificationPreferenceService.updateMyPreferences(
+        new NotificationPreferenceUpdateRequest(false, true, false, true, false)))
+        .thenReturn(NotificationPreferenceDetail.builder()
+            .mentions(false)
+            .likes(true)
+            .comments(false)
+            .messages(true)
+            .wflSessions(false)
+            .build());
+
+    mockMvc.perform(put("/api/notifications" + APIVersion.V20250914 + "/preferences")
+            .with(csrf())
+            .contentType("application/json")
+            .content("""
+                {
+                  "mentions": false,
+                  "likes": true,
+                  "comments": false,
+                  "messages": true,
+                  "wflSessions": false
+                }
+                """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.mentions").value(false))
+        .andExpect(jsonPath("$.payload.likes").value(true))
+        .andExpect(jsonPath("$.payload.comments").value(false))
+        .andExpect(jsonPath("$.payload.messages").value(true))
+        .andExpect(jsonPath("$.payload.wflSessions").value(false));
+  }
+
+  @Test
+  @DisplayName("Update notification preferences: missing field -> 400")
+  @WithMockUser(authorities = {"USER"})
+  void updateNotificationPreferences_whenFieldMissing_returnsBadRequest() throws Exception {
+    when(notificationPreferenceService.updateMyPreferences(
+        new NotificationPreferenceUpdateRequest(false, true, null, true, false)))
+        .thenThrow(new InvalidRequestException("All notification preference fields are required."));
+
+    mockMvc.perform(put("/api/notifications" + APIVersion.V20250914 + "/preferences")
+            .with(csrf())
+            .contentType("application/json")
+            .content("""
+                {
+                  "mentions": false,
+                  "likes": true,
+                  "messages": true,
+                  "wflSessions": false
+                }
+                """))
+        .andExpect(status().isBadRequest());
+  }
+
   private NotificationDetail detail(String id) {
     return NotificationDetail.builder()
         .id(id)
@@ -114,6 +195,16 @@ class NotificationControllerTest {
         .notificationType(NotificationType.MENTION)
         .read(false)
         .createdOn(Instant.parse("2026-05-18T15:00:00Z"))
+        .build();
+  }
+
+  private NotificationPreferenceDetail preferences() {
+    return NotificationPreferenceDetail.builder()
+        .mentions(true)
+        .likes(false)
+        .comments(true)
+        .messages(true)
+        .wflSessions(false)
         .build();
   }
 }
