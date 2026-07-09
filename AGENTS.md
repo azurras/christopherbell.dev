@@ -25,7 +25,7 @@ Useful feature docs:
 
 ## Project Facts
 
-- Java 25, Spring Boot 3.4, Gradle Wrapper.
+- Java 25, Spring Boot 4.1, Gradle Wrapper.
 - MongoDB persistence.
 - Thymeleaf server-rendered templates.
 - Vanilla JavaScript ES modules served directly from

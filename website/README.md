@@ -3,7 +3,7 @@
 Personal website and application for Christopher Bell. The project combines a Spring Boot backend with a vanilla JavaScript frontend that uses browser-native ES modules, Web Components, and a simple pub/sub system.
 
 ## Tech Stack
-- **Backend:** Java 21 target, Spring Boot 3, Gradle
+- **Backend:** Java 25, Spring Boot 4.1, Gradle
 - **Frontend:** Vanilla JavaScript, browser ES modules, Web Components
 - **Build Tools:** Gradle Wrapper
 - **Database:** MongoDB
@@ -11,7 +11,7 @@ Personal website and application for Christopher Bell. The project combines a Sp
 ## Getting Started
 
 ### Prerequisites
-- Java 21+ (CI builds with Java 21; newer local JDKs such as Java 25 are supported by the wrapper)
+- Java 25 JDK
 - MongoDB
 
 ### Quickstart
