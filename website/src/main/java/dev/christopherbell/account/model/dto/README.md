@@ -17,6 +17,8 @@ Owns account API shapes that leave or enter the account feature.
   accidentally exposed.
 - Prefer records for request/response shapes because they make API fields
   explicit and immutable.
+- Public request DTOs use Bean Validation annotations so malformed account
+  input returns a consistent 400 response before service logic runs.
 
 ## Update This Doc
 

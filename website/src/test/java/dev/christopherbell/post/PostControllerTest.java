@@ -113,6 +113,26 @@ public class PostControllerTest {
   }
 
   @Test
+  @DisplayName("Create post: blank text returns 400 before service")
+  @WithMockUser(authorities = {"USER"})
+  public void testCreatePost_whenTextBlank_Returns400() throws Exception {
+    var request = """
+        {"text":"   "}
+        """;
+
+    mockMvc
+        .perform(
+            post("/api/posts" + APIVersion.V20250914 + "/create")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.success").value(false));
+
+    verifyNoInteractions(postService);
+  }
+
+  @Test
   @DisplayName("Create post: invalid -> 400")
   @WithMockUser(authorities = {"USER"})
   public void testCreatePost_whenInvalid_Returns400() throws Exception {

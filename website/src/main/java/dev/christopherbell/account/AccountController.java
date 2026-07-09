@@ -15,6 +15,7 @@ import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -95,7 +96,7 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   public ResponseEntity<Response<AccountDetail>> createAccount(
-      @RequestBody AccountCreateRequest accountCreateRequest
+      @Valid @RequestBody AccountCreateRequest accountCreateRequest
   ) throws Exception {
     return new ResponseEntity<>(
         Response.<AccountDetail>builder()

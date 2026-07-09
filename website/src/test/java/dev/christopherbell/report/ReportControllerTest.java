@@ -2,6 +2,7 @@ package dev.christopherbell.report;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -43,5 +44,24 @@ class ReportControllerTest {
         .andExpect(jsonPath("$.success").value(true));
 
     verify(reportService).submitReport(eq(requestObj));
+  }
+
+  @Test
+  @DisplayName("Create report: blank post id returns 400 before service")
+  @WithMockUser(authorities = {"USER"})
+  void testCreateReport_whenPostIdBlank_returns400() throws Exception {
+    String request = """
+        {"postId":" ","reason":"spam"}
+        """;
+
+    mockMvc.perform(
+            post("/api/reports/2025-09-03")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.success").value(false));
+
+    verifyNoInteractions(reportService);
   }
 }

@@ -7,6 +7,7 @@ import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
+import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -48,7 +49,7 @@ public class PostController {
       consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<PostDetail>> createPost(@RequestBody PostCreateRequest request)
+  public ResponseEntity<Response<PostDetail>> createPost(@Valid @RequestBody PostCreateRequest request)
       throws Exception {
     return new ResponseEntity<>(
         Response.<PostDetail>builder()

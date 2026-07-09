@@ -1,5 +1,8 @@
 package dev.christopherbell.report.model;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
 /**
  * Request payload for reporting a post.
  *
@@ -8,7 +11,12 @@ package dev.christopherbell.report.model;
  * @param details optional additional details
  */
 public record ReportCreateRequest(
+    @NotBlank
+    @Size(max = 100)
     String postId,
+    @NotBlank
+    @Size(max = 80)
     String reason,
+    @Size(max = 1000)
     String details
 ) {}

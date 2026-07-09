@@ -20,6 +20,8 @@ Owns vehicle persistence, VIN decode, and data collection API records.
   external collection behavior.
 - Request records keep manual vehicle creation separate from VIN-only decode and
   import flows.
+- Public VIN decode request validation is enforced at the controller boundary
+  with Bean Validation before NHTSA services run.
 
 ## Update This Doc
 
