@@ -28,7 +28,7 @@ public class RateLimitFilterTest {
     Supplier<Bucket> supplier = () -> Bucket4j.builder()
         .addLimit(Bandwidth.simple(1, Duration.ofMinutes(1)))
         .build();
-    RateLimitFilter filter = new RateLimitFilter(supplier);
+    RateLimitFilter filter = new RateLimitFilter(supplier, new ClientIpResolver(new ClientIpProperties()));
     MockHttpServletRequest request = new MockHttpServletRequest();
     request.setRemoteAddr("1.1.1.1");
     MockHttpServletResponse response = new MockHttpServletResponse();
@@ -49,7 +49,7 @@ public class RateLimitFilterTest {
     Supplier<Bucket> supplier = () -> Bucket4j.builder()
         .addLimit(Bandwidth.simple(1, Duration.ofMinutes(1)))
         .build();
-    RateLimitFilter filter = new RateLimitFilter(supplier);
+    RateLimitFilter filter = new RateLimitFilter(supplier, new ClientIpResolver(new ClientIpProperties()));
     FilterChain chain = mock(FilterChain.class);
 
     MockHttpServletRequest request1 = new MockHttpServletRequest();
@@ -61,6 +61,31 @@ public class RateLimitFilterTest {
     filter.doFilter(request2, new MockHttpServletResponse(), chain);
 
     verify(chain, times(2))
+        .doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
+  }
+
+  @Test
+  public void spoofedForwardedForFromUntrustedRemoteUsesSameBucket()
+      throws ServletException, IOException {
+    Supplier<Bucket> supplier = () -> Bucket4j.builder()
+        .addLimit(Bandwidth.simple(1, Duration.ofMinutes(1)))
+        .build();
+    RateLimitFilter filter = new RateLimitFilter(supplier, new ClientIpResolver(new ClientIpProperties()));
+    FilterChain chain = mock(FilterChain.class);
+
+    MockHttpServletRequest request1 = new MockHttpServletRequest();
+    request1.setRemoteAddr("10.0.0.20");
+    request1.addHeader("X-Forwarded-For", "203.0.113.10");
+    filter.doFilter(request1, new MockHttpServletResponse(), chain);
+
+    MockHttpServletRequest request2 = new MockHttpServletRequest();
+    request2.setRemoteAddr("10.0.0.20");
+    request2.addHeader("X-Forwarded-For", "203.0.113.11");
+    MockHttpServletResponse response2 = new MockHttpServletResponse();
+    filter.doFilter(request2, response2, chain);
+
+    assertEquals(429, response2.getStatus());
+    verify(chain, times(1))
         .doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
   }
 }

@@ -14,6 +14,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import dev.christopherbell.configuration.ClientIpProperties;
+import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
@@ -44,7 +46,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(VehicleController.class)
-@Import(ControllerExceptionHandler.class)
+@Import({ControllerExceptionHandler.class, ClientIpProperties.class, ClientIpResolver.class})
 public class VehicleControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private PermissionService permissionService;
@@ -171,6 +173,39 @@ public class VehicleControllerTest {
         .andExpect(jsonPath("$.payload.plantCity").value("MARYSVILLE"));
 
     verify(vehicleVinDecodeService).decode(eq(requestObject), eq("account:user"));
+  }
+
+  @Test
+  @DisplayName("Anonymous VIN decode ignores spoofed X-Forwarded-For from untrusted remotes")
+  @WithMockUser(username = "anonymousUser")
+  public void testDecodeVin_whenAnonymousWithSpoofedForwardedFor_UsesRemoteAddress() throws Exception {
+    var request = """
+        {"vin":"%s"}
+        """.formatted(VehicleStub.VIN);
+    var requestObject = new VehicleVinDecodeRequest(VehicleStub.VIN);
+    var response = VehicleVinDecodeResponse.builder()
+        .vin(VehicleStub.VIN)
+        .make(VehicleStub.MAKE)
+        .model(VehicleStub.MODEL)
+        .year(VehicleStub.YEAR)
+        .rawDecodedValues(java.util.Map.of("VIN", VehicleStub.VIN))
+        .build();
+
+    when(vehicleVinDecodeService.decode(eq(requestObject), anyString())).thenReturn(response);
+
+    mockMvc
+        .perform(post("/api/vehicles" + APIVersion.V20260509 + "/vin/decode")
+            .with(csrf())
+            .with(requestPostProcessor -> {
+              requestPostProcessor.setRemoteAddr("10.0.0.20");
+              return requestPostProcessor;
+            })
+            .header("X-Forwarded-For", "203.0.113.10")
+            .content(request)
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isOk());
+
+    verify(vehicleVinDecodeService).decode(eq(requestObject), eq("ip:10.0.0.20"));
   }
 
   @Test

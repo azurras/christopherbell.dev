@@ -1,11 +1,14 @@
 package dev.christopherbell.configuration.security;
 
+import dev.christopherbell.configuration.ClientIpProperties;
+import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.configuration.filter.RateLimitFilter;
 import dev.christopherbell.configuration.filter.RequestSizeLimitFilter;
 import dev.christopherbell.libs.api.APIVersion;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -28,6 +31,7 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 @Configuration
 @EnableMethodSecurity
 @EnableWebSecurity
+@EnableConfigurationProperties(ClientIpProperties.class)
 public class SecurityConfig {
 
   private static final String[] PUBLIC_URLS = {
@@ -114,8 +118,16 @@ public class SecurityConfig {
    * Configures the rate limiting filter bean.
    */
   @Bean
-  public RateLimitFilter rateLimitFilter() {
-    return new RateLimitFilter();
+  public RateLimitFilter rateLimitFilter(ClientIpResolver clientIpResolver) {
+    return new RateLimitFilter(clientIpResolver);
+  }
+
+  /**
+   * Configures the trusted forwarding header client IP resolver.
+   */
+  @Bean
+  public ClientIpResolver clientIpResolver(ClientIpProperties clientIpProperties) {
+    return new ClientIpResolver(clientIpProperties);
   }
 
   /**
