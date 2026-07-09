@@ -11,7 +11,7 @@ changes.
 ## Tech Stack
 
 - Java 25
-- Spring Boot 3.4
+- Spring Boot 4.1
 - Gradle Wrapper
 - MongoDB
 - Thymeleaf templates

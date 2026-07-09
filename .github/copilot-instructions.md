@@ -5,7 +5,7 @@ workflows in this project.
 
 Key reminders:
 
-- This is a Java 25 Spring Boot app with vanilla JavaScript static assets.
+- This is a Java 25 Spring Boot 4.1 app with vanilla JavaScript static assets.
 - There is no npm workflow and no `package.json`.
 - Prefer vanilla JavaScript. Do not introduce frontend frameworks, npm packages,
   bundlers, or build steps unless explicitly requested.
