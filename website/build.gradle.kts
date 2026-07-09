@@ -37,7 +37,7 @@ dependencies {
     implementation("com.azure:azure-data-tables:12.5.3")
 
     // JSoup
-    implementation("org.jsoup:jsoup:1.20.1")
+    implementation("org.jsoup:jsoup:1.22.2")
 
     // MapStruct
     implementation("org.mapstruct:mapstruct:1.6.3")
