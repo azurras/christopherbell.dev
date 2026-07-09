@@ -11,5 +11,9 @@ Owns cross-cutting servlet filters that are not specific to one feature.
 
 ## Design Notes
 
+Rate limits are applied by the first matching `rate-limit.rules` entry.
+Defaults are stricter for auth mutations and public VIN decode, broader for API
+mutations, and permissive for static assets.
+
 Filters in this package should stay small and deterministic. Add focused filter tests for limit boundaries and bypass behavior when behavior changes.
 
