@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.filter;
 
+import dev.christopherbell.configuration.ClientIpProperties;
+import dev.christopherbell.configuration.ClientIpResolver;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Bucket4j;
@@ -26,6 +28,7 @@ import org.springframework.core.annotation.Order;
 public class RateLimitFilter extends OncePerRequestFilter {
 
   private final Supplier<Bucket> bucketSupplier;
+  private final ClientIpResolver clientIpResolver;
   private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
 
   /**
@@ -34,7 +37,18 @@ public class RateLimitFilter extends OncePerRequestFilter {
   public RateLimitFilter() {
     this(() -> Bucket4j.builder()
         .addLimit(Bandwidth.simple(10000, Duration.ofMinutes(1)))
-        .build());
+        .build(), new ClientIpResolver(new ClientIpProperties()));
+  }
+
+  /**
+   * Creates a filter with default limit and shared client IP resolution.
+   *
+   * @param clientIpResolver trusted forwarding header resolver
+   */
+  public RateLimitFilter(ClientIpResolver clientIpResolver) {
+    this(() -> Bucket4j.builder()
+        .addLimit(Bandwidth.simple(10000, Duration.ofMinutes(1)))
+        .build(), clientIpResolver);
   }
 
   /**
@@ -43,13 +57,24 @@ public class RateLimitFilter extends OncePerRequestFilter {
    * @param bucketSupplier factory for new buckets per client key
    */
   public RateLimitFilter(Supplier<Bucket> bucketSupplier) {
+    this(bucketSupplier, new ClientIpResolver(new ClientIpProperties()));
+  }
+
+  /**
+   * Creates a filter with a custom bucket supplier and client IP resolver. Intended for testing.
+   *
+   * @param bucketSupplier factory for new buckets per client key
+   * @param clientIpResolver trusted forwarding header resolver
+   */
+  public RateLimitFilter(Supplier<Bucket> bucketSupplier, ClientIpResolver clientIpResolver) {
     this.bucketSupplier = bucketSupplier;
+    this.clientIpResolver = clientIpResolver;
   }
 
   @Override
   protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
       FilterChain filterChain) throws ServletException, IOException {
-    String ip = extractClientIp(request);
+    String ip = clientIpResolver.resolveClientIp(request);
     Bucket bucket = buckets.computeIfAbsent(ip, k -> bucketSupplier.get());
     if (bucket.tryConsume(1)) {
       filterChain.doFilter(request, response);
@@ -58,17 +83,4 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
   }
 
-  /**
-   * Resolves the client IP address, preferring {@code X-Forwarded-For} if present.
-   *
-   * @param request current HTTP request
-   * @return the best-effort client IP address
-   */
-  private String extractClientIp(HttpServletRequest request) {
-    String forwarded = request.getHeader("X-Forwarded-For");
-    if (forwarded != null && !forwarded.isBlank()) {
-      return forwarded.split(",")[0].trim();
-    }
-    return request.getRemoteAddr();
-  }
 }

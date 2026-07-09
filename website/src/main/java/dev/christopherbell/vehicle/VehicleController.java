@@ -2,6 +2,7 @@ package dev.christopherbell.vehicle;
 
 import static dev.christopherbell.libs.api.APIVersion.V20260509;
 
+import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.vehicle.core.VehicleDataCollectionStateService;
 import dev.christopherbell.vehicle.model.VehicleCreateRequest;
@@ -42,6 +43,7 @@ public class VehicleController {
   private final VehicleDataCollectionStateService vehicleDataCollectionStateService;
   private final VehicleVinDecodeService vehicleVinDecodeService;
   private final VehicleService vehicleService;
+  private final ClientIpResolver clientIpResolver;
 
   /**
    * Creates a vehicle.
@@ -107,7 +109,7 @@ public class VehicleController {
       @RequestBody VehicleVinDecodeRequest request,
       HttpServletRequest servletRequest
   ) throws Exception {
-    var clientIp = clientIp(servletRequest);
+    var clientIp = clientIpResolver.resolveClientIp(servletRequest);
     var clientKey = clientKey(servletRequest, clientIp);
     log.info("VIN decoder used from ip={} clientKey={}.", clientIp, clientKey);
     return new ResponseEntity<>(
@@ -128,14 +130,6 @@ public class VehicleController {
     }
 
     return "ip:" + clientIp;
-  }
-
-  private String clientIp(HttpServletRequest request) {
-    var forwardedFor = request.getHeader("X-Forwarded-For");
-    if (forwardedFor != null && !forwardedFor.isBlank()) {
-      return forwardedFor.split(",")[0].trim();
-    }
-    return request.getRemoteAddr();
   }
 
   /**

@@ -4,7 +4,8 @@ Owns cross-cutting servlet filters that are not specific to one feature.
 
 ## What Lives Here
 
-- `RateLimitFilter` protects the app from excessive per-client request volume.
+- `RateLimitFilter` protects the app from excessive per-client request volume
+  using the shared trusted-proxy client IP resolver.
 - `RequestSizeLimitFilter` rejects requests that exceed the configured payload
   size limit, including bodies streamed without a trustworthy `Content-Length`.
 
