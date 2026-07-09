@@ -58,13 +58,13 @@ the same week replaces that week's stored result.
 
 Metro targets live in `application.yml` under `canes-box-tracker.metros` so the
 selected store refs can be corrected without changing Java code. The default
-set tracks the 25 highest-population U.S. metropolitan statistical areas where
+set tracks the 50 highest-population U.S. metropolitan statistical areas where
 the official Cane's location search returns a production online-orderable store
-near the metro center. Rank changes should be based on the current Census metro
-population estimates, and store inclusion should be verified against the
-official Cane's ordering API before updating configuration. Each target stores
-the metro, city center coordinates, restaurant ref, restaurant name, address,
-official source URL, and optional `fallback-menu-url`.
+within the configured search radius. Rank changes should be based on the current
+Census metro population estimates, and store inclusion should be verified
+against the official Cane's ordering API before updating configuration. Each
+target stores the metro, city center coordinates, restaurant ref, restaurant
+name, address, official source URL, and optional `fallback-menu-url`.
 
 The primary official source is the Cane's GraphQL gateway configured by
 `graph-ql-url`. Requests mirror the public ordering app headers and only query
@@ -103,12 +103,18 @@ The public page is `/canes-box-tracker`, served by
 `dev.christopherbell.view.tools.ToolsViewController` and rendered by
 `templates/canes-box-tracker.html`.
 
-The page script is `static/js/canes-box-tracker.js`. It loads history through
-`static/js/lib/api.js`, renders the latest average, renders the large percent
-index comparing the latest priced week against the previous priced week, draws a
-small inline SVG chart, and lists the latest metro sample statuses, sources, and
-quality statuses. The public average and percentage index use verified data
-only, so weeks with only provisional/failure data show as insufficient data.
+The page script is `static/js/canes-box-tracker.js`. It loads the latest 60
+weekly snapshots through `static/js/lib/api.js`, renders the latest average,
+renders month-over-month and year-over-year percent indexes by comparing the
+latest priced week to the closest priced week near one month and one year prior,
+draws a small inline SVG chart, lists the latest metro sample source and last
+collection date in America/Chicago, and lets visitors select one metro to see
+that metro's verified week-by-week trend. Selecting a metro also exposes a
+copyable `curl` command against Cane's official GraphQL menu API for that
+tracked store so readers can independently inspect the source menu payload. The
+public average, percentage indexes, and metro-specific trend charts use verified
+data only, so weeks with only provisional/failure data show as insufficient
+data.
 
 ## Update This Doc
 

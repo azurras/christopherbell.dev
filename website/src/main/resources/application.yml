@@ -257,6 +257,231 @@ canes-box-tracker:
       restaurant-name: "Raising Cane's #140"
       address: 415 West Martin Luther King Blvd, Austin, TX 78701
       source-url: https://order.raisingcanes.com/location/raising-canes-140/menu
+    - metro-name: Portland-Vancouver-Hillsboro
+      city: Portland
+      state: OR
+      latitude: 45.5152
+      longitude: -122.6784
+      restaurant-ref: raising-canes-714
+      restaurant-name: "Raising Cane's #714"
+      address: "700 SW 5th Ave #1109 (Located in Pioneer Place), Portland, OR 97204"
+      source-url: https://order.raisingcanes.com/location/raising-canes-714/menu
+    - metro-name: Sacramento-Roseville-Folsom
+      city: Sacramento
+      state: CA
+      latitude: 38.5816
+      longitude: -121.4944
+      restaurant-ref: raising-canes-1006
+      restaurant-name: "Raising Cane's #1006"
+      address: 1500 Arden Way, Sacramento, CA 95815
+      source-url: https://order.raisingcanes.com/location/raising-canes-1006/menu
+    - metro-name: Pittsburgh
+      city: Pittsburgh
+      state: PA
+      latitude: 40.4406
+      longitude: -79.9959
+      restaurant-ref: raising-canes-934
+      restaurant-name: "Raising Cane's #934"
+      address: 3610 Fifth Avenue, Pittsburgh, PA 15213
+      source-url: https://order.raisingcanes.com/location/raising-canes-934/menu
+    - metro-name: Las Vegas-Henderson-North Las Vegas
+      city: Las Vegas
+      state: NV
+      latitude: 36.1699
+      longitude: -115.1398
+      restaurant-ref: raising-canes-891
+      restaurant-name: "Raising Cane's #891"
+      address: 2231 Fremont Street, Las Vegas, NV 89101
+      source-url: https://order.raisingcanes.com/location/raising-canes-891/menu
+    - metro-name: Cincinnati
+      city: Cincinnati
+      state: OH
+      latitude: 39.1031
+      longitude: -84.5120
+      restaurant-ref: raising-canes-758
+      restaurant-name: "Raising Cane's #758"
+      address: 237 Calhoun St, Cincinnati, OH 45219
+      source-url: https://order.raisingcanes.com/location/raising-canes-758/menu
+    - metro-name: Kansas City
+      city: Kansas City
+      state: MO
+      latitude: 39.0997
+      longitude: -94.5786
+      restaurant-ref: raising-canes-222
+      restaurant-name: "Raising Cane's #222"
+      address: 4040 Mill Street, Kansas City, MO 64111
+      source-url: https://order.raisingcanes.com/location/raising-canes-222/menu
+    - metro-name: Columbus
+      city: Columbus
+      state: OH
+      latitude: 39.9612
+      longitude: -82.9988
+      restaurant-ref: raising-canes-858-2
+      restaurant-name: "Raising Cane's #858"
+      address: 1211 Olentangy River Road, Columbus, OH 43202
+      source-url: https://order.raisingcanes.com/location/raising-canes-858-2/menu
+    - metro-name: Indianapolis-Carmel-Greenwood
+      city: Indianapolis
+      state: IN
+      latitude: 39.7684
+      longitude: -86.1581
+      restaurant-ref: raising-canes-1316
+      restaurant-name: "Raising Cane's #1316"
+      address: 8733 US 31 S, Indianapolis, IN 46227
+      source-url: https://order.raisingcanes.com/location/raising-canes-1316/menu
+    - metro-name: Nashville-Davidson--Murfreesboro--Franklin
+      city: Nashville
+      state: TN
+      latitude: 36.1627
+      longitude: -86.7816
+      restaurant-ref: raising-canes-822-2
+      restaurant-name: "Raising Cane's #822"
+      address: 212 Broadway, Nashville, TN 37201
+      source-url: https://order.raisingcanes.com/location/raising-canes-822-2/menu
+    - metro-name: Cleveland
+      city: Cleveland
+      state: OH
+      latitude: 41.4993
+      longitude: -81.6944
+      restaurant-ref: raising-canes-774
+      restaurant-name: "Raising Cane's #774"
+      address: 14115 Detroit Ave., Lakewood, OH 44107
+      source-url: https://order.raisingcanes.com/location/raising-canes-774/menu
+    - metro-name: San Jose-Sunnyvale-Santa Clara
+      city: San Jose
+      state: CA
+      latitude: 37.3382
+      longitude: -121.8863
+      restaurant-ref: raising-canes-0722
+      restaurant-name: "Raising Cane's #0722"
+      address: 440 N Capitol Ave, San Jose, CA 95133
+      source-url: https://order.raisingcanes.com/location/raising-canes-0722/menu
+    - metro-name: Virginia Beach-Chesapeake-Norfolk
+      city: Virginia Beach
+      state: VA
+      latitude: 36.8529
+      longitude: -75.9780
+      restaurant-ref: raising-canes-1223
+      restaurant-name: "Raising Cane's #1223"
+      address: 675 Lynnhaven Parkway, Virginia Beach, VA 23452
+      source-url: https://order.raisingcanes.com/location/raising-canes-1223/menu
+    - metro-name: Jacksonville
+      city: Jacksonville
+      state: FL
+      latitude: 30.3322
+      longitude: -81.6557
+      restaurant-ref: raising-canes-1186-mob
+      restaurant-name: "Raising Cane's #1186"
+      address: 8308 Merchants Way, Jacksonville, FL 32222
+      source-url: https://order.raisingcanes.com/location/raising-canes-1186-mob/menu
+    - metro-name: Providence-Warwick
+      city: Providence
+      state: RI
+      latitude: 41.8240
+      longitude: -71.4128
+      restaurant-ref: raising-canes-887
+      restaurant-name: "Raising Cane's #887"
+      address: 175 Highland Avenue, Seekonk, MA 02771
+      source-url: https://order.raisingcanes.com/location/raising-canes-887/menu
+    - metro-name: Raleigh-Cary
+      city: Raleigh
+      state: NC
+      latitude: 35.7796
+      longitude: -78.6382
+      restaurant-ref: raising-canes-1260
+      restaurant-name: "Raising Cane's #1260"
+      address: 2420 Hillsborough Street, Raleigh, NC 27607
+      source-url: https://order.raisingcanes.com/location/raising-canes-1260/menu
+    - metro-name: Milwaukee-Waukesha
+      city: Milwaukee
+      state: WI
+      latitude: 43.0389
+      longitude: -87.9065
+      restaurant-ref: raising-canes-0996
+      restaurant-name: "Raising Cane's #0996"
+      address: 5250 South 76th Street, Greendale, WI 53129
+      source-url: https://order.raisingcanes.com/location/raising-canes-0996/menu
+    - metro-name: Oklahoma City
+      city: Oklahoma City
+      state: OK
+      latitude: 35.4676
+      longitude: -97.5164
+      restaurant-ref: raising-canes-150
+      restaurant-name: "Raising Cane's #150"
+      address: 2036 NW 23rd Street, Oklahoma City, OK 73106
+      source-url: https://order.raisingcanes.com/location/raising-canes-150/menu
+    - metro-name: Louisville/Jefferson County
+      city: Louisville
+      state: KY
+      latitude: 38.2527
+      longitude: -85.7585
+      restaurant-ref: raising-canes-649
+      restaurant-name: "Raising Cane's #649"
+      address: 1250 Bardstown Road (Highlands), Louisville, KY 40204
+      source-url: https://order.raisingcanes.com/location/raising-canes-649/menu
+    - metro-name: Richmond
+      city: Richmond
+      state: VA
+      latitude: 37.5407
+      longitude: -77.4360
+      restaurant-ref: raising-canes-700-2
+      restaurant-name: "Raising Cane's #700"
+      address: 3064 North Arthur Ashe Blvd, Richmond, VA 23230
+      source-url: https://order.raisingcanes.com/location/raising-canes-700-2/menu
+    - metro-name: Memphis
+      city: Memphis
+      state: TN
+      latitude: 35.1495
+      longitude: -90.0490
+      restaurant-ref: raising-canes-1205
+      restaurant-name: "Raising Cane's #1205"
+      address: 357 Goodman Road W, Southaven, MS 38671
+      source-url: https://order.raisingcanes.com/location/raising-canes-1205/menu
+    - metro-name: Salt Lake City-Murray
+      city: Salt Lake City
+      state: UT
+      latitude: 40.7608
+      longitude: -111.8910
+      restaurant-ref: raising-canes-546
+      restaurant-name: "Raising Cane's #546"
+      address: 2150 South State Street, South Salt Lake City, UT 84115
+      source-url: https://order.raisingcanes.com/location/raising-canes-546/menu
+    - metro-name: Fresno
+      city: Fresno
+      state: CA
+      latitude: 36.7378
+      longitude: -119.7871
+      restaurant-ref: raising-canes-796-2
+      restaurant-name: "Raising Cane's #796"
+      address: 4981 East Kings Canyon Road, Fresno, CA 93727
+      source-url: https://order.raisingcanes.com/location/raising-canes-796-2/menu
+    - metro-name: Birmingham
+      city: Birmingham
+      state: AL
+      latitude: 33.5186
+      longitude: -86.8104
+      restaurant-ref: raising-canes-1399
+      restaurant-name: "Raising Cane's #1399"
+      address: 5301 Hwy 280, Birmingham, AL 35242
+      source-url: https://order.raisingcanes.com/location/raising-canes-1399/menu
+    - metro-name: Grand Rapids-Wyoming-Kentwood
+      city: Grand Rapids
+      state: MI
+      latitude: 42.9634
+      longitude: -85.6681
+      restaurant-ref: raising-canes-1283
+      restaurant-name: "Raising Cane's #1283"
+      address: 3650 28th Street SE, Kentwood, MI 49512
+      source-url: https://order.raisingcanes.com/location/raising-canes-1283/menu
+    - metro-name: Hartford-West Hartford-East Hartford
+      city: Hartford
+      state: CT
+      latitude: 41.7658
+      longitude: -72.6734
+      restaurant-ref: raising-canes-1081-mob
+      restaurant-name: "Raising Cane's #1081"
+      address: 1298 Silas Deane HWY, Wethersfield, CT 06109
+      source-url: https://order.raisingcanes.com/location/raising-canes-1081-mob/menu
 vehicles:
   nhtsa-vin:
     enabled: true

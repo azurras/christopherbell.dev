@@ -155,7 +155,7 @@ class CanesBoxTrackerServiceTest {
   @Test
   void historyReturnsRecentSnapshotsAscendingByWeek() {
     var repository = mock(CanesBoxPriceSnapshotRepository.class);
-    when(repository.findTop52ByOrderByWeekStartDateDesc()).thenReturn(List.of(
+    when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of(
         snapshot("2026-06-08", "13.25"),
         snapshot("2026-06-01", "12.95")
     ));
@@ -186,7 +186,7 @@ class CanesBoxTrackerServiceTest {
     snapshot.setMetroPrices(List.of(
         CanesBoxMetroPrice.success(target, new BigDecimal("11.49"), Instant.parse("2026-06-01T12:00:00Z"), "PUBLIC_MENU", "https://public.example/dallas")
     ));
-    when(repository.findTop52ByOrderByWeekStartDateDesc()).thenReturn(List.of(snapshot));
+    when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of(snapshot));
     var service = new CanesBoxTrackerService(
         repository,
         candidate -> CanesBoxMetroPrice.failure(candidate, "unused"),
@@ -213,7 +213,7 @@ class CanesBoxTrackerServiceTest {
     snapshot.setMetroPrices(List.of(
         CanesBoxMetroPrice.success(target, new BigDecimal("7.80"), Instant.parse("2026-06-01T12:00:00Z"), "PUBLIC_MENU", "https://public.example/dallas")
     ));
-    when(repository.findTop52ByOrderByWeekStartDateDesc()).thenReturn(List.of(snapshot));
+    when(repository.findTop60ByOrderByWeekStartDateDesc()).thenReturn(List.of(snapshot));
     var service = new CanesBoxTrackerService(
         repository,
         candidate -> CanesBoxMetroPrice.failure(candidate, "unused"),

@@ -69,9 +69,12 @@ Owns browser-side behavior for server-rendered pages.
   `GET /api/location/zip/{zipCode}`, including ZIP normalization, inline errors,
   result fields, and copyable API/curl output.
 - `canes-box-tracker.js` renders the Tools Raising Canes Box Index page around
-  the public history API, including the large percent index, verified latest
-  average price, data-quality counts, metro sample status/source/quality, and a
-  lightweight inline SVG trend chart.
+  the public history API, including month-over-month and year-over-year percent
+  indexes, verified latest average price, data-quality counts, metro sample
+  source/Central-time collection date, clickable metro trend selection, a
+  copyable official GraphQL API `curl` for the selected tracked store, and
+  lightweight inline SVG trend charts for both the overall index and selected
+  metros.
 - `post.js` renders the `/p/{id}` Spectral Thread page. It loads the selected
   post and thread data, fills root/parent context echoes, applies selected-post
   detail styling through the shared feed renderer, renders the nested Signal

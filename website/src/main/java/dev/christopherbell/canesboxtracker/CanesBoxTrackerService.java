@@ -162,7 +162,7 @@ public class CanesBoxTrackerService {
    * Gets chart-ready weekly history sorted from oldest to newest.
    */
   public CanesBoxTrackerHistory getHistory() {
-    var weeks = repository.findTop52ByOrderByWeekStartDateDesc().stream()
+    var weeks = repository.findTop60ByOrderByWeekStartDateDesc().stream()
         .map(this::toDetail)
         .sorted(Comparator.comparing(CanesBoxWeeklyPriceDetail::weekStartDate))
         .toList();
