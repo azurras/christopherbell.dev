@@ -37,8 +37,10 @@ Owns site styling for server-rendered pages and frontend components.
 - ZIP Coordinates uses `.zip-coordinate-*` classes in `main.css` for its
   Void-inspired lookup shell, result grid, and copyable endpoint output.
 - Raising Canes Box Index uses `.canes-box-*` classes in `main.css` for its
-  public Tool shell, large red/green percent index, latest-price summary,
-  responsive data-quality summary grid, chart panel, and metro sample table.
+  public Tool shell, red/green month-over-month and year-over-year index cards,
+  latest-price summary, responsive data-quality summary grids, chart panels,
+  selected-metro trend panel, official API curl verification block, and
+  clickable metro sample table.
 - Void-related templates opt into `void-shell-page`; `main.css` owns the Lost
   Signal shell, Void-aware nav/footer treatment, shared lifespan countdown
   styling, rich post link preview cards, allowlisted media embeds, grouped post

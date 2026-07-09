@@ -1212,16 +1212,30 @@ body {
     padding: clamp(1.25rem, 4vw, 2rem);
 }
 
+.canes-box-index-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 1rem;
+}
+
+.canes-box-index-card {
+    border: 1px solid rgba(128, 190, 185, 0.18);
+    border-radius: 0.5rem;
+    background: rgba(4, 9, 14, 0.62);
+    min-width: 0;
+    padding: clamp(1rem, 3vw, 1.35rem);
+}
+
 .canes-box-index-number {
     display: block;
-    font-size: clamp(4rem, 14vw, 9rem);
+    font-size: clamp(2.75rem, 8vw, 5.75rem);
     font-weight: 950;
     letter-spacing: 0;
     line-height: 0.88;
     overflow-wrap: anywhere;
 }
 
-.canes-box-index-panel span {
+.canes-box-index-card span {
     color: rgba(201, 216, 221, 0.72);
     display: block;
     font-weight: 800;
@@ -1260,6 +1274,79 @@ body {
     font-size: 1.35rem;
     font-weight: 950;
     overflow-wrap: anywhere;
+}
+
+.canes-box-metro-trend-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.75rem;
+}
+
+.canes-box-metro-trend-summary div {
+    border: 1px solid rgba(128, 190, 185, 0.18);
+    border-radius: 0.5rem;
+    background: rgba(4, 9, 14, 0.62);
+    min-width: 0;
+    padding: 0.85rem;
+}
+
+.canes-box-metro-trend-summary strong {
+    color: #edf4f5;
+    display: block;
+    font-size: 1.25rem;
+    font-weight: 950;
+    overflow-wrap: anywhere;
+}
+
+.canes-box-metro-trend-store {
+    color: rgba(201, 216, 221, 0.78);
+    font-weight: 800;
+    margin: 0.8rem 0 0;
+}
+
+.canes-box-official-curl {
+    border: 1px solid rgba(222, 177, 95, 0.22);
+    border-radius: 0.5rem;
+    background: rgba(4, 9, 14, 0.68);
+    margin-top: 1rem;
+    padding: 1rem;
+}
+
+.canes-box-official-curl-header {
+    align-items: center;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+}
+
+.canes-box-official-curl h3 {
+    color: #edf4f5;
+    font-size: 1.1rem;
+    font-weight: 950;
+    margin: 0;
+}
+
+.canes-box-official-curl p:not(.profile-label) {
+    color: rgba(201, 216, 221, 0.78);
+    font-weight: 800;
+    margin: 0.75rem 0;
+}
+
+.canes-box-official-curl pre {
+    background: rgba(0, 0, 0, 0.36);
+    border: 1px solid rgba(128, 190, 185, 0.16);
+    border-radius: 0.4rem;
+    color: #d7f7ef;
+    margin: 0;
+    max-height: 18rem;
+    overflow: auto;
+    padding: 0.85rem;
+    white-space: pre;
+}
+
+.canes-box-official-curl code {
+    color: inherit;
+    font-size: 0.82rem;
 }
 
 .canes-box-chart {
@@ -1329,9 +1416,39 @@ body {
     margin: 0;
 }
 
+.canes-box-metro-button {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    color: #8ef1dc;
+    display: inline;
+    font: inherit;
+    font-weight: 950;
+    padding: 0;
+    text-align: left;
+}
+
+.canes-box-metro-button:hover,
+.canes-box-metro-button:focus-visible {
+    color: #deb15f;
+    outline: 0;
+    text-decoration: underline;
+    text-underline-offset: 0.18em;
+}
+
+.canes-box-metro-row-selected td {
+    background: rgba(117, 202, 185, 0.1);
+}
+
 @media (max-width: 720px) {
-    .canes-box-summary {
+    .canes-box-summary,
+    .canes-box-metro-trend-summary {
         grid-template-columns: minmax(0, 1fr);
+    }
+
+    .canes-box-official-curl-header {
+        align-items: stretch;
+        flex-direction: column;
     }
 }
 

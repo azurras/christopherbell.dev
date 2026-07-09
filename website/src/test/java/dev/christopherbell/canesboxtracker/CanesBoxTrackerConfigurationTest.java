@@ -15,11 +15,11 @@ class CanesBoxTrackerConfigurationTest {
       Pattern.compile("canes-box-tracker\\.metros\\[\\d+]\\.metro-name");
 
   @Test
-  void defaultConfigurationTracksTwentyFiveUniqueMetros() {
+  void defaultConfigurationTracksFiftyUniqueMetros() {
     var metroNames = configuredMetroNames();
 
-    assertEquals(25, metroNames.size());
-    assertEquals(25, new HashSet<>(metroNames).size());
+    assertEquals(50, metroNames.size());
+    assertEquals(50, new HashSet<>(metroNames).size());
   }
 
   private List<String> configuredMetroNames() {
