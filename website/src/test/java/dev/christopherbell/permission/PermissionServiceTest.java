@@ -10,6 +10,7 @@ import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -67,6 +68,38 @@ class PermissionServiceTest {
         .build());
 
     assertEquals("account-1", PermissionService.validateToken(token).getSubject());
+  }
+
+  @Test
+  @DisplayName("Production profile requires a configured JWT secret")
+  void resolveSecret_whenProductionAndSecretMissing_throws() {
+    assertThrows(
+        IllegalStateException.class,
+        () -> PermissionService.resolveSecret("", true, Map.of()));
+  }
+
+  @Test
+  @DisplayName("Production profile accepts APP_JWT_SECRET from environment")
+  void resolveSecret_whenProductionAndEnvironmentSecretPresent_returnsEnvironmentSecret() {
+    var secret = "prod-jwt-secret-that-is-long-enough-for-hs256";
+
+    assertEquals(secret, PermissionService.resolveSecret("", true, Map.of("APP_JWT_SECRET", secret)));
+  }
+
+  @Test
+  @DisplayName("Local profile keeps the development JWT fallback")
+  void resolveSecret_whenLocalAndSecretMissing_returnsLocalFallback() {
+    assertEquals(
+        "local-development-jwt-secret-change-me-at-least-32-bytes",
+        PermissionService.resolveSecret("", false, Map.of()));
+  }
+
+  @Test
+  @DisplayName("Weak production JWT secrets fail key creation")
+  void configureSigningKey_whenProductionSecretTooShort_throws() {
+    assertThrows(
+        IllegalStateException.class,
+        () -> PermissionService.configureSigningKey("too-short", true));
   }
 
   @Test
