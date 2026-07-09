@@ -694,7 +694,7 @@ public class RestaurantServiceTest {
     var restaurant2 = RestaurantStub.getRestaurantStub(RestaurantStub.ID_2);
     var detail1 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
     var detail2 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID_2);
-    var today = LocalDate.now().toString();
+    var today = LocalDate.now(ZoneId.of("America/Chicago")).toString();
     var pick = DailyLunchPicks.builder()
         .id(today)
         .pickDate(today)
@@ -725,7 +725,7 @@ public class RestaurantServiceTest {
     var replacement = RestaurantStub.getRestaurantStub("replacement");
     var keptDetail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID_2);
     var replacementDetail = RestaurantStub.getRestaurantDetailStub("replacement");
-    var today = LocalDate.now().toString();
+    var today = LocalDate.now(ZoneId.of("America/Chicago")).toString();
     var existingPick = DailyLunchPicks.builder()
         .id(today)
         .pickDate(today)
