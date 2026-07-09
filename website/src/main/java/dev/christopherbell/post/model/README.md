@@ -24,6 +24,8 @@ Owns Void post persistence and API records.
 - Reply count is computed from `rootId` and `parentId` when expiration is
   refreshed. It is not stored on `Post`, which keeps reply creation and subtree
   deletion from drifting a denormalized counter.
+- Create-post request validation is enforced at the controller boundary with
+  Bean Validation before post creation services run.
 
 ## Update This Doc
 

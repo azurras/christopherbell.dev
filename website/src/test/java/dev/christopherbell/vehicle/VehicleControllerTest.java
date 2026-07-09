@@ -209,6 +209,25 @@ public class VehicleControllerTest {
   }
 
   @Test
+  @DisplayName("VIN decode rejects invalid VIN before service")
+  @WithMockUser
+  public void testDecodeVin_whenVinInvalid_Returns400() throws Exception {
+    var request = """
+        {"vin":"bad"}
+        """;
+
+    mockMvc
+        .perform(post("/api/vehicles" + APIVersion.V20260509 + "/vin/decode")
+            .with(csrf())
+            .content(request)
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.success").value(false));
+
+    verifyNoInteractions(vehicleVinDecodeService);
+  }
+
+  @Test
   @DisplayName("Creates vehicles from VINs when caller has ADMIN authority")
   @WithMockUser(authorities = {"ADMIN"})
   public void testCreateVehiclesFromVins() throws Exception {

@@ -1,5 +1,7 @@
 package dev.christopherbell.post.model;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Builder;
 
 /**
@@ -11,6 +13,9 @@ import lombok.Builder;
  */
 @Builder
 public record PostCreateRequest(
+    @NotBlank
+    @Size(max = 280)
     String text,
+    @Size(max = 100)
     String parentId
 ) {}

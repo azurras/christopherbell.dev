@@ -6,6 +6,7 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.report.model.PostReport;
 import dev.christopherbell.report.model.ReportCreateRequest;
 import dev.christopherbell.report.model.ReportResolveRequest;
+import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -34,7 +35,7 @@ public class ReportController {
   @PostMapping(value = V20250903, produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<Void>> createReport(
-      @RequestBody ReportCreateRequest request
+      @Valid @RequestBody ReportCreateRequest request
   ) throws InvalidRequestException, ResourceNotFoundException {
     reportService.submitReport(request);
     return new ResponseEntity<>(

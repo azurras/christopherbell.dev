@@ -14,6 +14,8 @@ Owns moderation report persistence and API records.
 - Reports reference posts and accounts by id so moderation actions can operate
   even when display data changes.
 - Resolution and status enums keep admin workflows explicit and auditable.
+- Report submission request validation is enforced at the controller boundary
+  with Bean Validation before moderation services run.
 
 ## Update This Doc
 

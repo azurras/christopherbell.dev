@@ -47,6 +47,32 @@ public class AccountControllerTest {
   @MockitoBean private AccountService accountService;
 
   @Test
+  @DisplayName("Create account: invalid email returns 400 before service")
+  @WithMockUser
+  public void testCreateAccount_whenInvalidEmail_Returns400() throws Exception {
+    var request = """
+        {
+          "firstName": "Chris",
+          "lastName": "Bell",
+          "email": "not-an-email",
+          "password": "long-enough",
+          "username": "chris"
+        }
+        """;
+
+    mockMvc
+        .perform(
+            post("/api/accounts" + APIVersion.V20241215 + "/create")
+                .with(csrf())
+                .content(request)
+                .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.success").value(false));
+
+    verifyNoInteractions(accountService);
+  }
+
+  @Test
   @DisplayName("Should update an account when caller has ADMIN role.")
   @WithMockUser(authorities = {"ADMIN"})
   public void testUpdateAccount() throws Exception {

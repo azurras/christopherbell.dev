@@ -15,6 +15,7 @@ import dev.christopherbell.vehicle.model.VehicleVinDecodeResponse;
 import dev.christopherbell.vehicle.model.VehicleVinRequest;
 import dev.christopherbell.vehicle.nhtsa.decode.VehicleVinDecodeService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -106,7 +107,7 @@ public class VehicleController {
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   public ResponseEntity<Response<VehicleVinDecodeResponse>> decodeVin(
-      @RequestBody VehicleVinDecodeRequest request,
+      @Valid @RequestBody VehicleVinDecodeRequest request,
       HttpServletRequest servletRequest
   ) throws Exception {
     var clientIp = clientIpResolver.resolveClientIp(servletRequest);
