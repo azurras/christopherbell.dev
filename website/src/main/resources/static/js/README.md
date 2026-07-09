@@ -103,6 +103,8 @@ Owns browser-side behavior for server-rendered pages.
 - Avoid broad global state. Prefer module-local state and explicit callbacks.
 - Keep browser alerts out of new shared code when practical; page modules should
   render errors into page-specific alert containers.
+- Browser-side regression tests live under `website/src/test/js` and run through
+  `./gradlew :website:jsTest` without adding an npm workflow.
 
 ## Update This Doc
 

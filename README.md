@@ -10,7 +10,7 @@ changes.
 
 ## Tech Stack
 
-- Java 21
+- Java 25
 - Spring Boot 3.4
 - Gradle Wrapper
 - MongoDB
@@ -62,12 +62,12 @@ use `.github/copilot-instructions.md`, which points back to the same workflow.
 - `website` - the runnable Spring Boot web application.
 - `cbell-lib` - reusable Java library code shared by the app.
 
-The root Gradle build sets Java 21 for subprojects and enables JUnit Platform for
+The root Gradle build sets Java 25 for subprojects and enables JUnit Platform for
 tests.
 
 ## Requirements
 
-- Java 21 JDK
+- Java 25 JDK
 - MongoDB
 - A shell that can run the Gradle wrapper
 
@@ -172,6 +172,15 @@ check; it is not an npm workflow.
 ```bash
 node --check website/src/main/resources/static/js/back-office.js
 ```
+
+Run the browser-side JavaScript test suite through Gradle:
+
+```bash
+./gradlew :website:jsTest
+```
+
+This uses Node's built-in test runner against `website/src/test/js/*.test.js`.
+Set `NODE_EXE=/path/to/node` when Node is not on `PATH`.
 
 ## Backend Architecture
 

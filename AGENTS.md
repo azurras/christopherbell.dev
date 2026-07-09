@@ -25,7 +25,7 @@ Useful feature docs:
 
 ## Project Facts
 
-- Java 21, Spring Boot 3.4, Gradle Wrapper.
+- Java 25, Spring Boot 3.4, Gradle Wrapper.
 - MongoDB persistence.
 - Thymeleaf server-rendered templates.
 - Vanilla JavaScript ES modules served directly from
@@ -53,6 +53,12 @@ Check JavaScript syntax:
 
 ```bash
 node --check website/src/main/resources/static/js/back-office.js
+```
+
+Run browser-side JavaScript tests:
+
+```bash
+./gradlew :website:jsTest
 ```
 
 ## Architecture Rules
@@ -133,7 +139,7 @@ larger.
 - Service logic: targeted service tests.
 - Controller/API behavior: controller tests.
 - Security/public routes: include unauthenticated access coverage where useful.
-- JavaScript-only changes: `node --check` on touched files.
+- JavaScript-only changes: `node --check` on touched files and `./gradlew :website:jsTest`.
 - Shared config, security, or model changes: run `./gradlew :website:test`.
 
 Mention any tests that could not be run.

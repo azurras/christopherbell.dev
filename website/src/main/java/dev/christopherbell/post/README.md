@@ -24,6 +24,10 @@ Owns Void posts and feed behavior.
   feeds, threads, interactions, expiration, and link previews can change independently.
 - `PostRepository` is the Mongo boundary. Service code asks it for already-sorted
   post sets instead of sorting in memory.
+- The post document declares targeted Mongo indexes for global/user feeds,
+  account reply counts, thread reads, parent reply counts, and expiration
+  cleanup. Production rollout should allow time for these indexes to build on
+  existing collections.
 - `PostMapper` maps persistence entities to detail DTOs when feed-specific
   fields are not needed.
 - Feed endpoints use the feed service for page sizing,

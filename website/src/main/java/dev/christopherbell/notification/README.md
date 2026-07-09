@@ -14,6 +14,8 @@ Owns in-app notifications.
 - User category preferences under `preference`.
 - Inbox behavior under `inbox`.
 - Unread counts, notification listing, and mark-read behavior.
+- Mongo indexes cover account inbox ordering and unread-count lookups. Production
+  rollout should account for index creation on existing notification data.
 - The notification center page and nav dropdown consume the same notification API.
   The notification center also exposes settings for mentions, likes, comments,
   messages, and WFL session invites.
