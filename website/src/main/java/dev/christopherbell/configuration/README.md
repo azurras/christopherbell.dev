@@ -14,6 +14,8 @@ Owns application-wide Spring and web infrastructure.
 - Login JWTs expire one day after issue; the browser keeps users signed in until
   that token expiration.
 - Rate limiting and request size protection filters under `filter`.
+- `RateLimitProperties` binds ordered `rate-limit.rules` so environments can
+  tune per-endpoint capacity and window settings.
 - `ClientIpResolver` resolves effective client IPs from `X-Forwarded-For` only
   when the immediate remote address is listed in `client-ip.trusted-proxies`.
 - MongoDB auditing configuration under `mongo`.

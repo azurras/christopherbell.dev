@@ -16,6 +16,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -87,5 +88,66 @@ public class RateLimitFilterTest {
     assertEquals(429, response2.getStatus());
     verify(chain, times(1))
         .doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
+  }
+
+  @Test
+  public void configuredEndpointGroupsUseSeparateBuckets()
+      throws ServletException, IOException {
+    var properties = new RateLimitProperties();
+    properties.setRules(List.of(
+        rule("auth", 1, List.of("POST"), List.of("/api/accounts/*/login")),
+        rule("default", 2, List.of(), List.of("/**"))));
+    RateLimitFilter filter = new RateLimitFilter(
+        new ClientIpResolver(new ClientIpProperties()),
+        properties);
+    FilterChain chain = mock(FilterChain.class);
+
+    filter.doFilter(request("POST", "/api/accounts/2024-12-15/login"), new MockHttpServletResponse(), chain);
+    var deniedAuthResponse = new MockHttpServletResponse();
+    filter.doFilter(request("POST", "/api/accounts/2024-12-15/login"), deniedAuthResponse, chain);
+    var defaultResponse = new MockHttpServletResponse();
+    filter.doFilter(request("GET", "/css/app.css"), defaultResponse, chain);
+
+    assertEquals(429, deniedAuthResponse.getStatus());
+    assertEquals(200, defaultResponse.getStatus());
+    verify(chain, times(2))
+        .doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
+  }
+
+  @Test
+  public void stricterRuleOnlyAppliesToMatchingMethodAndPath()
+      throws ServletException, IOException {
+    var properties = new RateLimitProperties();
+    properties.setRules(List.of(
+        rule("vin-decode", 1, List.of("POST"), List.of("/api/vehicles/*/vin/decode")),
+        rule("default", 10, List.of(), List.of("/**"))));
+    RateLimitFilter filter = new RateLimitFilter(
+        new ClientIpResolver(new ClientIpProperties()),
+        properties);
+    FilterChain chain = mock(FilterChain.class);
+
+    filter.doFilter(request("GET", "/api/vehicles/2026-05-09/vin/decode"), new MockHttpServletResponse(), chain);
+    filter.doFilter(request("POST", "/api/vehicles/2026-05-09/vin/decode"), new MockHttpServletResponse(), chain);
+    var deniedVinResponse = new MockHttpServletResponse();
+    filter.doFilter(request("POST", "/api/vehicles/2026-05-09/vin/decode"), deniedVinResponse, chain);
+
+    assertEquals(429, deniedVinResponse.getStatus());
+    verify(chain, times(2))
+        .doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
+  }
+
+  private RateLimitProperties.Rule rule(
+      String name,
+      long capacity,
+      List<String> methods,
+      List<String> paths
+  ) {
+    return new RateLimitProperties.Rule(name, capacity, Duration.ofMinutes(1), methods, paths);
+  }
+
+  private MockHttpServletRequest request(String method, String path) {
+    var request = new MockHttpServletRequest(method, path);
+    request.setRemoteAddr("1.1.1.1");
+    return request;
   }
 }
