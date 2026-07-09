@@ -8,7 +8,7 @@ test('main stylesheet includes visible focus states for Void controls', () => {
   assert.match(css, /:focus-visible/);
   assert.match(css, /\.post-action:focus-visible/);
   assert.match(css, /\.void-thread-control:focus-visible/);
-  assert.match(css, /\.post-rich-image-trigger:hover,\n\.post-rich-image-trigger:focus-visible/);
+  assert.match(css, /\.post-rich-image-trigger:hover,\r?\n\.post-rich-image-trigger:focus-visible/);
 });
 
 test('post template exposes thread controls as a labelled group', () => {

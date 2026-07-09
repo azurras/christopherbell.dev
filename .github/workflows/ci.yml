@@ -11,11 +11,11 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         java-version: [ 25 ]
-        os: [ macos-latest, windows-latest ]
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
 
     steps:
       - name: Checkout code
@@ -27,11 +27,27 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ matrix.java-version }}
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Set BUILD_NUMBER env
+        if: runner.os != 'Windows'
         run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
 
+      - name: Set BUILD_NUMBER env on Windows
+        if: runner.os == 'Windows'
+        run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $env:GITHUB_ENV
+
       - name: Grant execute permission for Gradle
+        if: runner.os != 'Windows'
         run: chmod +x gradlew
 
       - name: Build and Test
+        if: runner.os != 'Windows'
         run: ./gradlew build
+
+      - name: Build and Test on Windows
+        if: runner.os == 'Windows'
+        run: .\gradlew.bat build

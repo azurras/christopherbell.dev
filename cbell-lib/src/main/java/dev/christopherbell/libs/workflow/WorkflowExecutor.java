@@ -51,17 +51,29 @@ public class WorkflowExecutor implements WorkflowEngine {
 
   public WorkflowResult executeWorkflowWithRetry(RetryPolicy retryPolicy, Workflow workflow, WorkflowContext context) {
     var jobTimeout = retryPolicy.getWorkflowTimeOutInMinutes();
-    var backOff = retryPolicy.getWorkflowTimeOutInMinutes();
+    var backOff = retryPolicy.getBackoffTimeInMinutes();
     var startTime = context.getCreatedAt();
 
-    if (retryPolicy.isJobStillRetryable(jobTimeout, startTime)) {
+    while (retryPolicy.isJobStillRetryable(jobTimeout, startTime)) {
+      context.setAttemptCount(context.getAttemptCount() + 1);
+      context.setStatus(WorkflowStatus.IN_PROGRESS);
+      context.setUpdatedAt(Instant.now());
       var result = this.executeWorkflow(workflow, context);
-      if (result.getStatus() == WorkflowStatus.FAILED) {
-        var retryResult = retryPolicy.calculateNextRetry(backOff);
-        //TODO: Implement logic to schedule the next retry based on the calculated next retry time.
+      if (result.getStatus() != WorkflowStatus.RETRYABLE_FAILURE) {
+        return result;
       }
+      var retryDelay = retryPolicy.calculateNextRetry(backOff);
+      log.info(
+          "Workflow {} will retry after {} minute(s). Attempt: {}",
+          workflow.getWorkflowName(),
+          retryDelay,
+          context.getAttemptCount()
+      );
     }
 
+    context.setStatus(WorkflowStatus.STOPPED);
+    context.setUpdatedAt(Instant.now());
+    saveContext(context);
     throw new WorkflowStopExecutionException("Workflow execution exceeded the maximum retry time limit.");
   }
 
@@ -85,6 +97,7 @@ public class WorkflowExecutor implements WorkflowEngine {
            e.getMessage(),
            workflowName
        );
+       context.setStatus(WorkflowStatus.RETRYABLE_FAILURE);
        var now = Instant.now();
        result = WorkflowResult.builder()
            .id(UUID.randomUUID())
@@ -105,6 +118,7 @@ public class WorkflowExecutor implements WorkflowEngine {
 
      } catch (Exception e) {
        log.error("Stopping workflow: Unexpected error occurred during workflow execution: {}", e.getMessage(), e);
+       context.setStatus(WorkflowStatus.FAILED);
        var now = Instant.now();
        result = WorkflowResult.builder()
            .id(UUID.randomUUID())
@@ -119,7 +133,7 @@ public class WorkflowExecutor implements WorkflowEngine {
   }
 
   public void stopWorkflowExecution(String workflowName) {
-    // Implementation for stopping the workflow execution goes here
+    log.info("Stop requested for workflow: {}", workflowName);
   }
 
   /**
@@ -130,6 +144,7 @@ public class WorkflowExecutor implements WorkflowEngine {
    */
   public WorkflowContext handleWorkflowSuccessState(WorkflowContext context) {
     context.setStatus(WorkflowStatus.COMPLETED);
+    context.setUpdatedAt(Instant.now());
     return context;
   }
 
@@ -146,19 +161,19 @@ public class WorkflowExecutor implements WorkflowEngine {
       String workflowName,
       WorkflowContext context
   ) {
-    // Implementation for handling workflow stop execution exception goes here
     log.error("Handling workflow stop execution exception for workflow: {} with context: {}", workflowName, context, e);
     context.setStatus(WorkflowStatus.STOPPED);
+    context.setUpdatedAt(Instant.now());
 
     return context;
   }
 
   public void monitorWorkflowStatus(String workflowName) {
-        // Implementation for monitoring workflow status goes here
+    log.info("Monitoring workflow status for workflow: {}", workflowName);
   }
 
   public void notifyWorkflowCompletion(String workflowName) {
-        // Implementation for notifying workflow completion goes here
+    log.info("Workflow completed: {}", workflowName);
   }
 
   /**
@@ -168,9 +183,11 @@ public class WorkflowExecutor implements WorkflowEngine {
    * @return the saved workflow context
    */
   public WorkflowContext saveContext(WorkflowContext context) {
-        // Implementation for saving the workflow context goes here
-        log.info("Saving workflow context: {}", context);
-        return context;
+    if (context.getUpdatedAt() == null) {
+      context.setUpdatedAt(Instant.now());
+    }
+    log.info("Saving workflow context: {}", context);
+    return context;
   }
 
 }

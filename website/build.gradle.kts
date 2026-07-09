@@ -1,3 +1,6 @@
+import org.gradle.api.GradleException
+import org.gradle.language.base.plugins.LifecycleBasePlugin
+
 plugins {
     id("org.springframework.boot")
     id("io.spring.dependency-management")
@@ -55,4 +58,33 @@ dependencies {
 
 springBoot {
     buildInfo()
+}
+
+val jsTestFiles = fileTree("src/test/js") {
+    include("*.test.js")
+}
+
+tasks.register<Exec>("jsTest") {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Runs browser-side JavaScript tests with Node's built-in test runner."
+    workingDir = rootProject.projectDir
+
+    inputs.files(jsTestFiles)
+    inputs.dir("src/main/resources/static/js")
+    inputs.dir("src/main/resources/static/css")
+    inputs.dir("src/main/resources/templates")
+
+    val nodeExecutable = providers.environmentVariable("NODE_EXE").orElse("node")
+
+    doFirst {
+        val files = jsTestFiles.files.sortedBy { it.name }.map { it.absolutePath }
+        if (files.isEmpty()) {
+            throw GradleException("No JavaScript tests found under website/src/test/js.")
+        }
+        commandLine(listOf(nodeExecutable.get(), "--test") + files)
+    }
+}
+
+tasks.named("check") {
+    dependsOn("jsTest")
 }

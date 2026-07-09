@@ -9,6 +9,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 @AllArgsConstructor
@@ -16,6 +18,10 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @NoArgsConstructor
+@CompoundIndexes({
+    @CompoundIndex(name = "notification_account_created_desc", def = "{'accountId': 1, 'createdOn': -1}"),
+    @CompoundIndex(name = "notification_account_read", def = "{'accountId': 1, 'read': 1}")
+})
 @Document("notifications")
 public class Notification {
   private final String type = "notification";

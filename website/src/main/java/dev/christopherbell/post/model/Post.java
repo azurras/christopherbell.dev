@@ -12,6 +12,8 @@ import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
@@ -26,6 +28,14 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @NoArgsConstructor
+@CompoundIndexes({
+    @CompoundIndex(name = "post_account_created_desc", def = "{'accountId': 1, 'createdOn': -1}"),
+    @CompoundIndex(name = "post_created_desc", def = "{'createdOn': -1}"),
+    @CompoundIndex(name = "post_root_created_asc", def = "{'rootId': 1, 'createdOn': 1}"),
+    @CompoundIndex(name = "post_parent", def = "{'parentId': 1}"),
+    @CompoundIndex(name = "post_expires", def = "{'expiresOn': 1}"),
+    @CompoundIndex(name = "post_account_parent", def = "{'accountId': 1, 'parentId': 1}")
+})
 @Document("posts")
 public class Post {
   private final String type = "post";
