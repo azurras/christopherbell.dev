@@ -21,6 +21,7 @@ import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
+import dev.christopherbell.configuration.security.ControllerSliceSecurityTestConfig;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
@@ -32,7 +33,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
@@ -40,7 +41,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(AccountController.class)
-@Import(ControllerExceptionHandler.class)
+@Import({ControllerExceptionHandler.class, ControllerSliceSecurityTestConfig.class})
 public class AccountControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private PermissionService permissionService;

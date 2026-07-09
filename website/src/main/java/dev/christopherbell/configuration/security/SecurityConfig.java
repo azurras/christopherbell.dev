@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -19,8 +20,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
 /**
@@ -107,7 +108,7 @@ public class SecurityConfig {
         )
 
         // Add rate limiting and JWT authentication filters
-        .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+        .addFilterBefore(jwtAuthenticationFilter, AuthorizationFilter.class)
         .addFilterBefore(rateLimitFilter, JwtAuthenticationFilter.class)
         .addFilterBefore(requestSizeLimitFilter, RateLimitFilter.class)
         
@@ -159,9 +160,9 @@ public class SecurityConfig {
   }
 
   /**
-   * Helper to convert path patterns into {@link AntPathRequestMatcher}s.
+   * Helper to convert path patterns into {@link PathPatternRequestMatcher}s.
    */
-  private List<RequestMatcher> publicMatchersList() {
+  public static List<RequestMatcher> publicMatchersList() {
     List<RequestMatcher> matchers = Arrays.stream(PUBLIC_URLS)
         .map(Sec::toMatcher)
         .collect(Collectors.toList());
@@ -182,7 +183,7 @@ public class SecurityConfig {
     return matchers;
   }
 
-  private RequestMatcher[] publicMatchers() {
+  public static RequestMatcher[] publicMatchers() {
     return publicMatchersList().toArray(new RequestMatcher[0]);
   }
 
@@ -193,9 +194,9 @@ public class SecurityConfig {
         String[] parts = spec.split(":", 2);
         String method = parts[0];
         String pattern = parts[1];
-        return new AntPathRequestMatcher(pattern, method);
+        return PathPatternRequestMatcher.pathPattern(HttpMethod.valueOf(method), pattern);
       }
-      return new AntPathRequestMatcher(spec);
+      return PathPatternRequestMatcher.pathPattern(spec);
     }
   }
 }

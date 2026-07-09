@@ -3,6 +3,7 @@ package dev.christopherbell.whatsforlunch.restaurant;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -10,10 +11,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.Role;
-import dev.christopherbell.configuration.security.SecurityConfig;
+import dev.christopherbell.configuration.security.ControllerSliceMethodSecurityTestConfig;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.permission.PermissionService;
@@ -29,14 +30,14 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(RestaurantController.class)
-@Import({ControllerExceptionHandler.class, SecurityConfig.class})
+@Import({ControllerExceptionHandler.class, ControllerSliceMethodSecurityTestConfig.class})
 class RestaurantControllerMemberSecurityTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
@@ -96,6 +97,7 @@ class RestaurantControllerMemberSecurityTest {
 
     mockMvc
         .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/preferences")
+            .with(csrf())
             .header("Authorization", bearer(Role.USER))
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)
@@ -124,6 +126,7 @@ class RestaurantControllerMemberSecurityTest {
 
     mockMvc
         .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/sessions")
+            .with(csrf())
             .header("Authorization", bearer(Role.USER))
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)
@@ -147,6 +150,7 @@ class RestaurantControllerMemberSecurityTest {
 
     mockMvc
         .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/sessions/session-1/join")
+            .with(csrf())
             .header("Authorization", bearer(Role.USER))
             .accept(MediaType.APPLICATION_JSON))
         .andExpect(status().isOk())
@@ -171,6 +175,7 @@ class RestaurantControllerMemberSecurityTest {
 
     mockMvc
         .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/rating")
+            .with(csrf())
             .header("Authorization", bearer(Role.USER))
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)
@@ -230,6 +235,7 @@ class RestaurantControllerMemberSecurityTest {
 
     mockMvc
         .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/favorite")
+            .with(csrf())
             .header("Authorization", bearer(Role.USER))
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)
@@ -252,6 +258,7 @@ class RestaurantControllerMemberSecurityTest {
 
     mockMvc
         .perform(delete("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/favorite")
+            .with(csrf())
             .header("Authorization", bearer(Role.USER))
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)

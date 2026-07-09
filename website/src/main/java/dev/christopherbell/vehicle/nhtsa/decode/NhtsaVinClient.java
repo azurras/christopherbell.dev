@@ -1,7 +1,7 @@
 package dev.christopherbell.vehicle.nhtsa.decode;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import java.io.IOException;

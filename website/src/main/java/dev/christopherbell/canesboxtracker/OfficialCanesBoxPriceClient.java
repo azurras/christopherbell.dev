@@ -1,7 +1,7 @@
 package dev.christopherbell.canesboxtracker;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.canesboxtracker.model.CanesBoxMetroPrice;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
 import java.math.BigDecimal;
@@ -260,7 +260,7 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
         }
       }
     } else if (node.isObject()) {
-      Iterator<JsonNode> children = node.elements();
+      Iterator<JsonNode> children = node.values().iterator();
       while (children.hasNext()) {
         var price = findBoxComboPrice(children.next());
         if (price.isPresent()) {
