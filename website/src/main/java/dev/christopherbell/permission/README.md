@@ -7,6 +7,9 @@ Owns shared permission checks.
 - Authority checks used by controller `@PreAuthorize` expressions.
 - JWT login token creation and validation. Generated login tokens expire one day
   after issue so users can stay signed in for the day without reauthenticating.
+- Production JWT signing requires a strong configured `app.jwt.secret` or
+  `APP_JWT_SECRET`; the local development fallback is not allowed when the
+  `prod` profile is active.
 - Small reusable permission helpers that keep authorization policy out of controllers.
 
 ## Package Shape

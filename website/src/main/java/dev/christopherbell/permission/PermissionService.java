@@ -17,9 +17,13 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
@@ -30,16 +34,19 @@ public class PermissionService {
   private static final String LOCAL_DEV_SECRET =
       "local-development-jwt-secret-change-me-at-least-32-bytes";
   private static final long EXPIRATION_TIME = Duration.ofDays(1).toMillis();
-  private static volatile Key key = buildKey(resolveSecret(null));
+  private static volatile Key key = buildKey(resolveSecret(null, false, System.getenv()));
 
   /**
    * Applies the configured JWT secret after Spring property binding.
    *
    * @param jwtSecret configured app.jwt.secret value
    */
-  @Value("${app.jwt.secret:}")
-  void setJwtSecret(String jwtSecret) {
-    configureSigningKey(jwtSecret);
+  @Autowired
+  void setJwtSecret(
+      @Value("${app.jwt.secret:}") String jwtSecret,
+      Environment environment
+  ) {
+    configureSigningKey(jwtSecret, environment.acceptsProfiles(Profiles.of("prod")));
   }
 
   public static String getSelf() {
@@ -110,20 +117,34 @@ public class PermissionService {
    * @param secret configured secret, or blank to resolve the environment/default fallback
    */
   static void configureSigningKey(String secret) {
-    key = buildKey(resolveSecret(secret));
+    configureSigningKey(secret, false);
   }
 
-  private static String resolveSecret(String configuredSecret) {
+  /**
+   * Configures the signing key from a stable secret with profile-aware fallback behavior.
+   *
+   * @param secret configured secret, or blank to resolve the environment/default fallback
+   * @param productionProfile whether production startup rules apply
+   */
+  static void configureSigningKey(String secret, boolean productionProfile) {
+    key = buildKey(resolveSecret(secret, productionProfile, System.getenv()));
+  }
+
+  static String resolveSecret(String configuredSecret, boolean productionProfile, Map<String, String> env) {
     if (hasText(configuredSecret)) {
       return configuredSecret.trim();
     }
-    var appJwtSecret = System.getenv("APP_JWT_SECRET");
+    var appJwtSecret = env.get("APP_JWT_SECRET");
     if (hasText(appJwtSecret)) {
       return appJwtSecret.trim();
     }
-    var jwtSecret = System.getenv("JWT_SECRET");
+    var jwtSecret = env.get("JWT_SECRET");
     if (hasText(jwtSecret)) {
       return jwtSecret.trim();
+    }
+    if (productionProfile) {
+      throw new IllegalStateException(
+          "Production JWT secret must be configured with app.jwt.secret or APP_JWT_SECRET.");
     }
     return LOCAL_DEV_SECRET;
   }
