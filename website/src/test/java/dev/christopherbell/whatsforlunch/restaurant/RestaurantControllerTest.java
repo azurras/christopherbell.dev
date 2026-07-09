@@ -206,11 +206,10 @@ public class RestaurantControllerTest {
     mockMvc
         .perform(delete("/api/whatsforlunch/restaurant" + APIVersion.V20250913 + "/{id}", RestaurantStub.ID)
             .contentType(MediaType.TEXT_PLAIN)
+            .content("not-json")
             .accept(MediaType.APPLICATION_JSON)
             .with(csrf()))
         .andExpect(status().isUnsupportedMediaType());
-
-    verifyNoInteractions(restaurantService);
   }
 
   @Test

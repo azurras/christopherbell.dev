@@ -8,6 +8,9 @@ import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 
 import java.util.List;
@@ -28,6 +31,8 @@ public class ControllerExceptionHandler {
   private static final String RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND";
   private static final String INVALID_REQUEST = "INVALID_REQUEST";
   private static final String INVALID_TOKEN = "INVALID_TOKEN";
+  private static final String ACCESS_DENIED = "ACCESS_DENIED";
+  private static final String REQUEST_ERROR = "REQUEST_ERROR";
 
   /**
    * Fallback handler for unanticipated exceptions. Returns HTTP 500 with a generic error message.
@@ -35,15 +40,50 @@ public class ControllerExceptionHandler {
    * @param e the exception
    * @return a {@link Response} with {@code success=false} and a single error {@link Message}
    */
-  public Response<?> handelGenericException(Exception e) {
+  @ExceptionHandler(Exception.class)
+  public ResponseEntity<Response<?>> handleGenericException(Exception e) {
+    var frameworkStatus = statusForFrameworkException(e);
+    if (frameworkStatus != null) {
+      log.error(REQUEST_ERROR, e);
+      return errorResponse(REQUEST_ERROR, e.getMessage(), frameworkStatus);
+    }
+
     log.error(INTERNAL_SERVER_ERROR, e);
+    return errorResponse(
+        INTERNAL_SERVER_ERROR,
+        "An unexpected error occurred. Please try again later.",
+        HttpStatus.INTERNAL_SERVER_ERROR);
+  }
+
+  /**
+   * Handles denied controller method authorization. Returns HTTP 403 with a standard envelope.
+   *
+   * @param e the exception
+   * @return a {@link Response} with {@code success=false} and an error {@link Message}
+   */
+  @ExceptionHandler(AccessDeniedException.class)
+  @ResponseStatus(HttpStatus.FORBIDDEN)
+  public Response<?> handleAccessDeniedException(AccessDeniedException e) {
+    log.error(ACCESS_DENIED, e);
     return Response.builder()
-            .messages(List.of(Message.builder()
-                .code(INTERNAL_SERVER_ERROR)
-                .description("An unexpected error occurred. Please try again later.")
-                .build()))
-            .success(false)
-            .build();
+        .messages(List.of(Message.builder()
+            .code(ACCESS_DENIED)
+            .description("Access is denied.")
+            .build()))
+        .success(false)
+        .build();
+  }
+
+  /**
+   * Handles Spring MVC request exceptions that already carry an HTTP status.
+   *
+   * @param e the exception
+   * @return a {@link Response} with {@code success=false} and an error {@link Message}
+   */
+  @ExceptionHandler(ErrorResponseException.class)
+  public ResponseEntity<Response<?>> handleErrorResponseException(ErrorResponseException e) {
+    log.error(REQUEST_ERROR, e);
+    return errorResponse(REQUEST_ERROR, e.getMessage(), e.getStatusCode());
   }
 
   /**
@@ -120,5 +160,34 @@ public class ControllerExceptionHandler {
                 .build()))
             .success(false)
             .build();
+  }
+
+  private ResponseEntity<Response<?>> errorResponse(String code, String description, HttpStatus status) {
+    return errorResponse(code, description, (org.springframework.http.HttpStatusCode) status);
+  }
+
+  private ResponseEntity<Response<?>> errorResponse(
+      String code,
+      String description,
+      org.springframework.http.HttpStatusCode status
+  ) {
+    var body = Response.builder()
+        .messages(List.of(Message.builder()
+            .code(code)
+            .description(description)
+            .build()))
+        .success(false)
+        .build();
+    return new ResponseEntity<>(body, status);
+  }
+
+  private HttpStatus statusForFrameworkException(Exception e) {
+    return switch (e.getClass().getName()) {
+      case "org.springframework.web.HttpMediaTypeNotSupportedException" -> HttpStatus.UNSUPPORTED_MEDIA_TYPE;
+      case "org.springframework.web.HttpMediaTypeNotAcceptableException" -> HttpStatus.NOT_ACCEPTABLE;
+      case "org.springframework.web.bind.MethodArgumentNotValidException",
+          "org.springframework.web.method.annotation.HandlerMethodValidationException" -> HttpStatus.BAD_REQUEST;
+      default -> null;
+    };
   }
 }

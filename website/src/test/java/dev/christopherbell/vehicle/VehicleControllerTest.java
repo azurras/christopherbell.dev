@@ -349,6 +349,25 @@ public class VehicleControllerTest {
   }
 
   @Test
+  @DisplayName("Returns standard 500 envelope for unexpected exceptions")
+  @WithMockUser(authorities = {"ADMIN"})
+  public void testGetVehicleById_whenUnexpectedException_Returns500Envelope() throws Exception {
+    when(vehicleService.getVehicleById(eq(VehicleStub.ID)))
+        .thenThrow(new RuntimeException("database unavailable"));
+
+    mockMvc
+        .perform(get("/api/vehicles" + APIVersion.V20260509 + "/{id}", VehicleStub.ID)
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isInternalServerError())
+        .andExpect(jsonPath("$.success").value(false))
+        .andExpect(jsonPath("$.messages[0].code").value("INTERNAL_SERVER_ERROR"))
+        .andExpect(jsonPath("$.messages[0].description")
+            .value("An unexpected error occurred. Please try again later."));
+
+    verify(vehicleService).getVehicleById(eq(VehicleStub.ID));
+  }
+
+  @Test
   @DisplayName("Updates vehicle")
   @WithMockUser(authorities = {"ADMIN"})
   public void testUpdateVehicle() throws Exception {
