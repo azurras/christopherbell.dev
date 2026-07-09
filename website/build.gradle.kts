@@ -34,7 +34,7 @@ dependencies {
     implementation("com.github.vladimir-bukhtoyarov:bucket4j-core:8.0.1")
 
     // Azure SDK
-    implementation("com.azure:azure-data-tables:12.5.3")
+    implementation("com.azure:azure-data-tables:12.5.11")
 
     // JSoup
     implementation("org.jsoup:jsoup:1.20.1")
