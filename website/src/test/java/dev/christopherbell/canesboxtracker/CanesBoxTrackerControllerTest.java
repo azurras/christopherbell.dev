@@ -2,7 +2,7 @@ package dev.christopherbell.canesboxtracker;
 
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerHistory;
 import dev.christopherbell.canesboxtracker.model.CanesBoxWeeklyPriceDetail;
-import dev.christopherbell.configuration.security.SecurityConfig;
+import dev.christopherbell.configuration.security.ControllerSliceMethodSecurityTestConfig;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.permission.PermissionService;
 import java.math.BigDecimal;
@@ -11,7 +11,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -20,13 +20,14 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(CanesBoxTrackerController.class)
-@Import({ControllerExceptionHandler.class, SecurityConfig.class})
+@Import({ControllerExceptionHandler.class, ControllerSliceMethodSecurityTestConfig.class})
 @DisplayName("Raising Canes Box Index controller")
 class CanesBoxTrackerControllerTest {
   @Autowired private MockMvc mockMvc;
@@ -75,7 +76,8 @@ class CanesBoxTrackerControllerTest {
     when(permissionService.hasAuthority("ADMIN")).thenReturn(true);
     when(service.collectCurrentWeekForAdmin()).thenReturn(detail);
 
-    mockMvc.perform(post("/api/canes-box-tracker/2026-06-04/collect"))
+    mockMvc.perform(post("/api/canes-box-tracker/2026-06-04/collect")
+            .with(csrf()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.weekStartDate").value("2026-06-01"))
@@ -90,7 +92,8 @@ class CanesBoxTrackerControllerTest {
   void adminCollectRejectsNonAdmins() throws Exception {
     when(permissionService.hasAuthority("ADMIN")).thenReturn(false);
 
-    mockMvc.perform(post("/api/canes-box-tracker/2026-06-04/collect"))
+    mockMvc.perform(post("/api/canes-box-tracker/2026-06-04/collect")
+            .with(csrf()))
         .andExpect(status().isForbidden());
   }
 
@@ -103,6 +106,7 @@ class CanesBoxTrackerControllerTest {
         .thenReturn(detail);
 
     mockMvc.perform(post("/api/canes-box-tracker/2026-06-04/2026-06-01/metros/Dallas-Fort Worth/approve")
+            .with(csrf())
             .contentType("application/json")
             .content("{\"note\":\"Receipt checked.\"}"))
         .andExpect(status().isOk())
@@ -119,6 +123,7 @@ class CanesBoxTrackerControllerTest {
         .thenReturn(detail);
 
     mockMvc.perform(post("/api/canes-box-tracker/2026-06-04/2026-06-01/metros/Dallas-Fort Worth/reject")
+            .with(csrf())
             .contentType("application/json")
             .content("{\"note\":\"Stale menu.\"}"))
         .andExpect(status().isOk())
@@ -134,6 +139,7 @@ class CanesBoxTrackerControllerTest {
         .thenReturn(detail);
 
     mockMvc.perform(post("/api/canes-box-tracker/2026-06-04/manual-prices")
+            .with(csrf())
             .contentType("application/json")
             .content("""
                 {

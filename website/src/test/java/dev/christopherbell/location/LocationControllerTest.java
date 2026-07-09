@@ -1,6 +1,6 @@
 package dev.christopherbell.location;
 
-import dev.christopherbell.configuration.security.SecurityConfig;
+import dev.christopherbell.configuration.security.ControllerSliceMethodSecurityTestConfig;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
@@ -12,7 +12,7 @@ import dev.christopherbell.permission.PermissionService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -21,13 +21,14 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(LocationController.class)
-@Import({ControllerExceptionHandler.class, SecurityConfig.class})
+@Import({ControllerExceptionHandler.class, ControllerSliceMethodSecurityTestConfig.class})
 @DisplayName("Location controller")
 class LocationControllerTest {
   @Autowired private MockMvc mockMvc;
@@ -90,7 +91,8 @@ class LocationControllerTest {
             .sourceYear(2025)
             .build());
 
-    mockMvc.perform(post("/api/location/zip/import/census"))
+    mockMvc.perform(post("/api/location/zip/import/census")
+            .with(csrf()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.processed").value(3))

@@ -1,6 +1,6 @@
 package dev.christopherbell.canesboxtracker;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
 import java.math.BigDecimal;

@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import dev.christopherbell.configuration.security.ControllerSliceSecurityTestConfig;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.message.model.ConversationSummary;
@@ -21,7 +22,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
@@ -29,7 +30,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(MessageController.class)
-@Import(ControllerExceptionHandler.class)
+@Import({ControllerExceptionHandler.class, ControllerSliceSecurityTestConfig.class})
 public class MessageControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private PermissionService permissionService;

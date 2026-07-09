@@ -1,7 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.whatsforlunch.restaurant.model.Address;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import java.io.IOException;
