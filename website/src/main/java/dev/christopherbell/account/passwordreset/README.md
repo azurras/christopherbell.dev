@@ -7,7 +7,8 @@ Owns password reset token lifecycle and notification delivery.
 - Generic reset requests that do not reveal whether an email exists.
 - Reset token generation, hashing, expiration, and cleanup.
 - Password replacement after a valid reset token.
-- Email notification handoff, with local/dev logging when mail is unavailable.
+- Email notification handoff. Reset URLs and bearer tokens are not written to
+  application logs when mail is unavailable or delivery fails.
 
 ## Update This Doc
 

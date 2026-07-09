@@ -11,7 +11,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
 /**
- * Sends password reset links when mail is configured, and logs them in local/dev.
+ * Sends password reset links when mail is configured.
  */
 @RequiredArgsConstructor
 @Service
@@ -25,7 +25,8 @@ public class PasswordResetNotificationService {
   public void sendPasswordReset(Account account, String resetUrl) {
     var mailSender = mailSenderProvider.getIfAvailable();
     if (mailSender == null) {
-      log.warn("Password reset link for account {}: {}", account.getId(), resetUrl);
+      log.warn("Password reset email for account {} was not sent because mail is not configured.",
+          account.getId());
       return;
     }
 
@@ -44,8 +45,7 @@ public class PasswordResetNotificationService {
     try {
       mailSender.send(message);
     } catch (MailException e) {
-      log.error("Unable to send password reset email for account {}. Reset link: {}",
-          account.getId(), resetUrl, e);
+      log.error("Unable to send password reset email for account {}.", account.getId(), e);
     }
   }
 }
