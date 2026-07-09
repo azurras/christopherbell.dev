@@ -371,6 +371,12 @@ Run:
 java -jar website/build/libs/<jar-name>.jar
 ```
 
+### MongoDB Backups and Restores
+
+Use the [MongoDB backup and restore runbook](docs/operations/mongodb-backup-restore.md)
+for production backup commands, expected archive storage, restore steps, and
+restore smoke checks.
+
 ## Troubleshooting
 
 Gradle wrapper has Windows line endings in WSL:
