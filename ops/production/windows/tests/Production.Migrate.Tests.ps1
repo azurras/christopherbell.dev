@@ -56,3 +56,16 @@ Describe 'WSL mongodump argument compatibility' {
         }
     }
 }
+
+Describe 'archive dry-run connection targeting' {
+    InModuleScope Production.Migrate {
+        It 'targets IPv4 loopback explicitly for mongorestore dry runs' {
+            Mock Invoke-CheckedProcess {}
+            $config = [pscustomobject]@{ mongoToolsPath='C:\mongo'; repositoryPath='A:\repo' }
+            Test-MongoArchive $config 'A:\backups\prod.archive.gz'
+            Should -Invoke Invoke-CheckedProcess -ParameterFilter {
+                $ArgumentList -contains '--uri=mongodb://127.0.0.1:27017'
+            }
+        }
+    }
+}
