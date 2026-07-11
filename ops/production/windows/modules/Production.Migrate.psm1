@@ -79,6 +79,11 @@ function Invoke-WslCommand {
     Invoke-CheckedProcess 'wsl.exe' @('-d',$Config.wslDistro,'--','bash','-lc',$Command) $Config.repositoryPath | Out-Null
 }
 
+function Invoke-WslRootCommand {
+    param($Config, [string]$Command)
+    Invoke-CheckedProcess 'wsl.exe' @('-d',$Config.wslDistro,'-u','root','--','bash','-lc',$Command) $Config.repositoryPath | Out-Null
+}
+
 function Restore-MongoDatabase {
     param($Config, [string]$Archive, [string]$Database, [switch]$Drop)
     $arguments = @('--uri','mongodb://127.0.0.1:27017','--archive',$Archive,'--gzip',"--nsFrom=christopherbell.*","--nsTo=$Database.*")
@@ -105,7 +110,7 @@ function Invoke-ProductionMigration {
         $release = New-ReleaseFromOriginMain $config $sha
         Invoke-WslCommand $config $config.wslWebsiteStopCommand
         $wslStopped = $true
-        Invoke-WslCommand $config $config.wslMongoStopCommand
+        Invoke-WslRootCommand $config $config.wslMongoStopCommand
         $wslMongoStopped = $true
         Start-Service MongoDB
         Restore-MongoDatabase $config $archive 'christopherbell_restore_check' -Drop
@@ -119,7 +124,7 @@ function Invoke-ProductionMigration {
     } catch {
         if ($wslMongoStopped) {
             Stop-Service MongoDB -ErrorAction SilentlyContinue
-            try { Invoke-WslCommand $config $config.wslMongoStartCommand } catch { }
+            try { Invoke-WslRootCommand $config $config.wslMongoStartCommand } catch { }
         }
         if ($wslStopped) { try { Invoke-WslCommand $config $config.wslWebsiteStartCommand } catch { } }
         throw
