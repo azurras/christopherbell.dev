@@ -21,6 +21,7 @@ Retain the existing WSL database and distro unchanged as a temporary rollback so
 - Start MongoDB and the website during Windows boot without an interactive login.
 - Make Windows Service Control Manager the only production process owner.
 - Deploy exactly the latest merged `origin/main` commit with one command.
+- Automatically detect and deploy new `origin/main` commits within approximately one minute.
 - Build from a clean detached Windows worktree, never the caller's checkout.
 - Validate a candidate on port 8081 before replacing port 8080.
 - Use atomic, versioned releases with automatic rollback.
@@ -32,8 +33,8 @@ Retain the existing WSL database and distro unchanged as a temporary rollback so
 ## Non-Goals
 
 - Removing or deleting the WSL distro during initial implementation.
-- Automatically deploying on every GitHub push.
 - Deploying unmerged pull-request branches.
+- Installing a self-hosted GitHub Actions runner or exposing an inbound deployment webhook on the production computer.
 - Moving production to a remote host or container platform.
 - Replacing GitHub Actions CI.
 
@@ -52,6 +53,10 @@ prod releases
 prod rollback
 prod backup
 prod uninstall
+prod auto-install
+prod auto-deploy
+prod auto-status
+prod auto-remove
 ```
 
 An optional root Makefile forwards equivalent `prod-*` targets to `prod.cmd`, but Make is not required on Windows.
@@ -108,6 +113,29 @@ The clean worktree runs:
 ```
 
 with a deployment-local `GRADLE_USER_HOME` and explicit `NODE_EXE`. The resulting executable boot JAR is copied into a staging release directory with provenance metadata. The worktree is removed in a `finally` path.
+
+## Automatic origin/main Deployment
+
+`prod auto-install` registers a boot-started Windows Scheduled Task that runs a
+supervised PowerShell polling loop without requiring an interactive login. Once
+per minute, the loop runs `git ls-remote origin refs/heads/main` and compares the
+returned SHA with the active, last-attempted, and last-successful release state.
+
+When the remote SHA equals the active release, the poller performs no fetch or
+build. When it changes, the poller invokes the same exclusive lock, clean
+worktree build, candidate smoke checks, atomic switch, production verification,
+retention, and rollback path used by `prod deploy`.
+
+Polling state under ProgramData records the last check time, remote SHA,
+attempted SHA, successful SHA, failure SHA, failure time, and summarized error.
+A failed SHA is retried only after a configurable backoff; a newer SHA is
+eligible immediately. Rapid merges are serialized by the deployment lock, and
+the next poll converges on the newest `origin/main` SHA.
+
+The task opens no inbound port, uses no GitHub API token, and installs no
+self-hosted GitHub Actions runner. Task recovery settings restart the poller
+after unexpected exit. `prod auto-status` reports task/process state and polling
+metadata; `prod auto-remove` removes only the automatic poller, not production.
 
 ## Candidate Smoke Profile
 
@@ -179,6 +207,7 @@ Migration rollback stops the Windows website service, stops Windows MongoDB, res
 ## Observability
 
 - `prod status` shows Windows service state, active/previous SHA, port listeners, MongoDB connectivity, and last verification.
+- `prod auto-status` shows poller task state plus last checked, attempted, successful, and failed SHAs.
 - `prod logs` tails application and WinSW wrapper logs.
 - Deployment logs show named phases and actionable errors without secrets.
 - `release.json` records Git SHA, source remote, build timestamp, deployment timestamp, and verification result.
@@ -186,6 +215,11 @@ Migration rollback stops the Windows website service, stops Windows MongoDB, res
 ## Testing
 
 Pester tests exercise PowerShell functions with temporary directories and stub executables. Coverage includes configuration validation, `origin/main` resolution, clean worktree lifecycle, locking, candidate failure, junction switching, automatic rollback, retention, migration inventory comparison, idempotent install, and uninstall safety.
+
+Automatic-deployment coverage includes cheap unchanged-SHA checks, one deploy
+per new SHA, lock serialization, failure backoff, immediate eligibility of a
+newer SHA, task registration/removal, state-file atomicity, and secret-safe
+error recording.
 
 Java configuration tests verify the smoke profile disables scheduled/startup mutations. Shell-independent tests validate Makefile/prod.cmd command forwarding.
 
@@ -200,6 +234,7 @@ Repository operations documentation covers prerequisites, native development, Wi
 - WSL is not required for build, test, deployment, MongoDB, or production runtime.
 - MongoDB and the website start during Windows boot without user login.
 - `prod deploy` deploys the exact latest `origin/main` commit from a clean Windows worktree.
+- A merged `origin/main` change automatically enters the same guarded deployment pipeline within approximately one minute.
 - Production remains on port 8080 until candidate verification passes.
 - Failed production verification restores the prior release automatically.
 - Native MongoDB matches the frozen WSL source collection-for-collection and index-for-index.
