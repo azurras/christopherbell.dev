@@ -97,7 +97,7 @@ Useful environment variables:
 
 ```bash
 export SPRING_PROFILES_ACTIVE=local
-export SPRING_DATA_MONGODB_URI=mongodb://localhost:27017
+export SPRING_MONGODB_URI=mongodb://localhost:27017
 export RESEND_API_KEY=re_your_resend_key
 export APP_MAIL_FROM=noreply@your-verified-domain.com
 export APP_JWT_SECRET=replace-with-at-least-32-random-characters
