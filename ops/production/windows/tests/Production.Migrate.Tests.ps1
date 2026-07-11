@@ -39,3 +39,20 @@ Describe 'WSL migration privilege boundaries' {
         }
     }
 }
+
+Describe 'WSL mongodump argument compatibility' {
+    InModuleScope Production.Migrate {
+        It 'provides WSL-compatible equals-form mongodump arguments' {
+            Get-Command Get-WslMongoDumpArguments -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
+
+        It 'keeps URI database and archive values attached to their options' {
+            $arguments = Get-WslMongoDumpArguments '/mnt/a/backups/prod.archive.gz'
+            $arguments | Should -Contain '--uri=mongodb://127.0.0.1:27017'
+            $arguments | Should -Contain '--db=christopherbell'
+            $arguments | Should -Contain '--archive=/mnt/a/backups/prod.archive.gz'
+            $arguments | Should -Not -Contain '--uri'
+            $arguments | Should -Not -Contain '--archive'
+        }
+    }
+}
