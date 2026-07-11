@@ -1,154 +1,72 @@
 # MongoDB Backup and Restore Runbook
 
-Use this runbook for production MongoDB backups, restore preparation, and
-restore smoke checks for `christopherbell.dev`. Run the commands from a host
-that has network access to MongoDB and the MongoDB Database Tools installed.
+Native Windows production backups are created with:
 
-## Required Environment
-
-Set these values in the shell that runs the backup or restore commands:
-
-```bash
-export MONGODB_URI="mongodb://<host>:<port>"
-export MONGODB_DATABASE="christopherbell"
-export BACKUP_DIR="/var/backups/christopherbell.dev/mongodb"
-export BACKUP_DATE="$(date -u +%Y%m%dT%H%M%SZ)"
-export BACKUP_ARCHIVE="$BACKUP_DIR/$MONGODB_DATABASE-$BACKUP_DATE.archive.gz"
+```powershell
+.\prod.cmd backup
 ```
 
-Use the production MongoDB URI format required by the deployment. If the URI
-already includes the database name, keep `MONGODB_DATABASE` set to the same
-database so archive names and restore commands stay explicit.
+The archive is stored under `backupRoot` from
+`C:\ProgramData\christopherbell.dev\config\deploy.json`. The default example is
+`A:\Projects\christopherbell.dev-backups`. Every backup must be non-empty, pass
+`mongorestore.exe --dryRun`, and have a JSON sidecar containing its SHA-256.
+The command never deletes the prior verified archive.
 
-Optional values for restore validation:
+## Inspect and Verify
 
-```bash
-export RESTORE_DATABASE="christopherbell_restore_check"
-export RESTORE_URI="mongodb://<host>:<port>"
-export SERVER_PORT=8082
+```powershell
+$archive = Get-ChildItem A:\Projects\christopherbell.dev-backups\*.archive.gz |
+  Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+Get-Item $archive.FullName
+Get-FileHash $archive.FullName -Algorithm SHA256
+& 'C:\Program Files\MongoDB\Tools\100\bin\mongorestore.exe' `
+  --archive $archive.FullName --gzip --dryRun
 ```
 
-## Storage Location
+Compare the computed hash with the adjacent `.sha256.json` file. If any check
+fails, preserve the previous known-good backup and stop.
 
-Store production archives under the host's protected backup area, rooted at:
+## Validation Restore
+
+Restore into a temporary database first:
+
+```powershell
+& 'C:\Program Files\MongoDB\Tools\100\bin\mongorestore.exe' `
+  --uri mongodb://127.0.0.1:27017 `
+  --archive $archive.FullName --gzip --drop `
+  '--nsFrom=christopherbell.*' `
+  '--nsTo=christopherbell_restore_check.*'
+```
+
+Generate canonical inventories for the source and validation databases using
+the same `Get-MongoInventory` implementation used by `prod migrate`. Collection
+names, document counts, index names, index keys, and uniqueness flags must match
+exactly. An intentionally removed document or index must make comparison fail.
+
+Run the application against the validation database on a non-production port.
+Confirm `GET /` returns HTTP 200 and the known smoke email returns HTTP 401 with
+an invalid password, never `RESOURCE_NOT_FOUND`.
+
+## Production Restore
+
+Restoring `christopherbell` is destructive and requires a maintenance window,
+a stopped website service, an explicit target check, a current backup, and a
+successful validation restore. Only then run the equivalent restore with:
 
 ```text
-/var/backups/christopherbell.dev/mongodb
+--nsTo=christopherbell.* --drop
 ```
 
-Archive filenames should use the database and UTC timestamp:
+Recompute the inventory and repeat the port-8081 checks before starting or
+restarting `ChristopherBellDev` on port 8080.
 
-```text
-christopherbell-YYYYMMDDTHHMMSSZ.archive.gz
-```
+## WSL Migration Fallback
 
-Move or replicate completed archives to the production backup storage provider
-used for the host. Keep local filesystem permissions limited to the service or
-operator account that performs backups.
+The original Debian WSL MongoDB files and the archives under
+`A:\Projects\christopherbell.dev-backups` remain rollback evidence throughout
+the migration soak. Do not unregister WSL, delete its database files, or remove
+those archives during initial cutover. If native inventory or smoke checks fail,
+stop native services and restart the preserved WSL production path.
 
-## Backup
-
-Create the backup directory and run `mongodump` with a compressed archive:
-
-```bash
-mkdir -p "$BACKUP_DIR"
-chmod 700 "$BACKUP_DIR"
-
-mongodump \
-  --uri="$MONGODB_URI" \
-  --db="$MONGODB_DATABASE" \
-  --archive="$BACKUP_ARCHIVE" \
-  --gzip
-```
-
-Record the resulting archive path in the deployment or incident log for the
-change window.
-
-## Verify a Backup
-
-Confirm that the archive exists and is not empty:
-
-```bash
-test -s "$BACKUP_ARCHIVE"
-ls -lh "$BACKUP_ARCHIVE"
-```
-
-List archive contents without restoring them:
-
-```bash
-mongorestore \
-  --archive="$BACKUP_ARCHIVE" \
-  --gzip \
-  --dryRun
-```
-
-If either check fails, do not delete the previous known-good backup.
-
-## Restore
-
-Restores can overwrite data. Prefer restoring into a staging or temporary
-validation database first. Only restore into production after confirming the
-target URI, target database, and maintenance window.
-
-Restore into a validation database:
-
-```bash
-mongorestore \
-  --uri="$RESTORE_URI" \
-  --nsFrom="$MONGODB_DATABASE.*" \
-  --nsTo="$RESTORE_DATABASE.*" \
-  --archive="$BACKUP_ARCHIVE" \
-  --gzip \
-  --drop
-```
-
-Restore into the original database only when the production target has been
-confirmed:
-
-```bash
-mongorestore \
-  --uri="$MONGODB_URI" \
-  --db="$MONGODB_DATABASE" \
-  --archive="$BACKUP_ARCHIVE" \
-  --gzip \
-  --drop
-```
-
-## Restore Smoke Check
-
-After restoring into a validation database, start the app against that database
-on a non-production port:
-
-```bash
-export SPRING_PROFILES_ACTIVE=local
-export SPRING_DATA_MONGODB_URI="$RESTORE_URI/$RESTORE_DATABASE"
-export SERVER_PORT=8082
-
-./gradlew :website:bootRun
-```
-
-In another shell, request a public page:
-
-```bash
-curl -i "http://localhost:$SERVER_PORT/"
-```
-
-Expected result:
-
-- HTTP status is `200 OK`.
-- The response body contains the public home page title or markup.
-- The application logs do not show MongoDB connection or authentication errors.
-
-For production restores, repeat the same smoke pattern against the production
-process after the restore and deployment restart are complete.
-
-## Operational Notes
-
-- Keep at least one previously verified archive until the new archive has passed
-  verification.
-- Do not paste credentials into tickets, pull requests, or shell history shared
-  with other users.
-- Test restore procedures periodically against a non-production MongoDB
-  instance.
-- Document backup archive path, restore target, operator, timestamp, and
-  smoke-check result in the deployment or incident log.
+Record the archive path, SHA-256, source and target inventories, operator,
+timestamp, HTTP results, and any rollback action in the migration test report.

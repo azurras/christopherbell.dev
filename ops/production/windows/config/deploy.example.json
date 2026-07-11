@@ -1,0 +1,22 @@
+{
+  "repositoryPath": "A:\\Projects\\christopherbell.dev",
+  "remote": "origin",
+  "branch": "main",
+  "programDataRoot": "C:\\ProgramData\\christopherbell.dev",
+  "javaExe": "C:\\Program Files\\Eclipse Adoptium\\jdk-25\\bin\\java.exe",
+  "nodeExe": "C:\\Program Files\\nodejs\\node.exe",
+  "mongoToolsPath": "C:\\Program Files\\MongoDB\\Tools\\100\\bin",
+  "mongoShellExe": "C:\\Program Files\\MongoDB\\mongosh\\current\\bin\\mongosh.exe",
+  "backupRoot": "A:\\Projects\\christopherbell.dev-backups",
+  "wslDistro": "Debian",
+  "wslWebsiteStopCommand": "pkill -f 'java.*server.port=8080'",
+  "wslWebsiteStartCommand": "systemctl --user start christopherbell-dev",
+  "wslMongoStopCommand": "sudo systemctl stop mongod",
+  "wslMongoStartCommand": "sudo systemctl start mongod",
+  "candidatePort": 8081,
+  "productionPort": 8080,
+  "smokeAccountEmail": "operator@example.com",
+  "releaseRetention": 5,
+  "autoDeployPollSeconds": 60,
+  "autoDeployFailureBackoffSeconds": 900
+}

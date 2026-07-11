@@ -1,0 +1,7 @@
+app:
+  scheduling:
+    enabled: false
+wfl:
+  restaurant-import:
+    monthly:
+      enabled: false

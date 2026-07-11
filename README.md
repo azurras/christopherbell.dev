@@ -349,48 +349,54 @@ Change page behavior:
 
 ## Production
 
-Build:
+Production runs natively on Windows through the `MongoDB` and
+`ChristopherBellDev` Windows services. WSL is not part of the steady-state
+production or deployment path.
 
-```bash
-./gradlew :website:build
+From an elevated PowerShell prompt, bootstrap and configure the runtime, then
+install automatic deployment:
+
+```powershell
+.\prod.cmd install
+# Edit C:\ProgramData\christopherbell.dev\config\deploy.json and app.env.
+.\prod.cmd install
+.\prod.cmd deploy
+.\prod.cmd auto-install
 ```
 
-Set production configuration with environment variables:
+The first `install` creates protected configuration examples and intentionally
+stops until real paths, the smoke-account email, and secrets replace every
+placeholder. `deploy` fetches the exact latest `origin/main` commit into a clean
+detached Windows worktree, builds and tests it, validates it on port 8081,
+atomically switches the active release, and rolls back when port-8080
+verification fails.
 
-```bash
-export SPRING_PROFILES_ACTIVE=prod
-export SPRING_DATA_MONGODB_URI=mongodb://<host>:<port>/<db>
-export SERVER_PORT=8080
-export RESEND_API_KEY=re_your_resend_key
-export APP_MAIL_FROM=noreply@your-verified-domain.com
-```
+`auto-install` creates a boot-started Scheduled Task that checks the remote SHA
+once per minute. Unchanged checks do not fetch, build, or restart the site. A
+changed SHA enters the same locked deployment and rollback pipeline; no inbound
+webhook or GitHub runner is required.
 
-Run:
+Common operations:
 
-```bash
-java -jar website/build/libs/<jar-name>.jar
+```powershell
+.\prod.cmd status
+.\prod.cmd logs
+.\prod.cmd releases
+.\prod.cmd rollback
+.\prod.cmd backup
+.\prod.cmd auto-status
 ```
 
 ### MongoDB Backups and Restores
 
-Use the [MongoDB backup and restore runbook](docs/operations/mongodb-backup-restore.md)
-for production backup commands, expected archive storage, restore steps, and
-restore smoke checks.
+Use the [Windows production runbook](docs/operations/windows-production.md) and
+[MongoDB backup and restore runbook](docs/operations/mongodb-backup-restore.md).
 
 ## Troubleshooting
 
-Gradle wrapper has Windows line endings in WSL:
-
-```bash
-sed -i 's/\r$//' gradlew
-chmod +x gradlew
-```
-
-Cannot connect to MongoDB:
-
-- Confirm MongoDB is running.
-- Confirm the URI matches the active profile.
-- Override with `SPRING_DATA_MONGODB_URI` if needed.
+Run `.\prod.cmd status` first for production failures and `.\prod.cmd logs` for
+application and WinSW wrapper output. Confirm both Windows services are running
+and `SPRING_MONGODB_URI` targets `mongodb://127.0.0.1:27017`.
 
 Static JS changes are not visible:
 
