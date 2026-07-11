@@ -1,0 +1,133 @@
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'Production.Common.psm1') -Force
+
+function Resolve-OriginMainRelease {
+    param($Config)
+    Invoke-CheckedProcess -FilePath 'git.exe' -ArgumentList @('-C',$Config.repositoryPath,'fetch','--prune',$Config.remote,$Config.branch) -WorkingDirectory $Config.repositoryPath | Out-Null
+    $sha = (Invoke-CheckedProcess -FilePath 'git.exe' -ArgumentList @('-C',$Config.repositoryPath,'rev-parse',"$($Config.remote)/$($Config.branch)") -WorkingDirectory $Config.repositoryPath).Trim()
+    if ($sha -notmatch '^[0-9a-f]{40}$') { throw 'Fetched origin/main did not resolve to a full Git SHA.' }
+    return $sha
+}
+
+function New-ReleaseFromOriginMain {
+    param($Config, [Parameter(Mandatory)][string]$Sha)
+    $worktree = Join-Path $Config.programDataRoot "worktrees\$Sha"
+    $release = Join-Path $Config.programDataRoot "releases\$Sha"
+    $staging = "$release.staging"
+    if (Test-Path -LiteralPath $release -PathType Container) { return $release }
+    New-Item -ItemType Directory -Force (Split-Path -Parent $worktree),(Split-Path -Parent $release) | Out-Null
+    try {
+        Invoke-CheckedProcess 'git.exe' @('-C',$Config.repositoryPath,'worktree','add','--detach',$worktree,$Sha) $Config.repositoryPath | Out-Null
+        $environment = @{ GRADLE_USER_HOME=(Join-Path $Config.programDataRoot 'gradle-home'); NODE_EXE=$Config.nodeExe }
+        Invoke-CheckedProcess (Join-Path $worktree 'gradlew.bat') @('--no-daemon',':website:build') $worktree $environment | Out-Null
+        $jars = @(Get-ChildItem (Join-Path $worktree 'website\build\libs') -Filter '*.jar' | Where-Object Name -NotLike '*-plain.jar')
+        if ($jars.Count -ne 1) { throw "Expected one executable boot JAR, found $($jars.Count)." }
+        if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+        New-Item -ItemType Directory -Force $staging | Out-Null
+        Copy-Item -LiteralPath $jars[0].FullName -Destination (Join-Path $staging 'app.jar')
+        [ordered]@{ sha=$Sha; source="$($Config.remote)/$($Config.branch)"; builtAt=(Get-Date).ToUniversalTime().ToString('o') } |
+            ConvertTo-Json | Set-Content (Join-Path $staging 'release.json') -Encoding utf8
+        Move-Item -LiteralPath $staging -Destination $release
+        return $release
+    } finally {
+        if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $worktree) {
+            try { Invoke-CheckedProcess 'git.exe' @('-C',$Config.repositoryPath,'worktree','remove','--force',$worktree) $Config.repositoryPath | Out-Null } catch { }
+        }
+        try { Invoke-CheckedProcess 'git.exe' @('-C',$Config.repositoryPath,'worktree','prune') $Config.repositoryPath | Out-Null } catch { }
+    }
+}
+
+function Start-ProductionJar {
+    param($Config, [Parameter(Mandatory)][string]$Release, [int]$Port, [string]$Profiles, [hashtable]$AdditionalEnvironment = @{})
+    $release = Assert-ReleasePath $Config $Release
+    $jar = Join-Path $release 'app.jar'
+    if (-not (Test-Path -LiteralPath $jar -PathType Leaf)) { throw "Missing release JAR: $jar" }
+    $environment = Read-ProductionEnvironment (Join-Path $Config.programDataRoot 'config\app.env')
+    foreach ($entry in $AdditionalEnvironment.GetEnumerator()) { $environment[$entry.Key] = [string]$entry.Value }
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Config.javaExe
+    $start.WorkingDirectory = $release
+    $start.UseShellExecute = $false
+    foreach ($argument in @('-Xrs','-jar',$jar,"--spring.profiles.active=$Profiles","--server.port=$Port")) { [void]$start.ArgumentList.Add($argument) }
+    foreach ($entry in $environment.GetEnumerator()) { $start.Environment[$entry.Key] = [string]$entry.Value }
+    return [Diagnostics.Process]::Start($start)
+}
+
+function Test-ProductionEndpoints {
+    param($Config, [int]$Port)
+    Wait-HttpStatus -Uri "http://127.0.0.1:$Port/" -ExpectedStatus 200 -Timeout ([timespan]::FromSeconds(90)) | Out-Null
+    $body = @{ email=$Config.smokeAccountEmail; password='deployment-smoke-intentionally-invalid' } | ConvertTo-Json
+    $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/api/accounts/2024-12-15/login" -Method Post -ContentType 'application/json' -Body $body -SkipHttpErrorCheck -TimeoutSec 15
+    if ([int]$response.StatusCode -ne 401) { throw "Smoke login expected HTTP 401, received $($response.StatusCode)." }
+    if ([string]$response.Content -match 'RESOURCE_NOT_FOUND') { throw 'Smoke account was not found in the configured production database.' }
+}
+
+function Test-CandidateRelease {
+    param($Config, [Parameter(Mandatory)][string]$Release, [string]$Database)
+    $additionalEnvironment = @{}
+    if (-not [string]::IsNullOrWhiteSpace($Database)) { $additionalEnvironment.SPRING_MONGODB_DATABASE = $Database }
+    $process = Start-ProductionJar -Config $Config -Release $Release -Port $Config.candidatePort -Profiles 'prod,deploy-smoke' -AdditionalEnvironment $additionalEnvironment
+    try {
+        Test-ProductionEndpoints -Config $Config -Port $Config.candidatePort
+    } finally {
+        if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+        $process.WaitForExit(10000) | Out-Null
+    }
+}
+
+function Switch-ProductionRelease {
+    param($Config, [Parameter(Mandatory)][string]$Release)
+    $release = Assert-ReleasePath $Config $Release
+    $currentPath = Join-Path $Config.programDataRoot 'current'
+    $previousPath = Join-Path $Config.programDataRoot 'previous'
+    $old = Get-JunctionTarget $currentPath
+    Stop-Service ChristopherBellDev -ErrorAction Stop
+    try {
+        if ($old) { Set-AtomicJunction $Config $previousPath $old }
+        Set-AtomicJunction $Config $currentPath $release
+        Start-Service ChristopherBellDev
+        Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
+    } catch {
+        if ($old) {
+            Stop-Service ChristopherBellDev -ErrorAction SilentlyContinue
+            Set-AtomicJunction $Config $currentPath $old
+            Start-Service ChristopherBellDev
+            Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
+        }
+        throw
+    }
+}
+
+function Remove-ExpiredReleases {
+    param($Config)
+    $protected = @(
+        Get-JunctionTarget (Join-Path $Config.programDataRoot 'current')
+        Get-JunctionTarget (Join-Path $Config.programDataRoot 'previous')
+    ) | Where-Object { $_ }
+    $releases = @(Get-ChildItem (Join-Path $Config.programDataRoot 'releases') -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending)
+    $kept = 0
+    foreach ($release in $releases) {
+        if ($protected -contains $release.FullName -or $kept -lt [int]$Config.releaseRetention) { $kept++; continue }
+        Assert-ReleasePath $Config $release.FullName | Out-Null
+        Remove-Item -LiteralPath $release.FullName -Recurse -Force
+    }
+}
+
+function Invoke-ProductionDeploy {
+    [CmdletBinding()]
+    param([switch]$WhatIf)
+    $config = Read-ProductionConfig
+    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    try {
+        $sha = Resolve-OriginMainRelease $config
+        if ($WhatIf) { Write-Output "Would deploy $($config.remote)/$($config.branch) at $sha"; return }
+        $release = New-ReleaseFromOriginMain $config $sha
+        Test-CandidateRelease $config $release
+        Switch-ProductionRelease $config $release
+        Remove-ExpiredReleases $config
+    } finally { $lock.Dispose() }
+}
+
+Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,New-ReleaseFromOriginMain,Start-ProductionJar,Test-ProductionEndpoints,Test-CandidateRelease,Switch-ProductionRelease,Remove-ExpiredReleases
