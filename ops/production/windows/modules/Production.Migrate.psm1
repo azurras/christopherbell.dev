@@ -84,7 +84,12 @@ print(EJSON.stringify(result));
 
 function Test-MongoArchive {
     param($Config, [string]$Archive)
-    Invoke-CheckedProcess (Join-Path $Config.mongoToolsPath 'mongorestore.exe') @('--archive',$Archive,'--gzip','--dryRun') $Config.repositoryPath | Out-Null
+    Invoke-CheckedProcess (Join-Path $Config.mongoToolsPath 'mongorestore.exe') @(
+        '--uri=mongodb://127.0.0.1:27017'
+        "--archive=$Archive"
+        '--gzip'
+        '--dryRun'
+    ) $Config.repositoryPath | Out-Null
 }
 
 function Invoke-WslCommand {
