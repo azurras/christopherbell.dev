@@ -35,6 +35,18 @@ function Assert-MongoInventoryEqual {
     if ($Source -cne $Target) { throw 'MongoDB collection/count/index inventory mismatch.' }
 }
 
+function Get-WslMongoDumpArguments {
+    param([string]$Archive)
+    return @(
+        '--exec'
+        'mongodump'
+        '--uri=mongodb://127.0.0.1:27017'
+        '--db=christopherbell'
+        "--archive=$Archive"
+        '--gzip'
+    )
+}
+
 function New-MigrationBackup {
     param($Config)
     New-Item -ItemType Directory -Force $Config.backupRoot | Out-Null
@@ -42,7 +54,8 @@ function New-MigrationBackup {
     $archive = Join-Path $Config.backupRoot "christopherbell-pre-native-$stamp.archive.gz"
     $wslArchive = (Invoke-CheckedProcess 'wsl.exe' @('-d',$Config.wslDistro,'--exec','wslpath','-u',$archive) $Config.repositoryPath).Trim()
     if ([string]::IsNullOrWhiteSpace($wslArchive)) { throw 'Could not map the migration backup path into WSL.' }
-    Invoke-CheckedProcess 'wsl.exe' @('-d',$Config.wslDistro,'--exec','mongodump','--uri','mongodb://127.0.0.1:27017','--db','christopherbell','--archive',$wslArchive,'--gzip') $Config.repositoryPath | Out-Null
+    $dumpArguments = @('-d',$Config.wslDistro) + @(Get-WslMongoDumpArguments $wslArchive)
+    Invoke-CheckedProcess 'wsl.exe' $dumpArguments $Config.repositoryPath | Out-Null
     if (-not (Test-Path $archive) -or (Get-Item $archive).Length -eq 0) { throw 'Migration backup is empty.' }
     $hash = (Get-FileHash $archive -Algorithm SHA256).Hash
     [ordered]@{ archive=$archive; sha256=$hash; createdAt=(Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content "$archive.sha256.json"
