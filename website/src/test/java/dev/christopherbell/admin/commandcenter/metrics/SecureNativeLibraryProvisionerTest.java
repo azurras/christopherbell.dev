@@ -62,9 +62,14 @@ class SecureNativeLibraryProvisionerTest {
 
   @Test
   @EnabledOnOs(OS.WINDOWS)
-  void productionAclRejectsBaseOwnedByInteractiveAttacker() {
+  void productionAclRejectsBaseOwnedByInteractiveAttacker() throws Exception {
+    Path attackerOwned = Files.createDirectory(tempDir.resolve("attacker-owned"));
+    var lookup = attackerOwned.getFileSystem().getUserPrincipalLookupService();
+    var interactiveUser = lookup.lookupPrincipalByName(System.getProperty("user.name"));
+    Files.setOwner(attackerOwned, interactiveUser);
+
     assertThatThrownBy(() -> new SecureNativeLibraryProvisioner(
-        tempDir.resolve("attacker-owned")).provision())
+        attackerOwned).provision())
         .isInstanceOf(SecurityException.class)
         .hasMessageContaining("owner");
   }
