@@ -149,6 +149,16 @@ function Set-AtomicJunction {
     } else { Move-Item -LiteralPath $temporary -Destination $Path }
 }
 
+function Get-TrustedGitArguments {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryPath,
+        [Parameter(Mandatory)][string[]]$ArgumentList
+    )
+    $safeDirectory = [IO.Path]::GetFullPath($RepositoryPath).Replace('\','/')
+    return @('-c',"safe.directory=$safeDirectory",'-C',$RepositoryPath) + $ArgumentList
+}
+
 function Show-ProductionHelp {
     @'
 Usage: prod.cmd <command> [-WhatIf]
@@ -159,4 +169,4 @@ Commands: install, deploy, status, logs, restart, releases, rollback, backup,
 '@ | Write-Output
 }
 
-Export-ModuleMember -Function Read-ProductionConfig,Invoke-CheckedProcess,Enter-DeploymentLock,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Show-ProductionHelp
+Export-ModuleMember -Function Read-ProductionConfig,Invoke-CheckedProcess,Enter-DeploymentLock,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Get-TrustedGitArguments,Show-ProductionHelp
