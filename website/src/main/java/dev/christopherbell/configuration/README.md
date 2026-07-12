@@ -8,8 +8,8 @@ Owns application-wide Spring and web infrastructure.
 - Public static browser assets such as `/favicon.ico`.
 - Public tool pages such as `/zip-coordinates`.
 - The public `/command-center` route serves only a data-free page shell. No
-  `/api/admin/command-center/**` route is public; every API method requires the
-  active approved admin permission check.
+  `/api/admin/command-center/**` route is public; every API method requires both
+  ADMIN JWT authority and a fresh persisted ADMIN, ACTIVE, approved account.
 - Public read-only WFL routes, including nearby restaurant lookup by browser
   coordinates or ZIP code.
 - JWT authentication filter wiring under `security`.

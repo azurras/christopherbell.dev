@@ -39,14 +39,16 @@ public class CommandCenterController {
 
   /** Returns the latest immutable cached host snapshot. */
   @GetMapping(value = V20260712 + "/snapshot", produces = MediaType.APPLICATION_JSON_VALUE)
-  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')"
+      + " and @commandCenterAccessService.hasFreshAdminAccess()")
   public ResponseEntity<Response<CommandCenterSnapshot>> snapshot() {
     return ok(metricsService.snapshot());
   }
 
   /** Returns one bounded, redacted page from the configured server-side log. */
   @GetMapping(value = V20260712 + "/logs", produces = MediaType.APPLICATION_JSON_VALUE)
-  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')"
+      + " and @commandCenterAccessService.hasFreshAdminAccess()")
   public ResponseEntity<Response<LogPage>> logs(
       @RequestParam(required = false) String cursor,
       @RequestParam(defaultValue = "ALL") String level,
@@ -59,7 +61,8 @@ public class CommandCenterController {
       value = V20260712 + "/action-challenges",
       consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE)
-  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')"
+      + " and @commandCenterAccessService.hasFreshAdminAccess()")
   public ResponseEntity<Response<ActionChallenge>> challenge(
       @Valid @RequestBody ChallengeRequest request) throws InvalidRequestException {
     return ok(actionService.createChallenge(request.action()));
@@ -70,7 +73,8 @@ public class CommandCenterController {
       value = V20260712 + "/actions",
       consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE)
-  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')"
+      + " and @commandCenterAccessService.hasFreshAdminAccess()")
   public ResponseEntity<Response<ActionResult>> execute(
       @Valid @RequestBody ActionConfirmation request,
       HttpServletRequest servletRequest) throws InvalidRequestException {
@@ -79,7 +83,8 @@ public class CommandCenterController {
 
   /** Cancels the currently pending cancellable machine action. */
   @PostMapping(value = V20260712 + "/actions/cancel", produces = MediaType.APPLICATION_JSON_VALUE)
-  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')"
+      + " and @commandCenterAccessService.hasFreshAdminAccess()")
   public ResponseEntity<Response<ActionResult>> cancel(HttpServletRequest servletRequest)
       throws InvalidRequestException {
     return ok(actionService.cancel(servletRequest));

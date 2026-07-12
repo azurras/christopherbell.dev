@@ -42,7 +42,12 @@ Owns back-office administration views and cross-feature admin operations.
 
 ### Security Boundary
 
-Command-center APIs require an active approved admin. They never accept shell
+Every command-center API requires both valid ADMIN JWT authority and a fresh
+persisted-account check through `CommandCenterAccessService`; missing accounts,
+repository failures, and accounts that are no longer ADMIN, ACTIVE, and approved
+fail closed before metrics, logs, challenges, or actions are invoked. The action
+service repeats the persisted-account check at execution time as defense in
+depth. Command-center APIs never accept shell
 fragments, executable paths, service names, log paths, filenames, or arbitrary
 arguments from callers. Request values select only the closed action enum or
 bounded log filters; server configuration owns every filesystem and process

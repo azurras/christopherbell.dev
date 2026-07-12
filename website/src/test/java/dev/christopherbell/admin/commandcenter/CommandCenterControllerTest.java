@@ -10,6 +10,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.model.Role;
 import dev.christopherbell.admin.commandcenter.action.CommandCenterActionService;
 import dev.christopherbell.admin.commandcenter.action.CommandCenterActionService.ActionChallenge;
 import dev.christopherbell.admin.commandcenter.action.CommandCenterActionService.ActionConfirmation;
@@ -30,6 +34,7 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -57,7 +62,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 @WebMvcTest(CommandCenterController.class)
-@Import({ControllerExceptionHandler.class,
+@Import({CommandCenterAccessService.class, ControllerExceptionHandler.class,
     CommandCenterControllerTest.MethodSecurityTestConfiguration.class})
 class CommandCenterControllerTest {
   private static final String BASE = "/api/admin/command-center/2026-07-12";
@@ -67,6 +72,7 @@ class CommandCenterControllerTest {
   @MockitoBean private CommandCenterMetricsService metricsService;
   @MockitoBean private CommandCenterLogService logService;
   @MockitoBean private CommandCenterActionService actionService;
+  @MockitoBean private AccountRepository accountRepository;
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
 
   @BeforeEach
@@ -74,6 +80,9 @@ class CommandCenterControllerTest {
     when(permissionService.hasAuthority("ADMIN")).thenAnswer(ignored ->
         SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
             .anyMatch(authority -> authority.getAuthority().equals("ADMIN")));
+    when(permissionService.getSelfId()).thenReturn("admin-1");
+    when(accountRepository.findById("admin-1")).thenReturn(Optional.of(admin(
+        AccountStatus.ACTIVE, true)));
   }
 
   @ParameterizedTest(name = "{0}: anonymous -> 401")
@@ -90,6 +99,44 @@ class CommandCenterControllerTest {
   @WithMockUser(authorities = "USER")
   void everyRoute_whenNonAdmin_returnsForbidden(
       String name, MockHttpServletRequestBuilder request) throws Exception {
+    mockMvc.perform(request).andExpect(status().isForbidden());
+
+    verifyNoInteractions(metricsService, logService, actionService);
+  }
+
+  @ParameterizedTest(name = "{0}: suspended persisted admin -> 403")
+  @MethodSource("routes")
+  @WithMockUser(authorities = "ADMIN")
+  void everyRoute_whenPersistedAdminIsSuspended_returnsForbidden(
+      String name, MockHttpServletRequestBuilder request) throws Exception {
+    when(accountRepository.findById("admin-1")).thenReturn(Optional.of(admin(
+        AccountStatus.SUSPENDED, true)));
+
+    mockMvc.perform(request).andExpect(status().isForbidden());
+
+    verifyNoInteractions(metricsService, logService, actionService);
+  }
+
+  @ParameterizedTest(name = "{0}: unapproved persisted admin -> 403")
+  @MethodSource("routes")
+  @WithMockUser(authorities = "ADMIN")
+  void everyRoute_whenPersistedAdminIsUnapproved_returnsForbidden(
+      String name, MockHttpServletRequestBuilder request) throws Exception {
+    when(accountRepository.findById("admin-1")).thenReturn(Optional.of(admin(
+        AccountStatus.ACTIVE, false)));
+
+    mockMvc.perform(request).andExpect(status().isForbidden());
+
+    verifyNoInteractions(metricsService, logService, actionService);
+  }
+
+  @ParameterizedTest(name = "{0}: missing persisted admin -> 403")
+  @MethodSource("routes")
+  @WithMockUser(authorities = "ADMIN")
+  void everyRoute_whenPersistedAdminIsMissing_returnsForbidden(
+      String name, MockHttpServletRequestBuilder request) throws Exception {
+    when(accountRepository.findById("admin-1")).thenReturn(Optional.empty());
+
     mockMvc.perform(request).andExpect(status().isForbidden());
 
     verifyNoInteractions(metricsService, logService, actionService);
@@ -239,6 +286,15 @@ class CommandCenterControllerTest {
                  "password":"private","confirmationPhrase":"RESTART SITE"}
                 """)),
         Arguments.of("cancel", post(BASE + "/actions/cancel")));
+  }
+
+  private Account admin(AccountStatus status, boolean approved) {
+    return Account.builder()
+        .id("admin-1")
+        .role(Role.ADMIN)
+        .status(status)
+        .isApproved(approved)
+        .build();
   }
 
   @TestConfiguration
