@@ -7,9 +7,11 @@ function Get-ProductionStatus {
     $config = Read-ProductionConfig
     $website = Get-Service ChristopherBellDev -ErrorAction SilentlyContinue
     $mongo = Get-Service MongoDB -ErrorAction SilentlyContinue
+    $cloudflared = Get-Service cloudflared -ErrorAction SilentlyContinue
     [pscustomobject]@{
         WebsiteService = if ($website) { $website.Status } else { 'NotInstalled' }
         MongoService = if ($mongo) { $mongo.Status } else { 'NotInstalled' }
+        CloudflaredService = if ($cloudflared) { $cloudflared.Status } else { 'NotInstalled' }
         CurrentRelease = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
         PreviousRelease = Get-JunctionTarget (Join-Path $config.programDataRoot 'previous')
         ProductionPortPid = (Get-NetTCPConnection -LocalPort $config.productionPort -State Listen -ErrorAction SilentlyContinue).OwningProcess
@@ -83,4 +85,23 @@ function Get-ProductionReleases {
         }
 }
 
-Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,New-ProductionBackup,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases
+function Test-ProductionStartup {
+    $config = Read-ProductionConfig
+    foreach ($name in 'MongoDB','ChristopherBellDev','cloudflared') {
+        $service = Get-Service $name -ErrorAction Stop
+        if ([string]$service.Status -ne 'Running') { throw "$name must be Running." }
+        if ([string]$service.StartType -ne 'Automatic') { throw "$name must use Automatic startup." }
+    }
+    $task = Get-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction Stop
+    if ([string]$task.State -eq 'Disabled') { throw 'ChristopherBellAutoDeploy must be enabled.' }
+    Test-ProductionEndpoints $config $config.productionPort
+    Wait-HttpStatus -Uri $config.publicUrl -ExpectedStatus 200 -Timeout ([timespan]::FromSeconds(30)) | Out-Null
+    [pscustomobject]@{
+        Services = 'RunningAutomatic'
+        AutoDeployTask = $task.State
+        NativeEndpoint = 200
+        PublicEndpoint = 200
+    }
+}
+
+Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,New-ProductionBackup,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases,Test-ProductionStartup

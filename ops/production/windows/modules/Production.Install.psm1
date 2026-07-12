@@ -27,7 +27,18 @@ function Install-ConfigurationExamples {
     $environmentTarget = Join-Path $Root 'config\app.env'
     Copy-Item (Join-Path $configSource 'deploy.example.json') (Join-Path $Root 'config\deploy.example.json') -Force
     Copy-Item (Join-Path $configSource 'app.env.example') (Join-Path $Root 'config\app.env.example') -Force
-    if (-not (Test-Path -LiteralPath $deployTarget)) { Copy-Item (Join-Path $configSource 'deploy.example.json') $deployTarget }
+    if (-not (Test-Path -LiteralPath $deployTarget)) {
+        Copy-Item (Join-Path $configSource 'deploy.example.json') $deployTarget
+    } else {
+        $defaults = Get-Content (Join-Path $configSource 'deploy.example.json') -Raw | ConvertFrom-Json
+        $existing = Get-Content $deployTarget -Raw | ConvertFrom-Json
+        foreach ($property in $defaults.PSObject.Properties) {
+            if ($existing.PSObject.Properties.Name -notcontains $property.Name) {
+                $existing | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
+            }
+        }
+        $existing | ConvertTo-Json -Depth 10 | Set-Content $deployTarget -Encoding utf8
+    }
     if (-not (Test-Path -LiteralPath $environmentTarget)) { Copy-Item (Join-Path $configSource 'app.env.example') $environmentTarget }
 }
 
@@ -38,17 +49,50 @@ function Protect-ProductionSecrets {
     if ($LASTEXITCODE -ne 0) { throw 'Failed to protect production configuration ACLs.' }
 }
 
+function Install-CloudflaredService {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Executable,
+        [string]$TokenPath,
+        [switch]$WhatIf
+    )
+    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+        throw "Missing cloudflared executable: $Executable"
+    }
+    $existing = Get-Service cloudflared -ErrorAction SilentlyContinue
+    if (-not $existing) {
+        if ([string]::IsNullOrWhiteSpace($TokenPath) -or -not (Test-Path -LiteralPath $TokenPath -PathType Leaf)) {
+            throw 'CloudflareTokenPath must reference a protected file when installing cloudflared.'
+        }
+        $token = (Get-Content -LiteralPath $TokenPath -Raw).Trim()
+        try {
+            if ($token.Length -lt 100 -or $token -notmatch '^[A-Za-z0-9_.=-]+$') {
+                throw 'Cloudflare tunnel token is invalid.'
+            }
+            if (-not $WhatIf) {
+                Invoke-CheckedProcess $Executable @('service','install',$token) (Split-Path -Parent $Executable) | Out-Null
+            }
+        } finally { $token = $null }
+    }
+    if (-not $WhatIf) {
+        Set-Service cloudflared -StartupType Automatic
+        Invoke-CheckedProcess 'sc.exe' @('failure','cloudflared','reset=','3600','actions=','restart/10000/restart/30000') | Out-Null
+        Start-Service cloudflared
+    }
+}
+
 function Install-ProductionRuntime {
     [CmdletBinding()]
-    param([switch]$WhatIf)
+    param([switch]$WhatIf, [string]$CloudflareTokenPath)
     Assert-Administrator
     $root = 'C:\ProgramData\christopherbell.dev'
-    if ($WhatIf) { Write-Output "Would create $root, preserve configuration, verify WinSW, and install ChristopherBellDev."; return }
+    if ($WhatIf) { Write-Output "Would create $root, preserve configuration, verify WinSW, install ChristopherBellDev, and validate cloudflared."; return }
     New-ProductionDirectories $root
     Install-ConfigurationExamples $root
     $config = Read-ProductionConfig (Join-Path $root 'config\deploy.json')
     Read-ProductionEnvironment (Join-Path $root 'config\app.env') | Out-Null
     Protect-ProductionSecrets $root
+    Install-CloudflaredService -Executable $config.cloudflaredExe -TokenPath $CloudflareTokenPath
     Set-Service MongoDB -StartupType Automatic
     & sc.exe failure MongoDB reset= 3600 actions= restart/10000/restart/30000 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure MongoDB service recovery.' }
@@ -86,4 +130,4 @@ function Uninstall-ProductionRuntime {
     }
 }
 
-Export-ModuleMember -Function Assert-Administrator,New-ProductionDirectories,Install-ConfigurationExamples,Protect-ProductionSecrets,Install-ProductionRuntime,Uninstall-ProductionRuntime
+Export-ModuleMember -Function Assert-Administrator,New-ProductionDirectories,Install-ConfigurationExamples,Protect-ProductionSecrets,Install-CloudflaredService,Install-ProductionRuntime,Uninstall-ProductionRuntime
