@@ -17,6 +17,9 @@ Owns back-office administration views and cross-feature admin operations.
   one schedule, retains bounded in-memory history, and exposes only immutable
   cached snapshot models to its API layer. Provider failures are isolated and
   last-good values become stale instead of blocking application startup.
+- Command-center log reads use only the configured server-side path, return a
+  line- and byte-bounded incremental tail, recover from rotation or truncation,
+  and redact credentials before applying literal text and severity filters.
 
 ## Update This Doc
 

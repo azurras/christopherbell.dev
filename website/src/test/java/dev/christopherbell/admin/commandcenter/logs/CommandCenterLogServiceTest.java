@@ -1,0 +1,205 @@
+package dev.christopherbell.admin.commandcenter.logs;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class CommandCenterLogServiceTest {
+
+  @TempDir Path tempDir;
+
+  @Test
+  void initialReadReturnsOnlyTheMostRecentConfiguredLines() throws IOException {
+    Path log = writeLog("INFO one\nWARN two\nERROR three\nDEBUG four\n");
+
+    var page = service(log, 2, 1_024).read(null, null, null);
+
+    assertThat(page.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("ERROR three", "DEBUG four");
+    assertThat(page.nextCursor()).isNotBlank();
+    assertThat(page.reset()).isFalse();
+    assertThat(page.status()).isEqualTo("ok");
+  }
+
+  @Test
+  void cursorAdvancesAndReturnsOnlyNewRecords() throws IOException {
+    Path log = writeLog("INFO first\n");
+    var service = service(log, 20, 1_024);
+    var first = service.read(null, null, null);
+    Files.writeString(log, "WARN second\n", UTF_8, StandardOpenOption.APPEND);
+
+    var second = service.read(first.nextCursor(), null, null);
+
+    assertThat(second.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("WARN second");
+    assertThat(second.nextCursor()).isNotEqualTo(first.nextCursor());
+    assertThat(second.reset()).isFalse();
+  }
+
+  @Test
+  void outputIsBoundedByLinesAndUtf8Bytes() throws IOException {
+    Path log = writeLog("INFO alpha-alpha\nINFO beta-beta\nINFO gamma-gamma\n");
+
+    var page = service(log, 20, 28).read(null, null, null);
+
+    assertThat(page.records()).isNotEmpty();
+    assertThat(page.records()).hasSizeLessThanOrEqualTo(20);
+    assertThat(renderedBytes(page)).isLessThanOrEqualTo(28);
+    assertThat(page.records().getLast().text()).isEqualTo("INFO gamma-gamma");
+  }
+
+  @Test
+  void queryIsLiteralAndAppliedAfterRedaction() throws IOException {
+    Path log = writeLog(
+        "INFO value a.b\nINFO value axb\nINFO token=hidden a.b\n");
+    var service = service(log, 20, 1_024);
+
+    var literal = service.read(null, null, "a.b");
+    var secret = service.read(null, null, "hidden");
+
+    assertThat(literal.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("INFO value a.b", "INFO token=[REDACTED] a.b");
+    assertThat(secret.records()).isEmpty();
+  }
+
+  @Test
+  void filtersOnlyBySupportedSeverity() throws IOException {
+    Path log = writeLog("TRACE t\nDEBUG d\nINFO i\nWARN w\nERROR e\nNOTICE n\n");
+    var service = service(log, 20, 1_024);
+
+    var page = service.read(null, "warn", null);
+
+    assertThat(page.records()).singleElement().satisfies(record -> {
+      assertThat(record.level()).isEqualTo("WARN");
+      assertThat(record.text()).isEqualTo("WARN w");
+    });
+    assertThatThrownBy(() -> service.read(null, "NOTICE", null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("level");
+  }
+
+  @Test
+  void invalidCursorResetsToTheCurrentTail() throws IOException {
+    Path log = writeLog("INFO current\n");
+
+    var page = service(log, 20, 1_024).read("not-a-valid-cursor", null, null);
+
+    assertThat(page.reset()).isTrue();
+    assertThat(page.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("INFO current");
+  }
+
+  @Test
+  void rejectsOversizedQueries() throws IOException {
+    var service = service(writeLog("INFO current\n"), 20, 1_024);
+
+    assertThatThrownBy(() -> service.read(null, null, "x".repeat(101)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("100");
+  }
+
+  @Test
+  void rotationResetsCursorAndCannotRedirectReadsToAnotherFile() throws IOException {
+    Path log = writeLog("INFO old\n");
+    Path other = tempDir.resolve("other.log");
+    Files.writeString(other, "ERROR other-secret\n", UTF_8);
+    var primary = service(log, 20, 1_024);
+    var cursor = primary.read(null, null, null).nextCursor();
+    var otherCursor = service(other, 20, 1_024).read(null, null, null).nextCursor();
+
+    Files.move(log, tempDir.resolve("application.log.1"));
+    Files.writeString(log, "WARN rotated\n", UTF_8);
+
+    var rotated = primary.read(cursor, null, null);
+    var crafted = primary.read(otherCursor, null, null);
+
+    assertThat(rotated.reset()).isTrue();
+    assertThat(rotated.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("WARN rotated");
+    assertThat(crafted.reset()).isTrue();
+    assertThat(crafted.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("WARN rotated");
+    assertThat(crafted.records()).allSatisfy(
+        record -> assertThat(record.text()).doesNotContain("other-secret"));
+  }
+
+  @Test
+  void truncationResetsCursorAndReadsTheReplacementContent() throws IOException {
+    Path log = writeLog("INFO a-long-original-line\nWARN second-original-line\n");
+    var service = service(log, 20, 1_024);
+    var cursor = service.read(null, null, null).nextCursor();
+    Files.writeString(log, "ERROR new\n", UTF_8, StandardOpenOption.TRUNCATE_EXISTING);
+
+    var page = service.read(cursor, null, null);
+
+    assertThat(page.reset()).isTrue();
+    assertThat(page.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("ERROR new");
+  }
+
+  @Test
+  void missingFileReturnsAnEmptyUnavailablePage() {
+    Path missing = tempDir.resolve("missing.log");
+
+    var page = service(missing, 20, 1_024).read(null, null, null);
+
+    assertThat(page.records()).isEmpty();
+    assertThat(page.nextCursor()).isEmpty();
+    assertThat(page.status()).isEqualTo("missing");
+  }
+
+  @Test
+  void malformedUtf8IsDecodedWithReplacementCharacters() throws IOException {
+    Path log = tempDir.resolve("application.log");
+    Files.write(log, new byte[] {'I', 'N', 'F', 'O', ' ', (byte) 0xC3, (byte) 0x28, '\n'});
+
+    var page = service(log, 20, 1_024).read(null, null, null);
+
+    assertThat(page.records()).singleElement().satisfies(
+        record -> assertThat(record.text()).contains("\uFFFD("));
+  }
+
+  @Test
+  void redactsAuthorizationCredentialsNamedSecretsAndJwts() throws IOException {
+    Path log = writeLog(
+        "INFO Authorization: Bearer bearer-value\n"
+            + "INFO password=hunter2 api_key: abc123 secret = hush token=tok-value\n"
+            + "INFO eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature\n");
+
+    var page = service(log, 20, 4_096).read(null, null, null);
+
+    assertThat(page.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .allSatisfy(text -> assertThat(text)
+            .doesNotContain("bearer-value", "hunter2", "abc123", "hush", "tok-value", "eyJ"));
+    assertThat(page.records().get(0).text()).contains("Authorization: Bearer [REDACTED]");
+    assertThat(page.records().get(1).text())
+        .contains("password=[REDACTED]", "api_key: [REDACTED]", "secret = [REDACTED]", "token=[REDACTED]");
+    assertThat(page.records().get(2).text()).contains("[REDACTED]");
+  }
+
+  private Path writeLog(String content) throws IOException {
+    Path log = tempDir.resolve("application.log");
+    Files.writeString(log, content, UTF_8);
+    return log;
+  }
+
+  private CommandCenterLogService service(Path logPath, int maxLines, int maxBytes) {
+    var properties = new CommandCenterProperties();
+    properties.setLogPath(logPath);
+    properties.setMaxLogLines(maxLines);
+    properties.setMaxLogBytes(maxBytes);
+    return new CommandCenterLogService(properties);
+  }
+
+  private int renderedBytes(CommandCenterLogService.LogPage page) {
+    return page.records().stream().mapToInt(record -> (record.text() + "\n").getBytes(UTF_8).length).sum();
+  }
+}
