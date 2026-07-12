@@ -21,6 +21,10 @@ Owns back-office administration views and cross-feature admin operations.
   line- and byte-bounded incremental tail, recover from rotation or truncation,
   and never return incomplete or oversized line fragments. Credentials are
   redacted before case-insensitive literal text and severity filters are applied.
+- Command-center host actions use a closed enum, fresh active-approved-admin
+  checks, password verification, single-use two-minute challenges, exact
+  confirmation phrases, throttling, cooldowns, and fixed simulated or Windows
+  argument arrays. Request values never become executables or command arguments.
 
 ## Update This Doc
 

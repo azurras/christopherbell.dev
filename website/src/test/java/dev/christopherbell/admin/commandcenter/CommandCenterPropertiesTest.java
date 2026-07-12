@@ -2,6 +2,8 @@ package dev.christopherbell.admin.commandcenter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.christopherbell.admin.commandcenter.action.SimulatedCommandExecutor;
+import dev.christopherbell.admin.commandcenter.action.WindowsCommandExecutor;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -47,6 +49,19 @@ class CommandCenterPropertiesTest {
 
     assertThat(properties.getActions().getMode())
         .isEqualTo(CommandCenterProperties.ActionMode.SIMULATED);
+  }
+
+  @Test
+  void selectsExecutorOnlyFromTheClosedConfiguredMode() {
+    var properties = new CommandCenterProperties();
+    var configuration = new CommandCenterConfiguration();
+
+    assertThat(configuration.commandExecutor(properties))
+        .isInstanceOf(SimulatedCommandExecutor.class);
+
+    properties.getActions().setMode(CommandCenterProperties.ActionMode.WINDOWS);
+    assertThat(configuration.commandExecutor(properties))
+        .isInstanceOf(WindowsCommandExecutor.class);
   }
 
   @Test
