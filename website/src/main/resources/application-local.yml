@@ -1,5 +1,8 @@
 server:
   port: 8081
+command-center:
+  actions:
+    mode: SIMULATED
 spring:
   mongodb:
     database: christopherbell

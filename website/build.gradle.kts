@@ -28,6 +28,10 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-web")
 
+    // Host metrics and Windows hardware sensors
+    implementation("com.github.oshi:oshi-core:7.4.0")
+    implementation("io.github.pandalxb:jLibreHardwareMonitor:1.0.6")
+
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
 
     // Rate Limiting

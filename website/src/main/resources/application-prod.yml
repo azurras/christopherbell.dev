@@ -23,3 +23,11 @@ app:
     secret: ${APP_JWT_SECRET:}
   mail:
     from: ${APP_MAIL_FROM:noreply@christopherbell.dev}
+command-center:
+  enabled: true
+  log-path: C:/ProgramData/christopherbell.dev/logs/ChristopherBellDev.out.log
+  actions:
+    mode: WINDOWS
+    win-sw-executable: C:/ProgramData/christopherbell.dev/service/ChristopherBellDev.exe
+    shutdown-executable: C:/Windows/System32/shutdown.exe
+    power-delay: 60s

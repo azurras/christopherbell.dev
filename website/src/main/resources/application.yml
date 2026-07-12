@@ -10,6 +10,28 @@ logging:
     root: INFO
     org.springframework: INFO
     dev.christopherbell: INFO
+command-center:
+  enabled: true
+  sample-interval: 5s
+  history-duration: 15m
+  provider-timeout: 2s
+  log-path: logs/application.log
+  max-log-lines: 250
+  max-log-bytes: 65536
+  actions:
+    mode: SIMULATED
+    win-sw-executable: ChristopherBellDev.exe
+    shutdown-executable: shutdown.exe
+    challenge-ttl: 2m
+    cooldown: 2m
+    power-delay: 60s
+    failed-attempts: 3
+    failed-attempt-window: 15m
+  thresholds:
+    cpu-warning-percent: 90
+    cpu-temperature-warning-celsius: 85
+    gpu-temperature-warning-celsius: 80
+    disk-free-warning-percent: 10
 app:
   jwt:
     secret: ${APP_JWT_SECRET:local-development-jwt-secret-change-me-at-least-32-bytes}
