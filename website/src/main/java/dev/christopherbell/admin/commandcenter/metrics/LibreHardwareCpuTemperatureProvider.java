@@ -5,12 +5,14 @@ import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.Metri
 import java.time.Instant;
 import java.util.Map;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** Publishes CPU temperature from the bounded LibreHardwareMonitor sensor client. */
 @Component
 public final class LibreHardwareCpuTemperatureProvider implements HostMetricsProvider {
   private final CpuTemperatureSensorClient client;
 
+  @Autowired
   public LibreHardwareCpuTemperatureProvider(LibreHardwareCpuTemperatureClient client) {
     this.client = client;
   }

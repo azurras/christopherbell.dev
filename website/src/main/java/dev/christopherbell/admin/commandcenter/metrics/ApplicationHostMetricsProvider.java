@@ -18,6 +18,7 @@ import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** Publishes fixed production-service and local application reachability metrics. */
 @Component
@@ -26,6 +27,7 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
   private final Instant applicationStartedAt;
   private final OperationalProbe probe;
 
+  @Autowired
   public ApplicationHostMetricsProvider(CommandCenterProperties properties, Clock clock) {
     this(properties, clock, new DefaultOperationalProbe(properties));
   }

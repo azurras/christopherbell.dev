@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** Reads NVIDIA GPU data with a fixed, bounded {@code nvidia-smi} invocation. */
 @Component
@@ -24,6 +25,7 @@ public class NvidiaMetricsProvider implements HostMetricsProvider {
   private final Duration timeout;
   private final CommandRunner commandRunner;
 
+  @Autowired
   public NvidiaMetricsProvider(CommandCenterProperties properties) {
     this("nvidia-smi", properties.getProviderTimeout(), NvidiaMetricsProvider::runCommand);
   }

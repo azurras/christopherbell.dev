@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /** Protects fixed host actions with fresh account checks and one-time challenges. */
@@ -55,6 +56,7 @@ public class CommandCenterActionService {
   private final Object actionStateLock = new Object();
   private final Object challengeStoreLock = new Object();
 
+  @Autowired
   public CommandCenterActionService(
       CommandCenterProperties properties,
       AccountRepository accountRepository,

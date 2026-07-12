@@ -7,6 +7,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.OptionalDouble;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** Owns a bounded PowerShell session and explicitly closes every native computer instance. */
 @Component
@@ -17,6 +18,7 @@ public final class LibreHardwareCpuTemperatureClient implements CpuTemperatureSe
   private SensorSession session;
   private SecureNativeLibraryProvisioner.NativeLibraries libraries;
 
+  @Autowired
   public LibreHardwareCpuTemperatureClient(CommandCenterProperties properties) {
     this(
         () -> new JPowerShellSession(PowerShell.openSession().configuration(Map.of(
