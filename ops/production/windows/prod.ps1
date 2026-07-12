@@ -9,7 +9,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $moduleRoot = Join-Path $PSScriptRoot 'modules'
-foreach ($module in 'Production.Deploy','Production.Install','Production.Operations','Production.AutoDeploy','Production.Common') {
+Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
+foreach ($module in 'Production.Deploy','Production.Install','Production.Operations','Production.AutoDeploy') {
     Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
 }
 

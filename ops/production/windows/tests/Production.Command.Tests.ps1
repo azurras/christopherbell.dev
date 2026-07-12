@@ -26,6 +26,18 @@ Describe 'native Windows production command surface' {
         }
     }
 
+    It 'keeps every command handler exported after loading all modules' {
+        $moduleRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\modules')).Path
+        Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
+        foreach ($module in 'Production.Deploy','Production.Install','Production.Operations','Production.AutoDeploy') {
+            Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
+        }
+
+        foreach ($command in 'Invoke-ProductionDeploy','Install-ProductionRuntime','Get-ProductionStatus','Install-AutoDeployTask','Show-ProductionHelp') {
+            Get-Command $command -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
+    }
+
     It 'does not expose the retired WSL migration command' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         $script = Get-Content (Join-Path $root 'ops\production\windows\prod.ps1') -Raw

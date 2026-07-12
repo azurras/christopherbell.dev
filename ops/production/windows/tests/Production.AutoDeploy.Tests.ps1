@@ -1,3 +1,6 @@
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.AutoDeploy.psm1') -Force
 
 Describe 'automatic origin main deployment' {

@@ -1,8 +1,5 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'Production.Common.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'Production.Deploy.psm1') -Force
-
 function Get-ProductionStatus {
     $config = Read-ProductionConfig
     $website = Get-Service ChristopherBellDev -ErrorAction SilentlyContinue

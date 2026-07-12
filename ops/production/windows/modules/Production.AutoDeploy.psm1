@@ -1,9 +1,5 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'Production.Common.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'Production.Install.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'Production.Deploy.psm1') -Force
-
 function New-AutoDeployState {
     [pscustomobject][ordered]@{ lastCheckedAt=$null; remoteSha=$null; attemptedSha=$null; successfulSha=$null; failedSha=$null; failedAt=$null; error=$null }
 }

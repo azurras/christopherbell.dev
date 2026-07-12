@@ -1,3 +1,4 @@
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
 
 Describe 'native Windows deployment' {
