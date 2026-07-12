@@ -12,6 +12,15 @@ Describe 'native Windows production command surface' {
         $LASTEXITCODE | Should -Be 0
     }
 
+    It 'does not expose the retired WSL migration command' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $script = Get-Content (Join-Path $root 'ops\production\windows\prod.ps1') -Raw
+        $help = & pwsh.exe -NoLogo -NoProfile -File (Join-Path $root 'ops\production\windows\prod.ps1') help
+        $script | Should -Not -Match "'migrate'"
+        ($help -join "`n") | Should -Not -Match '\bmigrate\b'
+        $script | Should -Not -Match 'Production\.Migrate'
+    }
+
     It 'rejects unknown commands' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         & pwsh.exe -NoLogo -NoProfile -File (Join-Path $root 'ops\production\windows\prod.ps1') unknown-command 2>$null
