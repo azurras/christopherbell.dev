@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -52,7 +53,6 @@ import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.test.context.TestSecurityContextHolder;
 import org.springframework.security.test.context.support.WithMockUser;
@@ -188,7 +188,7 @@ class CommandCenterControllerTest {
     when(actionService.createChallenge(eq(RESTART_SITE), any(HttpServletRequest.class))).thenReturn(
         new ActionChallenge("challenge-1", RESTART_SITE, NOW.plusSeconds(120), "RESTART SITE"));
 
-    mockMvc.perform(post(BASE + "/action-challenges")
+    mockMvc.perform(post(BASE + "/action-challenges").with(csrf())
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"action\":\"RESTART_SITE\"}"))
         .andExpect(status().isOk())
@@ -223,7 +223,7 @@ class CommandCenterControllerTest {
     when(actionService.execute(any(ActionConfirmation.class), any(HttpServletRequest.class)))
         .thenReturn(new ActionResult(RESTART_SITE, true, NOW, NOW.plusSeconds(2)));
 
-    mockMvc.perform(post(BASE + "/actions")
+    mockMvc.perform(post(BASE + "/actions").with(csrf())
             .contentType(MediaType.APPLICATION_JSON)
             .content("""
                 {"challengeId":"challenge-1","action":"RESTART_SITE",
@@ -244,7 +244,7 @@ class CommandCenterControllerTest {
     when(actionService.cancel(any(HttpServletRequest.class)))
         .thenReturn(new ActionResult(RESTART_SITE, true, NOW, NOW));
 
-    mockMvc.perform(post(BASE + "/actions/cancel"))
+    mockMvc.perform(post(BASE + "/actions/cancel").with(csrf()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.accepted").value(true));
@@ -266,7 +266,7 @@ class CommandCenterControllerTest {
   @DisplayName("Action challenge: missing action -> 400 without service call")
   @WithMockUser(authorities = "ADMIN")
   void challenge_whenActionMissing_returnsBadRequest() throws Exception {
-    mockMvc.perform(post(BASE + "/action-challenges")
+    mockMvc.perform(post(BASE + "/action-challenges").with(csrf())
             .contentType(MediaType.APPLICATION_JSON)
             .content("{}"))
         .andExpect(status().isBadRequest());
@@ -278,7 +278,7 @@ class CommandCenterControllerTest {
   @DisplayName("Action execute: blank protected fields -> 400 without service call")
   @WithMockUser(authorities = "ADMIN")
   void execute_whenRequiredFieldsBlank_returnsBadRequest() throws Exception {
-    mockMvc.perform(post(BASE + "/actions")
+    mockMvc.perform(post(BASE + "/actions").with(csrf())
             .contentType(MediaType.APPLICATION_JSON)
             .content("""
                 {"challengeId":"","action":"RESTART_SITE","password":"",
@@ -293,16 +293,16 @@ class CommandCenterControllerTest {
     return Stream.of(
         Arguments.of("snapshot", get(BASE + "/snapshot")),
         Arguments.of("logs", get(BASE + "/logs")),
-        Arguments.of("challenge", post(BASE + "/action-challenges")
+        Arguments.of("challenge", post(BASE + "/action-challenges").with(csrf())
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"action\":\"RESTART_SITE\"}")),
-        Arguments.of("execute", post(BASE + "/actions")
+        Arguments.of("execute", post(BASE + "/actions").with(csrf())
             .contentType(MediaType.APPLICATION_JSON)
             .content("""
                 {"challengeId":"challenge-1","action":"RESTART_SITE",
                  "password":"private","confirmationPhrase":"RESTART SITE"}
                 """)),
-        Arguments.of("cancel", post(BASE + "/actions/cancel")));
+        Arguments.of("cancel", post(BASE + "/actions/cancel").with(csrf())));
   }
 
   private Account admin(AccountStatus status, boolean approved) {
@@ -321,7 +321,6 @@ class CommandCenterControllerTest {
     @Bean
     SecurityFilterChain commandCenterTestSecurityFilterChain(HttpSecurity http) throws Exception {
       return http
-          .csrf(AbstractHttpConfigurer::disable)
           .exceptionHandling(exceptions -> exceptions
               .authenticationEntryPoint((request, response, exception) -> response.sendError(401))
               .accessDeniedHandler((request, response, exception) -> response.sendError(403)))

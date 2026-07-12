@@ -341,7 +341,8 @@ public class CommandCenterLogService {
       return;
     }
     int prefixLength = Math.min(budget, (budget + 1) / 2);
-    int suffixLength = Math.min(budget - prefixLength, (int) offset - prefixLength);
+    int suffixLength = Math.toIntExact(
+        Math.min((long) budget - prefixLength, offset - prefixLength));
     try (var file = new RandomAccessFile(path.toFile(), "r")) {
       byte[] prefix = new byte[prefixLength];
       file.readFully(prefix);
