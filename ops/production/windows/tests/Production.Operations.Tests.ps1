@@ -10,7 +10,7 @@ Describe 'native Windows production operations' {
                 [pscustomobject]@{
                     State = 'Ready'
                     Principal = [pscustomobject]@{ UserId='SYSTEM'; LogonType='ServiceAccount'; RunLevel='Highest' }
-                    Triggers = @([pscustomobject]@{ CimClass=[pscustomobject]@{ CimClassName='MSFT_TaskBootTrigger' } })
+                    Triggers = @([pscustomobject]@{ Enabled=$true; CimClass=[pscustomobject]@{ CimClassName='MSFT_TaskBootTrigger' } })
                     Actions = @([pscustomobject]@{
                         Execute = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
                         Arguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$ProgramDataRoot\tools\prod.ps1`" auto-deploy"
@@ -64,6 +64,13 @@ Describe 'native Windows production operations' {
             $task.Triggers[0].CimClass.CimClassName = 'MSFT_TaskLogonTrigger'
             $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60 }
             { Assert-AutoDeployTaskContract -Task $task -Config $config } | Should -Throw '*startup trigger*'
+        }
+
+        It 'rejects an automatic deployment task with a disabled boot trigger' {
+            $task = New-ValidStartupTask
+            $task.Triggers[0].Enabled = $false
+            $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60 }
+            { Assert-AutoDeployTaskContract -Task $task -Config $config } | Should -Throw '*enabled startup trigger*'
         }
 
         It 'rejects an automatic deployment task with the wrong action' {

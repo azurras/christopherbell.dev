@@ -106,8 +106,14 @@ function Assert-AutoDeployTaskContract {
         [string]$Task.Principal.RunLevel -ne 'Highest') {
         throw 'ChristopherBellAutoDeploy must run as SYSTEM with ServiceAccount logon and Highest privileges.'
     }
-    $startupTrigger = @($Task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskBootTrigger' })
-    if ($startupTrigger.Count -ne 1) { throw 'ChristopherBellAutoDeploy must have exactly one startup trigger.' }
+    $triggers = @($Task.Triggers)
+    $startupTrigger = @($triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskBootTrigger' })
+    if ($triggers.Count -ne 1 -or $startupTrigger.Count -ne 1) {
+        throw 'ChristopherBellAutoDeploy must have exactly one startup trigger.'
+    }
+    if (-not $startupTrigger[0].Enabled) {
+        throw 'ChristopherBellAutoDeploy must have an enabled startup trigger.'
+    }
     $actions = @($Task.Actions)
     if ($actions.Count -ne 1) { throw 'ChristopherBellAutoDeploy must have exactly one action.' }
     $expectedPowerShell = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
