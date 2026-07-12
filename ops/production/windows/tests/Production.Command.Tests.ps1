@@ -12,6 +12,20 @@ Describe 'native Windows production command surface' {
         $LASTEXITCODE | Should -Be 0
     }
 
+    It 'launches with PowerShell 7 when pwsh is not on PATH' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $originalPath = $env:PATH
+        try {
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+            $output = & "$env:SystemRoot\System32\cmd.exe" /d /c (Join-Path $root 'prod.cmd') help
+            ($output -join "`n") | Should -Match 'auto-install'
+            $LASTEXITCODE | Should -Be 0
+        }
+        finally {
+            $env:PATH = $originalPath
+        }
+    }
+
     It 'does not expose the retired WSL migration command' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         $script = Get-Content (Join-Path $root 'ops\production\windows\prod.ps1') -Raw
