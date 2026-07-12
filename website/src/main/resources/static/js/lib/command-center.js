@@ -46,6 +46,56 @@ export function shouldPoll(documentHidden, paused) {
   return !documentHidden && !paused;
 }
 
+/** Decide whether a poll request starts, queues behind the active request, or is ignored. */
+export function pollRequestDecision({ hidden, revoked, inFlight }) {
+  if (hidden || revoked) return 'ignore';
+  return inFlight ? 'queue' : 'start';
+}
+
+/** Classify poll failures without allowing stale generations to mask access loss. */
+export function pollFailureDecision(error, current) {
+  if (isAccessDenied(error)) return 'revoke';
+  if (error?.name === 'AbortError' || !current) return 'ignore';
+  return 'retry';
+}
+
+/** Identify authorization failures that require tearing down the private console. */
+export function isAccessDenied(error) {
+  return error?.status === 401 || error?.status === 403;
+}
+
+/**
+ * Decide whether a log page still belongs to the active filter/poll generation.
+ * Returned cursor presence is significant: an explicit empty cursor resets state.
+ */
+export function nextLogPageState(state, request, page) {
+  if (request.generation !== state.generation || request.cursor !== state.cursor) {
+    return { ...state, apply: false };
+  }
+  const cursor = Object.hasOwn(page, 'nextCursor') ? page.nextCursor : state.cursor;
+  const records = Array.isArray(page.records) ? page.records : [];
+  if (records.length > 0 && cursor === state.cursor && state.lastAppliedNextCursor === cursor) {
+    return { ...state, apply: false };
+  }
+  return {
+    apply: true,
+    generation: state.generation,
+    cursor,
+    lastAppliedNextCursor: cursor,
+  };
+}
+
+/** Clear every sensitive or transient value owned by the native action dialog. */
+export function clearActionDialogState({
+  passwordInput, phraseInput, requiredPhrase, dialogStatus,
+}) {
+  passwordInput.value = '';
+  phraseInput.value = '';
+  requiredPhrase.textContent = '';
+  dialogStatus.textContent = '';
+  return null;
+}
+
 /** Calculate a stable pending-action countdown from an absolute execution time. */
 export function actionCountdown(executeAt, now = Date.now(), cancellable = false) {
   const remaining = Date.parse(executeAt) - Number(now);

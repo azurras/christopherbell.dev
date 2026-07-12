@@ -334,14 +334,14 @@ public class CommandCenterLogService {
     ERROR;
 
     private static LogLevel parse(String value) {
-      if (value == null || value.isBlank()) {
+      if (value == null || value.isBlank() || "ALL".equalsIgnoreCase(value)) {
         return null;
       }
       try {
         return valueOf(value.toUpperCase(Locale.ROOT));
       } catch (IllegalArgumentException exception) {
         throw new IllegalArgumentException(
-            "Log level must be TRACE, DEBUG, INFO, WARN, or ERROR", exception);
+            "Log level must be ALL, TRACE, DEBUG, INFO, WARN, or ERROR", exception);
       }
     }
   }

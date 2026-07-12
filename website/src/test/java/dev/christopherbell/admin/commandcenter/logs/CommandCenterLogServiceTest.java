@@ -101,6 +101,16 @@ class CommandCenterLogServiceTest {
   }
 
   @Test
+  void allLevelAppliesNoSeverityFilter() throws IOException {
+    Path log = writeLog("TRACE t\nDEBUG d\nINFO i\nWARN w\nERROR e\nNOTICE n\n");
+
+    var page = service(log, 20, 1_024).read(null, "ALL", null);
+
+    assertThat(page.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("TRACE t", "DEBUG d", "INFO i", "WARN w", "ERROR e", "NOTICE n");
+  }
+
+  @Test
   void invalidCursorResetsToTheCurrentTail() throws IOException {
     Path log = writeLog("INFO current\n");
 

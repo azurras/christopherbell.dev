@@ -124,7 +124,8 @@ export function clearAuthState() {
 /**
  * Fetch JSON from an endpoint and return the payload.
  * Throws an Error when HTTP status is not OK or when the
- * API envelope indicates success=false.
+ * API envelope indicates success=false. HTTP failures preserve their numeric
+ * status on the thrown Error so protected pages can distinguish access loss.
  *
  * Set redirectOnUnauthorized when a protected page should send the visitor to
  * the login page. Public pages should receive the error without navigation so
@@ -147,12 +148,16 @@ export async function fetchJson(url, options = {}) {
     if (redirectOnUnauthorized && !window.location.pathname.startsWith('/login')) {
       window.location.href = loginRedirectUrl();
     }
-    throw new Error('Authentication required.');
+    const error = new Error('Authentication required.');
+    error.status = resp.status;
+    throw error;
   }
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok || data.success === false) {
     const msg = data?.messages?.[0]?.description || `Request failed: ${resp.status}`;
-    throw new Error(msg);
+    const error = new Error(msg);
+    error.status = resp.status;
+    throw error;
   }
   return data.payload ?? data;
 }

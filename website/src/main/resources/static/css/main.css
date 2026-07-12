@@ -204,6 +204,7 @@ body {
 .command-action-dialog::backdrop { background: rgba(0, 0, 0, 0.78); }
 .command-action-dialog label { display: block; margin-top: 0.8rem; }
 .command-action-dialog .form-control { color: #effbf5; border-color: #4c655b; background: #060b09; }
+.command-dialog-status { min-height: 1.5rem; margin-top: 0.75rem; color: #ffd1d5; }
 .command-dialog-actions { justify-content: flex-end; gap: 0.65rem; margin-top: 1rem; }
 
 .command-center-page button:focus-visible,

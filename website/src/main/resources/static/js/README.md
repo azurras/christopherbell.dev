@@ -99,7 +99,8 @@ Owns browser-side behavior for server-rendered pages.
   fresh account-role check, then renders protected host metrics, 15-minute
   sparklines, delayed text-only logs, and challenged fixed recovery actions.
   `lib/command-center.js` owns its pure formatting, countdown, visibility, and
-  bounded polling helpers.
+  bounded polling helpers. Poll generations abort and invalidate stale requests,
+  while any later 401/403 tears down and hides the console before redirecting.
 
 ## Design Notes
 

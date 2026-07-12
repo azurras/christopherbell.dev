@@ -3,9 +3,14 @@ import { authHeaders, fetchJson } from './lib/util.js';
 import {
   ACTION_PHRASES,
   actionCountdown,
+  clearActionDialogState,
   displayMetric,
+  isAccessDenied,
   metricState,
+  nextLogPageState,
   nextPollDelay,
+  pollFailureDecision,
+  pollRequestDecision,
   shouldPoll,
 } from './lib/command-center.js';
 
@@ -29,6 +34,7 @@ const phraseInput = document.querySelector('#commandActionPhrase');
 const requiredPhrase = document.querySelector('#commandRequiredPhrase');
 const actionSubmit = document.querySelector('#commandActionSubmit');
 const actionStatus = document.querySelector('#commandActionStatus');
+const dialogStatus = document.querySelector('#commandDialogStatus');
 const pendingPanel = document.querySelector('#commandPendingAction');
 const pendingText = document.querySelector('#commandPendingText');
 const cancelAction = document.querySelector('#commandCancelAction');
@@ -38,10 +44,15 @@ let sampleTimer;
 let searchTimer;
 let failures = 0;
 let logsPaused = false;
-let logCursor = null;
+let logState = { generation: 0, cursor: null, lastAppliedNextCursor: undefined };
 let latestSnapshot = null;
 let currentChallenge = null;
 let actionInFlight = false;
+let pollGeneration = 0;
+let pollController = null;
+let pollInFlight = false;
+let pollRequested = false;
+let accessRevoked = false;
 
 function redirectLostSignal() {
   window.location.replace('/404');
@@ -54,18 +65,17 @@ async function gateCommandCenter() {
     return;
   }
   try {
-    const response = await fetch(API.accounts.me, { headers: authHeaders() });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || body?.payload?.role !== 'ADMIN') {
-      redirectLostSignal();
+    const account = await fetchJson(API.accounts.me, { headers: authHeaders() });
+    if (account?.role !== 'ADMIN') {
+      revokeCommandCenterAccess();
       return;
     }
     localStorage.setItem('cbellRole', 'ADMIN');
     root.classList.remove('d-none');
     wireControls();
     await pollNow();
-  } catch (_) {
-    redirectLostSignal();
+  } catch (error) {
+    revokeCommandCenterAccess(error);
   }
 }
 
@@ -75,22 +85,29 @@ function wireControls() {
     logPause.textContent = logsPaused ? 'Resume' : 'Pause';
     logPause.setAttribute('aria-pressed', String(logsPaused));
     logStatus.textContent = logsPaused ? 'Log stream paused' : 'Log stream resumed';
-    if (!logsPaused && !document.hidden) pollNow();
+    restartPollGeneration();
   });
   logLevel.addEventListener('change', resetLogStream);
   logQuery.addEventListener('input', () => {
     window.clearTimeout(searchTimer);
-    searchTimer = window.setTimeout(resetLogStream, 300);
+    invalidateLogStream();
+    searchTimer = window.setTimeout(requestPoll, 300);
   });
   document.querySelector('#commandLogClear').addEventListener('click', () => {
     logOutput.replaceChildren();
     logStatus.textContent = 'Visible log records cleared';
+    restartPollGeneration();
   });
   document.querySelector('#commandLogCopy').addEventListener('click', copyVisibleLogs);
   document.querySelectorAll('[data-command-action]').forEach(button => {
     button.addEventListener('click', () => openActionDialog(button.dataset.commandAction));
   });
   document.querySelector('#commandActionDismiss').addEventListener('click', closeActionDialog);
+  actionDialog.addEventListener('cancel', event => {
+    event.preventDefault();
+    closeActionDialog();
+  });
+  actionDialog.addEventListener('close', clearDialogState);
   actionForm.addEventListener('submit', confirmAction);
   cancelAction.addEventListener('click', cancelPendingAction);
   document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -98,9 +115,14 @@ function wireControls() {
 }
 
 function resetLogStream() {
-  logCursor = null;
+  invalidateLogStream();
+  requestPoll();
+}
+
+function invalidateLogStream() {
+  invalidatePoll(false);
+  logState = { generation: pollGeneration, cursor: null, lastAppliedNextCursor: undefined };
   logOutput.replaceChildren();
-  if (!logsPaused && !document.hidden) pollNow();
 }
 
 async function copyVisibleLogs() {
@@ -113,31 +135,107 @@ async function copyVisibleLogs() {
 }
 
 function handleVisibilityChange() {
-  window.clearTimeout(pollTimer);
+  invalidatePoll(false);
   if (document.hidden) {
     connectionStatus.textContent = 'Mission Control polling paused while this tab is hidden';
     return;
   }
   connectionStatus.textContent = 'Mission Control polling resumed';
-  pollNow();
+  logState = { ...logState, generation: pollGeneration };
+  requestPoll();
 }
 
 async function pollNow() {
   window.clearTimeout(pollTimer);
-  if (!shouldPoll(document.hidden, false)) return;
+  const decision = pollRequestDecision({
+    hidden: document.hidden, revoked: accessRevoked, inFlight: pollInFlight,
+  });
+  if (decision === 'ignore') return;
+  if (decision === 'queue') {
+    pollRequested = true;
+    return;
+  }
+  pollInFlight = true;
+  pollRequested = false;
+  const generation = pollGeneration;
+  const controller = new AbortController();
+  pollController = controller;
   try {
-    const snapshot = await fetchJson(API.admin.commandCenter.snapshot, { headers: authHeaders() });
+    const snapshot = await fetchJson(API.admin.commandCenter.snapshot, {
+      headers: authHeaders(), signal: controller.signal,
+    });
+    if (!isCurrentPoll(generation, controller)) return;
     latestSnapshot = snapshot;
     failures = 0;
     renderSnapshot(snapshot);
     connectionStatus.textContent = 'Mission Control connected';
-    if (shouldPoll(document.hidden, logsPaused)) await pollLogs();
+    if (shouldPoll(document.hidden, logsPaused)) await pollLogs(generation, controller);
   } catch (error) {
-    failures += 1;
-    renderOffline(error);
+    const failureDecision = pollFailureDecision(error, isCurrentPoll(generation, controller));
+    if (failureDecision === 'revoke') {
+      revokeCommandCenterAccess(error);
+    } else if (failureDecision === 'retry') {
+      failures += 1;
+      renderOffline(error);
+    }
   } finally {
-    if (!document.hidden) pollTimer = window.setTimeout(pollNow, nextPollDelay(failures));
+    if (pollController === controller) pollController = null;
+    pollInFlight = false;
+    if (accessRevoked || document.hidden) return;
+    if (pollRequested) {
+      pollRequested = false;
+      queueMicrotask(pollNow);
+    } else {
+      pollTimer = window.setTimeout(pollNow, nextPollDelay(failures));
+    }
   }
+}
+
+function isCurrentPoll(generation, controller) {
+  return !accessRevoked && generation === pollGeneration
+    && pollController === controller && !controller.signal.aborted;
+}
+
+function invalidatePoll(restart = true) {
+  pollGeneration += 1;
+  window.clearTimeout(pollTimer);
+  pollRequested = restart && !document.hidden && !accessRevoked;
+  pollController?.abort();
+  if (!pollInFlight && pollRequested) requestPoll();
+}
+
+function restartPollGeneration() {
+  invalidatePoll(false);
+  logState = { ...logState, generation: pollGeneration };
+  requestPoll();
+}
+
+function requestPoll() {
+  if (accessRevoked || document.hidden) return;
+  if (pollInFlight) {
+    pollRequested = true;
+    return;
+  }
+  pollRequested = false;
+  void pollNow();
+}
+
+function handleRequestFailure(error) {
+  if (!isAccessDenied(error)) return false;
+  revokeCommandCenterAccess(error);
+  return true;
+}
+
+function revokeCommandCenterAccess() {
+  if (accessRevoked) return;
+  accessRevoked = true;
+  root.classList.add('d-none');
+  invalidatePoll(false);
+  window.clearInterval(sampleTimer);
+  window.clearTimeout(searchTimer);
+  clearDialogState();
+  if (actionDialog.open) actionDialog.close();
+  redirectLostSignal();
 }
 
 function renderOffline(error) {
@@ -222,17 +320,29 @@ function sparkline(points, label) {
   return svg;
 }
 
-async function pollLogs() {
+async function pollLogs(generation, controller) {
+  const request = { generation, cursor: logState.cursor };
   const params = new URLSearchParams({ level: logLevel.value, query: logQuery.value });
-  if (logCursor) params.set('cursor', logCursor);
+  if (request.cursor) params.set('cursor', request.cursor);
   try {
-    const page = await fetchJson(`${API.admin.commandCenter.logs}?${params}`, { headers: authHeaders() });
+    const page = await fetchJson(`${API.admin.commandCenter.logs}?${params}`, {
+      headers: authHeaders(), signal: controller.signal,
+    });
+    if (!isCurrentPoll(generation, controller)) return;
+    const decision = nextLogPageState(logState, request, page);
+    if (!decision.apply) return;
     if (page.reset) logOutput.replaceChildren();
     (page.records || []).forEach(appendLogRecord);
-    logCursor = page.nextCursor || logCursor;
+    logState = {
+      generation: decision.generation,
+      cursor: decision.cursor,
+      lastAppliedNextCursor: decision.lastAppliedNextCursor,
+    };
     logStatus.textContent = page.status || `${(page.records || []).length} new records`;
     if (logAutoscroll.checked) logOutput.scrollTop = logOutput.scrollHeight;
   } catch (error) {
+    if (error?.name === 'AbortError') return;
+    if (handleRequestFailure(error)) return;
     logStatus.textContent = error?.message || 'Log stream unavailable';
   }
 }
@@ -247,6 +357,7 @@ function appendLogRecord(record) {
 
 async function openActionDialog(action) {
   if (actionInFlight || !Object.hasOwn(ACTION_PHRASES, action)) return;
+  clearDialogState();
   actionStatus.textContent = 'Requesting a fresh action challenge…';
   try {
     currentChallenge = await fetchJson(API.admin.commandCenter.challenges, {
@@ -259,15 +370,20 @@ async function openActionDialog(action) {
     actionDialog.showModal();
     passwordInput.focus();
   } catch (error) {
+    if (handleRequestFailure(error)) return;
     actionStatus.textContent = error?.message || 'Unable to create action challenge';
   }
 }
 
 function closeActionDialog() {
-  currentChallenge = null;
-  passwordInput.value = '';
-  phraseInput.value = '';
-  actionDialog.close();
+  clearDialogState();
+  if (actionDialog.open) actionDialog.close();
+}
+
+function clearDialogState() {
+  currentChallenge = clearActionDialogState({
+    passwordInput, phraseInput, requiredPhrase, dialogStatus,
+  });
 }
 
 async function confirmAction(event) {
@@ -277,7 +393,7 @@ async function confirmAction(event) {
   passwordInput.value = '';
   const confirmationPhrase = phraseInput.value;
   if (confirmationPhrase !== currentChallenge.confirmationPhrase) {
-    actionStatus.textContent = 'The confirmation phrase must match exactly.';
+    dialogStatus.textContent = 'The confirmation phrase must match exactly.';
     phraseInput.focus();
     return;
   }
@@ -295,9 +411,10 @@ async function confirmAction(event) {
     });
     actionStatus.textContent = `${String(result.action).replaceAll('_', ' ')} accepted.`;
     closeActionDialog();
-    await pollNow();
+    restartPollGeneration();
   } catch (error) {
-    actionStatus.textContent = error?.message || 'Action was not accepted';
+    if (handleRequestFailure(error)) return;
+    dialogStatus.textContent = error?.message || 'Action was not accepted';
   } finally {
     actionInFlight = false;
     actionSubmit.disabled = false;
@@ -324,8 +441,9 @@ async function cancelPendingAction() {
   try {
     await fetchJson(API.admin.commandCenter.cancel, { method: 'POST', headers: authHeaders() });
     actionStatus.textContent = 'Pending machine action cancelled.';
-    await pollNow();
+    restartPollGeneration();
   } catch (error) {
+    if (handleRequestFailure(error)) return;
     actionStatus.textContent = error?.message || 'Unable to cancel pending action';
   } finally {
     actionInFlight = false;

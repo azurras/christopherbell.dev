@@ -35,9 +35,11 @@ test('command center shell exposes labelled regions and an accessible action dia
   assert.match(html, /<dialog[^>]+id="commandActionDialog"/);
   assert.match(html, /<label[^>]+for="commandActionPassword"/);
   assert.match(html, /<label[^>]+for="commandActionPhrase"/);
+  assert.match(html, /id="commandDialogStatus"[^>]+aria-live="assertive"/);
   assert.match(html, /aria-label="Server log level"/);
   assert.match(html, /aria-label="Search server logs literally"/);
   assert.match(html, /id="commandDangerZone"/);
+  assert.match(html, /<div class="command-center-health">\s*<div[^>]+aria-live="polite"[^>]*>\s*<span id="commandHealthBadge"[\s\S]*?<\/div>\s*<span id="commandSampleAge"/);
   assert.match(css, /\.command-center-page button:focus-visible/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });

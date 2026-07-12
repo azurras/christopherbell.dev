@@ -18,8 +18,10 @@
           <h1 id="commandCenterTitle">Mission Control</h1>
           <p>Private host telemetry, delayed server logs, and protected recovery controls.</p>
         </div>
-        <div class="command-center-health" aria-live="polite" aria-atomic="true">
-          <span id="commandHealthBadge" class="command-health-badge is-offline">Connecting</span>
+        <div class="command-center-health">
+          <div aria-live="polite" aria-atomic="true">
+            <span id="commandHealthBadge" class="command-health-badge is-offline">Connecting</span>
+          </div>
           <span id="commandSampleAge">No sample</span>
         </div>
       </header>
@@ -94,6 +96,7 @@
       <input id="commandActionPassword" name="password" class="form-control" type="password" autocomplete="current-password" required />
       <label for="commandActionPhrase">Confirmation phrase</label>
       <input id="commandActionPhrase" name="confirmationPhrase" class="form-control" autocomplete="off" required />
+      <div id="commandDialogStatus" class="command-dialog-status" aria-live="assertive"></div>
       <div class="command-dialog-actions">
         <button id="commandActionDismiss" class="btn btn-outline-secondary" type="button">Cancel</button>
         <button id="commandActionSubmit" class="btn btn-danger" type="submit">Confirm action</button>
