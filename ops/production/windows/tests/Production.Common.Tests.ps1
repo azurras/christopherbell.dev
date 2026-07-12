@@ -91,4 +91,9 @@ Describe 'production common operations' {
         try { Invoke-CheckedProcess -FilePath 'cmd.exe' -ArgumentList @('/d','/c','echo sensitive-child-output 1>&2 & exit /b 7') -WorkingDirectory $TestDrive }
         catch { $_.Exception.Message | Should -Not -Match 'sensitive-child-output' }
     }
+
+    It 'scopes Git repository trust to each production command' {
+        $arguments = Get-TrustedGitArguments -RepositoryPath 'A:\Projects\christopherbell.dev' -ArgumentList @('status','--short')
+        $arguments | Should -Be @('-c','safe.directory=A:/Projects/christopherbell.dev','-C','A:\Projects\christopherbell.dev','status','--short')
+    }
 }

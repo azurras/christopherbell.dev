@@ -2,8 +2,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 function Resolve-OriginMainRelease {
     param($Config)
-    Invoke-CheckedProcess -FilePath 'git.exe' -ArgumentList @('-C',$Config.repositoryPath,'fetch','--prune',$Config.remote,$Config.branch) -WorkingDirectory $Config.repositoryPath | Out-Null
-    $sha = (Invoke-CheckedProcess -FilePath 'git.exe' -ArgumentList @('-C',$Config.repositoryPath,'rev-parse',"$($Config.remote)/$($Config.branch)") -WorkingDirectory $Config.repositoryPath).Trim()
+    $fetchArguments = Get-TrustedGitArguments $Config.repositoryPath @('fetch','--prune',$Config.remote,$Config.branch)
+    Invoke-CheckedProcess -FilePath 'git.exe' -ArgumentList $fetchArguments -WorkingDirectory $Config.repositoryPath | Out-Null
+    $resolveArguments = Get-TrustedGitArguments $Config.repositoryPath @('rev-parse',"$($Config.remote)/$($Config.branch)")
+    $sha = (Invoke-CheckedProcess -FilePath 'git.exe' -ArgumentList $resolveArguments -WorkingDirectory $Config.repositoryPath).Trim()
     if ($sha -notmatch '^[0-9a-f]{40}$') { throw 'Fetched origin/main did not resolve to a full Git SHA.' }
     return $sha
 }
@@ -16,7 +18,8 @@ function New-ReleaseFromOriginMain {
     if (Test-Path -LiteralPath $release -PathType Container) { return $release }
     New-Item -ItemType Directory -Force (Split-Path -Parent $worktree),(Split-Path -Parent $release) | Out-Null
     try {
-        Invoke-CheckedProcess 'git.exe' @('-C',$Config.repositoryPath,'worktree','add','--detach',$worktree,$Sha) $Config.repositoryPath | Out-Null
+        $addArguments = Get-TrustedGitArguments $Config.repositoryPath @('worktree','add','--detach',$worktree,$Sha)
+        Invoke-CheckedProcess 'git.exe' $addArguments $Config.repositoryPath | Out-Null
         $environment = @{ GRADLE_USER_HOME=(Join-Path $Config.programDataRoot 'gradle-home'); NODE_EXE=$Config.nodeExe }
         Invoke-CheckedProcess (Join-Path $worktree 'gradlew.bat') @('--no-daemon',':website:build') $worktree $environment | Out-Null
         $jars = @(Get-ChildItem (Join-Path $worktree 'website\build\libs') -Filter '*.jar' | Where-Object Name -NotLike '*-plain.jar')
@@ -31,9 +34,15 @@ function New-ReleaseFromOriginMain {
     } finally {
         if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
         if (Test-Path -LiteralPath $worktree) {
-            try { Invoke-CheckedProcess 'git.exe' @('-C',$Config.repositoryPath,'worktree','remove','--force',$worktree) $Config.repositoryPath | Out-Null } catch { }
+            try {
+                $removeArguments = Get-TrustedGitArguments $Config.repositoryPath @('worktree','remove','--force',$worktree)
+                Invoke-CheckedProcess 'git.exe' $removeArguments $Config.repositoryPath | Out-Null
+            } catch { }
         }
-        try { Invoke-CheckedProcess 'git.exe' @('-C',$Config.repositoryPath,'worktree','prune') $Config.repositoryPath | Out-Null } catch { }
+        try {
+            $pruneArguments = Get-TrustedGitArguments $Config.repositoryPath @('worktree','prune')
+            Invoke-CheckedProcess 'git.exe' $pruneArguments $Config.repositoryPath | Out-Null
+        } catch { }
     }
 }
 

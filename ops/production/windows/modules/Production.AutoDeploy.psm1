@@ -25,7 +25,8 @@ function Write-AutoDeployState {
 
 function Get-RemoteMainSha {
     param($Config)
-    $output = Invoke-CheckedProcess 'git.exe' @('-C',$Config.repositoryPath,'ls-remote',$Config.remote,"refs/heads/$($Config.branch)") $Config.repositoryPath
+    $arguments = Get-TrustedGitArguments $Config.repositoryPath @('ls-remote',$Config.remote,"refs/heads/$($Config.branch)")
+    $output = Invoke-CheckedProcess 'git.exe' $arguments $Config.repositoryPath
     $sha = (($output.Trim() -split '\s+')[0]).ToLowerInvariant()
     if ($sha -notmatch '^[0-9a-f]{40}$') { throw 'Remote main returned an invalid SHA.' }
     return $sha
