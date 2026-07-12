@@ -35,6 +35,21 @@ public class AdminActivityService {
         .map(account -> account.getUsername() == null ? actorId : account.getUsername())
         .orElse(actorId);
 
+    return recordForActor(
+        actorId, actorUsername, action, targetType, targetId, targetLabel, message, metadata);
+  }
+
+  /** Records an outcome for an explicitly captured actor outside request security context. */
+  public AdminActivity recordForActor(
+      String actorId,
+      String actorUsername,
+      String action,
+      String targetType,
+      String targetId,
+      String targetLabel,
+      String message,
+      Map<String, String> metadata
+  ) {
     return adminActivityRepository.save(AdminActivity.builder()
         .actorAccountId(actorId)
         .actorUsername(actorUsername)
@@ -43,7 +58,7 @@ public class AdminActivityService {
         .targetId(targetId)
         .targetLabel(targetLabel)
         .message(message.formatted(actorUsername))
-        .metadata(metadata)
+        .metadata(Map.copyOf(metadata))
         .createdOn(Instant.now(clock))
         .build());
   }

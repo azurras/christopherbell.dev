@@ -41,6 +41,12 @@ Owns site styling for server-rendered pages and frontend components.
   latest-price summary, responsive data-quality summary grids, chart panels,
   selected-metro trend panel, official API curl verification block, and
   clickable metro sample table.
+- Mission Control styling is owned by the `.command-*` classes in `main.css`:
+  the initially hidden admin-gated shell, phone-first telemetry grid, explicit
+  available/stale/unavailable states, 15-minute sparklines, alert strip, delayed
+  text log console, pending-action countdown, native accessible challenge dialog,
+  and visually separate danger zone. Its responsive rules preserve readable log
+  controls and action targets on narrow screens.
 - Void-related templates opt into `void-shell-page`; `main.css` owns the Lost
   Signal shell, Void-aware nav/footer treatment, shared lifespan countdown
   styling, rich post link preview cards, allowlisted media embeds, grouped post

@@ -39,6 +39,8 @@ const {
   toolsMenuItems
 } = await import('../../main/resources/static/js/components/nav.js');
 
+const { adminMenuItems } = await import('../../main/resources/static/js/components/nav.js');
+
 test('messages nav link sends signed-out users to login and back to messages', () => {
   assert.equal(messagesNavHref(false), '/login?redirect=%2Fmessages');
 });
@@ -113,4 +115,12 @@ test('hideNavPanel closes a nav panel and resets the trigger state', () => {
 
   assert.equal(classes.has('show'), false);
   assert.equal(triggerAttributes['aria-expanded'], 'false');
+});
+
+test('admin menu alone exposes back office and command center', () => {
+  assert.deepEqual(adminMenuItems(false), []);
+  assert.deepEqual(adminMenuItems(true), [
+    { href: '/back-office', label: 'Back Office' },
+    { href: '/command-center', label: 'Command Center' },
+  ]);
 });

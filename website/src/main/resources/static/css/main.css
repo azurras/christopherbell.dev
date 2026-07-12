@@ -6,6 +6,238 @@ body {
     /*padding-top: 3.5rem;*/
 }
 
+/* Mission Control: private, phone-first operational console. */
+.command-center-page {
+    background: #070b0d;
+    color: #e8f4ee;
+}
+
+.command-center-main {
+    min-height: 100vh;
+    background: radial-gradient(circle at 80% 0, rgba(35, 110, 76, 0.18), transparent 38%), #070b0d;
+}
+
+.command-center-shell {
+    width: min(100%, 1440px);
+    margin: 0 auto;
+    padding: 1rem;
+}
+
+.command-center-hero,
+.command-section-heading,
+.command-center-health,
+.command-log-controls,
+.command-danger-actions,
+.command-dialog-actions,
+.command-pending-action {
+    display: flex;
+    align-items: center;
+}
+
+.command-center-hero,
+.command-section-heading {
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.command-center-hero {
+    align-items: flex-start;
+    padding: 1.1rem 0 1.4rem;
+    border-bottom: 1px solid #274038;
+}
+
+.command-center-hero h1,
+.command-section-heading h2 {
+    margin: 0;
+    color: #f5fff9;
+}
+
+.command-center-hero p:last-child,
+.command-danger-zone > p,
+.command-metric-status,
+.command-metric-card small,
+#commandSampleAge,
+#commandVersion,
+#commandLogStatus {
+    color: #9ab0a7;
+}
+
+.command-center-health {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.35rem;
+    text-align: right;
+}
+
+.command-health-badge {
+    display: inline-flex;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font: 700 0.75rem/1 monospace;
+    letter-spacing: 0.08em;
+}
+
+.command-health-badge.is-healthy { color: #50e39b; }
+.command-health-badge.is-degraded,
+.command-health-badge.is-action-pending { color: #ffc85c; }
+.command-health-badge.is-offline { color: #ff7785; }
+
+.command-alert-strip {
+    margin: 1rem 0;
+    padding: 0.75rem 1rem;
+    border-left: 3px solid #ffc85c;
+    background: #211b0e;
+}
+
+.command-alert { margin: 0.25rem 0; }
+.command-alert.severity-error { color: #ff9aa4; }
+
+.command-section-heading {
+    margin: 1.35rem 0 0.8rem;
+}
+
+.command-metric-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+}
+
+.command-metric-card,
+.command-log-panel,
+.command-danger-zone {
+    border: 1px solid #223a32;
+    border-radius: 6px;
+    background: rgba(13, 23, 20, 0.96);
+}
+
+.command-metric-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.35rem 0.75rem;
+    min-width: 0;
+    padding: 0.9rem;
+}
+
+.command-metric-card.is-stale { border-color: #806d35; }
+.command-metric-card.is-unavailable { border-color: #593942; }
+.command-metric-label { color: #b9cec5; font-size: 0.82rem; }
+.command-metric-value { font: 700 1.35rem/1.15 monospace; }
+.command-metric-status { text-transform: uppercase; font: 0.68rem/1.2 monospace; letter-spacing: 0.08em; }
+.command-metric-card small { grid-column: 1 / -1; }
+
+.command-sparkline {
+    grid-column: 1 / -1;
+    width: 100%;
+    height: 42px;
+    margin-top: 0.35rem;
+}
+
+.command-sparkline polyline {
+    fill: none;
+    stroke: #50e39b;
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+}
+
+.command-log-panel,
+.command-danger-zone {
+    margin-top: 1rem;
+    padding: 1rem;
+}
+
+.command-log-controls {
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin-bottom: 0.75rem;
+}
+
+.command-log-controls label { color: #c5d8d0; font-size: 0.78rem; }
+.command-log-controls .form-select,
+.command-log-controls .form-control {
+    margin-top: 0.25rem;
+    color: #effbf5;
+    border-color: #365448;
+    background: #09110e;
+}
+
+.command-log-search { flex: 1 1 13rem; }
+.command-log-check { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+.command-log-output {
+    height: 19rem;
+    overflow: auto;
+    padding: 0.75rem;
+    border: 1px solid #1c3029;
+    background: #030605;
+    color: #b9cec5;
+    font: 0.76rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.command-log-line.level-warn { color: #ffd47a; }
+.command-log-line.level-error { color: #ff8e9a; }
+.command-log-line.level-debug,
+.command-log-line.level-trace { color: #77988a; }
+
+.command-danger-zone {
+    margin-top: 1.5rem;
+    border-color: #713c44;
+    background: #190d10;
+}
+
+.command-danger-zone a { color: #ffabb3; }
+.command-danger-actions { flex-wrap: wrap; gap: 0.65rem; }
+.command-action-status { min-height: 1.5rem; margin-top: 0.75rem; color: #ffd1d5; }
+.command-pending-action { justify-content: space-between; gap: 1rem; margin-top: 0.75rem; padding: 0.75rem; background: #2b1b0d; }
+
+.command-action-dialog {
+    width: min(calc(100% - 2rem), 32rem);
+    padding: 1.25rem;
+    border: 1px solid #713c44;
+    border-radius: 6px;
+    background: #101715;
+    color: #effbf5;
+}
+
+.command-action-dialog::backdrop { background: rgba(0, 0, 0, 0.78); }
+.command-action-dialog label { display: block; margin-top: 0.8rem; }
+.command-action-dialog .form-control { color: #effbf5; border-color: #4c655b; background: #060b09; }
+.command-dialog-status { min-height: 1.5rem; margin-top: 0.75rem; color: #ffd1d5; }
+.command-dialog-actions { justify-content: flex-end; gap: 0.65rem; margin-top: 1rem; }
+
+.command-center-page button:focus-visible,
+.command-center-page a:focus-visible,
+.command-center-page input:focus-visible,
+.command-center-page select:focus-visible,
+.command-log-output:focus-visible {
+    outline: 3px solid #7bf2b8;
+    outline-offset: 3px;
+}
+
+@media (min-width: 640px) {
+    .command-center-shell { padding: 1.5rem; }
+    .command-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1024px) {
+    .command-center-shell { padding: 2rem; }
+    .command-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .command-log-panel { padding: 1.25rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .command-center-page *,
+    .command-center-page *::before,
+    .command-center-page *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
 .void-console-nav {
     display: block;
     padding: 0;

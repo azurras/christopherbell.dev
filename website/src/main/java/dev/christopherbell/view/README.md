@@ -7,6 +7,10 @@ Owns server-side routing for HTML pages.
 - Spring MVC routes that return Thymeleaf templates.
 - `account` serves login, signup, password reset, and Void auth pages.
 - `content` serves the home gateway, blog, photos, reports, Back Office, and The Bell pages.
+- `content` also serves `/command-center` as a public, data-free HTML shell. The
+  template contains no telemetry, logs, credentials, challenges, or action data;
+  its browser module reveals and populates the console only after a fresh admin
+  role check, while the private API independently enforces authorization.
 - `tools` serves Raising Canes Box Index, VIN Decoder, and ZIP Coordinates pages.
 - `voidroutes` serves Void, profile, messages, notifications, public user feeds, and post pages.
 - `wfl` serves What's For Lunch, WFL restaurant profiles, favorites, and top-rated lists.

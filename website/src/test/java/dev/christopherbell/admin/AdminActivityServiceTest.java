@@ -130,6 +130,31 @@ class AdminActivityServiceTest {
     assertEquals("account-3 updated a user.", result.getMessage());
   }
 
+  @Test
+  @DisplayName("Explicit actor records do not require request security context")
+  void recordForActor_savesWithoutReadingCurrentRequestActor() {
+    var service = service();
+    when(adminActivityRepository.save(org.mockito.ArgumentMatchers.any(AdminActivity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    var result = service.recordForActor(
+        "account-5",
+        "captured-admin",
+        "COMMAND_CENTER_ACTION_LAUNCHED",
+        "command-center",
+        "RESTART_SITE",
+        "RESTART_SITE",
+        "%s launched a protected action.",
+        Map.of("outcome", "launched"));
+
+    assertEquals("account-5", result.getActorAccountId());
+    assertEquals("captured-admin", result.getActorUsername());
+    assertEquals("captured-admin launched a protected action.", result.getMessage());
+    assertEquals(NOW, result.getCreatedOn());
+    verify(adminActivityRepository).save(org.mockito.ArgumentMatchers.any(AdminActivity.class));
+    verifyNoMoreInteractions(accountRepository, adminActivityRepository, permissionService);
+  }
+
   private AdminActivityService service() {
     return new AdminActivityService(
         accountRepository,

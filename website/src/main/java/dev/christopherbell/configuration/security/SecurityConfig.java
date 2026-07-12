@@ -81,6 +81,7 @@ public class SecurityConfig {
       "/void",
       "/void/**",
       "/back-office",
+      "/command-center",
       "/wfl",
       "/wfl/favorites",
       "/wfl/top-rated",

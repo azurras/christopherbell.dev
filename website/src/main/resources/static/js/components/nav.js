@@ -48,6 +48,14 @@ export function topLevelNavItems(isAuthenticated) {
     ];
 }
 
+/** Administrative destinations shown only for an exact stored ADMIN role. */
+export function adminMenuItems(isAdmin) {
+    return isAdmin ? [
+        { href: '/back-office', label: 'Back Office' },
+        { href: '/command-center', label: 'Command Center' },
+    ] : [];
+}
+
 /** Determine whether a nav href represents the current browser route. */
 export function isActiveNavHref(href, pathname = window.location.pathname) {
     const currentPath = String(pathname || '/').replace(/\/+$/, '') || '/';
@@ -333,7 +341,7 @@ class AppNav extends HTMLElement {
                         <span class="avatar-initials">${initials}</span>
                     </button>
                     <div class="dropdown-menu dropdown-menu-end profile-menu">
-                        ${isAdmin ? `<a class="dropdown-item" href="/back-office">Back Office</a>` : ''}
+                        ${adminMenuItems(isAdmin).map(item => `<a class="dropdown-item" href="${item.href}">${item.label}</a>`).join('')}
                         <a class="dropdown-item" href="${profileHref}">Profile</a>
                         <button id="logout" type="button" class="dropdown-item">Logout</button>
                     </div>

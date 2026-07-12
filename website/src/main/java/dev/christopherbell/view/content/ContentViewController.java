@@ -53,6 +53,16 @@ public class ContentViewController {
   }
 
   /**
+   * Serves the data-free admin command-center page shell.
+   *
+   * @return {@code command-center.html}
+   */
+  @GetMapping(value = "/command-center")
+  public String getCommandCenterPage() {
+    return "command-center.html";
+  }
+
+  /**
    * Serves the report page.
    *
    * @return {@code report.html}

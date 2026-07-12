@@ -1,5 +1,9 @@
 server:
   port: 8081
+command-center:
+  actions:
+    mode: SIMULATED
+    power-actions-enabled: true
 spring:
   mongodb:
     database: christopherbell
