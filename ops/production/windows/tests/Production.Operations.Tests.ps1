@@ -22,5 +22,16 @@ Describe 'native Windows production operations' {
             Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Manual' } }
             { Test-ProductionStartup } | Should -Throw '*Automatic*'
         }
+
+        It 'uses attached IPv4 URI and archive arguments for native backups' {
+            $dump = Get-NativeMongoDumpArguments 'A:\backups\native.archive.gz'
+            $restore = Get-NativeMongoRestoreDryRunArguments 'A:\backups\native.archive.gz'
+            $dump | Should -Contain '--uri=mongodb://127.0.0.1:27017'
+            $dump | Should -Contain '--archive=A:\backups\native.archive.gz'
+            $restore | Should -Contain '--uri=mongodb://127.0.0.1:27017'
+            $restore | Should -Contain '--archive=A:\backups\native.archive.gz'
+            $dump | Should -Not -Contain '--archive'
+            $restore | Should -Not -Contain '--archive'
+        }
     }
 }
