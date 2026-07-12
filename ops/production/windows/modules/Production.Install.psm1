@@ -37,6 +37,9 @@ function Install-ConfigurationExamples {
                 $existing | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
             }
         }
+        foreach ($retired in 'wslDistro','wslWebsiteStopCommand','wslWebsiteStartCommand','wslMongoStopCommand','wslMongoStartCommand') {
+            $existing.PSObject.Properties.Remove($retired)
+        }
         $existing | ConvertTo-Json -Depth 10 | Set-Content $deployTarget -Encoding utf8
     }
     if (-not (Test-Path -LiteralPath $environmentTarget)) { Copy-Item (Join-Path $configSource 'app.env.example') $environmentTarget }

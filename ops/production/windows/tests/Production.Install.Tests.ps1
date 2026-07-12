@@ -21,7 +21,7 @@ Describe 'native Windows service installer' {
         $root = Join-Path $TestDrive 'existing-data'
         New-ProductionDirectories $root
         $deploy = Join-Path $root 'config\deploy.json'
-        @{ repositoryPath='A:\custom-repository'; smokeAccountEmail='admin@christopherbell.dev' } |
+        @{ repositoryPath='A:\custom-repository'; smokeAccountEmail='admin@christopherbell.dev'; wslDistro='Debian'; wslWebsiteStartCommand='start-site' } |
             ConvertTo-Json | Set-Content $deploy
         Install-ConfigurationExamples $root
         $updated = Get-Content $deploy -Raw | ConvertFrom-Json
@@ -29,6 +29,8 @@ Describe 'native Windows service installer' {
         $updated.smokeAccountEmail | Should -Be 'admin@christopherbell.dev'
         $updated.cloudflaredExe | Should -Match 'cloudflared\.exe$'
         $updated.publicUrl | Should -Be 'https://www.christopherbell.dev/'
+        $updated.PSObject.Properties.Name | Should -Not -Contain 'wslDistro'
+        $updated.PSObject.Properties.Name | Should -Not -Contain 'wslWebsiteStartCommand'
     }
 }
 
