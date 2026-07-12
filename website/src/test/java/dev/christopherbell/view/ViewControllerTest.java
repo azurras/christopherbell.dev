@@ -144,6 +144,19 @@ public class ViewControllerTest {
   }
 
   @Test
+  @DisplayName("Command center renders a hidden data-free public shell")
+  public void getCommandCenterPage_rendersHiddenShell() throws Exception {
+    mockMvc
+        .perform(get("/command-center"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("CB | Mission Control")))
+        .andExpect(content().string(containsString("id=\"commandCenterRoot\"")))
+        .andExpect(content().string(containsString("d-none")))
+        .andExpect(content().string(not(containsString("applicationVersion"))))
+        .andExpect(content().string(containsString("/js/command-center.js")));
+  }
+
+  @Test
   @DisplayName("Public user page renders canonical username social URL")
   public void getPublicUserPage_rendersUsernameSocialUrl() throws Exception {
     mockMvc

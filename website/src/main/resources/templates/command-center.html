@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Mission Control', 'Private operational status for christopherbell.dev.', 'https://www.christopherbell.dev/command-center', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
+  <title>Mission Control</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+  <link rel="stylesheet" type="text/css" href="/css/main.css" />
+</head>
+<body class="site-page void-shell-page command-center-page">
+  <div id="nav"></div>
+  <main id="commandCenterRoot" class="site-main command-center-main d-none" aria-labelledby="commandCenterTitle">
+    <div class="command-center-shell">
+      <header class="command-center-hero">
+        <div>
+          <p class="thread-label">Admin / live operations</p>
+          <h1 id="commandCenterTitle">Mission Control</h1>
+          <p>Private host telemetry, delayed server logs, and protected recovery controls.</p>
+        </div>
+        <div class="command-center-health" aria-live="polite" aria-atomic="true">
+          <span id="commandHealthBadge" class="command-health-badge is-offline">Connecting</span>
+          <span id="commandSampleAge">No sample</span>
+        </div>
+      </header>
+
+      <div id="commandConnectionStatus" class="visually-hidden" aria-live="polite"></div>
+      <section id="commandAlertStrip" class="command-alert-strip d-none" aria-label="System alerts" aria-live="assertive"></section>
+
+      <section aria-labelledby="commandMetricsTitle">
+        <div class="command-section-heading">
+          <div>
+            <p class="profile-label">15 minute window</p>
+            <h2 id="commandMetricsTitle">Mission Control Grid</h2>
+          </div>
+          <span id="commandVersion">Version unavailable</span>
+        </div>
+        <div id="commandMetricGrid" class="command-metric-grid" aria-live="polite"></div>
+      </section>
+
+      <section class="command-log-panel" aria-labelledby="commandLogsTitle">
+        <div class="command-section-heading">
+          <div>
+            <p class="profile-label">Delayed stream</p>
+            <h2 id="commandLogsTitle">Server Logs</h2>
+          </div>
+          <span id="commandLogStatus" aria-live="polite">Waiting for access check</span>
+        </div>
+        <div class="command-log-controls">
+          <label>Level
+            <select id="commandLogLevel" class="form-select" aria-label="Server log level">
+              <option value="ALL">All</option><option value="TRACE">Trace</option>
+              <option value="DEBUG">Debug</option><option value="INFO">Info</option>
+              <option value="WARN">Warn</option><option value="ERROR">Error</option>
+            </select>
+          </label>
+          <label class="command-log-search">Literal search
+            <input id="commandLogQuery" class="form-control" type="search" maxlength="100" autocomplete="off" aria-label="Search server logs literally" />
+          </label>
+          <button id="commandLogPause" class="btn btn-outline-light" type="button" aria-pressed="false">Pause</button>
+          <label class="command-log-check"><input id="commandLogAutoscroll" type="checkbox" checked /> Auto-scroll</label>
+          <button id="commandLogCopy" class="btn btn-outline-light" type="button">Copy</button>
+          <button id="commandLogClear" class="btn btn-outline-light" type="button">Clear view</button>
+        </div>
+        <div id="commandLogOutput" class="command-log-output" role="log" aria-label="Delayed server log records" tabindex="0"></div>
+      </section>
+
+      <section id="commandDangerZone" class="command-danger-zone" aria-labelledby="commandDangerTitle">
+        <div class="command-section-heading">
+          <div><p class="profile-label">Step-up required</p><h2 id="commandDangerTitle">Danger Zone</h2></div>
+          <a href="/back-office">Back Office</a>
+        </div>
+        <p>Every operation requires a fresh challenge, your password, and the exact confirmation phrase.</p>
+        <div class="command-danger-actions">
+          <button class="btn btn-warning" type="button" data-command-action="RESTART_SITE">Restart site</button>
+          <button class="btn btn-danger" type="button" data-command-action="RESTART_COMPUTER">Restart computer</button>
+          <button class="btn btn-danger" type="button" data-command-action="SHUTDOWN_COMPUTER">Shut down computer</button>
+        </div>
+        <div id="commandActionStatus" class="command-action-status" aria-live="assertive"></div>
+        <div id="commandPendingAction" class="command-pending-action d-none" aria-live="polite">
+          <span id="commandPendingText"></span>
+          <button id="commandCancelAction" class="btn btn-sm btn-outline-light" type="button">Cancel pending action</button>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="commandActionDialog" class="command-action-dialog" aria-labelledby="commandActionTitle">
+    <form id="commandActionForm" method="dialog">
+      <p class="profile-label">Protected operation</p>
+      <h2 id="commandActionTitle">Confirm action</h2>
+      <p>Type <strong id="commandRequiredPhrase"></strong> exactly.</p>
+      <label for="commandActionPassword">Password</label>
+      <input id="commandActionPassword" name="password" class="form-control" type="password" autocomplete="current-password" required />
+      <label for="commandActionPhrase">Confirmation phrase</label>
+      <input id="commandActionPhrase" name="confirmationPhrase" class="form-control" autocomplete="off" required />
+      <div class="command-dialog-actions">
+        <button id="commandActionDismiss" class="btn btn-outline-secondary" type="button">Cancel</button>
+        <button id="commandActionSubmit" class="btn btn-danger" type="submit">Confirm action</button>
+      </div>
+    </form>
+  </dialog>
+  <footer id="footer"></footer>
+  <script type="module" src="/js/app.js"></script>
+  <script type="module" src="/js/command-center.js"></script>
+</body>
+</html>

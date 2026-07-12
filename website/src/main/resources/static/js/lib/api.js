@@ -6,6 +6,13 @@
 export const API = {
   admin: {
     activity: '/api/admin/activity/2026-05-09',
+    commandCenter: {
+      snapshot: '/api/admin/command-center/2026-07-12/snapshot',
+      logs: '/api/admin/command-center/2026-07-12/logs',
+      challenges: '/api/admin/command-center/2026-07-12/action-challenges',
+      actions: '/api/admin/command-center/2026-07-12/actions',
+      cancel: '/api/admin/command-center/2026-07-12/actions/cancel',
+    },
   },
   canesBoxTracker: {
     history: '/api/canes-box-tracker/2026-06-04/history',

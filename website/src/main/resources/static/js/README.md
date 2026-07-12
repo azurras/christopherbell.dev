@@ -95,6 +95,11 @@ Owns browser-side behavior for server-rendered pages.
   promotion, and exposes practical admin operations such as Location Census ZIP
   coordinate import, WFL import/dedupe, Raising Canes Box Index collection and
   datapoint review, and vehicle VIN maintenance.
+- `command-center.js` gates the public data-free `/command-center` shell with a
+  fresh account-role check, then renders protected host metrics, 15-minute
+  sparklines, delayed text-only logs, and challenged fixed recovery actions.
+  `lib/command-center.js` owns its pure formatting, countdown, visibility, and
+  bounded polling helpers.
 
 ## Design Notes
 
