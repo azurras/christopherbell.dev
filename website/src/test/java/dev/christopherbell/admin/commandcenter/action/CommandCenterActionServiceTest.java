@@ -6,10 +6,13 @@ import static dev.christopherbell.admin.commandcenter.action.CommandCenterAction
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -147,12 +150,11 @@ class CommandCenterActionServiceTest {
 
   @Test
   void concurrentDistinctChallengesCannotBypassTheAcceptedActionCooldown() throws Exception {
-    var barrierClock = new CooldownRaceClock(NOW);
     var concurrentExecutions = java.util.Collections.synchronizedList(
         new ArrayList<CommandCenterActionType>());
     var concurrentService = new CommandCenterActionService(
         properties, accounts, permissions, activities, clientIps, concurrentExecutions::add,
-        scheduler, barrierClock, new SecureRandom());
+        scheduler, clock, new SecureRandom());
     var first = concurrentService.createChallenge(RESTART_COMPUTER);
     var second = concurrentService.createChallenge(RESTART_COMPUTER);
     var confirmations = List.of(
@@ -225,6 +227,83 @@ class CommandCenterActionServiceTest {
   }
 
   @Test
+  void challengeStringRepresentationsNeverExposeTheOneTimeId() throws Exception {
+    var challenge = service.createChallenge(RESTART_SITE);
+    var stored = storedChallenges(service).get(challenge.id());
+
+    assertThat(challenge.toString())
+        .doesNotContain(challenge.id())
+        .contains("<redacted>");
+    assertThat(stored.toString())
+        .doesNotContain(challenge.id())
+        .contains("<redacted>");
+  }
+
+  @Test
+  void challengeStorePrunesExpiredEntriesAndCapsPerActorAndTotalSize() throws Exception {
+    service.createChallenge(RESTART_SITE);
+    clock.advance(Duration.ofMinutes(2).plusMillis(1));
+    service.createChallenge(RESTART_SITE);
+    assertThat(storedChallenges(service)).hasSize(1);
+
+    for (int challenge = 0; challenge < 20; challenge++) {
+      service.createChallenge(RESTART_SITE);
+    }
+    assertThat(storedChallenges(service).size()).isLessThanOrEqualTo(8);
+
+    var currentActor = new java.util.concurrent.atomic.AtomicReference<>("bounded-admin-0");
+    when(permissions.getSelfId()).thenAnswer(ignored -> currentActor.get());
+    when(accounts.findById(any())).thenAnswer(invocation -> {
+      String id = invocation.getArgument(0);
+      return Optional.of(Account.builder()
+          .id(id).username(id).role(Role.ADMIN).status(AccountStatus.ACTIVE).isApproved(true)
+          .passwordSalt(actor.getPasswordSalt()).passwordHash(actor.getPasswordHash()).build());
+    });
+    var boundedService = new CommandCenterActionService(
+        properties, accounts, permissions, activities, clientIps, executor, scheduler,
+        clock, new SecureRandom());
+    for (int accountIndex = 0; accountIndex < 65; accountIndex++) {
+      currentActor.set("bounded-admin-" + accountIndex);
+      boundedService.createChallenge(RESTART_SITE);
+    }
+    assertThat(storedChallenges(boundedService).size()).isLessThanOrEqualTo(64);
+  }
+
+  @Test
+  void concurrentInvalidChallengesAtomicallyReserveOnlyThreeFailureSlots() throws Exception {
+    alignAccountLookups(32);
+    var messages = runConcurrently(32, attempt -> new ActionConfirmation(
+        "missing-" + attempt, RESTART_SITE, PASSWORD, "RESTART SITE"));
+
+    assertThat(messages.stream()
+        .filter("Action challenge is invalid or expired."::equals)
+        .count()).isEqualTo(3);
+    assertThat(messages.stream()
+        .filter("Too many failed action confirmations."::equals)
+        .count()).isEqualTo(29);
+  }
+
+  @Test
+  void concurrentWrongPasswordsAtomicallyReserveOnlyThreeFailureSlots() throws Exception {
+    var confirmations = new ArrayList<ActionConfirmation>();
+    for (int attempt = 0; attempt < 8; attempt++) {
+      var challenge = service.createChallenge(RESTART_SITE);
+      confirmations.add(new ActionConfirmation(
+          challenge.id(), RESTART_SITE, "wrong-password-" + attempt, "RESTART SITE"));
+    }
+    alignAccountLookups(8);
+
+    var messages = runConcurrently(confirmations);
+
+    assertThat(messages.stream()
+        .filter("Password verification failed."::equals)
+        .count()).isEqualTo(3);
+    assertThat(messages.stream()
+        .filter("Too many failed action confirmations."::equals)
+        .count()).isEqualTo(5);
+  }
+
+  @Test
   void acceptedActionEnforcesCooldownAndAuditsOnlySafeMetadata() throws Exception {
     var challenge = service.createChallenge(RESTART_COMPUTER);
     var result = execute(challenge.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER");
@@ -257,6 +336,17 @@ class CommandCenterActionServiceTest {
     clock.advance(Duration.ofMinutes(2).plusMillis(1));
     var later = service.createChallenge(RESTART_COMPUTER);
     assertThat(execute(later.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER").accepted()).isTrue();
+  }
+
+  @Test
+  void powerActionExecuteAtRemainsExactlySixtySecondsDespitePropertyOverride() throws Exception {
+    properties.getActions().setPowerDelay(Duration.ofSeconds(5));
+    var challenge = service.createChallenge(RESTART_COMPUTER);
+
+    var result = execute(
+        challenge.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER");
+
+    assertThat(result.executeAt()).isEqualTo(NOW.plusSeconds(60));
   }
 
   @Test
@@ -326,9 +416,116 @@ class CommandCenterActionServiceTest {
   }
 
   @Test
+  void cancellationAuditIsPersistedBeforeTheFixedCancelCommand() throws Exception {
+    var orderedExecutor = mock(CommandExecutor.class);
+    var orderedService = new CommandCenterActionService(
+        properties, accounts, permissions, activities, clientIps, orderedExecutor, scheduler,
+        clock, new SecureRandom());
+    var challenge = orderedService.createChallenge(SHUTDOWN_COMPUTER);
+    orderedService.execute(new ActionConfirmation(
+        challenge.id(), SHUTDOWN_COMPUTER, PASSWORD, "SHUTDOWN COMPUTER"), request);
+    clearInvocations(activities, orderedExecutor);
+
+    orderedService.cancel(request);
+
+    var order = inOrder(activities, orderedExecutor);
+    order.verify(activities).recordForActor(
+        any(), any(), eq("COMMAND_CENTER_ACTION_ACCEPTED"), any(),
+        eq("CANCEL_PENDING_ACTION"), any(), any(), any());
+    order.verify(orderedExecutor).execute(CommandCenterActionType.CANCEL_PENDING_ACTION);
+  }
+
+  @Test
+  void failedCancellationAuditsFailureAfterAcceptanceAndRetainsPendingState() throws Exception {
+    var orderedExecutor = mock(CommandExecutor.class);
+    var orderedService = new CommandCenterActionService(
+        properties, accounts, permissions, activities, clientIps, orderedExecutor, scheduler,
+        clock, new SecureRandom());
+    var challenge = orderedService.createChallenge(SHUTDOWN_COMPUTER);
+    orderedService.execute(new ActionConfirmation(
+        challenge.id(), SHUTDOWN_COMPUTER, PASSWORD, "SHUTDOWN COMPUTER"), request);
+    clearInvocations(activities, orderedExecutor);
+    doThrow(new java.io.IOException("simulated cancel failure"))
+        .when(orderedExecutor).execute(CommandCenterActionType.CANCEL_PENDING_ACTION);
+
+    assertThatThrownBy(() -> orderedService.cancel(request))
+        .isInstanceOf(InvalidRequestException.class);
+
+    var order = inOrder(activities, orderedExecutor);
+    order.verify(activities).recordForActor(
+        any(), any(), eq("COMMAND_CENTER_ACTION_ACCEPTED"), any(),
+        eq("CANCEL_PENDING_ACTION"), any(), any(), any());
+    order.verify(orderedExecutor).execute(CommandCenterActionType.CANCEL_PENDING_ACTION);
+    order.verify(activities).recordForActor(
+        any(), any(), eq("COMMAND_CENTER_ACTION_LAUNCH_FAILED"), any(),
+        eq("CANCEL_PENDING_ACTION"), any(), any(), any());
+    assertThat(orderedService.pendingAction()).isPresent();
+  }
+
+  @Test
+  void cancellationCannotOvertakeAReservedPowerActionBeforeItsLaunch() throws Exception {
+    var powerEntered = new java.util.concurrent.CountDownLatch(1);
+    var releasePower = new java.util.concurrent.CountDownLatch(1);
+    var cancelEntered = new java.util.concurrent.CountDownLatch(1);
+    var done = new java.util.concurrent.CountDownLatch(2);
+    var launchOrder = java.util.Collections.synchronizedList(
+        new ArrayList<CommandCenterActionType>());
+    CommandExecutor blockingExecutor = action -> {
+      if (action == RESTART_COMPUTER) {
+        powerEntered.countDown();
+        try {
+          if (!releasePower.await(5, TimeUnit.SECONDS)) {
+            throw new java.io.IOException("timed out waiting to release power launch");
+          }
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+          throw new java.io.IOException("interrupted", exception);
+        }
+      } else if (action == CommandCenterActionType.CANCEL_PENDING_ACTION) {
+        cancelEntered.countDown();
+      }
+      launchOrder.add(action);
+    };
+    var serializedService = new CommandCenterActionService(
+        properties, accounts, permissions, activities, clientIps, blockingExecutor, scheduler,
+        clock, new SecureRandom());
+    var challenge = serializedService.createChallenge(RESTART_COMPUTER);
+
+    Thread.startVirtualThread(() -> {
+      try {
+        serializedService.execute(new ActionConfirmation(
+            challenge.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER"), request);
+      } catch (Exception ignored) {
+        // Asserted through ordering below.
+      } finally {
+        done.countDown();
+      }
+    });
+    assertThat(powerEntered.await(5, TimeUnit.SECONDS)).isTrue();
+    Thread.startVirtualThread(() -> {
+      try {
+        serializedService.cancel(request);
+      } catch (Exception ignored) {
+        // Asserted through ordering below.
+      } finally {
+        done.countDown();
+      }
+    });
+
+    assertThat(cancelEntered.await(200, TimeUnit.MILLISECONDS)).isFalse();
+    releasePower.countDown();
+    assertThat(done.await(5, TimeUnit.SECONDS)).isTrue();
+    assertThat(launchOrder).containsExactly(
+        RESTART_COMPUTER, CommandCenterActionType.CANCEL_PENDING_ACTION);
+  }
+
+  @Test
   void failedPowerLaunchDoesNotLeaveAPhantomPendingAction() throws Exception {
+    var failLaunch = new java.util.concurrent.atomic.AtomicBoolean(true);
     CommandExecutor failingExecutor = action -> {
-      throw new java.io.IOException("simulated fixed power launch failure");
+      if (failLaunch.get()) {
+        throw new java.io.IOException("simulated fixed power launch failure");
+      }
     };
     var failingService = new CommandCenterActionService(
         properties, accounts, permissions, activities, clientIps, failingExecutor, scheduler,
@@ -341,6 +538,10 @@ class CommandCenterActionServiceTest {
         request)).isInstanceOf(InvalidRequestException.class);
 
     assertThat(failingService.pendingAction()).isEmpty();
+    failLaunch.set(false);
+    var retry = failingService.createChallenge(RESTART_COMPUTER);
+    assertThat(failingService.execute(new ActionConfirmation(
+        retry.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER"), request).accepted()).isTrue();
   }
 
   @Test
@@ -387,6 +588,64 @@ class CommandCenterActionServiceTest {
       String challengeId, CommandCenterActionType action, String password, String phrase)
       throws Exception {
     return service.execute(new ActionConfirmation(challengeId, action, password, phrase), request);
+  }
+
+  private List<String> runConcurrently(
+      int attempts,
+      java.util.function.IntFunction<ActionConfirmation> confirmationFactory) throws Exception {
+    var confirmations = new ArrayList<ActionConfirmation>();
+    for (int attempt = 0; attempt < attempts; attempt++) {
+      confirmations.add(confirmationFactory.apply(attempt));
+    }
+    return runConcurrently(confirmations);
+  }
+
+  private List<String> runConcurrently(List<ActionConfirmation> confirmations) throws Exception {
+    var messages = java.util.Collections.synchronizedList(new ArrayList<String>());
+    var start = new java.util.concurrent.CountDownLatch(1);
+    var done = new java.util.concurrent.CountDownLatch(confirmations.size());
+    for (var confirmation : confirmations) {
+      Thread.startVirtualThread(() -> {
+        try {
+          start.await();
+          service.execute(confirmation, request);
+        } catch (InvalidRequestException exception) {
+          messages.add(exception.getMessage());
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+          messages.add("interrupted");
+        } finally {
+          done.countDown();
+        }
+      });
+    }
+    start.countDown();
+    assertThat(done.await(15, TimeUnit.SECONDS)).isTrue();
+    return messages;
+  }
+
+  private void alignAccountLookups(int participants) {
+    var actorLookups = new java.util.concurrent.CountDownLatch(participants);
+    when(accounts.findById(actor.getId())).thenAnswer(ignored -> {
+      actorLookups.countDown();
+      try {
+        if (!actorLookups.await(5, TimeUnit.SECONDS)) {
+          throw new AssertionError("Concurrent account lookups did not align");
+        }
+      } catch (InterruptedException exception) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError("Interrupted while aligning account lookups", exception);
+      }
+      return Optional.of(actor);
+    });
+  }
+
+  @SuppressWarnings("unchecked")
+  private static java.util.Map<String, ?> storedChallenges(CommandCenterActionService target)
+      throws Exception {
+    var field = CommandCenterActionService.class.getDeclaredField("challenges");
+    field.setAccessible(true);
+    return (java.util.Map<String, ?>) field.get(target);
   }
 
   private static Account account(String id, Role role, AccountStatus status, boolean approved) {
@@ -445,42 +704,4 @@ class CommandCenterActionServiceTest {
     }
   }
 
-  private static final class CooldownRaceClock extends Clock {
-    private final Instant instant;
-    private final java.util.concurrent.atomic.AtomicInteger calls =
-        new java.util.concurrent.atomic.AtomicInteger();
-    private final java.util.concurrent.CountDownLatch acceptanceBarrier =
-        new java.util.concurrent.CountDownLatch(2);
-
-    private CooldownRaceClock(Instant instant) {
-      this.instant = instant;
-    }
-
-    @Override
-    public ZoneId getZone() {
-      return ZoneId.of("UTC");
-    }
-
-    @Override
-    public Clock withZone(ZoneId zone) {
-      return this;
-    }
-
-    @Override
-    public Instant instant() {
-      int call = calls.incrementAndGet();
-      if (call == 9 || call == 10) {
-        acceptanceBarrier.countDown();
-        try {
-          if (!acceptanceBarrier.await(5, TimeUnit.SECONDS)) {
-            throw new AssertionError("Concurrent executions did not reach the acceptance barrier");
-          }
-        } catch (InterruptedException exception) {
-          Thread.currentThread().interrupt();
-          throw new AssertionError("Interrupted while coordinating cooldown race", exception);
-        }
-      }
-      return instant;
-    }
-  }
 }

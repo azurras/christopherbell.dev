@@ -24,7 +24,11 @@ Owns back-office administration views and cross-feature admin operations.
 - Command-center host actions use a closed enum, fresh active-approved-admin
   checks, password verification, single-use two-minute challenges, exact
   confirmation phrases, throttling, cooldowns, and fixed simulated or Windows
-  argument arrays. Request values never become executables or command arguments.
+  argument arrays. Challenge storage is bounded and expired entries are evicted.
+  Machine actions always use a fixed 60-second countdown; cancellation is
+  serialized with launch and succeeds only after the fixed `/a` process exits
+  successfully within its bounded wait. Request values never become executables
+  or command arguments.
 
 ## Update This Doc
 

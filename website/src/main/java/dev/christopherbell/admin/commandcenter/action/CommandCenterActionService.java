@@ -32,6 +32,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class CommandCenterActionService {
   private static final Duration WEBSITE_RESTART_RESPONSE_GRACE = Duration.ofSeconds(2);
+  private static final Duration MACHINE_POWER_DELAY = Duration.ofSeconds(60);
+  private static final int MAX_CHALLENGES_PER_ACTOR = 8;
+  private static final int MAX_CHALLENGES_TOTAL = 64;
 
   private final CommandCenterProperties properties;
   private final AccountRepository accountRepository;
@@ -47,6 +50,7 @@ public class CommandCenterActionService {
   private final ConcurrentHashMap<ActionKey, Instant> acceptedActions = new ConcurrentHashMap<>();
   private final AtomicReference<PendingAction> pendingAction = new AtomicReference<>();
   private final Object actionStateLock = new Object();
+  private final Object challengeStoreLock = new Object();
 
   public CommandCenterActionService(
       CommandCenterProperties properties,
@@ -91,9 +95,15 @@ public class CommandCenterActionService {
       throw new InvalidRequestException("Action does not use a challenge.");
     }
     enforceAttemptWindow(actor.getId());
-    var expiresAt = clock.instant().plus(properties.getActions().getChallengeTtl());
+    var now = clock.instant();
+    var expiresAt = now.plus(properties.getActions().getChallengeTtl());
     var challenge = new StoredChallenge(randomToken(), actor.getId(), action, expiresAt);
-    challenges.put(challenge.id(), challenge);
+    synchronized (challengeStoreLock) {
+      pruneExpiredChallenges(now);
+      evictOldestChallengesForActor(actor.getId());
+      evictOldestChallengesToTotalBound();
+      challenges.put(challenge.id(), challenge);
+    }
     return new ActionChallenge(
         challenge.id(), action, expiresAt, action.getConfirmationPhrase());
   }
@@ -106,37 +116,28 @@ public class CommandCenterActionService {
       throw new InvalidRequestException("Action confirmation is required.");
     }
     var actor = requireCurrentAdmin();
-    enforceAttemptWindow(actor.getId());
-    try {
-      consumeChallenge(confirmation, actor.getId());
-    } catch (InvalidRequestException exception) {
-      recordFailedAttempt(actor.getId());
-      throw exception;
-    }
-    verifyPassword(actor, confirmation.password());
-    if (!confirmation.action().getConfirmationPhrase().equals(confirmation.confirmationPhrase())) {
-      recordFailedAttempt(actor.getId());
-      throw new InvalidRequestException("Confirmation phrase did not match.");
-    }
+    validateConfirmation(actor, confirmation);
     var now = clock.instant();
     var executeAt = executionTime(confirmation.action(), now);
-    var acceptedPendingAction = acceptActionState(
-        actor.getId(), confirmation.action(), now, executeAt);
     var clientIp = clientIpResolver.resolveClientIp(servletRequest);
-    audit(actor, confirmation.action(), clientIp, "accepted");
 
-    if (confirmation.action() == CommandCenterActionType.RESTART_SITE) {
+    if (isPowerAction(confirmation.action())) {
+      synchronized (actionStateLock) {
+        var acceptedPendingAction = acceptActionState(
+            actor.getId(), confirmation.action(), now, executeAt);
+        try {
+          audit(actor, confirmation.action(), clientIp, "accepted");
+          executeNow(actor, confirmation.action(), clientIp);
+        } catch (InvalidRequestException | RuntimeException exception) {
+          rollbackActionState(actor.getId(), confirmation.action(), now, acceptedPendingAction);
+          throw exception;
+        }
+      }
+    } else {
+      acceptActionState(actor.getId(), confirmation.action(), now, executeAt);
+      audit(actor, confirmation.action(), clientIp, "accepted");
       scheduler.schedule(
           () -> executeBackground(actor, confirmation.action(), clientIp), executeAt);
-    } else {
-      try {
-        executeNow(actor, confirmation.action(), clientIp);
-      } catch (InvalidRequestException exception) {
-        if (acceptedPendingAction != null) {
-          pendingAction.compareAndSet(acceptedPendingAction, null);
-        }
-        throw exception;
-      }
     }
     return new ActionResult(confirmation.action(), true, now, executeAt);
   }
@@ -147,21 +148,18 @@ public class CommandCenterActionService {
     var actor = requireCurrentAdmin();
     var clientIp = clientIpResolver.resolveClientIp(servletRequest);
     synchronized (actionStateLock) {
-      var current = pendingAction.getAndSet(null);
+      var current = pendingAction.get();
       if (current == null || !current.cancellable()
           || !clock.instant().isBefore(current.executeAt())) {
         throw new InvalidRequestException("There is no cancellable pending action.");
       }
-      try {
-        executeNow(actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp);
-      } catch (InvalidRequestException exception) {
-        pendingAction.compareAndSet(null, current);
-        throw exception;
-      }
+      audit(actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp, "accepted");
+      executeNow(actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp);
+      pendingAction.compareAndSet(current, null);
+      var acceptedAt = clock.instant();
+      return new ActionResult(
+          CommandCenterActionType.CANCEL_PENDING_ACTION, true, acceptedAt, acceptedAt);
     }
-    audit(actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp, "accepted");
-    return new ActionResult(
-        CommandCenterActionType.CANCEL_PENDING_ACTION, true, clock.instant(), clock.instant());
   }
 
   /** Returns only the immutable pending power-action snapshot. */
@@ -198,12 +196,11 @@ public class CommandCenterActionService {
         || !confirmation.action().isRequiresChallenge()) {
       throw new InvalidRequestException("A valid action challenge is required.");
     }
-    var consumed = new AtomicReference<StoredChallenge>();
-    challenges.compute(confirmation.challengeId(), (ignored, stored) -> {
-      consumed.set(stored);
-      return null;
-    });
-    var challenge = consumed.get();
+    StoredChallenge challenge;
+    synchronized (challengeStoreLock) {
+      pruneExpiredChallenges(clock.instant());
+      challenge = challenges.remove(confirmation.challengeId());
+    }
     if (challenge == null
         || !challenge.actorId().equals(actorId)
         || challenge.action() != confirmation.action()
@@ -216,12 +213,32 @@ public class CommandCenterActionService {
     try {
       if (password == null || !PasswordUtil.verifyPassword(
           password, actor.getPasswordSalt(), actor.getPasswordHash())) {
-        recordFailedAttempt(actor.getId());
         throw new InvalidRequestException("Password verification failed.");
       }
     } catch (GeneralSecurityException | IllegalArgumentException | NullPointerException exception) {
-      recordFailedAttempt(actor.getId());
       throw new InvalidRequestException("Password verification failed.");
+    }
+  }
+
+  private void validateConfirmation(Account actor, ActionConfirmation confirmation)
+      throws InvalidRequestException {
+    var attempts = failedAttempts.computeIfAbsent(actor.getId(), ignored -> new ArrayDeque<>());
+    synchronized (attempts) {
+      prune(attempts, properties.getActions().getFailedAttemptWindow());
+      if (attempts.size() >= properties.getActions().getFailedAttempts()) {
+        throw new InvalidRequestException("Too many failed action confirmations.");
+      }
+      try {
+        consumeChallenge(confirmation, actor.getId());
+        verifyPassword(actor, confirmation.password());
+        if (!confirmation.action().getConfirmationPhrase()
+            .equals(confirmation.confirmationPhrase())) {
+          throw new InvalidRequestException("Confirmation phrase did not match.");
+        }
+      } catch (InvalidRequestException exception) {
+        attempts.addLast(clock.instant());
+        throw exception;
+      }
     }
   }
 
@@ -232,14 +249,6 @@ public class CommandCenterActionService {
       if (attempts.size() >= properties.getActions().getFailedAttempts()) {
         throw new InvalidRequestException("Too many failed action confirmations.");
       }
-    }
-  }
-
-  private void recordFailedAttempt(String actorId) {
-    var attempts = failedAttempts.computeIfAbsent(actorId, ignored -> new ArrayDeque<>());
-    synchronized (attempts) {
-      prune(attempts, properties.getActions().getFailedAttemptWindow());
-      attempts.addLast(clock.instant());
     }
   }
 
@@ -277,9 +286,18 @@ public class CommandCenterActionService {
     }
   }
 
+  private void rollbackActionState(
+      String actorId,
+      CommandCenterActionType action,
+      Instant acceptedAt,
+      PendingAction acceptedPendingAction) {
+    acceptedActions.remove(new ActionKey(actorId, action), acceptedAt);
+    pendingAction.compareAndSet(acceptedPendingAction, null);
+  }
+
   private Instant executionTime(CommandCenterActionType action, Instant now) {
     if (isPowerAction(action)) {
-      return now.plus(properties.getActions().getPowerDelay());
+      return now.plus(MACHINE_POWER_DELAY);
     }
     return now.plus(WEBSITE_RESTART_RESPONSE_GRACE);
   }
@@ -332,6 +350,32 @@ public class CommandCenterActionService {
             "outcome", outcome));
   }
 
+  private void pruneExpiredChallenges(Instant now) {
+    challenges.entrySet().removeIf(entry -> !now.isBefore(entry.getValue().expiresAt()));
+  }
+
+  private void evictOldestChallengesForActor(String actorId) {
+    while (challenges.values().stream()
+        .filter(challenge -> challenge.actorId().equals(actorId))
+        .count() >= MAX_CHALLENGES_PER_ACTOR) {
+      removeOldestChallenge(actorId);
+    }
+  }
+
+  private void evictOldestChallengesToTotalBound() {
+    while (challenges.size() >= MAX_CHALLENGES_TOTAL) {
+      removeOldestChallenge(null);
+    }
+  }
+
+  private void removeOldestChallenge(String actorId) {
+    challenges.values().stream()
+        .filter(challenge -> actorId == null || challenge.actorId().equals(actorId))
+        .min(java.util.Comparator.comparing(StoredChallenge::expiresAt)
+            .thenComparing(StoredChallenge::id))
+        .ifPresent(challenge -> challenges.remove(challenge.id()));
+  }
+
   private String randomToken() {
     var bytes = new byte[32];
     secureRandom.nextBytes(bytes);
@@ -343,7 +387,13 @@ public class CommandCenterActionService {
       String id,
       CommandCenterActionType action,
       Instant expiresAt,
-      String confirmationPhrase) {}
+      String confirmationPhrase) {
+    @Override
+    public String toString() {
+      return "ActionChallenge[id=<redacted>, action=" + action
+          + ", expiresAt=" + expiresAt + ", confirmationPhrase=" + confirmationPhrase + "]";
+    }
+  }
 
   /** Confirmation input; no field can influence an executable or argument. */
   public record ActionConfirmation(
@@ -369,7 +419,13 @@ public class CommandCenterActionService {
       String id,
       String actorId,
       CommandCenterActionType action,
-      Instant expiresAt) {}
+      Instant expiresAt) {
+    @Override
+    public String toString() {
+      return "StoredChallenge[id=<redacted>, actorId=" + actorId
+          + ", action=" + action + ", expiresAt=" + expiresAt + "]";
+    }
+  }
 
   private record ActionKey(String actorId, CommandCenterActionType action) {}
 }
