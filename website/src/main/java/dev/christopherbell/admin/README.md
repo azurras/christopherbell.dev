@@ -13,6 +13,10 @@ Owns back-office administration views and cross-feature admin operations.
 - Back Office operations for Location Census ZIP coordinate imports, What's For
   Lunch imports/dedupe, vehicle VIN admin actions, vehicle collection state, and
   admin-only content reads.
+- The `commandcenter` subfeature samples OSHI and optional NVIDIA host metrics on
+  one schedule, retains bounded in-memory history, and exposes only immutable
+  cached snapshot models to its API layer. Provider failures are isolated and
+  last-good values become stale instead of blocking application startup.
 
 ## Update This Doc
 
