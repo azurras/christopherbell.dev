@@ -9,6 +9,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributeView;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -68,6 +72,16 @@ class CommandCenterLogServiceTest {
     assertThat(literal.records()).extracting(CommandCenterLogService.LogRecord::text)
         .containsExactly("INFO value a.b", "INFO token=[REDACTED] a.b");
     assertThat(secret.records()).isEmpty();
+  }
+
+  @Test
+  void literalQueryIsCaseInsensitive() throws IOException {
+    Path log = writeLog("INFO MiXeD-CaSe value\nINFO unrelated\n");
+
+    var page = service(log, 20, 1_024).read(null, null, "mixed-CASE");
+
+    assertThat(page.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("INFO MiXeD-CaSe value");
   }
 
   @Test
@@ -132,6 +146,44 @@ class CommandCenterLogServiceTest {
   }
 
   @Test
+  void replacementOfEmptyFileResetsEvenWhenCreationTimeIsReused() throws IOException {
+    Path log = writeLog("");
+    var service = service(log, 20, 32);
+    var cursor = service.read(null, null, null).nextCursor();
+    BasicFileAttributes original = Files.readAttributes(log, BasicFileAttributes.class);
+
+    Files.move(log, tempDir.resolve("empty.log.1"));
+    Files.write(log, new byte[0]);
+    Files.getFileAttributeView(log, BasicFileAttributeView.class)
+        .setTimes(null, null, original.creationTime());
+
+    var page = service.read(cursor, null, null);
+
+    assertThat(page.reset()).isTrue();
+    assertThat(page.records()).isEmpty();
+  }
+
+  @Test
+  void replacementWithSameSuffixAndCreationTimeResets() throws IOException {
+    String commonSuffix = "S".repeat(160) + "\n";
+    Path log = writeLog("INFO " + "A".repeat(160) + commonSuffix);
+    var service = service(log, 20, 512);
+    var cursor = service.read(null, null, null).nextCursor();
+    BasicFileAttributes original = Files.readAttributes(log, BasicFileAttributes.class);
+
+    Files.move(log, tempDir.resolve("same-suffix.log.1"));
+    Files.writeString(log, "WARN " + "B".repeat(160) + commonSuffix, UTF_8);
+    Files.getFileAttributeView(log, BasicFileAttributeView.class)
+        .setTimes(null, null, original.creationTime());
+
+    var page = service.read(cursor, null, null);
+
+    assertThat(page.reset()).isTrue();
+    assertThat(page.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("WARN " + "B".repeat(160) + "S".repeat(160));
+  }
+
+  @Test
   void truncationResetsCursorAndReadsTheReplacementContent() throws IOException {
     Path log = writeLog("INFO a-long-original-line\nWARN second-original-line\n");
     var service = service(log, 20, 1_024);
@@ -168,6 +220,55 @@ class CommandCenterLogServiceTest {
   }
 
   @Test
+  void trailingIncompleteLineIsHeldUntilItsNewlineArrives() throws IOException {
+    Path log = writeLog("INFO ready\n");
+    var service = service(log, 20, 64);
+    var cursor = service.read(null, null, null).nextCursor();
+    Files.writeString(log, "WARN pending", UTF_8, StandardOpenOption.APPEND);
+
+    var pending = service.read(cursor, null, null);
+    Files.writeString(log, " completed\n", UTF_8, StandardOpenOption.APPEND);
+    var completed = service.read(pending.nextCursor(), null, null);
+
+    assertThat(pending.records()).isEmpty();
+    assertThat(completed.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("WARN pending completed");
+  }
+
+  @Test
+  void splitSecretLinesAreDiscardedWithoutReturningFragments() throws IOException {
+    assertSplitSecretIsNeverReturned("INFO token=" + "t".repeat(80));
+    assertSplitSecretIsNeverReturned("INFO Authorization: Bearer " + "b".repeat(80));
+    assertSplitSecretIsNeverReturned(
+        "INFO eyJ" + "a".repeat(40) + "." + "b".repeat(40) + "." + "c".repeat(40));
+  }
+
+  @Test
+  void oversizedLineWithNoNewlineMakesProgressAndRecoversAtNextCompleteLine()
+      throws IOException {
+    Path log = writeLog("INFO ready\n");
+    var service = service(log, 20, 16);
+    var cursor = service.read(null, null, null).nextCursor();
+    Files.writeString(log, "X".repeat(96), UTF_8, StandardOpenOption.APPEND);
+
+    List<String> cursors = new ArrayList<>();
+    for (int index = 0; index < 4; index++) {
+      var page = service.read(cursor, null, null);
+      assertThat(page.records()).isEmpty();
+      assertThat(page.nextCursor()).isNotEqualTo(cursor);
+      cursor = page.nextCursor();
+      cursors.add(cursor);
+    }
+
+    Files.writeString(log, "X".repeat(32) + "\nINFO safe\n", UTF_8, StandardOpenOption.APPEND);
+    var recoveredRecords = readUntilRecord(service, cursor, 10);
+
+    assertThat(cursors).doesNotHaveDuplicates();
+    assertThat(recoveredRecords).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("INFO safe");
+  }
+
+  @Test
   void redactsAuthorizationCredentialsNamedSecretsAndJwts() throws IOException {
     Path log = writeLog(
         "INFO Authorization: Bearer bearer-value\n"
@@ -189,6 +290,39 @@ class CommandCenterLogServiceTest {
     Path log = tempDir.resolve("application.log");
     Files.writeString(log, content, UTF_8);
     return log;
+  }
+
+  private void assertSplitSecretIsNeverReturned(String secretLine) throws IOException {
+    Path log = tempDir.resolve("split-" + Math.abs(secretLine.hashCode()) + ".log");
+    Files.writeString(log, "INFO ready\n", UTF_8);
+    var service = service(log, 20, 16);
+    var cursor = service.read(null, null, null).nextCursor();
+    Files.writeString(log, secretLine, UTF_8, StandardOpenOption.APPEND);
+
+    for (int index = 0; index < 4; index++) {
+      var page = service.read(cursor, null, null);
+      assertThat(page.records()).as("secret fragments must stay hidden").isEmpty();
+      assertThat(page.nextCursor()).isNotEqualTo(cursor);
+      cursor = page.nextCursor();
+    }
+
+    Files.writeString(log, "\nINFO safe\n", UTF_8, StandardOpenOption.APPEND);
+    var recoveredRecords = readUntilRecord(service, cursor, 16);
+    assertThat(recoveredRecords).extracting(CommandCenterLogService.LogRecord::text)
+        .containsExactly("INFO safe");
+  }
+
+  private List<CommandCenterLogService.LogRecord> readUntilRecord(
+      CommandCenterLogService service, String initialCursor, int attempts) {
+    String cursor = initialCursor;
+    for (int index = 0; index < attempts; index++) {
+      var page = service.read(cursor, null, null);
+      if (!page.records().isEmpty()) {
+        return page.records();
+      }
+      cursor = page.nextCursor();
+    }
+    return List.of();
   }
 
   private CommandCenterLogService service(Path logPath, int maxLines, int maxBytes) {

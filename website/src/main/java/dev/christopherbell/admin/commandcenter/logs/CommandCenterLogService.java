@@ -5,6 +5,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -71,6 +72,7 @@ public class CommandCenterLogService {
     boolean cursorMatches =
         cursor != null
             && cursor.offset() <= fileSize
+            && hasUnambiguousIdentity(attributes, cursor.offset())
             && cursor.fingerprint().equals(fingerprint(logPath, attributes, cursor.offset()));
 
     long start;
@@ -81,16 +83,29 @@ public class CommandCenterLogService {
       start = Math.max(0, fileSize - maxBytes());
     }
 
-    ReadWindow window = readWindow(logPath, start, fileSize, cursorMatches);
+    ReadWindow window =
+        readWindow(
+            logPath,
+            start,
+            fileSize,
+            cursorMatches,
+            cursorMatches && cursor.discarding());
     List<LogRecord> records = filterAndBound(window.lines(), requestedLevel, query);
     String nextCursor =
         encodeCursor(
             new Cursor(
-                fingerprint(logPath, attributes, window.nextOffset()), window.nextOffset()));
+                fingerprint(logPath, attributes, window.nextOffset()),
+                window.nextOffset(),
+                window.discarding()));
     return new LogPage(nextCursor, records, reset, "ok");
   }
 
-  private ReadWindow readWindow(Path logPath, long start, long fileSize, boolean incremental)
+  private ReadWindow readWindow(
+      Path logPath,
+      long start,
+      long fileSize,
+      boolean incremental,
+      boolean cursorDiscarding)
       throws IOException {
     int length = (int) Math.min(maxBytes(), fileSize - start);
     byte[] bytes = new byte[length];
@@ -100,12 +115,28 @@ public class CommandCenterLogService {
     }
 
     int from = 0;
-    if (!incremental && start > 0) {
-      from = afterFirstNewline(bytes);
+    boolean discarding = cursorDiscarding || (!incremental && start > 0);
+    if (discarding) {
+      int newline = firstNewline(bytes);
+      if (newline < 0) {
+        return new ReadWindow(List.of(), start + bytes.length, true);
+      }
+      from = newline + 1;
+      discarding = false;
     }
 
-    List<RawLine> lines = splitLines(bytes, from, start);
-    return new ReadWindow(lines, start + bytes.length);
+    SplitResult split = splitCompleteLines(bytes, from, start);
+    if (!split.hasIncompleteLine()) {
+      return new ReadWindow(split.lines(), start + bytes.length, false);
+    }
+
+    // Hold a normal partial line at its start so the next poll can redact it as one unit. Once a
+    // line fills an entire window without a newline, advance in discard mode until its terminator.
+    int incompleteLength = bytes.length - split.incompleteStart();
+    if (split.incompleteStart() == from && incompleteLength == maxBytes()) {
+      return new ReadWindow(split.lines(), start + bytes.length, true);
+    }
+    return new ReadWindow(split.lines(), start + split.incompleteStart(), false);
   }
 
   private List<LogRecord> filterAndBound(
@@ -115,8 +146,10 @@ public class CommandCenterLogService {
       String redacted = redact(new String(line.bytes(), UTF_8));
       LogLevel actualLevel = classify(redacted);
       if ((requestedLevel == null || requestedLevel == actualLevel)
-          && (query == null || redacted.contains(query))) {
-        matches.add(new LogRecord(line.offset(), actualLevel == null ? "" : actualLevel.name(), redacted));
+          && (query == null || redacted.toLowerCase(Locale.ROOT).contains(query))) {
+        matches.add(
+            new LogRecord(
+                line.offset(), actualLevel == null ? "" : actualLevel.name(), redacted));
       }
     }
 
@@ -137,12 +170,11 @@ public class CommandCenterLogService {
     return List.copyOf(boundedNewestFirst);
   }
 
-  private List<RawLine> splitLines(byte[] bytes, int from, long absoluteStart) {
+  private SplitResult splitCompleteLines(byte[] bytes, int from, long absoluteStart) {
     List<RawLine> lines = new ArrayList<>();
     int lineStart = from;
-    for (int index = from; index <= bytes.length; index++) {
-      boolean atEnd = index == bytes.length;
-      if (!atEnd && bytes[index] != '\n') {
+    for (int index = from; index < bytes.length; index++) {
+      if (bytes[index] != '\n') {
         continue;
       }
       int lineEnd = index;
@@ -155,16 +187,16 @@ public class CommandCenterLogService {
       }
       lineStart = index + 1;
     }
-    return lines;
+    return new SplitResult(lines, lineStart, lineStart < bytes.length);
   }
 
-  private int afterFirstNewline(byte[] bytes) {
+  private int firstNewline(byte[] bytes) {
     for (int index = 0; index < bytes.length; index++) {
       if (bytes[index] == '\n') {
-        return index + 1;
+        return index;
       }
     }
-    return bytes.length;
+    return -1;
   }
 
   private String redact(String text) {
@@ -185,7 +217,7 @@ public class CommandCenterLogService {
     if (query.length() > MAX_QUERY_LENGTH) {
       throw new IllegalArgumentException("Log query must not exceed 100 characters");
     }
-    return query;
+    return query.toLowerCase(Locale.ROOT);
   }
 
   private CursorResult decodeCursor(String encoded) {
@@ -195,51 +227,78 @@ public class CommandCenterLogService {
     try {
       String decoded = new String(Base64.getUrlDecoder().decode(encoded), UTF_8);
       String[] parts = decoded.split(":", -1);
-      if (parts.length != 3 || !parts[0].equals("v1")) {
+      if (parts.length != 4 || !parts[0].equals("v2")) {
         throw new IllegalArgumentException("Unsupported cursor");
       }
       long offset = Long.parseLong(parts[2]);
+      boolean discarding = switch (parts[3]) {
+        case "0" -> false;
+        case "1" -> true;
+        default -> throw new IllegalArgumentException("Invalid cursor state");
+      };
       if (parts[1].isBlank() || offset < 0) {
         throw new IllegalArgumentException("Invalid cursor");
       }
-      return new CursorResult(new Cursor(parts[1], offset), true, false);
+      return new CursorResult(new Cursor(parts[1], offset, discarding), true, false);
     } catch (IllegalArgumentException exception) {
       return new CursorResult(null, true, true);
     }
   }
 
   private String encodeCursor(Cursor cursor) {
-    String value = "v1:" + cursor.fingerprint() + ":" + cursor.offset();
+    String value =
+        "v2:"
+            + cursor.fingerprint()
+            + ":"
+            + cursor.offset()
+            + ":"
+            + (cursor.discarding() ? "1" : "0");
     return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(UTF_8));
   }
 
   private String fingerprint(Path path, BasicFileAttributes attributes, long offset)
       throws IOException {
-    Object fileKey = attributes.fileKey();
-    String identity =
-        path.toAbsolutePath().normalize()
-            + "|"
-            + (fileKey == null ? "" : fileKey)
-            + "|"
-            + attributes.creationTime().toMillis()
-            + "|"
-            + Base64.getEncoder().encodeToString(readAnchor(path, offset));
     try {
-      byte[] digest = MessageDigest.getInstance("SHA-256").digest(identity.getBytes(UTF_8));
+      MessageDigest digestBuilder = MessageDigest.getInstance("SHA-256");
+      digestBuilder.update("command-center-log-v2\0".getBytes(UTF_8));
+      Object fileKey = attributes.fileKey();
+      digestBuilder.update((fileKey == null ? "no-file-key" : fileKey.toString()).getBytes(UTF_8));
+      digestBuilder.update((byte) 0);
+      digestBuilder.update(attributes.creationTime().toString().getBytes(UTF_8));
+      digestBuilder.update(ByteBuffer.allocate(Long.BYTES).putLong(offset).array());
+      updateContentFingerprint(digestBuilder, path, offset);
+      byte[] digest = digestBuilder.digest();
       return java.util.HexFormat.of().formatHex(digest);
     } catch (NoSuchAlgorithmException exception) {
       throw new IllegalStateException("SHA-256 is required for log cursors", exception);
     }
   }
 
-  private byte[] readAnchor(Path path, long offset) throws IOException {
-    int length = (int) Math.min(128, offset);
-    byte[] anchor = new byte[length];
-    try (var file = new RandomAccessFile(path.toFile(), "r")) {
-      file.seek(offset - length);
-      file.readFully(anchor);
+  private boolean hasUnambiguousIdentity(BasicFileAttributes attributes, long offset) {
+    // Empty files have no content fallback. Without a platform file key, reset rather than claim
+    // that an offset-zero cursor still refers to the same empty file.
+    return attributes.fileKey() != null || offset > 0;
+  }
+
+  private void updateContentFingerprint(MessageDigest digest, Path path, long offset)
+      throws IOException {
+    int budget = (int) Math.min(8_192, Math.min(offset, maxBytes()));
+    if (budget == 0) {
+      return;
     }
-    return anchor;
+    int prefixLength = Math.min(budget, (budget + 1) / 2);
+    int suffixLength = Math.min(budget - prefixLength, (int) offset - prefixLength);
+    try (var file = new RandomAccessFile(path.toFile(), "r")) {
+      byte[] prefix = new byte[prefixLength];
+      file.readFully(prefix);
+      digest.update(prefix);
+      if (suffixLength > 0) {
+        byte[] suffix = new byte[suffixLength];
+        file.seek(offset - suffixLength);
+        file.readFully(suffix);
+        digest.update(suffix);
+      }
+    }
   }
 
   private int maxLines() {
@@ -256,13 +315,16 @@ public class CommandCenterLogService {
   /** One redacted plain-text log line with its byte-offset sequence. */
   public record LogRecord(long sequence, String level, String text) {}
 
-  private record Cursor(String fingerprint, long offset) {}
+  private record Cursor(String fingerprint, long offset, boolean discarding) {}
 
   private record CursorResult(Cursor cursor, boolean provided, boolean invalid) {}
 
   private record RawLine(long offset, byte[] bytes) {}
 
-  private record ReadWindow(List<RawLine> lines, long nextOffset) {}
+  private record SplitResult(
+      List<RawLine> lines, int incompleteStart, boolean hasIncompleteLine) {}
+
+  private record ReadWindow(List<RawLine> lines, long nextOffset, boolean discarding) {}
 
   private enum LogLevel {
     TRACE,

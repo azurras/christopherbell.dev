@@ -19,7 +19,8 @@ Owns back-office administration views and cross-feature admin operations.
   last-good values become stale instead of blocking application startup.
 - Command-center log reads use only the configured server-side path, return a
   line- and byte-bounded incremental tail, recover from rotation or truncation,
-  and redact credentials before applying literal text and severity filters.
+  and never return incomplete or oversized line fragments. Credentials are
+  redacted before case-insensitive literal text and severity filters are applied.
 
 ## Update This Doc
 
