@@ -32,7 +32,13 @@ class CommandCenterPropertiesTest {
 
     assertThat(properties.getSampleInterval()).isEqualTo(Duration.ofSeconds(5));
     assertThat(properties.getHistoryDuration()).isEqualTo(Duration.ofMinutes(15));
+    assertThat(properties.getProviderTimeout()).isEqualTo(Duration.ofSeconds(2));
+    assertThat(properties.getActions().getChallengeTtl()).isEqualTo(Duration.ofMinutes(2));
+    assertThat(properties.getActions().getCooldown()).isEqualTo(Duration.ofMinutes(2));
     assertThat(properties.getActions().getPowerDelay()).isEqualTo(Duration.ofSeconds(60));
+    assertThat(properties.getActions().getFailedAttempts()).isEqualTo(3);
+    assertThat(properties.getActions().getFailedAttemptWindow())
+        .isEqualTo(Duration.ofMinutes(15));
   }
 
   @Test
