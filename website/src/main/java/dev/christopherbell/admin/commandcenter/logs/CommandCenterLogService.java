@@ -203,9 +203,30 @@ public class CommandCenterLogService {
 
   private String redact(String text) {
     String redacted = redactStructuredQuotedSecrets(text);
+    redacted = redactStructuredQuotedSecrets(normalizeEscapedStructuralQuotes(redacted));
     redacted = AUTHORIZATION_PATTERN.matcher(redacted).replaceAll("$1[REDACTED]");
     redacted = NAMED_SECRET_PATTERN.matcher(redacted).replaceAll("$1$2[REDACTED]");
     return JWT_PATTERN.matcher(redacted).replaceAll("[REDACTED]");
+  }
+
+  private static String normalizeEscapedStructuralQuotes(String text) {
+    var normalized = new StringBuilder(text.length());
+    for (int index = 0; index < text.length();) {
+      if (text.charAt(index) != '\\') {
+        normalized.append(text.charAt(index++));
+        continue;
+      }
+      int start = index;
+      while (index < text.length() && text.charAt(index) == '\\') index++;
+      int slashCount = index - start;
+      if (slashCount == 1 && index < text.length()
+          && (text.charAt(index) == '"' || text.charAt(index) == '\'')) {
+        normalized.append(text.charAt(index++));
+      } else {
+        normalized.append(text, start, index);
+      }
+    }
+    return normalized.toString();
   }
 
   private String redactStructuredQuotedSecrets(String text) {

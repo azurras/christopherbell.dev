@@ -3,6 +3,7 @@ package dev.christopherbell.admin.commandcenter.metrics;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.AclEntry;
 import java.nio.file.attribute.AclEntryFlag;
@@ -10,6 +11,7 @@ import java.nio.file.attribute.AclEntryPermission;
 import java.nio.file.attribute.AclEntryType;
 import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.FileOwnerAttributeView;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -54,10 +56,12 @@ final class SecureNativeLibraryProvisioner {
     Path versionDirectory = baseDirectory.resolve("jlibre-" + VERSION + "-" + nonce);
     boolean created = false;
     try {
-      Files.createDirectories(baseDirectory);
+      createDirectoriesWithoutLinks(baseDirectory);
+      verifyNotLinkOrReparsePoint(baseDirectory);
       aclPolicy.hardenAndVerify(baseDirectory);
       Files.createDirectory(versionDirectory);
       created = true;
+      verifyNotLinkOrReparsePoint(versionDirectory);
       aclPolicy.hardenAndVerify(versionDirectory);
       Path libre = null;
       for (var resource : resources) {
@@ -71,6 +75,7 @@ final class SecureNativeLibraryProvisioner {
           }
           Files.copy(input, target);
         }
+        verifyNotLinkOrReparsePoint(target);
         if (!resource.expectedSha256().equalsIgnoreCase(sha256(target))) {
           throw new SecurityException("Bundled native library checksum mismatch.");
         }
@@ -92,6 +97,27 @@ final class SecureNativeLibraryProvisioner {
         throw securityException;
       }
       throw new SecurityException("Secure native library provisioning failed.", failure);
+    }
+  }
+
+  private static void createDirectoriesWithoutLinks(Path directory) throws IOException {
+    Path current = directory.getRoot();
+    for (Path segment : directory) {
+      current = current == null ? segment : current.resolve(segment);
+      if (Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+        verifyNotLinkOrReparsePoint(current);
+      } else {
+        Files.createDirectory(current);
+        verifyNotLinkOrReparsePoint(current);
+      }
+    }
+  }
+
+  private static void verifyNotLinkOrReparsePoint(Path path) throws IOException {
+    var attributes = Files.readAttributes(
+        path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+    if (attributes.isSymbolicLink() || attributes.isOther()) {
+      throw new SecurityException("Native library path contains a link or reparse point.");
     }
   }
 
@@ -155,7 +181,23 @@ final class SecureNativeLibraryProvisioner {
     @Override public void close() { if (owned) deleteTree(directory); }
   }
 
-  private static final class WindowsAclPolicy implements AclPolicy {
+  static final class WindowsAclPolicy implements AclPolicy {
+    private static final Set<String> TRUSTED_PRINCIPAL_NAMES = Set.of(
+        "NT AUTHORITY\\SYSTEM", "BUILTIN\\Administrators");
+    private static final Set<AclEntryPermission> DANGEROUS_PERMISSIONS = EnumSet.of(
+        AclEntryPermission.WRITE_DATA,
+        AclEntryPermission.APPEND_DATA,
+        AclEntryPermission.WRITE_NAMED_ATTRS,
+        AclEntryPermission.WRITE_ATTRIBUTES,
+        AclEntryPermission.DELETE,
+        AclEntryPermission.DELETE_CHILD,
+        AclEntryPermission.WRITE_ACL,
+        AclEntryPermission.WRITE_OWNER);
+
+    static Set<String> trustedPrincipalNames() {
+      return TRUSTED_PRINCIPAL_NAMES;
+    }
+
     @Override
     public void hardenAndVerify(Path path) throws IOException {
       var view = Files.getFileAttributeView(path, AclFileAttributeView.class);
@@ -164,14 +206,19 @@ final class SecureNativeLibraryProvisioner {
         throw new SecurityException("Windows ACL support is required.");
       }
       var lookup = path.getFileSystem().getUserPrincipalLookupService();
+      var system = lookupPrincipal(lookup, "NT AUTHORITY\\SYSTEM", "SYSTEM", false);
+      var administrators = lookupPrincipal(
+          lookup, "BUILTIN\\Administrators", "Administrators", true);
       var owner = ownerView.getOwner();
-      var system = lookup.lookupPrincipalByName("SYSTEM");
-      var administrators = lookup.lookupPrincipalByGroupName("Administrators");
+      if (!owner.equals(system) && !owner.equals(administrators)) {
+        throw new SecurityException("Native library base owner is not trusted.");
+      }
+      ownerView.setOwner(system);
       var permissions = EnumSet.allOf(AclEntryPermission.class);
       var flags = Files.isDirectory(path)
           ? EnumSet.of(AclEntryFlag.FILE_INHERIT, AclEntryFlag.DIRECTORY_INHERIT)
           : EnumSet.noneOf(AclEntryFlag.class);
-      var principals = List.of(system, administrators, owner);
+      var principals = List.of(system, administrators);
       var entries = new ArrayList<AclEntry>();
       for (var principal : principals.stream().distinct().toList()) {
         entries.add(AclEntry.newBuilder().setType(AclEntryType.ALLOW).setPrincipal(principal)
@@ -182,9 +229,27 @@ final class SecureNativeLibraryProvisioner {
           .map(principal -> principal.getName().toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toSet());
       for (var entry : view.getAcl()) {
         if (entry.type() == AclEntryType.ALLOW
-            && !allowed.contains(entry.principal().getName().toLowerCase(Locale.ROOT))) {
-          throw new SecurityException("Untrusted principal retains native library access.");
+            && !allowed.contains(entry.principal().getName().toLowerCase(Locale.ROOT))
+            && entry.permissions().stream().anyMatch(DANGEROUS_PERMISSIONS::contains)) {
+          throw new SecurityException("Untrusted principal retains native library write access.");
         }
+      }
+      if (!ownerView.getOwner().equals(system)) {
+        throw new SecurityException("Native library owner could not be restricted to SYSTEM.");
+      }
+    }
+
+    private static java.nio.file.attribute.UserPrincipal lookupPrincipal(
+        java.nio.file.attribute.UserPrincipalLookupService lookup,
+        String qualified,
+        String fallback,
+        boolean group) throws IOException {
+      try {
+        return group ? lookup.lookupPrincipalByGroupName(qualified)
+            : lookup.lookupPrincipalByName(qualified);
+      } catch (java.nio.file.attribute.UserPrincipalNotFoundException failure) {
+        return group ? lookup.lookupPrincipalByGroupName(fallback)
+            : lookup.lookupPrincipalByName(fallback);
       }
     }
   }

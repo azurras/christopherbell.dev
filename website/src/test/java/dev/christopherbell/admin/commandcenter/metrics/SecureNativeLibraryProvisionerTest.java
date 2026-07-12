@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -61,21 +62,35 @@ class SecureNativeLibraryProvisionerTest {
 
   @Test
   @EnabledOnOs(OS.WINDOWS)
-  void productionAclAllowsOnlySystemAdministratorsAndOwner() throws Exception {
-    var libraries = new SecureNativeLibraryProvisioner(tempDir.resolve("secure")).provision();
+  void productionAclRejectsBaseOwnedByInteractiveAttacker() {
+    assertThatThrownBy(() -> new SecureNativeLibraryProvisioner(
+        tempDir.resolve("attacker-owned")).provision())
+        .isInstanceOf(SecurityException.class)
+        .hasMessageContaining("owner");
+  }
+
+  @Test
+  void productionAclNeverGrantsAnArbitraryCurrentOwner() {
+    assertThat(SecureNativeLibraryProvisioner.WindowsAclPolicy.trustedPrincipalNames())
+        .containsExactlyInAnyOrder("NT AUTHORITY\\SYSTEM", "BUILTIN\\Administrators")
+        .noneMatch(name -> name.contains(System.getProperty("user.name")));
+  }
+
+  @Test
+  void configuredBaseRejectsSymbolicLinksOrReparsePoints() throws Exception {
+    Path target = Files.createDirectory(tempDir.resolve("target"));
+    Path linked = tempDir.resolve("linked");
     try {
-      var acl = Files.getFileAttributeView(
-          libraries.libreHardwareMonitor(), java.nio.file.attribute.AclFileAttributeView.class).getAcl();
-      assertThat(acl).allSatisfy(entry -> {
-        if (entry.type() == java.nio.file.attribute.AclEntryType.ALLOW) {
-          String principal = entry.principal().getName().toLowerCase(java.util.Locale.ROOT);
-          assertThat(principal).doesNotEndWith("\\users");
-          assertThat(principal).doesNotContain("everyone", "authenticated users");
-        }
-      });
-    } finally {
-      libraries.close();
+      Files.createSymbolicLink(linked, target);
+    } catch (UnsupportedOperationException | IOException failure) {
+      org.junit.jupiter.api.Assumptions.abort("Symbolic links unavailable: " + failure.getMessage());
     }
+    var provisioner = new SecureNativeLibraryProvisioner(
+        linked, List.of(), path -> {}, () -> "linked");
+
+    assertThatThrownBy(provisioner::provision)
+        .isInstanceOf(SecurityException.class)
+        .hasMessageContaining("link");
   }
 
   private SecureNativeLibraryProvisioner provisioner(

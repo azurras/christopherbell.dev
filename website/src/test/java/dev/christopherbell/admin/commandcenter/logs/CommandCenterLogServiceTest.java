@@ -106,6 +106,20 @@ class CommandCenterLogServiceTest {
   }
 
   @Test
+  void redactsNestedJsonWhoseStructuralDelimitersAreEscaped() throws IOException {
+    Path log = writeLog("""
+        payload={\"password\":\"hunter2\",\"authorization\":\"Bearer nested-auth\"}
+        event={\"token\":\"nested-token\",\"password\":\"before\\\\\\\"inside-after\"}
+        """);
+
+    var rendered = service(log, 20, 2_048).read(null, null, null).records().toString();
+
+    assertThat(rendered).doesNotContain(
+        "hunter2", "nested-auth", "nested-token", "before", "inside-after");
+    assertThat(rendered).contains("[REDACTED]");
+  }
+
+  @Test
   void literalQueryIsCaseInsensitive() throws IOException {
     Path log = writeLog("INFO MiXeD-CaSe value\nINFO unrelated\n");
 

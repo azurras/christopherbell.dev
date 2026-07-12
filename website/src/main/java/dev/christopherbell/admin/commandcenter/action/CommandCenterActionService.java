@@ -179,6 +179,11 @@ public class CommandCenterActionService {
             () -> executeBackground(actor, confirmation.action(), clientIp), executeAt);
       } catch (RuntimeException exception) {
         rollbackActionState(actor.getId(), confirmation.action(), now, null);
+        try {
+          audit(actor, confirmation.action(), clientIp, "schedule-failed");
+        } catch (RuntimeException auditFailure) {
+          exception.addSuppressed(auditFailure);
+        }
         throw exception;
       }
     }

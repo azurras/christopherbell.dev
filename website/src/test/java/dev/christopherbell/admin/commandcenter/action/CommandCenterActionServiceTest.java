@@ -491,6 +491,15 @@ class CommandCenterActionServiceTest {
     assertThatThrownBy(() -> execute(first.id(), RESTART_SITE, PASSWORD, "RESTART SITE"))
         .isInstanceOf(IllegalStateException.class);
 
+    var order = inOrder(activities, scheduler);
+    order.verify(activities).recordForActor(
+        any(), any(), eq("COMMAND_CENTER_ACTION_ACCEPTED"), any(),
+        eq("RESTART_SITE"), any(), any(), any());
+    order.verify(scheduler).schedule(any(Runnable.class), any(Instant.class));
+    order.verify(activities).recordForActor(
+        any(), any(), eq("COMMAND_CENTER_ACTION_SCHEDULE_FAILED"), any(),
+        eq("RESTART_SITE"), any(), any(), any());
+
     reset(scheduler);
     var retry = service.createChallenge(RESTART_SITE);
     assertThat(execute(retry.id(), RESTART_SITE, PASSWORD, "RESTART SITE").accepted()).isTrue();
