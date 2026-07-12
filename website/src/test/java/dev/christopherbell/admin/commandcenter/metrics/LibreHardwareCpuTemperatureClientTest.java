@@ -9,7 +9,8 @@ class LibreHardwareCpuTemperatureClientTest {
   @Test
   void acceptsOnlyFinitePhysicallySaneTemperature() {
     var session = new FakeSession("64.25", false, false);
-    var client = new LibreHardwareCpuTemperatureClient(() -> session, () -> "C:\\fixed\\Libre.dll", true);
+    var client = new LibreHardwareCpuTemperatureClient(
+        () -> session, () -> libraries("C:\\fixed\\Libre.dll"), true);
 
     assertThat(client.readCelsius()).hasValue(64.25);
   }
@@ -21,7 +22,8 @@ class LibreHardwareCpuTemperatureClientTest {
     var recovered = new FakeSession("55.0", false, false);
     sessions.add(timedOut);
     sessions.add(recovered);
-    var client = new LibreHardwareCpuTemperatureClient(sessions::remove, () -> "C:\\fixed\\Libre.dll", true);
+    var client = new LibreHardwareCpuTemperatureClient(
+        sessions::remove, () -> libraries("C:\\fixed\\Libre.dll"), true);
 
     assertThat(client.readCelsius()).isEmpty();
     assertThat(timedOut.closed).isTrue();
@@ -31,9 +33,10 @@ class LibreHardwareCpuTemperatureClientTest {
   @Test
   void unsupportedPlatformAndStartupFailureDegradeWithoutThrowing() {
     var unsupported = new LibreHardwareCpuTemperatureClient(
-        () -> { throw new AssertionError("must not open"); }, () -> "unused", false);
+        () -> { throw new AssertionError("must not open"); }, () -> libraries("unused"), false);
     var failed = new LibreHardwareCpuTemperatureClient(
-        () -> { throw new IllegalStateException("PowerShell missing"); }, () -> "unused", true);
+        () -> { throw new IllegalStateException("PowerShell missing"); },
+        () -> { throw new SecurityException("ACL unavailable"); }, true);
 
     assertThat(unsupported.readCelsius()).isEmpty();
     assertThat(failed.readCelsius()).isEmpty();
@@ -42,13 +45,19 @@ class LibreHardwareCpuTemperatureClientTest {
   @Test
   void closeIsIdempotentAndClosesOwnedSession() {
     var session = new FakeSession("60", false, false);
-    var client = new LibreHardwareCpuTemperatureClient(() -> session, () -> "C:\\fixed\\Libre.dll", true);
+    var client = new LibreHardwareCpuTemperatureClient(
+        () -> session, () -> libraries("C:\\fixed\\Libre.dll"), true);
     client.readCelsius();
 
     client.close();
     client.close();
 
     assertThat(session.closeCalls).isEqualTo(1);
+  }
+
+  private static SecureNativeLibraryProvisioner.NativeLibraries libraries(String path) {
+    return new SecureNativeLibraryProvisioner.NativeLibraries(
+        java.nio.file.Path.of(path).getParent(), java.nio.file.Path.of(path));
   }
 
   private static final class FakeSession implements LibreHardwareCpuTemperatureClient.SensorSession {

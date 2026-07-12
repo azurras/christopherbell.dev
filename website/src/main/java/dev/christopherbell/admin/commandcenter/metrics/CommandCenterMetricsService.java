@@ -24,6 +24,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +54,7 @@ public class CommandCenterMetricsService {
   private final Map<String, ArrayDeque<MetricPoint>> history = new TreeMap<>();
   private final Map<HostMetricsProvider, Map<String, MetricReading>> lastGoodByProvider =
       new IdentityHashMap<>();
+  private final Map<HostMetricsProvider, ProviderTask> inFlightProviders = new IdentityHashMap<>();
 
   /** Creates the production collector without performing any host or database I/O at startup. */
   @Autowired
@@ -122,10 +124,28 @@ public class CommandCenterMetricsService {
     var readings = new LinkedHashMap<String, MetricReading>();
     var alerts = new ArrayList<Alert>();
 
+    inFlightProviders.entrySet().removeIf(entry -> entry.getValue().completed().get());
     var submitted = new LinkedHashMap<HostMetricsProvider, ProviderTask>();
     for (var provider : providers) {
-      submitted.put(provider, new ProviderTask(
-          providerExecutor.submit(() -> Map.copyOf(provider.read(sampledAt))), System.nanoTime()));
+      if (inFlightProviders.containsKey(provider)) {
+        retainStale(provider, readings);
+        alerts.add(new Alert("PROVIDER_IN_FLIGHT", "WARNING",
+            provider.getClass().getSimpleName() + " is still completing its prior sample."));
+        continue;
+      }
+      var started = new AtomicBoolean();
+      var completed = new AtomicBoolean();
+      var future = providerExecutor.submit(() -> {
+        started.set(true);
+        try {
+          return Map.copyOf(provider.read(sampledAt));
+        } finally {
+          completed.set(true);
+        }
+      });
+      var task = new ProviderTask(future, System.nanoTime(), started, completed);
+      inFlightProviders.put(provider, task);
+      submitted.put(provider, task);
     }
     for (var entry : submitted.entrySet()) {
       var provider = entry.getKey();
@@ -135,18 +155,20 @@ public class CommandCenterMetricsService {
         var providerReadings = entry.getValue().future().get(remaining, TimeUnit.NANOSECONDS);
         readings.putAll(providerReadings);
         lastGoodByProvider.put(provider, providerReadings);
+        inFlightProviders.remove(provider, entry.getValue());
       } catch (TimeoutException failure) {
-        entry.getValue().future().cancel(true);
+        cancel(entry.getValue());
         retainStale(provider, readings);
         alerts.add(new Alert(
             "PROVIDER_TIMEOUT", "WARNING",
             provider.getClass().getSimpleName() + " exceeded its sampling timeout."));
       } catch (InterruptedException failure) {
         Thread.currentThread().interrupt();
-        entry.getValue().future().cancel(true);
+        cancel(entry.getValue());
         retainStale(provider, readings);
         alerts.add(new Alert("PROVIDER_ERROR", "WARNING", "Metrics sampling was interrupted."));
       } catch (Exception failure) {
+        inFlightProviders.remove(provider, entry.getValue());
         LOGGER.warn(
             "Command-center metrics provider {} failed.",
             provider.getClass().getName(),
@@ -221,6 +243,13 @@ public class CommandCenterMetricsService {
         readings.put(key, stale(reading, PROVIDER_UNAVAILABLE_DETAIL)));
   }
 
+  private static void cancel(ProviderTask task) {
+    boolean cancelled = task.future().cancel(true);
+    if (cancelled && !task.started().get()) {
+      task.completed().set(true);
+    }
+  }
+
   private boolean pingMongo() {
     try {
       return mongoPing.ping(properties.getProviderTimeout());
@@ -265,6 +294,11 @@ public class CommandCenterMetricsService {
     var disk = readings.get("disk.free");
     if (isAvailable(disk) && disk.value() <= thresholds.getDiskFreeWarningPercent()) {
       alerts.add(new Alert("DISK_SPACE_LOW", "WARNING", "Free disk space is below the warning threshold."));
+    }
+    var service = readings.get("production.service.running");
+    if (isAvailable(service) && service.value() == 0) {
+      alerts.add(new Alert("PRODUCTION_SERVICE_STOPPED", "ERROR",
+          "The production website service is stopped."));
     }
     return alerts;
   }
@@ -334,5 +368,9 @@ public class CommandCenterMetricsService {
     Optional<CommandCenterSnapshot.PendingAction> pendingAction();
   }
 
-  private record ProviderTask(Future<Map<String, MetricReading>> future, long startedNanos) {}
+  private record ProviderTask(
+      Future<Map<String, MetricReading>> future,
+      long startedNanos,
+      AtomicBoolean started,
+      AtomicBoolean completed) {}
 }

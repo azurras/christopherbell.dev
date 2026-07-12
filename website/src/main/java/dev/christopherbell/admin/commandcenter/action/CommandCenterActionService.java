@@ -173,9 +173,14 @@ public class CommandCenterActionService {
         auditRejection(actor, confirmation.action(), clientIp, rejectionCategory(exception));
         throw exception;
       }
-      audit(actor, confirmation.action(), clientIp, "accepted");
-      scheduler.schedule(
-          () -> executeBackground(actor, confirmation.action(), clientIp), executeAt);
+      try {
+        audit(actor, confirmation.action(), clientIp, "accepted");
+        scheduler.schedule(
+            () -> executeBackground(actor, confirmation.action(), clientIp), executeAt);
+      } catch (RuntimeException exception) {
+        rollbackActionState(actor.getId(), confirmation.action(), now, null);
+        throw exception;
+      }
     }
     return new ActionResult(confirmation.action(), true, now, executeAt);
   }

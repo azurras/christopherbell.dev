@@ -126,6 +126,60 @@ class CommandCenterMetricsServiceTest {
   }
 
   @Test
+  void timedOutInterruptIgnoringProviderIsNotResubmittedUntilItsInvocationCompletes() throws Exception {
+    var clock = new MutableClock(START);
+    var properties = properties();
+    properties.setProviderTimeout(Duration.ofMillis(50));
+    var release = new CountDownLatch(1);
+    var completed = new CountDownLatch(1);
+    var invocations = new java.util.concurrent.atomic.AtomicInteger();
+    HostMetricsProvider blocked = sampledAt -> {
+      invocations.incrementAndGet();
+      while (release.getCount() > 0) {
+        try { release.await(); } catch (InterruptedException ignored) { }
+      }
+      completed.countDown();
+      return Map.of("cpu.usage", reading("cpu.usage", 10, sampledAt));
+    };
+    var executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+    try {
+      var service = new CommandCenterMetricsService(
+          List.of(blocked), properties, clock, "test", timeout -> true, executor,
+          java.util.Optional::empty);
+      service.collect();
+      clock.advance(Duration.ofSeconds(5));
+      service.collect();
+      assertThat(invocations).hasValue(1);
+      assertThat(service.snapshot().alerts()).extracting(CommandCenterSnapshot.Alert::code)
+          .contains("PROVIDER_IN_FLIGHT");
+
+      release.countDown();
+      assertThat(completed.await(1, TimeUnit.SECONDS)).isTrue();
+      service.collect();
+      assertThat(invocations).hasValue(2);
+    } finally {
+      release.countDown();
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void stoppedProductionServiceCreatesAlertAndDegradedHealth() {
+    HostMetricsProvider provider = sampledAt -> Map.of(
+        "production.service.running", new MetricReading(
+            "production.service.running", "Production service", 0.0, "state",
+            MetricStatus.AVAILABLE, sampledAt, null));
+    var service = new CommandCenterMetricsService(
+        List.of(provider), properties(), new MutableClock(START), "test", timeout -> true);
+
+    service.collect();
+
+    assertThat(service.snapshot().health()).isEqualTo(CommandCenterSnapshot.HealthStatus.DEGRADED);
+    assertThat(service.snapshot().alerts()).extracting(CommandCenterSnapshot.Alert::code)
+        .contains("PRODUCTION_SERVICE_STOPPED");
+  }
+
+  @Test
   void snapshotComposesPendingActionAndRestoresUnderlyingHealthAfterCancel() {
     var pending = new java.util.concurrent.atomic.AtomicReference<
         java.util.Optional<CommandCenterSnapshot.PendingAction>>(java.util.Optional.of(

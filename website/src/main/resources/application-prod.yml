@@ -25,6 +25,8 @@ app:
     from: ${APP_MAIL_FROM:noreply@christopherbell.dev}
 command-center:
   enabled: true
+  sensor-libraries-enabled: true
+  sensor-library-directory: C:/ProgramData/christopherbell.dev/config/command-center-sensors
   log-path: C:/ProgramData/christopherbell.dev/logs/ChristopherBellDev.out.log
   actions:
     mode: WINDOWS

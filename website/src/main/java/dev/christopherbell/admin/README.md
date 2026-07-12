@@ -29,6 +29,9 @@ Owns back-office administration views and cross-feature admin operations.
   delay, and cancellation uses the fixed `/a` command.
 - Host providers run concurrently behind independent timeouts on a private scheduler. CPU
   temperature uses a bounded, lifecycle-owned LibreHardwareMonitor PowerShell session on Windows.
+- Bundled sensor DLLs are checksum-pinned and extracted with create-new semantics into a fresh,
+  service-owned directory whose ACL permits only SYSTEM, Administrators, and its service owner.
+  Sensor collection fails closed if extraction, checksum verification, or ACL hardening fails.
 - Computer restart and shutdown additionally require the environment-backed
   `COMMAND_CENTER_POWER_ACTIONS_ENABLED=true` switch.
 - Every challenged action requires a fresh active approved admin, immediate

@@ -91,6 +91,21 @@ class CommandCenterLogServiceTest {
   }
 
   @Test
+  void redactsEscapeAwareStructuredSecretsWithQuotesAndBackslashes() throws IOException {
+    Path log = writeLog("""
+        {"password":"before\\\"quoted\\\\path-after","token":"tok\\\\en"}
+        authorization="Bearer abc\\\"def" password='single\\'quoted'
+        """);
+
+    var texts = service(log, 20, 2_048).read(null, null, null).records().stream()
+        .map(CommandCenterLogService.LogRecord::text).toList();
+
+    assertThat(texts).allSatisfy(text -> assertThat(text)
+        .doesNotContain("before", "quoted", "path-after", "tok\\\\en", "abc", "def", "single"));
+    assertThat(texts).allSatisfy(text -> assertThat(text).contains("[REDACTED]"));
+  }
+
+  @Test
   void literalQueryIsCaseInsensitive() throws IOException {
     Path log = writeLog("INFO MiXeD-CaSe value\nINFO unrelated\n");
 

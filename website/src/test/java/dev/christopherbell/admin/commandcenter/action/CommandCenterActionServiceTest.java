@@ -471,6 +471,32 @@ class CommandCenterActionServiceTest {
   }
 
   @Test
+  void websiteRestartRollsBackCooldownWhenAcceptedAuditFails() throws Exception {
+    doThrow(new IllegalStateException("audit unavailable")).when(activities).recordForActor(
+        any(), any(), eq("COMMAND_CENTER_ACTION_ACCEPTED"), any(), any(), any(), any(), any());
+    var first = service.createChallenge(RESTART_SITE);
+    assertThatThrownBy(() -> execute(first.id(), RESTART_SITE, PASSWORD, "RESTART SITE"))
+        .isInstanceOf(IllegalStateException.class);
+
+    reset(activities);
+    var retry = service.createChallenge(RESTART_SITE);
+    assertThat(execute(retry.id(), RESTART_SITE, PASSWORD, "RESTART SITE").accepted()).isTrue();
+  }
+
+  @Test
+  void websiteRestartRollsBackCooldownWhenSchedulerRejectsRegistration() throws Exception {
+    when(scheduler.schedule(any(Runnable.class), any(Instant.class)))
+        .thenThrow(new IllegalStateException("scheduler stopped"));
+    var first = service.createChallenge(RESTART_SITE);
+    assertThatThrownBy(() -> execute(first.id(), RESTART_SITE, PASSWORD, "RESTART SITE"))
+        .isInstanceOf(IllegalStateException.class);
+
+    reset(scheduler);
+    var retry = service.createChallenge(RESTART_SITE);
+    assertThat(execute(retry.id(), RESTART_SITE, PASSWORD, "RESTART SITE").accepted()).isTrue();
+  }
+
+  @Test
   void cancellationUsesOnlyTheFixedCancelActionAndClearsPendingState() throws Exception {
     var challenge = service.createChallenge(SHUTDOWN_COMPUTER);
     execute(challenge.id(), SHUTDOWN_COMPUTER, PASSWORD, "SHUTDOWN COMPUTER");

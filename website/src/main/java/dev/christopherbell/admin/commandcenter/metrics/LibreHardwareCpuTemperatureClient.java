@@ -1,36 +1,36 @@
 package dev.christopherbell.admin.commandcenter.metrics;
 
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
-import io.github.pandalxb.jlibrehardwaremonitor.util.SensorsUtils;
 import io.github.pandalxb.jpowershell.PowerShell;
 import jakarta.annotation.PreDestroy;
 import java.util.Locale;
 import java.util.Map;
 import java.util.OptionalDouble;
-import java.util.function.Supplier;
 import org.springframework.stereotype.Component;
 
 /** Owns a bounded PowerShell session and explicitly closes every native computer instance. */
 @Component
 public final class LibreHardwareCpuTemperatureClient implements CpuTemperatureSensorClient {
   private final SessionFactory sessionFactory;
-  private final Supplier<String> dllPathResolver;
+  private final NativeLibraryResolver libraryResolver;
   private final boolean windows;
   private SensorSession session;
+  private SecureNativeLibraryProvisioner.NativeLibraries libraries;
 
   public LibreHardwareCpuTemperatureClient(CommandCenterProperties properties) {
     this(
         () -> new JPowerShellSession(PowerShell.openSession().configuration(Map.of(
             "maxWait", Long.toString(Math.max(1, properties.getProviderTimeout().toMillis())),
             "waitPause", "5"))),
-        LibreHardwareCpuTemperatureClient::extractLibraries,
-        System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
+        () -> new SecureNativeLibraryProvisioner(properties.getSensorLibraryDirectory()).provision(),
+        properties.isSensorLibrariesEnabled()
+            && System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
   }
 
   LibreHardwareCpuTemperatureClient(
-      SessionFactory sessionFactory, Supplier<String> dllPathResolver, boolean windows) {
+      SessionFactory sessionFactory, NativeLibraryResolver libraryResolver, boolean windows) {
     this.sessionFactory = sessionFactory;
-    this.dllPathResolver = dllPathResolver;
+    this.libraryResolver = libraryResolver;
     this.windows = windows;
   }
 
@@ -41,9 +41,12 @@ public final class LibreHardwareCpuTemperatureClient implements CpuTemperatureSe
     }
     try {
       if (session == null) {
+        if (libraries == null) {
+          libraries = libraryResolver.resolve();
+        }
         session = sessionFactory.open();
       }
-      var result = session.execute(script(dllPathResolver.get()));
+      var result = session.execute(script(libraries.libreHardwareMonitor().toString()));
       if (result.error() || result.timeout()) {
         discardSession();
         return OptionalDouble.empty();
@@ -61,6 +64,10 @@ public final class LibreHardwareCpuTemperatureClient implements CpuTemperatureSe
   @PreDestroy
   public synchronized void close() {
     discardSession();
+    if (libraries != null) {
+      libraries.close();
+      libraries = null;
+    }
   }
 
   private void discardSession() {
@@ -71,11 +78,6 @@ public final class LibreHardwareCpuTemperatureClient implements CpuTemperatureSe
         session = null;
       }
     }
-  }
-
-  private static String extractLibraries() {
-    SensorsUtils.generateLibPath("/lib/", "HidSharp.dll");
-    return SensorsUtils.generateLibPath("/lib/", "LibreHardwareMonitorLib.dll");
   }
 
   private static String script(String dllPath) {
@@ -107,6 +109,10 @@ public final class LibreHardwareCpuTemperatureClient implements CpuTemperatureSe
 
   interface SessionFactory {
     SensorSession open();
+  }
+
+  interface NativeLibraryResolver {
+    SecureNativeLibraryProvisioner.NativeLibraries resolve();
   }
 
   interface SensorSession extends AutoCloseable {

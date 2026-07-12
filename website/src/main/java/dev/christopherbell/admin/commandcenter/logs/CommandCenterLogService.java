@@ -28,10 +28,8 @@ public class CommandCenterLogService {
       Pattern.compile("\\b(TRACE|DEBUG|INFO|WARN|ERROR)\\b");
   private static final Pattern AUTHORIZATION_PATTERN =
       Pattern.compile("(?i)(authorization\\s*[:=]\\s*bearer\\s+)[^\\s,;]+");
-  private static final Pattern JSON_SECRET_PATTERN = Pattern.compile(
-      "(?i)(\\\"(?:password|api[_-]?key|secret|token|authorization)\\\"\\s*:\\s*\\\")([^\\\"]*)(\\\")");
-  private static final Pattern QUOTED_SECRET_PATTERN = Pattern.compile(
-      "(?i)((?:password|api[_-]?key|secret|token|authorization)\\s*[:=]\\s*)(['\\\"])(.*?)(\\2)");
+  private static final Pattern STRUCTURED_QUOTED_SECRET_PATTERN = Pattern.compile(
+      "(?i)(?<![A-Za-z0-9_-])(\\\"?(?:password|api[_-]?key|secret|token|authorization)\\\"?\\s*[:=]\\s*)(['\\\"])");
   private static final Pattern NAMED_SECRET_PATTERN =
       Pattern.compile("(?i)(password|api[_-]?key|secret|token)(\\s*[:=]\\s*)[^\\s,;]+");
   private static final Pattern JWT_PATTERN =
@@ -204,11 +202,40 @@ public class CommandCenterLogService {
   }
 
   private String redact(String text) {
-    String redacted = JSON_SECRET_PATTERN.matcher(text).replaceAll("$1[REDACTED]$3");
-    redacted = QUOTED_SECRET_PATTERN.matcher(redacted).replaceAll("$1$2[REDACTED]$4");
+    String redacted = redactStructuredQuotedSecrets(text);
     redacted = AUTHORIZATION_PATTERN.matcher(redacted).replaceAll("$1[REDACTED]");
     redacted = NAMED_SECRET_PATTERN.matcher(redacted).replaceAll("$1$2[REDACTED]");
     return JWT_PATTERN.matcher(redacted).replaceAll("[REDACTED]");
+  }
+
+  private String redactStructuredQuotedSecrets(String text) {
+    var output = new StringBuilder(text.length());
+    var matcher = STRUCTURED_QUOTED_SECRET_PATTERN.matcher(text);
+    int cursor = 0;
+    while (matcher.find(cursor)) {
+      char quote = matcher.group(2).charAt(0);
+      int closing = closingQuote(text, matcher.end(), quote);
+      output.append(text, cursor, matcher.end()).append("[REDACTED]");
+      if (closing < 0) {
+        return output.toString();
+      }
+      cursor = closing;
+    }
+    return output.append(text, cursor, text.length()).toString();
+  }
+
+  private static int closingQuote(String text, int from, char quote) {
+    boolean escaped = false;
+    for (int index = from; index < text.length(); index++) {
+      char current = text.charAt(index);
+      if (current == '\\') {
+        escaped = !escaped;
+      } else {
+        if (current == quote && !escaped) return index;
+        escaped = false;
+      }
+    }
+    return -1;
   }
 
   private LogLevel classify(String text) {

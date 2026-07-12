@@ -16,6 +16,9 @@ import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
 
 class CommandCenterPropertiesTest {
 
@@ -26,6 +29,52 @@ class CommandCenterPropertiesTest {
     new ApplicationContextRunner()
         .withUserConfiguration(CommandCenterConfiguration.class)
         .run(context -> assertThat(context).hasSingleBean(oshi.spi.SystemInfoProvider.class));
+  }
+
+  @Test
+  void providesManagedDefaultAndDedicatedSchedulers() {
+    var configuration = new CommandCenterConfiguration();
+    var general = configuration.taskScheduler();
+    var metrics = configuration.commandCenterMetricsScheduler();
+    var actions = configuration.commandCenterActionScheduler();
+    try {
+      assertThat(general).isNotSameAs(metrics).isNotSameAs(actions);
+      assertThat(((org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler) general)
+          .getThreadNamePrefix()).isEqualTo("application-scheduled-");
+    } finally {
+      ((org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler) general).shutdown();
+      ((org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler) metrics).shutdown();
+      ((org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler) actions).shutdown();
+    }
+  }
+
+  @Test
+  void generalScheduledWorkUsesNamedDefaultPoolInsteadOfCommandCenterPools() {
+    new ApplicationContextRunner()
+        .withUserConfiguration(CommandCenterConfiguration.class, SchedulingProbeConfiguration.class)
+        .run(context -> {
+          var probe = context.getBean(SchedulingProbe.class);
+          assertThat(probe.ran.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+          assertThat(probe.threadName).startsWith("application-scheduled-");
+        });
+  }
+
+  @Configuration
+  @EnableScheduling
+  static class SchedulingProbeConfiguration {
+    @org.springframework.context.annotation.Bean SchedulingProbe schedulingProbe() {
+      return new SchedulingProbe();
+    }
+  }
+
+  static class SchedulingProbe {
+    private final java.util.concurrent.CountDownLatch ran = new java.util.concurrent.CountDownLatch(1);
+    private volatile String threadName;
+    @Scheduled(fixedDelay = 60_000)
+    void run() {
+      threadName = Thread.currentThread().getName();
+      ran.countDown();
+    }
   }
 
   @Test
@@ -77,6 +126,9 @@ class CommandCenterPropertiesTest {
     assertThat(properties.getActions().getShutdownExecutable())
         .isEqualTo(Path.of("C:/Windows/System32/shutdown.exe"));
     assertThat(properties.getActions().getPowerDelay()).isEqualTo(Duration.ofSeconds(60));
+    assertThat(properties.isSensorLibrariesEnabled()).isTrue();
+    assertThat(properties.getSensorLibraryDirectory()).isEqualTo(
+        Path.of("C:/ProgramData/christopherbell.dev/config/command-center-sensors"));
   }
 
   private CommandCenterProperties bindProfile(String profile) throws IOException {

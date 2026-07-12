@@ -17,6 +17,17 @@ import oshi.spi.SystemInfoProvider;
 @Configuration
 public class CommandCenterConfiguration {
 
+  /** Default scheduler for the application's unrelated scheduled workloads. */
+  @Bean(name = "taskScheduler")
+  public TaskScheduler taskScheduler() {
+    var scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(4);
+    scheduler.setThreadNamePrefix("application-scheduled-");
+    scheduler.setWaitForTasksToCompleteOnShutdown(false);
+    scheduler.initialize();
+    return scheduler;
+  }
+
   /**
    * Creates the platform-specific OSHI provider once for reuse by all metric collectors.
    *

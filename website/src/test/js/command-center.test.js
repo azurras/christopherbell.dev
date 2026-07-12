@@ -49,6 +49,13 @@ test('metric display distinguishes unavailable and stale readings', () => {
   assert.equal(metricState({ status: 'ERROR' }), 'unavailable');
 });
 
+test('metric display formats service state, start timestamps, and commit identifiers', () => {
+  assert.equal(displayMetric({ key: 'production.service.running', status: 'AVAILABLE', value: 1, unit: 'state' }), 'Running');
+  assert.equal(displayMetric({ key: 'production.service.running', status: 'AVAILABLE', value: 0, unit: 'state' }), 'Stopped');
+  assert.equal(displayMetric({ key: 'application.last-start', status: 'AVAILABLE', value: 1783857600, unit: 'epoch-seconds' }), '2026-07-12 12:00:00 UTC');
+  assert.equal(displayMetric({ key: 'application.commit', status: 'AVAILABLE', value: 1, unit: 'commit', detail: 'abc123' }), 'abc123');
+});
+
 test('polling uses five seconds then bounded 10, 20, and 30 second backoff', () => {
   assert.equal(POLL_INTERVAL_MS, 5000);
   assert.deepEqual([0, 1, 2, 3, 9].map(nextPollDelay), [5000, 10000, 20000, 30000, 30000]);

@@ -21,6 +21,8 @@ public class CommandCenterProperties {
   private int productionPort = 8080;
   private String productionServiceName = "ChristopherBellDev";
   private String commitIdentifier = "unknown";
+  private boolean sensorLibrariesEnabled;
+  private Path sensorLibraryDirectory = Path.of("command-center-sensors");
   private final Actions actions = new Actions();
   private final Thresholds thresholds = new Thresholds();
 

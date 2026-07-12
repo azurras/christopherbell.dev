@@ -94,4 +94,40 @@ class NvidiaMetricsProviderTest {
     assertThatThrownBy(() -> nonZero.read(SAMPLED_AT)).hasMessageContaining("exit code 7");
     assertThatThrownBy(() -> missing.read(SAMPLED_AT)).hasMessageContaining("unavailable");
   }
+
+  @Test
+  void interruptedWaitForciblyDestroysChildProcess() {
+    var process = new InterruptingProcess();
+
+    assertThatThrownBy(() -> NvidiaMetricsProvider.readProcess(process, Duration.ofSeconds(1)))
+        .isInstanceOf(InterruptedException.class);
+
+    assertThat(process.destroyed).isTrue();
+  }
+
+  @Test
+  void providerPreservesInterruptStatus() {
+    var provider = new NvidiaMetricsProvider(
+        "nvidia-smi", Duration.ofSeconds(1),
+        (command, timeout) -> { throw new InterruptedException("test"); });
+    try {
+      assertThatThrownBy(() -> provider.read(SAMPLED_AT)).hasMessageContaining("interrupted");
+      assertThat(Thread.currentThread().isInterrupted()).isTrue();
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
+  private static final class InterruptingProcess extends Process {
+    private boolean destroyed;
+    @Override public boolean waitFor(long timeout, java.util.concurrent.TimeUnit unit)
+        throws InterruptedException { throw new InterruptedException("test"); }
+    @Override public Process destroyForcibly() { destroyed = true; return this; }
+    @Override public java.io.OutputStream getOutputStream() { return java.io.OutputStream.nullOutputStream(); }
+    @Override public java.io.InputStream getInputStream() { return java.io.InputStream.nullInputStream(); }
+    @Override public java.io.InputStream getErrorStream() { return java.io.InputStream.nullInputStream(); }
+    @Override public int waitFor() { return 0; }
+    @Override public int exitValue() { return 0; }
+    @Override public void destroy() { destroyed = true; }
+  }
 }

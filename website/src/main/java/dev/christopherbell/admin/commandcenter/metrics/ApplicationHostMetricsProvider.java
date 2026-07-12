@@ -54,7 +54,8 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
     String commit = safeCommit(properties.getCommitIdentifier());
     readings.put("application.commit", commit == null
         ? unavailable("application.commit", "Application commit", "state", sampledAt)
-        : available("application.commit", "Application commit " + commit, 1, "state", sampledAt));
+        : new MetricReading("application.commit", "Application commit", 1.0, "commit",
+            MetricStatus.AVAILABLE, sampledAt, commit));
     readings.put("production.service.running", result.serviceRunning().isPresent()
         ? available("production.service.running", "Production service",
             result.serviceRunning().orElseThrow() ? 1 : 0, "state", sampledAt)

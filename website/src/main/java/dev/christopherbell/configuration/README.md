@@ -43,6 +43,8 @@ mapping independently enforce the fixed 60-second delay.
 
 Production computer power actions remain disabled unless
 `COMMAND_CENTER_POWER_ACTIONS_ENABLED=true`; `GIT_COMMIT` supplies the optional safe commit label.
+The production sensor library directory is fixed beneath the service-owned `config` directory;
+local/default profiles do not enable native sensor loading.
 
 ## Update This Doc
 

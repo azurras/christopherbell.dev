@@ -13,6 +13,16 @@ export function displayMetric(reading) {
       || reading.value == null || !Number.isFinite(Number(reading.value))) {
     return 'Unavailable';
   }
+  if (reading.key === 'production.service.running') {
+    return Number(reading.value) === 1 ? 'Running' : 'Stopped';
+  }
+  if (reading.unit === 'epoch-seconds') {
+    const timestamp = new Date(Number(reading.value) * 1000);
+    return Number.isNaN(timestamp.getTime())
+      ? 'Unavailable'
+      : timestamp.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+  }
+  if (reading.unit === 'commit') return String(reading.detail || 'Unavailable');
   const value = Number(reading.value).toLocaleString(undefined, { maximumFractionDigits: 1 });
   const units = {
     percent: '%',

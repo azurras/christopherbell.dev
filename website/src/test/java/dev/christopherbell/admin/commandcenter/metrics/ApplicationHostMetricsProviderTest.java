@@ -29,7 +29,8 @@ class ApplicationHostMetricsProviderTest {
     assertThat(readings.get("production.port").value()).isEqualTo(8080.0);
     assertThat(readings.get("application.last-start").value()).isEqualTo((double) START.getEpochSecond());
     assertThat(readings.get("application.local-response").value()).isEqualTo(12.5);
-    assertThat(readings.get("application.commit").label()).contains("abc123def");
+    assertThat(readings.get("application.commit").detail()).isEqualTo("abc123def");
+    assertThat(readings.get("application.commit").unit()).isEqualTo("commit");
     assertThat(readings.get("application.commit").status()).isEqualTo(MetricStatus.AVAILABLE);
   }
 

@@ -104,7 +104,18 @@ public class NvidiaMetricsProvider implements HostMetricsProvider {
   private static CommandResult runCommand(List<String> command, Duration timeout)
       throws IOException, InterruptedException {
     var process = new ProcessBuilder(command).redirectErrorStream(true).start();
-    var finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+    return readProcess(process, timeout);
+  }
+
+  static CommandResult readProcess(Process process, Duration timeout)
+      throws IOException, InterruptedException {
+    final boolean finished;
+    try {
+      finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (InterruptedException failure) {
+      process.destroyForcibly();
+      throw failure;
+    }
     if (!finished) {
       process.destroyForcibly();
       return new CommandResult(-1, "", true);
