@@ -60,8 +60,12 @@ function Install-CloudflaredService {
         throw "Missing cloudflared executable: $Executable"
     }
     $existing = Get-Service cloudflared -ErrorAction SilentlyContinue
-    if (-not $existing) {
-        if ([string]::IsNullOrWhiteSpace($TokenPath) -or -not (Test-Path -LiteralPath $TokenPath -PathType Leaf)) {
+    $tokenProvided = -not [string]::IsNullOrWhiteSpace($TokenPath)
+    if (-not $existing -and -not $tokenProvided) {
+        throw 'CloudflareTokenPath must reference a protected file when installing cloudflared.'
+    }
+    if ($tokenProvided) {
+        if (-not (Test-Path -LiteralPath $TokenPath -PathType Leaf)) {
             throw 'CloudflareTokenPath must reference a protected file when installing cloudflared.'
         }
         $token = (Get-Content -LiteralPath $TokenPath -Raw).Trim()
@@ -70,6 +74,9 @@ function Install-CloudflaredService {
                 throw 'Cloudflare tunnel token is invalid.'
             }
             if (-not $WhatIf) {
+                if ($existing) {
+                    Invoke-CheckedProcess $Executable @('service','uninstall') (Split-Path -Parent $Executable) | Out-Null
+                }
                 Invoke-CheckedProcess $Executable @('service','install',$token) (Split-Path -Parent $Executable) | Out-Null
             }
         } finally { $token = $null }

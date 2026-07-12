@@ -349,24 +349,29 @@ Change page behavior:
 
 ## Production
 
-Production runs natively on Windows through the `MongoDB` and
-`ChristopherBellDev` Windows services. WSL is not part of the steady-state
-production or deployment path.
+Production runs natively on Windows through the `MongoDB`,
+`ChristopherBellDev`, and `cloudflared` Windows services. All three use
+Automatic startup. WSL contains no website, database, proxy, tunnel, or
+deployment dependency.
 
 From an elevated PowerShell prompt, bootstrap and configure the runtime, then
 install automatic deployment:
 
 ```powershell
-.\prod.cmd install
+.\prod.cmd install -CloudflareTokenPath C:\Secure\cloudflared-token.txt
 # Edit C:\ProgramData\christopherbell.dev\config\deploy.json and app.env.
-.\prod.cmd install
+.\prod.cmd install -CloudflareTokenPath C:\Secure\cloudflared-token.txt
 .\prod.cmd deploy
 .\prod.cmd auto-install
+.\prod.cmd verify-startup
 ```
 
 The first `install` creates protected configuration examples and intentionally
 stops until real paths, the smoke-account email, and secrets replace every
-placeholder. `deploy` fetches the exact latest `origin/main` commit into a clean
+placeholder. On a fresh host, `CloudflareTokenPath` points to a temporary,
+protected file containing only the rotated tunnel token; delete that file as
+soon as installation succeeds. Existing cloudflared services do not require the
+token again. `deploy` fetches the exact latest `origin/main` commit into a clean
 detached Windows worktree, builds and tests it, validates it on port 8081,
 atomically switches the active release, and rolls back when port-8080
 verification fails.
@@ -385,6 +390,7 @@ Common operations:
 .\prod.cmd rollback
 .\prod.cmd backup
 .\prod.cmd auto-status
+.\prod.cmd verify-startup
 ```
 
 ### MongoDB Backups and Restores
@@ -395,7 +401,7 @@ Use the [Windows production runbook](docs/operations/windows-production.md) and
 ## Troubleshooting
 
 Run `.\prod.cmd status` first for production failures and `.\prod.cmd logs` for
-application and WinSW wrapper output. Confirm both Windows services are running
+application and WinSW wrapper output. Confirm all three Windows services are running
 and `SPRING_MONGODB_URI` targets `mongodb://127.0.0.1:27017`.
 
 Static JS changes are not visible:

@@ -21,6 +21,19 @@ Describe 'native Windows production command surface' {
         $script | Should -Not -Match 'Production\.Migrate'
     }
 
+    It 'documents native setup startup and cloudflared upgrades without WSL' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $makefile = Get-Content (Join-Path $root 'Makefile') -Raw
+        $runbook = Get-Content (Join-Path $root 'docs\operations\windows-production.md') -Raw
+        $makefile | Should -Match 'prod-cloudflare-upgrade'
+        $makefile | Should -Match 'prod-verify-startup'
+        $runbook | Should -Match 'CloudflareTokenPath'
+        $runbook | Should -Match 'verify-startup'
+        $runbook | Should -Match 'winget upgrade --id Cloudflare\.cloudflared'
+        $runbook | Should -Not -Match '\.\\prod\.cmd migrate'
+        $runbook | Should -Not -Match 'WSL fallback'
+    }
+
     It 'rejects unknown commands' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         & pwsh.exe -NoLogo -NoProfile -File (Join-Path $root 'ops\production\windows\prod.ps1') unknown-command 2>$null

@@ -59,5 +59,25 @@ Describe 'native cloudflared service installer' {
             }
             ($output -join '') | Should -Not -Match ('a' * 20)
         }
+
+        It 'replaces an existing cloudflared credential only when a token path is supplied' {
+            $tokenPath = Join-Path $TestDrive 'rotated-token.txt'
+            ('b' * 240) | Set-Content $tokenPath -NoNewline
+            Mock Get-Service { [pscustomobject]@{ Status='Running' } } -ParameterFilter { $Name -eq 'cloudflared' }
+            Mock Test-Path { $true }
+            Mock Invoke-CheckedProcess {}
+            Mock Set-Service {}
+            Mock Start-Service {}
+            Install-CloudflaredService -Executable 'C:\cloudflared.exe' -TokenPath $tokenPath
+            Should -Invoke Invoke-CheckedProcess -ParameterFilter {
+                $FilePath -eq 'C:\cloudflared.exe' -and ($ArgumentList -join ' ') -eq 'service uninstall'
+            }
+            Should -Invoke Invoke-CheckedProcess -ParameterFilter {
+                $FilePath -eq 'C:\cloudflared.exe' -and
+                $ArgumentList[0] -eq 'service' -and
+                $ArgumentList[1] -eq 'install' -and
+                $ArgumentList[2].Length -eq 240
+            }
+        }
     }
 }
