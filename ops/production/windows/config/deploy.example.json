@@ -9,7 +9,7 @@
   "mongoShellExe": "C:\\Program Files\\MongoDB\\mongosh\\current\\bin\\mongosh.exe",
   "backupRoot": "A:\\Projects\\christopherbell.dev-backups",
   "wslDistro": "Debian",
-  "wslWebsiteStopCommand": "pkill -f 'java.*server.port=8080'",
+  "wslWebsiteStopCommand": "pkill -f '[j]ava.*server.port=8080' || true",
   "wslWebsiteStartCommand": "systemctl --user start christopherbell-dev",
   "wslMongoStopCommand": "systemctl stop mongod",
   "wslMongoStartCommand": "systemctl start mongod",
