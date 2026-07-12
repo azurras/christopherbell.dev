@@ -19,6 +19,7 @@ The cutover initially retained Debian WSL as a rollback source. That fallback be
 - Remove the WSL migration/fallback command surface from repository production tooling so it cannot be invoked accidentally.
 - Keep native MongoDB backup, restore verification, rollback, deployment, and automatic deployment operations.
 - Document native cloudflared installation, upgrade, health verification, and recovery.
+- Update checked-in setup/startup automation so a new Windows production installation registers MongoDB, the website, cloudflared, and automatic deployment without depending on WSL.
 
 ## Non-Goals
 
@@ -66,7 +67,10 @@ Do not run `apt autoremove`; unrelated packages must be preserved.
 - Add `cloudflared` service state to `Get-ProductionStatus` so routine status checks prove all three native services.
 - Correct native backup and dry-run commands to use equals-form MongoDB URI/archive arguments, with regression coverage.
 - Rewrite the Windows production runbook and README steady-state sections so WSL is explicitly out of scope and native cloudflared install/upgrade/recovery is documented.
-- Add Makefile targets or documented command aliases only where they provide a stable wrapper over the existing `prod.cmd` interface; tunnel tokens must never be command-line constants in versioned files.
+- Update setup scripts to detect the signed machine-wide cloudflared executable, register or validate its automatic Windows service, and fail clearly when the operator has not supplied a tunnel token through an approved secret-input path.
+- Update startup scripts and service configuration so the boot contract covers `MongoDB`, `ChristopherBellDev`, `cloudflared`, and `ChristopherBellAutoDeploy` without an interactive login.
+- Add Makefile targets or documented command aliases for install, status, deploy, backup, cloudflared upgrade, and post-reboot verification where they provide stable wrappers over the existing `prod.cmd` interface; tunnel tokens must never be command-line constants in versioned files.
+- Document fresh-machine setup, routine application releases, cloudflared upgrades, reboot acceptance, secret rotation, logs, backup/restore, rollback, and uninstall/retirement.
 
 ## Failure Handling
 
@@ -79,6 +83,7 @@ Do not run `apt autoremove`; unrelated packages must be preserved.
 
 - Run the complete Windows production Pester suite.
 - Add assertions that `prod.ps1`, production config, and help expose no WSL migration fields or commands.
+- Add setup/startup tests proving cloudflared is required, automatic, included in status output, and installed without persisting a token in versioned files.
 - Add native backup argument tests for attached URI/archive values and IPv4 loopback.
 - Verify Windows services `cloudflared`, `ChristopherBellDev`, and `MongoDB` are `Running` and `Automatic`.
 - Verify `http://127.0.0.1:8080/` and `https://www.christopherbell.dev/` return HTTP 200.
@@ -94,3 +99,4 @@ Do not run `apt autoremove`; unrelated packages must be preserved.
 - Repository production tooling contains no executable WSL migration/fallback path.
 - Native backup/restore verification is covered by passing tests.
 - Operations documentation describes install, upgrade, status, backup, rollback, and recovery without relying on WSL.
+- Checked-in setup/startup scripts can reproduce the native boot-persistent service topology and provide a single documented post-reboot verification command.
