@@ -92,6 +92,43 @@ function Get-ProductionReleases {
         }
 }
 
+function Assert-AutoDeployTaskContract {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Task, [Parameter(Mandatory)]$Config)
+    if ([int]$Config.autoDeployPollSeconds -ne 60) {
+        throw 'Automatic deployment polling must run every 60 seconds.'
+    }
+    if ([string]$Task.State -eq 'Disabled' -or -not $Task.Settings.Enabled) {
+        throw 'ChristopherBellAutoDeploy must be enabled.'
+    }
+    if ([string]$Task.Principal.UserId -ne 'SYSTEM' -or
+        [string]$Task.Principal.LogonType -ne 'ServiceAccount' -or
+        [string]$Task.Principal.RunLevel -ne 'Highest') {
+        throw 'ChristopherBellAutoDeploy must run as SYSTEM with ServiceAccount logon and Highest privileges.'
+    }
+    $startupTrigger = @($Task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskBootTrigger' })
+    if ($startupTrigger.Count -ne 1) { throw 'ChristopherBellAutoDeploy must have exactly one startup trigger.' }
+    $actions = @($Task.Actions)
+    if ($actions.Count -ne 1) { throw 'ChristopherBellAutoDeploy must have exactly one action.' }
+    $expectedPowerShell = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    if (-not [string]::Equals([string]$actions[0].Execute, $expectedPowerShell, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "ChristopherBellAutoDeploy must use the PowerShell 7 executable at $expectedPowerShell."
+    }
+    $expectedArguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$($Config.programDataRoot)\tools\prod.ps1`" auto-deploy"
+    if ([string]$actions[0].Arguments -ne $expectedArguments) {
+        throw 'ChristopherBellAutoDeploy must run the installed production auto-deploy command.'
+    }
+    if ([string]$Task.Settings.ExecutionTimeLimit -ne 'PT0S') {
+        throw 'ChristopherBellAutoDeploy must have an unlimited execution time.'
+    }
+    if ([int]$Task.Settings.RestartCount -lt 3 -or [string]$Task.Settings.RestartInterval -ne 'PT1M') {
+        throw 'ChristopherBellAutoDeploy must restart at least three times at one-minute intervals.'
+    }
+    if ([string]$Task.Settings.MultipleInstances -ne 'IgnoreNew') {
+        throw 'ChristopherBellAutoDeploy must ignore overlapping task starts.'
+    }
+}
+
 function Test-ProductionStartup {
     $config = Read-ProductionConfig
     foreach ($name in 'MongoDB','ChristopherBellDev','cloudflared') {
@@ -100,7 +137,7 @@ function Test-ProductionStartup {
         if ([string]$service.StartType -ne 'Automatic') { throw "$name must use Automatic startup." }
     }
     $task = Get-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction Stop
-    if ([string]$task.State -eq 'Disabled') { throw 'ChristopherBellAutoDeploy must be enabled.' }
+    Assert-AutoDeployTaskContract -Task $task -Config $config
     Test-ProductionEndpoints $config $config.productionPort
     Wait-HttpStatus -Uri $config.publicUrl -ExpectedStatus 200 -Timeout ([timespan]::FromSeconds(30)) | Out-Null
     [pscustomobject]@{
@@ -111,4 +148,4 @@ function Test-ProductionStartup {
     }
 }
 
-Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,Get-NativeMongoDumpArguments,Get-NativeMongoRestoreDryRunArguments,New-ProductionBackup,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases,Test-ProductionStartup
+Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,Get-NativeMongoDumpArguments,Get-NativeMongoRestoreDryRunArguments,New-ProductionBackup,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases,Assert-AutoDeployTaskContract,Test-ProductionStartup
