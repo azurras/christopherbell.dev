@@ -19,6 +19,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bson.Document;
@@ -28,7 +31,9 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.info.BuildProperties;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.beans.factory.annotation.Qualifier;
+import dev.christopherbell.admin.commandcenter.action.CommandCenterActionService;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /** Collects host metrics into one atomic snapshot with bounded in-memory history. */
@@ -41,6 +46,8 @@ public class CommandCenterMetricsService {
   private final Clock clock;
   private final String applicationVersion;
   private final MongoPing mongoPing;
+  private final ExecutorService providerExecutor;
+  private final PendingActionSupplier pendingActionSupplier;
   private final Instant applicationStartedAt;
   private final AtomicReference<CommandCenterSnapshot> latest;
   private final Map<String, ArrayDeque<MetricPoint>> history = new TreeMap<>();
@@ -54,13 +61,17 @@ public class CommandCenterMetricsService {
       CommandCenterProperties properties,
       Clock clock,
       MongoTemplate mongoTemplate,
-      ObjectProvider<BuildProperties> buildProperties) {
+      ObjectProvider<BuildProperties> buildProperties,
+      @Qualifier("commandCenterProviderExecutor") ExecutorService providerExecutor,
+      CommandCenterActionService actionService) {
     this(
         providers,
         properties,
         clock,
         applicationVersion(buildProperties),
-        timeout -> boundedMongoPing(mongoTemplate, timeout));
+        timeout -> boundedMongoPing(mongoTemplate, timeout),
+        providerExecutor,
+        actionService::pendingAction);
   }
 
   CommandCenterMetricsService(
@@ -69,11 +80,27 @@ public class CommandCenterMetricsService {
       Clock clock,
       String applicationVersion,
       MongoPing mongoPing) {
+    this(providers, properties, clock, applicationVersion, mongoPing,
+        java.util.concurrent.Executors.newThreadPerTaskExecutor(
+            Thread.ofVirtual().name("command-center-provider-test-", 0).factory()),
+        Optional::empty);
+  }
+
+  CommandCenterMetricsService(
+      List<HostMetricsProvider> providers,
+      CommandCenterProperties properties,
+      Clock clock,
+      String applicationVersion,
+      MongoPing mongoPing,
+      ExecutorService providerExecutor,
+      PendingActionSupplier pendingActionSupplier) {
     this.providers = List.copyOf(providers);
     this.properties = properties;
     this.clock = clock;
     this.applicationVersion = applicationVersion == null ? "unknown" : applicationVersion;
     this.mongoPing = mongoPing;
+    this.providerExecutor = providerExecutor;
+    this.pendingActionSupplier = pendingActionSupplier;
     this.applicationStartedAt = clock.instant();
     this.latest = new AtomicReference<>(new CommandCenterSnapshot(
         HealthStatus.OFFLINE,
@@ -87,7 +114,6 @@ public class CommandCenterMetricsService {
   }
 
   /** Samples every provider independently and atomically publishes the resulting snapshot. */
-  @Scheduled(fixedDelayString = "${command-center.sample-interval:5s}")
   public synchronized void collect() {
     if (!properties.isEnabled()) {
       return;
@@ -96,19 +122,36 @@ public class CommandCenterMetricsService {
     var readings = new LinkedHashMap<String, MetricReading>();
     var alerts = new ArrayList<Alert>();
 
+    var submitted = new LinkedHashMap<HostMetricsProvider, ProviderTask>();
     for (var provider : providers) {
+      submitted.put(provider, new ProviderTask(
+          providerExecutor.submit(() -> Map.copyOf(provider.read(sampledAt))), System.nanoTime()));
+    }
+    for (var entry : submitted.entrySet()) {
+      var provider = entry.getKey();
       try {
-        var providerReadings = Map.copyOf(provider.read(sampledAt));
+        long timeoutNanos = properties.getProviderTimeout().toNanos();
+        long remaining = Math.max(1, timeoutNanos - (System.nanoTime() - entry.getValue().startedNanos()));
+        var providerReadings = entry.getValue().future().get(remaining, TimeUnit.NANOSECONDS);
         readings.putAll(providerReadings);
         lastGoodByProvider.put(provider, providerReadings);
-      } catch (RuntimeException failure) {
+      } catch (TimeoutException failure) {
+        entry.getValue().future().cancel(true);
+        retainStale(provider, readings);
+        alerts.add(new Alert(
+            "PROVIDER_TIMEOUT", "WARNING",
+            provider.getClass().getSimpleName() + " exceeded its sampling timeout."));
+      } catch (InterruptedException failure) {
+        Thread.currentThread().interrupt();
+        entry.getValue().future().cancel(true);
+        retainStale(provider, readings);
+        alerts.add(new Alert("PROVIDER_ERROR", "WARNING", "Metrics sampling was interrupted."));
+      } catch (Exception failure) {
         LOGGER.warn(
             "Command-center metrics provider {} failed.",
             provider.getClass().getName(),
             failure);
-        var previous = lastGoodByProvider.getOrDefault(provider, Map.of());
-        previous.forEach((key, reading) ->
-            readings.put(key, stale(reading, PROVIDER_UNAVAILABLE_DETAIL)));
+        retainStale(provider, readings);
         alerts.add(new Alert(
             "PROVIDER_ERROR",
             "WARNING",
@@ -156,18 +199,26 @@ public class CommandCenterMetricsService {
             ? stale(reading, "Sample is older than two collection intervals")
             : reading)
         .toList();
-    if (readings.equals(snapshot.metrics())) {
-      return snapshot;
+    var pending = pendingActionSupplier.pendingAction().orElse(null);
+    var underlyingHealth = readings.equals(snapshot.metrics())
+        ? snapshot.health() : HealthStatus.DEGRADED;
+    if (underlyingHealth == HealthStatus.ACTION_PENDING) {
+      underlyingHealth = health(readings, snapshot.alerts());
     }
     return new CommandCenterSnapshot(
-        HealthStatus.DEGRADED,
+        pending == null ? underlyingHealth : HealthStatus.ACTION_PENDING,
         snapshot.sampledAt(),
         readings,
         snapshot.history(),
         snapshot.alerts(),
-        snapshot.pendingAction(),
+        pending,
         snapshot.applicationVersion(),
         Math.max(0, Duration.between(applicationStartedAt, clock.instant()).toSeconds()));
+  }
+
+  private void retainStale(HostMetricsProvider provider, Map<String, MetricReading> readings) {
+    lastGoodByProvider.getOrDefault(provider, Map.of()).forEach((key, reading) ->
+        readings.put(key, stale(reading, PROVIDER_UNAVAILABLE_DETAIL)));
   }
 
   private boolean pingMongo() {
@@ -277,4 +328,11 @@ public class CommandCenterMetricsService {
   interface MongoPing {
     boolean ping(Duration timeout);
   }
+
+  @FunctionalInterface
+  interface PendingActionSupplier {
+    Optional<CommandCenterSnapshot.PendingAction> pendingAction();
+  }
+
+  private record ProviderTask(Future<Map<String, MetricReading>> future, long startedNanos) {}
 }

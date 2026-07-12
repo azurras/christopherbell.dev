@@ -27,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.TaskScheduler;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /** Protects fixed host actions with fresh account checks and one-time challenges. */
@@ -61,7 +62,7 @@ public class CommandCenterActionService {
       AdminActivityService adminActivityService,
       ClientIpResolver clientIpResolver,
       CommandExecutor commandExecutor,
-      TaskScheduler scheduler,
+      @Qualifier("commandCenterActionScheduler") TaskScheduler scheduler,
       Clock clock) {
     this(properties, accountRepository, permissionService, adminActivityService, clientIpResolver,
         commandExecutor, scheduler, clock, new SecureRandom());
@@ -91,12 +92,30 @@ public class CommandCenterActionService {
   /** Creates a short-lived challenge bound to the current admin and requested action. */
   public ActionChallenge createChallenge(CommandCenterActionType action)
       throws InvalidRequestException {
+    return createChallenge(action, null);
+  }
+
+  /** Creates and audits a challenge using the request's resolved source address. */
+  public ActionChallenge createChallenge(
+      CommandCenterActionType action, HttpServletRequest servletRequest)
+      throws InvalidRequestException {
     requireEnabled();
     var actor = requireCurrentAdmin();
+    var clientIp = clientIpResolver.resolveClientIp(servletRequest);
     if (action == null || !action.isRequiresChallenge()) {
+      auditChallenge(actor, action, clientIp, "invalid-action", false);
       throw new InvalidRequestException("Action does not use a challenge.");
     }
-    enforceAttemptWindow(actor.getId());
+    if (isPowerAction(action) && !properties.getActions().isPowerActionsEnabled()) {
+      auditChallenge(actor, action, clientIp, "power-actions-disabled", false);
+      throw new InvalidRequestException("Computer power actions are disabled.");
+    }
+    try {
+      enforceAttemptWindow(actor.getId());
+    } catch (InvalidRequestException exception) {
+      auditChallenge(actor, action, clientIp, "throttled", false);
+      throw exception;
+    }
     var now = clock.instant();
     var expiresAt = now.plus(properties.getActions().getChallengeTtl());
     var challenge = new StoredChallenge(randomToken(), actor.getId(), action, expiresAt);
@@ -106,6 +125,7 @@ public class CommandCenterActionService {
       evictOldestChallengesToTotalBound();
       challenges.put(challenge.id(), challenge);
     }
+    auditChallenge(actor, action, clientIp, "created", true);
     return new ActionChallenge(
         challenge.id(), action, expiresAt, action.getConfirmationPhrase());
   }
@@ -118,15 +138,26 @@ public class CommandCenterActionService {
       throw new InvalidRequestException("Action confirmation is required.");
     }
     var actor = requireCurrentAdmin();
-    validateConfirmation(actor, confirmation);
+    var clientIp = clientIpResolver.resolveClientIp(servletRequest);
+    try {
+      validateConfirmation(actor, confirmation);
+    } catch (InvalidRequestException exception) {
+      auditRejection(actor, confirmation.action(), clientIp, rejectionCategory(exception));
+      throw exception;
+    }
     var now = clock.instant();
     var executeAt = executionTime(confirmation.action(), now);
-    var clientIp = clientIpResolver.resolveClientIp(servletRequest);
 
     if (isPowerAction(confirmation.action())) {
       synchronized (actionStateLock) {
-        var acceptedPendingAction = acceptActionState(
-            actor.getId(), confirmation.action(), now, executeAt);
+        PendingAction acceptedPendingAction;
+        try {
+          acceptedPendingAction = acceptActionState(
+              actor.getId(), confirmation.action(), now, executeAt);
+        } catch (InvalidRequestException exception) {
+          auditRejection(actor, confirmation.action(), clientIp, rejectionCategory(exception));
+          throw exception;
+        }
         try {
           audit(actor, confirmation.action(), clientIp, "accepted");
           executeNow(actor, confirmation.action(), clientIp);
@@ -136,7 +167,12 @@ public class CommandCenterActionService {
         }
       }
     } else {
-      acceptActionState(actor.getId(), confirmation.action(), now, executeAt);
+      try {
+        acceptActionState(actor.getId(), confirmation.action(), now, executeAt);
+      } catch (InvalidRequestException exception) {
+        auditRejection(actor, confirmation.action(), clientIp, rejectionCategory(exception));
+        throw exception;
+      }
       audit(actor, confirmation.action(), clientIp, "accepted");
       scheduler.schedule(
           () -> executeBackground(actor, confirmation.action(), clientIp), executeAt);
@@ -153,6 +189,8 @@ public class CommandCenterActionService {
       var current = pendingAction.get();
       if (current == null || !current.cancellable()
           || !clock.instant().isBefore(current.executeAt())) {
+        auditRejection(
+            actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp, "no-pending-action");
         throw new InvalidRequestException("There is no cancellable pending action.");
       }
       audit(actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp, "accepted");
@@ -350,6 +388,50 @@ public class CommandCenterActionService {
             "clientIp", clientIp == null ? "unknown" : clientIp,
             "mode", properties.getActions().getMode().name(),
             "outcome", outcome));
+  }
+
+  private void auditRejection(
+      Account actor, CommandCenterActionType action, String clientIp, String outcome) {
+    auditEvent(actor, action, clientIp, outcome, "COMMAND_CENTER_ACTION_REJECTED");
+  }
+
+  private void auditChallenge(
+      Account actor,
+      CommandCenterActionType action,
+      String clientIp,
+      String outcome,
+      boolean created) {
+    auditEvent(actor, action, clientIp, outcome,
+        created ? "COMMAND_CENTER_CHALLENGE_CREATED" : "COMMAND_CENTER_CHALLENGE_REJECTED");
+  }
+
+  private void auditEvent(
+      Account actor,
+      CommandCenterActionType action,
+      String clientIp,
+      String outcome,
+      String event) {
+    String safeAction = action == null ? "UNKNOWN" : action.name();
+    adminActivityService.recordForActor(
+        actor.getId(), actor.getUsername() == null ? actor.getId() : actor.getUsername(),
+        event, "command-center", safeAction, safeAction,
+        "%s requested a protected command-center operation.",
+        Map.of(
+            "action", safeAction,
+            "clientIp", clientIp == null ? "unknown" : clientIp,
+            "mode", properties.getActions().getMode().name(),
+            "outcome", outcome));
+  }
+
+  private static String rejectionCategory(InvalidRequestException exception) {
+    return switch (exception.getMessage()) {
+      case "Password verification failed." -> "wrong-password";
+      case "Confirmation phrase did not match." -> "phrase-mismatch";
+      case "Too many failed action confirmations." -> "throttled";
+      case "Action is in cooldown." -> "cooldown";
+      case "A machine power action is already pending." -> "action-pending";
+      default -> "invalid-challenge";
+    };
   }
 
   private void pruneExpiredChallenges(Instant now) {

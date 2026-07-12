@@ -64,8 +64,9 @@ public class CommandCenterController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')"
       + " and @commandCenterAccessService.hasFreshAdminAccess()")
   public ResponseEntity<Response<ActionChallenge>> challenge(
-      @Valid @RequestBody ChallengeRequest request) throws InvalidRequestException {
-    return ok(actionService.createChallenge(request.action()));
+      @Valid @RequestBody ChallengeRequest request,
+      HttpServletRequest servletRequest) throws InvalidRequestException {
+    return ok(actionService.createChallenge(request.action(), servletRequest));
   }
 
   /** Confirms and accepts a previously challenged fixed host action. */

@@ -2,6 +2,7 @@ package dev.christopherbell.admin.commandcenter;
 
 import static dev.christopherbell.admin.commandcenter.action.CommandCenterActionType.RESTART_SITE;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -184,7 +185,7 @@ class CommandCenterControllerTest {
   @DisplayName("Action challenge: admin -> 200 with safe challenge payload")
   @WithMockUser(authorities = "ADMIN")
   void challenge_whenAdmin_returnsChallenge() throws Exception {
-    when(actionService.createChallenge(RESTART_SITE)).thenReturn(
+    when(actionService.createChallenge(eq(RESTART_SITE), any(HttpServletRequest.class))).thenReturn(
         new ActionChallenge("challenge-1", RESTART_SITE, NOW.plusSeconds(120), "RESTART SITE"));
 
     mockMvc.perform(post(BASE + "/action-challenges")
@@ -196,7 +197,23 @@ class CommandCenterControllerTest {
         .andExpect(jsonPath("$.payload.action").value("RESTART_SITE"))
         .andExpect(jsonPath("$.payload.confirmationPhrase").value("RESTART SITE"));
 
-    verify(actionService).createChallenge(RESTART_SITE);
+    verify(actionService).createChallenge(eq(RESTART_SITE), any(HttpServletRequest.class));
+  }
+
+  @Test
+  @DisplayName("Snapshot: pending machine action -> 200 with countdown state")
+  @WithMockUser(authorities = "ADMIN")
+  void snapshot_whenPowerActionPending_returnsActionPendingState() throws Exception {
+    when(metricsService.snapshot()).thenReturn(new CommandCenterSnapshot(
+        HealthStatus.ACTION_PENDING, NOW, List.of(), Map.of(), List.of(),
+        new CommandCenterSnapshot.PendingAction("RESTART_COMPUTER", NOW.plusSeconds(60), true),
+        "1.2.3", 45));
+
+    mockMvc.perform(get(BASE + "/snapshot"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.health").value("ACTION_PENDING"))
+        .andExpect(jsonPath("$.payload.pendingAction.action").value("RESTART_COMPUTER"))
+        .andExpect(jsonPath("$.payload.pendingAction.cancellable").value(true));
   }
 
   @Test

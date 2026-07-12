@@ -8,6 +8,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import oshi.spi.SystemInfoFactory;
 import oshi.spi.SystemInfoProvider;
 
@@ -44,5 +46,23 @@ public class CommandCenterConfiguration {
     scheduler.setWaitForTasksToCompleteOnShutdown(false);
     scheduler.initialize();
     return scheduler;
+  }
+
+  /** Owns command-center sampling so a blocked collector cannot starve application schedules. */
+  @Bean
+  public TaskScheduler commandCenterMetricsScheduler() {
+    var scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("command-center-metrics-");
+    scheduler.setWaitForTasksToCompleteOnShutdown(false);
+    scheduler.initialize();
+    return scheduler;
+  }
+
+  /** Runs each host provider independently on interruptible virtual threads. */
+  @Bean(destroyMethod = "shutdownNow")
+  public ExecutorService commandCenterProviderExecutor() {
+    return Executors.newThreadPerTaskExecutor(
+        Thread.ofVirtual().name("command-center-provider-", 0).factory());
   }
 }

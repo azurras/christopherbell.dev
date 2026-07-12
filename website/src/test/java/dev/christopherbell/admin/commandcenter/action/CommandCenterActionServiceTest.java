@@ -339,7 +339,92 @@ class CommandCenterActionServiceTest {
   }
 
   @Test
+  void rejectedConfirmationsAreDurablyAuditedWithSafeCategoriesAndSourceIp() throws Exception {
+    properties.getActions().setFailedAttempts(20);
+
+    var wrongPassword = service.createChallenge(RESTART_SITE, request);
+    assertThatThrownBy(() -> execute(
+        wrongPassword.id(), RESTART_SITE, "wrong", "RESTART SITE"))
+        .isInstanceOf(InvalidRequestException.class);
+    var phraseMismatch = service.createChallenge(RESTART_SITE, request);
+    assertThatThrownBy(() -> execute(
+        phraseMismatch.id(), RESTART_SITE, PASSWORD, "wrong phrase"))
+        .isInstanceOf(InvalidRequestException.class);
+    assertThatThrownBy(() -> execute(
+        "missing", RESTART_SITE, PASSWORD, "RESTART SITE"))
+        .isInstanceOf(InvalidRequestException.class);
+    var expired = service.createChallenge(RESTART_SITE, request);
+    clock.advance(Duration.ofMinutes(2).plusMillis(1));
+    assertThatThrownBy(() -> execute(
+        expired.id(), RESTART_SITE, PASSWORD, "RESTART SITE"))
+        .isInstanceOf(InvalidRequestException.class);
+    var replayed = service.createChallenge(RESTART_SITE, request);
+    execute(replayed.id(), RESTART_SITE, PASSWORD, "RESTART SITE");
+    assertThatThrownBy(() -> execute(
+        replayed.id(), RESTART_SITE, PASSWORD, "RESTART SITE"))
+        .isInstanceOf(InvalidRequestException.class);
+
+    @SuppressWarnings("unchecked")
+    var metadata = ArgumentCaptor.forClass(
+        (Class<java.util.Map<String, String>>) (Class<?>) java.util.Map.class);
+    verify(activities, org.mockito.Mockito.atLeast(5)).recordForActor(
+        eq("admin-1"), eq("admin"), eq("COMMAND_CENTER_ACTION_REJECTED"),
+        eq("command-center"), eq("RESTART_SITE"), eq("RESTART_SITE"), any(), metadata.capture());
+    assertThat(metadata.getAllValues()).extracting(value -> value.get("outcome"))
+        .contains("wrong-password", "phrase-mismatch", "invalid-challenge");
+    assertThat(metadata.getAllValues()).allSatisfy(value -> {
+      assertThat(value).containsEntry("clientIp", "203.0.113.9");
+      assertThat(value).containsOnlyKeys("action", "clientIp", "mode", "outcome");
+      assertThat(value.toString()).doesNotContain(
+          PASSWORD, "wrong phrase", wrongPassword.id(), expired.id(), replayed.id());
+    });
+  }
+
+  @Test
+  void challengeCreationAndThrottleAreAuditedWithoutChallengeIdentifiers() throws Exception {
+    properties.getActions().setFailedAttempts(1);
+    var challenge = service.createChallenge(RESTART_SITE, request);
+    assertThatThrownBy(() -> execute(challenge.id(), RESTART_SITE, "wrong", "RESTART SITE"))
+        .isInstanceOf(InvalidRequestException.class);
+    assertThatThrownBy(() -> service.createChallenge(RESTART_SITE, request))
+        .isInstanceOf(InvalidRequestException.class);
+
+    @SuppressWarnings("unchecked")
+    var metadata = ArgumentCaptor.forClass(
+        (Class<java.util.Map<String, String>>) (Class<?>) java.util.Map.class);
+    verify(activities).recordForActor(
+        eq("admin-1"), eq("admin"), eq("COMMAND_CENTER_CHALLENGE_CREATED"),
+        eq("command-center"), eq("RESTART_SITE"), eq("RESTART_SITE"), any(), metadata.capture());
+    verify(activities).recordForActor(
+        eq("admin-1"), eq("admin"), eq("COMMAND_CENTER_CHALLENGE_REJECTED"),
+        eq("command-center"), eq("RESTART_SITE"), eq("RESTART_SITE"), any(), metadata.capture());
+    assertThat(metadata.getAllValues()).allSatisfy(value -> {
+      assertThat(value).containsEntry("clientIp", "203.0.113.9");
+      assertThat(value.toString()).doesNotContain(challenge.id(), PASSWORD, "challengeId");
+    });
+  }
+
+  @Test
+  void invalidChallengeTypeAndCancelWithoutPendingActionAreAudited() throws Exception {
+    assertThatThrownBy(() -> service.createChallenge(
+        CommandCenterActionType.CANCEL_PENDING_ACTION, request))
+        .isInstanceOf(InvalidRequestException.class);
+    assertThatThrownBy(() -> service.cancel(request))
+        .isInstanceOf(InvalidRequestException.class);
+
+    verify(activities).recordForActor(
+        eq("admin-1"), eq("admin"), eq("COMMAND_CENTER_CHALLENGE_REJECTED"),
+        eq("command-center"), eq("CANCEL_PENDING_ACTION"), eq("CANCEL_PENDING_ACTION"),
+        any(), any());
+    verify(activities).recordForActor(
+        eq("admin-1"), eq("admin"), eq("COMMAND_CENTER_ACTION_REJECTED"),
+        eq("command-center"), eq("CANCEL_PENDING_ACTION"), eq("CANCEL_PENDING_ACTION"),
+        any(), any());
+  }
+
+  @Test
   void powerActionExecuteAtRemainsExactlySixtySecondsDespitePropertyOverride() throws Exception {
+    properties.getActions().setPowerActionsEnabled(true);
     properties.getActions().setPowerDelay(Duration.ofSeconds(5));
     var challenge = service.createChallenge(RESTART_COMPUTER);
 
@@ -347,6 +432,17 @@ class CommandCenterActionServiceTest {
         challenge.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER");
 
     assertThat(result.executeAt()).isEqualTo(NOW.plusSeconds(60));
+  }
+
+  @Test
+  void powerActionsRequireDedicatedEnableFlagEvenInWindowsMode() throws Exception {
+    properties.getActions().setMode(CommandCenterProperties.ActionMode.WINDOWS);
+    properties.getActions().setPowerActionsEnabled(false);
+
+    assertThatThrownBy(() -> service.createChallenge(RESTART_COMPUTER, request))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("disabled");
+    assertThat(service.createChallenge(RESTART_SITE, request).action()).isEqualTo(RESTART_SITE);
   }
 
   @Test
@@ -674,6 +770,7 @@ class CommandCenterActionServiceTest {
     properties.getActions().setFailedAttemptWindow(Duration.ofMinutes(15));
     properties.getActions().setCooldown(Duration.ofMinutes(2));
     properties.getActions().setPowerDelay(Duration.ofSeconds(60));
+    properties.getActions().setPowerActionsEnabled(true);
     return properties;
   }
 

@@ -16,11 +16,15 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 import oshi.hardware.CentralProcessor;
 import oshi.hardware.GlobalMemory;
 import oshi.hardware.HardwareAbstractionLayer;
+import oshi.hardware.HWDiskStore;
 import oshi.hardware.NetworkIF;
 import oshi.hardware.Sensors;
 import oshi.software.os.FileSystem;
@@ -32,7 +36,7 @@ class CommandCenterMetricsServiceTest {
   private static final Instant START = Instant.parse("2026-07-12T12:00:00Z");
 
   @Test
-  void oshiProviderUsesInitialTicksAsBaselineAndRejectsUnavailableTemperatures() {
+  void oshiProviderUsesInitialTicksAsBaselineAndLeavesTemperatureToWindowsProvider() {
     var fixture = new OshiFixture();
     var provider = new OshiHostMetricsProvider(fixture.systemInfo);
     when(fixture.processor.getSystemCpuLoadTicks())
@@ -40,15 +44,14 @@ class CommandCenterMetricsServiceTest {
         .thenReturn(new long[] {2, 3, 4, 5, 6, 7, 8, 9});
     when(fixture.processor.getSystemCpuLoadBetweenTicks(any(long[].class), any(long[].class)))
         .thenReturn(0.42);
-    when(fixture.sensors.getCpuTemperature()).thenReturn(0.0, Double.NaN);
 
     var first = provider.read(START);
     var second = provider.read(START.plusSeconds(5));
 
     assertThat(first.get("cpu.usage").status()).isEqualTo(MetricStatus.UNAVAILABLE);
-    assertThat(first.get("cpu.temperature").status()).isEqualTo(MetricStatus.UNAVAILABLE);
+    assertThat(first).doesNotContainKey("cpu.temperature");
     assertThat(second.get("cpu.usage").value()).isEqualTo(42.0);
-    assertThat(second.get("cpu.temperature").status()).isEqualTo(MetricStatus.UNAVAILABLE);
+    assertThat(second).doesNotContainKey("cpu.temperature");
   }
 
   @Test
@@ -66,6 +69,8 @@ class CommandCenterMetricsServiceTest {
     when(fixture.fileStore.getUsableSpace()).thenReturn(400L);
     when(fixture.network.getBytesRecv()).thenReturn(10_000L, 15_000L);
     when(fixture.network.getBytesSent()).thenReturn(20_000L, 22_500L);
+    when(fixture.disk.getReadBytes()).thenReturn(1_000L, 4_000L);
+    when(fixture.disk.getWriteBytes()).thenReturn(2_000L, 3_500L);
 
     var first = provider.read(START);
     var second = provider.read(START.plusSeconds(5));
@@ -75,6 +80,73 @@ class CommandCenterMetricsServiceTest {
     assertThat(second.get("disk.free").value()).isEqualTo(20.0);
     assertThat(second.get("network.receive").value()).isEqualTo(1_000.0);
     assertThat(second.get("network.transmit").value()).isEqualTo(500.0);
+    assertThat(second.get("memory.used.bytes").value()).isEqualTo(750.0);
+    assertThat(second.get("memory.total.bytes").value()).isEqualTo(1_000.0);
+    assertThat(second.get("disk.used.bytes").value()).isEqualTo(1_600.0);
+    assertThat(second.get("disk.free.bytes").value()).isEqualTo(400.0);
+    assertThat(second.get("disk.activity").value()).isEqualTo(900.0);
+  }
+
+  @Test
+  void providerTimeoutDoesNotBlockOtherProvidersOrTheCollector() throws Exception {
+    var clock = new MutableClock(START);
+    var properties = properties();
+    properties.setProviderTimeout(Duration.ofMillis(100));
+    var neverReturns = new CountDownLatch(1);
+    HostMetricsProvider blocked = sampledAt -> {
+      try {
+        neverReturns.await();
+      } catch (InterruptedException exception) {
+        Thread.currentThread().interrupt();
+      }
+      return Map.of();
+    };
+    HostMetricsProvider healthy = sampledAt -> Map.of(
+        "gpu.temperature", reading("gpu.temperature", 40, sampledAt));
+    var executor = Executors.newThreadPerTaskExecutor(
+        Thread.ofVirtual().name("metrics-test-", 0).factory());
+    try {
+      var service = new CommandCenterMetricsService(
+          List.of(blocked, healthy), properties, clock, "test-version", timeout -> true, executor,
+          () -> java.util.Optional.empty());
+
+      long started = System.nanoTime();
+      service.collect();
+
+      assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(1));
+      assertThat(metric(service.snapshot(), "gpu.temperature").status())
+          .isEqualTo(MetricStatus.AVAILABLE);
+      assertThat(service.snapshot().alerts()).extracting(CommandCenterSnapshot.Alert::code)
+          .contains("PROVIDER_TIMEOUT");
+    } finally {
+      neverReturns.countDown();
+      executor.shutdownNow();
+      executor.awaitTermination(1, TimeUnit.SECONDS);
+    }
+  }
+
+  @Test
+  void snapshotComposesPendingActionAndRestoresUnderlyingHealthAfterCancel() {
+    var pending = new java.util.concurrent.atomic.AtomicReference<
+        java.util.Optional<CommandCenterSnapshot.PendingAction>>(java.util.Optional.of(
+            new CommandCenterSnapshot.PendingAction("RESTART_COMPUTER", START.plusSeconds(60), true)));
+    var executor = Executors.newSingleThreadExecutor();
+    var service = new CommandCenterMetricsService(
+        List.of(sampledAt -> Map.of("cpu.usage", reading("cpu.usage", 10, sampledAt))),
+        properties(), new MutableClock(START), "test-version", timeout -> true,
+        executor, pending::get);
+    try {
+      service.collect();
+      assertThat(service.snapshot().health()).isEqualTo(CommandCenterSnapshot.HealthStatus.ACTION_PENDING);
+      assertThat(service.snapshot().pendingAction()).isEqualTo(pending.get().orElseThrow());
+
+      pending.set(java.util.Optional.empty());
+      assertThat(service.snapshot().health()).isEqualTo(CommandCenterSnapshot.HealthStatus.HEALTHY);
+      assertThat(service.snapshot().pendingAction()).isNull();
+    } finally {
+      // The test owns this executor; production owns and closes its bean.
+      executor.shutdownNow();
+    }
   }
 
   @Test
@@ -272,6 +344,7 @@ class CommandCenterMetricsServiceTest {
     private final FileSystem fileSystem = mock(FileSystem.class);
     private final OSFileStore fileStore = mock(OSFileStore.class);
     private final NetworkIF network = mock(NetworkIF.class);
+    private final HWDiskStore disk = mock(HWDiskStore.class);
 
     private OshiFixture() {
       when(systemInfo.getHardware()).thenReturn(hardware);
@@ -280,6 +353,7 @@ class CommandCenterMetricsServiceTest {
       when(hardware.getMemory()).thenReturn(memory);
       when(hardware.getSensors()).thenReturn(sensors);
       when(hardware.getNetworkIFs(true)).thenReturn(List.of(network));
+      when(hardware.getDiskStores()).thenReturn(List.of(disk));
       when(operatingSystem.getFileSystem()).thenReturn(fileSystem);
       when(fileSystem.getFileStores(true)).thenReturn(List.of(fileStore));
       when(fileStore.isLocal()).thenReturn(true);

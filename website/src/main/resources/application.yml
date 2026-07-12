@@ -18,6 +18,9 @@ command-center:
   log-path: logs/application.log
   max-log-lines: 250
   max-log-bytes: 65536
+  production-port: 8080
+  production-service-name: ChristopherBellDev
+  commit-identifier: ${GIT_COMMIT:unknown}
   actions:
     mode: SIMULATED
     win-sw-executable: ChristopherBellDev.exe

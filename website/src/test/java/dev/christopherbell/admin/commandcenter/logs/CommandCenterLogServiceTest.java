@@ -75,6 +75,22 @@ class CommandCenterLogServiceTest {
   }
 
   @Test
+  void redactsQuotedJsonAndLogfmtSecretsWithoutLeavingBearerValues() throws IOException {
+    Path log = writeLog("""
+        {"password":"json-secret","token":"token-secret","authorization":"Bearer bearer-secret"}
+        password='quoted secret' token=plain-secret authorization=Bearer logfmt-secret safe=value
+        """);
+
+    var page = service(log, 20, 2_048).read(null, null, null);
+
+    assertThat(page.records()).extracting(CommandCenterLogService.LogRecord::text)
+        .allSatisfy(text -> assertThat(text)
+            .doesNotContain("json-secret", "token-secret", "bearer-secret", "quoted secret",
+                "plain-secret", "logfmt-secret"))
+        .allSatisfy(text -> assertThat(text).contains("[REDACTED]"));
+  }
+
+  @Test
   void literalQueryIsCaseInsensitive() throws IOException {
     Path log = writeLog("INFO MiXeD-CaSe value\nINFO unrelated\n");
 

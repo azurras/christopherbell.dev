@@ -3,6 +3,7 @@ server:
 command-center:
   actions:
     mode: SIMULATED
+    power-actions-enabled: true
 spring:
   mongodb:
     database: christopherbell

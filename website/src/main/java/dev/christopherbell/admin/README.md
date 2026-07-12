@@ -27,6 +27,10 @@ Owns back-office administration views and cross-feature admin operations.
   are simulated by default. Windows mode maps those values to fixed WinSW or
   `shutdown.exe` argument arrays; restart and shutdown use the fixed 60-second
   delay, and cancellation uses the fixed `/a` command.
+- Host providers run concurrently behind independent timeouts on a private scheduler. CPU
+  temperature uses a bounded, lifecycle-owned LibreHardwareMonitor PowerShell session on Windows.
+- Computer restart and shutdown additionally require the environment-backed
+  `COMMAND_CENTER_POWER_ACTIONS_ENABLED=true` switch.
 - Every challenged action requires a fresh active approved admin, immediate
   password verification, a single-use two-minute challenge, the exact
   confirmation phrase, throttling, and cooldown enforcement. Passwords are

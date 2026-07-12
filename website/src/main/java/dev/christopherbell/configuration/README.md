@@ -41,6 +41,9 @@ controls. The profiles retain `power-delay: 60s` as an operator-visible statemen
 of the contract, while both the scheduled pending-action time and Windows command
 mapping independently enforce the fixed 60-second delay.
 
+Production computer power actions remain disabled unless
+`COMMAND_CENTER_POWER_ACTIONS_ENABLED=true`; `GIT_COMMIT` supplies the optional safe commit label.
+
 ## Update This Doc
 
 Update this README when public/private routes, security rules, JWT behavior, rate limits, or request limits change.

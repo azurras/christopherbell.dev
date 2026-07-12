@@ -18,6 +18,9 @@ public class CommandCenterProperties {
   private Path logPath = Path.of("logs", "application.log");
   private int maxLogLines = 250;
   private int maxLogBytes = 65_536;
+  private int productionPort = 8080;
+  private String productionServiceName = "ChristopherBellDev";
+  private String commitIdentifier = "unknown";
   private final Actions actions = new Actions();
   private final Thresholds thresholds = new Thresholds();
 
@@ -33,6 +36,7 @@ public class CommandCenterProperties {
     private ActionMode mode = ActionMode.SIMULATED;
     private Path winSwExecutable = Path.of("ChristopherBellDev.exe");
     private Path shutdownExecutable = Path.of("shutdown.exe");
+    private boolean powerActionsEnabled;
     private Duration challengeTtl = Duration.ofMinutes(2);
     private Duration cooldown = Duration.ofMinutes(2);
     private Duration powerDelay = Duration.ofSeconds(60);

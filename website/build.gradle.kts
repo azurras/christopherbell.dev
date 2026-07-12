@@ -31,6 +31,7 @@ dependencies {
     // Host metrics and Windows hardware sensors
     implementation("com.github.oshi:oshi-core:7.4.0")
     implementation("io.github.pandalxb:jLibreHardwareMonitor:1.0.6")
+    implementation("io.github.pandalxb:jPowerShell:1.0.1")
 
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
 

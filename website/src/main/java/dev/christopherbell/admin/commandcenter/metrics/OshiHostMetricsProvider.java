@@ -17,6 +17,8 @@ public class OshiHostMetricsProvider implements HostMetricsProvider {
   private Instant previousNetworkSample;
   private long previousBytesReceived;
   private long previousBytesSent;
+  private Instant previousDiskSample;
+  private long previousDiskBytes;
 
   public OshiHostMetricsProvider(SystemInfoProvider systemInfo) {
     this.systemInfo = systemInfo;
@@ -42,13 +44,6 @@ public class OshiHostMetricsProvider implements HostMetricsProvider {
     }
     previousCpuTicks = currentTicks.clone();
 
-    var temperature = hardware.getSensors().getCpuTemperature();
-    readings.put(
-        "cpu.temperature",
-        temperature <= 0 || !Double.isFinite(temperature)
-            ? unavailable("cpu.temperature", "CPU temperature", "celsius", sampledAt, "Sensor unavailable")
-            : available("cpu.temperature", "CPU temperature", temperature, "celsius", sampledAt));
-
     var memory = hardware.getMemory();
     var totalMemory = memory.getTotal();
     readings.put(
@@ -61,6 +56,19 @@ public class OshiHostMetricsProvider implements HostMetricsProvider {
                 percent(totalMemory - memory.getAvailable(), totalMemory),
                 "percent",
                 sampledAt));
+    readings.put(
+        "memory.used.bytes",
+        totalMemory <= 0
+            ? unavailable("memory.used.bytes", "Memory used", "bytes", sampledAt,
+                "Memory total unavailable")
+            : available("memory.used.bytes", "Memory used", totalMemory - memory.getAvailable(),
+                "bytes", sampledAt));
+    readings.put(
+        "memory.total.bytes",
+        totalMemory <= 0
+            ? unavailable("memory.total.bytes", "Memory total", "bytes", sampledAt,
+                "Memory total unavailable")
+            : available("memory.total.bytes", "Memory total", totalMemory, "bytes", sampledAt));
 
     var stores = systemInfo.getOperatingSystem().getFileSystem().getFileStores(true);
     long totalDisk = 0;
@@ -76,6 +84,35 @@ public class OshiHostMetricsProvider implements HostMetricsProvider {
         totalDisk <= 0
             ? unavailable("disk.free", "Disk free", "percent", sampledAt, "Local disk total unavailable")
             : available("disk.free", "Disk free", percent(usableDisk, totalDisk), "percent", sampledAt));
+    readings.put(
+        "disk.free.bytes",
+        totalDisk <= 0
+            ? unavailable("disk.free.bytes", "Disk free", "bytes", sampledAt,
+                "Local disk total unavailable")
+            : available("disk.free.bytes", "Disk free", usableDisk, "bytes", sampledAt));
+    readings.put(
+        "disk.used.bytes",
+        totalDisk <= 0
+            ? unavailable("disk.used.bytes", "Disk used", "bytes", sampledAt,
+                "Local disk total unavailable")
+            : available("disk.used.bytes", "Disk used", totalDisk - usableDisk, "bytes", sampledAt));
+    long diskBytes = 0;
+    for (var disk : hardware.getDiskStores()) {
+      diskBytes += Math.max(0, disk.getReadBytes()) + Math.max(0, disk.getWriteBytes());
+    }
+    var diskElapsed = previousDiskSample == null
+        ? Duration.ZERO : Duration.between(previousDiskSample, sampledAt);
+    readings.put(
+        "disk.activity",
+        diskElapsed.isZero() || diskElapsed.isNegative()
+            ? unavailable("disk.activity", "Disk activity", "bytes/second", sampledAt,
+                "Waiting for a second disk sample")
+            : available("disk.activity", "Disk activity",
+                Math.max(0, diskBytes - previousDiskBytes)
+                    / (diskElapsed.toNanos() / 1_000_000_000.0),
+                "bytes/second", sampledAt));
+    previousDiskSample = sampledAt;
+    previousDiskBytes = diskBytes;
 
     var systemUptime = systemInfo.getOperatingSystem().getSystemUptime();
     readings.put(

@@ -28,6 +28,10 @@ public class CommandCenterLogService {
       Pattern.compile("\\b(TRACE|DEBUG|INFO|WARN|ERROR)\\b");
   private static final Pattern AUTHORIZATION_PATTERN =
       Pattern.compile("(?i)(authorization\\s*[:=]\\s*bearer\\s+)[^\\s,;]+");
+  private static final Pattern JSON_SECRET_PATTERN = Pattern.compile(
+      "(?i)(\\\"(?:password|api[_-]?key|secret|token|authorization)\\\"\\s*:\\s*\\\")([^\\\"]*)(\\\")");
+  private static final Pattern QUOTED_SECRET_PATTERN = Pattern.compile(
+      "(?i)((?:password|api[_-]?key|secret|token|authorization)\\s*[:=]\\s*)(['\\\"])(.*?)(\\2)");
   private static final Pattern NAMED_SECRET_PATTERN =
       Pattern.compile("(?i)(password|api[_-]?key|secret|token)(\\s*[:=]\\s*)[^\\s,;]+");
   private static final Pattern JWT_PATTERN =
@@ -200,7 +204,9 @@ public class CommandCenterLogService {
   }
 
   private String redact(String text) {
-    String redacted = AUTHORIZATION_PATTERN.matcher(text).replaceAll("$1[REDACTED]");
+    String redacted = JSON_SECRET_PATTERN.matcher(text).replaceAll("$1[REDACTED]$3");
+    redacted = QUOTED_SECRET_PATTERN.matcher(redacted).replaceAll("$1$2[REDACTED]$4");
+    redacted = AUTHORIZATION_PATTERN.matcher(redacted).replaceAll("$1[REDACTED]");
     redacted = NAMED_SECRET_PATTERN.matcher(redacted).replaceAll("$1$2[REDACTED]");
     return JWT_PATTERN.matcher(redacted).replaceAll("[REDACTED]");
   }
