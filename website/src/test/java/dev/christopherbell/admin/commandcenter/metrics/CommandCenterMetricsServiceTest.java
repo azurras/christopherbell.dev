@@ -78,6 +78,21 @@ class CommandCenterMetricsServiceTest {
   }
 
   @Test
+  void oshiProviderPublishesHostUptimeSeparatelyFromApplicationUptime() {
+    var fixture = new OshiFixture();
+    when(fixture.operatingSystem.getSystemUptime()).thenReturn(7_200L);
+    when(fixture.processor.getSystemCpuLoadTicks()).thenReturn(new long[] {1, 1, 1, 1, 1, 1, 1, 1});
+    var provider = new OshiHostMetricsProvider(fixture.systemInfo);
+
+    var readings = provider.read(START);
+
+    assertThat(readings).containsKey("system.uptime");
+    assertThat(readings.get("system.uptime"))
+        .extracting(MetricReading::value, MetricReading::unit, MetricReading::status)
+        .containsExactly(7_200.0, "seconds", MetricStatus.AVAILABLE);
+  }
+
+  @Test
   void collectorIsolatesProviderFailureAndRetainsItsLastGoodValuesAsStale() {
     var clock = new MutableClock(START);
     var properties = properties();
@@ -95,6 +110,25 @@ class CommandCenterMetricsServiceTest {
     assertThat(metric(snapshot, "cpu.usage").value()).isEqualTo(20.0);
     assertThat(metric(snapshot, "gpu.temperature").status()).isEqualTo(MetricStatus.AVAILABLE);
     assertThat(snapshot.alerts()).extracting(CommandCenterSnapshot.Alert::code).contains("PROVIDER_ERROR");
+  }
+
+  @Test
+  void providerFailureDetailsAreSanitizedBeforeEnteringTheSnapshot() throws Exception {
+    var clock = new MutableClock(START);
+    var properties = properties();
+    var secret = "C:\\private\\service\\nvidia-smi.exe --secret-token=abc123";
+    var provider = new SequenceProvider(reading("cpu.usage", 20.0), new IllegalStateException(secret));
+    var service = new CommandCenterMetricsService(
+        List.of(provider), properties, clock, "test-version", timeout -> true);
+    service.collect();
+    clock.advance(Duration.ofSeconds(5));
+
+    service.collect();
+
+    var snapshot = service.snapshot();
+    assertThat(metric(snapshot, "cpu.usage").detail()).isEqualTo("Provider temporarily unavailable.");
+    assertThat(new ObjectMapper().writeValueAsString(snapshot))
+        .doesNotContain("private", "nvidia-smi", "secret-token", "abc123");
   }
 
   @Test

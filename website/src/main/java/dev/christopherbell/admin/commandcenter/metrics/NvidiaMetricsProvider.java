@@ -57,14 +57,15 @@ public class NvidiaMetricsProvider implements HostMetricsProvider {
 
     var sample = parse(result.stdout());
     var readings = new LinkedHashMap<String, MetricReading>();
-    readings.put("gpu.usage", available("gpu.usage", "GPU usage", sample.utilizationPercent(), "percent", sampledAt));
-    readings.put("gpu.temperature", available(
+    readings.put("gpu.usage", reading(
+        "gpu.usage", "GPU usage", sample.utilizationPercent(), "percent", sampledAt));
+    readings.put("gpu.temperature", reading(
         "gpu.temperature", "GPU temperature", sample.temperatureCelsius(), "celsius", sampledAt));
-    readings.put("gpu.memory.used", available(
+    readings.put("gpu.memory.used", reading(
         "gpu.memory.used", "GPU memory used", sample.memoryUsedMegabytes(), "megabytes", sampledAt));
-    readings.put("gpu.memory.total", available(
+    readings.put("gpu.memory.total", reading(
         "gpu.memory.total", "GPU memory total", sample.memoryTotalMegabytes(), "megabytes", sampledAt));
-    readings.put("gpu.power.draw", available(
+    readings.put("gpu.power.draw", reading(
         "gpu.power.draw", "GPU power draw", sample.powerDrawWatts(), "watts", sampledAt));
     return Map.copyOf(readings);
   }
@@ -76,18 +77,28 @@ public class NvidiaMetricsProvider implements HostMetricsProvider {
     }
     try {
       var sample = new NvidiaSample(
-          Double.parseDouble(columns[0]),
-          Double.parseDouble(columns[1]),
-          Double.parseDouble(columns[2]),
-          Double.parseDouble(columns[3]),
-          Double.parseDouble(columns[4]));
-      if (!sample.isFinite()) {
-        throw new IllegalArgumentException("NVIDIA metrics must be finite numbers.");
-      }
+          optionalNumber(columns[0]),
+          optionalTemperature(columns[1]),
+          optionalNumber(columns[2]),
+          optionalNumber(columns[3]),
+          optionalNumber(columns[4]));
       return sample;
     } catch (NumberFormatException failure) {
       throw new IllegalArgumentException("NVIDIA metrics contain a non-numeric value.", failure);
     }
+  }
+
+  private static Double optionalTemperature(String value) {
+    var temperature = optionalNumber(value);
+    return temperature == null || temperature <= 0 ? null : temperature;
+  }
+
+  private static Double optionalNumber(String value) {
+    if (value.equalsIgnoreCase("N/A")) {
+      return null;
+    }
+    var number = Double.parseDouble(value);
+    return Double.isFinite(number) ? number : null;
   }
 
   private static CommandResult runCommand(List<String> command, Duration timeout)
@@ -102,25 +113,20 @@ public class NvidiaMetricsProvider implements HostMetricsProvider {
         process.exitValue(), new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8), false);
   }
 
-  private static MetricReading available(
-      String key, String label, double value, String unit, Instant sampledAt) {
-    return new MetricReading(key, label, value, unit, MetricStatus.AVAILABLE, sampledAt, null);
+  private static MetricReading reading(
+      String key, String label, Double value, String unit, Instant sampledAt) {
+    return value == null
+        ? new MetricReading(
+            key, label, null, unit, MetricStatus.UNAVAILABLE, sampledAt, "Metric unavailable")
+        : new MetricReading(key, label, value, unit, MetricStatus.AVAILABLE, sampledAt, null);
   }
 
   record NvidiaSample(
-      double utilizationPercent,
-      double temperatureCelsius,
-      double memoryUsedMegabytes,
-      double memoryTotalMegabytes,
-      double powerDrawWatts) {
-    private boolean isFinite() {
-      return Double.isFinite(utilizationPercent)
-          && Double.isFinite(temperatureCelsius)
-          && Double.isFinite(memoryUsedMegabytes)
-          && Double.isFinite(memoryTotalMegabytes)
-          && Double.isFinite(powerDrawWatts);
-    }
-  }
+      Double utilizationPercent,
+      Double temperatureCelsius,
+      Double memoryUsedMegabytes,
+      Double memoryTotalMegabytes,
+      Double powerDrawWatts) {}
 
   record CommandResult(int exitCode, String stdout, boolean timedOut) {}
 

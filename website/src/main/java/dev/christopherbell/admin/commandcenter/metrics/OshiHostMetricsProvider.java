@@ -77,6 +77,13 @@ public class OshiHostMetricsProvider implements HostMetricsProvider {
             ? unavailable("disk.free", "Disk free", "percent", sampledAt, "Local disk total unavailable")
             : available("disk.free", "Disk free", percent(usableDisk, totalDisk), "percent", sampledAt));
 
+    var systemUptime = systemInfo.getOperatingSystem().getSystemUptime();
+    readings.put(
+        "system.uptime",
+        systemUptime < 0
+            ? unavailable("system.uptime", "System uptime", "seconds", sampledAt, "System uptime unavailable")
+            : available("system.uptime", "System uptime", systemUptime, "seconds", sampledAt));
+
     long bytesReceived = 0;
     long bytesSent = 0;
     for (var network : hardware.getNetworkIFs(true)) {

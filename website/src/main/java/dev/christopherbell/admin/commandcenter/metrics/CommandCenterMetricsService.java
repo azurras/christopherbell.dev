@@ -22,6 +22,8 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bson.Document;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.info.BuildProperties;
@@ -32,6 +34,8 @@ import org.springframework.stereotype.Service;
 /** Collects host metrics into one atomic snapshot with bounded in-memory history. */
 @Service
 public class CommandCenterMetricsService {
+  private static final Logger LOGGER = LoggerFactory.getLogger(CommandCenterMetricsService.class);
+  private static final String PROVIDER_UNAVAILABLE_DETAIL = "Provider temporarily unavailable.";
   private final List<HostMetricsProvider> providers;
   private final CommandCenterProperties properties;
   private final Clock clock;
@@ -98,8 +102,13 @@ public class CommandCenterMetricsService {
         readings.putAll(providerReadings);
         lastGoodByProvider.put(provider, providerReadings);
       } catch (RuntimeException failure) {
+        LOGGER.warn(
+            "Command-center metrics provider {} failed.",
+            provider.getClass().getName(),
+            failure);
         var previous = lastGoodByProvider.getOrDefault(provider, Map.of());
-        previous.forEach((key, reading) -> readings.put(key, stale(reading, failure.getMessage())));
+        previous.forEach((key, reading) ->
+            readings.put(key, stale(reading, PROVIDER_UNAVAILABLE_DETAIL)));
         alerts.add(new Alert(
             "PROVIDER_ERROR",
             "WARNING",

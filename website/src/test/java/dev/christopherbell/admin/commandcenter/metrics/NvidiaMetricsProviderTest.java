@@ -51,14 +51,31 @@ class NvidiaMetricsProviderTest {
   }
 
   @Test
-  void rejectsUnavailableOrMalformedCsv() {
-    assertThatThrownBy(() -> NvidiaMetricsProvider.parse("N/A, 37, 2076, 12282, 18.4"))
-        .isInstanceOf(IllegalArgumentException.class);
+  void rejectsMalformedCsv() {
     assertThatThrownBy(() -> NvidiaMetricsProvider.parse("3, 37, 2076, 12282, 18.4, extra"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("metric count");
     assertThatThrownBy(() -> NvidiaMetricsProvider.parse("driver error"))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void marksOnlyNvidiaTemperatureUnavailableForZeroNaNOrNotAvailable() {
+    for (var temperature : List.of("0", "NaN", "N/A")) {
+      var provider = new NvidiaMetricsProvider(
+          "nvidia-smi", Duration.ofSeconds(2),
+          (command, timeout) -> new NvidiaMetricsProvider.CommandResult(
+              0, "3, " + temperature + ", 2076, 12282, 18.4", false));
+
+      var readings = provider.read(SAMPLED_AT);
+
+      assertThat(readings.get("gpu.temperature").value()).isNull();
+      assertThat(readings.get("gpu.temperature").status()).isEqualTo(MetricStatus.UNAVAILABLE);
+      assertThat(readings.get("gpu.usage").value()).isEqualTo(3.0);
+      assertThat(readings.get("gpu.memory.used").value()).isEqualTo(2076.0);
+      assertThat(readings.get("gpu.memory.total").value()).isEqualTo(12282.0);
+      assertThat(readings.get("gpu.power.draw").value()).isEqualTo(18.4);
+    }
   }
 
   @Test
