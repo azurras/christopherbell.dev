@@ -104,7 +104,7 @@ function Invoke-WslRootCommand {
 
 function Restore-MongoDatabase {
     param($Config, [string]$Archive, [string]$Database, [switch]$Drop)
-    $arguments = @('--uri','mongodb://127.0.0.1:27017','--archive',$Archive,'--gzip',"--nsFrom=christopherbell.*","--nsTo=$Database.*")
+    $arguments = @('--uri=mongodb://127.0.0.1:27017',"--archive=$Archive",'--gzip',"--nsFrom=christopherbell.*","--nsTo=$Database.*")
     if ($Drop) { $arguments += '--drop' }
     Invoke-CheckedProcess (Join-Path $Config.mongoToolsPath 'mongorestore.exe') $arguments $Config.repositoryPath | Out-Null
 }

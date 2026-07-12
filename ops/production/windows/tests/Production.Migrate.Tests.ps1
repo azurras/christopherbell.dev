@@ -77,3 +77,19 @@ Describe 'archive dry-run connection targeting' {
         }
     }
 }
+
+Describe 'archive restore argument compatibility' {
+    InModuleScope Production.Migrate {
+        It 'keeps URI and archive values attached to their options' {
+            Mock Invoke-CheckedProcess {}
+            $config = [pscustomobject]@{ mongoToolsPath='C:\mongo'; repositoryPath='A:\repo' }
+            Restore-MongoDatabase $config 'A:\backups\prod.archive.gz' 'christopherbell_restore_check' -Drop
+            Should -Invoke Invoke-CheckedProcess -ParameterFilter {
+                $ArgumentList -contains '--uri=mongodb://127.0.0.1:27017' -and
+                $ArgumentList -contains '--archive=A:\backups\prod.archive.gz' -and
+                $ArgumentList -notcontains '--uri' -and
+                $ArgumentList -notcontains '--archive'
+            }
+        }
+    }
+}
