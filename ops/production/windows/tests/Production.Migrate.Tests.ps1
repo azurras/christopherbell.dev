@@ -40,6 +40,14 @@ Describe 'WSL migration privilege boundaries' {
     }
 }
 
+Describe 'WSL website stop command safety' {
+    It 'does not let pkill match its own command line' {
+        $config = Get-Content (Join-Path $PSScriptRoot '..\config\deploy.example.json') -Raw | ConvertFrom-Json
+        $config.wslWebsiteStopCommand | Should -Match "\[j\]ava"
+        $config.wslWebsiteStopCommand | Should -Not -Match "pkill -f 'java"
+    }
+}
+
 Describe 'WSL mongodump argument compatibility' {
     InModuleScope Production.Migrate {
         It 'provides WSL-compatible equals-form mongodump arguments' {
