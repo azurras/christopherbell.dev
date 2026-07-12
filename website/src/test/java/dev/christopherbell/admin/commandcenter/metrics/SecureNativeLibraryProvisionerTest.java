@@ -3,6 +3,7 @@ package dev.christopherbell.admin.commandcenter.metrics;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -66,6 +67,9 @@ class SecureNativeLibraryProvisionerTest {
     Path attackerOwned = Files.createDirectory(tempDir.resolve("attacker-owned"));
     var lookup = attackerOwned.getFileSystem().getUserPrincipalLookupService();
     var interactiveUser = lookup.lookupPrincipalByName(System.getProperty("user.name"));
+    assumeFalse(SecureNativeLibraryProvisioner.WindowsAclPolicy.trustedPrincipalNames().stream()
+        .anyMatch(name -> name.equalsIgnoreCase(interactiveUser.getName())),
+        "Test requires an untrusted interactive owner");
     Files.setOwner(attackerOwned, interactiveUser);
 
     assertThatThrownBy(() -> new SecureNativeLibraryProvisioner(
