@@ -15,8 +15,9 @@ Describe 'production common operations' {
         $script:validConfig = @{
             repositoryPath=$repo; remote='origin'; branch='main'; programDataRoot=(Join-Path $TestDrive 'data')
             javaExe=$java.FullName; nodeExe=$node.FullName; mongoToolsPath=$tools; mongoShellExe=$mongosh.FullName
-            backupRoot=$backup; wslDistro='Debian'; wslWebsiteStopCommand='stop-site'; wslWebsiteStartCommand='start-site'
-            wslMongoStopCommand='stop-mongo'; wslMongoStartCommand='start-mongo'
+            backupRoot=$backup
+            cloudflaredExe=(New-Item -ItemType File -Force (Join-Path $TestDrive 'cloudflared.exe')).FullName
+            publicUrl='https://www.christopherbell.dev/'
             smokeAccountEmail='admin@christopherbell.dev'; candidatePort=8081; productionPort=8080
             releaseRetention=5; autoDeployPollSeconds=60; autoDeployFailureBackoffSeconds=900
         }
@@ -25,6 +26,13 @@ Describe 'production common operations' {
     It 'loads a complete valid configuration' {
         $validConfig | ConvertTo-Json | Set-Content $configPath
         (Read-ProductionConfig -Path $configPath).branch | Should -Be 'main'
+    }
+
+    It 'loads a Windows-only configuration without WSL fields' {
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+        $config = Read-ProductionConfig -Path $configPath
+        $config.publicUrl | Should -Be 'https://www.christopherbell.dev/'
+        $config.PSObject.Properties.Name | Should -Not -Contain 'wslDistro'
     }
 
     It 'rejects concurrent deployment locks' {

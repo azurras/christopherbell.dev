@@ -1,7 +1,5 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'Production.Common.psm1') -Force
-
 function Resolve-OriginMainRelease {
     param($Config)
     Invoke-CheckedProcess -FilePath 'git.exe' -ArgumentList @('-C',$Config.repositoryPath,'fetch','--prune',$Config.remote,$Config.branch) -WorkingDirectory $Config.repositoryPath | Out-Null

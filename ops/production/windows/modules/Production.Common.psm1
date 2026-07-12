@@ -9,7 +9,7 @@ function Read-ProductionConfig {
         throw "Missing deploy config: $Path"
     }
     $config = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    foreach ($name in 'repositoryPath','remote','branch','programDataRoot','javaExe','nodeExe','mongoToolsPath','mongoShellExe','backupRoot','wslDistro','wslWebsiteStopCommand','wslWebsiteStartCommand','wslMongoStopCommand','wslMongoStartCommand','smokeAccountEmail') {
+    foreach ($name in 'repositoryPath','remote','branch','programDataRoot','javaExe','nodeExe','mongoToolsPath','mongoShellExe','cloudflaredExe','backupRoot','publicUrl','smokeAccountEmail') {
         if (-not ($config.PSObject.Properties.Name -contains $name) -or
             [string]::IsNullOrWhiteSpace([string]$config.$name)) {
             throw "Missing deploy config value: $name"
@@ -30,7 +30,7 @@ function Read-ProductionConfig {
     if ([string]$config.smokeAccountEmail -eq 'operator@example.com') {
         throw 'smokeAccountEmail must be configured for a real production account.'
     }
-    foreach ($name in 'repositoryPath','javaExe','nodeExe','mongoToolsPath','mongoShellExe','backupRoot') {
+    foreach ($name in 'repositoryPath','javaExe','nodeExe','mongoToolsPath','mongoShellExe','cloudflaredExe','backupRoot') {
         if (-not (Test-Path -LiteralPath $config.$name)) { throw "Configured path does not exist: $name" }
     }
     return $config
@@ -153,8 +153,9 @@ function Show-ProductionHelp {
     @'
 Usage: prod.cmd <command> [-WhatIf]
 
-Commands: install, migrate, deploy, status, logs, restart, releases, rollback,
-          backup, uninstall, auto-install, auto-deploy, auto-status, auto-remove
+Commands: install, deploy, status, logs, restart, releases, rollback, backup,
+          verify-startup, uninstall, auto-install, auto-deploy, auto-status,
+          auto-remove
 '@ | Write-Output
 }
 

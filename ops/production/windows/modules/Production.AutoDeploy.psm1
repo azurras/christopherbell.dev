@@ -1,9 +1,5 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'Production.Common.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'Production.Install.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'Production.Deploy.psm1') -Force
-
 function New-AutoDeployState {
     [pscustomobject][ordered]@{ lastCheckedAt=$null; remoteSha=$null; attemptedSha=$null; successfulSha=$null; failedSha=$null; failedAt=$null; error=$null }
 }
@@ -90,6 +86,14 @@ function Start-AutoDeployLoop {
     }
 }
 
+function Resolve-PowerShell7Executable {
+    $executable = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+        throw "PowerShell 7 is required at $executable."
+    }
+    return $executable
+}
+
 function Install-AutoDeployTask {
     [CmdletBinding()]
     param([switch]$WhatIf)
@@ -99,7 +103,7 @@ function Install-AutoDeployTask {
     $tools = Join-Path $config.programDataRoot 'tools'
     New-Item -ItemType Directory -Force $tools | Out-Null
     Copy-Item (Join-Path $PSScriptRoot '..\*') $tools -Recurse -Force
-    $action = New-ScheduledTaskAction -Execute 'pwsh.exe' -Argument "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$tools\prod.ps1`" auto-deploy"
+    $action = New-ScheduledTaskAction -Execute (Resolve-PowerShell7Executable) -Argument "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$tools\prod.ps1`" auto-deploy"
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([timespan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
