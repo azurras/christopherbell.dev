@@ -56,7 +56,7 @@ final class SecureNativeLibraryProvisioner {
     Path versionDirectory = baseDirectory.resolve("jlibre-" + VERSION + "-" + nonce);
     boolean created = false;
     try {
-      createDirectoriesWithoutLinks(baseDirectory);
+      createTrustedBaseDirectory();
       verifyNotLinkOrReparsePoint(baseDirectory);
       aclPolicy.hardenAndVerify(baseDirectory);
       Files.createDirectory(versionDirectory);
@@ -98,6 +98,19 @@ final class SecureNativeLibraryProvisioner {
       }
       throw new SecurityException("Secure native library provisioning failed.", failure);
     }
+  }
+
+  private void createTrustedBaseDirectory() throws IOException {
+    if (aclPolicy instanceof WindowsAclPolicy) {
+      createDirectoriesWithoutLinks(baseDirectory);
+      return;
+    }
+    if (Files.exists(baseDirectory, LinkOption.NOFOLLOW_LINKS)) {
+      verifyNotLinkOrReparsePoint(baseDirectory);
+      return;
+    }
+    Files.createDirectories(baseDirectory);
+    verifyNotLinkOrReparsePoint(baseDirectory);
   }
 
   private static void createDirectoriesWithoutLinks(Path directory) throws IOException {
