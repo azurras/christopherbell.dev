@@ -50,6 +50,41 @@ function Protect-ProductionSecrets {
     if ($LASTEXITCODE -ne 0) { throw 'Failed to protect production configuration ACLs.' }
 }
 
+function Assert-CloudflaredExecutable {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Executable)
+    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+        throw "Missing cloudflared executable: $Executable"
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Executable
+    $signer = $signature.SignerCertificate
+    $subject = if ($signer) { [string]$signer.Subject } else { '' }
+    if ([string]$signature.Status -ne 'Valid' -or
+        $subject -notmatch '(?i)(?:^|,\s*)O="?Cloudflare, Inc\."?(?:,|$)') {
+        throw 'The configured cloudflared executable must have a valid Authenticode signature signed by Cloudflare, Inc.'
+    }
+}
+
+function Get-ServiceExecutablePath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$PathName)
+    $match = [regex]::Match($PathName, '^\s*(?:"([^"]+)"|(\S+))')
+    if (-not $match.Success) { throw 'The cloudflared service executable path is invalid.' }
+    if ($match.Groups[1].Success) { return $match.Groups[1].Value }
+    return $match.Groups[2].Value
+}
+
+function Assert-CloudflaredServiceBinding {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Executable)
+    $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='cloudflared'" -ErrorAction Stop
+    if (-not $service) { throw 'The cloudflared service registration is missing.' }
+    $serviceExecutable = Get-ServiceExecutablePath -PathName ([string]$service.PathName)
+    if (-not [string]::Equals($serviceExecutable, $Executable, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The cloudflared service is not bound to the configured signed executable; provide CloudflareTokenPath to reinstall it.'
+    }
+}
+
 function Install-CloudflaredService {
     [CmdletBinding()]
     param(
@@ -57,13 +92,14 @@ function Install-CloudflaredService {
         [string]$TokenPath,
         [switch]$WhatIf
     )
-    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
-        throw "Missing cloudflared executable: $Executable"
-    }
+    Assert-CloudflaredExecutable -Executable $Executable
     $existing = Get-Service cloudflared -ErrorAction SilentlyContinue
     $tokenProvided = -not [string]::IsNullOrWhiteSpace($TokenPath)
     if (-not $existing -and -not $tokenProvided) {
         throw 'CloudflareTokenPath must reference a protected file when installing cloudflared.'
+    }
+    if ($existing -and -not $tokenProvided) {
+        Assert-CloudflaredServiceBinding -Executable $Executable
     }
     if ($tokenProvided) {
         if (-not (Test-Path -LiteralPath $TokenPath -PathType Leaf)) {
@@ -79,6 +115,7 @@ function Install-CloudflaredService {
                     Invoke-CheckedProcess $Executable @('service','uninstall') (Split-Path -Parent $Executable) | Out-Null
                 }
                 Invoke-CheckedProcess $Executable @('service','install',$token) (Split-Path -Parent $Executable) | Out-Null
+                Assert-CloudflaredServiceBinding -Executable $Executable
             }
         } finally { $token = $null }
     }
@@ -146,4 +183,4 @@ function Uninstall-ProductionRuntime {
     }
 }
 
-Export-ModuleMember -Function Assert-Administrator,New-ProductionDirectories,Install-ConfigurationExamples,Protect-ProductionSecrets,Install-CloudflaredService,Install-WinSwBinary,Install-ProductionRuntime,Uninstall-ProductionRuntime
+Export-ModuleMember -Function Assert-Administrator,New-ProductionDirectories,Install-ConfigurationExamples,Protect-ProductionSecrets,Assert-CloudflaredExecutable,Get-ServiceExecutablePath,Assert-CloudflaredServiceBinding,Install-CloudflaredService,Install-WinSwBinary,Install-ProductionRuntime,Uninstall-ProductionRuntime

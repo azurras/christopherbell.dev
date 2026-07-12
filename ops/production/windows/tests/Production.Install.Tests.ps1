@@ -49,6 +49,33 @@ Describe 'native Windows service installer' {
 
 Describe 'native cloudflared service installer' {
     InModuleScope Production.Install {
+        BeforeEach {
+            Mock Get-AuthenticodeSignature {
+                [pscustomobject]@{
+                    Status = 'Valid'
+                    SignerCertificate = [pscustomobject]@{ Subject='CN="Cloudflare, Inc.", O="Cloudflare, Inc.", C=US' }
+                }
+            }
+            Mock Get-CimInstance { [pscustomobject]@{ PathName='"C:\cloudflared.exe" service' } }
+        }
+
+        It 'rejects a cloudflared executable without a valid Cloudflare signature' {
+            Mock Test-Path { $true }
+            Mock Get-AuthenticodeSignature {
+                [pscustomobject]@{ Status='NotSigned'; SignerCertificate=$null }
+            }
+            { Assert-CloudflaredExecutable -Executable 'C:\cloudflared.exe' } |
+                Should -Throw '*signed by Cloudflare*'
+        }
+
+        It 'rejects an existing service bound to a different executable without a replacement token' {
+            Mock Get-Service { [pscustomobject]@{ Status='Running' } } -ParameterFilter { $Name -eq 'cloudflared' }
+            Mock Test-Path { $true }
+            Mock Get-CimInstance { [pscustomobject]@{ PathName='"C:\stale\cloudflared.exe" service' } }
+            { Install-CloudflaredService -Executable 'C:\cloudflared.exe' } |
+                Should -Throw '*not bound*'
+        }
+
         It 'requires a token path only when cloudflared is not installed' {
             Mock Get-Service { $null } -ParameterFilter { $Name -eq 'cloudflared' }
             Mock Test-Path { $true } -ParameterFilter { $LiteralPath -eq 'C:\cloudflared.exe' }
