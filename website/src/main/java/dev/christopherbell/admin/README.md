@@ -29,6 +29,11 @@ Owns back-office administration views and cross-feature admin operations.
   serialized with launch and succeeds only after the fixed `/a` process exits
   successfully within its bounded wait. Request values never become executables
   or command arguments.
+- The method-secured command-center API is rooted at
+  `/api/admin/command-center/2026-07-12`. Admins can read `snapshot` and `logs`,
+  create `action-challenges`, submit confirmed `actions` (HTTP 202), and cancel
+  a pending machine action at `actions/cancel`. Request validation runs before
+  the action services, including a 100-character maximum log query.
 
 ## Update This Doc
 

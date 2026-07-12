@@ -12,6 +12,8 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.security.PasswordUtil;
 import dev.christopherbell.permission.PermissionService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -397,10 +399,10 @@ public class CommandCenterActionService {
 
   /** Confirmation input; no field can influence an executable or argument. */
   public record ActionConfirmation(
-      String challengeId,
-      CommandCenterActionType action,
-      String password,
-      String confirmationPhrase) {
+      @NotBlank String challengeId,
+      @NotNull CommandCenterActionType action,
+      @NotBlank String password,
+      @NotBlank String confirmationPhrase) {
     @Override
     public String toString() {
       return "ActionConfirmation[action=" + action
