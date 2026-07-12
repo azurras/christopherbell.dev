@@ -2,6 +2,18 @@ Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Glo
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Force
 
 Describe 'native Windows service installer' {
+    It 'reuses an existing WinSW binary instead of replacing a running service executable' {
+        $serviceRoot = Join-Path $TestDrive 'service'
+        New-Item -ItemType Directory -Path $serviceRoot | Out-Null
+        'existing-winsw' | Set-Content (Join-Path $serviceRoot 'ChristopherBellDev.exe')
+        Mock Invoke-WebRequest { throw 'WinSW should not be downloaded again.' }
+
+        Install-WinSwBinary -ServiceRoot $serviceRoot
+
+        Get-Content (Join-Path $serviceRoot 'ChristopherBellDev.exe') -Raw | Should -Match 'existing-winsw'
+        Should -Invoke Invoke-WebRequest -Times 0
+    }
+
     It 'preserves an existing secret environment file' {
         $root = Join-Path $TestDrive 'data'
         New-ProductionDirectories $root

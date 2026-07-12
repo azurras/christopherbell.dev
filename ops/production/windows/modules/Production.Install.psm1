@@ -89,6 +89,21 @@ function Install-CloudflaredService {
     }
 }
 
+function Install-WinSwBinary {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ServiceRoot)
+    $binary = Join-Path $ServiceRoot 'ChristopherBellDev.exe'
+    if (Test-Path -LiteralPath $binary -PathType Leaf) { return $binary }
+    $download = "$binary.download"
+    Invoke-WebRequest $script:WinSwUri -OutFile $download
+    if ((Get-FileHash $download -Algorithm SHA256).Hash -ne $script:WinSwSha256) {
+        Remove-Item -LiteralPath $download -Force
+        throw 'WinSW SHA-256 verification failed.'
+    }
+    Move-Item -LiteralPath $download -Destination $binary
+    return $binary
+}
+
 function Install-ProductionRuntime {
     [CmdletBinding()]
     param([switch]$WhatIf, [string]$CloudflareTokenPath)
@@ -105,14 +120,7 @@ function Install-ProductionRuntime {
     & sc.exe failure MongoDB reset= 3600 actions= restart/10000/restart/30000 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure MongoDB service recovery.' }
     $service = Join-Path $root 'service'
-    $binary = Join-Path $service 'ChristopherBellDev.exe'
-    $download = "$binary.download"
-    Invoke-WebRequest $script:WinSwUri -OutFile $download
-    if ((Get-FileHash $download -Algorithm SHA256).Hash -ne $script:WinSwSha256) {
-        Remove-Item -LiteralPath $download -Force
-        throw 'WinSW SHA-256 verification failed.'
-    }
-    Move-Item -LiteralPath $download -Destination $binary -Force
+    $binary = Install-WinSwBinary -ServiceRoot $service
     Copy-Item (Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml') $service -Force
     Copy-Item (Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1') $service -Force
     if (-not (Get-Service ChristopherBellDev -ErrorAction SilentlyContinue)) {
@@ -138,4 +146,4 @@ function Uninstall-ProductionRuntime {
     }
 }
 
-Export-ModuleMember -Function Assert-Administrator,New-ProductionDirectories,Install-ConfigurationExamples,Protect-ProductionSecrets,Install-CloudflaredService,Install-ProductionRuntime,Uninstall-ProductionRuntime
+Export-ModuleMember -Function Assert-Administrator,New-ProductionDirectories,Install-ConfigurationExamples,Protect-ProductionSecrets,Install-CloudflaredService,Install-WinSwBinary,Install-ProductionRuntime,Uninstall-ProductionRuntime
