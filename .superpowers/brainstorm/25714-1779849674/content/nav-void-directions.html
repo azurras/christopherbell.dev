@@ -1,0 +1,267 @@
+<style>
+  .nav-mock-grid {
+    display: grid;
+    gap: 22px;
+  }
+
+  .nav-mock-card {
+    border: 1px solid rgba(128, 190, 185, 0.24);
+    border-radius: 8px;
+    background: #071018;
+    overflow: hidden;
+  }
+
+  .nav-preview {
+    min-height: 170px;
+    padding: 28px;
+    background:
+      repeating-linear-gradient(90deg, rgba(117, 202, 187, 0.06) 0 1px, transparent 1px 54px),
+      linear-gradient(180deg, #081018, #05090e);
+  }
+
+  .void-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    color: #e6edf2;
+    font-family: Inter, system-ui, sans-serif;
+  }
+
+  .void-brand,
+  .void-links,
+  .void-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .void-brand strong {
+    color: #fff;
+    font-size: 18px;
+    letter-spacing: 0.02em;
+  }
+
+  .void-brand span,
+  .void-link,
+  .void-pill,
+  .void-icon {
+    border: 1px solid rgba(128, 190, 185, 0.22);
+    background: rgba(6, 11, 16, 0.82);
+  }
+
+  .void-brand span {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    color: #deb15f;
+    font-weight: 900;
+  }
+
+  .void-link,
+  .void-pill {
+    color: rgba(230, 237, 242, 0.8);
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .void-link.is-active {
+    color: #071016;
+    background: #75cab9;
+    border-color: #75cab9;
+  }
+
+  .void-icon {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    color: #fff;
+    font-weight: 900;
+  }
+
+  .nav-hero-filler {
+    margin-top: 32px;
+    color: rgba(201, 216, 221, 0.7);
+    max-width: 560px;
+  }
+
+  .rail-nav {
+    align-items: stretch;
+    border: 1px solid rgba(128, 190, 185, 0.22);
+    border-radius: 8px;
+    background: rgba(4, 9, 14, 0.88);
+    box-shadow: 0 20px 46px rgba(0, 0, 0, 0.32);
+    padding: 10px;
+  }
+
+  .rail-nav .void-links {
+    gap: 4px;
+  }
+
+  .rail-nav .void-link {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .terminal-nav {
+    display: grid;
+    gap: 8px;
+    border: 1px solid rgba(128, 190, 185, 0.24);
+    border-radius: 8px;
+    background: rgba(5, 9, 14, 0.86);
+    padding: 10px 12px;
+  }
+
+  .terminal-top,
+  .terminal-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .terminal-line {
+    color: #deb15f;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .terminal-bottom {
+    border-top: 1px solid rgba(128, 190, 185, 0.18);
+    padding-top: 8px;
+  }
+
+  .signal-strip-nav {
+    border-bottom: 1px solid rgba(128, 190, 185, 0.22);
+    background: linear-gradient(90deg, rgba(5, 9, 14, 0.96), rgba(10, 24, 28, 0.9));
+    padding: 12px 0;
+  }
+
+  .signal-strip-nav .void-brand span {
+    border-radius: 999px;
+  }
+
+  .signal-strip-nav .void-link {
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .mobile-row {
+    display: none;
+    margin-top: 18px;
+    border-top: 1px solid rgba(128, 190, 185, 0.14);
+    padding-top: 14px;
+    color: rgba(230, 237, 242, 0.74);
+  }
+
+  .option .content h3 {
+    margin-bottom: 6px;
+  }
+
+  @media (max-width: 760px) {
+    .void-links {
+      display: none;
+    }
+
+    .mobile-row {
+      display: block;
+    }
+  }
+</style>
+
+<h2>Void Nav Redesign Directions</h2>
+<p class="subtitle">Three directions for the shared site nav. All keep the current routes, auth behavior, notifications, profile menu, top-level WFL link, and Tools dropdown.</p>
+
+<div class="nav-mock-grid">
+  <div class="option nav-mock-card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Signal Console</h3>
+      <p>Recommended: compact, dark, and app-like. It makes Home feel like the Void entry point without stealing attention from page content.</p>
+      <div class="nav-preview">
+        <div class="void-nav rail-nav">
+          <div class="void-brand"><span>V</span><strong>Void</strong></div>
+          <div class="void-links">
+            <div class="void-link">Feed</div>
+            <div class="void-link">Messages</div>
+            <div class="void-link is-active">What's For Lunch</div>
+            <div class="void-link">Tools</div>
+          </div>
+          <div class="void-actions">
+            <div class="void-icon">!</div>
+            <div class="void-icon">C</div>
+          </div>
+        </div>
+        <div class="mobile-row">Mobile collapses into the same glass rail with a clean signal menu.</div>
+        <p class="nav-hero-filler">Strongest fit for a product-like Void experience: visible, quiet, and easy to scan.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="option nav-mock-card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Terminal Header</h3>
+      <p>More stylized and distinctive. Adds a small system/status row above the links, leaning harder into the Void theme.</p>
+      <div class="nav-preview">
+        <div class="terminal-nav">
+          <div class="terminal-top">
+            <div class="void-brand"><span>V</span><strong>christopherbell.dev</strong></div>
+            <div class="terminal-line">signal online</div>
+          </div>
+          <div class="terminal-bottom">
+            <div class="void-links">
+              <div class="void-link is-active">Void</div>
+              <div class="void-link">Messages</div>
+              <div class="void-link">WFL</div>
+              <div class="void-link">Tools</div>
+            </div>
+            <div class="void-actions">
+              <div class="void-icon">!</div>
+              <div class="void-icon">C</div>
+            </div>
+          </div>
+        </div>
+        <div class="mobile-row">Mobile keeps brand/status on top, menu below.</div>
+        <p class="nav-hero-filler">Best if you want the nav to feel intentionally weird and branded, with a little more vertical height.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="option nav-mock-card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Signal Strip</h3>
+      <p>Flatter and more traditional. Keeps the strongest Bootstrap-like mental model while shifting the colors and states into the Void style.</p>
+      <div class="nav-preview">
+        <div class="signal-strip-nav">
+          <div class="void-nav">
+            <div class="void-brand"><span>C</span><strong>CB</strong></div>
+            <div class="void-links">
+              <div class="void-link is-active">Home</div>
+              <div class="void-link">Void</div>
+              <div class="void-link">Messages</div>
+              <div class="void-link">What's For Lunch</div>
+              <div class="void-link">Tools</div>
+            </div>
+            <div class="void-actions">
+              <div class="void-pill">Login</div>
+              <div class="void-pill">Sign-up</div>
+            </div>
+          </div>
+        </div>
+        <div class="mobile-row">Mobile stays closest to the current hamburger behavior.</div>
+        <p class="nav-hero-filler">Lowest risk option: familiar layout, better Void skin, less personality than A or B.</p>
+      </div>
+    </div>
+  </div>
+</div>
