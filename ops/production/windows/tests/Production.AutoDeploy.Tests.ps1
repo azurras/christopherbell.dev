@@ -48,9 +48,15 @@ Describe 'automatic origin main deployment' {
                 $env:PATH = ''
                 Mock Assert-Administrator {}
                 Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive } }
+                Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
                 Mock New-Item {}
                 Mock Copy-Item {}
-                Mock Register-ScheduledTask {}
+                $script:existingTaskStopped = $false
+                Mock Stop-ScheduledTask { $script:existingTaskStopped = $true }
+                Mock Get-ScheduledTask { [pscustomobject]@{ State='Ready' } }
+                Mock Register-ScheduledTask {
+                    if (-not $script:existingTaskStopped) { throw 'Existing task must be stopped before registration.' }
+                }
                 Mock Start-ScheduledTask {}
 
                 Install-AutoDeployTask
@@ -58,10 +64,55 @@ Describe 'automatic origin main deployment' {
                 Should -Invoke Register-ScheduledTask -ParameterFilter {
                     $Action.Execute -eq (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
                 }
+                Should -Invoke Stop-ScheduledTask -Times 1 -ParameterFilter { $TaskName -eq 'ChristopherBellAutoDeploy' }
             }
             finally {
                 $env:PATH = $originalPath
             }
+        }
+    }
+
+    It 'does not overwrite tools or stop the task while a deployment is active' {
+        InModuleScope Production.AutoDeploy {
+            Mock Assert-Administrator {}
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive } }
+            Mock Enter-DeploymentLock { throw 'A production deployment is already running.' }
+            Mock New-Item {}
+            Mock Copy-Item {}
+            Mock Stop-ScheduledTask {}
+            Mock Register-ScheduledTask {}
+
+            { Install-AutoDeployTask } | Should -Throw '*already running*'
+
+            Should -Invoke Copy-Item -Times 0
+            Should -Invoke Stop-ScheduledTask -Times 0
+            Should -Invoke Register-ScheduledTask -Times 0
+        }
+    }
+
+    It 'does not register or restart when the existing task refuses to stop' {
+        InModuleScope Production.AutoDeploy {
+            Mock Assert-Administrator {}
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock New-Item {}
+            Mock Copy-Item {}
+            Mock Stop-ScheduledTask {}
+            Mock Get-ScheduledTask { [pscustomobject]@{ State='Running' } }
+            Mock Start-Sleep {}
+            $script:dateCall = 0
+            Mock Get-Date {
+                $script:dateCall++
+                if ($script:dateCall -eq 1) { [datetime]'2026-07-12T10:00:00' }
+                else { [datetime]'2026-07-12T10:00:31' }
+            }
+            Mock Register-ScheduledTask {}
+            Mock Start-ScheduledTask {}
+
+            { Install-AutoDeployTask } | Should -Throw '*did not stop*'
+
+            Should -Invoke Register-ScheduledTask -Times 0
+            Should -Invoke Start-ScheduledTask -Times 0
         }
     }
 }

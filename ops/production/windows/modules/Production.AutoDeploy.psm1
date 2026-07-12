@@ -101,14 +101,30 @@ function Install-AutoDeployTask {
     Assert-Administrator
     $config = Read-ProductionConfig
     if ($WhatIf) { Write-Output 'Would register and start the ChristopherBellAutoDeploy startup task.'; return }
-    $tools = Join-Path $config.programDataRoot 'tools'
-    New-Item -ItemType Directory -Force $tools | Out-Null
-    Copy-Item (Join-Path $PSScriptRoot '..\*') $tools -Recurse -Force
-    $action = New-ScheduledTaskAction -Execute (Resolve-PowerShell7Executable) -Argument "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$tools\prod.ps1`" auto-deploy"
-    $trigger = New-ScheduledTaskTrigger -AtStartup
-    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([timespan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
-    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-    Register-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    try {
+        $tools = Join-Path $config.programDataRoot 'tools'
+        New-Item -ItemType Directory -Force $tools | Out-Null
+        Copy-Item (Join-Path $PSScriptRoot '..\*') $tools -Recurse -Force
+        $action = New-ScheduledTaskAction -Execute (Resolve-PowerShell7Executable) -Argument "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$tools\prod.ps1`" auto-deploy"
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+        $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([timespan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
+        $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        Stop-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction SilentlyContinue
+        $deadline = (Get-Date).AddSeconds(30)
+        do {
+            $existingTask = Get-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction SilentlyContinue
+            if (-not $existingTask -or [string]$existingTask.State -ne 'Running') { break }
+            Start-Sleep -Milliseconds 500
+        } while ((Get-Date) -lt $deadline)
+        if ($existingTask -and [string]$existingTask.State -eq 'Running') {
+            throw 'ChristopherBellAutoDeploy did not stop before task registration.'
+        }
+        Register-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+    }
+    finally {
+        $lock.Dispose()
+    }
     Start-ScheduledTask -TaskName 'ChristopherBellAutoDeploy'
 }
 
