@@ -65,12 +65,10 @@ class SecureNativeLibraryProvisionerTest {
   @EnabledOnOs(OS.WINDOWS)
   void productionAclRejectsBaseOwnedByInteractiveAttacker() throws Exception {
     Path attackerOwned = Files.createDirectory(tempDir.resolve("attacker-owned"));
-    var lookup = attackerOwned.getFileSystem().getUserPrincipalLookupService();
-    var interactiveUser = lookup.lookupPrincipalByName(System.getProperty("user.name"));
+    var interactiveUser = Files.getOwner(attackerOwned);
     assumeFalse(SecureNativeLibraryProvisioner.WindowsAclPolicy.trustedPrincipalNames().stream()
         .anyMatch(name -> name.equalsIgnoreCase(interactiveUser.getName())),
         "Test requires an untrusted interactive owner");
-    Files.setOwner(attackerOwned, interactiveUser);
 
     assertThatThrownBy(() -> new SecureNativeLibraryProvisioner(
         attackerOwned).provision())
