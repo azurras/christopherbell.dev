@@ -17,6 +17,7 @@ import {
   metricState,
   nextPollDelay,
   shouldPoll,
+  visibleLogText,
 } from '../../main/resources/static/js/lib/command-center.js';
 
 test('command center API contract uses the five fixed protected paths', () => {
@@ -89,6 +90,20 @@ test('log page state honors empty cursors and rejects same-cursor duplicate batc
   assert.equal(nextLogPageState(emptied, { generation: 2, cursor: '' }, {
     nextCursor: '', records: [{ text: 'duplicate' }]
   }).apply, false);
+});
+
+test('visible log copy preserves each row as exact plain text separated by newlines', () => {
+  const rows = [
+    { textContent: 'INFO first' },
+    { textContent: '<script>alert(1)</script>' },
+    { textContent: 'ERROR third' },
+  ];
+
+  assert.equal(
+    visibleLogText(rows),
+    'INFO first\n<script>alert(1)</script>\nERROR third'
+  );
+  assert.equal(visibleLogText([]), '');
 });
 
 test('only unauthorized and forbidden request errors revoke command center access', () => {

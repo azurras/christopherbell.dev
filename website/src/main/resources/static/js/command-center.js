@@ -12,6 +12,7 @@ import {
   pollFailureDecision,
   pollRequestDecision,
   shouldPoll,
+  visibleLogText,
 } from './lib/command-center.js';
 
 const root = document.querySelector('#commandCenterRoot');
@@ -127,7 +128,8 @@ function invalidateLogStream() {
 
 async function copyVisibleLogs() {
   try {
-    await navigator.clipboard.writeText(logOutput.textContent || '');
+    const rows = logOutput.querySelectorAll('.command-log-line');
+    await navigator.clipboard.writeText(visibleLogText(rows));
     logStatus.textContent = 'Visible log records copied';
   } catch (_) {
     logStatus.textContent = 'Unable to copy visible log records';

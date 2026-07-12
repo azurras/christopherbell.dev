@@ -85,6 +85,11 @@ export function nextLogPageState(state, request, page) {
   };
 }
 
+/** Build clipboard-safe plain text from the visible rendered log rows. */
+export function visibleLogText(rows) {
+  return Array.from(rows || [], row => String(row?.textContent ?? '')).join('\n');
+}
+
 /** Clear every sensitive or transient value owned by the native action dialog. */
 export function clearActionDialogState({
   passwordInput, phraseInput, requiredPhrase, dialogStatus,
