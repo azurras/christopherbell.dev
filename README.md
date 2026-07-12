@@ -393,6 +393,14 @@ Common operations:
 .\prod.cmd verify-startup
 ```
 
+The `prod` Spring profile also enables Mission Control host integrations. It
+sets `command-center.actions.mode=WINDOWS`, reads only the fixed WinSW service
+log under `C:\ProgramData\christopherbell.dev\logs`, and invokes only the fixed
+WinSW and Windows shutdown executables configured in `application-prod.yml`.
+Local/default operation remains simulated. Before changing these paths, confirm
+they still match the installed service layout; browser requests cannot supply or
+override executable, service, or log paths.
+
 ### MongoDB Backups and Restores
 
 Use the [Windows production runbook](docs/operations/windows-production.md) and

@@ -96,11 +96,24 @@ Owns browser-side behavior for server-rendered pages.
   coordinate import, WFL import/dedupe, Raising Canes Box Index collection and
   datapoint review, and vehicle VIN maintenance.
 - `command-center.js` gates the public data-free `/command-center` shell with a
-  fresh account-role check, then renders protected host metrics, 15-minute
-  sparklines, delayed text-only logs, and challenged fixed recovery actions.
-  `lib/command-center.js` owns its pure formatting, countdown, visibility, and
-  bounded polling helpers. Poll generations abort and invalidate stale requests,
-  while any later 401/403 tears down and hides the console before redirecting.
+  fresh account-role check, then renders protected host metrics, explicit
+  stale/unavailable states, 15-minute sparklines, delayed logs, and challenged
+  fixed recovery actions. It polls at five seconds with bounded backoff, pauses
+  while the tab is hidden, serializes overlapping requests, and uses abortable
+  generations so stale snapshot or log responses cannot overwrite newer state.
+- Command-center log filters invalidate the cursor generation; literal search is
+  debounced, pause suppresses log reads, and clear affects only visible rows.
+  Logs are appended with DOM `textContent`, copied from visible row text, and
+  never rendered as HTML. Server reset responses replace the visible tail.
+- The native action dialog obtains a fresh challenge before opening and clears
+  the password, confirmation phrase, required phrase, status, and challenge on
+  every close or cancel path. Only restart site, restart computer, and shut down
+  computer are challenge buttons; cancellation appears only for a cancellable
+  pending machine action.
+- `lib/command-center.js` owns pure metric formatting, unavailable semantics,
+  polling/backoff decisions, cursor-generation decisions, text-only log copying,
+  dialog clearing, and countdown helpers. Any 401/403—including one from a stale
+  request generation—tears down and hides the console before redirecting.
 
 ## Design Notes
 

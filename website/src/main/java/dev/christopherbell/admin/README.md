@@ -13,22 +13,25 @@ Owns back-office administration views and cross-feature admin operations.
 - Back Office operations for Location Census ZIP coordinate imports, What's For
   Lunch imports/dedupe, vehicle VIN admin actions, vehicle collection state, and
   admin-only content reads.
-- The `commandcenter` subfeature samples OSHI and optional NVIDIA host metrics on
-  one schedule, retains bounded in-memory history, and exposes only immutable
-  cached snapshot models to its API layer. Provider failures are isolated and
-  last-good values become stale instead of blocking application startup.
-- Command-center log reads use only the configured server-side path, return a
-  line- and byte-bounded incremental tail, recover from rotation or truncation,
-  and never return incomplete or oversized line fragments. Credentials are
-  redacted before case-insensitive literal text and severity filters are applied.
-- Command-center host actions use a closed enum, fresh active-approved-admin
-  checks, password verification, single-use two-minute challenges, exact
-  confirmation phrases, throttling, cooldowns, and fixed simulated or Windows
-  argument arrays. Challenge storage is bounded and expired entries are evicted.
-  Machine actions always use a fixed 60-second countdown; cancellation is
-  serialized with launch and succeeds only after the fixed `/a` process exits
-  successfully within its bounded wait. Request values never become executables
-  or command arguments.
+- The `commandcenter` subfeature owns cached OSHI and optional NVIDIA host
+  metrics, the bounded configured log tail, one-time action challenges, fixed
+  Windows command mappings, and the admin API. Provider failures are isolated;
+  last-good values become stale and unavailable metrics stay explicit instead
+  of blocking application startup or being fabricated.
+- Command-center log reads use only `command-center.log-path`, return a line- and
+  byte-bounded incremental tail, recover from rotation or truncation, and never
+  return incomplete or oversized line fragments. Credentials are redacted before
+  case-insensitive literal text and exact supported severity filters are applied.
+- Command-center host actions use the closed set `RESTART_SITE`,
+  `RESTART_COMPUTER`, `SHUTDOWN_COMPUTER`, and `CANCEL_PENDING_ACTION`. Actions
+  are simulated by default. Windows mode maps those values to fixed WinSW or
+  `shutdown.exe` argument arrays; restart and shutdown use the fixed 60-second
+  delay, and cancellation uses the fixed `/a` command.
+- Every challenged action requires a fresh active approved admin, immediate
+  password verification, a single-use two-minute challenge, the exact
+  confirmation phrase, throttling, and cooldown enforcement. Passwords are
+  never persisted or logged. Challenge storage is bounded and expired entries
+  are evicted.
 - The method-secured command-center API is rooted at
   `/api/admin/command-center/2026-07-12`. Admins can read `snapshot` and `logs`,
   create `action-challenges`, submit confirmed `actions` (HTTP 202), and cancel
@@ -36,6 +39,20 @@ Owns back-office administration views and cross-feature admin operations.
   the action services, including a 100-character maximum log query. Log level
   `ALL` is the default and applies no severity filter; named levels restrict the
   returned records to that exact supported severity.
+
+### Security Boundary
+
+Command-center APIs require an active approved admin. They never accept shell
+fragments, executable paths, service names, log paths, filenames, or arbitrary
+arguments from callers. Request values select only the closed action enum or
+bounded log filters; server configuration owns every filesystem and process
+boundary.
+
+### Verification
+
+Run the focused command-center Java tests, `./gradlew :website:jsTest`,
+`./gradlew :website:test`, `./gradlew :website:build`, and `node --check` for the
+two command-center JavaScript modules before publishing changes.
 
 ## Update This Doc
 
