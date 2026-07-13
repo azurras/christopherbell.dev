@@ -20,8 +20,14 @@ class SecureNativeLibraryProvisionerTest {
   @TempDir Path tempDir;
 
   @Test
+  void usesPinnedLibreHardwareMonitorVersion() {
+    assertThat(SecureNativeLibraryProvisioner.VERSION).isEqualTo("0.9.6");
+  }
+
+  @Test
   void refusesPreexistingVersionDirectoryWithoutLoadingItsFiles() throws Exception {
-    Path existing = Files.createDirectories(tempDir.resolve("jlibre-1.0.6-fixed"));
+    Path existing = Files.createDirectories(
+        tempDir.resolve("librehardwaremonitor-0.9.6-fixed"));
     Files.writeString(existing.resolve("LibreHardwareMonitorLib.dll"), "malicious", UTF_8);
     var provisioner = provisioner("trusted", hash("trusted"), path -> {}, "fixed");
 
@@ -35,7 +41,7 @@ class SecureNativeLibraryProvisionerTest {
     var provisioner = provisioner("tampered", hash("trusted"), path -> {}, "mismatch");
 
     assertThatThrownBy(provisioner::provision).isInstanceOf(SecurityException.class);
-    assertThat(tempDir.resolve("jlibre-1.0.6-mismatch")).doesNotExist();
+    assertThat(tempDir.resolve("librehardwaremonitor-0.9.6-mismatch")).doesNotExist();
   }
 
   @Test
@@ -45,17 +51,20 @@ class SecureNativeLibraryProvisionerTest {
     }, "acl-failure");
 
     assertThatThrownBy(provisioner::provision).isInstanceOf(SecurityException.class);
-    assertThat(tempDir.resolve("jlibre-1.0.6-acl-failure/LibreHardwareMonitorLib.dll"))
+    assertThat(tempDir.resolve(
+        "librehardwaremonitor-0.9.6-acl-failure/LibreHardwareMonitorLib.dll"))
         .doesNotExist();
   }
 
   @Test
-  void verifiedCreateNewExtractionReturnsPinnedLibraryAndScriptAndCleansThemUp() throws Exception {
-    var provisioner = provisionerWithLibraryAndScript(path -> {}, "verified");
+  void verifiedExtractionReturnsPrimaryLibraryCompanionAndScriptThenCleansUp() throws Exception {
+    var provisioner = provisionerWithLibraryCompanionAndScript(path -> {}, "verified");
 
     var libraries = provisioner.provision();
 
     assertThat(Files.readString(libraries.libreHardwareMonitor(), UTF_8)).isEqualTo("trusted");
+    assertThat(Files.readString(libraries.directory().resolve("HidSharp.dll"), UTF_8))
+        .isEqualTo("trusted-hid");
     assertThat(Files.readString(libraries.cpuTemperatureScript(), UTF_8))
         .isEqualTo("trusted-script");
     Path directory = libraries.directory();
@@ -63,7 +72,7 @@ class SecureNativeLibraryProvisionerTest {
     assertThat(directory).doesNotExist();
   }
 
-  private SecureNativeLibraryProvisioner provisionerWithLibraryAndScript(
+  private SecureNativeLibraryProvisioner provisionerWithLibraryCompanionAndScript(
       SecureNativeLibraryProvisioner.AclPolicy acl,
       String nonce) {
     return new SecureNativeLibraryProvisioner(
@@ -72,6 +81,9 @@ class SecureNativeLibraryProvisionerTest {
             new SecureNativeLibraryProvisioner.ResourceSpec(
                 "LibreHardwareMonitorLib.dll", hash("trusted"),
                 () -> new ByteArrayInputStream("trusted".getBytes(UTF_8))),
+            new SecureNativeLibraryProvisioner.ResourceSpec(
+                "HidSharp.dll", hash("trusted-hid"),
+                () -> new ByteArrayInputStream("trusted-hid".getBytes(UTF_8))),
             new SecureNativeLibraryProvisioner.ResourceSpec(
                 "cpu-temperature.ps1", hash("trusted-script"),
                 () -> new ByteArrayInputStream("trusted-script".getBytes(UTF_8)))),

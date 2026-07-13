@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 /** Returns cached CPU temperature while refreshing the privileged probe off the sampling path. */
 @Component
 public final class LibreHardwareCpuTemperatureClient implements CpuTemperatureSensorClient {
+  private static final Duration FAILURE_RETRY_INTERVAL = Duration.ofMinutes(5);
   private final TemperatureProbe probe;
   private final ExecutorService refreshExecutor;
   private final Clock clock;
@@ -74,13 +75,19 @@ public final class LibreHardwareCpuTemperatureClient implements CpuTemperatureSe
   }
 
   private void refresh() {
+    Duration nextDelay = refreshInterval;
     try {
       var value = probe.readCelsius();
-      if (value.isPresent()) lastGood.set(new CachedTemperature(value, clock.instant()));
+      if (value.isPresent()) {
+        lastGood.set(new CachedTemperature(value, clock.instant()));
+      } else {
+        nextDelay = FAILURE_RETRY_INTERVAL;
+      }
     } catch (RuntimeException ignored) {
+      nextDelay = FAILURE_RETRY_INTERVAL;
       // The provider preserves the prior good value and explicit unavailable semantics.
     } finally {
-      nextRefresh = clock.instant().plus(refreshInterval);
+      nextRefresh = clock.instant().plus(nextDelay);
       refreshInFlight.set(false);
     }
   }

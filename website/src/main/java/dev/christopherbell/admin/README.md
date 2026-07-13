@@ -30,10 +30,11 @@ Owns back-office administration views and cross-feature admin operations.
 - Host providers run concurrently behind independent timeouts on a private scheduler. CPU
   temperature returns a non-blocking cache and refreshes every 30 seconds through a bounded,
   one-shot Windows PowerShell process whose full process tree is terminated on timeout.
-- The bundled sensor DLLs and CPU-temperature script are checksum-pinned and extracted with
-  create-new semantics into a fresh, service-owned directory whose ACL permits only SYSTEM and
-  Administrators.
-  Sensor collection fails closed if extraction, checksum verification, or ACL hardening fails.
+- CPU temperature requires locally installed PawnIO 2.2.0 and the pinned official
+  LibreHardwareMonitor 0.9.6 runtime. The runtime DLLs and script are checksum-pinned and
+  extracted with create-new semantics into a fresh, SYSTEM-owned directory whose ACL permits
+  only SYSTEM and Administrators. Missing PawnIO, extraction, checksum, ACL, or probe failures
+  fail closed to explicit unavailable state without blocking other telemetry.
 - Computer restart and shutdown additionally require the environment-backed
   `COMMAND_CENTER_POWER_ACTIONS_ENABLED=true` switch.
 - Every challenged action requires a fresh active approved admin, immediate

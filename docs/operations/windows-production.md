@@ -121,6 +121,44 @@ It requires all three services to be Running and Automatic, confirms the
 automatic deployment task is enabled, exercises the native home/login smoke
 checks, and requires the public URL to return HTTP 200.
 
+## CPU Temperature Provider
+
+CPU temperature is disabled by default in protected `deploy.json`. The website remains healthy
+and reports the metric unavailable when PawnIO is absent or disabled. Provider lifecycle commands
+are local elevated operations only:
+
+```powershell
+.\prod.cmd sensor-status
+.\prod.cmd sensor-install -WhatIf
+.\prod.cmd sensor-install
+.\prod.cmd sensor-enable -WhatIf
+.\prod.cmd sensor-enable
+.\prod.cmd sensor-disable
+```
+
+`sensor-install` downloads only the pinned official PawnIO 2.2.0 installer, verifies its SHA-256
+and publisher thumbprint, scans it with Microsoft Defender, installs it silently, verifies the
+registered version and running driver, scans again, and leaves sensors disabled. The installer is
+staged under a new random directory whose ACL allows only SYSTEM and Administrators; reparse points
+are rejected and the ACL, hash, and signer are revalidated immediately before launch from the
+elevated shell. Exit code
+3010 means a reboot is required; stop and obtain explicit reboot approval.
+
+`auto-install` likewise replaces the deployed `tools` tree while its scheduled task is stopped,
+rejects reparse points, and restricts the entire tree to SYSTEM and Administrators before the task
+is registered again. These protections prevent a standard local account from replacing content
+that a later elevated installer or SYSTEM task would execute.
+
+Never add a Defender exclusion. Enable only after the elevated direct probe and a non-production
+port candidate return a plausible CPU Celsius value for three refresh windows with stable process
+counts and no active Defender detection. On any problem, run `sensor-disable` first. If the driver
+must be removed, use the verified PawnIO entry in Windows Installed Apps, then verify registry,
+driver, Defender, and website state; never delete driver files manually.
+
+When sensors are enabled, `verify-startup` also fails closed unless PawnIO is installed, its signed
+driver is running, Defender reports no active sensor-provider threat, the live extracted resources
+retain their pinned hashes and protected ACLs, and a bounded direct probe returns plausible Celsius.
+
 ## Application Releases
 
 Normal releases require only a merge or push to `origin/main`. The poller reads

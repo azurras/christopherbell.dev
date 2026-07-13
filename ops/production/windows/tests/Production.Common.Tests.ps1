@@ -19,6 +19,7 @@ Describe 'production common operations' {
             cloudflaredExe=(New-Item -ItemType File -Force (Join-Path $TestDrive 'cloudflared.exe')).FullName
             publicUrl='https://www.christopherbell.dev/'
             smokeAccountEmail='admin@christopherbell.dev'; candidatePort=8081; productionPort=8080
+            sensorLibrariesEnabled=$false
             releaseRetention=5; autoDeployPollSeconds=60; autoDeployFailureBackoffSeconds=900
         }
     }
@@ -33,6 +34,15 @@ Describe 'production common operations' {
         $config = Read-ProductionConfig -Path $configPath
         $config.publicUrl | Should -Be 'https://www.christopherbell.dev/'
         $config.PSObject.Properties.Name | Should -Not -Contain 'wslDistro'
+    }
+
+    It 'rejects a missing or string sensor provider switch' {
+        $validConfig.Remove('sensorLibrariesEnabled')
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+        { Read-ProductionConfig -Path $configPath } | Should -Throw '*Boolean*'
+        $validConfig.sensorLibrariesEnabled = 'false'
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+        { Read-ProductionConfig -Path $configPath } | Should -Throw '*Boolean*'
     }
 
     It 'rejects concurrent deployment locks' {
@@ -95,5 +105,33 @@ Describe 'production common operations' {
     It 'scopes Git repository trust to each production command' {
         $arguments = Get-TrustedGitArguments -RepositoryPath 'A:\Projects\christopherbell.dev' -ArgumentList @('status','--short')
         $arguments | Should -Be @('-c','safe.directory=A:/Projects/christopherbell.dev','-C','A:\Projects\christopherbell.dev','status','--short')
+    }
+
+    It 'builds a protected directory ACL owned by Administrators with only privileged writers' {
+        $acl = New-ProtectedProductionAcl -Directory
+        $acl.AreAccessRulesProtected | Should -BeTrue
+        $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value | Should -Be 'S-1-5-32-544'
+        $rules = @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]))
+        @($rules.IdentityReference.Value | Sort-Object) | Should -Be @('S-1-5-18','S-1-5-32-544')
+        @($rules | Where-Object {
+            $_.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+            -not ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl)
+        }) | Should -BeNullOrEmpty
+    }
+
+    It 'rejects a reparse point before applying a privileged ACL' {
+        InModuleScope Production.Common {
+            Mock Get-Item {
+                [pscustomobject]@{
+                    Attributes = [IO.FileAttributes]::ReparsePoint
+                    PSIsContainer = $true
+                }
+            }
+            Mock Set-Acl {}
+
+            { Protect-ProductionPath -Path 'C:\audit\linked-tools' } | Should -Throw '*reparse*'
+
+            Should -Invoke Set-Acl -Times 0
+        }
     }
 }

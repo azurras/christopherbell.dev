@@ -6,6 +6,11 @@ Import-Module (Join-Path $PSScriptRoot '..\modules\Production.AutoDeploy.psm1') 
 Describe 'automatic origin main deployment' {
     BeforeEach {
         $script:config = [pscustomobject]@{ programDataRoot=$TestDrive; repositoryPath=$TestDrive; remote='origin'; branch='main'; autoDeployFailureBackoffSeconds=900 }
+        Mock Assert-ProductionPathNotReparse {} -ModuleName Production.AutoDeploy
+        Mock Assert-ProductionTreeNotReparse {} -ModuleName Production.AutoDeploy
+        Mock Protect-ProductionPath {} -ModuleName Production.AutoDeploy
+        Mock Protect-ProductionTree {} -ModuleName Production.AutoDeploy
+        Mock Assert-ProtectedProductionTree {} -ModuleName Production.AutoDeploy
     }
 
     It 'does not deploy when the remote SHA is already active' {
@@ -113,6 +118,38 @@ Describe 'automatic origin main deployment' {
 
             Should -Invoke Register-ScheduledTask -Times 0
             Should -Invoke Start-ScheduledTask -Times 0
+        }
+    }
+
+    It 'replaces and protects the installed tools tree before SYSTEM task registration' {
+        InModuleScope Production.AutoDeploy {
+            $script:events = [Collections.Generic.List[string]]::new()
+            Mock Assert-Administrator {}
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Stop-ScheduledTask { $script:events.Add('stop') }
+            Mock Get-ScheduledTask { [pscustomobject]@{ State='Ready' } }
+            Mock Test-Path { $true }
+            Mock Assert-ProductionPathNotReparse { $script:events.Add('reject-links') }
+            Mock Assert-ProductionTreeNotReparse { $script:events.Add('reject-tree-links') }
+            Mock Remove-Item { $script:events.Add('remove') }
+            Mock New-Item { $script:events.Add('create') }
+            Mock Protect-ProductionPath { $script:events.Add('protect-root') }
+            Mock Copy-Item { $script:events.Add('copy') }
+            Mock Protect-ProductionTree { $script:events.Add('protect-tree') }
+            Mock Assert-ProtectedProductionTree { $script:events.Add('verify-tree') }
+            Mock Register-ScheduledTask { $script:events.Add('register') }
+            Mock Start-ScheduledTask { $script:events.Add('start') }
+
+            Install-AutoDeployTask
+
+            $script:events.IndexOf('protect-root') | Should -BeLessThan $script:events.IndexOf('remove')
+            $script:events.IndexOf('stop') | Should -BeLessThan $script:events.IndexOf('remove')
+            $script:events.IndexOf('remove') | Should -BeLessThan $script:events.IndexOf('copy')
+            $script:events.IndexOf('protect-tree') | Should -BeLessThan $script:events.IndexOf('verify-tree')
+            $script:events.IndexOf('verify-tree') | Should -BeLessThan $script:events.IndexOf('register')
+            Should -Invoke Remove-Item -Times 1 -ParameterFilter { $LiteralPath -like '*\tools' -and $Recurse }
+            Should -Invoke Assert-ProtectedProductionTree -Times 1 -ParameterFilter { $Path -like '*\tools' }
         }
     }
 }

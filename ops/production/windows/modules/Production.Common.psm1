@@ -19,6 +19,10 @@ function Read-ProductionConfig {
         $port = [int]$config.$name
         if ($port -lt 1 -or $port -gt 65535) { throw "$name must be between 1 and 65535." }
     }
+    $sensorProperty = $config.PSObject.Properties['sensorLibrariesEnabled']
+    if (-not $sensorProperty -or $sensorProperty.Value -isnot [bool]) {
+        throw 'sensorLibrariesEnabled must be a Boolean.'
+    }
     if ([int]$config.candidatePort -eq [int]$config.productionPort) {
         throw 'Candidate and production ports must differ.'
     }
@@ -70,6 +74,124 @@ function Enter-DeploymentLock {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LockPath) | Out-Null
     try { return [IO.File]::Open($LockPath, 'OpenOrCreate', 'ReadWrite', 'None') }
     catch [IO.IOException] { throw 'Another production operation is already running.' }
+}
+
+function New-ProtectedProductionAcl {
+    [CmdletBinding()]
+    param([switch]$Directory)
+
+    $acl = if ($Directory) {
+        [Security.AccessControl.DirectorySecurity]::new()
+    } else {
+        [Security.AccessControl.FileSecurity]::new()
+    }
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $inheritance = if ($Directory) {
+        [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    } else {
+        [Security.AccessControl.InheritanceFlags]::None
+    }
+    $propagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetOwner($administrators)
+    foreach ($identity in $system,$administrators) {
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+            $identity,
+            [Security.AccessControl.FileSystemRights]::FullControl,
+            $inheritance,
+            $propagation,
+            $allow)
+        [void]$acl.AddAccessRule($rule)
+    }
+    return $acl
+}
+
+function Assert-ProductionPathNotReparse {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "Protected production path must not contain a reparse point: $Path"
+    }
+    return $item
+}
+
+function Assert-ProductionTreeNotReparse {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    Assert-ProductionPathNotReparse -Path $Path | Out-Null
+    foreach ($item in Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction Stop) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Protected production tree must not contain a reparse point: $($item.FullName)"
+        }
+    }
+}
+
+function Assert-ProtectedProductionPath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    Assert-ProductionPathNotReparse -Path $Path | Out-Null
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    if (-not $acl.AreAccessRulesProtected) {
+        throw "Protected production path must disable ACL inheritance: $Path"
+    }
+    $allowed = @('S-1-5-18','S-1-5-32-544')
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($allowed -notcontains $owner) {
+        throw "Protected production path has an untrusted owner: $Path"
+    }
+    $rules = @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -ne 2) {
+        throw "Protected production path must have exactly two privileged ACL entries: $Path"
+    }
+    foreach ($rule in $rules) {
+        $identity = $rule.IdentityReference.Value
+        $fullControl = [Security.AccessControl.FileSystemRights]::FullControl
+        if ($allowed -notcontains $identity -or
+            $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+            ($rule.FileSystemRights -band $fullControl) -ne $fullControl) {
+            throw "Protected production path grants access outside SYSTEM and Administrators: $Path"
+        }
+    }
+}
+
+function Protect-ProductionPath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $item = Assert-ProductionPathNotReparse -Path $Path
+    $acl = New-ProtectedProductionAcl -Directory:$item.PSIsContainer
+    Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
+    Assert-ProtectedProductionPath -Path $Path
+}
+
+function Protect-ProductionTree {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    Assert-ProductionTreeNotReparse -Path $Path
+    Protect-ProductionPath -Path $Path
+    foreach ($item in Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction Stop) {
+        Protect-ProductionPath -Path $item.FullName
+    }
+    Assert-ProtectedProductionTree -Path $Path
+}
+
+function Assert-ProtectedProductionTree {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    Assert-ProductionTreeNotReparse -Path $Path
+    Assert-ProtectedProductionPath -Path $Path
+    foreach ($item in Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction Stop) {
+        Assert-ProtectedProductionPath -Path $item.FullName
+    }
 }
 
 function Wait-HttpStatus {
@@ -165,8 +287,9 @@ Usage: prod.cmd <command> [-WhatIf]
 
 Commands: install, deploy, status, logs, restart, releases, rollback, backup,
           verify-startup, uninstall, auto-install, auto-deploy, auto-status,
-          auto-remove
+          auto-remove, sensor-install, sensor-status, sensor-enable,
+          sensor-disable
 '@ | Write-Output
 }
 
-Export-ModuleMember -Function Read-ProductionConfig,Invoke-CheckedProcess,Enter-DeploymentLock,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Get-TrustedGitArguments,Show-ProductionHelp
+Export-ModuleMember -Function Read-ProductionConfig,Invoke-CheckedProcess,Enter-DeploymentLock,New-ProtectedProductionAcl,Assert-ProductionPathNotReparse,Assert-ProductionTreeNotReparse,Assert-ProtectedProductionPath,Protect-ProductionPath,Protect-ProductionTree,Assert-ProtectedProductionTree,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Get-TrustedGitArguments,Show-ProductionHelp

@@ -1,5 +1,6 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Sensors.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Operations.psm1') -Force
 
 Describe 'native Windows production operations' {
@@ -45,6 +46,81 @@ Describe 'native Windows production operations' {
             Mock Read-ProductionConfig { [pscustomobject]@{ publicUrl='https://www.christopherbell.dev/'; productionPort=8080 } }
             Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Manual' } }
             { Test-ProductionStartup } | Should -Throw '*Automatic*'
+        }
+
+        It 'rejects startup verification without protected sensor state' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60
+                    publicUrl='https://www.christopherbell.dev/'; productionPort=8080
+                }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Automatic' } }
+            Mock Get-ScheduledTask { New-ValidStartupTask }
+            Mock Test-ProductionEndpoints {}
+            Mock Wait-HttpStatus { 200 }
+
+            { Test-ProductionStartup } | Should -Throw '*sensorLibrariesEnabled*'
+        }
+
+        It 'reports the protected sensor state during startup verification' -TestCases @(
+            @{ Enabled=$false }
+            @{ Enabled=$true }
+        ) {
+            param($Enabled)
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60
+                    publicUrl='https://www.christopherbell.dev/'; productionPort=8080
+                    sensorLibrariesEnabled=$Enabled
+                }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Automatic' } }
+            Mock Get-ScheduledTask { New-ValidStartupTask }
+            Mock Test-ProductionEndpoints {}
+            Mock Wait-HttpStatus { 200 }
+            Mock Assert-ProductionSensorReady { 61.5 }
+
+            (Test-ProductionStartup).SensorLibrariesEnabled | Should -Be $Enabled
+        }
+
+        It 'requires a live verified CPU temperature when sensors are enabled' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60
+                    publicUrl='https://www.christopherbell.dev/'; productionPort=8080
+                    sensorLibrariesEnabled=$true
+                }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Automatic' } }
+            Mock Get-ScheduledTask { New-ValidStartupTask }
+            Mock Test-ProductionEndpoints {}
+            Mock Wait-HttpStatus { 200 }
+            Mock Assert-ProductionSensorReady { 61.5 }
+
+            (Test-ProductionStartup).CpuTemperatureCelsius | Should -Be 61.5
+
+            Should -Invoke Assert-ProductionSensorReady -Times 1 -ParameterFilter {
+                $Root -eq 'C:\ProgramData\christopherbell.dev'
+            }
+        }
+
+        It 'does not require the native provider while sensors are disabled' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60
+                    publicUrl='https://www.christopherbell.dev/'; productionPort=8080
+                    sensorLibrariesEnabled=$false
+                }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Automatic' } }
+            Mock Get-ScheduledTask { New-ValidStartupTask }
+            Mock Test-ProductionEndpoints {}
+            Mock Wait-HttpStatus { 200 }
+            Mock Assert-ProductionSensorReady { throw 'must not run' }
+
+            (Test-ProductionStartup).CpuTemperatureCelsius | Should -BeNullOrEmpty
+            Should -Invoke Assert-ProductionSensorReady -Times 0
         }
 
         It 'accepts the complete automatic deployment startup contract' {
