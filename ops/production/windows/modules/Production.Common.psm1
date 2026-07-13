@@ -169,7 +169,7 @@ Usage: prod.cmd <command> [-WhatIf]
 
 Commands: install, deploy, status, logs, restart, releases, rollback, backup,
           verify-startup, uninstall, auto-install, auto-deploy, auto-status,
-          auto-remove
+          auto-remove, sensor-install, sensor-status, sensor-enable, sensor-disable
 '@ | Write-Output
 }
 

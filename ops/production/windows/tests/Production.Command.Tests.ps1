@@ -9,6 +9,10 @@ Describe 'native Windows production command surface' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         $output = & pwsh.exe -NoLogo -NoProfile -File (Join-Path $root 'ops\production\windows\prod.ps1') help
         ($output -join "`n") | Should -Match 'auto-install'
+        ($output -join "`n") | Should -Match 'sensor-install'
+        ($output -join "`n") | Should -Match 'sensor-status'
+        ($output -join "`n") | Should -Match 'sensor-enable'
+        ($output -join "`n") | Should -Match 'sensor-disable'
         $LASTEXITCODE | Should -Be 0
     }
 
@@ -29,11 +33,14 @@ Describe 'native Windows production command surface' {
     It 'keeps every command handler exported after loading all modules' {
         $moduleRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\modules')).Path
         Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
-        foreach ($module in 'Production.Deploy','Production.Install','Production.Operations','Production.AutoDeploy') {
+        foreach ($module in 'Production.Deploy','Production.Install','Production.Operations','Production.AutoDeploy','Production.Sensors') {
             Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
         }
 
         foreach ($command in 'Invoke-ProductionDeploy','Install-ProductionRuntime','Get-ProductionStatus','Install-AutoDeployTask','Show-ProductionHelp') {
+            Get-Command $command -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
+        foreach ($command in 'Install-PawnIoProvider','Get-ProductionSensorStatus','Set-ProductionSensorState') {
             Get-Command $command -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
     }
