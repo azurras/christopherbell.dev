@@ -56,6 +56,18 @@ test('metric display formats service state, start timestamps, and commit identif
   assert.equal(displayMetric({ key: 'application.commit', status: 'AVAILABLE', value: 1, unit: 'commit', detail: 'abc123' }), 'abc123');
 });
 
+test('metric display compacts byte values for fixed-width command cards', () => {
+  assert.equal(displayMetric({ status: 'AVAILABLE', value: 34_028_523_520, unit: 'bytes' }), '31.7 GiB');
+  assert.equal(displayMetric({ status: 'AVAILABLE', value: 4_315_924_926_464, unit: 'bytes' }), '3.9 TiB');
+  assert.equal(displayMetric({ status: 'AVAILABLE', value: 46_564_906.8, unit: 'bytes/second' }), '44.4 MiB/s');
+});
+
+test('metric cards reserve a full row for values and wrap exceptional text', () => {
+  const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
+  assert.match(css, /\.command-metric-card\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
+  assert.match(css, /\.command-metric-value\s*\{[^}]*overflow-wrap:\s*anywhere;/s);
+});
+
 test('polling uses five seconds then bounded 10, 20, and 30 second backoff', () => {
   assert.equal(POLL_INTERVAL_MS, 5000);
   assert.deepEqual([0, 1, 2, 3, 9].map(nextPollDelay), [5000, 10000, 20000, 30000, 30000]);

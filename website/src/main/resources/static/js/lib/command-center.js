@@ -23,6 +23,8 @@ export function displayMetric(reading) {
       : timestamp.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
   }
   if (reading.unit === 'commit') return String(reading.detail || 'Unavailable');
+  if (reading.unit === 'bytes') return formatBinaryMetric(Number(reading.value), false);
+  if (reading.unit === 'bytes/second') return formatBinaryMetric(Number(reading.value), true);
   const value = Number(reading.value).toLocaleString(undefined, { maximumFractionDigits: 1 });
   const units = {
     percent: '%',
@@ -35,6 +37,19 @@ export function displayMetric(reading) {
   };
   const suffix = Object.hasOwn(units, reading.unit) ? units[reading.unit] : (reading.unit || '');
   return suffix ? `${value} ${suffix}` : value;
+}
+
+function formatBinaryMetric(value, perSecond) {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+  let scaled = Math.abs(value);
+  let unitIndex = 0;
+  while (scaled >= 1024 && unitIndex < units.length - 1) {
+    scaled /= 1024;
+    unitIndex += 1;
+  }
+  if (value < 0) scaled *= -1;
+  const formatted = scaled.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  return `${formatted} ${units[unitIndex]}${perSecond ? '/s' : ''}`;
 }
 
 /** Resolve the CSS/display state for a reading. */
