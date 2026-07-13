@@ -4,6 +4,8 @@ $script:PawnIoUri = 'https://github.com/namazso/PawnIO.Setup/releases/download/2
 $script:PawnIoSha256 = '1F519A22E47187F70A1379A48CA604981C4FCF694F4E65B734AAA74A9FBA3032'
 $script:PawnIoSignerThumbprint = 'F380DCC9F706E2756A5047B832FFE719E1BC35F5'
 $script:PawnIoVersion = '2.2.0'
+$script:CpuTemperatureScriptSha256 = '34A0B773CF975A28039DF2E265014EC024E103FE48D1B6CA54DD1EFF96FA14FE'
+$script:LibreHardwareMonitorSha256 = '6EBC194316536BA61AF5BE24508AD9FCBB2ECC685E716C12E787C79530F66BF0'
 $script:PawnIoRegistryPaths = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO',
     'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO')
@@ -75,6 +77,90 @@ function Assert-PawnIoInstallation {
         throw 'PawnIO verified uninstall registration is missing.'
     }
     return $installation
+}
+
+function Get-ProductionCpuTemperature {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root)
+
+    $base = Join-Path $Root 'config\command-center-sensors'
+    if (-not (Test-Path -LiteralPath $base -PathType Container)) {
+        throw 'Live CPU temperature resources are unavailable.'
+    }
+    $directories = @(Get-ChildItem -LiteralPath $base -Directory -Filter 'librehardwaremonitor-0.9.6-*' -ErrorAction Stop)
+    if ($directories.Count -ne 1) {
+        throw 'Expected exactly one live CPU temperature resource directory.'
+    }
+    $directory = $directories[0].FullName
+    Assert-ProtectedProductionTree -Path $directory
+    $scriptPath = Join-Path $directory 'cpu-temperature.ps1'
+    $libraryPath = Join-Path $directory 'LibreHardwareMonitorLib.dll'
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $libraryPath -PathType Leaf)) {
+        throw 'Live CPU temperature resources are incomplete.'
+    }
+    if ((Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash -ne $script:CpuTemperatureScriptSha256 -or
+        (Get-FileHash -LiteralPath $libraryPath -Algorithm SHA256).Hash -ne $script:LibreHardwareMonitorSha256) {
+        throw 'Live CPU temperature resource verification failed.'
+    }
+
+    $powerShell = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    if (-not (Test-Path -LiteralPath $powerShell -PathType Leaf)) {
+        throw 'PowerShell 7 is required for the CPU temperature probe.'
+    }
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $powerShell
+    $start.WorkingDirectory = $directory
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$scriptPath,
+            '-LibreHardwareMonitorPath',$libraryPath)) {
+        [void]$start.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::Start($start)
+    try {
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(30000)) {
+            $process.Kill($true)
+            $process.WaitForExit()
+            [void]$stdoutTask.GetAwaiter().GetResult()
+            [void]$stderrTask.GetAwaiter().GetResult()
+            throw 'Live CPU temperature probe timed out.'
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult().Trim()
+        [void]$stderrTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            throw "Live CPU temperature probe exited with code $($process.ExitCode)."
+        }
+        if ($stdout.Length -eq 0 -or $stdout.Length -gt 32) {
+            throw 'Live CPU temperature probe returned an invalid response.'
+        }
+        [double]$temperature = 0
+        $parsed = [double]::TryParse(
+            $stdout,
+            [Globalization.NumberStyles]::Float,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$temperature)
+        if (-not $parsed) { throw 'Live CPU temperature probe returned an invalid response.' }
+        return $temperature
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Assert-ProductionSensorReady {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root)
+
+    Assert-NoActiveSensorThreat
+    Assert-PawnIoInstallation | Out-Null
+    $temperature = Get-ProductionCpuTemperature -Root $Root
+    if (-not [double]::IsFinite([double]$temperature) -or $temperature -le 0 -or $temperature -gt 125) {
+        throw 'Live CPU temperature must be plausible Celsius.'
+    }
+    return [double]$temperature
 }
 
 function Write-ProductionSensorConfig {
@@ -186,4 +272,4 @@ function Get-ProductionSensorStatus {
     }
 }
 
-Export-ModuleMember -Function Assert-PawnIoInstaller,Get-PawnIoInstallation,Assert-PawnIoInstallation,Install-PawnIoProvider,Set-ProductionSensorState,Get-ProductionSensorStatus
+Export-ModuleMember -Function Assert-PawnIoInstaller,Get-PawnIoInstallation,Assert-PawnIoInstallation,Assert-ProductionSensorReady,Install-PawnIoProvider,Set-ProductionSensorState,Get-ProductionSensorStatus

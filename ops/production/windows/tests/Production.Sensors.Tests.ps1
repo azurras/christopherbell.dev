@@ -105,5 +105,31 @@ Describe 'PawnIO sensor provider operations' {
             }
             { Assert-PawnIoInstallation } | Should -Throw '*signature*'
         }
+
+        It 'requires a plausible live direct probe after provider and Defender checks' {
+            Mock Assert-NoActiveSensorThreat {}
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0'; Driver='Running' } }
+            Mock Get-ProductionCpuTemperature { 63.25 }
+
+            Assert-ProductionSensorReady -Root 'C:\ProgramData\christopherbell.dev' | Should -Be 63.25
+
+            Should -Invoke Assert-NoActiveSensorThreat -Times 1
+            Should -Invoke Assert-PawnIoInstallation -Times 1
+            Should -Invoke Get-ProductionCpuTemperature -Times 1
+        }
+
+        It 'rejects an implausible direct CPU temperature' -TestCases @(
+            @{ Value=0.0 }
+            @{ Value=126.0 }
+            @{ Value=[double]::NaN }
+        ) {
+            param($Value)
+            Mock Assert-NoActiveSensorThreat {}
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0'; Driver='Running' } }
+            Mock Get-ProductionCpuTemperature { $Value }
+
+            { Assert-ProductionSensorReady -Root 'C:\ProgramData\christopherbell.dev' } |
+                Should -Throw '*plausible*'
+        }
     }
 }

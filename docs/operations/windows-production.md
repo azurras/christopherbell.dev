@@ -140,7 +140,8 @@ are local elevated operations only:
 and publisher thumbprint, scans it with Microsoft Defender, installs it silently, verifies the
 registered version and running driver, scans again, and leaves sensors disabled. The installer is
 staged under a new random directory whose ACL allows only SYSTEM and Administrators; reparse points
-are rejected and the ACL, hash, and signer are revalidated immediately before elevation. Exit code
+are rejected and the ACL, hash, and signer are revalidated immediately before launch from the
+elevated shell. Exit code
 3010 means a reboot is required; stop and obtain explicit reboot approval.
 
 `auto-install` likewise replaces the deployed `tools` tree while its scheduled task is stopped,
@@ -153,6 +154,10 @@ port candidate return a plausible CPU Celsius value for three refresh windows wi
 counts and no active Defender detection. On any problem, run `sensor-disable` first. If the driver
 must be removed, use the verified PawnIO entry in Windows Installed Apps, then verify registry,
 driver, Defender, and website state; never delete driver files manually.
+
+When sensors are enabled, `verify-startup` also fails closed unless PawnIO is installed, its signed
+driver is running, Defender reports no active sensor-provider threat, the live extracted resources
+retain their pinned hashes and protected ACLs, and a bounded direct probe returns plausible Celsius.
 
 ## Application Releases
 

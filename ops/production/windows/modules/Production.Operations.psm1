@@ -145,6 +145,9 @@ function Test-ProductionStartup {
     if ($config.PSObject.Properties.Name -notcontains 'sensorLibrariesEnabled') {
         throw 'deploy.json must declare sensorLibrariesEnabled.'
     }
+    $cpuTemperature = if ([bool]$config.sensorLibrariesEnabled) {
+        Assert-ProductionSensorReady -Root $config.programDataRoot
+    } else { $null }
     $task = Get-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction Stop
     Assert-AutoDeployTaskContract -Task $task -Config $config
     Test-ProductionEndpoints $config $config.productionPort
@@ -155,6 +158,7 @@ function Test-ProductionStartup {
         NativeEndpoint = 200
         PublicEndpoint = 200
         SensorLibrariesEnabled = [bool]$config.sensorLibrariesEnabled
+        CpuTemperatureCelsius = $cpuTemperature
     }
 }
 
