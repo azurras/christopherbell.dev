@@ -235,7 +235,7 @@ function Install-PawnIoProvider {
         Assert-NoActiveSensorThreat
         Assert-ProtectedProductionTree -Path $staging
         Assert-PawnIoInstaller -Path $installer
-        $process = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+        $process = Start-Process -FilePath $installer -ArgumentList @('-install','-silent') -Wait -PassThru
         if ($process.ExitCode -eq 3010) { throw 'PawnIO installation stopped: reboot required; sensors remain disabled.' }
         if ($process.ExitCode -ne 0) { throw "PawnIO installer exited with code $($process.ExitCode); sensors remain disabled." }
         $installation = Assert-PawnIoInstallation
