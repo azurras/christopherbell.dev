@@ -1,5 +1,12 @@
+import java.net.URI
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.HexFormat
+import java.util.zip.ZipFile
 import org.gradle.api.GradleException
 import org.gradle.language.base.plugins.LifecycleBasePlugin
+import org.gradle.language.jvm.tasks.ProcessResources
 
 plugins {
     id("org.springframework.boot")
@@ -28,10 +35,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-web")
 
-    // Host metrics and Windows hardware sensors
+    // Host metrics; Windows sensor binaries are pinned generated resources below.
     implementation("com.github.oshi:oshi-core:7.4.0")
-    implementation("io.github.pandalxb:jLibreHardwareMonitor:1.0.6")
-    implementation("io.github.pandalxb:jPowerShell:1.0.1")
 
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
 
@@ -66,6 +71,67 @@ springBoot {
     buildInfo()
 }
 
+val libreHardwareMonitorUri = URI(
+    "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases/download/v0.9.6/LibreHardwareMonitor.zip")
+val libreHardwareMonitorArchiveSha256 =
+    "086d9f1b5a99e643edc2cfaaac16051685b551e4c5ac0b32a57c58c0e529c001"
+val libreHardwareMonitorFiles = linkedMapOf(
+    "LibreHardwareMonitorLib.dll" to "6ebc194316536ba61af5be24508ad9fcbb2ecc685e716c12e787c79530f66bf0",
+    "HidSharp.dll" to "d86690efde30ea9179f669320f39148853793b743a98b531afeaf30598e22f54",
+    "BlackSharp.Core.dll" to "cafb93afcc8d8a367e21f619673d05c06887d8964867fed1371f02ded1cd3e23",
+    "DiskInfoToolkit.dll" to "1acbf51b3c10c51c986cf43021680d34a2e38d9a5ba652bcfa9a1b5f7fc09800",
+    "RAMSPDToolkit-NDD.dll" to "b6882354c7c8ec186617e421507743dbfae09c5c1fc24cef76a1d0c0c26651de",
+    "System.Memory.dll" to "d5e8e4866f9cfa66f7765660f84b210198893e55335487afe5ebda342c0e913d",
+    "System.Runtime.CompilerServices.Unsafe.dll" to "08cbd7278b66f1e68425a82d4b97181a4130d93e3dd91831407aba7212ccdacf")
+
+fun sha256(path: java.nio.file.Path): String = Files.newInputStream(path).use { input ->
+    val digest = MessageDigest.getInstance("SHA-256")
+    val buffer = ByteArray(8192)
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        digest.update(buffer, 0, count)
+    }
+    HexFormat.of().formatHex(digest.digest())
+}
+
+val sensorResourceDirectory = layout.buildDirectory.dir("generated/sensor-resources")
+val prepareSensorResources by tasks.registering {
+    val archive = layout.buildDirectory.file("sensor-downloads/LibreHardwareMonitor-0.9.6.zip")
+    outputs.dir(sensorResourceDirectory)
+    doLast {
+        val archivePath = archive.get().asFile.toPath()
+        Files.createDirectories(archivePath.parent)
+        libreHardwareMonitorUri.toURL().openStream().use { input ->
+            Files.copy(input, archivePath, StandardCopyOption.REPLACE_EXISTING)
+        }
+        if (sha256(archivePath) != libreHardwareMonitorArchiveSha256) {
+            Files.deleteIfExists(archivePath)
+            throw GradleException("LibreHardwareMonitor archive SHA-256 verification failed.")
+        }
+        val output = sensorResourceDirectory.get().dir("lib").asFile.toPath()
+        Files.createDirectories(output)
+        ZipFile(archivePath.toFile()).use { zip ->
+            libreHardwareMonitorFiles.forEach { (name, expected) ->
+                val entry = zip.getEntry(name)
+                    ?: throw GradleException("LibreHardwareMonitor release is missing $name.")
+                val target = output.resolve(name)
+                zip.getInputStream(entry).use { input ->
+                    Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING)
+                }
+                if (sha256(target) != expected) {
+                    Files.deleteIfExists(target)
+                    throw GradleException(
+                        "LibreHardwareMonitor resource SHA-256 verification failed: $name")
+                }
+            }
+        }
+    }
+}
+
+sourceSets.named("main") { resources.srcDir(sensorResourceDirectory) }
+tasks.named<ProcessResources>("processResources") { dependsOn(prepareSensorResources) }
+
 val jsTestFiles = fileTree("src/test/js") {
     include("*.test.js")
 }
@@ -94,3 +160,24 @@ tasks.register<Exec>("jsTest") {
 tasks.named("check") {
     dependsOn("jsTest")
 }
+
+val verifySensorRuntime by tasks.registering {
+    dependsOn(tasks.named("bootJar"))
+    doLast {
+        val jar = tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar")
+            .get().archiveFile.get().asFile
+        ZipFile(jar).use { zip ->
+            val names = zip.entries().asSequence().map { it.name }.toList()
+            if (names.any { it.contains("jLibreHardwareMonitor", ignoreCase = true) ||
+                    it.contains("WinRing", ignoreCase = true) }) {
+                throw GradleException("Legacy WinRing0 sensor runtime is present in the boot JAR.")
+            }
+            libreHardwareMonitorFiles.keys.forEach { name ->
+                if ("BOOT-INF/classes/lib/$name" !in names) {
+                    throw GradleException("Pinned sensor runtime is missing from the boot JAR: $name")
+                }
+            }
+        }
+    }
+}
+tasks.named("check") { dependsOn(verifySensorRuntime) }

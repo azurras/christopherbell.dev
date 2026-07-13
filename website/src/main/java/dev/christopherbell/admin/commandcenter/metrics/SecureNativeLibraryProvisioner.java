@@ -24,7 +24,7 @@ import java.util.function.Supplier;
 
 /** Extracts checksum-pinned native libraries only into an ACL-restricted fresh directory. */
 final class SecureNativeLibraryProvisioner {
-  static final String VERSION = "1.0.6";
+  static final String VERSION = "0.9.6";
   private final Path baseDirectory;
   private final List<ResourceSpec> resources;
   private final AclPolicy aclPolicy;
@@ -32,9 +32,14 @@ final class SecureNativeLibraryProvisioner {
 
   SecureNativeLibraryProvisioner(Path baseDirectory) {
     this(baseDirectory, List.of(
-        resource("HidSharp.dll", "8c58e5fba22acc751032dfe97ce633e4f8a4c96089749bf316d55283b36649c2"),
-        resource("LibreHardwareMonitorLib.dll", "a0f2728f1734c236a9d02d9e25a88bc4f8cb7bd1faff1770726beb7af06bf8dc"),
-        resource("cpu-temperature.ps1", "4d47eccfc836fe4d4ea771bf36b1b4fa4a4b91490b3f2ed8ab5e9c475687b2f3")),
+        resource("LibreHardwareMonitorLib.dll", "6ebc194316536ba61af5be24508ad9fcbb2ecc685e716c12e787c79530f66bf0"),
+        resource("HidSharp.dll", "d86690efde30ea9179f669320f39148853793b743a98b531afeaf30598e22f54"),
+        resource("BlackSharp.Core.dll", "cafb93afcc8d8a367e21f619673d05c06887d8964867fed1371f02ded1cd3e23"),
+        resource("DiskInfoToolkit.dll", "1acbf51b3c10c51c986cf43021680d34a2e38d9a5ba652bcfa9a1b5f7fc09800"),
+        resource("RAMSPDToolkit-NDD.dll", "b6882354c7c8ec186617e421507743dbfae09c5c1fc24cef76a1d0c0c26651de"),
+        resource("System.Memory.dll", "d5e8e4866f9cfa66f7765660f84b210198893e55335487afe5ebda342c0e913d"),
+        resource("System.Runtime.CompilerServices.Unsafe.dll", "08cbd7278b66f1e68425a82d4b97181a4130d93e3dd91831407aba7212ccdacf"),
+        resource("cpu-temperature.ps1", "34a0b773cf975a28039df2e265014ec024e103fe48d1b6ca54dd1eff96fa14fe")),
         new WindowsAclPolicy(), () -> UUID.randomUUID().toString());
   }
 
@@ -54,7 +59,8 @@ final class SecureNativeLibraryProvisioner {
     if (nonce == null || !nonce.matches("[A-Za-z0-9-]{1,64}")) {
       throw new SecurityException("Invalid native library extraction nonce.");
     }
-    Path versionDirectory = baseDirectory.resolve("jlibre-" + VERSION + "-" + nonce);
+    Path versionDirectory = baseDirectory.resolve(
+        "librehardwaremonitor-" + VERSION + "-" + nonce);
     boolean created = false;
     try {
       createTrustedBaseDirectory();

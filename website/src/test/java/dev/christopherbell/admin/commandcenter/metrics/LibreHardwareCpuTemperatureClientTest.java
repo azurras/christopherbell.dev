@@ -94,6 +94,25 @@ class LibreHardwareCpuTemperatureClientTest {
   }
 
   @Test
+  void providerUnavailableUsesFiveMinuteFailureBackoff() {
+    var clock = new MutableClock();
+    var executor = new ManualExecutorService();
+    var probe = new FakeProbe(OptionalDouble.empty());
+    var client = client(probe, executor, clock);
+
+    client.readCelsius();
+    executor.runNext();
+    clock.advance(Duration.ofMinutes(4).plusSeconds(59));
+    assertThat(client.readCelsius()).isEmpty();
+    assertThat(executor.pending()).isZero();
+
+    clock.advance(Duration.ofSeconds(1));
+    assertThat(client.readCelsius()).isEmpty();
+    assertThat(executor.pending()).isEqualTo(1);
+    assertThat(probe.readCalls()).isEqualTo(1);
+  }
+
+  @Test
   void closeIsIdempotentAndClosesProbeAndExecutorOnce() {
     var executor = new ManualExecutorService();
     var probe = new FakeProbe(OptionalDouble.empty());
