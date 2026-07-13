@@ -45,6 +45,22 @@ Describe 'PawnIO sensor provider operations' {
             Should -Invoke Start-MpScan -Times 2
         }
 
+        It 'uses the official PawnIO install and silent command-line switches' {
+            Mock Invoke-WebRequest { 'installer' | Set-Content -LiteralPath $OutFile }
+            Mock Assert-PawnIoInstaller {}
+            Mock Start-Process { [pscustomobject]@{ ExitCode=0 } }
+            Mock Set-ProductionSensorState {}
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0'; Driver='Running' } }
+
+            Install-PawnIoProvider -Root $TestDrive
+
+            Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+                $ArgumentList.Count -eq 2 -and
+                $ArgumentList[0] -eq '-install' -and
+                $ArgumentList[1] -eq '-silent'
+            }
+        }
+
         It 'uses a fresh protected installer directory and revalidates immediately before launch' {
             $script:downloadPath = $null
             $script:protectedPaths = [Collections.Generic.List[string]]::new()
