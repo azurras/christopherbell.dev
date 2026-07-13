@@ -50,15 +50,33 @@ class SecureNativeLibraryProvisionerTest {
   }
 
   @Test
-  void verifiedCreateNewExtractionReturnsOnlyFreshLibraryAndCleansItUp() throws Exception {
-    var provisioner = provisioner("trusted", hash("trusted"), path -> {}, "verified");
+  void verifiedCreateNewExtractionReturnsPinnedLibraryAndScriptAndCleansThemUp() throws Exception {
+    var provisioner = provisionerWithLibraryAndScript(path -> {}, "verified");
 
     var libraries = provisioner.provision();
 
     assertThat(Files.readString(libraries.libreHardwareMonitor(), UTF_8)).isEqualTo("trusted");
+    assertThat(Files.readString(libraries.cpuTemperatureScript(), UTF_8))
+        .isEqualTo("trusted-script");
     Path directory = libraries.directory();
     libraries.close();
     assertThat(directory).doesNotExist();
+  }
+
+  private SecureNativeLibraryProvisioner provisionerWithLibraryAndScript(
+      SecureNativeLibraryProvisioner.AclPolicy acl,
+      String nonce) {
+    return new SecureNativeLibraryProvisioner(
+        tempDir,
+        List.of(
+            new SecureNativeLibraryProvisioner.ResourceSpec(
+                "LibreHardwareMonitorLib.dll", hash("trusted"),
+                () -> new ByteArrayInputStream("trusted".getBytes(UTF_8))),
+            new SecureNativeLibraryProvisioner.ResourceSpec(
+                "cpu-temperature.ps1", hash("trusted-script"),
+                () -> new ByteArrayInputStream("trusted-script".getBytes(UTF_8)))),
+        acl,
+        () -> nonce);
   }
 
   @Test

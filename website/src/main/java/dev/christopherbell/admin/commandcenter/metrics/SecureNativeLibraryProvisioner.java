@@ -33,7 +33,8 @@ final class SecureNativeLibraryProvisioner {
   SecureNativeLibraryProvisioner(Path baseDirectory) {
     this(baseDirectory, List.of(
         resource("HidSharp.dll", "8c58e5fba22acc751032dfe97ce633e4f8a4c96089749bf316d55283b36649c2"),
-        resource("LibreHardwareMonitorLib.dll", "a0f2728f1734c236a9d02d9e25a88bc4f8cb7bd1faff1770726beb7af06bf8dc")),
+        resource("LibreHardwareMonitorLib.dll", "a0f2728f1734c236a9d02d9e25a88bc4f8cb7bd1faff1770726beb7af06bf8dc"),
+        resource("cpu-temperature.ps1", "4d47eccfc836fe4d4ea771bf36b1b4fa4a4b91490b3f2ed8ab5e9c475687b2f3")),
         new WindowsAclPolicy(), () -> UUID.randomUUID().toString());
   }
 
@@ -64,6 +65,7 @@ final class SecureNativeLibraryProvisioner {
       verifyNotLinkOrReparsePoint(versionDirectory);
       aclPolicy.hardenAndVerify(versionDirectory);
       Path libre = null;
+      Path cpuTemperatureScript = null;
       for (var resource : resources) {
         Path target = versionDirectory.resolve(resource.fileName()).normalize();
         if (!target.getParent().equals(versionDirectory)) {
@@ -85,12 +87,14 @@ final class SecureNativeLibraryProvisioner {
         }
         if (resource.fileName().equals("LibreHardwareMonitorLib.dll")) {
           libre = target;
+        } else if (resource.fileName().equals("cpu-temperature.ps1")) {
+          cpuTemperatureScript = target;
         }
       }
-      if (libre == null) {
-        throw new SecurityException("LibreHardwareMonitor library is missing.");
+      if (libre == null || cpuTemperatureScript == null) {
+        throw new SecurityException("Required CPU sensor resources are missing.");
       }
-      return NativeLibraries.owned(versionDirectory, libre);
+      return NativeLibraries.owned(versionDirectory, libre, cpuTemperatureScript);
     } catch (IOException | RuntimeException failure) {
       if (created) deleteTree(versionDirectory);
       if (failure instanceof SecurityException securityException) {
@@ -173,24 +177,36 @@ final class SecureNativeLibraryProvisioner {
   static final class NativeLibraries implements AutoCloseable {
     private final Path directory;
     private final Path libreHardwareMonitor;
+    private final Path cpuTemperatureScript;
     private final boolean owned;
 
     NativeLibraries(Path directory, Path libreHardwareMonitor) {
-      this(directory, libreHardwareMonitor, false);
+      this(directory, libreHardwareMonitor, directory.resolve("cpu-temperature.ps1"), false);
     }
 
-    private NativeLibraries(Path directory, Path libreHardwareMonitor, boolean owned) {
+    NativeLibraries(Path directory, Path libreHardwareMonitor, Path cpuTemperatureScript) {
+      this(directory, libreHardwareMonitor, cpuTemperatureScript, false);
+    }
+
+    private NativeLibraries(
+        Path directory, Path libreHardwareMonitor, Path cpuTemperatureScript, boolean owned) {
       this.directory = directory;
       this.libreHardwareMonitor = libreHardwareMonitor;
+      this.cpuTemperatureScript = cpuTemperatureScript;
       this.owned = owned;
     }
 
     static NativeLibraries owned(Path directory, Path libre) {
-      return new NativeLibraries(directory, libre, true);
+      return new NativeLibraries(directory, libre, directory.resolve("cpu-temperature.ps1"), true);
+    }
+
+    static NativeLibraries owned(Path directory, Path libre, Path script) {
+      return new NativeLibraries(directory, libre, script, true);
     }
 
     Path directory() { return directory; }
     Path libreHardwareMonitor() { return libreHardwareMonitor; }
+    Path cpuTemperatureScript() { return cpuTemperatureScript; }
     @Override public void close() { if (owned) deleteTree(directory); }
   }
 

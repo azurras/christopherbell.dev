@@ -1,139 +1,111 @@
 package dev.christopherbell.admin.commandcenter.metrics;
 
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
-import io.github.pandalxb.jpowershell.PowerShell;
 import jakarta.annotation.PreDestroy;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Locale;
-import java.util.Map;
 import java.util.OptionalDouble;
-import org.springframework.stereotype.Component;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
-/** Owns a bounded PowerShell session and explicitly closes every native computer instance. */
+/** Returns cached CPU temperature while refreshing the privileged probe off the sampling path. */
 @Component
 public final class LibreHardwareCpuTemperatureClient implements CpuTemperatureSensorClient {
-  private final SessionFactory sessionFactory;
-  private final NativeLibraryResolver libraryResolver;
+  private final TemperatureProbe probe;
+  private final ExecutorService refreshExecutor;
+  private final Clock clock;
+  private final Duration refreshInterval;
   private final boolean windows;
-  private SensorSession session;
-  private SecureNativeLibraryProvisioner.NativeLibraries libraries;
+  private final AtomicReference<CachedTemperature> lastGood =
+      new AtomicReference<>(new CachedTemperature(OptionalDouble.empty(), Instant.MIN));
+  private final AtomicBoolean refreshInFlight = new AtomicBoolean();
+  private final AtomicBoolean closed = new AtomicBoolean();
+  private volatile Instant nextRefresh = Instant.MIN;
 
   @Autowired
-  public LibreHardwareCpuTemperatureClient(CommandCenterProperties properties) {
+  public LibreHardwareCpuTemperatureClient(
+      PowerShellCpuTemperatureProbe probe,
+      CommandCenterProperties properties,
+      Clock clock) {
     this(
-        () -> new JPowerShellSession(PowerShell.openSession().configuration(Map.of(
-            "maxWait", Long.toString(Math.max(1, properties.getProviderTimeout().toMillis())),
-            "waitPause", "5"))),
-        () -> new SecureNativeLibraryProvisioner(properties.getSensorLibraryDirectory()).provision(),
+        probe,
+        Executors.newSingleThreadExecutor(
+            Thread.ofVirtual().name("cpu-temperature-refresh-", 0).factory()),
+        clock,
+        properties.getCpuTemperatureRefreshInterval(),
         properties.isSensorLibrariesEnabled()
             && System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
   }
 
   LibreHardwareCpuTemperatureClient(
-      SessionFactory sessionFactory, NativeLibraryResolver libraryResolver, boolean windows) {
-    this.sessionFactory = sessionFactory;
-    this.libraryResolver = libraryResolver;
+      TemperatureProbe probe,
+      ExecutorService refreshExecutor,
+      Clock clock,
+      Duration refreshInterval,
+      boolean windows) {
+    this.probe = probe;
+    this.refreshExecutor = refreshExecutor;
+    this.clock = clock;
+    this.refreshInterval = refreshInterval;
     this.windows = windows;
   }
 
   @Override
-  public synchronized OptionalDouble readCelsius() {
-    if (!windows) {
-      return OptionalDouble.empty();
+  public OptionalDouble readCelsius() {
+    var current = currentValue();
+    if (windows
+        && !closed.get()
+        && !clock.instant().isBefore(nextRefresh)
+        && refreshInFlight.compareAndSet(false, true)) {
+      try {
+        refreshExecutor.submit(this::refresh);
+      } catch (RejectedExecutionException failure) {
+        refreshInFlight.set(false);
+      }
     }
+    return current;
+  }
+
+  private void refresh() {
     try {
-      if (session == null) {
-        if (libraries == null) {
-          libraries = libraryResolver.resolve();
-        }
-        session = sessionFactory.open();
-      }
-      var result = session.execute(script(libraries.libreHardwareMonitor().toString()));
-      if (result.error() || result.timeout()) {
-        discardSession();
-        return OptionalDouble.empty();
-      }
-      double value = Double.parseDouble(result.output().trim());
-      return Double.isFinite(value) && value > 0 && value <= 125
-          ? OptionalDouble.of(value) : OptionalDouble.empty();
-    } catch (RuntimeException failure) {
-      discardSession();
-      return OptionalDouble.empty();
+      var value = probe.readCelsius();
+      if (value.isPresent()) lastGood.set(new CachedTemperature(value, clock.instant()));
+    } catch (RuntimeException ignored) {
+      // The provider preserves the prior good value and explicit unavailable semantics.
+    } finally {
+      nextRefresh = clock.instant().plus(refreshInterval);
+      refreshInFlight.set(false);
     }
   }
 
   @Override
   @PreDestroy
-  public synchronized void close() {
-    discardSession();
-    if (libraries != null) {
-      libraries.close();
-      libraries = null;
-    }
+  public void close() {
+    if (!closed.compareAndSet(false, true)) return;
+    refreshExecutor.shutdownNow();
+    probe.close();
   }
 
-  private void discardSession() {
-    if (session != null) {
-      try {
-        session.close();
-      } finally {
-        session = null;
-      }
-    }
-  }
-
-  private static String script(String dllPath) {
-    String escaped = dllPath.replace("'", "''");
-    return """
-        $PC = $null
-        try {
-          Add-Type -Path '%s'
-          $PC = New-Object LibreHardwareMonitor.Hardware.Computer
-          $PC.IsCpuEnabled = $true
-          $PC.Open()
-          $values = @()
-          foreach ($hw in $PC.Hardware) {
-            if ($hw.HardwareType -eq [LibreHardwareMonitor.Hardware.HardwareType]::Cpu) {
-              $hw.Update()
-              $values += $hw.Sensors | Where-Object { $_.SensorType -eq [LibreHardwareMonitor.Hardware.SensorType]::Temperature -and $null -ne $_.Value } | ForEach-Object { [double]$_.Value }
-              foreach ($sub in $hw.SubHardware) {
-                $sub.Update()
-                $values += $sub.Sensors | Where-Object { $_.SensorType -eq [LibreHardwareMonitor.Hardware.SensorType]::Temperature -and $null -ne $_.Value } | ForEach-Object { [double]$_.Value }
-              }
-            }
-          }
-          if ($values.Count -gt 0) { [Console]::Write(($values | Measure-Object -Maximum).Maximum.ToString([Globalization.CultureInfo]::InvariantCulture)) }
-        } finally {
-          if ($null -ne $PC) { $PC.Close() }
-        }
-        """.formatted(escaped);
-  }
-
-  interface SessionFactory {
-    SensorSession open();
-  }
-
-  interface NativeLibraryResolver {
-    SecureNativeLibraryProvisioner.NativeLibraries resolve();
-  }
-
-  interface SensorSession extends AutoCloseable {
-    SensorResult execute(String script);
+  interface TemperatureProbe extends AutoCloseable {
+    OptionalDouble readCelsius();
     @Override void close();
   }
 
-  record SensorResult(String output, boolean error, boolean timeout) {}
-
-  private record JPowerShellSession(PowerShell delegate) implements SensorSession {
-    @Override
-    public SensorResult execute(String script) {
-      var response = delegate.executeCommand(script);
-      return new SensorResult(response.getCommandOutput(), response.isError(), response.isTimeout());
+  private OptionalDouble currentValue() {
+    var cached = lastGood.get();
+    if (cached.value().isEmpty()
+        || cached.sampledAt().plus(refreshInterval.multipliedBy(2)).isBefore(clock.instant())) {
+      return OptionalDouble.empty();
     }
-
-    @Override
-    public void close() {
-      delegate.close();
-    }
+    return cached.value();
   }
+
+  private record CachedTemperature(OptionalDouble value, Instant sampledAt) {}
 }
