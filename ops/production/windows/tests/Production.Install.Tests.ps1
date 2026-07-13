@@ -45,6 +45,28 @@ Describe 'native Windows service installer' {
         $updated.PSObject.Properties.Name | Should -Not -Contain 'wslDistro'
         $updated.PSObject.Properties.Name | Should -Not -Contain 'wslWebsiteStartCommand'
     }
+
+    It 'adds the sensor provider switch disabled without replacing existing values' {
+        $root = Join-Path $TestDrive 'sensor-default'
+        New-ProductionDirectories $root
+        $deploy = Join-Path $root 'config\deploy.json'
+        @{ repositoryPath='A:\custom-repository'; sensorLibrariesEnabled=$true } |
+            ConvertTo-Json | Set-Content $deploy
+
+        Install-ConfigurationExamples $root
+
+        $updated = Get-Content $deploy -Raw | ConvertFrom-Json
+        $updated.sensorLibrariesEnabled | Should -BeTrue
+        $example = Get-Content (Join-Path $root 'config\deploy.example.json') -Raw | ConvertFrom-Json
+        $example.sensorLibrariesEnabled | Should -BeFalse
+    }
+
+    It 'starts the website with the protected typed sensor switch' {
+        $startup = Get-Content (Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1') -Raw
+        $startup | Should -Match 'sensorLibrariesEnabled'
+        $startup | Should -Match 'COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED'
+        $startup | Should -Not -Match "SetEnvironmentVariable\('COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED',\s*'true'"
+    }
 }
 
 Describe 'native cloudflared service installer' {

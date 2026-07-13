@@ -19,6 +19,10 @@ function Read-ProductionConfig {
         $port = [int]$config.$name
         if ($port -lt 1 -or $port -gt 65535) { throw "$name must be between 1 and 65535." }
     }
+    $sensorProperty = $config.PSObject.Properties['sensorLibrariesEnabled']
+    if (-not $sensorProperty -or $sensorProperty.Value -isnot [bool]) {
+        throw 'sensorLibrariesEnabled must be a Boolean.'
+    }
     if ([int]$config.candidatePort -eq [int]$config.productionPort) {
         throw 'Candidate and production ports must differ.'
     }

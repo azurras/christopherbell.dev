@@ -13,6 +13,7 @@
   "candidatePort": 8081,
   "productionPort": 8080,
   "smokeAccountEmail": "operator@example.com",
+  "sensorLibrariesEnabled": false,
   "releaseRetention": 5,
   "autoDeployPollSeconds": 60,
   "autoDeployFailureBackoffSeconds": 900

@@ -19,6 +19,7 @@ Describe 'production common operations' {
             cloudflaredExe=(New-Item -ItemType File -Force (Join-Path $TestDrive 'cloudflared.exe')).FullName
             publicUrl='https://www.christopherbell.dev/'
             smokeAccountEmail='admin@christopherbell.dev'; candidatePort=8081; productionPort=8080
+            sensorLibrariesEnabled=$false
             releaseRetention=5; autoDeployPollSeconds=60; autoDeployFailureBackoffSeconds=900
         }
     }
@@ -33,6 +34,15 @@ Describe 'production common operations' {
         $config = Read-ProductionConfig -Path $configPath
         $config.publicUrl | Should -Be 'https://www.christopherbell.dev/'
         $config.PSObject.Properties.Name | Should -Not -Contain 'wslDistro'
+    }
+
+    It 'rejects a missing or string sensor provider switch' {
+        $validConfig.Remove('sensorLibrariesEnabled')
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+        { Read-ProductionConfig -Path $configPath } | Should -Throw '*Boolean*'
+        $validConfig.sensorLibrariesEnabled = 'false'
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+        { Read-ProductionConfig -Path $configPath } | Should -Throw '*Boolean*'
     }
 
     It 'rejects concurrent deployment locks' {
