@@ -4,8 +4,8 @@ param(
 )
 
 $pawnIo = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO' -ErrorAction SilentlyContinue
-if (-not $pawnIo -or [string]$pawnIo.DisplayVersion -ne '2.2.0') {
-  [Console]::Error.Write('PawnIO 2.2.0 is unavailable.')
+if (-not $pawnIo -or [string]$pawnIo.DisplayVersion -ne '2.2.0.0') {
+  [Console]::Error.Write('PawnIO 2.2.0.0 is unavailable.')
   exit 3
 }
 

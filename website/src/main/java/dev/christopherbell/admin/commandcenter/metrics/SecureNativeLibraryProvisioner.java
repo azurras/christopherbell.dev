@@ -39,7 +39,7 @@ final class SecureNativeLibraryProvisioner {
         resource("RAMSPDToolkit-NDD.dll", "b6882354c7c8ec186617e421507743dbfae09c5c1fc24cef76a1d0c0c26651de"),
         resource("System.Memory.dll", "d5e8e4866f9cfa66f7765660f84b210198893e55335487afe5ebda342c0e913d"),
         resource("System.Runtime.CompilerServices.Unsafe.dll", "08cbd7278b66f1e68425a82d4b97181a4130d93e3dd91831407aba7212ccdacf"),
-        resource("cpu-temperature.ps1", "34a0b773cf975a28039df2e265014ec024e103fe48d1b6ca54dd1eff96fa14fe")),
+        resource("cpu-temperature.ps1", "6b2cf322f148bc17431f3a75225747eceb558f158fc84afbda899c3788981c68")),
         new WindowsAclPolicy(), () -> UUID.randomUUID().toString());
   }
 

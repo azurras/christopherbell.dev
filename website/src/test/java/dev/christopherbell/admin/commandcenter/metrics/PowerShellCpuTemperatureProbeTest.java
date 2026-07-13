@@ -40,7 +40,7 @@ class PowerShellCpuTemperatureProbeTest {
     assertThat(read(FakeManagedProcess.completed("0", "", 0))).isEmpty();
     assertThat(read(FakeManagedProcess.completed("NaN", "", 0))).isEmpty();
     assertThat(read(FakeManagedProcess.completed(
-        "", "PawnIO 2.2.0 is unavailable.", 3))).isEmpty();
+        "", "PawnIO 2.2.0.0 is unavailable.", 3))).isEmpty();
     assertThat(read(FakeManagedProcess.completed("64", "failure", 1))).isEmpty();
     assertThat(read(FakeManagedProcess.truncated("64"))).isEmpty();
     assertThat(read(FakeManagedProcess.completed("126", "", 0))).isEmpty();

@@ -136,7 +136,8 @@ are local elevated operations only:
 .\prod.cmd sensor-disable
 ```
 
-`sensor-install` downloads only the pinned official PawnIO 2.2.0 installer, verifies its SHA-256
+`sensor-install` downloads only the pinned official PawnIO 2.2.0 installer (registered by Windows
+as product version `2.2.0.0`), verifies its SHA-256
 and publisher thumbprint, scans it with Microsoft Defender, installs it silently, verifies the
 registered version and running driver, scans again, and leaves sensors disabled. The installer is
 staged under a new random directory whose ACL allows only SYSTEM and Administrators; reparse points
