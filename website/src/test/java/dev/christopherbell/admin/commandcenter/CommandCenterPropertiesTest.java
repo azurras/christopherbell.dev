@@ -78,12 +78,14 @@ class CommandCenterPropertiesTest {
   }
 
   @Test
-  void bindsSharedSamplingAndHistorySettings() throws IOException {
+  void bindsSharedSamplingAndIndependentCpuTemperatureSettings() throws IOException {
     CommandCenterProperties properties = bindProfile("local");
 
     assertThat(properties.getSampleInterval()).isEqualTo(Duration.ofSeconds(5));
     assertThat(properties.getHistoryDuration()).isEqualTo(Duration.ofMinutes(15));
     assertThat(properties.getProviderTimeout()).isEqualTo(Duration.ofSeconds(2));
+    assertThat(properties.getCpuTemperatureRefreshInterval()).isEqualTo(Duration.ofSeconds(30));
+    assertThat(properties.getCpuTemperatureProcessTimeout()).isEqualTo(Duration.ofSeconds(20));
     assertThat(properties.getActions().getChallengeTtl()).isEqualTo(Duration.ofMinutes(2));
     assertThat(properties.getActions().getCooldown()).isEqualTo(Duration.ofMinutes(2));
     assertThat(properties.getActions().getPowerDelay()).isEqualTo(Duration.ofSeconds(60));

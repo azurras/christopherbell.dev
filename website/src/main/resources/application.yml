@@ -15,6 +15,8 @@ command-center:
   sample-interval: 5s
   history-duration: 15m
   provider-timeout: 2s
+  cpu-temperature-refresh-interval: 30s
+  cpu-temperature-process-timeout: 20s
   log-path: logs/application.log
   max-log-lines: 250
   max-log-bytes: 65536

@@ -62,6 +62,19 @@ test('metric display compacts byte values for fixed-width command cards', () => 
   assert.equal(displayMetric({ status: 'AVAILABLE', value: 46_564_906.8, unit: 'bytes/second' }), '44.4 MiB/s');
 });
 
+test('metric display formats uptime as seconds, minutes, hours, and days', () => {
+  const uptime = (value) => displayMetric({ status: 'AVAILABLE', value, unit: 'seconds' });
+  assert.equal(uptime(59), '59s');
+  assert.equal(uptime(60), '1m 0s');
+  assert.equal(uptime(754), '12m 34s');
+  assert.equal(uptime(3599), '59m 59s');
+  assert.equal(uptime(3600), '1h 0m');
+  assert.equal(uptime(32040), '8h 54m');
+  assert.equal(uptime(86399), '23h 59m');
+  assert.equal(uptime(86400), '1d 0h');
+  assert.equal(uptime(288000), '3d 8h');
+});
+
 test('metric cards reserve a full row for values and wrap exceptional text', () => {
   const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
   assert.match(css, /\.command-metric-card\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);

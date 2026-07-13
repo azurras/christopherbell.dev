@@ -15,6 +15,8 @@ public class CommandCenterProperties {
   private Duration sampleInterval = Duration.ofSeconds(5);
   private Duration historyDuration = Duration.ofMinutes(15);
   private Duration providerTimeout = Duration.ofSeconds(2);
+  private Duration cpuTemperatureRefreshInterval = Duration.ofSeconds(30);
+  private Duration cpuTemperatureProcessTimeout = Duration.ofSeconds(20);
   private Path logPath = Path.of("logs", "application.log");
   private int maxLogLines = 250;
   private int maxLogBytes = 65_536;

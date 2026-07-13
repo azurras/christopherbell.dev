@@ -29,9 +29,10 @@ Owns application-wide Spring and web infrastructure.
 
 `command-center.enabled` gates host sampling and action acceptance;
 `sample-interval`, `history-duration`, and `provider-timeout` control cached host
-sampling. `log-path`, `max-log-lines`, and `max-log-bytes` define the server-owned
-fixed log boundary. Threshold properties control warning evaluation without
-changing raw readings.
+sampling. `cpu-temperature-refresh-interval` and `cpu-temperature-process-timeout`
+separately bound the privileged CPU sensor without delaying other providers. `log-path`,
+`max-log-lines`, and `max-log-bytes` define the server-owned fixed log boundary.
+Threshold properties control warning evaluation without changing raw readings.
 
 `command-center.actions.mode` defaults to `SIMULATED`. The local profile keeps
 that mode explicitly. The production profile opts into `WINDOWS` and supplies
