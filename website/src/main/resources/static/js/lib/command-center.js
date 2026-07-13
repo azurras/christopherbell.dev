@@ -25,11 +25,11 @@ export function displayMetric(reading) {
   if (reading.unit === 'commit') return String(reading.detail || 'Unavailable');
   if (reading.unit === 'bytes') return formatBinaryMetric(Number(reading.value), false);
   if (reading.unit === 'bytes/second') return formatBinaryMetric(Number(reading.value), true);
+  if (reading.unit === 'seconds') return formatDuration(Number(reading.value));
   const value = Number(reading.value).toLocaleString(undefined, { maximumFractionDigits: 1 });
   const units = {
     percent: '%',
     celsius: '°C',
-    seconds: 's',
     megabytes: 'MB',
     watts: 'W',
     'bytes/second': 'B/s',
@@ -37,6 +37,16 @@ export function displayMetric(reading) {
   };
   const suffix = Object.hasOwn(units, reading.unit) ? units[reading.unit] : (reading.unit || '');
   return suffix ? `${value} ${suffix}` : value;
+}
+
+function formatDuration(value) {
+  const totalSeconds = Math.max(0, Math.floor(value));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}m ${totalSeconds % 60}s`;
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) return `${totalHours}h ${totalMinutes % 60}m`;
+  return `${Math.floor(totalHours / 24)}d ${totalHours % 24}h`;
 }
 
 function formatBinaryMetric(value, perSecond) {
