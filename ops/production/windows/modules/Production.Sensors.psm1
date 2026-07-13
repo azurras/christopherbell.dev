@@ -3,8 +3,8 @@ $ErrorActionPreference = 'Stop'
 $script:PawnIoUri = 'https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe'
 $script:PawnIoSha256 = '1F519A22E47187F70A1379A48CA604981C4FCF694F4E65B734AAA74A9FBA3032'
 $script:PawnIoSignerThumbprint = 'F380DCC9F706E2756A5047B832FFE719E1BC35F5'
-$script:PawnIoVersion = '2.2.0'
-$script:CpuTemperatureScriptSha256 = '34A0B773CF975A28039DF2E265014EC024E103FE48D1B6CA54DD1EFF96FA14FE'
+$script:PawnIoVersion = '2.2.0.0'
+$script:CpuTemperatureScriptSha256 = '6B2CF322F148BC17431F3A75225747ECEB558F158FC84AFBDA899C3788981C68'
 $script:LibreHardwareMonitorSha256 = '6EBC194316536BA61AF5BE24508AD9FCBB2ECC685E716C12E787C79530F66BF0'
 $script:PawnIoRegistryPaths = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO',

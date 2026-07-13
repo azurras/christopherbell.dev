@@ -39,7 +39,7 @@ Describe 'PawnIO sensor provider operations' {
             Mock Assert-PawnIoInstaller {}
             Mock Start-Process { [pscustomobject]@{ ExitCode=0 } }
             Mock Set-ProductionSensorState {}
-            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0'; Driver='Running' } }
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
             Install-PawnIoProvider -Root $TestDrive
             Should -Invoke Set-ProductionSensorState -Times 1 -ParameterFilter { -not $Enabled }
             Should -Invoke Start-MpScan -Times 2
@@ -50,7 +50,7 @@ Describe 'PawnIO sensor provider operations' {
             Mock Assert-PawnIoInstaller {}
             Mock Start-Process { [pscustomobject]@{ ExitCode=0 } }
             Mock Set-ProductionSensorState {}
-            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0'; Driver='Running' } }
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
 
             Install-PawnIoProvider -Root $TestDrive
 
@@ -74,7 +74,7 @@ Describe 'PawnIO sensor provider operations' {
             Mock Assert-PawnIoInstaller {}
             Mock Start-Process { [pscustomobject]@{ ExitCode=0 } }
             Mock Set-ProductionSensorState {}
-            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0'; Driver='Running' } }
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
 
             Install-PawnIoProvider -Root $TestDrive
 
@@ -89,7 +89,7 @@ Describe 'PawnIO sensor provider operations' {
         It 'fails enablement closed and restores false when endpoint verification fails' {
             $configPath = Join-Path $TestDrive 'deploy.json'
             @{ productionPort=8080; sensorLibrariesEnabled=$false } | ConvertTo-Json | Set-Content $configPath
-            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0'; Driver='Running' } }
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
             Mock Test-ProductionEndpoints { throw 'endpoint failed' }
             { Set-ProductionSensorState -Enabled $true -ConfigPath $configPath } | Should -Throw '*endpoint failed*'
             (Get-Content $configPath -Raw | ConvertFrom-Json).sensorLibrariesEnabled | Should -BeFalse
@@ -101,14 +101,14 @@ Describe 'PawnIO sensor provider operations' {
             @{ sensorLibrariesEnabled=$false } | ConvertTo-Json | Set-Content $configPath
             Mock Get-PawnIoInstallation {
                 [pscustomobject]@{
-                    Version='2.2.0'; Driver='Running'; DriverPath='C:\Windows\System32\drivers\PawnIO.sys'
+                    Version='2.2.0.0'; Driver='Running'; DriverPath='C:\Windows\System32\drivers\PawnIO.sys'
                     DriverSignature='Valid'; UninstallString='C:\Program Files\PawnIO\uninstall.exe'
                 }
             }
             Mock Get-MpThreat { @() }
             $status = Get-ProductionSensorStatus -ConfigPath $configPath
             $status.Enabled | Should -BeFalse
-            $status.PawnIoVersion | Should -Be '2.2.0'
+            $status.PawnIoVersion | Should -Be '2.2.0.0'
             $status.Driver | Should -Be 'Running'
             $status.DriverSignature | Should -Be 'Valid'
             $status.UninstallRegistered | Should -BeTrue
@@ -117,14 +117,34 @@ Describe 'PawnIO sensor provider operations' {
 
         It 'rejects an installed driver without a valid Windows signature' {
             Mock Get-PawnIoInstallation {
-                [pscustomobject]@{ Version='2.2.0'; Driver='Running'; DriverSignature='NotSigned' }
+                [pscustomobject]@{ Version='2.2.0.0'; Driver='Running'; DriverSignature='NotSigned' }
             }
             { Assert-PawnIoInstallation } | Should -Throw '*signature*'
         }
 
+        It 'accepts the exact installed PawnIO product version' {
+            Mock Get-PawnIoInstallation {
+                [pscustomobject]@{
+                    Version='2.2.0.0'; Driver='Running'; DriverSignature='Valid'
+                    UninstallString='C:\Program Files\PawnIO\uninstall.exe -uninstall'
+                }
+            }
+            { Assert-PawnIoInstallation } | Should -Not -Throw
+        }
+
+        It 'rejects the release tag in place of the installed product version' {
+            Mock Get-PawnIoInstallation {
+                [pscustomobject]@{
+                    Version='2.2.0'; Driver='Running'; DriverSignature='Valid'
+                    UninstallString='C:\Program Files\PawnIO\uninstall.exe -uninstall'
+                }
+            }
+            { Assert-PawnIoInstallation } | Should -Throw '*2.2.0.0*'
+        }
+
         It 'requires a plausible live direct probe after provider and Defender checks' {
             Mock Assert-NoActiveSensorThreat {}
-            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0'; Driver='Running' } }
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
             Mock Get-ProductionCpuTemperature { 63.25 }
 
             Assert-ProductionSensorReady -Root 'C:\ProgramData\christopherbell.dev' | Should -Be 63.25
@@ -141,7 +161,7 @@ Describe 'PawnIO sensor provider operations' {
         ) {
             param($Value)
             Mock Assert-NoActiveSensorThreat {}
-            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0'; Driver='Running' } }
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
             Mock Get-ProductionCpuTemperature { $Value }
 
             { Assert-ProductionSensorReady -Root 'C:\ProgramData\christopherbell.dev' } |

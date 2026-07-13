@@ -30,7 +30,8 @@ Owns back-office administration views and cross-feature admin operations.
 - Host providers run concurrently behind independent timeouts on a private scheduler. CPU
   temperature returns a non-blocking cache and refreshes every 30 seconds through a bounded,
   one-shot Windows PowerShell process whose full process tree is terminated on timeout.
-- CPU temperature requires locally installed PawnIO 2.2.0 and the pinned official
+- CPU temperature requires locally installed PawnIO release 2.2.0 (Windows product version
+  2.2.0.0) and the pinned official
   LibreHardwareMonitor 0.9.6 runtime. The runtime DLLs and script are checksum-pinned and
   extracted with create-new semantics into a fresh, SYSTEM-owned directory whose ACL permits
   only SYSTEM and Administrators. Missing PawnIO, extraction, checksum, ACL, or probe failures
