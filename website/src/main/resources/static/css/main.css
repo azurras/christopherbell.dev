@@ -113,7 +113,7 @@ body {
 
 .command-metric-card {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.35rem 0.75rem;
     min-width: 0;
     padding: 0.9rem;
@@ -122,7 +122,11 @@ body {
 .command-metric-card.is-stale { border-color: #806d35; }
 .command-metric-card.is-unavailable { border-color: #593942; }
 .command-metric-label { color: #b9cec5; font-size: 0.82rem; }
-.command-metric-value { font: 700 1.35rem/1.15 monospace; }
+.command-metric-value {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font: 700 1.35rem/1.15 monospace;
+}
 .command-metric-status { text-transform: uppercase; font: 0.68rem/1.2 monospace; letter-spacing: 0.08em; }
 .command-metric-card small { grid-column: 1 / -1; }
 
