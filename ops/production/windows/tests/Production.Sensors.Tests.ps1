@@ -10,6 +10,9 @@ Describe 'PawnIO sensor provider operations' {
             Mock Start-MpScan {}
             Mock Restart-Service {}
             Mock Test-ProductionEndpoints {}
+            Mock Protect-ProductionPath {}
+            Mock Protect-ProductionTree {}
+            Mock Assert-ProtectedProductionTree {}
         }
 
         It 'rejects an installer whose hash or signer thumbprint differs' {
@@ -40,6 +43,31 @@ Describe 'PawnIO sensor provider operations' {
             Install-PawnIoProvider -Root $TestDrive
             Should -Invoke Set-ProductionSensorState -Times 1 -ParameterFilter { -not $Enabled }
             Should -Invoke Start-MpScan -Times 2
+        }
+
+        It 'uses a fresh protected installer directory and revalidates immediately before launch' {
+            $script:downloadPath = $null
+            $script:protectedPaths = [Collections.Generic.List[string]]::new()
+            Mock Protect-ProductionPath { $script:protectedPaths.Add([IO.Path]::GetFullPath($Path)) }
+            Mock Protect-ProductionTree {}
+            Mock Assert-ProtectedProductionTree {}
+            Mock Invoke-WebRequest {
+                $script:downloadPath = $OutFile
+                'installer' | Set-Content -LiteralPath $OutFile
+            }
+            Mock Assert-PawnIoInstaller {}
+            Mock Start-Process { [pscustomobject]@{ ExitCode=0 } }
+            Mock Set-ProductionSensorState {}
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0'; Driver='Running' } }
+
+            Install-PawnIoProvider -Root $TestDrive
+
+            $script:protectedPaths[0] | Should -Be ([IO.Path]::GetFullPath($TestDrive))
+            $relative = [IO.Path]::GetRelativePath($TestDrive, $script:downloadPath)
+            $relative | Should -Match '^sensors[\\/][0-9a-f-]{36}[\\/]PawnIO_setup-2\.2\.0\.exe$'
+            Should -Invoke Assert-PawnIoInstaller -Times 2 -Exactly
+            Should -Invoke Assert-ProtectedProductionTree -Times 2 -Exactly
+            Test-Path -LiteralPath (Split-Path -Parent $script:downloadPath) | Should -BeFalse
         }
 
         It 'fails enablement closed and restores false when endpoint verification fails' {

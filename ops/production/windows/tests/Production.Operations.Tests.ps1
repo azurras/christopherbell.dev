@@ -47,6 +47,41 @@ Describe 'native Windows production operations' {
             { Test-ProductionStartup } | Should -Throw '*Automatic*'
         }
 
+        It 'rejects startup verification without protected sensor state' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60
+                    publicUrl='https://www.christopherbell.dev/'; productionPort=8080
+                }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Automatic' } }
+            Mock Get-ScheduledTask { New-ValidStartupTask }
+            Mock Test-ProductionEndpoints {}
+            Mock Wait-HttpStatus { 200 }
+
+            { Test-ProductionStartup } | Should -Throw '*sensorLibrariesEnabled*'
+        }
+
+        It 'reports the protected sensor state during startup verification' -TestCases @(
+            @{ Enabled=$false }
+            @{ Enabled=$true }
+        ) {
+            param($Enabled)
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60
+                    publicUrl='https://www.christopherbell.dev/'; productionPort=8080
+                    sensorLibrariesEnabled=$Enabled
+                }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Automatic' } }
+            Mock Get-ScheduledTask { New-ValidStartupTask }
+            Mock Test-ProductionEndpoints {}
+            Mock Wait-HttpStatus { 200 }
+
+            (Test-ProductionStartup).SensorLibrariesEnabled | Should -Be $Enabled
+        }
+
         It 'accepts the complete automatic deployment startup contract' {
             $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60 }
             { Assert-AutoDeployTaskContract -Task (New-ValidStartupTask) -Config $config } | Should -Not -Throw

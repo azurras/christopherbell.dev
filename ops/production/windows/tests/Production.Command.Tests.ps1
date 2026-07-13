@@ -67,6 +67,17 @@ Describe 'native Windows production command surface' {
         $runbook | Should -Not -Match 'WSL fallback'
     }
 
+    It 'documents the guarded sensor provider lifecycle and rollback' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $runbook = Get-Content (Join-Path $root 'docs\operations\windows-production.md') -Raw
+        foreach ($command in 'sensor-install','sensor-status','sensor-enable','sensor-disable') {
+            $runbook | Should -Match ([regex]::Escape($command))
+        }
+        $runbook | Should -Match '3010'
+        $runbook | Should -Match 'Never add a Defender exclusion'
+        $runbook | Should -Match 'run `sensor-disable` first'
+    }
+
     It 'rejects unknown commands' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         & pwsh.exe -NoLogo -NoProfile -File (Join-Path $root 'ops\production\windows\prod.ps1') unknown-command 2>$null

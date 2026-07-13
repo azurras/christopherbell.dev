@@ -106,4 +106,32 @@ Describe 'production common operations' {
         $arguments = Get-TrustedGitArguments -RepositoryPath 'A:\Projects\christopherbell.dev' -ArgumentList @('status','--short')
         $arguments | Should -Be @('-c','safe.directory=A:/Projects/christopherbell.dev','-C','A:\Projects\christopherbell.dev','status','--short')
     }
+
+    It 'builds a protected directory ACL owned by Administrators with only privileged writers' {
+        $acl = New-ProtectedProductionAcl -Directory
+        $acl.AreAccessRulesProtected | Should -BeTrue
+        $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value | Should -Be 'S-1-5-32-544'
+        $rules = @($acl.GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier]))
+        @($rules.IdentityReference.Value | Sort-Object) | Should -Be @('S-1-5-18','S-1-5-32-544')
+        @($rules | Where-Object {
+            $_.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+            -not ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl)
+        }) | Should -BeNullOrEmpty
+    }
+
+    It 'rejects a reparse point before applying a privileged ACL' {
+        InModuleScope Production.Common {
+            Mock Get-Item {
+                [pscustomobject]@{
+                    Attributes = [IO.FileAttributes]::ReparsePoint
+                    PSIsContainer = $true
+                }
+            }
+            Mock Set-Acl {}
+
+            { Protect-ProductionPath -Path 'C:\audit\linked-tools' } | Should -Throw '*reparse*'
+
+            Should -Invoke Set-Acl -Times 0
+        }
+    }
 }

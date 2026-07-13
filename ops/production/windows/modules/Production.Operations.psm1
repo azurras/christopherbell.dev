@@ -142,6 +142,9 @@ function Test-ProductionStartup {
         if ([string]$service.Status -ne 'Running') { throw "$name must be Running." }
         if ([string]$service.StartType -ne 'Automatic') { throw "$name must use Automatic startup." }
     }
+    if ($config.PSObject.Properties.Name -notcontains 'sensorLibrariesEnabled') {
+        throw 'deploy.json must declare sensorLibrariesEnabled.'
+    }
     $task = Get-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction Stop
     Assert-AutoDeployTaskContract -Task $task -Config $config
     Test-ProductionEndpoints $config $config.productionPort
@@ -151,6 +154,7 @@ function Test-ProductionStartup {
         AutoDeployTask = $task.State
         NativeEndpoint = 200
         PublicEndpoint = 200
+        SensorLibrariesEnabled = [bool]$config.sensorLibrariesEnabled
     }
 }
 

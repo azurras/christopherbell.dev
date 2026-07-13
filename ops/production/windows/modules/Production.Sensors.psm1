@@ -132,20 +132,35 @@ function Install-PawnIoProvider {
     $configPath = Join-Path $Root 'config\deploy.json'
     Set-ProductionSensorState -Enabled $false -ConfigPath $configPath -WhatIf:$WhatIf
     if ($WhatIf) { Write-Output 'Would download, verify, Defender-scan, and install PawnIO 2.2.0 without enabling sensors.'; return }
+    Protect-ProductionPath -Path $Root
     $directory = Join-Path $Root 'sensors'
     New-Item -ItemType Directory -Force -Path $directory | Out-Null
-    $installer = Join-Path $directory 'PawnIO_setup-2.2.0.exe'
-    Invoke-WebRequest -Uri $script:PawnIoUri -OutFile $installer
-    Assert-PawnIoInstaller -Path $installer
-    Start-MpScan -ScanType CustomScan -ScanPath $installer
-    Assert-NoActiveSensorThreat
-    $process = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
-    if ($process.ExitCode -eq 3010) { throw 'PawnIO installation stopped: reboot required; sensors remain disabled.' }
-    if ($process.ExitCode -ne 0) { throw "PawnIO installer exited with code $($process.ExitCode); sensors remain disabled." }
-    $installation = Assert-PawnIoInstallation
-    Start-MpScan -ScanType CustomScan -ScanPath $directory
-    Assert-NoActiveSensorThreat
-    return $installation
+    Protect-ProductionPath -Path $directory
+    $staging = Join-Path $directory ([guid]::NewGuid().ToString('D'))
+    New-Item -ItemType Directory -Path $staging | Out-Null
+    Protect-ProductionPath -Path $staging
+    $installer = Join-Path $staging 'PawnIO_setup-2.2.0.exe'
+    try {
+        Invoke-WebRequest -Uri $script:PawnIoUri -OutFile $installer
+        Protect-ProductionTree -Path $staging
+        Assert-ProtectedProductionTree -Path $staging
+        Assert-PawnIoInstaller -Path $installer
+        Start-MpScan -ScanType CustomScan -ScanPath $installer
+        Assert-NoActiveSensorThreat
+        Assert-ProtectedProductionTree -Path $staging
+        Assert-PawnIoInstaller -Path $installer
+        $process = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+        if ($process.ExitCode -eq 3010) { throw 'PawnIO installation stopped: reboot required; sensors remain disabled.' }
+        if ($process.ExitCode -ne 0) { throw "PawnIO installer exited with code $($process.ExitCode); sensors remain disabled." }
+        $installation = Assert-PawnIoInstallation
+        Start-MpScan -ScanType CustomScan -ScanPath $directory
+        Assert-NoActiveSensorThreat
+        return $installation
+    } finally {
+        if (Test-Path -LiteralPath $staging) {
+            Remove-Item -LiteralPath $staging -Recurse -Force
+        }
+    }
 }
 
 function Get-ProductionSensorStatus {
