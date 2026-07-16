@@ -8,6 +8,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -19,10 +21,13 @@ import java.util.OptionalDouble;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
+import tools.jackson.databind.ObjectMapper;
 
 /** Publishes fixed production-service and local application reachability metrics. */
 @Component
 public final class ApplicationHostMetricsProvider implements HostMetricsProvider {
+  private static final long MAX_RELEASE_METADATA_BYTES = 4_096;
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private final CommandCenterProperties properties;
   private final Instant applicationStartedAt;
   private final OperationalProbe probe;
@@ -45,7 +50,7 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
     try {
       result = probe.read();
     } catch (RuntimeException failure) {
-      result = new ProbeResult(Optional.empty(), OptionalDouble.empty());
+      result = new ProbeResult(Optional.empty(), OptionalDouble.empty(), Optional.empty());
     }
     var readings = new LinkedHashMap<String, MetricReading>();
     readings.put("production.port", available(
@@ -54,6 +59,9 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
         "application.last-start", "Last application start", applicationStartedAt.getEpochSecond(),
         "epoch-seconds", sampledAt));
     String commit = safeCommit(properties.getCommitIdentifier());
+    if (commit == null) {
+      commit = safeCommit(result.releaseCommit().orElse(null));
+    }
     readings.put("application.commit", commit == null
         ? unavailable("application.commit", "Application commit", "state", sampledAt)
         : new MetricReading("application.commit", "Application commit", 1.0, "commit",
@@ -76,6 +84,23 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
     return commit;
   }
 
+  static Optional<String> readReleaseCommit(Path metadata) {
+    try {
+      if (!Files.isRegularFile(metadata, LinkOption.NOFOLLOW_LINKS)
+          || Files.size(metadata) <= 0
+          || Files.size(metadata) > MAX_RELEASE_METADATA_BYTES) {
+        return Optional.empty();
+      }
+      var root = OBJECT_MAPPER.readTree(Files.readString(metadata, StandardCharsets.UTF_8));
+      var sha = root.get("sha");
+      if (sha == null || !sha.isString()) return Optional.empty();
+      String value = sha.stringValue();
+      return value.matches("^[0-9a-f]{40}$") ? Optional.of(value) : Optional.empty();
+    } catch (Exception failure) {
+      return Optional.empty();
+    }
+  }
+
   private static MetricReading available(
       String key, String label, double value, String unit, Instant sampledAt) {
     return new MetricReading(key, label, value, unit, MetricStatus.AVAILABLE, sampledAt, null);
@@ -91,7 +116,10 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
     ProbeResult read();
   }
 
-  record ProbeResult(Optional<Boolean> serviceRunning, OptionalDouble responseMillis) {}
+  record ProbeResult(
+      Optional<Boolean> serviceRunning,
+      OptionalDouble responseMillis,
+      Optional<String> releaseCommit) {}
 
   private static final class DefaultOperationalProbe implements OperationalProbe {
     private final CommandCenterProperties properties;
@@ -103,7 +131,12 @@ public final class ApplicationHostMetricsProvider implements HostMetricsProvider
 
     @Override
     public ProbeResult read() {
-      return new ProbeResult(serviceRunning(), responseMillis());
+      return new ProbeResult(serviceRunning(), responseMillis(), releaseCommit());
+    }
+
+    private Optional<String> releaseCommit() {
+      Path metadata = Path.of("release.json").toAbsolutePath().normalize();
+      return readReleaseCommit(metadata);
     }
 
     private Optional<Boolean> serviceRunning() {

@@ -17,6 +17,7 @@ class LibreHardwareCpuTemperatureProviderTest {
     var reading = provider.read(NOW).get("cpu.temperature");
 
     assertThat(reading.value()).isEqualTo(63.5);
+    assertThat(reading.label()).isEqualTo("CPU temperature");
     assertThat(reading.status()).isEqualTo(MetricStatus.AVAILABLE);
   }
 
@@ -29,6 +30,7 @@ class LibreHardwareCpuTemperatureProviderTest {
 
     assertThat(empty.read(NOW).get("cpu.temperature").status())
         .isEqualTo(MetricStatus.UNAVAILABLE);
+    assertThat(empty.read(NOW).get("cpu.temperature").label()).isEqualTo("CPU temperature");
     assertThat(failed.read(NOW).get("cpu.temperature").status())
         .isEqualTo(MetricStatus.UNAVAILABLE);
     assertThat(failed.read(NOW).get("cpu.temperature").detail())

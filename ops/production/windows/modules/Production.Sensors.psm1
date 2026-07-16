@@ -4,8 +4,6 @@ $script:PawnIoUri = 'https://github.com/namazso/PawnIO.Setup/releases/download/2
 $script:PawnIoSha256 = '1F519A22E47187F70A1379A48CA604981C4FCF694F4E65B734AAA74A9FBA3032'
 $script:PawnIoSignerThumbprint = 'F380DCC9F706E2756A5047B832FFE719E1BC35F5'
 $script:PawnIoVersion = '2.2.0.0'
-$script:CpuTemperatureScriptSha256 = 'F90A50A607B3C714512A4CF9070339CB8E03AC2759E649BE68F907BB75AEE30B'
-$script:LibreHardwareMonitorSha256 = '6EBC194316536BA61AF5BE24508AD9FCBB2ECC685E716C12E787C79530F66BF0'
 $script:PawnIoRegistryPaths = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO',
     'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO')
@@ -152,6 +150,50 @@ function Wait-ProductionSensorResourceDirectory {
     }
 }
 
+function Get-ProductionJarResourceHash {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$EntryPath,
+        [ValidateRange(1,16777216)][int]$MaximumBytes = 16777216
+    )
+
+    $jar = Join-Path $Root 'current\app.jar'
+    if (-not (Test-Path -LiteralPath $jar -PathType Leaf)) {
+        throw 'Active production release JAR is unavailable.'
+    }
+    $archive = [IO.Compression.ZipFile]::OpenRead($jar)
+    try {
+        $entries = @($archive.Entries | Where-Object FullName -eq $EntryPath)
+        if ($entries.Count -ne 1 -or
+            [long]$entries[0].Length -le 0 -or
+            [long]$entries[0].Length -gt $MaximumBytes) {
+            throw 'Active production sensor resource is unavailable.'
+        }
+        $stream = $entries[0].Open()
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            return -join (
+                $sha.ComputeHash($stream) |
+                    ForEach-Object { $_.ToString('X2') }
+            )
+        } finally {
+            $sha.Dispose()
+            $stream.Dispose()
+        }
+    } finally {
+        $archive.Dispose()
+    }
+}
+
+function Get-ProductionCpuTemperatureScriptHash {
+    param([Parameter(Mandatory)][string]$Root)
+    Get-ProductionJarResourceHash `
+        -Root $Root `
+        -EntryPath 'BOOT-INF/classes/lib/cpu-temperature.ps1' `
+        -MaximumBytes 65536
+}
+
 function Get-ProductionCpuTemperature {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Root)
@@ -180,8 +222,14 @@ function Get-ProductionCpuTemperature {
         -not (Test-Path -LiteralPath $libraryPath -PathType Leaf)) {
         throw 'Live CPU temperature resources are incomplete.'
     }
-    if ((Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash -ne $script:CpuTemperatureScriptSha256 -or
-        (Get-FileHash -LiteralPath $libraryPath -Algorithm SHA256).Hash -ne $script:LibreHardwareMonitorSha256) {
+    $expectedScriptHash = Get-ProductionCpuTemperatureScriptHash -Root $Root
+    $expectedLibraryHash = Get-ProductionJarResourceHash `
+        -Root $Root `
+        -EntryPath 'BOOT-INF/classes/lib/LibreHardwareMonitorLib.dll'
+    if ((Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash -ne
+            $expectedScriptHash -or
+        (Get-FileHash -LiteralPath $libraryPath -Algorithm SHA256).Hash -ne
+            $expectedLibraryHash) {
         throw 'Live CPU temperature resource verification failed.'
     }
 
