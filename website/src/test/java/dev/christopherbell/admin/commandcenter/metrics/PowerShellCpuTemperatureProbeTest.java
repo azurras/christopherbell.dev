@@ -19,7 +19,7 @@ class PowerShellCpuTemperatureProbeTest {
 
     assertThat(probe.readCelsius()).hasValue(64.25);
     assertThat(factory.command()).containsExactly(
-        "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
+        PowerShellCpuTemperatureProbe.WINDOWS_POWERSHELL, "-NoLogo", "-NoProfile", "-NonInteractive",
         "-ExecutionPolicy", "Bypass", "-File", "C:\\trusted\\cpu-temperature.ps1",
         "-LibreHardwareMonitorPath", "C:\\trusted\\LibreHardwareMonitorLib.dll");
     assertThat(process.terminateCalls()).isEqualTo(1);
@@ -42,6 +42,7 @@ class PowerShellCpuTemperatureProbeTest {
     assertThat(read(FakeManagedProcess.completed(
         "", "PawnIO 2.2.0.0 is unavailable.", 3))).isEmpty();
     assertThat(read(FakeManagedProcess.completed("64", "failure", 1))).isEmpty();
+    assertThat(read(FakeManagedProcess.completed("64", "failure", 0))).isEmpty();
     assertThat(read(FakeManagedProcess.truncated("64"))).isEmpty();
     assertThat(read(FakeManagedProcess.completed("126", "", 0))).isEmpty();
   }

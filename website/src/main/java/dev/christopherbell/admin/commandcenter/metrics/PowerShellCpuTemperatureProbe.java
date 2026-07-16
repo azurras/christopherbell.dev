@@ -25,6 +25,7 @@ final class PowerShellCpuTemperatureProbe
   private static final Logger LOGGER = LoggerFactory.getLogger(PowerShellCpuTemperatureProbe.class);
   private static final int MAX_OUTPUT_BYTES = 8_192;
   private static final Duration TERMINATION_GRACE = Duration.ofSeconds(1);
+  static final String WINDOWS_POWERSHELL = windowsPowerShell();
   private final ProcessFactory processFactory;
   private final NativeLibraryResolver libraryResolver;
   private final Duration timeout;
@@ -54,7 +55,7 @@ final class PowerShellCpuTemperatureProbe
     try {
       var resources = resources();
       var command = List.of(
-          "powershell.exe",
+          WINDOWS_POWERSHELL,
           "-NoLogo",
           "-NoProfile",
           "-NonInteractive",
@@ -74,7 +75,7 @@ final class PowerShellCpuTemperatureProbe
         LOGGER.warn("CPU temperature probe exceeded its {} ms timeout.", timeout.toMillis());
         return OptionalDouble.empty();
       }
-      if (result.exitCode() != 0 || result.outputTruncated()) {
+      if (result.exitCode() != 0 || result.outputTruncated() || !result.stderr().isBlank()) {
         LOGGER.warn("CPU temperature probe returned an unusable bounded response.");
         return OptionalDouble.empty();
       }
@@ -97,6 +98,12 @@ final class PowerShellCpuTemperatureProbe
     if (closed.get()) throw new IllegalStateException("CPU temperature probe is closed.");
     if (libraries == null) libraries = libraryResolver.resolve();
     return libraries;
+  }
+
+  private static String windowsPowerShell() {
+    var systemRoot = System.getenv("SystemRoot");
+    if (systemRoot == null || systemRoot.isBlank()) systemRoot = "C:\\Windows";
+    return systemRoot + "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
   }
 
   @Override
