@@ -6,7 +6,9 @@ import {
   clearActionDialogState,
   displayMetric,
   isAccessDenied,
+  metricDetail,
   metricState,
+  metricTitle,
   nextLogPageState,
   nextPollDelay,
   pollFailureDecision,
@@ -290,13 +292,16 @@ function metricCard(reading, points) {
   const valueNode = document.createElement('strong');
   valueNode.className = 'command-metric-value';
   valueNode.textContent = displayMetric(reading);
+  const title = metricTitle(reading);
+  if (title) valueNode.title = title;
   const status = document.createElement('span');
   status.className = 'command-metric-status';
   status.textContent = state === 'available' ? 'Live' : state;
   card.append(label, valueNode, status, sparkline(points, `${reading.label || reading.key} 15 minute trend`));
-  if (reading.detail) {
+  const detailText = metricDetail(reading);
+  if (detailText) {
     const detail = document.createElement('small');
-    detail.textContent = reading.detail;
+    detail.textContent = detailText;
     card.append(detail);
   }
   return card;

@@ -113,6 +113,17 @@ test('commit cards suppress duplicate detail and retain the full accessible titl
   }), null);
 });
 
+test('metric card renderer uses pure detail and accessible title rules', () => {
+  const source = fs.readFileSync(
+    'website/src/main/resources/static/js/command-center.js',
+    'utf8'
+  );
+
+  assert.match(source, /metricDetail\(reading\)/);
+  assert.match(source, /metricTitle\(reading\)/);
+  assert.doesNotMatch(source, /if \(reading\.detail\)/);
+});
+
 test('metric display compacts byte values for fixed-width command cards', () => {
   assert.equal(displayMetric({ status: 'AVAILABLE', value: 34_028_523_520, unit: 'bytes' }), '31.7 GiB');
   assert.equal(displayMetric({ status: 'AVAILABLE', value: 4_315_924_926_464, unit: 'bytes' }), '3.9 TiB');
