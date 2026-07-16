@@ -78,6 +78,19 @@ Describe 'native Windows production command surface' {
         $runbook | Should -Match 'run `sensor-disable` first'
     }
 
+    It 'uses bounded size-only WinSW log rotation' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        [xml]$service = Get-Content (
+            Join-Path $root 'ops\production\windows\service\ChristopherBellDev.xml') -Raw
+        $log = $service.service.log
+
+        [string]$log.mode | Should -Be 'roll-by-size'
+        [int]$log.sizeThreshold | Should -Be 10240
+        [int]$log.keepFiles | Should -Be 7
+        $log.autoRollAtTime | Should -BeNullOrEmpty
+        $log.pattern | Should -BeNullOrEmpty
+    }
+
     It 'rejects unknown commands' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         & pwsh.exe -NoLogo -NoProfile -File (Join-Path $root 'ops\production\windows\prod.ps1') unknown-command 2>$null
