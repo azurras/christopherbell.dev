@@ -34,6 +34,7 @@ subprojects {
 
     tasks.withType<Test> {
         useJUnitPlatform()
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
         testLogging {
             events("passed", "skipped", "failed")
         }

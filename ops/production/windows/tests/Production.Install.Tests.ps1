@@ -65,6 +65,7 @@ Describe 'native Windows service installer' {
         $startup = Get-Content (Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1') -Raw
         $startup | Should -Match 'sensorLibrariesEnabled'
         $startup | Should -Match 'COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED'
+        $startup | Should -Match '--enable-native-access=ALL-UNNAMED'
         $startup | Should -Not -Match "SetEnvironmentVariable\('COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED',\s*'true'"
     }
 }

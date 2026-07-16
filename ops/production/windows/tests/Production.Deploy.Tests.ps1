@@ -52,5 +52,13 @@ Describe 'native Windows deployment' {
                 $AdditionalEnvironment.SPRING_MONGODB_DATABASE -eq 'restore_check'
             }
         }
+
+        It 'allows the fixed JNA bridge in deployment candidate JVMs' {
+            $deploy = Get-Content (
+                Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1'
+            ) -Raw
+
+            $deploy | Should -Match '--enable-native-access=ALL-UNNAMED'
+        }
     }
 }

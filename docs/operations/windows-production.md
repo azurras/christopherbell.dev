@@ -166,7 +166,9 @@ exclusive file lease, builds and verifies each fresh resource set under a
 nonmatching staging name, atomically publishes the complete nonce directory,
 and then validates and removes every matching stale sibling. Its final
 publication step writes an ACL-protected owner marker containing the process
-PID and start time; any failure before that marker is published requires strict
+PID and start time. Windows DACL inheritance is disabled and verified through
+the fixed JNA bridge because Java NIO ACL entries alone cannot express that
+protection flag. Any failure before the marker is published requires strict
 rollback of the fresh directory. Deployment smoke candidates force native
 sensors off and cannot participate in that lifecycle. Startup verification
 matches owner markers to the process listening on the configured production

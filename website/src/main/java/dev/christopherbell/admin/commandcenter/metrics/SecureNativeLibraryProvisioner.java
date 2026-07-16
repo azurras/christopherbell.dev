@@ -1,5 +1,10 @@
 package dev.christopherbell.admin.commandcenter.metrics;
 
+import com.sun.jna.platform.win32.AccCtrl;
+import com.sun.jna.platform.win32.Advapi32;
+import com.sun.jna.platform.win32.Advapi32Util;
+import com.sun.jna.platform.win32.Win32Exception;
+import com.sun.jna.platform.win32.WinNT;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.channels.FileChannel;
@@ -461,6 +466,7 @@ final class SecureNativeLibraryProvisioner {
             .setPermissions(permissions).setFlags(flags).build());
       }
       view.setAcl(entries);
+      protectDacl(path);
       Set<String> allowed = principals.stream()
           .map(principal -> principal.getName().toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toSet());
       for (var entry : view.getAcl()) {
@@ -472,6 +478,32 @@ final class SecureNativeLibraryProvisioner {
       }
       if (!ownerView.getOwner().equals(system)) {
         throw new SecurityException("Native library owner could not be restricted to SYSTEM.");
+      }
+    }
+
+    /** Reapplies the current DACL while disabling inheritance, which Java NIO cannot express. */
+    static void protectDacl(Path path) {
+      var descriptor = Advapi32Util.getFileSecurityDescriptor(path.toFile(), false);
+      var dacl = descriptor.getDiscretionaryACL();
+      if (dacl == null) {
+        throw new SecurityException("Windows ACL has no discretionary access list.");
+      }
+      int result = Advapi32.INSTANCE.SetNamedSecurityInfo(
+          path.toAbsolutePath().toString(),
+          AccCtrl.SE_OBJECT_TYPE.SE_FILE_OBJECT,
+          WinNT.DACL_SECURITY_INFORMATION | WinNT.PROTECTED_DACL_SECURITY_INFORMATION,
+          null,
+          null,
+          dacl.getPointer(),
+          null);
+      if (result != 0) {
+        throw new SecurityException(
+            "Windows ACL inheritance could not be disabled.",
+            new Win32Exception(result));
+      }
+      descriptor = Advapi32Util.getFileSecurityDescriptor(path.toFile(), false);
+      if ((descriptor.Control & WinNT.SE_DACL_PROTECTED) == 0) {
+        throw new SecurityException("Windows ACL inheritance remains enabled.");
       }
     }
 

@@ -14,5 +14,11 @@ foreach ($line in Get-Content -LiteralPath (Join-Path $root 'config\app.env')) {
         [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
     }
 }
-& $config.javaExe '-Xrs' '-jar' (Join-Path $root 'current\app.jar') '--spring.profiles.active=prod' "--server.port=$($config.productionPort)"
+& $config.javaExe `
+    '-Xrs' `
+    '--enable-native-access=ALL-UNNAMED' `
+    '-jar' `
+    (Join-Path $root 'current\app.jar') `
+    '--spring.profiles.active=prod' `
+    "--server.port=$($config.productionPort)"
 exit $LASTEXITCODE
