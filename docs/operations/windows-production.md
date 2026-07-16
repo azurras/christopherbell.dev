@@ -221,6 +221,13 @@ Get-Service MongoDB,ChristopherBellDev,cloudflared |
 - Auto-deploy state: `C:\ProgramData\christopherbell.dev\state\auto-deploy.json`.
 - cloudflared: Windows service state and Windows Application/System event logs.
 - MongoDB: the log configured by the native MongoDB Server installation.
+- WinSW keeps seven 10 MiB output logs with size-only rotation. Do not use
+  `roll-by-size-time` or `autoRollAtTime`: WinSW can break the output stream at
+  a live time boundary and leave the Java child running outside the service.
+- If `ChristopherBellDev` is stopped while port 8080 still responds, treat the
+  listener as a possible orphan. Verify the listener PID and its full parent
+  chain before terminating anything, refresh the installed service definition,
+  and require `verify-startup` to pass before resuming sensor operations.
 
 Do not print service command lines because the cloudflared service registration
 contains its tunnel credential.

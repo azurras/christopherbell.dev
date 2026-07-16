@@ -12,11 +12,8 @@
   <onfailure action="restart" delay="30 sec" />
   <resetfailure>1 hour</resetfailure>
   <logpath>C:\ProgramData\christopherbell.dev\logs</logpath>
-  <log mode="roll-by-size-time">
-    <sizeThreshold>10485760</sizeThreshold>
-    <pattern>yyyyMMdd</pattern>
-    <autoRollAtTime>00:00:00</autoRollAtTime>
-    <zipOlderThanNumDays>7</zipOlderThanNumDays>
-    <zipDateFormat>yyyyMMdd</zipDateFormat>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>7</keepFiles>
   </log>
 </service>
