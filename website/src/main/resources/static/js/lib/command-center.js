@@ -23,7 +23,9 @@ export function displayMetric(reading) {
       : timestamp.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
   }
   if (reading.unit === 'commit') {
-    return String(reading.detail || 'Unavailable').slice(0, 8);
+    const detail = reading.detail == null ? '' : String(reading.detail);
+    if (!detail) return 'Unavailable';
+    return /^[A-Za-z0-9._-]{1,64}$/.test(detail) ? detail.slice(0, 8) : detail;
   }
   if (reading.unit === 'bytes') return formatBinaryMetric(Number(reading.value), false);
   if (reading.unit === 'bytes/second') return formatBinaryMetric(Number(reading.value), true);

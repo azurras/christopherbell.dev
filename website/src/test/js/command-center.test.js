@@ -65,6 +65,30 @@ test('metric display formats service state, start timestamps, and commit identif
   assert.equal(displayMetric(commit), '01234567');
 });
 
+test('commit display keeps the unavailable fallback when detail is absent', () => {
+  const commit = {
+    key: 'application.commit',
+    status: 'AVAILABLE',
+    value: 1,
+    unit: 'commit',
+  };
+
+  assert.equal(displayMetric(commit), 'Unavailable');
+  assert.equal(displayMetric({ ...commit, detail: '' }), 'Unavailable');
+});
+
+test('commit display only shortens safe commit identifiers', () => {
+  const commit = {
+    key: 'application.commit',
+    status: 'AVAILABLE',
+    value: 1,
+    unit: 'commit',
+  };
+
+  assert.equal(displayMetric({ ...commit, detail: 'abc123' }), 'abc123');
+  assert.equal(displayMetric({ ...commit, detail: 'bad commit value' }), 'bad commit value');
+});
+
 test('commit cards suppress duplicate detail and retain the full accessible title', () => {
   assert.equal(typeof commandCenterHelpers.metricDetail, 'function');
   assert.equal(typeof commandCenterHelpers.metricTitle, 'function');
