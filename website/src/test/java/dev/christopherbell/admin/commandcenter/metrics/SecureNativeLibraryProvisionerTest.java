@@ -25,15 +25,78 @@ class SecureNativeLibraryProvisionerTest {
   }
 
   @Test
-  void refusesPreexistingVersionDirectoryWithoutLoadingItsFiles() throws Exception {
-    Path existing = Files.createDirectories(
-        tempDir.resolve("librehardwaremonitor-0.9.6-fixed"));
-    Files.writeString(existing.resolve("LibreHardwareMonitorLib.dll"), "malicious", UTF_8);
-    var provisioner = provisioner("trusted", hash("trusted"), path -> {}, "fixed");
+  void publishesCompleteFreshResourcesBeforeRetiringStaleSiblings() throws Exception {
+    Path stale = Files.createDirectories(
+        tempDir.resolve("librehardwaremonitor-0.9.6-stale"));
+    Files.writeString(stale.resolve("LibreHardwareMonitorLib.dll"), "malicious", UTF_8);
+    Path fresh = tempDir.resolve("librehardwaremonitor-0.9.6-fresh");
+    boolean[] finalVisibleDuringCopy = {false};
+    boolean[] finalCompleteDuringCleanup = {false};
+    boolean[] ownerMarkerVisibleDuringCleanup = {false};
+    var provisioner = provisionerWithLibraryCompanionAndScript(path -> {
+      if (path.equals(stale)) {
+        finalCompleteDuringCleanup[0] =
+            Files.exists(fresh.resolve("LibreHardwareMonitorLib.dll"))
+                && Files.exists(fresh.resolve("cpu-temperature.ps1"));
+        ownerMarkerVisibleDuringCleanup[0] =
+            Files.exists(fresh.resolve("live-owner.pid"));
+      }
+    }, "fresh", () -> finalVisibleDuringCopy[0] |= Files.exists(fresh));
 
-    assertThatThrownBy(provisioner::provision).isInstanceOf(SecurityException.class);
-    assertThat(Files.readString(existing.resolve("LibreHardwareMonitorLib.dll"), UTF_8))
-        .isEqualTo("malicious");
+    var libraries = provisioner.provision();
+
+    assertThat(finalVisibleDuringCopy[0]).isFalse();
+    assertThat(finalCompleteDuringCleanup[0]).isTrue();
+    assertThat(ownerMarkerVisibleDuringCleanup[0]).isFalse();
+    assertThat(stale).doesNotExist();
+    assertThat(libraries.directory()).isEqualTo(fresh);
+    assertThat(Files.readString(libraries.libreHardwareMonitor(), UTF_8))
+        .isEqualTo("trusted");
+    String marker = Files.readString(fresh.resolve("live-owner.pid"), UTF_8);
+    assertThat(marker).contains("pid=" + ProcessHandle.current().pid());
+    assertThat(marker).contains("startedAtEpochMillis=");
+    libraries.close();
+  }
+
+  @Test
+  void holdsExclusiveLeaseForTheOwnedResourceLifetime() throws Exception {
+    var first = provisionerWithLibraryCompanionAndScript(path -> {}, "first");
+    var second = provisionerWithLibraryCompanionAndScript(path -> {}, "second");
+    var firstLibraries = first.provision();
+
+    assertThatThrownBy(second::provision)
+        .isInstanceOf(SecurityException.class)
+        .hasMessageContaining("already in use");
+
+    firstLibraries.close();
+    var secondLibraries = second.provision();
+    secondLibraries.close();
+  }
+
+  @Test
+  void reportsStrictRollbackFailureWithoutPublishingAnOwnerMarker() throws Exception {
+    Path outside = Files.writeString(tempDir.resolve("rollback-outside.txt"), "outside", UTF_8);
+    Path stale = Files.createDirectories(
+        tempDir.resolve("librehardwaremonitor-0.9.6-rollback-stale"));
+    try {
+      Files.createSymbolicLink(stale.resolve("linked.txt"), outside);
+    } catch (UnsupportedOperationException | IOException failure) {
+      org.junit.jupiter.api.Assumptions.abort(
+          "Symbolic links unavailable: " + failure.getMessage());
+    }
+    Path fresh = tempDir.resolve("librehardwaremonitor-0.9.6-rollback-fresh");
+    int[] freshAclVisits = {0};
+    var provisioner = provisionerWithLibraryCompanionAndScript(path -> {
+      if (path.equals(fresh) && ++freshAclVisits[0] > 1) {
+        throw new IOException("rollback blocked");
+      }
+    }, "rollback-fresh");
+
+    assertThatThrownBy(provisioner::provision)
+        .isInstanceOf(SecurityException.class)
+        .hasMessageContaining("rollback failed");
+    assertThat(fresh.resolve("live-owner.pid")).doesNotExist();
+    assertThat(outside).exists();
   }
 
   @Test
@@ -75,18 +138,34 @@ class SecureNativeLibraryProvisionerTest {
   private SecureNativeLibraryProvisioner provisionerWithLibraryCompanionAndScript(
       SecureNativeLibraryProvisioner.AclPolicy acl,
       String nonce) {
+    return provisionerWithLibraryCompanionAndScript(acl, nonce, () -> {});
+  }
+
+  private SecureNativeLibraryProvisioner provisionerWithLibraryCompanionAndScript(
+      SecureNativeLibraryProvisioner.AclPolicy acl,
+      String nonce,
+      Runnable beforeResourceCopy) {
     return new SecureNativeLibraryProvisioner(
         tempDir,
         List.of(
             new SecureNativeLibraryProvisioner.ResourceSpec(
                 "LibreHardwareMonitorLib.dll", hash("trusted"),
-                () -> new ByteArrayInputStream("trusted".getBytes(UTF_8))),
+                () -> {
+                  beforeResourceCopy.run();
+                  return new ByteArrayInputStream("trusted".getBytes(UTF_8));
+                }),
             new SecureNativeLibraryProvisioner.ResourceSpec(
                 "HidSharp.dll", hash("trusted-hid"),
-                () -> new ByteArrayInputStream("trusted-hid".getBytes(UTF_8))),
+                () -> {
+                  beforeResourceCopy.run();
+                  return new ByteArrayInputStream("trusted-hid".getBytes(UTF_8));
+                }),
             new SecureNativeLibraryProvisioner.ResourceSpec(
                 "cpu-temperature.ps1", hash("trusted-script"),
-                () -> new ByteArrayInputStream("trusted-script".getBytes(UTF_8)))),
+                () -> {
+                  beforeResourceCopy.run();
+                  return new ByteArrayInputStream("trusted-script".getBytes(UTF_8));
+                })),
         acl,
         () -> nonce);
   }
@@ -128,6 +207,26 @@ class SecureNativeLibraryProvisionerTest {
     assertThatThrownBy(provisioner::provision)
         .isInstanceOf(SecurityException.class)
         .hasMessageContaining("link");
+  }
+
+  @Test
+  void staleCleanupRefusesSymbolicLinksWithoutDeletingTheirTarget() throws Exception {
+    Path outside = Files.writeString(tempDir.resolve("outside.txt"), "outside", UTF_8);
+    Path stale = Files.createDirectories(
+        tempDir.resolve("librehardwaremonitor-0.9.6-stale-link"));
+    try {
+      Files.createSymbolicLink(stale.resolve("linked.txt"), outside);
+    } catch (UnsupportedOperationException | IOException failure) {
+      org.junit.jupiter.api.Assumptions.abort(
+          "Symbolic links unavailable: " + failure.getMessage());
+    }
+    var provisioner = provisionerWithLibraryCompanionAndScript(
+        path -> {}, "fresh-link");
+
+    assertThatThrownBy(provisioner::provision)
+        .isInstanceOf(SecurityException.class)
+        .hasMessageContaining("link");
+    assertThat(outside).exists();
   }
 
   private SecureNativeLibraryProvisioner provisioner(

@@ -142,6 +142,171 @@ Describe 'PawnIO sensor provider operations' {
             { Assert-PawnIoInstallation } | Should -Throw '*2.2.0.0*'
         }
 
+        It 'ignores a sole stale owner until the current owner marker appears' {
+            $script:directoryEnumerations = 0
+            $ownerStartedAt = [datetime]'2026-07-16T15:00:00Z'
+            Mock Test-Path { $true }
+            Mock Get-ChildItem {
+                $script:directoryEnumerations++
+                if ($script:directoryEnumerations -eq 1) {
+                    return @([pscustomobject]@{
+                        Name='librehardwaremonitor-0.9.6-stale'
+                        FullName='C:\sensors\stale'
+                    })
+                }
+                return @(
+                    [pscustomobject]@{
+                        Name='librehardwaremonitor-0.9.6-stale'
+                        FullName='C:\sensors\stale'
+                    },
+                    [pscustomobject]@{
+                        Name='librehardwaremonitor-0.9.6-live'
+                        FullName='C:\sensors\live'
+                    })
+            }
+            Mock Test-ProductionSensorOwnerMarker {
+                $Directory.FullName -eq 'C:\sensors\live'
+            }
+            Mock Start-Sleep {}
+
+            $directory = Wait-ProductionSensorResourceDirectory `
+                -Base 'C:\sensors' `
+                -OwnerPid 1234 `
+                -OwnerStartedAt $ownerStartedAt `
+                -Timeout ([timespan]::FromSeconds(1))
+
+            $directory.FullName | Should -Be 'C:\sensors\live'
+            Should -Invoke Get-ChildItem -Times 2 -Exactly
+            Should -Invoke Start-Sleep -Times 1 -Exactly -ParameterFilter {
+                $Milliseconds -eq 250
+            }
+        }
+
+        It 'reports the unresolved resource count when the wait expires' {
+            $ownerStartedAt = [datetime]'2026-07-16T15:00:00Z'
+            Mock Test-Path { $true }
+            Mock Get-ChildItem {
+                @(
+                    [pscustomobject]@{
+                        Name='librehardwaremonitor-0.9.6-stale-a'
+                        FullName='C:\sensors\stale-a'
+                    },
+                    [pscustomobject]@{
+                        Name='librehardwaremonitor-0.9.6-stale-b'
+                        FullName='C:\sensors\stale-b'
+                    })
+            }
+            Mock Test-ProductionSensorOwnerMarker { $false }
+            Mock Start-Sleep {}
+
+            {
+                Wait-ProductionSensorResourceDirectory `
+                    -Base 'C:\sensors' `
+                    -OwnerPid 1234 `
+                    -OwnerStartedAt $ownerStartedAt `
+                    -Timeout ([timespan]::Zero)
+            } | Should -Throw '*found 0 live of 2 total*'
+
+            Should -Invoke Start-Sleep -Times 0 -Exactly
+        }
+
+        It 'clamps a nonzero unresolved wait to the remaining monotonic timeout' {
+            $ownerStartedAt = [datetime]'2026-07-16T15:00:00Z'
+            Mock Test-Path { $true }
+            Mock Get-ChildItem {
+                @(
+                    [pscustomobject]@{
+                        Name='librehardwaremonitor-0.9.6-stale-a'
+                        FullName='C:\sensors\stale-a'
+                    },
+                    [pscustomobject]@{
+                        Name='librehardwaremonitor-0.9.6-stale-b'
+                        FullName='C:\sensors\stale-b'
+                    })
+            }
+            Mock Test-ProductionSensorOwnerMarker { $false }
+
+            $elapsed = Measure-Command {
+                {
+                    Wait-ProductionSensorResourceDirectory `
+                        -Base 'C:\sensors' `
+                        -OwnerPid 1234 `
+                        -OwnerStartedAt $ownerStartedAt `
+                        -Timeout ([timespan]::FromMilliseconds(20)) `
+                        -PollMilliseconds 250
+                } | Should -Throw '*found 0 live of 2 total*'
+            }
+
+            $elapsed.TotalMilliseconds | Should -BeLessThan 200
+        }
+
+        It 'matches owner markers by pid and process start time' {
+            $directory = New-Item -ItemType Directory -Path (
+                Join-Path $TestDrive 'librehardwaremonitor-0.9.6-owner')
+            $ownerStartedAt = [datetime]'2026-07-16T15:00:00Z'
+            @(
+                'pid=9999'
+                "startedAtEpochMillis=$(
+                    ([DateTimeOffset]$ownerStartedAt).ToUnixTimeMilliseconds()
+                )"
+            ) | Set-Content -LiteralPath (Join-Path $directory.FullName 'live-owner.pid')
+
+            Test-ProductionSensorOwnerMarker `
+                -Directory $directory `
+                -OwnerPid 1234 `
+                -OwnerStartedAt $ownerStartedAt | Should -BeFalse
+
+            @(
+                'pid=1234'
+                "startedAtEpochMillis=$(
+                    ([DateTimeOffset]$ownerStartedAt.AddMilliseconds(-1)).
+                        ToUnixTimeMilliseconds()
+                )"
+            ) | Set-Content -LiteralPath (Join-Path $directory.FullName 'live-owner.pid')
+
+            Test-ProductionSensorOwnerMarker `
+                -Directory $directory `
+                -OwnerPid 1234 `
+                -OwnerStartedAt $ownerStartedAt | Should -BeFalse
+
+            @(
+                'pid=1234'
+                "startedAtEpochMillis=$(
+                    ([DateTimeOffset]$ownerStartedAt).ToUnixTimeMilliseconds()
+                )"
+            ) | Set-Content -LiteralPath (Join-Path $directory.FullName 'live-owner.pid')
+
+            Test-ProductionSensorOwnerMarker `
+                -Directory $directory `
+                -OwnerPid 1234 `
+                -OwnerStartedAt $ownerStartedAt | Should -BeTrue
+        }
+
+        It 'excludes invalid nonce directory names from the live count' {
+            $ownerStartedAt = [datetime]'2026-07-16T15:00:00Z'
+            Mock Test-Path { $true }
+            Mock Get-ChildItem {
+                @(
+                    [pscustomobject]@{
+                        Name='librehardwaremonitor-0.9.6-invalid!'
+                        FullName='C:\sensors\invalid'
+                    },
+                    [pscustomobject]@{
+                        Name='librehardwaremonitor-0.9.6-live'
+                        FullName='C:\sensors\live'
+                    })
+            }
+            Mock Test-ProductionSensorOwnerMarker { $true }
+
+            $directory = Wait-ProductionSensorResourceDirectory `
+                -Base 'C:\sensors' `
+                -OwnerPid 1234 `
+                -OwnerStartedAt $ownerStartedAt `
+                -Timeout ([timespan]::FromSeconds(1))
+
+            $directory.FullName | Should -Be 'C:\sensors\live'
+        }
+
         It 'requires a plausible live direct probe after provider and Defender checks' {
             Mock Assert-NoActiveSensorThreat {}
             Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }

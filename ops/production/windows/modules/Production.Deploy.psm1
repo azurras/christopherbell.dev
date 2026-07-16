@@ -73,8 +73,12 @@ function Test-ProductionEndpoints {
 
 function Test-CandidateRelease {
     param($Config, [Parameter(Mandatory)][string]$Release, [string]$Database)
-    $additionalEnvironment = @{}
-    if (-not [string]::IsNullOrWhiteSpace($Database)) { $additionalEnvironment.SPRING_MONGODB_DATABASE = $Database }
+    $additionalEnvironment = @{
+        COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED = 'false'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Database)) {
+        $additionalEnvironment.SPRING_MONGODB_DATABASE = $Database
+    }
     $process = Start-ProductionJar -Config $Config -Release $Release -Port $Config.candidatePort -Profiles 'prod,deploy-smoke' -AdditionalEnvironment $additionalEnvironment
     try {
         Test-ProductionEndpoints -Config $Config -Port $Config.candidatePort
