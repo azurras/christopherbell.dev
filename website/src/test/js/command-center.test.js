@@ -19,6 +19,8 @@ import {
   shouldPoll,
   visibleLogText,
 } from '../../main/resources/static/js/lib/command-center.js';
+import * as commandCenterHelpers
+  from '../../main/resources/static/js/lib/command-center.js';
 
 test('command center API contract uses the five fixed protected paths', () => {
   assert.deepEqual(API.admin.commandCenter, {
@@ -53,7 +55,38 @@ test('metric display formats service state, start timestamps, and commit identif
   assert.equal(displayMetric({ key: 'production.service.running', status: 'AVAILABLE', value: 1, unit: 'state' }), 'Running');
   assert.equal(displayMetric({ key: 'production.service.running', status: 'AVAILABLE', value: 0, unit: 'state' }), 'Stopped');
   assert.equal(displayMetric({ key: 'application.last-start', status: 'AVAILABLE', value: 1783857600, unit: 'epoch-seconds' }), '2026-07-12 12:00:00 UTC');
-  assert.equal(displayMetric({ key: 'application.commit', status: 'AVAILABLE', value: 1, unit: 'commit', detail: 'abc123' }), 'abc123');
+  const commit = {
+    key: 'application.commit',
+    status: 'AVAILABLE',
+    value: 1,
+    unit: 'commit',
+    detail: '0123456789abcdef0123456789abcdef01234567',
+  };
+  assert.equal(displayMetric(commit), '01234567');
+});
+
+test('commit cards suppress duplicate detail and retain the full accessible title', () => {
+  assert.equal(typeof commandCenterHelpers.metricDetail, 'function');
+  assert.equal(typeof commandCenterHelpers.metricTitle, 'function');
+  const sha = '0123456789abcdef0123456789abcdef01234567';
+  const commit = {
+    key: 'application.commit',
+    status: 'AVAILABLE',
+    value: 1,
+    unit: 'commit',
+    detail: sha,
+  };
+
+  assert.equal(commandCenterHelpers.metricDetail(commit), null);
+  assert.equal(commandCenterHelpers.metricTitle(commit), sha);
+  assert.equal(commandCenterHelpers.metricDetail({
+    unit: 'celsius',
+    detail: 'Last successful reading',
+  }), 'Last successful reading');
+  assert.equal(commandCenterHelpers.metricTitle({
+    unit: 'celsius',
+    detail: 'Last successful reading',
+  }), null);
 });
 
 test('metric display compacts byte values for fixed-width command cards', () => {

@@ -22,7 +22,9 @@ export function displayMetric(reading) {
       ? 'Unavailable'
       : timestamp.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
   }
-  if (reading.unit === 'commit') return String(reading.detail || 'Unavailable');
+  if (reading.unit === 'commit') {
+    return String(reading.detail || 'Unavailable').slice(0, 8);
+  }
   if (reading.unit === 'bytes') return formatBinaryMetric(Number(reading.value), false);
   if (reading.unit === 'bytes/second') return formatBinaryMetric(Number(reading.value), true);
   if (reading.unit === 'seconds') return formatDuration(Number(reading.value));
@@ -37,6 +39,19 @@ export function displayMetric(reading) {
   };
   const suffix = Object.hasOwn(units, reading.unit) ? units[reading.unit] : (reading.unit || '');
   return suffix ? `${value} ${suffix}` : value;
+}
+
+/** Return optional secondary metric text without duplicating commit values. */
+export function metricDetail(reading) {
+  const detail = reading?.detail == null ? '' : String(reading.detail);
+  if (!detail || reading?.unit === 'commit') return null;
+  return detail;
+}
+
+/** Preserve the complete commit identifier as accessible title text. */
+export function metricTitle(reading) {
+  if (reading?.unit !== 'commit' || !reading?.detail) return null;
+  return String(reading.detail);
 }
 
 function formatDuration(value) {
