@@ -183,6 +183,18 @@ under PowerShell 7. The probe script treats every PowerShell error as
 terminating; zero exit with stderr or empty, malformed, or implausible output
 still fails startup verification.
 
+The CPU card prefers LibreHardwareMonitor's `CPU Package` sensor, then
+`Core Max`, then the maximum remaining actual CPU temperature.
+`Distance to TjMax` values are thermal headroom and are never displayed as
+temperature. Startup verification derives the expected script and library
+hashes from the active `current\app.jar`, so the protected resources remain
+verifiable if the release junction rolls back.
+
+The application reads the active release's bounded `release.json` from its
+working directory and validates the 40-character SHA for the administrator-only
+Application commit card. This remains part of the merge-only application
+release and does not depend on refreshing the installed service launcher.
+
 ## Application Releases
 
 Normal releases require only a merge or push to `origin/main`. The poller reads

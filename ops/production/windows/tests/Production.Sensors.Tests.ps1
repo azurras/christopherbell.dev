@@ -327,6 +327,89 @@ Describe 'PawnIO sensor provider operations' {
             )
         }
 
+        It 'prefers package temperature and excludes TjMax distance headroom' {
+            $probePath = Join-Path $PSScriptRoot (
+                '..\..\..\..\website\src\main\resources\lib\cpu-temperature.ps1'
+            )
+            $tokens = $null
+            $errors = $null
+            $ast = [Management.Automation.Language.Parser]::ParseFile(
+                $probePath, [ref]$tokens, [ref]$errors)
+            $function = $ast.Find({
+                param($node)
+                $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Select-CpuTemperature'
+            }, $true)
+
+            $errors | Should -BeNullOrEmpty
+            $function | Should -Not -BeNullOrEmpty
+            Invoke-Expression $function.Extent.Text
+
+            Select-CpuTemperature @(
+                [pscustomobject]@{ Name='Core Average'; Value=37.5 },
+                [pscustomobject]@{ Name='Core Max'; Value=45.0 },
+                [pscustomobject]@{ Name='CPU Package'; Value=48.0 },
+                [pscustomobject]@{
+                    Name='E-Core #5 Distance to TjMax'
+                    Value=66.0
+                }
+            ) | Should -Be 48.0
+
+            Select-CpuTemperature @(
+                [pscustomobject]@{ Name='Core Max'; Value=45.0 },
+                [pscustomobject]@{ Name='P-Core #1'; Value=43.0 },
+                [pscustomobject]@{
+                    Name='P-Core #1 Distance to TjMax'
+                    Value=57.0
+                }
+            ) | Should -Be 45.0
+
+            Select-CpuTemperature @(
+                [pscustomobject]@{ Name='P-Core #1'; Value=43.0 },
+                [pscustomobject]@{ Name='E-Core #1'; Value=36.0 },
+                [pscustomobject]@{
+                    Name='E-Core #1 Distance to TjMax'
+                    Value=64.0
+                }
+            ) | Should -Be 43.0
+        }
+
+        It 'derives the expected probe hash from the active release jar' {
+            $root = Join-Path $TestDrive 'release-aware-hash'
+            $current = New-Item -ItemType Directory (
+                Join-Path $root 'current')
+            $jar = Join-Path $current.FullName 'app.jar'
+            $content = 'previous-release-probe'
+            $archive = [IO.Compression.ZipFile]::Open(
+                $jar, [IO.Compression.ZipArchiveMode]::Create)
+            try {
+                $entry = $archive.CreateEntry(
+                    'BOOT-INF/classes/lib/cpu-temperature.ps1')
+                $stream = $entry.Open()
+                try {
+                    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($content)
+                    $stream.Write($bytes, 0, $bytes.Length)
+                } finally {
+                    $stream.Dispose()
+                }
+            } finally {
+                $archive.Dispose()
+            }
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try {
+                $expected = -join (
+                    $sha.ComputeHash(
+                        [Text.UTF8Encoding]::new($false).GetBytes($content)
+                    ) | ForEach-Object { $_.ToString('X2') }
+                )
+            } finally {
+                $sha.Dispose()
+            }
+
+            Get-ProductionCpuTemperatureScriptHash -Root $root |
+                Should -Be $expected
+        }
+
         It 'requires a plausible live direct probe after provider and Defender checks' {
             Mock Assert-NoActiveSensorThreat {}
             Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
