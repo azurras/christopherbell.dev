@@ -4,7 +4,7 @@ $script:PawnIoUri = 'https://github.com/namazso/PawnIO.Setup/releases/download/2
 $script:PawnIoSha256 = '1F519A22E47187F70A1379A48CA604981C4FCF694F4E65B734AAA74A9FBA3032'
 $script:PawnIoSignerThumbprint = 'F380DCC9F706E2756A5047B832FFE719E1BC35F5'
 $script:PawnIoVersion = '2.2.0.0'
-$script:CpuTemperatureScriptSha256 = '6B2CF322F148BC17431F3A75225747ECEB558F158FC84AFBDA899C3788981C68'
+$script:CpuTemperatureScriptSha256 = 'F90A50A607B3C714512A4CF9070339CB8E03AC2759E649BE68F907BB75AEE30B'
 $script:LibreHardwareMonitorSha256 = '6EBC194316536BA61AF5BE24508AD9FCBB2ECC685E716C12E787C79530F66BF0'
 $script:PawnIoRegistryPaths = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO',
@@ -185,9 +185,11 @@ function Get-ProductionCpuTemperature {
         throw 'Live CPU temperature resource verification failed.'
     }
 
-    $powerShell = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    $powerShell = Join-Path $env:SystemRoot (
+        'System32\WindowsPowerShell\v1.0\powershell.exe'
+    )
     if (-not (Test-Path -LiteralPath $powerShell -PathType Leaf)) {
-        throw 'PowerShell 7 is required for the CPU temperature probe.'
+        throw 'Windows PowerShell 5.1 is required for the CPU temperature probe.'
     }
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $powerShell
@@ -195,8 +197,17 @@ function Get-ProductionCpuTemperature {
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    foreach ($argument in @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$scriptPath,
-            '-LibreHardwareMonitorPath',$libraryPath)) {
+    foreach ($argument in @(
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        $scriptPath,
+        '-LibreHardwareMonitorPath',
+        $libraryPath
+    )) {
         [void]$start.ArgumentList.Add($argument)
     }
     $process = [Diagnostics.Process]::Start($start)
@@ -211,9 +222,12 @@ function Get-ProductionCpuTemperature {
             throw 'Live CPU temperature probe timed out.'
         }
         $stdout = $stdoutTask.GetAwaiter().GetResult().Trim()
-        [void]$stderrTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult().Trim()
         if ($process.ExitCode -ne 0) {
             throw "Live CPU temperature probe exited with code $($process.ExitCode)."
+        }
+        if ($stderr.Length -gt 0) {
+            throw 'Live CPU temperature probe reported an error.'
         }
         if ($stdout.Length -eq 0 -or $stdout.Length -gt 32) {
             throw 'Live CPU temperature probe returned an invalid response.'

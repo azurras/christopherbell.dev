@@ -307,6 +307,26 @@ Describe 'PawnIO sensor provider operations' {
             $directory.FullName | Should -Be 'C:\sensors\live'
         }
 
+        It 'uses the full framework probe host and terminating script errors' {
+            $module = Get-Content (
+                Join-Path $PSScriptRoot '..\modules\Production.Sensors.psm1'
+            ) -Raw
+            $probe = Get-Content (
+                Join-Path $PSScriptRoot (
+                    '..\..\..\..\website\src\main\resources\lib\' +
+                    'cpu-temperature.ps1'
+                )
+            ) -Raw
+
+            $module | Should -Match (
+                'System32\\WindowsPowerShell\\v1\.0\\powershell\.exe'
+            )
+            $module | Should -Not -Match 'PowerShell\\7\\pwsh\.exe'
+            $probe | Should -Match (
+                '(?m)^\$ErrorActionPreference\s*=\s*''Stop'''
+            )
+        }
+
         It 'requires a plausible live direct probe after provider and Defender checks' {
             Mock Assert-NoActiveSensorThreat {}
             Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }

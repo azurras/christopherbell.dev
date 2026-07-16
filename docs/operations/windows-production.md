@@ -177,6 +177,12 @@ Stale directories and invalid nonce names are excluded from the live set;
 unresolved zero or multiple current live counts still fail closed and sensors
 must be disabled.
 
+The pinned LibreHardwareMonitor 0.9.6 probe runs through Windows PowerShell 5.1
+because it calls full .NET Framework synchronization APIs that are unavailable
+under PowerShell 7. The probe script treats every PowerShell error as
+terminating; zero exit with stderr or empty, malformed, or implausible output
+still fails startup verification.
+
 ## Application Releases
 
 Normal releases require only a merge or push to `origin/main`. The poller reads
