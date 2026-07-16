@@ -57,7 +57,14 @@ function Start-ProductionJar {
     $start.FileName = $Config.javaExe
     $start.WorkingDirectory = $release
     $start.UseShellExecute = $false
-    foreach ($argument in @('-Xrs','-jar',$jar,"--spring.profiles.active=$Profiles","--server.port=$Port")) { [void]$start.ArgumentList.Add($argument) }
+    foreach ($argument in @(
+        '-Xrs',
+        '--enable-native-access=ALL-UNNAMED',
+        '-jar',
+        $jar,
+        "--spring.profiles.active=$Profiles",
+        "--server.port=$Port"
+    )) { [void]$start.ArgumentList.Add($argument) }
     foreach ($entry in $environment.GetEnumerator()) { $start.Environment[$entry.Key] = [string]$entry.Value }
     return [Diagnostics.Process]::Start($start)
 }

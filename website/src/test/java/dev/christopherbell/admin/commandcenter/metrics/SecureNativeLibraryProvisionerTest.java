@@ -5,11 +5,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
+import com.sun.jna.platform.win32.Advapi32Util;
+import com.sun.jna.platform.win32.WinNT;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryFlag;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
+import java.nio.file.attribute.AclFileAttributeView;
 import java.security.MessageDigest;
+import java.util.EnumSet;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -190,6 +198,35 @@ class SecureNativeLibraryProvisionerTest {
     assertThat(SecureNativeLibraryProvisioner.WindowsAclPolicy.trustedPrincipalNames())
         .containsExactlyInAnyOrder("NT AUTHORITY\\SYSTEM", "BUILTIN\\Administrators")
         .noneMatch(name -> name.contains(System.getProperty("user.name")));
+  }
+
+  @Test
+  @EnabledOnOs(OS.WINDOWS)
+  void windowsAclProtectionDisablesDirectoryInheritance() throws Exception {
+    Path directory = Files.createDirectory(tempDir.resolve("inherited-acl"));
+    assumeFalse(isDaclProtected(directory), "Test requires an ACL-inheriting directory");
+    var view = Files.getFileAttributeView(directory, AclFileAttributeView.class);
+    var intendedEntry = AclEntry.newBuilder()
+        .setType(AclEntryType.ALLOW)
+        .setPrincipal(Files.getOwner(directory))
+        .setPermissions(EnumSet.allOf(AclEntryPermission.class))
+        .setFlags(AclEntryFlag.FILE_INHERIT, AclEntryFlag.DIRECTORY_INHERIT)
+        .build();
+    view.setAcl(List.of(intendedEntry));
+
+    SecureNativeLibraryProvisioner.WindowsAclPolicy.protectDacl(directory);
+
+    assertThat(isDaclProtected(directory)).isTrue();
+    assertThat(view.getAcl()).containsExactly(intendedEntry);
+    assertThat(Advapi32Util.getFileSecurityDescriptor(directory.toFile(), false)
+        .getDiscretionaryACL().getACEs())
+        .hasSize(1)
+        .allMatch(ace -> (ace.AceFlags & WinNT.INHERITED_ACE) == 0);
+  }
+
+  private static boolean isDaclProtected(Path path) {
+    var descriptor = Advapi32Util.getFileSecurityDescriptor(path.toFile(), false);
+    return (descriptor.Control & WinNT.SE_DACL_PROTECTED) != 0;
   }
 
   @Test
