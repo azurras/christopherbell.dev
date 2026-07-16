@@ -79,19 +79,100 @@ function Assert-PawnIoInstallation {
     return $installation
 }
 
+function Test-ProductionSensorOwnerMarker {
+    param(
+        [Parameter(Mandatory)]$Directory,
+        [Parameter(Mandatory)][int]$OwnerPid,
+        [Parameter(Mandatory)][datetime]$OwnerStartedAt
+    )
+
+    $marker = Join-Path $Directory.FullName 'live-owner.pid'
+    if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+        return $false
+    }
+    $values = @{}
+    foreach ($line in Get-Content -LiteralPath $marker -ErrorAction Stop) {
+        if ($line -match '^([A-Za-z]+)=(\d+)$') {
+            $values[$Matches[1]] = $Matches[2]
+        }
+    }
+    [long]$markerPid = 0
+    [long]$markerStartedAt = 0
+    if (-not [long]::TryParse([string]$values.pid, [ref]$markerPid) -or
+        -not [long]::TryParse(
+            [string]$values.startedAtEpochMillis,
+            [ref]$markerStartedAt)) {
+        return $false
+    }
+    $ownerStartedAtEpochMillis = (
+        [DateTimeOffset]$OwnerStartedAt
+    ).ToUnixTimeMilliseconds()
+    return $markerPid -eq $OwnerPid -and
+        $markerStartedAt -eq $ownerStartedAtEpochMillis
+}
+
+function Wait-ProductionSensorResourceDirectory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Base,
+        [Parameter(Mandatory)][int]$OwnerPid,
+        [Parameter(Mandatory)][datetime]$OwnerStartedAt,
+        [timespan]$Timeout = ([timespan]::FromSeconds(15)),
+        [ValidateRange(1,5000)][int]$PollMilliseconds = 250
+    )
+
+    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $observedCount = 0
+    while ($true) {
+        $allDirectories = if (Test-Path -LiteralPath $Base -PathType Container) {
+            @(Get-ChildItem -LiteralPath $Base -Directory `
+                -Filter 'librehardwaremonitor-0.9.6-*' -ErrorAction Stop |
+                Where-Object {
+                    $_.Name -match '^librehardwaremonitor-0\.9\.6-[A-Za-z0-9-]{1,64}$'
+                })
+        } else {
+            @()
+        }
+        $directories = @($allDirectories | Where-Object {
+            Test-ProductionSensorOwnerMarker `
+                -Directory $_ `
+                -OwnerPid $OwnerPid `
+                -OwnerStartedAt $OwnerStartedAt
+        })
+        $observedCount = $directories.Count
+        $remainingMilliseconds = $Timeout.TotalMilliseconds - $stopwatch.Elapsed.TotalMilliseconds
+        if ($observedCount -eq 1 -and $remainingMilliseconds -ge 0) {
+            return $directories[0]
+        }
+        if ($remainingMilliseconds -le 0) {
+            throw "Expected exactly one live CPU temperature resource directory; found $observedCount live of $($allDirectories.Count) total."
+        }
+        Start-Sleep -Milliseconds ([int][math]::Ceiling(
+            [math]::Min($PollMilliseconds, $remainingMilliseconds)))
+    }
+}
+
 function Get-ProductionCpuTemperature {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Root)
 
+    $config = Get-Content -LiteralPath (Join-Path $Root 'config\deploy.json') -Raw |
+        ConvertFrom-Json
+    $listeners = @(
+        Get-NetTCPConnection -LocalPort ([int]$config.productionPort) `
+            -State Listen -ErrorAction SilentlyContinue
+    )
+    if ($listeners.Count -ne 1) {
+        throw "Expected exactly one production listener for CPU sensor ownership; found $($listeners.Count)."
+    }
+    $ownerProcess = Get-Process -Id ([int]$listeners[0].OwningProcess) -ErrorAction Stop
     $base = Join-Path $Root 'config\command-center-sensors'
-    if (-not (Test-Path -LiteralPath $base -PathType Container)) {
-        throw 'Live CPU temperature resources are unavailable.'
-    }
-    $directories = @(Get-ChildItem -LiteralPath $base -Directory -Filter 'librehardwaremonitor-0.9.6-*' -ErrorAction Stop)
-    if ($directories.Count -ne 1) {
-        throw 'Expected exactly one live CPU temperature resource directory.'
-    }
-    $directory = $directories[0].FullName
+    $directory = (
+        Wait-ProductionSensorResourceDirectory `
+            -Base $base `
+            -OwnerPid ([int]$listeners[0].OwningProcess) `
+            -OwnerStartedAt $ownerProcess.StartTime
+    ).FullName
     Assert-ProtectedProductionTree -Path $directory
     $scriptPath = Join-Path $directory 'cpu-temperature.ps1'
     $libraryPath = Join-Path $directory 'LibreHardwareMonitorLib.dll'

@@ -35,5 +35,22 @@ Describe 'native Windows deployment' {
             Test-CandidateRelease $config 'C:\data\releases\new' 'christopherbell_restore_check'
             Should -Invoke Start-ProductionJar -ParameterFilter { $AdditionalEnvironment.SPRING_MONGODB_DATABASE -eq 'christopherbell_restore_check' }
         }
+
+        It 'forces native sensor libraries off in deployment candidates' {
+            $process = [pscustomobject]@{ Id=1234; HasExited=$true }
+            $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
+                param($milliseconds) $true
+            }
+            Mock Start-ProductionJar { $process }
+            Mock Test-ProductionEndpoints {}
+            $config = [pscustomobject]@{ candidatePort=8081 }
+
+            Test-CandidateRelease $config 'C:\data\releases\new' 'restore_check'
+
+            Should -Invoke Start-ProductionJar -Times 1 -Exactly -ParameterFilter {
+                $AdditionalEnvironment.COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED -eq 'false' -and
+                $AdditionalEnvironment.SPRING_MONGODB_DATABASE -eq 'restore_check'
+            }
+        }
     }
 }

@@ -2,9 +2,14 @@ package dev.christopherbell.admin.commandcenter.metrics;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.AclEntry;
 import java.nio.file.attribute.AclEntryFlag;
 import java.nio.file.attribute.AclEntryPermission;
@@ -25,6 +30,16 @@ import java.util.function.Supplier;
 /** Extracts checksum-pinned native libraries only into an ACL-restricted fresh directory. */
 final class SecureNativeLibraryProvisioner {
   static final String VERSION = "0.9.6";
+  private static final String DIRECTORY_PREFIX = "librehardwaremonitor-" + VERSION + "-";
+  private static final String STAGING_PREFIX = ".librehardwaremonitor-" + VERSION + "-";
+  private static final String STAGING_SUFFIX = "-staging";
+  private static final String LEASE_FILE = "librehardwaremonitor.lock";
+  private static final String VALID_DIRECTORY_NAME =
+      java.util.regex.Pattern.quote(DIRECTORY_PREFIX) + "[A-Za-z0-9-]{1,64}";
+  private static final String VALID_STAGING_NAME =
+      java.util.regex.Pattern.quote(STAGING_PREFIX)
+          + "[A-Za-z0-9-]{1,64}"
+          + java.util.regex.Pattern.quote(STAGING_SUFFIX);
   private final Path baseDirectory;
   private final List<ResourceSpec> resources;
   private final AclPolicy aclPolicy;
@@ -59,22 +74,26 @@ final class SecureNativeLibraryProvisioner {
     if (nonce == null || !nonce.matches("[A-Za-z0-9-]{1,64}")) {
       throw new SecurityException("Invalid native library extraction nonce.");
     }
-    Path versionDirectory = baseDirectory.resolve(
-        "librehardwaremonitor-" + VERSION + "-" + nonce);
-    boolean created = false;
+    Path versionDirectory = baseDirectory.resolve(DIRECTORY_PREFIX + nonce);
+    Path stagingDirectory =
+        baseDirectory.resolve(STAGING_PREFIX + nonce + STAGING_SUFFIX);
+    Path ownedDirectory = null;
+    SensorLease lease = null;
     try {
       createTrustedBaseDirectory();
       verifyNotLinkOrReparsePoint(baseDirectory);
       aclPolicy.hardenAndVerify(baseDirectory);
-      Files.createDirectory(versionDirectory);
-      created = true;
-      verifyNotLinkOrReparsePoint(versionDirectory);
-      aclPolicy.hardenAndVerify(versionDirectory);
+      lease = acquireSensorLease();
+      removeOwnedDirectories(STAGING_PREFIX + "*", VALID_STAGING_NAME, null);
+      Files.createDirectory(stagingDirectory);
+      ownedDirectory = stagingDirectory;
+      verifyNotLinkOrReparsePoint(stagingDirectory);
+      aclPolicy.hardenAndVerify(stagingDirectory);
       Path libre = null;
       Path cpuTemperatureScript = null;
       for (var resource : resources) {
-        Path target = versionDirectory.resolve(resource.fileName()).normalize();
-        if (!target.getParent().equals(versionDirectory)) {
+        Path target = stagingDirectory.resolve(resource.fileName()).normalize();
+        if (!target.getParent().equals(stagingDirectory)) {
           throw new SecurityException("Invalid bundled native library name.");
         }
         try (InputStream input = resource.input().get()) {
@@ -100,9 +119,31 @@ final class SecureNativeLibraryProvisioner {
       if (libre == null || cpuTemperatureScript == null) {
         throw new SecurityException("Required CPU sensor resources are missing.");
       }
-      return NativeLibraries.owned(versionDirectory, libre, cpuTemperatureScript);
+      Files.move(stagingDirectory, versionDirectory, StandardCopyOption.ATOMIC_MOVE);
+      ownedDirectory = versionDirectory;
+      verifyNotLinkOrReparsePoint(versionDirectory);
+      aclPolicy.hardenAndVerify(versionDirectory);
+      Path finalLibre = versionDirectory.resolve(libre.getFileName());
+      Path finalScript = versionDirectory.resolve(cpuTemperatureScript.getFileName());
+      removeOwnedDirectories(DIRECTORY_PREFIX + "*", VALID_DIRECTORY_NAME, versionDirectory);
+      publishOwnerMarker(versionDirectory);
+      return NativeLibraries.owned(
+          versionDirectory, finalLibre, finalScript, lease);
     } catch (IOException | RuntimeException failure) {
-      if (created) deleteTree(versionDirectory);
+      try {
+        if (ownedDirectory != null
+            && Files.exists(ownedDirectory, LinkOption.NOFOLLOW_LINKS)) {
+          deleteOwnedTreeStrict(ownedDirectory);
+        }
+      } catch (IOException | RuntimeException rollbackFailure) {
+        var combined = new SecurityException(
+            "Secure native library provisioning rollback failed.",
+            rollbackFailure);
+        combined.addSuppressed(failure);
+        throw combined;
+      } finally {
+        if (lease != null) lease.close();
+      }
       if (failure instanceof SecurityException securityException) {
         throw securityException;
       }
@@ -121,6 +162,127 @@ final class SecureNativeLibraryProvisioner {
     }
     Files.createDirectories(baseDirectory);
     verifyNotLinkOrReparsePoint(baseDirectory);
+  }
+
+  private void removeOwnedDirectories(
+      String glob,
+      String validNamePattern,
+      Path excludedDirectory) throws IOException {
+    var trees = new ArrayList<List<Path>>();
+    try (var candidates = Files.newDirectoryStream(baseDirectory, glob)) {
+      for (Path candidate : candidates) {
+        Path normalized = candidate.toAbsolutePath().normalize();
+        if (!baseDirectory.equals(normalized.getParent())
+            || !normalized.getFileName().toString().matches(validNamePattern)) {
+          throw new SecurityException("Invalid native library resource directory.");
+        }
+        verifyNotLinkOrReparsePoint(normalized);
+        if (!Files.isDirectory(normalized, LinkOption.NOFOLLOW_LINKS)) {
+          throw new SecurityException("Native library resource is not a directory.");
+        }
+        if (excludedDirectory != null && excludedDirectory.equals(normalized)) {
+          continue;
+        }
+        var tree = new ArrayList<Path>();
+        collectTrustedTree(normalized, tree);
+        trees.add(tree);
+      }
+    }
+    for (List<Path> tree : trees) {
+      tree.sort(java.util.Comparator.reverseOrder());
+      for (Path path : tree) {
+        Files.delete(path);
+      }
+    }
+  }
+
+  private void deleteOwnedTreeStrict(Path directory) throws IOException {
+    var tree = new ArrayList<Path>();
+    collectTrustedTree(directory, tree);
+    tree.sort(java.util.Comparator.reverseOrder());
+    for (Path path : tree) {
+      Files.delete(path);
+    }
+  }
+
+  private void collectTrustedTree(Path path, List<Path> paths) throws IOException {
+    verifyNotLinkOrReparsePoint(path);
+    aclPolicy.hardenAndVerify(path);
+    paths.add(path);
+    if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) return;
+    try (var children = Files.newDirectoryStream(path)) {
+      for (Path child : children) {
+        Path normalized = child.toAbsolutePath().normalize();
+        if (!path.equals(normalized.getParent())) {
+          throw new SecurityException("Stale native library child escaped its directory.");
+        }
+        collectTrustedTree(normalized, paths);
+      }
+    }
+  }
+
+  private SensorLease acquireSensorLease() throws IOException {
+    Path leasePath = baseDirectory.resolve(LEASE_FILE);
+    if (Files.exists(leasePath, LinkOption.NOFOLLOW_LINKS)) {
+      verifyNotLinkOrReparsePoint(leasePath);
+    } else {
+      try {
+        Files.createFile(leasePath);
+      } catch (java.nio.file.FileAlreadyExistsException ignored) {
+        verifyNotLinkOrReparsePoint(leasePath);
+      }
+    }
+    verifyNotLinkOrReparsePoint(leasePath);
+    aclPolicy.hardenAndVerify(leasePath);
+    FileChannel channel = FileChannel.open(leasePath, StandardOpenOption.WRITE);
+    try {
+      FileLock lock = channel.tryLock();
+      if (lock == null) {
+        throw new SecurityException("CPU sensor resources are already in use.");
+      }
+      return new SensorLease(channel, lock);
+    } catch (OverlappingFileLockException failure) {
+      var wrapped = new SecurityException(
+          "CPU sensor resources are already in use.", failure);
+      closeFailedLeaseChannel(channel, wrapped);
+      throw wrapped;
+    } catch (IOException | RuntimeException failure) {
+      closeFailedLeaseChannel(channel, failure);
+      throw failure;
+    }
+  }
+
+  private static void closeFailedLeaseChannel(FileChannel channel, Throwable failure) {
+    try {
+      channel.close();
+    } catch (IOException closeFailure) {
+      failure.addSuppressed(closeFailure);
+    }
+  }
+
+  private void publishOwnerMarker(Path directory) throws IOException {
+    long ownerPid = ProcessHandle.current().pid();
+    long startedAtEpochMillis = ProcessHandle.current().info().startInstant()
+        .orElseThrow(() -> new SecurityException(
+            "CPU sensor owner process start time is unavailable."))
+        .toEpochMilli();
+    String owner = "pid=" + ownerPid + System.lineSeparator()
+        + "startedAtEpochMillis=" + startedAtEpochMillis + System.lineSeparator();
+    Path stagingMarker = directory.resolve(".live-owner.pid-staging");
+    Path ownerMarker = directory.resolve("live-owner.pid");
+    Files.writeString(
+        stagingMarker,
+        owner,
+        java.nio.charset.StandardCharsets.US_ASCII,
+        StandardOpenOption.CREATE_NEW,
+        StandardOpenOption.WRITE);
+    verifyNotLinkOrReparsePoint(stagingMarker);
+    aclPolicy.hardenAndVerify(stagingMarker);
+    if (!owner.equals(Files.readString(
+        stagingMarker, java.nio.charset.StandardCharsets.US_ASCII))) {
+      throw new SecurityException("CPU sensor owner marker changed before publication.");
+    }
+    Files.move(stagingMarker, ownerMarker, StandardCopyOption.ATOMIC_MOVE);
   }
 
   private static void createDirectoriesWithoutLinks(Path directory) throws IOException {
@@ -185,35 +347,74 @@ final class SecureNativeLibraryProvisioner {
     private final Path libreHardwareMonitor;
     private final Path cpuTemperatureScript;
     private final boolean owned;
+    private final SensorLease lease;
 
     NativeLibraries(Path directory, Path libreHardwareMonitor) {
-      this(directory, libreHardwareMonitor, directory.resolve("cpu-temperature.ps1"), false);
+      this(directory, libreHardwareMonitor, directory.resolve("cpu-temperature.ps1"), false, null);
     }
 
     NativeLibraries(Path directory, Path libreHardwareMonitor, Path cpuTemperatureScript) {
-      this(directory, libreHardwareMonitor, cpuTemperatureScript, false);
+      this(directory, libreHardwareMonitor, cpuTemperatureScript, false, null);
     }
 
     private NativeLibraries(
-        Path directory, Path libreHardwareMonitor, Path cpuTemperatureScript, boolean owned) {
+        Path directory,
+        Path libreHardwareMonitor,
+        Path cpuTemperatureScript,
+        boolean owned,
+        SensorLease lease) {
       this.directory = directory;
       this.libreHardwareMonitor = libreHardwareMonitor;
       this.cpuTemperatureScript = cpuTemperatureScript;
       this.owned = owned;
+      this.lease = lease;
     }
 
     static NativeLibraries owned(Path directory, Path libre) {
-      return new NativeLibraries(directory, libre, directory.resolve("cpu-temperature.ps1"), true);
+      return new NativeLibraries(
+          directory, libre, directory.resolve("cpu-temperature.ps1"), true, null);
     }
 
     static NativeLibraries owned(Path directory, Path libre, Path script) {
-      return new NativeLibraries(directory, libre, script, true);
+      return new NativeLibraries(directory, libre, script, true, null);
+    }
+
+    static NativeLibraries owned(
+        Path directory, Path libre, Path script, SensorLease lease) {
+      return new NativeLibraries(directory, libre, script, true, lease);
     }
 
     Path directory() { return directory; }
     Path libreHardwareMonitor() { return libreHardwareMonitor; }
     Path cpuTemperatureScript() { return cpuTemperatureScript; }
-    @Override public void close() { if (owned) deleteTree(directory); }
+    @Override
+    public void close() {
+      if (owned) deleteTree(directory);
+      if (lease != null) lease.close();
+    }
+  }
+
+  private static final class SensorLease implements AutoCloseable {
+    private final FileChannel channel;
+    private final FileLock lock;
+
+    private SensorLease(FileChannel channel, FileLock lock) {
+      this.channel = channel;
+      this.lock = lock;
+    }
+
+    @Override
+    public void close() {
+      try {
+        if (lock.isValid()) lock.release();
+      } catch (IOException ignored) {
+      } finally {
+        try {
+          channel.close();
+        } catch (IOException ignored) {
+        }
+      }
+    }
   }
 
   static final class WindowsAclPolicy implements AclPolicy {

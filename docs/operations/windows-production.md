@@ -160,6 +160,21 @@ When sensors are enabled, `verify-startup` also fails closed unless PawnIO is in
 driver is running, Defender reports no active sensor-provider threat, the live extracted resources
 retain their pinned hashes and protected ACLs, and a bounded direct probe returns plausible Celsius.
 
+CPU sensor resources are extracted beneath the protected
+`config\command-center-sensors` base. A sensor-enabled process holds an
+exclusive file lease, builds and verifies each fresh resource set under a
+nonmatching staging name, atomically publishes the complete nonce directory,
+and then validates and removes every matching stale sibling. Its final
+publication step writes an ACL-protected owner marker containing the process
+PID and start time; any failure before that marker is published requires strict
+rollback of the fresh directory. Deployment smoke candidates force native
+sensors off and cannot participate in that lifecycle. Startup verification
+matches owner markers to the process listening on the configured production
+port and waits up to 15 seconds to find exactly one current live directory.
+Stale directories and invalid nonce names are excluded from the live set;
+unresolved zero or multiple current live counts still fail closed and sensors
+must be disabled.
+
 ## Application Releases
 
 Normal releases require only a merge or push to `origin/main`. The poller reads
