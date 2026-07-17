@@ -1,7 +1,7 @@
 # Shared Folder
 
-Owns the security boundary for the private shared-folder feature before any routes or filesystem
-operations exist.
+Owns the security boundary and conflict-safe read/write portal for the private shared-folder
+feature.
 
 ## What Lives Here
 
@@ -23,10 +23,10 @@ operations exist.
   and write implies read. JWTs intentionally carry no shared-folder capability.
 - `audit` defines a bounded command and sink contract only. No audit persistence bean or
   operation-time sink injection exists until the later persistence task.
-- `model`, `service`, and `web` provide the read-only portal slice: authenticated directory
-  listings, disk-streamed full or single-range downloads, and safe previews. `web` accepts each
-  query path after Spring has decoded it once and passes that value unchanged to the resolver;
-  response models never include a local absolute path.
+- `model`, `service`, `upload`, and `web` provide authenticated directory listings,
+  disk-streamed full or single-range downloads, safe previews, conflict-safe mutations, and
+  resumable uploads. `web` accepts each path after Spring has decoded it once and passes that
+  value unchanged to the resolver; response models never include a local absolute path.
 
 ## Configuration
 
@@ -53,7 +53,40 @@ flag. Local and test profiles use build-owned paths; production roots use enviro
   Previews send `nosniff`; PDFs additionally send a restrictive sandbox CSP. Download and preview
   filenames use framework-built RFC 5987 content-disposition values.
 
+## Conflict-Safe Writes
+
+- Folder creation, rename, move, and delete reload the account with `requireWrite()` for every
+  operation. ADMIN has write access implicitly; other accounts need the persisted shared-folder
+  write capability. The versioned API remains `private, no-store` for successful writes and
+  errors.
+- Every existing source is addressed with an opaque observed token from a fresh listing. A stale
+  source, collision, or changed replacement target returns `409 Conflict`. Replacing an existing
+  destination is never implicit: the client must opt in and supply that destination's current
+  observed token. Portable no-replace moves use filesystem create-new semantics rather than
+  relying on platform-specific atomic-move replacement behavior.
+- Enabled Windows deployments perform create, write, flush, truncate, rename, move, and delete
+  with retained native directory handles and `NtCreateFile`/`NtSetInformationFile`. Opens are
+  relative and use `OBJ_DONT_REPARSE`; source and replacement-target file IDs are rechecked while
+  held. Mutations have no path-based NIO fallback in native mode. Volume capacity is queried from
+  the retained system-root handle and arithmetic overflow fails closed.
+
+## Resumable Uploads
+
+- Upload sessions are owner-scoped, optimistic-versioned Mongo records. Private staging lives
+  under the configured system root, never the visible shared root, and finalization is a
+  same-volume handle-relative rename. Ordered chunks are streamed to disk, SHA-256 checked, and
+  idempotent at the recorded offset; concurrent append/terminal operations serialize around the
+  durable session state.
+- The browser sends 8 MiB chunks, shows byte progress, supports cancel and drag/drop, and can
+  resume a matching local file after refresh. Browser resume storage contains only the session
+  identifier and non-secret file metadata—never an observed token or bearer credential.
+- The configured per-file maximum returns `413 Payload Too Large`; insufficient capacity after
+  the configured reserve returns `507 Insufficient Storage`. Finalization and cancellation use
+  durable `FINALIZING` and `CANCEL_PENDING` phases so a database save failure after the physical
+  operation can be reconciled from stable file identity instead of duplicating or losing work.
+  Terminal sessions report `COMPLETED`, `CANCELLED`, or `EXPIRED` and cannot accept more chunks.
+
 ## Update This Doc
 
-Update this README when resolver guarantees, effective access rules, audit fields, or
-shared-folder configuration changes.
+Update this README when resolver or native-handle guarantees, effective access rules, mutation
+conflict rules, upload state, audit fields, or shared-folder configuration changes.

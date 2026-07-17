@@ -9,4 +9,17 @@ public record SharedDirectoryEntry(
     SharedDirectoryEntryType type,
     long size,
     Instant modifiedAt,
-    SharedFolderPreviewKind previewKind) {}
+    SharedFolderPreviewKind previewKind,
+    String observedToken) {
+
+  /** Preserves the read-only response construction used before observations were introduced. */
+  public SharedDirectoryEntry(
+      String name,
+      String path,
+      SharedDirectoryEntryType type,
+      long size,
+      Instant modifiedAt,
+      SharedFolderPreviewKind previewKind) {
+    this(name, path, type, size, modifiedAt, previewKind, null);
+  }
+}

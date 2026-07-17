@@ -31,8 +31,8 @@ public class SharedFolderAccessService {
   }
 
   /** Requires a fresh effective shared-folder write capability. */
-  public void requireWrite() {
-    require(AccountPermission.SHARED_FOLDER_WRITE, "Shared-folder write access required");
+  public Account requireWrite() {
+    return require(AccountPermission.SHARED_FOLDER_WRITE, "Shared-folder write access required");
   }
 
   /**
@@ -66,11 +66,12 @@ public class SharedFolderAccessService {
     return Set.copyOf(effective);
   }
 
-  private void require(AccountPermission required, String denialMessage) {
+  private Account require(AccountPermission required, String denialMessage) {
     Account account = currentActiveApprovedAccount();
     if (!effectivePermissions(account).contains(required)) {
       throw new AccessDeniedException(denialMessage);
     }
+    return account;
   }
 
   private Account currentActiveApprovedAccount() {

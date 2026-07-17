@@ -114,7 +114,7 @@ Owns browser-side behavior for server-rendered pages.
   polling/backoff decisions, cursor-generation decisions, text-only log copying,
   dialog clearing, and countdown helpers. Any 401/403—including one from a stale
   request generation—tears down and hides the console before redirecting.
-- `shared-folder.js` owns the read-only Shared Folder shell: it redirects visitors without a token,
+- `shared-folder.js` owns the Shared Folder shell: it redirects visitors without a token,
   checks the current account's effective shared read capability, renders relative-path breadcrumbs
   and accessible button controls, copies same-origin `/shared?path=` links, starts native
   attachment downloads and media previews without Blob buffering, and inserts text previews only
@@ -128,8 +128,12 @@ Owns browser-side behavior for server-rendered pages.
   per-client token on 401 or logout. Text and native-stream 401/403 responses use one actionable
   access-loss handler. Its root bootstrap script is intentionally public for exact anonymous
   `GET /shared-folder-auth-sw.js` so installation can happen before it has a bearer token; all
-  shared-folder API requests stay protected. The shared nav adds Shared Folder only after the
-  current-account API reports effective read access.
+  shared-folder API requests stay protected. Write-capable users can create folders, rename, move,
+  explicitly replace, and delete entries with observed tokens. The same module owns resumable
+  8 MiB chunk uploads, SHA-256 chunk digests, progress, cancel, drag/drop, explicit replacement,
+  and refresh recovery from non-secret local session metadata; terminal sessions clear that local
+  record. The shared nav adds Shared Folder only after the current-account API reports effective
+  read access.
 
 ## Design Notes
 

@@ -5,11 +5,16 @@ import test from 'node:test';
 import { API } from '../../main/resources/static/js/lib/api.js';
 import {
   accountHasSharedFolderRead,
+  accountHasSharedFolderWrite,
   breadcrumbItems,
   internalSharedFolderUrl,
   isSharedFolderAccessDenied,
   renderPreviewText,
   shouldActivateEntry,
+  uploadProgressPercent,
+  uploadIsTerminal,
+  uploadResumeMatchesFile,
+  moveMutationPayload,
 } from '../../main/resources/static/js/lib/shared-folder.js';
 
 test('shared-folder API paths encode each decoded relative path once', () => {
@@ -26,6 +31,49 @@ test('effective read access includes admins and stored write capability', () => 
   assert.equal(accountHasSharedFolderRead({ role: 'USER', permissions: ['SHARED_FOLDER_READ'] }), true);
   assert.equal(accountHasSharedFolderRead({ role: 'MOD', permissions: ['SHARED_FOLDER_WRITE'] }), true);
   assert.equal(accountHasSharedFolderRead({ role: 'USER', permissions: [] }), false);
+});
+
+test('effective write access and resumable upload progress are explicit', () => {
+  assert.equal(accountHasSharedFolderWrite({ role: 'ADMIN', permissions: [] }), true);
+  assert.equal(accountHasSharedFolderWrite({ role: 'USER', permissions: ['SHARED_FOLDER_WRITE'] }), true);
+  assert.equal(accountHasSharedFolderWrite({ role: 'USER', permissions: ['SHARED_FOLDER_READ'] }), false);
+  assert.equal(uploadProgressPercent({ expectedBytes: 20, nextOffset: 5 }), 25);
+  assert.equal(uploadProgressPercent({ expectedBytes: 0, nextOffset: 0 }), 0);
+  assert.equal(uploadProgressPercent({ expectedBytes: 20, nextOffset: 99 }), 100);
+  assert.equal(uploadIsTerminal({ state: 'COMPLETED' }), true);
+  assert.equal(uploadIsTerminal({ state: 'CANCELLED' }), true);
+  assert.equal(uploadIsTerminal({ state: 'EXPIRED' }), true);
+  assert.equal(uploadIsTerminal({ state: 'ACTIVE' }), false);
+  assert.equal(uploadResumeMatchesFile(
+    { parentPath: 'docs', name: 'video.mkv', expectedBytes: 10 },
+    { name: 'video.mkv', size: 10 }, 'docs'), true);
+  assert.equal(uploadResumeMatchesFile(
+    { parentPath: 'docs', name: 'video.mkv', expectedBytes: 10 },
+    { name: 'other.mkv', size: 10 }, 'docs'), false);
+});
+
+test('shared-folder write API paths encode identifiers and expose resumable upload actions', () => {
+  assert.equal(API.sharedFolder.folders, '/api/shared-folder/2026-07-17/folders');
+  assert.equal(API.sharedFolder.uploads, '/api/shared-folder/2026-07-17/uploads');
+  assert.equal(API.sharedFolder.uploadStatus('session/id'),
+    '/api/shared-folder/2026-07-17/uploads/session%2Fid');
+  assert.equal(API.sharedFolder.uploadChunk('session/id', 8192),
+    '/api/shared-folder/2026-07-17/uploads/session%2Fid/chunks/8192');
+  assert.equal(API.sharedFolder.uploadComplete('session/id'),
+    '/api/shared-folder/2026-07-17/uploads/session%2Fid/complete');
+});
+
+test('move payload requires an explicit observed replacement token', () => {
+  const source = { path: 'docs/a.txt', observedToken: 'source-token' };
+  assert.deepEqual(moveMutationPayload(source, 'archive', 'a.txt'), {
+    path: 'docs/a.txt', destinationPath: 'archive', name: 'a.txt',
+    observedToken: 'source-token', replace: false, replacedObservedToken: null,
+  });
+  assert.deepEqual(moveMutationPayload(
+    source, 'archive', 'a.txt', { observedToken: 'target-token' }), {
+    path: 'docs/a.txt', destinationPath: 'archive', name: 'a.txt',
+    observedToken: 'source-token', replace: true, replacedObservedToken: 'target-token',
+  });
 });
 
 test('breadcrumbs and copied links contain only internal decoded paths', () => {
@@ -60,4 +108,14 @@ test('shared-folder shell owns a responsive single-column mobile layout and down
   assert.match(page, /loginRedirectUrl/);
   assert.match(page, /clipboard\.writeText/);
   assert.match(page, /setAttribute\('sandbox', ''\)/);
+  assert.match(page, /shared-upload-progress/);
+  assert.match(page, /localStorage/);
+  assert.match(page, /crypto\.subtle\.digest/);
+  assert.match(page, /uploadCancel/);
+  assert.match(page, /dragover/);
+  assert.match(page, /API\.sharedFolder\.folders/);
+  assert.match(page, /API\.sharedFolder\.rename/);
+  assert.match(page, /API\.sharedFolder\.move/);
+  assert.match(page, /API\.sharedFolder\.delete/);
+  assert.match(page, /window\.confirm/);
 });

@@ -78,4 +78,55 @@ public class RequestSizeLimitFilterTest {
 
     assertEquals(413, response.getStatus());
   }
+
+  @Test
+  public void sharedFolderUploadChunksUseTheirConfiguredLimitWithoutChangingOtherRoutes()
+      throws ServletException, IOException {
+    RequestSizeLimitFilter filter = new RequestSizeLimitFilter(10, 8);
+    FilterChain drain = (servletRequest, servletResponse) -> {
+      ServletInputStream input = ((HttpServletRequest) servletRequest).getInputStream();
+      while (input.read() != -1) {
+        // Exercise the same streamed enforcement used for chunked HTTP bodies.
+      }
+    };
+
+    MockHttpServletRequest exactChunk = new MockHttpServletRequest(
+        "PUT", "/api/shared-folder/2026-07-17/uploads/id/chunks/0");
+    exactChunk.setContent(new byte[8]);
+    MockHttpServletResponse exactResponse = new MockHttpServletResponse();
+    filter.doFilter(exactChunk, exactResponse, drain);
+
+    MockHttpServletRequest oversizeChunk = new MockHttpServletRequest(
+        "PUT", "/api/shared-folder/2026-07-17/uploads/id/chunks/0");
+    oversizeChunk.setContent(new byte[9]);
+    MockHttpServletResponse oversizeResponse = new MockHttpServletResponse();
+    filter.doFilter(oversizeChunk, oversizeResponse, drain);
+
+    MockHttpServletRequest ordinary = new MockHttpServletRequest("POST", "/api/ordinary");
+    ordinary.setContent(new byte[11]);
+    MockHttpServletResponse ordinaryResponse = new MockHttpServletResponse();
+    filter.doFilter(ordinary, ordinaryResponse, drain);
+
+    MockHttpServletRequest complete = new MockHttpServletRequest(
+        "POST", "/api/shared-folder/2026-07-17/uploads/id/complete");
+    complete.setContent(new byte[9]);
+    MockHttpServletResponse completeResponse = new MockHttpServletResponse();
+    filter.doFilter(complete, completeResponse, drain);
+
+    MockHttpServletRequest unknownLengthChunk = new MockHttpServletRequest(
+        "PUT", "/api/shared-folder/2026-07-17/uploads/id/chunks/0");
+    unknownLengthChunk.setContent(new byte[9]);
+    HttpServletRequestWrapper streamedChunk = new HttpServletRequestWrapper(unknownLengthChunk) {
+      @Override public int getContentLength() { return -1; }
+      @Override public long getContentLengthLong() { return -1; }
+    };
+    MockHttpServletResponse streamedChunkResponse = new MockHttpServletResponse();
+    filter.doFilter(streamedChunk, streamedChunkResponse, drain);
+
+    assertEquals(200, exactResponse.getStatus());
+    assertEquals(413, oversizeResponse.getStatus());
+    assertEquals(413, ordinaryResponse.getStatus());
+    assertEquals(200, completeResponse.getStatus());
+    assertEquals(413, streamedChunkResponse.getStatus());
+  }
 }

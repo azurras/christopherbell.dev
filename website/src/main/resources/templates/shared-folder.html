@@ -20,6 +20,20 @@
     </header>
     <nav id="shared-breadcrumbs" class="shared-folder-breadcrumbs" aria-label="Shared folder path"></nav>
     <section id="shared-toolbar" class="shared-folder-toolbar" aria-label="Folder actions"></section>
+    <section id="shared-upload-panel" class="shared-folder-upload" aria-labelledby="shared-upload-title" hidden>
+      <h2 id="shared-upload-title" class="h5">Upload a file</h2>
+      <form id="shared-upload-form">
+        <label for="shared-upload-file" class="form-label">Choose a file</label>
+        <input id="shared-upload-file" class="form-control" type="file" required />
+        <div class="shared-folder-upload-actions">
+          <button class="btn btn-warning" type="submit">Upload or resume</button>
+          <button id="shared-upload-cancel" class="btn btn-outline-light" type="button" hidden>Cancel upload</button>
+        </div>
+      </form>
+      <label for="shared-upload-progress" class="form-label">Upload progress</label>
+      <progress id="shared-upload-progress" max="100" value="0">0%</progress>
+      <p id="shared-upload-detail" aria-live="polite">No upload in progress.</p>
+    </section>
     <div class="shared-folder-layout">
       <section id="shared-list" class="shared-folder-list" aria-label="Folder contents" aria-live="polite"></section>
       <section id="shared-preview" class="shared-folder-preview" aria-label="File preview" hidden></section>

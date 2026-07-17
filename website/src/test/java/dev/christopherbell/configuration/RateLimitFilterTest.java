@@ -136,6 +136,44 @@ public class RateLimitFilterTest {
         .doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
   }
 
+  @Test
+  public void sharedFolderUploadMutationAndTranscodeRulesPrecedeTheGenericApiMutationRule() {
+    var rules = new RateLimitProperties().getRules();
+    int apiMutations = indexOf(rules, "api-mutations");
+
+    assertEquals(true, indexOf(rules, "shared-folder-uploads") < apiMutations);
+    assertEquals(true, indexOf(rules, "shared-folder-mutations") < apiMutations);
+    assertEquals(true, indexOf(rules, "shared-folder-transcode") < apiMutations);
+  }
+
+  @Test
+  public void sharedFolderUploadRequestsConsumeTheFirstMatchingDedicatedBucket()
+      throws ServletException, IOException {
+    RateLimitFilter filter = new RateLimitFilter(
+        new ClientIpResolver(new ClientIpProperties()), new RateLimitProperties());
+    FilterChain chain = mock(FilterChain.class);
+    MockHttpServletResponse response = null;
+    for (int count = 0; count < 121; count++) {
+      response = new MockHttpServletResponse();
+      filter.doFilter(request(
+          "PUT", "/api/shared-folder/2026-07-17/uploads/session/chunks/0"), response, chain);
+    }
+    MockHttpServletResponse genericResponse = new MockHttpServletResponse();
+    filter.doFilter(request("POST", "/api/ordinary/2026-07-17/action"), genericResponse, chain);
+
+    assertEquals(429, response.getStatus());
+    assertEquals(200, genericResponse.getStatus());
+  }
+
+  private int indexOf(List<RateLimitProperties.Rule> rules, String name) {
+    for (int index = 0; index < rules.size(); index++) {
+      if (name.equals(rules.get(index).getName())) {
+        return index;
+      }
+    }
+    return Integer.MAX_VALUE;
+  }
+
   private RateLimitProperties.Rule rule(
       String name,
       long capacity,

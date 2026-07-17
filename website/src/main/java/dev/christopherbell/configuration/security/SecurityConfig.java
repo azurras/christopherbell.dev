@@ -155,8 +155,8 @@ public class SecurityConfig {
    * Configures the request size limiting filter bean.
    */
   @Bean
-  public RequestSizeLimitFilter requestSizeLimitFilter() {
-    return new RequestSizeLimitFilter();
+  public RequestSizeLimitFilter requestSizeLimitFilter(SharedFolderProperties sharedFolderProperties) {
+    return new RequestSizeLimitFilter(1_000_000L, sharedFolderProperties.uploadChunk().toBytes());
   }
 
   /** Applies no-store headers before authentication can return a protected shared-folder error. */

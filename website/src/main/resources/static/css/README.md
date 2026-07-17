@@ -64,9 +64,9 @@ Owns site styling for server-rendered pages and frontend components.
   for this page after the broader feed mobile rules hide them elsewhere.
 - Public profile cards use `.profile-trust-status` for mute/block feedback
   inside the same Void shell treatment as the rest of the profile page.
-- The shared-folder read portal uses `.shared-folder-*` classes for its keyboard-visible entry
-  controls, two-column listing/preview surface, bounded text preview, and single-column mobile
-  layout below 768px.
+- The shared-folder portal uses `.shared-folder-*` classes for its keyboard-visible entry and
+  mutation controls, two-column listing/preview surface, bounded text preview, upload picker,
+  drag/drop state, progress/cancel controls, and single-column mobile layout below 768px.
 - Responsive rules live near the related component styles when possible. Broad
   page-level breakpoints are kept at the end of `main.css`.
 

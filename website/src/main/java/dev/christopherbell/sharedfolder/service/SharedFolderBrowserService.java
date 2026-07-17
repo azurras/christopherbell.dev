@@ -82,7 +82,8 @@ public class SharedFolderBrowserService {
               childAttributes.lastModifiedTime().toInstant(),
               childAttributes.isRegularFile()
                   ? SharedFolderContentPolicy.previewKind(name)
-                  : dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind.NONE));
+                  : dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind.NONE,
+              SharedFolderObservedItemTokens.token(relativePath, childAttributes)));
         }
       }
       entries.sort(Comparator.comparing(SharedDirectoryEntry::name, String.CASE_INSENSITIVE_ORDER));
@@ -112,7 +113,14 @@ public class SharedFolderBrowserService {
         entry.name(), relativePath, type, entry.regularFile() ? entry.size() : 0, entry.modifiedAt(),
         entry.regularFile()
             ? SharedFolderContentPolicy.previewKind(entry.name())
-            : dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind.NONE);
+            : dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind.NONE,
+        SharedFolderObservedItemTokens.token(relativePath, nativeIdentity(entry), entry.directory(),
+            entry.size(), entry.modifiedAt()));
+  }
+
+  private String nativeIdentity(DirectoryEntry entry) {
+    return entry.identity().volumeSerial() + ":" + java.util.Base64.getUrlEncoder().withoutPadding()
+        .encodeToString(entry.identity().fileId());
   }
 
   private SharedFolderPathResolver resolver() {

@@ -5933,6 +5933,27 @@ body {
   padding: 1rem;
 }
 
+.shared-folder-upload {
+  margin-block: 1rem;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.75rem;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.shared-folder-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-block: 0.75rem;
+}
+
+.shared-folder-upload progress {
+  display: block;
+  width: 100%;
+  min-height: 1rem;
+}
+
 .shared-folder-entry {
   width: 100%;
   justify-content: space-between;

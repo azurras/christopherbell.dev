@@ -23,6 +23,18 @@ public interface WindowsSharedFolderNativeBridge {
   /** Opens one validated child relative to an already trusted directory handle. */
   NativeHandle openRelative(NativeHandle parent, String name, OpenKind kind, int objectAttributes);
 
+  /** Opens one existing child with DELETE access for a later handle-relative rename or delete. */
+  default NativeHandle openRelativeForMutation(
+      NativeHandle parent, String name, OpenKind kind, int objectAttributes) {
+    throw unsupportedMutation();
+  }
+
+  /** Creates one new child relative to a retained trusted directory handle without overwrite. */
+  default NativeHandle createRelative(
+      NativeHandle parent, String name, OpenKind kind, int objectAttributes) {
+    throw unsupportedMutation();
+  }
+
   /** Reads metadata from the opened handle rather than a mutable pathname. */
   NativeFileMetadata metadata(NativeHandle handle);
 
@@ -35,8 +47,43 @@ public interface WindowsSharedFolderNativeBridge {
   /** Moves an opened ordinary-file handle to an absolute byte position. */
   long seek(NativeHandle handle, long offset);
 
+  /** Appends or writes bytes at the current position of an already opened native file handle. */
+  default int write(NativeHandle handle, byte[] buffer, int offset, int length) {
+    throw unsupportedMutation();
+  }
+
+  /** Durably flushes a previously written native file handle before its state is recorded. */
+  default void flush(NativeHandle handle) {
+    throw unsupportedMutation();
+  }
+
+  /** Sets the end of file for rollback of an uncommitted staged append. */
+  default void truncate(NativeHandle handle, long size) {
+    throw unsupportedMutation();
+  }
+
+  /** Renames one opened source into an opened parent directory using native handle-relative APIs. */
+  default void rename(
+      NativeHandle source, NativeHandle destinationParent, String name, boolean replace) {
+    throw unsupportedMutation();
+  }
+
+  /** Marks an opened file or directory for physical deletion through the native handle. */
+  default void delete(NativeHandle source) {
+    throw unsupportedMutation();
+  }
+
+  /** Returns usable bytes for the volume containing one retained directory handle. */
+  default long usableSpace(NativeHandle volumeHandle) {
+    throw unsupportedMutation();
+  }
+
   /** Closes one native handle. Implementations must make no absolute path available to callers. */
   void close(NativeHandle handle);
+
+  private NativeBoundaryException unsupportedMutation() {
+    return new NativeBoundaryException("native shared-folder mutation is unavailable", 0);
+  }
 
   /** Opaque native handle wrapper. */
   record NativeHandle(Object value) {
@@ -48,7 +95,7 @@ public interface WindowsSharedFolderNativeBridge {
   }
 
   /** Requested opened object kind. */
-  enum OpenKind { DIRECTORY, FILE }
+  enum OpenKind { DIRECTORY, FILE, ANY }
 
   /** Stable identity reported by {@code FileIdInfo}: volume serial and 128-bit file id. */
   final class NativeFileIdentity {

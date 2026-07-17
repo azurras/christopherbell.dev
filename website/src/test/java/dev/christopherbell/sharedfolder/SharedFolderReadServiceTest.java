@@ -55,6 +55,8 @@ class SharedFolderReadServiceTest {
         .containsExactly("music/notes.txt", "music/track.flac");
     assertThat(response.entries()).extracting("previewKind")
         .containsExactly(SharedFolderPreviewKind.TEXT, SharedFolderPreviewKind.AUDIO);
+    assertThat(response.entries()).extracting("observedToken")
+        .allSatisfy(token -> assertThat((String) token).isNotBlank());
     assertThat(response.toString()).doesNotContain(root.toString());
   }
 

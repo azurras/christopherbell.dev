@@ -72,6 +72,17 @@ export const API = {
     markRead: (id) => `/api/notifications/2025-09-14/${encodeURIComponent(id)}/read`,
   },
   sharedFolder: {
+    folders: '/api/shared-folder/2026-07-17/folders',
+    rename: '/api/shared-folder/2026-07-17/entries/rename',
+    move: '/api/shared-folder/2026-07-17/entries/move',
+    delete: '/api/shared-folder/2026-07-17/entries',
+    uploads: '/api/shared-folder/2026-07-17/uploads',
+    uploadStatus: (id) => `/api/shared-folder/2026-07-17/uploads/${encodeURIComponent(id)}`,
+    uploadChunk: (id, offset) =>
+      `/api/shared-folder/2026-07-17/uploads/${encodeURIComponent(id)}/chunks/${encodeURIComponent(offset)}`,
+    uploadComplete: (id) =>
+      `/api/shared-folder/2026-07-17/uploads/${encodeURIComponent(id)}/complete`,
+    uploadCancel: (id) => `/api/shared-folder/2026-07-17/uploads/${encodeURIComponent(id)}`,
     entries: (path = '') => {
       const params = new URLSearchParams({ path: String(path || '') });
       return `/api/shared-folder/2026-07-17/entries?${params}`;
