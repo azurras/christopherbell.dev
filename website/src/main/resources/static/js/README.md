@@ -121,8 +121,10 @@ Owns browser-side behavior for server-rendered pages.
   with `textContent`. Before assigning a protected native URL it waits for the shared-folder
   service worker to acknowledge the current JWT; 401 redirects to login and 403/revocation is
   shown inline. The worker receives no token in a URL, attaches it only to the exact versioned
-  shared-folder API prefix, and preserves `Range`. The shared nav adds Shared Folder only after
-  the current-account API reports effective read access.
+  shared-folder API prefix, preserves `Range`, forwards with `cache: 'no-store'`, and clears its
+  per-client token on 401 or logout. Text and native-stream 401/403 responses use one actionable
+  access-loss handler. The shared nav adds Shared Folder only after the current-account API reports
+  effective read access.
 
 ## Design Notes
 

@@ -15,11 +15,13 @@ import {
   renderPreviewText,
 } from './lib/shared-folder.js';
 import {
+  clearSharedFolderStreamingAuth,
   prepareSharedFolderStreamingAuth,
   sharedFolderStreamingDenial,
 } from './lib/shared-folder-streaming.js';
 
 const root = document.getElementById('shared-folder-app');
+let currentPreviewLostAccess = false;
 
 function clear(node) {
   while (node?.firstChild) node.removeChild(node.firstChild);
@@ -48,10 +50,12 @@ function renderBreadcrumbs(path) {
   });
 }
 
-function handleStreamingDenial(statusCode) {
+function handleSharedFolderAccessLoss(statusCode) {
   const denial = sharedFolderStreamingDenial(statusCode);
+  currentPreviewLostAccess = true;
   status(denial.message);
   if (denial.redirectToLogin && !window.location.pathname.startsWith('/login')) {
+    clearSharedFolderStreamingAuth();
     clearAuthState();
     window.location.replace(loginRedirectUrl(currentRedirectTarget()));
   }
@@ -94,10 +98,19 @@ async function preview(entry) {
   host.append(heading);
 
   if (entry.previewKind === 'TEXT') {
-    const response = await fetchJson(API.sharedFolder.preview(entry.path), {
-      headers: authHeaders(),
-      redirectOnUnauthorized: true,
-    });
+    let response;
+    try {
+      response = await fetchJson(API.sharedFolder.preview(entry.path), {
+        headers: authHeaders(),
+        redirectOnUnauthorized: false,
+      });
+    } catch (error) {
+      if (isSharedFolderAccessDenied(error)) {
+        handleSharedFolderAccessLoss(error.status);
+        return;
+      }
+      throw error;
+    }
     const pre = document.createElement('pre');
     renderPreviewText(pre, response.text);
     host.append(pre);
@@ -111,6 +124,7 @@ async function preview(entry) {
   }
 
   if (!await prepareNativeStreaming()) return;
+  currentPreviewLostAccess = false;
   const element = entry.previewKind === 'IMAGE' ? document.createElement('img')
     : entry.previewKind === 'AUDIO' ? document.createElement('audio')
       : entry.previewKind === 'VIDEO' ? document.createElement('video')
@@ -119,7 +133,9 @@ async function preview(entry) {
   element.title = `${entry.name} preview`;
   if (element instanceof HTMLMediaElement) element.controls = true;
   if (entry.previewKind === 'PDF') element.setAttribute('sandbox', '');
-  element.addEventListener('error', () => status('The preview could not be loaded.'));
+  element.addEventListener('error', () => {
+    if (!currentPreviewLostAccess) status('The preview could not be loaded.');
+  });
   host.append(element);
 }
 
@@ -187,7 +203,7 @@ async function initialize() {
   try {
     const accountResponse = await fetchJson(API.accounts.me, {
       headers: authHeaders(),
-      redirectOnUnauthorized: true,
+      redirectOnUnauthorized: false,
     });
     if (!accountHasSharedFolderRead(accountResponse?.payload)) {
       root.classList.remove('d-none');
@@ -197,7 +213,7 @@ async function initialize() {
     const path = new URLSearchParams(window.location.search).get('path') || '';
     const response = await fetchJson(API.sharedFolder.entries(path), {
       headers: authHeaders(),
-      redirectOnUnauthorized: true,
+      redirectOnUnauthorized: false,
     });
     root.classList.remove('d-none');
     renderBreadcrumbs(response.path);
@@ -206,16 +222,18 @@ async function initialize() {
     status(`${response.entries.length} item${response.entries.length === 1 ? '' : 's'}`);
   } catch (error) {
     root.classList.remove('d-none');
-    status(isSharedFolderAccessDenied(error)
-      ? 'Shared-folder access was denied.'
-      : (error?.message || 'The shared folder is unavailable.'));
+    if (isSharedFolderAccessDenied(error)) {
+      handleSharedFolderAccessLoss(error.status);
+    } else {
+      status(error?.message || 'The shared folder is unavailable.');
+    }
   }
 }
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', event => {
     if (event.data?.type === 'shared-folder-auth-denied') {
-      handleStreamingDenial(event.data.status);
+      handleSharedFolderAccessLoss(event.data.status);
     }
   });
 }

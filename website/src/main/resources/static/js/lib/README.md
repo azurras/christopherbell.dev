@@ -12,7 +12,8 @@ Owns reusable browser-side modules that are not tied to one page.
   formatting, sanitizing, shared mention/URL linking, and small DOM utilities.
 - `shared-folder-streaming.js` defines the exact shared-folder API scope, request cloning that
   preserves `Range` while attaching the per-client JWT in the service worker, worker readiness,
-  logout cleanup, and actionable 401/403 streaming states. It never places bearer data in a URL.
+  logout/401 token cleanup, and actionable 401/403 streaming states. Worker forwarding uses
+  `cache: 'no-store'`; it never places bearer data in a URL.
 - `composer.js` initializes reusable post composer behavior.
 - `composer-preview.js` turns draft post text into a live, sanitized preview
   using the same mention linking and rich embed rendering as feed cards.

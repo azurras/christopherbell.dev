@@ -5,12 +5,16 @@ import dev.christopherbell.sharedfolder.fs.SharedFolderReadResource;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver.ReadHandle;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundary;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundary.NativeReadTarget;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.attribute.BasicFileAttributes;
 import org.springframework.core.io.Resource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -23,10 +27,19 @@ public class SharedFolderPreviewService {
   private static final int MAX_TEXT_PREVIEW_LINES = 2_000;
 
   private final SharedFolderProperties properties;
+  private final WindowsSharedFolderReadBoundary nativeBoundary;
 
   /** Creates the preview service from the configured shared-folder boundary. */
   public SharedFolderPreviewService(SharedFolderProperties properties) {
+    this(properties, WindowsSharedFolderReadBoundary.inactive());
+  }
+
+  /** Creates the Spring service with native reads activated only by the held-root singleton. */
+  @Autowired
+  public SharedFolderPreviewService(
+      SharedFolderProperties properties, WindowsSharedFolderReadBoundary nativeBoundary) {
     this.properties = properties;
+    this.nativeBoundary = nativeBoundary;
   }
 
   /**
@@ -39,6 +52,9 @@ public class SharedFolderPreviewService {
    * @return bounded text or a disk-backed media resource with safe presentation metadata
    */
   public SharedFolderPreview open(String decodedPath) {
+    if (nativeBoundary.nativeMode()) {
+      return openNative(decodedPath);
+    }
     ResolvedFile file = resolveFile(decodedPath);
     String name = file.name();
     SharedFolderPreviewKind kind = SharedFolderContentPolicy.previewKind(name);
@@ -55,6 +71,29 @@ public class SharedFolderPreviewService {
           new SharedFolderReadResource(file.handle(), name, file.attributes().size()), false, mediaType,
           disposition);
     } catch (IOException exception) {
+      throw notFound();
+    }
+  }
+
+  private SharedFolderPreview openNative(String decodedPath) {
+    if (!properties.enabled() || decodedPath == null) {
+      throw notFound();
+    }
+    try {
+      NativeReadTarget target = nativeBoundary.file(decodedPath);
+      String name = decodedPath.substring(decodedPath.lastIndexOf('/') + 1);
+      SharedFolderPreviewKind kind = SharedFolderContentPolicy.previewKind(name);
+      Resource resource = target.resource(name);
+      if (kind == SharedFolderPreviewKind.TEXT) {
+        BoundedText text = readBoundedUtf8(resource);
+        return SharedFolderPreview.text(text.value(), text.truncated());
+      }
+      MediaType mediaType = SharedFolderContentPolicy.mediaType(name, kind);
+      String disposition = kind == SharedFolderPreviewKind.NONE
+          ? SharedFolderContentPolicy.attachmentDisposition(name)
+          : SharedFolderContentPolicy.inlineDisposition(name);
+      return new SharedFolderPreview(kind, null, resource, false, mediaType, disposition);
+    } catch (IOException | UnsafeSharedPathException exception) {
       throw notFound();
     }
   }
@@ -78,25 +117,35 @@ public class SharedFolderPreviewService {
   }
 
   private BoundedText readBoundedUtf8(ReadHandle file) throws IOException {
+    try (InputStream stream = file.openFile()) {
+      return readBoundedUtf8(stream);
+    }
+  }
+
+  private BoundedText readBoundedUtf8(Resource resource) throws IOException {
+    try (InputStream stream = new BufferedInputStream(resource.getInputStream())) {
+      return readBoundedUtf8(stream);
+    }
+  }
+
+  private BoundedText readBoundedUtf8(InputStream stream) throws IOException {
     byte[] bytes = new byte[MAX_TEXT_PREVIEW_BYTES];
     int count = 0;
     int lines = 0;
     boolean truncated = false;
-    try (InputStream stream = file.openFile()) {
-      while (count < bytes.length) {
-        int next = stream.read();
-        if (next < 0) {
-          break;
-        }
-        bytes[count++] = (byte) next;
-        if (next == '\n' && ++lines >= MAX_TEXT_PREVIEW_LINES) {
-          truncated = stream.read() >= 0;
-          break;
-        }
+    while (count < bytes.length) {
+      int next = stream.read();
+      if (next < 0) {
+        break;
       }
-      if (count == bytes.length && !truncated) {
+      bytes[count++] = (byte) next;
+      if (next == '\n' && ++lines >= MAX_TEXT_PREVIEW_LINES) {
         truncated = stream.read() >= 0;
+        break;
       }
+    }
+    if (count == bytes.length && !truncated) {
+      truncated = stream.read() >= 0;
     }
     return new BoundedText(new String(bytes, 0, count, StandardCharsets.UTF_8), truncated);
   }

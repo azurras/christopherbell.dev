@@ -32,9 +32,11 @@ self.addEventListener('fetch', event => {
   if (!isSharedFolderApiRequest(event.request, self.location.origin)) return;
   const token = clientTokens.get(event.clientId);
   if (!token) return;
-  event.respondWith(fetch(attachSharedFolderAuthorization(event.request, token, self.location.origin))
+  event.respondWith(fetch(attachSharedFolderAuthorization(event.request, token, self.location.origin),
+      { cache: 'no-store' })
     .then(async response => {
       if (response.status === 401 || response.status === 403) {
+        if (response.status === 401) clientTokens.delete(event.clientId);
         const client = event.clientId ? await self.clients.get(event.clientId) : null;
         client?.postMessage({ type: 'shared-folder-auth-denied', status: response.status });
       }

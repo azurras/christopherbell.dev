@@ -7,6 +7,7 @@ import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.configuration.filter.RateLimitFilter;
 import dev.christopherbell.configuration.filter.RequestSizeLimitFilter;
 import dev.christopherbell.libs.api.APIVersion;
+import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -100,7 +101,8 @@ public class SecurityConfig {
   public SecurityFilterChain securityFilterChain(HttpSecurity http,
       RateLimitFilter rateLimitFilter,
       JwtAuthenticationFilter jwtAuthenticationFilter,
-      RequestSizeLimitFilter requestSizeLimitFilter) throws Exception {
+      RequestSizeLimitFilter requestSizeLimitFilter,
+      SharedFolderNoStoreFilter sharedFolderNoStoreFilter) throws Exception {
     return http
         // Disable CSRF for APIs (use with care)
         .csrf(AbstractHttpConfigurer::disable)
@@ -115,6 +117,7 @@ public class SecurityConfig {
         .addFilterBefore(jwtAuthenticationFilter, AuthorizationFilter.class)
         .addFilterBefore(rateLimitFilter, JwtAuthenticationFilter.class)
         .addFilterBefore(requestSizeLimitFilter, RateLimitFilter.class)
+        .addFilterBefore(sharedFolderNoStoreFilter, RequestSizeLimitFilter.class)
         
         // Build the SecurityFilterChain
         .build();
@@ -153,6 +156,12 @@ public class SecurityConfig {
   @Bean
   public RequestSizeLimitFilter requestSizeLimitFilter() {
     return new RequestSizeLimitFilter();
+  }
+
+  /** Applies no-store headers before authentication can return a protected shared-folder error. */
+  @Bean
+  public SharedFolderNoStoreFilter sharedFolderNoStoreFilter() {
+    return new SharedFolderNoStoreFilter();
   }
 
   /**

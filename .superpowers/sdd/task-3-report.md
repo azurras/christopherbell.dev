@@ -2,8 +2,10 @@
 
 ## Status
 
-Completed on branch `codex/shared-folder-portal` from Task 2 base
-`ff2380987788fd462d0bce272ce2119f5bf484b5`.
+Cache/revocation remediation and the Windows native read boundary are implemented on branch
+`codex/shared-folder-portal` from Task 2 base `ff2380987788fd462d0bce272ce2119f5bf484b5`.
+Enabled Windows production reads now use held-root, handle-relative native opens rather than a
+last-moment pathname recheck as their final race boundary.
 
 ## Scope Delivered
 
@@ -101,7 +103,8 @@ checks also passed for `components/nav.js`, `shared-folder.js`, and `lib/shared-
 - `website/src/main/java/dev/christopherbell/sharedfolder/service/` — resolver-backed browsing,
   disk streaming/range handling, content policy, bounded previews, and revalidating resources.
 - `website/src/main/java/dev/christopherbell/sharedfolder/fs/` — last-responsible-moment read
-  handles, captured leaf-identity checks, and fail-closed no-follow channel opening.
+  handles, captured leaf-identity checks, fail-closed no-follow channel opening, and the native
+  Windows held-root JNA bridge/resource boundary.
 - `website/src/main/java/dev/christopherbell/sharedfolder/web/SharedFolderReadController.java` —
   protected HTTP routes and response headers.
 - `website/src/main/java/dev/christopherbell/configuration/security/SecurityConfig.java` and its
@@ -211,20 +214,122 @@ Result: exit `0`; 4/4 browser-side tests passed: prefix-only token scope, preser
 token query parameter, no Blob/ObjectURL buffering for anchor/media actions, and actionable
 401/403 states.
 
+## Cache and Revocation Remediation — 2026-07-17
+
+### Scope and Decisions
+
+- `SharedFolderNoStoreFilter` applies `Cache-Control: private, no-store` only to the exact
+  `/api/shared-folder/2026-07-17/` prefix before security or controller processing. Controller
+  responses also set the same header for entries, full/partial content, `HEAD`, `416`, and
+  previews; the filter covers protected `401`, `403`, and error responses.
+- The service worker now forwards scoped authenticated requests with `cache: 'no-store'` without
+  changing the URL or existing headers such as `Range`. It removes the transient per-client token
+  on a `401`; logout continues to send the explicit clear message.
+- Text preview and native worker streaming now send both `401` and `403` through one
+  `handleSharedFolderAccessLoss` UI action. `401` clears local and worker state before login
+  redirect; `403` gives the existing capability-revoked status without an unhandled rejection.
+
+### RED
+
+```powershell
+$env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; .\gradlew.bat --no-daemon :website:test --tests dev.christopherbell.sharedfolder.SharedFolderReadControllerTest
+```
+
+Result: exit `1`; the new cache/error assertions could not compile because
+`SharedFolderNoStoreFilter` did not exist, proving the required pre-security no-store boundary was
+absent.
+
+### GREEN
+
+```powershell
+$env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; .\gradlew.bat --no-daemon :website:test --tests dev.christopherbell.sharedfolder.SharedFolderReadControllerTest --tests dev.christopherbell.sharedfolder.SharedFolderNoStoreFilterTest
+```
+
+Result: exit `0`; entries, full/partial content, `HEAD`, `416`, text/PDF/media preview, `401`,
+`403`, and protected `404` all assert `Cache-Control: private, no-store`; the filter test rejects
+the near-miss version prefix.
+
+```powershell
+& 'C:\Progra~1\nodejs\node.exe' --test website/src/test/js/shared-folder-streaming.test.js
+```
+
+Result: exit `0`; 5/5 tests passed, covering exact worker scope, authorization/`Range` retention,
+no token URL, `cache: 'no-store'`, 401-only worker token eviction, logout clearing, and one
+text/native 401/403 action handler.
+
+## Native Windows Handle Boundary — 2026-07-17
+
+### Contract and Decisions
+
+- When `app.shared-folder.enabled` is true on Windows, the singleton
+  `WindowsSharedFolderReadBoundary` initializes or fails closed. It opens the configured root once
+  with a custom JNA `NtCreateFile` binding, an absolute NT name, `FILE_DIRECTORY_FILE`, and
+  `OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE`; its retained handle closes at application shutdown.
+- Each request is parsed with the existing Windows-safe grammar. Every selected directory and file
+  is then opened one segment at a time relative to the retained/opened parent handle, with no
+  pathname-based NIO fallback. Native failure, including
+  `STATUS_REPARSE_POINT_ENCOUNTERED (0xC000050B)`, maps to a generic unavailable/not-found result.
+- Listings use `GetFileInformationByHandleEx(FileIdBothDirectoryRestartInfo/Info)` on the opened
+  directory handle, retain its `EndOfFile` and `LastWriteTime` metadata, and skip reparse or
+  grammar-invalid names. File metadata uses `FileIdInfo`; the stream opens a fresh relative native
+  file handle and compares volume serial plus the full 128-bit ID before exposing an `InputStream`.
+  The stream uses `ReadFile`, `SetFilePointerEx` for range skipping, and idempotent close.
+- The native boundary has a fair JVM lifecycle read/write lock so shutdown cannot close the held
+  root during an in-process traversal. It is defense in depth only; the native held-root traversal
+  is the security boundary. Non-Windows local/test providers keep the prior NIO behavior and do
+  not claim this Windows-specific race guarantee.
+
+### RED
+
+```powershell
+$env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; .\gradlew.bat --no-daemon :website:test --tests dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundaryTest
+```
+
+Result: exit `1`; `:website:compileTestJava` reported the expected missing
+`WindowsSharedFolderNativeBridge`, `WindowsSharedFolderReadBoundary`, handle, metadata, and open
+kind symbols. The initial deterministic test suite therefore had no native boundary implementation.
+
+```powershell
+$env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; .\gradlew.bat --no-daemon :website:test --tests dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundaryTest.nativeTextPreviewUsesBoundedBlockReadsInsteadOfOneReadFileCallPerByte
+```
+
+Result: exit `1`; the counting native-resource preview test observed the unbuffered byte-at-a-time
+path instead of bounded block reads.
+
+### GREEN
+
+```powershell
+$env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; .\gradlew.bat --no-daemon :website:test --tests dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundaryTest --tests dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeJnaIntegrationTest
+```
+
+Result: exit `0`; deterministic tests cover root-relative `OBJ_DONT_REPARSE` opens, safe reparse
+mapping, delayed FileId rejection, same-handle enumeration/unsafe-child filtering, range seek and
+idempotent close with mapped close failure, close-on-failed-open, and bounded text-preview bridge reads. The Windows JNA
+smoke test created a temporary root and verified native list name/size/mtime, file open/identity,
+seek/read, file close, and root close against real Windows APIs.
+
+The junction swap regression is gated by Windows capability and remains available for an explicit
+local run. It passed on this Windows host with a real `mklink /J` swap target:
+
+```powershell
+$env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; $env:SHARED_FOLDER_RUN_WINDOWS_NATIVE_JUNCTION_TEST = 'true'; .\gradlew.bat --no-daemon :website:test --tests dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeJnaIntegrationTest.junctionRaceIsRejectedWhenExplicitNativeIntegrationIsEnabled
+```
+
 ## Full Verification
 
 ```powershell
 $env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; .\gradlew.bat --no-daemon :website:test --console=plain
 ```
 
-Result: latest remediation run completed successfully after the no-follow fail-closed changes;
-all Java tests passed.
+Result: exit `0`; the complete Java suite passed after cache/revocation and native boundary changes.
+The standard run includes the real Windows JNA smoke test; the deliberately capability-gated
+junction test is separately recorded above as passed on this host.
 
 ```powershell
 $env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; $env:NODE_EXE = 'C:\Progra~1\nodejs\node.exe'; .\gradlew.bat --no-daemon :website:jsTest --console=plain
 ```
 
-Result: latest remediation run exit `0`; Node reported `133` passed, `0` failed.
+Result: exit `0`; Node reported `134` passed, `0` failed.
 
 ```powershell
 git diff --check

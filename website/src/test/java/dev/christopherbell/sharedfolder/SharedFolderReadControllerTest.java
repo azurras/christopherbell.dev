@@ -25,6 +25,7 @@ import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService.SharedFolderPreview;
 import dev.christopherbell.sharedfolder.service.SharedFolderRangeNotSatisfiableException;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
+import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import dev.christopherbell.sharedfolder.web.SharedFolderReadController;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -55,9 +56,11 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.web.server.ResponseStatusException;
 
 @WebMvcTest(SharedFolderReadController.class)
 @Import({ControllerExceptionHandler.class,
+    SharedFolderNoStoreFilter.class,
     SharedFolderReadControllerTest.MethodSecurityTestConfiguration.class})
 class SharedFolderReadControllerTest {
   private static final String BASE = "/api/shared-folder/2026-07-17";
@@ -74,7 +77,9 @@ class SharedFolderReadControllerTest {
         get(BASE + "/entries").queryParam("path", "music"),
         get(BASE + "/content").queryParam("path", "music/track.flac"),
         get(BASE + "/preview").queryParam("path", "music/notes.txt"))) {
-      mockMvc.perform(request).andExpect(status().isUnauthorized());
+      mockMvc.perform(request)
+          .andExpect(status().isUnauthorized())
+          .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
     }
 
     verifyNoInteractions(access, browser, downloads, previews);
@@ -94,6 +99,7 @@ class SharedFolderReadControllerTest {
 
     mockMvc.perform(get(BASE + "/entries").queryParam("path", "music"))
         .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
         .andExpect(jsonPath("$.path").value("music"))
         .andExpect(jsonPath("$.entries[0].name").value("track.flac"))
         .andExpect(content().string(not(containsString("A:\\Shared"))));
@@ -101,6 +107,7 @@ class SharedFolderReadControllerTest {
     mockMvc.perform(get(BASE + "/content").queryParam("path", "music/track.flac")
             .header(HttpHeaders.RANGE, "bytes=0-3"))
         .andExpect(status().isPartialContent())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
         .andExpect(header().string(HttpHeaders.ACCEPT_RANGES, "bytes"))
         .andExpect(header().string(HttpHeaders.CONTENT_RANGE, "bytes 0-3/10"))
         .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
@@ -120,7 +127,9 @@ class SharedFolderReadControllerTest {
         get(BASE + "/entries").queryParam("path", "music"),
         get(BASE + "/content").queryParam("path", "music/track.flac"),
         get(BASE + "/preview").queryParam("path", "music/notes.txt"))) {
-      mockMvc.perform(request).andExpect(status().isForbidden());
+      mockMvc.perform(request)
+          .andExpect(status().isForbidden())
+          .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
     }
 
     verifyNoInteractions(browser, downloads, previews);
@@ -135,6 +144,7 @@ class SharedFolderReadControllerTest {
     mockMvc.perform(get(BASE + "/content").queryParam("path", "music/track.flac")
             .header(HttpHeaders.RANGE, "bytes=0-1,4-5"))
         .andExpect(status().isRequestedRangeNotSatisfiable())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
         .andExpect(header().string(HttpHeaders.CONTENT_RANGE, "bytes */10"));
 
     when(downloads.open("music/track.flac", null))
@@ -146,10 +156,31 @@ class SharedFolderReadControllerTest {
     mockMvc.perform(head(BASE + "/content").queryParam("path", "music/track.flac"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.ACCEPT_RANGES, "bytes"))
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
         .andExpect(header().string(HttpHeaders.CONTENT_LENGTH, "10"));
 
     verify(downloads).open("music/track.flac", "bytes=0-1,4-5");
     verify(downloads).open("music/track.flac", null);
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void fullContentAndProtectedNotFoundResponsesAreNeverStored() throws Exception {
+    when(downloads.open("music/full.flac", null))
+        .thenReturn(new SharedFolderDownload(
+            new ByteArrayResource("0123456789".getBytes(StandardCharsets.UTF_8)),
+            0, 10, 10, false, MediaType.APPLICATION_OCTET_STREAM,
+            "attachment; filename=full.flac"));
+    when(browser.list("missing")).thenThrow(new ResponseStatusException(
+        org.springframework.http.HttpStatus.NOT_FOUND, "Shared folder item was not found"));
+
+    mockMvc.perform(get(BASE + "/content").queryParam("path", "music/full.flac"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
+
+    mockMvc.perform(get(BASE + "/entries").queryParam("path", "missing"))
+        .andExpect(status().isNotFound())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
   }
 
   @Test
@@ -161,6 +192,7 @@ class SharedFolderReadControllerTest {
     mockMvc.perform(get(BASE + "/preview").queryParam("path", "music/notes.txt"))
         .andExpect(status().isOk())
         .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
         .andExpect(jsonPath("$.text").value("<script>alert('no')</script>"));
 
     verify(access).requireRead();
@@ -178,6 +210,7 @@ class SharedFolderReadControllerTest {
     mockMvc.perform(get(BASE + "/preview").queryParam("path", "music/guide.pdf"))
         .andExpect(status().isOk())
         .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
         .andExpect(header().string("Content-Security-Policy", "sandbox; default-src 'none'"))
         .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=guide.pdf"));
 
@@ -209,12 +242,15 @@ class SharedFolderReadControllerTest {
   @EnableWebSecurity
   static class MethodSecurityTestConfiguration {
     @Bean
-    SecurityFilterChain sharedFolderTestSecurityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain sharedFolderTestSecurityFilterChain(
+        HttpSecurity http,
+        SharedFolderNoStoreFilter sharedFolderNoStoreFilter) throws Exception {
       return http
           .exceptionHandling(exceptions -> exceptions
               .authenticationEntryPoint((request, response, exception) -> response.sendError(401))
               .accessDeniedHandler((request, response, exception) -> response.sendError(403)))
           .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+          .addFilterBefore(sharedFolderNoStoreFilter, UsernamePasswordAuthenticationFilter.class)
           .addFilterBefore(new TestSecurityContextBridgeFilter(),
               UsernamePasswordAuthenticationFilter.class)
           .build();

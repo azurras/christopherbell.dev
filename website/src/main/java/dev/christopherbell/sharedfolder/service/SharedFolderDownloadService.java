@@ -5,9 +5,12 @@ import dev.christopherbell.sharedfolder.fs.SharedFolderReadResource;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver.ReadHandle;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundary;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundary.NativeReadTarget;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
 import org.springframework.core.io.Resource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpRange;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -18,10 +21,19 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class SharedFolderDownloadService {
   private final SharedFolderProperties properties;
+  private final WindowsSharedFolderReadBoundary nativeBoundary;
 
   /** Creates the download service from the configured shared-folder boundary. */
   public SharedFolderDownloadService(SharedFolderProperties properties) {
+    this(properties, WindowsSharedFolderReadBoundary.inactive());
+  }
+
+  /** Creates the Spring service with native reads activated only by the held-root singleton. */
+  @Autowired
+  public SharedFolderDownloadService(
+      SharedFolderProperties properties, WindowsSharedFolderReadBoundary nativeBoundary) {
     this.properties = properties;
+    this.nativeBoundary = nativeBoundary;
   }
 
   /**
@@ -35,6 +47,9 @@ public class SharedFolderDownloadService {
    * @return a safe file resource and the selected byte region
    */
   public SharedFolderDownload open(String decodedPath, String rangeHeader) {
+    if (nativeBoundary.nativeMode()) {
+      return openNative(decodedPath, rangeHeader);
+    }
     ResolvedFile file = resolveFile(decodedPath);
     long totalLength = file.attributes().size();
     RangeSelection selection = rangeSelection(rangeHeader, totalLength);
@@ -47,6 +62,24 @@ public class SharedFolderDownloadService {
         selection.partial(),
         SharedFolderContentPolicy.mediaType(name, SharedFolderContentPolicy.previewKind(name)),
         SharedFolderContentPolicy.attachmentDisposition(name));
+  }
+
+  private SharedFolderDownload openNative(String decodedPath, String rangeHeader) {
+    if (!properties.enabled() || decodedPath == null) {
+      throw notFound();
+    }
+    try {
+      NativeReadTarget target = nativeBoundary.file(decodedPath);
+      long totalLength = target.metadata().size();
+      RangeSelection selection = rangeSelection(rangeHeader, totalLength);
+      String name = decodedPath.substring(decodedPath.lastIndexOf('/') + 1);
+      return new SharedFolderDownload(
+          target.resource(name), selection.start(), selection.length(), totalLength, selection.partial(),
+          SharedFolderContentPolicy.mediaType(name, SharedFolderContentPolicy.previewKind(name)),
+          SharedFolderContentPolicy.attachmentDisposition(name));
+    } catch (UnsafeSharedPathException exception) {
+      throw notFound();
+    }
   }
 
   private ResolvedFile resolveFile(String decodedPath) {

@@ -45,9 +45,11 @@ public class SharedFolderReadController {
 
   /** Lists a decoded relative directory path after refreshing effective read access. */
   @GetMapping("/entries")
-  public SharedDirectoryResponse list(@RequestParam(defaultValue = "") String path) {
+  public ResponseEntity<SharedDirectoryResponse> list(@RequestParam(defaultValue = "") String path) {
     access.requireRead();
-    return browser.list(path);
+    return ResponseEntity.ok()
+        .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+        .body(browser.list(path));
   }
 
   /**
@@ -71,6 +73,7 @@ public class SharedFolderReadController {
       HttpHeaders responseHeaders = new HttpHeaders();
       responseHeaders.set(HttpHeaders.ACCEPT_RANGES, "bytes");
       responseHeaders.set("X-Content-Type-Options", "nosniff");
+      responseHeaders.setCacheControl("private, no-store");
       responseHeaders.setContentType(download.mediaType());
       responseHeaders.set(HttpHeaders.CONTENT_DISPOSITION, download.disposition());
       responseHeaders.setContentLength(download.length());
@@ -110,6 +113,7 @@ public class SharedFolderReadController {
     return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
         .header(HttpHeaders.CONTENT_RANGE, "bytes */" + totalLength)
         .header(HttpHeaders.ACCEPT_RANGES, "bytes")
+        .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
         .build();
   }
 }

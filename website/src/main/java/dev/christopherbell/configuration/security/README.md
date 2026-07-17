@@ -6,6 +6,9 @@ Owns Spring Security wiring and request authentication infrastructure.
 
 - `SecurityConfig` defines public routes, method security, the filter chain, and security-related beans.
 - `JwtAuthenticationFilter` reads bearer tokens, validates them, and populates the Spring Security context.
+- `SharedFolderNoStoreFilter` runs before shared-folder authentication and applies
+  `Cache-Control: private, no-store` only to the exact versioned shared-folder API prefix,
+  including authentication and authorization failures.
 
 ## Design Notes
 

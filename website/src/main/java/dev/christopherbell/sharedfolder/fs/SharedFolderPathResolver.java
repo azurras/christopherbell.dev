@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
@@ -170,26 +171,9 @@ public final class SharedFolderPathResolver {
   }
 
   private Path parseRelative(String raw, boolean allowEmpty) {
-    if (raw == null) {
-      throw unsafe("Shared-folder path is required");
-    }
-    if (raw.isEmpty()) {
-      if (allowEmpty) {
-        return Path.of("");
-      }
-      throw unsafe("Shared-folder name is required");
-    }
-    if (raw.startsWith("/") || raw.startsWith("\\") || raw.matches("(?i)^[a-z]:.*")) {
-      throw unsafe("Shared-folder paths must be relative");
-    }
-    if (raw.indexOf('\\') >= 0 || raw.indexOf(':') >= 0 || containsControlCharacter(raw)
-        || containsEncodedSeparator(raw)) {
-      throw unsafe("Shared-folder path contains an unsafe Windows form");
-    }
-
-    String[] segments = raw.split("/", -1);
-    for (String segment : segments) {
-      validateSegment(segment);
+    List<String> segments = safeRelativeSegments(raw, allowEmpty);
+    if (segments.isEmpty()) {
+      return Path.of("");
     }
     try {
       Path relative = Path.of(raw);
@@ -205,14 +189,46 @@ public final class SharedFolderPathResolver {
     }
   }
 
-  private void validateSingleWindowsName(String name) {
+  /**
+   * Parses untrusted path text into Windows-safe relative components without touching a filesystem.
+   *
+   * <p>The native held-root boundary uses exactly this grammar before issuing each handle-relative
+   * open, so native directory enumeration and NIO resolution cannot drift apart.
+   */
+  public static List<String> safeRelativeSegments(String raw, boolean allowEmpty) {
+    if (raw == null) {
+      throw unsafe("Shared-folder path is required");
+    }
+    if (raw.isEmpty()) {
+      if (allowEmpty) {
+      return List.of();
+      }
+      throw unsafe("Shared-folder name is required");
+    }
+    if (raw.startsWith("/") || raw.startsWith("\\") || raw.matches("(?i)^[a-z]:.*")) {
+      throw unsafe("Shared-folder paths must be relative");
+    }
+    if (raw.indexOf('\\') >= 0 || raw.indexOf(':') >= 0 || containsControlCharacter(raw)
+        || containsEncodedSeparator(raw)) {
+      throw unsafe("Shared-folder path contains an unsafe Windows form");
+    }
+
+    String[] segments = raw.split("/", -1);
+    for (String segment : segments) {
+      validateSegment(segment);
+    }
+    return List.of(segments);
+  }
+
+  /** Validates one name returned from native enumeration before exposing it to callers. */
+  public static void validateSingleWindowsName(String name) {
     if (name == null || name.isEmpty() || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0) {
       throw unsafe("Shared-folder child name must be one path segment");
     }
     validateSegment(name);
   }
 
-  private void validateSegment(String segment) {
+  private static void validateSegment(String segment) {
     if (segment.isEmpty() || ".".equals(segment) || "..".equals(segment)) {
       throw unsafe("Shared-folder dot and empty path segments are not allowed");
     }
@@ -308,25 +324,25 @@ public final class SharedFolderPathResolver {
     }
   }
 
-  private boolean containsControlCharacter(String value) {
+  private static boolean containsControlCharacter(String value) {
     return value.codePoints().anyMatch(Character::isISOControl);
   }
 
-  private boolean containsEncodedSeparator(String value) {
+  private static boolean containsEncodedSeparator(String value) {
     String normalized = value.toLowerCase(Locale.ROOT);
     return normalized.contains("%2f") || normalized.contains("%5c");
   }
 
-  private boolean containsWindowsForbiddenCharacter(String value) {
+  private static boolean containsWindowsForbiddenCharacter(String value) {
     return value.indexOf('"') >= 0 || value.indexOf('<') >= 0 || value.indexOf('>') >= 0
         || value.indexOf('|') >= 0 || value.indexOf('?') >= 0 || value.indexOf('*') >= 0;
   }
 
-  private UnsafeSharedPathException unsafe(String message) {
+  private static UnsafeSharedPathException unsafe(String message) {
     return new UnsafeSharedPathException(message);
   }
 
-  private UnsafeSharedPathException unsafe(String message, Throwable cause) {
+  private static UnsafeSharedPathException unsafe(String message, Throwable cause) {
     return new UnsafeSharedPathException(message, cause);
   }
 

@@ -4,6 +4,8 @@ import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver.ReadHandle;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.DirectoryEntry;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundary;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntryType;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
@@ -15,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -22,10 +25,19 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class SharedFolderBrowserService {
   private final SharedFolderProperties properties;
+  private final WindowsSharedFolderReadBoundary nativeBoundary;
 
   /** Creates the browser from the configured shared-folder boundary. */
   public SharedFolderBrowserService(SharedFolderProperties properties) {
+    this(properties, WindowsSharedFolderReadBoundary.inactive());
+  }
+
+  /** Creates the Spring service with the Windows held-root boundary when it is active. */
+  @Autowired
+  public SharedFolderBrowserService(
+      SharedFolderProperties properties, WindowsSharedFolderReadBoundary nativeBoundary) {
     this.properties = properties;
+    this.nativeBoundary = nativeBoundary;
   }
 
   /**
@@ -39,6 +51,9 @@ public class SharedFolderBrowserService {
    */
   public SharedDirectoryResponse list(String decodedPath) {
     String requestedPath = requirePath(decodedPath);
+    if (nativeBoundary.nativeMode()) {
+      return nativeList(requestedPath);
+    }
     SharedFolderPathResolver resolver = resolver();
     Path directory = resolveExisting(resolver, requestedPath);
     try {
@@ -75,6 +90,29 @@ public class SharedFolderBrowserService {
     } catch (IOException | SecurityException exception) {
       throw notFound();
     }
+  }
+
+  private SharedDirectoryResponse nativeList(String requestedPath) {
+    try {
+      List<SharedDirectoryEntry> entries = nativeBoundary.list(requestedPath).stream()
+          .map(entry -> nativeEntry(requestedPath, entry))
+          .sorted(Comparator.comparing(SharedDirectoryEntry::name, String.CASE_INSENSITIVE_ORDER))
+          .toList();
+      return new SharedDirectoryResponse(requestedPath, entries);
+    } catch (UnsafeSharedPathException exception) {
+      throw notFound();
+    }
+  }
+
+  private SharedDirectoryEntry nativeEntry(String parent, DirectoryEntry entry) {
+    String relativePath = parent.isEmpty() ? entry.name() : parent + "/" + entry.name();
+    SharedDirectoryEntryType type = entry.directory()
+        ? SharedDirectoryEntryType.DIRECTORY : SharedDirectoryEntryType.FILE;
+    return new SharedDirectoryEntry(
+        entry.name(), relativePath, type, entry.regularFile() ? entry.size() : 0, entry.modifiedAt(),
+        entry.regularFile()
+            ? SharedFolderContentPolicy.previewKind(entry.name())
+            : dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind.NONE);
   }
 
   private SharedFolderPathResolver resolver() {

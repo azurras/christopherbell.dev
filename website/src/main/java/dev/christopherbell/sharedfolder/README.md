@@ -8,12 +8,16 @@ operations exist.
 - `fs` resolves only existing, ordinary descendants of the configured shared root using
   Windows-safe relative names. It rejects drive-qualified and UNC forms, alternate streams,
   dot segments, unsafe DOS names, all ISO control characters, links, NTFS reparse points, and
-  filesystem mounts. Every existing segment must retain a canonical identity beneath the root and
-  stay on its file store. Linux reads `/proc/self/mountinfo` and fails closed when its mount facts
-  are unavailable or malformed; the Windows provider relies on native reparse-point and
-  file-store checks. Read callers use a resolver-owned handle that captures the leaf identity,
-  rechecks the full chain immediately before metadata and provider opens, and refuses a provider
-  that cannot open an ordinary leaf with `NOFOLLOW_LINKS`.
+  filesystem mounts. On enabled Windows deployments, `WindowsSharedFolderReadBoundary` opens the
+  configured root once with native `NtCreateFile`, retains that directory handle for its lifecycle,
+  and opens every requested component relative to that handle with `OBJ_CASE_INSENSITIVE` and
+  `OBJ_DONT_REPARSE`. Directory entries are enumerated from the already opened handle; native file
+  streams compare `FileIdInfo` (volume serial plus 128-bit file ID) between metadata probe and the
+  later stream open. There is no path-based NIO read fallback in that Windows mode. A fair JVM
+  lifecycle lock prevents the root handle from closing during an in-process traversal, but the
+  held native root is the security boundary; application locks and ACLs are defense in depth only.
+  Non-Windows test/local providers retain the portable NIO resolver with no claim of this native
+  handle-relative race guarantee.
 - `security` reloads the authenticated account from MongoDB for every decision. A persisted
   active approved account needs a shared-folder capability; ADMIN has read and write implicitly,
   and write implies read. JWTs intentionally carry no shared-folder capability.
@@ -36,7 +40,9 @@ flag. Local and test profiles use build-owned paths; production roots use enviro
   redirects unauthenticated visitors to login before making any protected read request.
 - Every `/api/shared-folder/2026-07-17/**` route first reloads the authenticated account through
   `SharedFolderAccessService.requireRead()`. Revoked, inactive, unapproved, or missing accounts
-  are denied before a filesystem service runs.
+  are denied before a filesystem service runs. The exact versioned API prefix sets
+  `Cache-Control: private, no-store` before security or controller handling, so successful reads,
+  range/HEAD responses, and protected errors cannot be retained by browser or intermediary caches.
 - `GET /entries` returns only decoded relative paths and ordinary-entry metadata. `GET /content`
   uses a revalidating disk-backed resource plus `ResourceRegion` for disk streaming and supports
   exactly one HTTP byte range, including correct `206`, `416`, `Content-Range`, `Accept-Ranges`,
