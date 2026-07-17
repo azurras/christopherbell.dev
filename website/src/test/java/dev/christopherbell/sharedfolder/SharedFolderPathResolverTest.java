@@ -3,11 +3,14 @@ package dev.christopherbell.sharedfolder;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import dev.christopherbell.sharedfolder.fs.NioSharedFolderFileSystemBoundary;
+import dev.christopherbell.sharedfolder.fs.SharedFolderFileSystemBoundary;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -60,6 +63,9 @@ class SharedFolderPathResolverTest {
         "com9.txt",
         "LPT1",
         "lpt9.txt",
+        "COM" + '\u00b9',
+        "lpt" + '\u00b2' + ".txt",
+        "LPT" + '\u00b3',
         "name.",
         "name ",
         "music//live",
@@ -70,6 +76,8 @@ class SharedFolderPathResolverTest {
         "music/%5C/secret",
         "control\u0001name",
         "delete\u007fname",
+        "c1" + '\u0085' + "name",
+        "c1" + '\u009f' + "name",
         "bad\u0000name");
   }
 
@@ -122,6 +130,57 @@ class SharedFolderPathResolverTest {
   }
 
   @Test
+  void rejectsConfiguredRootThatIsALinkOrJunction() throws Exception {
+    Path target = Files.createDirectory(temp.resolve("shared-target"));
+    Path rootLink = temp.resolve("shared-link");
+    assumeLinkOrJunctionCreated(rootLink, target);
+
+    assertThatThrownBy(() -> new SharedFolderPathResolver(rootLink))
+        .isInstanceOf(UnsafeSharedPathException.class);
+  }
+
+  @Test
+  void rejectsConfiguredRootMarkedAsFilesystemMount() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("shared"));
+
+    assertThatThrownBy(() -> new SharedFolderPathResolver(root, new MountBoundary(root)))
+        .isInstanceOf(UnsafeSharedPathException.class);
+  }
+
+  @Test
+  void rejectsFilesystemMountInExistingAncestor() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("shared"));
+    Files.createDirectories(root.resolve("music/live"));
+    var resolver = new SharedFolderPathResolver(root, new MountBoundary(root.resolve("music")));
+
+    assertThatThrownBy(() -> resolver.existing("music/live"))
+        .isInstanceOf(UnsafeSharedPathException.class);
+  }
+
+  @Test
+  void rejectsExistingAncestorThatCrossesTheRootFileStore() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("shared"));
+    Files.createDirectories(root.resolve("music/live"));
+    var resolver = new SharedFolderPathResolver(
+        root, new DifferentFileStoreBoundary(root.resolve("music")));
+
+    assertThatThrownBy(() -> resolver.existing("music/live"))
+        .isInstanceOf(UnsafeSharedPathException.class);
+  }
+
+  @Test
+  void rejectsExistingAncestorWhoseCanonicalIdentityEscapesTheConfiguredRoot() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("shared"));
+    Files.createDirectories(root.resolve("music/live"));
+    Path outside = Files.createDirectory(temp.resolve("outside"));
+    var resolver = new SharedFolderPathResolver(
+        root, new CanonicalEscapeBoundary(root.resolve("music"), outside));
+
+    assertThatThrownBy(() -> resolver.existing("music/live"))
+        .isInstanceOf(UnsafeSharedPathException.class);
+  }
+
+  @Test
   void mutationRecheckRejectsAncestorReplacedByLinkOrJunction() throws Exception {
     Path root = Files.createDirectory(temp.resolve("shared"));
     Path parent = Files.createDirectories(root.resolve("music"));
@@ -158,5 +217,98 @@ class SharedFolderPathResolverTest {
     }
 
     Assumptions.abort("symbolic links are unavailable on this test host");
+  }
+
+  private static class DelegatingBoundary implements SharedFolderFileSystemBoundary {
+    private final SharedFolderFileSystemBoundary delegate = new NioSharedFolderFileSystemBoundary();
+
+    @Override
+    public Path absoluteNormalized(Path path) {
+      return delegate.absoluteNormalized(path);
+    }
+
+    @Override
+    public boolean existsNoFollow(Path path) {
+      return delegate.existsNoFollow(path);
+    }
+
+    @Override
+    public BasicFileAttributes readAttributesNoFollow(Path path) throws IOException {
+      return delegate.readAttributesNoFollow(path);
+    }
+
+    @Override
+    public Path realPath(Path path) throws IOException {
+      return delegate.realPath(path);
+    }
+
+    @Override
+    public Path realPathNoFollow(Path path) throws IOException {
+      return delegate.realPathNoFollow(path);
+    }
+
+    @Override
+    public boolean sameFileStore(Path first, Path second) throws IOException {
+      return delegate.sameFileStore(first, second);
+    }
+
+    @Override
+    public boolean isMountPoint(Path path) throws IOException {
+      return delegate.isMountPoint(path);
+    }
+
+    @Override
+    public Object dosAttributesNoFollow(Path path) throws IOException {
+      return delegate.dosAttributesNoFollow(path);
+    }
+  }
+
+  private static final class MountBoundary extends DelegatingBoundary {
+    private final Path mountPoint;
+
+    private MountBoundary(Path mountPoint) {
+      this.mountPoint = mountPoint.toAbsolutePath().normalize();
+    }
+
+    @Override
+    public boolean isMountPoint(Path path) throws IOException {
+      return mountPoint.equals(path.toAbsolutePath().normalize()) || super.isMountPoint(path);
+    }
+  }
+
+  private static final class CanonicalEscapeBoundary extends DelegatingBoundary {
+    private final Path escapedAncestor;
+    private final Path outside;
+
+    private CanonicalEscapeBoundary(Path escapedAncestor, Path outside) {
+      this.escapedAncestor = escapedAncestor.toAbsolutePath().normalize();
+      this.outside = outside.toAbsolutePath().normalize();
+    }
+
+    @Override
+    public Path realPath(Path path) throws IOException {
+      return escapedAncestor.equals(path.toAbsolutePath().normalize()) ? outside : super.realPath(path);
+    }
+
+    @Override
+    public Path realPathNoFollow(Path path) throws IOException {
+      return escapedAncestor.equals(path.toAbsolutePath().normalize())
+          ? outside
+          : super.realPathNoFollow(path);
+    }
+  }
+
+  private static final class DifferentFileStoreBoundary extends DelegatingBoundary {
+    private final Path crossedAncestor;
+
+    private DifferentFileStoreBoundary(Path crossedAncestor) {
+      this.crossedAncestor = crossedAncestor.toAbsolutePath().normalize();
+    }
+
+    @Override
+    public boolean sameFileStore(Path first, Path second) throws IOException {
+      return !crossedAncestor.equals(second.toAbsolutePath().normalize())
+          && super.sameFileStore(first, second);
+    }
   }
 }

@@ -1,8 +1,6 @@
 package dev.christopherbell.sharedfolder.fs;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Locale;
@@ -14,31 +12,52 @@ import java.util.Set;
  *
  * <p>Resolution is not authorization. Callers must make their fresh access decision separately
  * and invoke {@link #recheckForMutation(Path)} immediately before a mutation that follows a
- * previous resolution. That recheck detects a link or reparse-point substitution made between
- * validation and use.
+ * previous resolution. That recheck detects a link, reparse-point, mount, or canonical-identity
+ * substitution made between validation and use.
  */
 public final class SharedFolderPathResolver {
   private static final int FILE_ATTRIBUTE_REPARSE_POINT = 0x0400;
   private static final Set<String> RESERVED_DOS_NAMES = Set.of(
       "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-      "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9");
+      "COM8", "COM9", "COM\u00b9", "COM\u00b2", "COM\u00b3", "LPT1", "LPT2", "LPT3", "LPT4",
+      "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "LPT\u00b9", "LPT\u00b2", "LPT\u00b3");
 
+  private final SharedFolderFileSystemBoundary fileSystem;
   private final Path root;
+  private final Path canonicalRoot;
+  private final Object rootFileKey;
 
   /**
-   * Creates a resolver for an existing ordinary directory.
+   * Creates a resolver that uses the production NIO filesystem boundary.
    *
    * @param root configured shared-folder root
-   * @throws UnsafeSharedPathException when the root is unavailable, not a directory, or a link
-   *     or Windows reparse point
    */
   public SharedFolderPathResolver(Path root) {
-    if (root == null) {
-      throw unsafe("Shared-folder root is required");
+    this(root, new NioSharedFolderFileSystemBoundary());
+  }
+
+  /**
+   * Creates a resolver with an explicit production filesystem boundary.
+   *
+   * <p>The boundary is injectable so deployments with a controlled filesystem provider retain
+   * the same canonical, file-store, mount, and reparse-point contract as the default NIO
+   * implementation.
+   *
+   * @param root configured shared-folder root
+   * @param fileSystem filesystem facts used to prove every existing segment
+   * @throws UnsafeSharedPathException when the root is unavailable, not a directory, linked,
+   *     reparse-pointed, mounted, or not canonically stable
+   */
+  public SharedFolderPathResolver(Path root, SharedFolderFileSystemBoundary fileSystem) {
+    if (root == null || fileSystem == null) {
+      throw unsafe("Shared-folder root and filesystem boundary are required");
     }
+    this.fileSystem = fileSystem;
     try {
-      this.root = root.toAbsolutePath().normalize();
-      verifyRoot();
+      this.root = fileSystem.absoluteNormalized(root);
+      ExistingIdentity rootIdentity = inspectExistingSegment(this.root, true);
+      this.canonicalRoot = rootIdentity.canonicalPath();
+      this.rootFileKey = rootIdentity.fileKey();
     } catch (IOException | SecurityException exception) {
       if (exception instanceof UnsafeSharedPathException unsafePathException) {
         throw unsafePathException;
@@ -92,14 +111,15 @@ public final class SharedFolderPathResolver {
    *
    * @param resolved a path previously returned by {@link #existing(String)} or an existing parent
    * @return the revalidated absolute path
-   * @throws UnsafeSharedPathException when a segment is missing, linked, or a reparse point
+   * @throws UnsafeSharedPathException when a segment is missing, linked, reparse-pointed, mounted,
+   *     or no longer canonically beneath the configured root
    */
   public Path recheckForMutation(Path resolved) {
     if (resolved == null) {
       throw unsafe("Shared-folder mutation path is required");
     }
     try {
-      Path candidate = resolved.toAbsolutePath().normalize();
+      Path candidate = fileSystem.absoluteNormalized(resolved);
       requireBeneathRoot(candidate);
       verifyExistingChain(candidate);
       return candidate;
@@ -170,12 +190,12 @@ public final class SharedFolderPathResolver {
     }
   }
 
-  private void verifyRoot() throws IOException {
-    if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)
-        || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) {
-      throw unsafe("Shared-folder root must be an existing directory");
+  private ExistingIdentity verifyRoot() throws IOException {
+    ExistingIdentity rootIdentity = inspectExistingSegment(root, true);
+    if (!sameRootIdentity(rootIdentity)) {
+      throw unsafe("Shared-folder root canonical identity changed");
     }
-    requireOrdinary(root);
+    return rootIdentity;
   }
 
   private void verifyExistingChain(Path candidate) {
@@ -184,10 +204,13 @@ public final class SharedFolderPathResolver {
       Path current = root;
       for (Path segment : root.relativize(candidate)) {
         current = current.resolve(segment);
-        if (!Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
-          throw unsafe("Shared-folder path does not exist");
+        ExistingIdentity identity = inspectExistingSegment(current, false);
+        if (!identity.canonicalPath().startsWith(canonicalRoot)) {
+          throw unsafe("Shared-folder path canonical identity escapes the configured root");
         }
-        requireOrdinary(current);
+        if (!fileSystem.sameFileStore(root, current)) {
+          throw unsafe("Shared-folder paths cannot cross a filesystem boundary");
+        }
       }
     } catch (IOException | SecurityException exception) {
       if (exception instanceof UnsafeSharedPathException unsafePathException) {
@@ -197,15 +220,41 @@ public final class SharedFolderPathResolver {
     }
   }
 
+  private ExistingIdentity inspectExistingSegment(Path path, boolean rootPath) throws IOException {
+    if (!fileSystem.existsNoFollow(path)) {
+      throw unsafe(rootPath ? "Shared-folder root must exist" : "Shared-folder path does not exist");
+    }
+    BasicFileAttributes attributes = fileSystem.readAttributesNoFollow(path);
+    if (rootPath && !attributes.isDirectory()) {
+      throw unsafe("Shared-folder root must be an existing directory");
+    }
+    requireOrdinary(path, attributes);
+    if (fileSystem.isMountPoint(path)) {
+      throw unsafe("Shared-folder paths cannot contain filesystem mount points");
+    }
+    Path canonicalPath = fileSystem.realPath(path);
+    Path nonFollowingPath = fileSystem.realPathNoFollow(path);
+    if (!canonicalPath.equals(nonFollowingPath)) {
+      throw unsafe("Shared-folder paths must retain canonical identity without following links");
+    }
+    return new ExistingIdentity(canonicalPath, attributes.fileKey());
+  }
+
+  private boolean sameRootIdentity(ExistingIdentity currentRoot) {
+    if (!canonicalRoot.equals(currentRoot.canonicalPath())) {
+      return false;
+    }
+    return rootFileKey == null || currentRoot.fileKey() == null
+        || rootFileKey.equals(currentRoot.fileKey());
+  }
+
   private void requireBeneathRoot(Path candidate) {
     if (!candidate.startsWith(root)) {
       throw unsafe("Shared-folder path escapes the configured root");
     }
   }
 
-  private void requireOrdinary(Path path) throws IOException {
-    BasicFileAttributes attributes = Files.readAttributes(
-        path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+  private void requireOrdinary(Path path, BasicFileAttributes attributes) throws IOException {
     if (attributes.isSymbolicLink() || attributes.isOther() || hasWindowsReparsePoint(path)) {
       throw unsafe("Shared-folder paths cannot contain links or reparse points");
     }
@@ -213,7 +262,7 @@ public final class SharedFolderPathResolver {
 
   private boolean hasWindowsReparsePoint(Path path) throws IOException {
     try {
-      Object attributes = Files.getAttribute(path, "dos:attributes", LinkOption.NOFOLLOW_LINKS);
+      Object attributes = fileSystem.dosAttributesNoFollow(path);
       return attributes instanceof Number number
           && (number.intValue() & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
     } catch (UnsupportedOperationException exception) {
@@ -222,7 +271,7 @@ public final class SharedFolderPathResolver {
   }
 
   private boolean containsControlCharacter(String value) {
-    return value.codePoints().anyMatch(codePoint -> codePoint <= 0x1f || codePoint == 0x7f);
+    return value.codePoints().anyMatch(Character::isISOControl);
   }
 
   private boolean containsEncodedSeparator(String value) {
@@ -242,4 +291,6 @@ public final class SharedFolderPathResolver {
   private UnsafeSharedPathException unsafe(String message, Throwable cause) {
     return new UnsafeSharedPathException(message, cause);
   }
+
+  private record ExistingIdentity(Path canonicalPath, Object fileKey) {}
 }
