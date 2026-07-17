@@ -8,6 +8,8 @@ import dev.christopherbell.sharedfolder.fs.SharedFolderFileSystemBoundary;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -209,6 +211,46 @@ class SharedFolderPathResolverTest {
         .isInstanceOf(UnsafeSharedPathException.class);
   }
 
+  @Test
+  void readHandleRejectsDirectorySubstitutionImmediatelyBeforeListingOpen() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("shared"));
+    Path directory = Files.createDirectory(root.resolve("music"));
+    var resolver = new SharedFolderPathResolver(root);
+    var handle = resolver.readHandle(resolver.existing("music"));
+
+    Files.move(directory, temp.resolve("original-music"));
+    Files.createDirectory(directory);
+
+    assertThatThrownBy(handle::openDirectory)
+        .isInstanceOf(UnsafeSharedPathException.class);
+  }
+
+  @Test
+  void readHandleRejectsFileSubstitutionImmediatelyBeforeTextPreviewOpen() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("shared"));
+    Path notes = Files.writeString(root.resolve("notes.txt"), "original");
+    var resolver = new SharedFolderPathResolver(root);
+    var handle = resolver.readHandle(resolver.existing("notes.txt"));
+
+    Files.move(notes, temp.resolve("original-notes.txt"));
+    Files.writeString(notes, "replacement");
+
+    assertThatThrownBy(handle::openFile)
+        .isInstanceOf(UnsafeSharedPathException.class);
+  }
+
+  @Test
+  void readHandleMapsAnUnsupportedNoFollowOpenToTheFailClosedPathResult() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("shared"));
+    Files.writeString(root.resolve("notes.txt"), "safe");
+    var resolver = new SharedFolderPathResolver(root, new UnsupportedNoFollowBoundary());
+    var handle = resolver.readHandle(resolver.existing("notes.txt"));
+
+    assertThatThrownBy(handle::openFile)
+        .isInstanceOf(UnsafeSharedPathException.class)
+        .hasMessageNotContaining(root.toString());
+  }
+
   private void assumeLinkOrJunctionCreated(Path link, Path target) throws Exception {
     try {
       Files.createSymbolicLink(link, target);
@@ -273,6 +315,16 @@ class SharedFolderPathResolverTest {
     public Object dosAttributesNoFollow(Path path) throws IOException {
       return delegate.dosAttributesNoFollow(path);
     }
+
+    @Override
+    public DirectoryStream<Path> openDirectory(Path path) throws IOException {
+      return delegate.openDirectory(path);
+    }
+
+    @Override
+    public InputStream openFileNoFollow(Path path) throws IOException {
+      return delegate.openFileNoFollow(path);
+    }
   }
 
   private static final class MountBoundary extends DelegatingBoundary {
@@ -321,6 +373,13 @@ class SharedFolderPathResolverTest {
     public boolean sameFileStore(Path first, Path second) throws IOException {
       return !crossedAncestor.equals(second.toAbsolutePath().normalize())
           && super.sameFileStore(first, second);
+    }
+  }
+
+  private static final class UnsupportedNoFollowBoundary extends DelegatingBoundary {
+    @Override
+    public InputStream openFileNoFollow(Path path) {
+      throw new UnsupportedOperationException("NOFOLLOW is unavailable");
     }
   }
 }

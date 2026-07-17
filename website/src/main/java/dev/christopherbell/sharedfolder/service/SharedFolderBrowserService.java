@@ -2,14 +2,13 @@ package dev.christopherbell.sharedfolder.service;
 
 import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
+import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver.ReadHandle;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntryType;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
@@ -43,19 +42,18 @@ public class SharedFolderBrowserService {
     SharedFolderPathResolver resolver = resolver();
     Path directory = resolveExisting(resolver, requestedPath);
     try {
-      BasicFileAttributes attributes = Files.readAttributes(
-          directory, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+      ReadHandle directoryHandle = resolver.readHandle(directory);
+      BasicFileAttributes attributes = directoryHandle.attributes();
       if (!attributes.isDirectory()) {
         throw notFound();
       }
       List<SharedDirectoryEntry> entries = new ArrayList<>();
-      try (DirectoryStream<Path> children = Files.newDirectoryStream(directory)) {
+      try (DirectoryStream<Path> children = directoryHandle.openDirectory()) {
         for (Path child : children) {
           String name = child.getFileName().toString();
           String relativePath = requestedPath.isEmpty() ? name : requestedPath + "/" + name;
           Path safeChild = resolveExisting(resolver, relativePath);
-          BasicFileAttributes childAttributes = Files.readAttributes(
-              safeChild, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+          BasicFileAttributes childAttributes = resolver.readHandle(safeChild).attributes();
           SharedDirectoryEntryType type = childAttributes.isDirectory()
               ? SharedDirectoryEntryType.DIRECTORY : SharedDirectoryEntryType.FILE;
           if (!childAttributes.isDirectory() && !childAttributes.isRegularFile()) {

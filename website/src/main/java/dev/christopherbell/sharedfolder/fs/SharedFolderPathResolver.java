@@ -1,6 +1,8 @@
 package dev.christopherbell.sharedfolder.fs;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Locale;
@@ -12,8 +14,9 @@ import java.util.Set;
  *
  * <p>Resolution is not authorization. Callers must make their fresh access decision separately
  * and invoke {@link #recheckForMutation(Path)} immediately before a mutation that follows a
- * previous resolution. That recheck detects a link, reparse-point, mount, or canonical-identity
- * substitution made between validation and use.
+ * previous resolution. Use {@link #readHandle(Path)} for reads: its open methods recheck the full
+ * path chain and captured leaf identity at the last responsible moment before the provider opens
+ * the directory or file.
  */
 public final class SharedFolderPathResolver {
   private static final int FILE_ATTRIBUTE_REPARSE_POINT = 0x0400;
@@ -115,8 +118,43 @@ public final class SharedFolderPathResolver {
    *     or no longer canonically beneath the configured root
    */
   public Path recheckForMutation(Path resolved) {
+    return recheckExisting(resolved, "mutation");
+  }
+
+  /**
+   * Revalidates an existing path immediately before a read operation.
+   *
+   * @param resolved a path previously returned by {@link #existing(String)}
+   * @return the revalidated absolute path
+   */
+  public Path recheckForRead(Path resolved) {
+    return recheckExisting(resolved, "read");
+  }
+
+  /**
+   * Captures the ordinary leaf identity that a later read must still match.
+   *
+   * <p>The returned handle never exposes an absolute path. Callers must use its attribute or open
+   * methods rather than reopening the earlier pathname themselves.
+   *
+   * @param resolved a path previously returned by {@link #existing(String)}
+   * @return a revalidating read handle
+   */
+  public ReadHandle readHandle(Path resolved) {
+    Path candidate = recheckForRead(resolved);
+    try {
+      return new ReadHandle(candidate, inspectExistingSegment(candidate, candidate.equals(root)));
+    } catch (IOException | SecurityException exception) {
+      if (exception instanceof UnsafeSharedPathException unsafePathException) {
+        throw unsafePathException;
+      }
+      throw unsafe("Shared-folder read path cannot be inspected", exception);
+    }
+  }
+
+  private Path recheckExisting(Path resolved, String operation) {
     if (resolved == null) {
-      throw unsafe("Shared-folder mutation path is required");
+      throw unsafe("Shared-folder " + operation + " path is required");
     }
     try {
       Path candidate = fileSystem.absoluteNormalized(resolved);
@@ -127,7 +165,7 @@ public final class SharedFolderPathResolver {
       if (exception instanceof UnsafeSharedPathException unsafePathException) {
         throw unsafePathException;
       }
-      throw unsafe("Shared-folder mutation path cannot be inspected", exception);
+      throw unsafe("Shared-folder " + operation + " path cannot be inspected", exception);
     }
   }
 
@@ -237,7 +275,7 @@ public final class SharedFolderPathResolver {
     if (!canonicalPath.equals(nonFollowingPath)) {
       throw unsafe("Shared-folder paths must retain canonical identity without following links");
     }
-    return new ExistingIdentity(canonicalPath, attributes.fileKey());
+    return new ExistingIdentity(canonicalPath, attributes.fileKey(), attributes);
   }
 
   private boolean sameRootIdentity(ExistingIdentity currentRoot) {
@@ -292,5 +330,81 @@ public final class SharedFolderPathResolver {
     return new UnsafeSharedPathException(message, cause);
   }
 
-  private record ExistingIdentity(Path canonicalPath, Object fileKey) {}
+  /**
+   * A leaf path that is rechecked immediately before metadata reads and provider opens.
+   *
+   * <p>The handle is intentionally pathless to its callers. This prevents a service from
+   * validating a path once and later passing that mutable path to a {@code Resource}.
+   */
+  public final class ReadHandle {
+    private final Path selectedPath;
+    private final ExistingIdentity expectedIdentity;
+
+    private ReadHandle(Path selectedPath, ExistingIdentity expectedIdentity) {
+      this.selectedPath = selectedPath;
+      this.expectedIdentity = expectedIdentity;
+    }
+
+    /** Rechecks the chain and leaf identity immediately before returning safe metadata. */
+    public BasicFileAttributes attributes() {
+      return verifyCurrentIdentity().attributes();
+    }
+
+    /** Rechecks the chain and leaf identity immediately before opening a directory stream. */
+    public DirectoryStream<Path> openDirectory() throws IOException {
+      ExistingIdentity current = verifyCurrentIdentity();
+      if (!current.attributes().isDirectory()) {
+        throw unsafe("Shared-folder directory is no longer available");
+      }
+      return fileSystem.openDirectory(selectedPath);
+    }
+
+    /** Rechecks the chain and leaf identity immediately before opening an ordinary input stream. */
+    public InputStream openFile() throws IOException {
+      ExistingIdentity current = verifyCurrentIdentity();
+      if (!current.attributes().isRegularFile()) {
+        throw unsafe("Shared-folder file is no longer available");
+      }
+      try {
+        return fileSystem.openFileNoFollow(selectedPath);
+      } catch (UnsupportedOperationException exception) {
+        throw unsafe("Shared-folder provider cannot safely open files", exception);
+      }
+    }
+
+    private ExistingIdentity verifyCurrentIdentity() {
+      Path candidate = recheckForRead(selectedPath);
+      try {
+        ExistingIdentity current = inspectExistingSegment(candidate, candidate.equals(root));
+        if (!sameLeafIdentity(expectedIdentity, current)) {
+          throw unsafe("Shared-folder read target identity changed");
+        }
+        return current;
+      } catch (IOException | SecurityException exception) {
+        if (exception instanceof UnsafeSharedPathException unsafePathException) {
+          throw unsafePathException;
+        }
+        throw unsafe("Shared-folder read target cannot be inspected", exception);
+      }
+    }
+  }
+
+  private boolean sameLeafIdentity(ExistingIdentity expected, ExistingIdentity current) {
+    if (!expected.canonicalPath().equals(current.canonicalPath())) {
+      return false;
+    }
+    if (expected.fileKey() != null && current.fileKey() != null) {
+      return expected.fileKey().equals(current.fileKey());
+    }
+    BasicFileAttributes expectedAttributes = expected.attributes();
+    BasicFileAttributes currentAttributes = current.attributes();
+    return expectedAttributes.isDirectory() == currentAttributes.isDirectory()
+        && expectedAttributes.isRegularFile() == currentAttributes.isRegularFile()
+        && expectedAttributes.size() == currentAttributes.size()
+        && expectedAttributes.lastModifiedTime().equals(currentAttributes.lastModifiedTime())
+        && expectedAttributes.creationTime().equals(currentAttributes.creationTime());
+  }
+
+  private record ExistingIdentity(
+      Path canonicalPath, Object fileKey, BasicFileAttributes attributes) {}
 }

@@ -185,6 +185,25 @@ class SharedFolderReadControllerTest {
     verify(previews).open("music/guide.pdf");
   }
 
+  @Test
+  @WithMockUser(authorities = "USER")
+  void mediaPreview_honorsNativeSingleRangeRequests() throws Exception {
+    when(previews.open("music/track.mp3")).thenReturn(new SharedFolderPreview(
+        SharedFolderPreviewKind.AUDIO, null,
+        new ByteArrayResource("0123456789".getBytes(StandardCharsets.UTF_8)), false,
+        MediaType.valueOf("audio/mpeg"), "inline; filename=track.mp3"));
+
+    mockMvc.perform(get(BASE + "/preview").queryParam("path", "music/track.mp3")
+            .header(HttpHeaders.RANGE, "bytes=2-5"))
+        .andExpect(status().isPartialContent())
+        .andExpect(header().string(HttpHeaders.ACCEPT_RANGES, "bytes"))
+        .andExpect(header().string(HttpHeaders.CONTENT_RANGE, "bytes 2-5/10"))
+        .andExpect(header().string(HttpHeaders.CONTENT_LENGTH, "4"));
+
+    verify(access).requireRead();
+    verify(previews).open("music/track.mp3");
+  }
+
   @TestConfiguration
   @EnableMethodSecurity
   @EnableWebSecurity

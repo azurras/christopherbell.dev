@@ -1,13 +1,20 @@
 package dev.christopherbell.sharedfolder.fs;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.channels.Channels;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 
 /** Real NIO-backed implementation of the shared-folder filesystem boundary. */
 public class NioSharedFolderFileSystemBoundary implements SharedFolderFileSystemBoundary {
@@ -72,6 +79,23 @@ public class NioSharedFolderFileSystemBoundary implements SharedFolderFileSystem
   @Override
   public Object dosAttributesNoFollow(Path path) throws IOException {
     return Files.getAttribute(path, "dos:attributes", LinkOption.NOFOLLOW_LINKS);
+  }
+
+  @Override
+  public DirectoryStream<Path> openDirectory(Path path) throws IOException {
+    return Files.newDirectoryStream(path);
+  }
+
+  @Override
+  public InputStream openFileNoFollow(Path path) throws IOException {
+    Set<OpenOption> options = Set.of(StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
+    return Channels.newInputStream(openNoFollowChannel(path, options));
+  }
+
+  /** Opens a channel with NOFOLLOW semantics; unsupported providers must fail rather than reopen. */
+  protected SeekableByteChannel openNoFollowChannel(Path path, Set<OpenOption> options)
+      throws IOException {
+    return Files.newByteChannel(path, options);
   }
 
   private static SharedFolderMountMetadata defaultMountMetadata() {

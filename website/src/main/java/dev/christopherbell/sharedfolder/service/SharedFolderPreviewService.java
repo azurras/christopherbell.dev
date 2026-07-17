@@ -1,17 +1,15 @@
 package dev.christopherbell.sharedfolder.service;
 
 import dev.christopherbell.configuration.SharedFolderProperties;
+import dev.christopherbell.sharedfolder.fs.SharedFolderReadResource;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
+import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver.ReadHandle;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -41,48 +39,50 @@ public class SharedFolderPreviewService {
    * @return bounded text or a disk-backed media resource with safe presentation metadata
    */
   public SharedFolderPreview open(String decodedPath) {
-    Path file = resolveFile(decodedPath);
-    String name = file.getFileName().toString();
+    ResolvedFile file = resolveFile(decodedPath);
+    String name = file.name();
     SharedFolderPreviewKind kind = SharedFolderContentPolicy.previewKind(name);
     try {
       if (kind == SharedFolderPreviewKind.TEXT) {
-        BoundedText text = readBoundedUtf8(file);
+        BoundedText text = readBoundedUtf8(file.handle());
         return SharedFolderPreview.text(text.value(), text.truncated());
       }
       MediaType mediaType = SharedFolderContentPolicy.mediaType(name, kind);
       String disposition = kind == SharedFolderPreviewKind.NONE
           ? SharedFolderContentPolicy.attachmentDisposition(name)
           : SharedFolderContentPolicy.inlineDisposition(name);
-      return new SharedFolderPreview(kind, null, new FileSystemResource(file), false, mediaType,
+      return new SharedFolderPreview(kind, null,
+          new SharedFolderReadResource(file.handle(), name, file.attributes().size()), false, mediaType,
           disposition);
     } catch (IOException exception) {
       throw notFound();
     }
   }
 
-  private Path resolveFile(String decodedPath) {
+  private ResolvedFile resolveFile(String decodedPath) {
     if (!properties.enabled() || decodedPath == null) {
       throw notFound();
     }
     try {
-      Path file = new SharedFolderPathResolver(properties.root()).existing(decodedPath);
-      BasicFileAttributes attributes = Files.readAttributes(
-          file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+      SharedFolderPathResolver resolver = new SharedFolderPathResolver(properties.root());
+      ReadHandle handle = resolver.readHandle(resolver.existing(decodedPath));
+      BasicFileAttributes attributes = handle.attributes();
       if (!attributes.isRegularFile()) {
         throw notFound();
       }
-      return file;
-    } catch (IOException | UnsafeSharedPathException exception) {
+      String name = decodedPath.substring(decodedPath.lastIndexOf('/') + 1);
+      return new ResolvedFile(handle, name, attributes);
+    } catch (UnsafeSharedPathException exception) {
       throw notFound();
     }
   }
 
-  private BoundedText readBoundedUtf8(Path file) throws IOException {
+  private BoundedText readBoundedUtf8(ReadHandle file) throws IOException {
     byte[] bytes = new byte[MAX_TEXT_PREVIEW_BYTES];
     int count = 0;
     int lines = 0;
     boolean truncated = false;
-    try (InputStream stream = Files.newInputStream(file)) {
+    try (InputStream stream = file.openFile()) {
       while (count < bytes.length) {
         int next = stream.read();
         if (next < 0) {
@@ -106,6 +106,8 @@ public class SharedFolderPreviewService {
   }
 
   private record BoundedText(String value, boolean truncated) {}
+
+  private record ResolvedFile(ReadHandle handle, String name, BasicFileAttributes attributes) {}
 
   /** Safe preview data that never exposes a local filesystem path. */
   public record SharedFolderPreview(

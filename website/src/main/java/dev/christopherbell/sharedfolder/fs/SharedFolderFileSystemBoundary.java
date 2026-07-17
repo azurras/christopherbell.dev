@@ -1,6 +1,8 @@
 package dev.christopherbell.sharedfolder.fs;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 
@@ -35,4 +37,13 @@ public interface SharedFolderFileSystemBoundary {
 
   /** Returns native DOS attributes without resolving a link when the provider supports them. */
   Object dosAttributesNoFollow(Path path) throws IOException;
+
+  /** Opens an already revalidated directory for one listing operation. */
+  DirectoryStream<Path> openDirectory(Path path) throws IOException;
+
+  /**
+   * Opens an already revalidated ordinary file for reading without following a link where the
+   * provider supports that option.
+   */
+  InputStream openFileNoFollow(Path path) throws IOException;
 }

@@ -1,15 +1,12 @@
 package dev.christopherbell.sharedfolder.service;
 
 import dev.christopherbell.configuration.SharedFolderProperties;
+import dev.christopherbell.sharedfolder.fs.SharedFolderReadResource;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
+import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver.ReadHandle;
 import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpRange;
 import org.springframework.http.HttpStatus;
@@ -30,45 +27,42 @@ public class SharedFolderDownloadService {
   /**
    * Opens one decoded relative file path for a full or single-range download.
    *
-   * <p>The returned {@link FileSystemResource} streams from disk. This method does not buffer a
-   * file into memory or URL-decode an already decoded HTTP value.
+   * <p>The returned resource streams from disk. It rechecks the resolver-owned handle when Spring
+   * actually opens the stream, and never URL-decodes an already decoded HTTP value.
    *
    * @param decodedPath decoded relative file path
    * @param rangeHeader one raw HTTP {@code Range} header value, or {@code null}
    * @return a safe file resource and the selected byte region
    */
   public SharedFolderDownload open(String decodedPath, String rangeHeader) {
-    Path file = resolveFile(decodedPath);
-    try {
-      long totalLength = Files.size(file);
-      RangeSelection selection = rangeSelection(rangeHeader, totalLength);
-      String name = file.getFileName().toString();
-      return new SharedFolderDownload(
-          new FileSystemResource(file),
-          selection.start(),
-          selection.length(),
-          totalLength,
-          selection.partial(),
-          SharedFolderContentPolicy.mediaType(name, SharedFolderContentPolicy.previewKind(name)),
-          SharedFolderContentPolicy.attachmentDisposition(name));
-    } catch (IOException exception) {
-      throw notFound();
-    }
+    ResolvedFile file = resolveFile(decodedPath);
+    long totalLength = file.attributes().size();
+    RangeSelection selection = rangeSelection(rangeHeader, totalLength);
+    String name = file.name();
+    return new SharedFolderDownload(
+        new SharedFolderReadResource(file.handle(), name, totalLength),
+        selection.start(),
+        selection.length(),
+        totalLength,
+        selection.partial(),
+        SharedFolderContentPolicy.mediaType(name, SharedFolderContentPolicy.previewKind(name)),
+        SharedFolderContentPolicy.attachmentDisposition(name));
   }
 
-  private Path resolveFile(String decodedPath) {
+  private ResolvedFile resolveFile(String decodedPath) {
     if (!properties.enabled() || decodedPath == null) {
       throw notFound();
     }
     try {
-      Path file = new SharedFolderPathResolver(properties.root()).existing(decodedPath);
-      BasicFileAttributes attributes = Files.readAttributes(
-          file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+      SharedFolderPathResolver resolver = new SharedFolderPathResolver(properties.root());
+      ReadHandle handle = resolver.readHandle(resolver.existing(decodedPath));
+      BasicFileAttributes attributes = handle.attributes();
       if (!attributes.isRegularFile()) {
         throw notFound();
       }
-      return file;
-    } catch (IOException | UnsafeSharedPathException exception) {
+      String name = decodedPath.substring(decodedPath.lastIndexOf('/') + 1);
+      return new ResolvedFile(handle, name, attributes);
+    } catch (UnsafeSharedPathException exception) {
       throw notFound();
     }
   }
@@ -103,6 +97,8 @@ public class SharedFolderDownloadService {
   }
 
   private record RangeSelection(long start, long length, boolean partial) {}
+
+  private record ResolvedFile(ReadHandle handle, String name, BasicFileAttributes attributes) {}
 
   /** Disk-backed download response metadata that contains no absolute filesystem path. */
   public record SharedFolderDownload(

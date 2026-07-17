@@ -11,7 +11,9 @@ operations exist.
   filesystem mounts. Every existing segment must retain a canonical identity beneath the root and
   stay on its file store. Linux reads `/proc/self/mountinfo` and fails closed when its mount facts
   are unavailable or malformed; the Windows provider relies on native reparse-point and
-  file-store checks. Callers recheck an existing selected path immediately before any mutation.
+  file-store checks. Read callers use a resolver-owned handle that captures the leaf identity,
+  rechecks the full chain immediately before metadata and provider opens, and refuses a provider
+  that cannot open an ordinary leaf with `NOFOLLOW_LINKS`.
 - `security` reloads the authenticated account from MongoDB for every decision. A persisted
   active approved account needs a shared-folder capability; ADMIN has read and write implicitly,
   and write implies read. JWTs intentionally carry no shared-folder capability.
@@ -36,13 +38,14 @@ flag. Local and test profiles use build-owned paths; production roots use enviro
   `SharedFolderAccessService.requireRead()`. Revoked, inactive, unapproved, or missing accounts
   are denied before a filesystem service runs.
 - `GET /entries` returns only decoded relative paths and ordinary-entry metadata. `GET /content`
-  uses a `FileSystemResource` plus `ResourceRegion` for disk streaming and supports exactly one
-  HTTP byte range, including correct `206`, `416`, `Content-Range`, `Accept-Ranges`, and `HEAD`
-  semantics. It never calls `readAllBytes`.
+  uses a revalidating disk-backed resource plus `ResourceRegion` for disk streaming and supports
+  exactly one HTTP byte range, including correct `206`, `416`, `Content-Range`, `Accept-Ranges`,
+  and `HEAD` semantics. It never calls `readAllBytes` or exposes an absolute local path.
 - `GET /preview` returns bounded UTF-8 text as JSON for text files; allowlisted raster image,
   audio, video, and PDF types stream inline. HTML, SVG, and every unknown type stay attachment
-  only. Previews send `nosniff`; PDFs additionally send a restrictive sandbox CSP. Download and
-  preview filenames use framework-built RFC 5987 content-disposition values.
+  only. Native media `Range` requests are preserved through to Spring's resource streaming.
+  Previews send `nosniff`; PDFs additionally send a restrictive sandbox CSP. Download and preview
+  filenames use framework-built RFC 5987 content-disposition values.
 
 ## Update This Doc
 

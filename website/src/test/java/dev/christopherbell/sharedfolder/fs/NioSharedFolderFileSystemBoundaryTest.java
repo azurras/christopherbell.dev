@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
@@ -63,5 +64,22 @@ class NioSharedFolderFileSystemBoundaryTest {
     assertThatThrownBy(() -> boundary.isMountPoint(child))
         .isInstanceOf(IOException.class)
         .hasMessageContaining("malformed");
+  }
+
+  @Test
+  void refusesToReopenAFileWhenTheProviderDoesNotSupportNoFollow() throws Exception {
+    Path file = Files.writeString(temp.resolve("target.txt"), "safe");
+    var boundary = new UnsupportedNoFollowBoundary();
+
+    assertThatThrownBy(() -> boundary.openFileNoFollow(file))
+        .isInstanceOf(UnsupportedOperationException.class)
+        .hasMessageContaining("NOFOLLOW");
+  }
+
+  private static final class UnsupportedNoFollowBoundary extends NioSharedFolderFileSystemBoundary {
+    @Override
+    protected SeekableByteChannel openNoFollowChannel(Path path, java.util.Set<java.nio.file.OpenOption> options) {
+      throw new UnsupportedOperationException("NOFOLLOW is unavailable");
+    }
   }
 }

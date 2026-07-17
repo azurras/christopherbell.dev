@@ -8,6 +8,7 @@ import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
 import dev.christopherbell.sharedfolder.service.SharedFolderBrowserService;
 import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -133,6 +134,32 @@ class SharedFolderReadServiceTest {
           assertThat(exception.getStatusCode().value()).isEqualTo(404);
           assertThat(exception.getMessage()).doesNotContain(root.toString());
         });
+  }
+
+  @Test
+  void downloadResourceRejectsLeafSubstitutionWhenTheStreamActuallyOpens() throws Exception {
+    Path file = Files.writeString(root.resolve("sample.bin"), "original");
+    var transfer = new SharedFolderDownloadService(properties).open("sample.bin", null);
+
+    Files.move(file, temp.resolve("original-sample.bin"));
+    Files.writeString(file, "replacement");
+
+    assertThatThrownBy(() -> transfer.resource().getInputStream())
+        .isInstanceOf(IOException.class)
+        .hasMessageNotContaining(root.toString());
+  }
+
+  @Test
+  void binaryPreviewResourceRejectsLeafSubstitutionWhenTheStreamActuallyOpens() throws Exception {
+    Path file = Files.writeString(root.resolve("sample.pdf"), "%PDF-original");
+    var preview = new SharedFolderPreviewService(properties).open("sample.pdf");
+
+    Files.move(file, temp.resolve("original-sample.pdf"));
+    Files.writeString(file, "%PDF-replacement");
+
+    assertThatThrownBy(() -> preview.resource().getInputStream())
+        .isInstanceOf(IOException.class)
+        .hasMessageNotContaining(root.toString());
   }
 
   private void assertRangeRejected(SharedFolderDownloadService downloads, String range) {

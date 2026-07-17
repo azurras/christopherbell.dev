@@ -116,10 +116,13 @@ Owns browser-side behavior for server-rendered pages.
   request generation—tears down and hides the console before redirecting.
 - `shared-folder.js` owns the read-only Shared Folder shell: it redirects visitors without a token,
   checks the current account's effective shared read capability, renders relative-path breadcrumbs
-  and accessible button controls, copies same-origin `/shared?path=` links, starts attachment
-  downloads, and inserts text previews only with `textContent`. Its helper module owns the
-  one-time URL encoding, capability check, breadcrumbs, and safe text rendering. The shared nav
-  adds Shared Folder only after the current-account API reports effective read access.
+  and accessible button controls, copies same-origin `/shared?path=` links, starts native
+  attachment downloads and media previews without Blob buffering, and inserts text previews only
+  with `textContent`. Before assigning a protected native URL it waits for the shared-folder
+  service worker to acknowledge the current JWT; 401 redirects to login and 403/revocation is
+  shown inline. The worker receives no token in a URL, attaches it only to the exact versioned
+  shared-folder API prefix, and preserves `Range`. The shared nav adds Shared Folder only after
+  the current-account API reports effective read access.
 
 ## Design Notes
 

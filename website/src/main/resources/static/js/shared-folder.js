@@ -1,6 +1,7 @@
 import { API } from './lib/api.js';
 import {
   authHeaders,
+  clearAuthState,
   currentRedirectTarget,
   fetchJson,
   getAuthToken,
@@ -13,6 +14,10 @@ import {
   isSharedFolderAccessDenied,
   renderPreviewText,
 } from './lib/shared-folder.js';
+import {
+  prepareSharedFolderStreamingAuth,
+  sharedFolderStreamingDenial,
+} from './lib/shared-folder-streaming.js';
 
 const root = document.getElementById('shared-folder-app');
 
@@ -43,27 +48,34 @@ function renderBreadcrumbs(path) {
   });
 }
 
-async function authenticatedBlob(url) {
-  const response = await fetch(url, { headers: authHeaders() });
-  if (!response.ok) {
-    const error = new Error(`Request failed (${response.status})`);
-    error.status = response.status;
-    throw error;
+function handleStreamingDenial(statusCode) {
+  const denial = sharedFolderStreamingDenial(statusCode);
+  status(denial.message);
+  if (denial.redirectToLogin && !window.location.pathname.startsWith('/login')) {
+    clearAuthState();
+    window.location.replace(loginRedirectUrl(currentRedirectTarget()));
   }
-  return response.blob();
+}
+
+async function prepareNativeStreaming() {
+  try {
+    await prepareSharedFolderStreamingAuth(getAuthToken());
+    return true;
+  } catch (error) {
+    status(error?.message || 'Secure shared-folder streaming is unavailable.');
+    return false;
+  }
 }
 
 async function download(entry) {
   status(`Preparing ${entry.name}`);
-  const blob = await authenticatedBlob(API.sharedFolder.content(entry.path));
-  const url = URL.createObjectURL(blob);
+  if (!await prepareNativeStreaming()) return;
   const link = document.createElement('a');
-  link.href = url;
+  link.href = API.sharedFolder.content(entry.path);
   link.download = entry.name;
   document.body.append(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
   status('Download started');
 }
 
@@ -98,17 +110,16 @@ async function preview(entry) {
     return;
   }
 
-  const blob = await authenticatedBlob(API.sharedFolder.preview(entry.path));
-  const url = URL.createObjectURL(blob);
+  if (!await prepareNativeStreaming()) return;
   const element = entry.previewKind === 'IMAGE' ? document.createElement('img')
     : entry.previewKind === 'AUDIO' ? document.createElement('audio')
       : entry.previewKind === 'VIDEO' ? document.createElement('video')
         : document.createElement('iframe');
-  element.src = url;
+  element.src = API.sharedFolder.preview(entry.path);
   element.title = `${entry.name} preview`;
   if (element instanceof HTMLMediaElement) element.controls = true;
   if (entry.previewKind === 'PDF') element.setAttribute('sandbox', '');
-  element.addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
+  element.addEventListener('error', () => status('The preview could not be loaded.'));
   host.append(element);
 }
 
@@ -140,7 +151,13 @@ function renderEntries(response) {
     open.type = 'button';
     open.className = 'btn btn-link text-start flex-grow-1';
     open.textContent = `${entry.type === 'DIRECTORY' ? 'Folder' : 'File'}: ${entry.name}`;
-    open.addEventListener('click', () => entry.type === 'DIRECTORY' ? navigate(entry.path) : preview(entry));
+    open.addEventListener('click', () => {
+      if (entry.type === 'DIRECTORY') {
+        navigate(entry.path);
+      } else {
+        void preview(entry).catch(error => status(error?.message || 'The preview could not be loaded.'));
+      }
+    });
     row.append(open);
     if (entry.type === 'FILE') {
       const copy = document.createElement('button');
@@ -152,7 +169,9 @@ function renderEntries(response) {
       save.type = 'button';
       save.className = 'btn btn-sm btn-warning';
       save.textContent = 'Download';
-      save.addEventListener('click', () => download(entry));
+      save.addEventListener('click', () => {
+        void download(entry).catch(error => status(error?.message || 'The download could not be started.'));
+      });
       row.append(copy, save);
     }
     host.append(row);
@@ -191,6 +210,14 @@ async function initialize() {
       ? 'Shared-folder access was denied.'
       : (error?.message || 'The shared folder is unavailable.'));
   }
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', event => {
+    if (event.data?.type === 'shared-folder-auth-denied') {
+      handleStreamingDenial(event.data.status);
+    }
+  });
 }
 
 initialize();
