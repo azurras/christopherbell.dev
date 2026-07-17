@@ -352,6 +352,51 @@ root-scoped worker, verifies its expected controller, and resolves only after th
 acknowledgement; `node --test website/src/test/js/shared-folder-streaming.test.js` reports `6/6`
 passing. Live-browser smoke remains Task 9.
 
+## Page DTO and Worker-Restart Remediation — 2026-07-17
+
+### Scope and Decisions
+
+- `fetchJson()` returns an already-unwrapped account DTO. The shared-folder initializer now passes
+  that DTO directly to `accountHasSharedFolderRead()` and does not look for a second `payload`
+  wrapper, so effective READ accounts proceed to the protected entries request while denied
+  accounts stop before it.
+- A service-worker execution-context restart can discard the worker's in-memory per-client JWT
+  map while the controlled page and native media request remain live. For an exact shared-folder
+  API request with no token, the worker now performs a bounded one-shot message-port request to
+  only the initiating controlled client. A recovered token exists only in that worker map, then is
+  attached to a no-store clone retaining `Range`; no recovery reply returns a no-store `401`,
+  notifies the page, and never forwards an unauthenticated request.
+
+### RED
+
+```powershell
+& 'C:\Progra~1\nodejs\node.exe' --test website/src/test/js/shared-folder-page-initialization.test.js
+```
+
+Result: exit `1`; the desired page-flow test could not import
+`initializeSharedFolderPage`, proving the existing initializer had no testable path that exercised
+the unwrapped account DTO through its entries render flow.
+
+```powershell
+& 'C:\Progra~1\nodejs\node.exe' --test website/src/test/js/shared-folder-worker-runtime.test.js
+```
+
+Result: exit `1`; Node reported `ERR_MODULE_NOT_FOUND` for
+`js/lib/shared-folder-worker-runtime.js`, proving there was no restart-recovery boundary.
+
+### GREEN
+
+```powershell
+& 'C:\Progra~1\nodejs\node.exe' --test website/src/test/js/shared-folder-page-initialization.test.js website/src/test/js/shared-folder-worker-runtime.test.js website/src/test/js/shared-folder-streaming.test.js
+```
+
+Result: exit `0`; all `12` focused tests passed. Page initialization proves a READ account DTO
+reaches the entries request and rendering while a denied DTO does not. Worker lifecycle coverage
+proves map loss rehydrates through the initiating client before an authorized no-store request,
+preserves `Range`, rejects a timeout or client-lookup failure without a network fetch, notifies an
+available page with a controlled `401`, and keeps the recovery runtime free of URL or
+persistent-storage token channels.
+
 ## Full Verification
 
 ```powershell
@@ -366,7 +411,7 @@ junction test is separately recorded above as passed on this host.
 $env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; $env:NODE_EXE = 'C:\Progra~1\nodejs\node.exe'; .\gradlew.bat --no-daemon :website:jsTest --console=plain
 ```
 
-Result: exit `0`; Node reported `135` passed, `0` failed.
+Result: exit `0`; Node reported `141` passed, `0` failed.
 
 ```powershell
 git diff --check

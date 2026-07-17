@@ -30,11 +30,14 @@ test('native shared-folder authorization preserves Range and never puts a bearer
   assert.equal(new URL(authorized.url).searchParams.has('access_token'), false);
 });
 
-test('worker bypasses HTTP caches and clears the per-client token only after 401', () => {
+test('worker delegates no-store forwarding and 401 token eviction to its runtime', () => {
   const worker = fs.readFileSync('website/src/main/resources/static/shared-folder-auth-sw.js', 'utf8');
+  const runtime = fs.readFileSync(
+    'website/src/main/resources/static/js/lib/shared-folder-worker-runtime.js', 'utf8');
 
-  assert.match(worker, /fetch\(attachSharedFolderAuthorization\([\s\S]*?\{ cache: 'no-store' \}\)/);
-  assert.match(worker, /response\.status === 401[\s\S]*?clientTokens\.delete\(event\.clientId\)/);
+  assert.match(worker, /respondToSharedFolderFetch/);
+  assert.match(runtime, /fetchFn\(\s*attachSharedFolderAuthorization\([\s\S]*?\{ cache: 'no-store' \}/);
+  assert.match(runtime, /response\.status === 401[\s\S]*?clientTokens\.delete\(clientId\)/);
   assert.match(worker, /shared-folder-auth-clear[\s\S]*?clientTokens\.delete\(clientId\)/);
 });
 
@@ -52,6 +55,8 @@ test('download and binary-preview denial states are actionable without a rejecte
 test('shared-folder page starts native anchor and media requests without Blob buffering', () => {
   const page = fs.readFileSync('website/src/main/resources/static/js/shared-folder.js', 'utf8');
   const worker = fs.readFileSync('website/src/main/resources/static/shared-folder-auth-sw.js', 'utf8');
+  const runtime = fs.readFileSync(
+    'website/src/main/resources/static/js/lib/shared-folder-worker-runtime.js', 'utf8');
 
   assert.doesNotMatch(page, /\.blob\(/);
   assert.doesNotMatch(page, /URL\.createObjectURL/);
@@ -62,8 +67,9 @@ test('shared-folder page starts native anchor and media requests without Blob bu
   assert.match(page, /handleSharedFolderAccessLoss\(error\.status\)/);
   assert.match(page, /handleSharedFolderAccessLoss\(event\.data\.status\)/);
   assert.match(page, /redirectOnUnauthorized: false/);
-  assert.match(worker, /attachSharedFolderAuthorization/);
-  assert.match(worker, /shared-folder-auth-denied/);
+  assert.match(worker, /respondToSharedFolderFetch/);
+  assert.match(runtime, /attachSharedFolderAuthorization/);
+  assert.match(runtime, /shared-folder-auth-denied/);
 });
 
 test('worker registration waits for the root-scoped controller and its token acknowledgement', async () => {

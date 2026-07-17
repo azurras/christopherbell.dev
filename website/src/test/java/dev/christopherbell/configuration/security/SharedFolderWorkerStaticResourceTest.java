@@ -22,7 +22,7 @@ class SharedFolderWorkerStaticResourceTest {
   void anonymousGetReturnsTheSharedFolderWorkerWhileTheApiStaysProtected() throws Exception {
     mockMvc.perform(get("/shared-folder-auth-sw.js"))
         .andExpect(status().isOk())
-        .andExpect(content().string(containsString("shared-folder-auth-denied")));
+        .andExpect(content().string(containsString("respondToSharedFolderFetch")));
 
     mockMvc.perform(get("/api/shared-folder/2026-07-17/entries"))
         .andExpect(status().isUnauthorized());

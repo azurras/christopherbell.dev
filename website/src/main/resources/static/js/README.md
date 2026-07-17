@@ -120,7 +120,10 @@ Owns browser-side behavior for server-rendered pages.
   attachment downloads and media previews without Blob buffering, and inserts text previews only
   with `textContent`. Before assigning a protected native URL it waits for the shared-folder
   service worker to acknowledge the current JWT; 401 redirects to login and 403/revocation is
-  shown inline. The worker receives no token in a URL, attaches it only to the exact versioned
+  shown inline. If a restarted worker has lost its per-client in-memory token, it asks only the
+  initiating controlled page for a one-shot recovery reply over a bounded message port; a missing
+  reply produces a controlled 401 rather than an unauthenticated network request. The worker
+  receives no token in a URL or persistent worker storage, attaches it only to the exact versioned
   shared-folder API prefix, preserves `Range`, forwards with `cache: 'no-store'`, and clears its
   per-client token on 401 or logout. Text and native-stream 401/403 responses use one actionable
   access-loss handler. Its root bootstrap script is intentionally public for exact anonymous

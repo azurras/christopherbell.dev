@@ -16,6 +16,11 @@ Owns reusable browser-side modules that are not tied to one page.
   `cache: 'no-store'`; it never places bearer data in a URL. Its root worker script is installed
   through the exact public `GET /shared-folder-auth-sw.js` bootstrap route, not through a public
   shared-folder API prefix.
+- `shared-folder-worker-runtime.js` is the worker's per-request authorization boundary. When a
+  worker restart has lost a per-client token, it uses a bounded one-shot message-port handshake
+  with only the initiating controlled client, keeps a successful reply only in the worker map,
+  and returns/notifies a controlled 401 if recovery fails rather than sending an unauthenticated
+  shared-folder request. It uses no URL or persistent-storage token channel.
 - `composer.js` initializes reusable post composer behavior.
 - `composer-preview.js` turns draft post text into a live, sanitized preview
   using the same mention linking and rich embed rendering as feed cards.

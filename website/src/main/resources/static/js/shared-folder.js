@@ -20,7 +20,7 @@ import {
   sharedFolderStreamingDenial,
 } from './lib/shared-folder-streaming.js';
 
-const root = document.getElementById('shared-folder-app');
+const root = typeof document === 'undefined' ? null : document.getElementById('shared-folder-app');
 let currentPreviewLostAccess = false;
 
 function clear(node) {
@@ -194,48 +194,70 @@ function renderEntries(response) {
   });
 }
 
-async function initialize() {
-  if (!root) return;
-  if (!getAuthToken()) {
-    window.location.replace(loginRedirectUrl(currentRedirectTarget()));
+export async function initializeSharedFolderPage({
+  pageRoot = root,
+  getAuthTokenFn = getAuthToken,
+  authHeadersFn = authHeaders,
+  fetchJsonFn = fetchJson,
+  accountHasReadFn = accountHasSharedFolderRead,
+  requestedPath = () => new URLSearchParams(window.location.search).get('path') || '',
+  renderBreadcrumbsFn = renderBreadcrumbs,
+  renderToolbarFn = renderToolbar,
+  renderEntriesFn = renderEntries,
+  statusFn = status,
+  handleAccessLossFn = handleSharedFolderAccessLoss,
+  redirectToLogin = () => window.location.replace(loginRedirectUrl(currentRedirectTarget())),
+} = {}) {
+  if (!pageRoot) return;
+  if (!getAuthTokenFn()) {
+    redirectToLogin();
     return;
   }
   try {
-    const accountResponse = await fetchJson(API.accounts.me, {
-      headers: authHeaders(),
+    const account = await fetchJsonFn(API.accounts.me, {
+      headers: authHeadersFn(),
       redirectOnUnauthorized: false,
     });
-    if (!accountHasSharedFolderRead(accountResponse?.payload)) {
-      root.classList.remove('d-none');
-      status('Your account does not have shared-folder read access.');
+    if (!accountHasReadFn(account)) {
+      pageRoot.classList.remove('d-none');
+      statusFn('Your account does not have shared-folder read access.');
       return;
     }
-    const path = new URLSearchParams(window.location.search).get('path') || '';
-    const response = await fetchJson(API.sharedFolder.entries(path), {
-      headers: authHeaders(),
+    const path = requestedPath();
+    const response = await fetchJsonFn(API.sharedFolder.entries(path), {
+      headers: authHeadersFn(),
       redirectOnUnauthorized: false,
     });
-    root.classList.remove('d-none');
-    renderBreadcrumbs(response.path);
-    renderToolbar(response.path);
-    renderEntries(response);
-    status(`${response.entries.length} item${response.entries.length === 1 ? '' : 's'}`);
+    pageRoot.classList.remove('d-none');
+    renderBreadcrumbsFn(response.path);
+    renderToolbarFn(response.path);
+    renderEntriesFn(response);
+    statusFn(`${response.entries.length} item${response.entries.length === 1 ? '' : 's'}`);
   } catch (error) {
-    root.classList.remove('d-none');
+    pageRoot.classList.remove('d-none');
     if (isSharedFolderAccessDenied(error)) {
-      handleSharedFolderAccessLoss(error.status);
+      handleAccessLossFn(error.status);
     } else {
-      status(error?.message || 'The shared folder is unavailable.');
+      statusFn(error?.message || 'The shared folder is unavailable.');
     }
   }
 }
 
-if ('serviceWorker' in navigator) {
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', event => {
+    if (event.data?.type === 'shared-folder-auth-request-token') {
+      const controller = navigator.serviceWorker.controller;
+      if (event.source !== controller || !event.ports?.[0]) return;
+      event.ports[0].postMessage({
+        type: 'shared-folder-auth-recovery',
+        token: getAuthToken() || null,
+      });
+      return;
+    }
     if (event.data?.type === 'shared-folder-auth-denied') {
       handleSharedFolderAccessLoss(event.data.status);
     }
   });
 }
 
-initialize();
+void initializeSharedFolderPage();
