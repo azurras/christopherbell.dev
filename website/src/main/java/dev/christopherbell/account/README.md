@@ -26,6 +26,9 @@ subfeature services own the larger account workflows.
 - Public profiles expose usernames and counts only; first and last names stay private to account detail APIs.
 - Admin account updates can change account status and promote roles when the
   Back Office user queue needs to grant moderator or administrator privileges.
+- Admins can independently grant or revoke persisted shared-folder read/write
+  capabilities through the dated account API. These capabilities do not change
+  the USER/MOD/ADMIN hierarchy or JWT contents; write always requires read.
 - Account DTOs and persistence models under `model`.
 
 ## Update This Doc

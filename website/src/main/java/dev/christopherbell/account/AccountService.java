@@ -8,11 +8,13 @@ import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
+import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
@@ -27,6 +29,7 @@ import dev.christopherbell.libs.security.UsernameSanitizer;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
@@ -349,5 +352,37 @@ public class AccountService {
   public AccountDetail updateAccount(AccountUpdateRequest request)
       throws InvalidRequestException, ResourceNotFoundException, ResourceExistsException {
     return accountModerationService.updateAccount(request);
+  }
+
+  /**
+   * Replaces an account's shared-folder capabilities without changing its role.
+   *
+   * @param accountId account whose capabilities are being changed
+   * @param request requested read and write state
+   * @return the saved account detail with its stored capabilities
+   * @throws InvalidRequestException if the request is malformed or enables write without read
+   * @throws ResourceNotFoundException if the account does not exist
+   */
+  public AccountDetail updateSharedFolderPermissions(
+      String accountId,
+      SharedFolderPermissionUpdate request) throws InvalidRequestException, ResourceNotFoundException {
+    if (request == null || request.read() == null || request.write() == null) {
+      throw new InvalidRequestException("Shared-folder permissions are required.");
+    }
+    if (!request.read() && request.write()) {
+      throw new InvalidRequestException("Shared-folder write requires read.");
+    }
+
+    var account = accountRepository.findById(accountId)
+        .orElseThrow(() -> new ResourceNotFoundException("Account not found."));
+    var next = EnumSet.noneOf(AccountPermission.class);
+    if (request.read()) {
+      next.add(AccountPermission.SHARED_FOLDER_READ);
+    }
+    if (request.write()) {
+      next.add(AccountPermission.SHARED_FOLDER_WRITE);
+    }
+    account.setPermissions(next);
+    return accountMapper.toAccount(accountRepository.save(account));
   }
 }

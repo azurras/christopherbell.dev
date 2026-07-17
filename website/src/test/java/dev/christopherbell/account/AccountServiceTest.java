@@ -18,11 +18,13 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
+import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.passwordreset.PasswordResetNotificationService;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
@@ -741,6 +743,30 @@ public class AccountServiceTest {
     verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
     verify(accountRepository).findByUsernameIgnoreCase(eq("Chris.Bell"));
     verifyNoMoreInteractions(accountRepository);
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: write requires read and changes persist independently of role")
+  public void sharedFolderStateCannotBecomeWriteOnly() throws Exception {
+    var account = Account.builder().id("account-permissions").role(Role.USER).build();
+    when(accountRepository.findById(eq(account.getId()))).thenReturn(Optional.of(account));
+    when(accountRepository.save(eq(account))).thenReturn(account);
+    when(accountMapper.toAccount(eq(account))).thenReturn(AccountDetail.builder().id(account.getId()).build());
+
+    accountService.updateSharedFolderPermissions(
+        account.getId(), new SharedFolderPermissionUpdate(true, true));
+    assertEquals(
+        java.util.Set.of(AccountPermission.SHARED_FOLDER_READ, AccountPermission.SHARED_FOLDER_WRITE),
+        account.getPermissions());
+
+    accountService.updateSharedFolderPermissions(
+        account.getId(), new SharedFolderPermissionUpdate(false, false));
+    assertEquals(java.util.Set.of(), account.getPermissions());
+
+    assertThrows(
+        InvalidRequestException.class,
+        () -> accountService.updateSharedFolderPermissions(
+            account.getId(), new SharedFolderPermissionUpdate(false, true)));
   }
 
   private String hashResetToken(String token) throws Exception {

@@ -206,6 +206,20 @@
       </div>
     </section>
   </main>
+  <template id="sharedFolderPermissionsTemplate">
+    <section class="detail-section" aria-labelledby="sharedFolderPermissionsTitle">
+      <span class="detail-label" id="sharedFolderPermissionsTitle">Shared Folder</span>
+      <div class="form-check">
+        <input class="form-check-input" id="sharedFolderReadPermission" type="checkbox" data-shared-folder-permission="read" />
+        <label class="form-check-label" for="sharedFolderReadPermission">Read shared files</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" id="sharedFolderWritePermission" type="checkbox" data-shared-folder-permission="write" />
+        <label class="form-check-label" for="sharedFolderWritePermission">Upload and manage shared files</label>
+      </div>
+      <p class="queue-age mb-0">Write access always includes read access.</p>
+    </section>
+  </template>
   <aside id="backOfficeDrawer" class="back-office-drawer d-none" aria-hidden="true" aria-labelledby="drawerTitle">
     <div class="drawer-header">
       <div>

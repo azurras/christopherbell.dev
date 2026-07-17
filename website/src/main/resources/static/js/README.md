@@ -92,7 +92,7 @@ Owns browser-side behavior for server-rendered pages.
   actions for other users.
 - `back-office.js` gates the Back Office to admins, renders report/user queues
   with repeat-report context, supports user approval/status changes/role
-  promotion, and exposes practical admin operations such as Location Census ZIP
+  promotion and shared-folder capability controls, and exposes practical admin operations such as Location Census ZIP
   coordinate import, WFL import/dedupe, Raising Canes Box Index collection and
   datapoint review, and vehicle VIN maintenance.
 - `command-center.js` gates the public data-free `/command-center` shell with a

@@ -3,7 +3,11 @@
  */
 import { API } from './lib/api.js';
 import { canesBoxIndexResultMarkup } from './lib/back-office-canes-box-index.js';
-import { promotedRoleForAction, rolePromotionOptions } from './lib/back-office-users.js';
+import {
+  promotedRoleForAction,
+  rolePromotionOptions,
+  sharedFolderPermissionState,
+} from './lib/back-office-users.js';
 import { authHeaders, fetchJson, formatWhen, sanitize } from './lib/util.js';
 
 const content = document.getElementById('backOfficeContent');
@@ -16,6 +20,7 @@ const drawerBody = document.getElementById('drawerBody');
 const drawerClose = document.getElementById('drawerClose');
 const drawerKicker = document.getElementById('drawerKicker');
 const drawerTitle = document.getElementById('drawerTitle');
+const sharedFolderPermissionsTemplate = document.getElementById('sharedFolderPermissionsTemplate');
 const wflOperationStatus = document.getElementById('wflOperationStatus');
 const canesBoxIndexOperationStatus = document.getElementById('canesBoxIndexOperationStatus');
 const canesBoxManualPriceForm = document.getElementById('canesBoxManualPriceForm');
@@ -275,6 +280,9 @@ function openDrawer(type, id) {
       ? `${item.reason || 'Report'}`
       : `@${item.username || 'user'}`;
   drawerBody.innerHTML = type === 'report' ? reportDetails(item) : userDetails(item);
+  if (type === 'user') {
+    renderSharedFolderPermissions(item);
+  }
   drawer.classList.remove('d-none');
   drawer.setAttribute('aria-hidden', 'false');
 }
@@ -333,12 +341,30 @@ function userDetails(account) {
       ${detailRow('Updated', account.lastUpdatedOn ? formatWhen(account.lastUpdatedOn) : '—')}
       ${detailRow('ID', account.id)}
     </div>
+    <div id="sharedFolderPermissions"></div>
     <div class="detail-section">
       ${userActionSelect(account)}
       <button type="button" class="btn btn-outline-secondary btn-sm" data-user-posts="${sanitize(account.id || '')}">Load User Posts</button>
       <div id="drawerUserPosts" class="operation-result">Posts have not been loaded.</div>
     </div>
   `;
+}
+
+function renderSharedFolderPermissions(account) {
+  const host = document.getElementById('sharedFolderPermissions');
+  if (!host || !sharedFolderPermissionsTemplate) return;
+
+  const state = sharedFolderPermissionState(account);
+  const fragment = sharedFolderPermissionsTemplate.content.cloneNode(true);
+  const read = fragment.querySelector('[data-shared-folder-permission="read"]');
+  const write = fragment.querySelector('[data-shared-folder-permission="write"]');
+  [read, write].forEach(input => {
+    input.dataset.account = account.id || '';
+    input.disabled = state.disabled;
+  });
+  read.checked = state.read;
+  write.checked = state.write;
+  host.replaceChildren(fragment);
 }
 
 async function resolveReport(reportId, resolution) {
@@ -354,6 +380,14 @@ async function updateAccount(accountId, patch) {
     method: 'PUT',
     headers: authHeaders(),
     body: JSON.stringify({ id: accountId, ...patch }),
+  });
+}
+
+async function updateSharedFolderPermissions(accountId, { read, write }) {
+  return fetchJson(API.accounts.updateSharedFolderPermissions(accountId), {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ read, write }),
   });
 }
 
@@ -668,6 +702,27 @@ async function handleUserAction(target) {
   }
 }
 
+async function handleSharedFolderPermissionChange(target) {
+  const accountId = target.dataset.account;
+  const permission = target.dataset.sharedFolderPermission;
+  const account = accounts.find(candidate => candidate.id === accountId);
+  if (!account || !permission) return;
+
+  const state = sharedFolderPermissionState(account, { [permission]: target.checked });
+  const controls = drawerBody?.querySelectorAll('[data-shared-folder-permission]') || [];
+  controls.forEach(control => {
+    control.disabled = true;
+  });
+  try {
+    await updateSharedFolderPermissions(accountId, state);
+    await refreshDashboard();
+    openDrawer('user', accountId);
+  } catch (err) {
+    showAlert(err.message || 'Failed to update shared-folder permissions.');
+    renderSharedFolderPermissions(account);
+  }
+}
+
 async function handleOperation(button) {
   const operation = button.getAttribute('data-operation');
   clearAlert();
@@ -740,10 +795,11 @@ function wireEvents() {
 
   document.addEventListener('change', async (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLSelectElement)) return;
-    if (target.classList.contains('report-action')) {
+    if (target instanceof HTMLInputElement && target.dataset.sharedFolderPermission) {
+      await handleSharedFolderPermissionChange(target);
+    } else if (target instanceof HTMLSelectElement && target.classList.contains('report-action')) {
       await handleReportAction(target);
-    } else if (target.classList.contains('user-action')) {
+    } else if (target instanceof HTMLSelectElement && target.classList.contains('user-action')) {
       await handleUserAction(target);
     }
   });

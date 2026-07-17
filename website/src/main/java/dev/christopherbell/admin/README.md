@@ -10,6 +10,10 @@ Owns back-office administration views and cross-feature admin operations.
 - Back Office work queues for reports and users.
 - Back Office user moderation actions, including approval, suspension,
   activation, and role promotion through the account update API.
+- Back Office user details include independent shared-folder read/write controls.
+  ADMIN accounts retain their role-based default access and the controls are
+  checked but disabled; enabling write also enables read and removing read
+  removes write.
 - Back Office operations for Location Census ZIP coordinate imports, What's For
   Lunch imports/dedupe, vehicle VIN admin actions, vehicle collection state, and
   admin-only content reads.

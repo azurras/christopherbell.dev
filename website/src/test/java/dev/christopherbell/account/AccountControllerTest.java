@@ -1,12 +1,14 @@
 package dev.christopherbell.account;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -19,8 +21,10 @@ import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
+import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
+import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.configuration.security.ControllerSliceSecurityTestConfig;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
@@ -31,21 +35,111 @@ import dev.christopherbell.libs.test.TestUtil;
 import dev.christopherbell.permission.PermissionService;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.http.MediaType;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(AccountController.class)
-@Import({ControllerExceptionHandler.class, ControllerSliceSecurityTestConfig.class})
+@Import({
+    ControllerExceptionHandler.class,
+    ControllerSliceSecurityTestConfig.class,
+    AccountControllerTest.MethodSecurityTestConfig.class
+})
 public class AccountControllerTest {
   @Autowired private MockMvc mockMvc;
-  @MockitoBean private PermissionService permissionService;
+  @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private AccountService accountService;
+
+  @BeforeEach
+  void allowMethodSecuredControllerCalls() {
+    when(permissionService.hasAuthority(anyString())).thenReturn(true);
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: ADMIN can grant read and write")
+  @WithMockUser(authorities = {"ADMIN"})
+  public void updateSharedFolderPermissions_whenAdmin_ReturnsUpdatedDetail() throws Exception {
+    var request = new SharedFolderPermissionUpdate(true, true);
+    var detail = AccountDetail.builder()
+        .id("acc-42")
+        .permissions(java.util.Set.of(
+            AccountPermission.SHARED_FOLDER_READ,
+            AccountPermission.SHARED_FOLDER_WRITE))
+        .build();
+    when(accountService.updateSharedFolderPermissions(eq("acc-42"), eq(request))).thenReturn(detail);
+
+    mockMvc
+        .perform(patch("/api/accounts/2026-07-17/{accountId}/shared-folder-permissions", "acc-42")
+            .with(csrf())
+            .content("{\"read\":true,\"write\":true}")
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.permissions").value(
+            org.hamcrest.Matchers.containsInAnyOrder(
+                "SHARED_FOLDER_READ",
+                "SHARED_FOLDER_WRITE")));
+
+    verify(accountService).updateSharedFolderPermissions(eq("acc-42"), eq(request));
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: non-admin is forbidden")
+  @WithMockUser(authorities = {"USER"})
+  public void updateSharedFolderPermissions_whenNonAdmin_ReturnsForbidden() throws Exception {
+    when(permissionService.hasAuthority("ADMIN")).thenReturn(false);
+
+    mockMvc
+        .perform(patch("/api/accounts/2026-07-17/{accountId}/shared-folder-permissions", "acc-42")
+            .with(csrf())
+            .content("{\"read\":true,\"write\":true}")
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isForbidden());
+
+    verifyNoInteractions(accountService);
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: missing capability field returns 400")
+  @WithMockUser(authorities = {"ADMIN"})
+  public void updateSharedFolderPermissions_whenFieldMissing_ReturnsBadRequest() throws Exception {
+    mockMvc
+        .perform(patch("/api/accounts/2026-07-17/{accountId}/shared-folder-permissions", "acc-42")
+            .with(csrf())
+            .content("{\"write\":true}")
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isBadRequest());
+
+    verifyNoInteractions(accountService);
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: ADMIN can revoke read and write")
+  @WithMockUser(authorities = {"ADMIN"})
+  public void updateSharedFolderPermissions_whenRevoked_ReturnsEmptyPermissions() throws Exception {
+    var request = new SharedFolderPermissionUpdate(false, false);
+    when(accountService.updateSharedFolderPermissions(eq("acc-42"), eq(request)))
+        .thenReturn(AccountDetail.builder().id("acc-42").permissions(java.util.Set.of()).build());
+
+    mockMvc
+        .perform(patch("/api/accounts/2026-07-17/{accountId}/shared-folder-permissions", "acc-42")
+            .with(csrf())
+            .content("{\"read\":false,\"write\":false}")
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.permissions").isEmpty());
+
+    verify(accountService).updateSharedFolderPermissions(eq("acc-42"), eq(request));
+  }
 
   @Test
   @DisplayName("Create account: invalid email returns 400 before service")
@@ -473,4 +567,8 @@ public class AccountControllerTest {
 
     verify(accountService).resetPassword(eq(request));
   }
+
+  @TestConfiguration
+  @EnableMethodSecurity
+  static class MethodSecurityTestConfig {}
 }
