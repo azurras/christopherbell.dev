@@ -169,6 +169,7 @@ public final class WindowsSharedFolderReadBoundary {
     try {
       OpenedHandle file;
       try {
+        requireActive();
         file = openSegments(target.segments(), OpenKind.FILE);
       } catch (UnsafeSharedPathException exception) {
         throw notFound(exception);

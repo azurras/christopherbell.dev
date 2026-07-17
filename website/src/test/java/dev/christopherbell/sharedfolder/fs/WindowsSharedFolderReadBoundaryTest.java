@@ -64,6 +64,20 @@ class WindowsSharedFolderReadBoundaryTest {
   }
 
   @Test
+  void delayedResourceAfterBoundaryShutdownMapsRootLossToGenericNotFound() {
+    RecordingBridge bridge = new RecordingBridge();
+    WindowsSharedFolderReadBoundary boundary = WindowsSharedFolderReadBoundary.forTest(
+        Path.of("C:/shared"), bridge);
+    var resource = boundary.file("letter.txt").resource("letter.txt");
+
+    boundary.destroy();
+
+    assertThatThrownBy(resource::getInputStream)
+        .isInstanceOf(FileNotFoundException.class)
+        .hasMessage("Shared-folder item is no longer available");
+  }
+
+  @Test
   void enumerationUsesTheOpenedDirectoryHandleAndSkipsUnsafeChildren() {
     RecordingBridge bridge = new RecordingBridge();
     bridge.setEntries(List.of(
@@ -208,6 +222,9 @@ class WindowsSharedFolderReadBoundaryTest {
     @Override
     public NativeHandle openRelative(
         NativeHandle parent, String name, OpenKind kind, int objectAttributes) {
+      if (parent == null) {
+        throw new NullPointerException("retained root was closed");
+      }
       openRequests.add(new OpenRequest(parent, name, kind, objectAttributes));
       if (failureStatus != 0 || name.equals(failName)) {
         throw new NativeBoundaryException("native open failed", failureStatus);

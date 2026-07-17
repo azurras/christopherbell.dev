@@ -296,6 +296,13 @@ $env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3';
 Result: exit `1`; the counting native-resource preview test observed the unbuffered byte-at-a-time
 path instead of bounded block reads.
 
+```powershell
+$env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; .\gradlew.bat --no-daemon :website:test --tests dev.christopherbell.sharedfolder.fs.WindowsSharedFolderReadBoundaryTest.delayedResourceAfterBoundaryShutdownMapsRootLossToGenericNotFound
+```
+
+Result: exit `1`; a resource created before boundary shutdown reached the missing parent handle
+instead of returning the generic `FileNotFoundException` required from a delayed stream open.
+
 ### GREEN
 
 ```powershell
@@ -307,6 +314,10 @@ mapping, delayed FileId rejection, same-handle enumeration/unsafe-child filterin
 idempotent close with mapped close failure, close-on-failed-open, and bounded text-preview bridge reads. The Windows JNA
 smoke test created a temporary root and verified native list name/size/mtime, file open/identity,
 seek/read, file close, and root close against real Windows APIs.
+
+The delayed resource also now rechecks that the held root remains active under the lifecycle lock
+when Spring opens it. A resource created before shutdown returns the generic `FileNotFoundException`
+after shutdown rather than invoking a native bridge with no parent handle.
 
 The junction swap regression is gated by Windows capability and remains available for an explicit
 local run. It passed on this Windows host with a real `mklink /J` swap target:
@@ -336,7 +347,10 @@ retrieval test could not reach the bootstrap asset.
 The same focused command now exits `0`. The matcher test proves only the exact GET (including one
 with a query string) is public; POST, trailing path, `.map`, and shared-folder API paths
 are not. Anonymous MockMvc retrieves the real worker content, while the protected API still returns
-`401`.
+`401`. The browser-facing Node lifecycle regression additionally exercises registration of the
+root-scoped worker, verifies its expected controller, and resolves only after the token-message
+acknowledgement; `node --test website/src/test/js/shared-folder-streaming.test.js` reports `6/6`
+passing. Live-browser smoke remains Task 9.
 
 ## Full Verification
 
@@ -352,7 +366,7 @@ junction test is separately recorded above as passed on this host.
 $env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; $env:NODE_EXE = 'C:\Progra~1\nodejs\node.exe'; .\gradlew.bat --no-daemon :website:jsTest --console=plain
 ```
 
-Result: exit `0`; Node reported `134` passed, `0` failed.
+Result: exit `0`; Node reported `135` passed, `0` failed.
 
 ```powershell
 git diff --check
