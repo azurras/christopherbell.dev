@@ -27,6 +27,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -105,6 +107,21 @@ class SharedFolderWriteControllerTest {
         .andExpect(status().isOk())
         .andExpect(header().string("Cache-Control", "private, no-store"))
         .andExpect(jsonPath("$.nextOffset").value(3));
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {400, 404, 409, 503})
+  @WithMockUser(authorities = "USER")
+  void mutationStatusesKeepExactCodesAndSafeBodies(int code) throws Exception {
+    when(uploads.status("session-1")).thenThrow(new org.springframework.web.server.ResponseStatusException(
+        org.springframework.http.HttpStatus.valueOf(code), "Shared-folder request failed"));
+
+    String body = mockMvc.perform(get(BASE + "/uploads/session-1"))
+        .andExpect(status().is(code))
+        .andReturn().getResponse().getContentAsString();
+
+    org.assertj.core.api.Assertions.assertThat(body)
+        .doesNotContain("NativeBoundaryException", "java.", "C:\\", "shared-folder-upload-staging");
   }
 
   @TestConfiguration

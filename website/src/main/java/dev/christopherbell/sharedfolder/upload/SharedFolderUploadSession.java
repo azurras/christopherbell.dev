@@ -27,8 +27,17 @@ public class SharedFolderUploadSession {
   private Map<String, String> chunkDigests = new HashMap<>();
   private Map<String, Long> chunkLengths = new HashMap<>();
   private String stagingKey;
+  private String appendLeaseToken;
+  private Instant appendLeaseExpiresAt;
+  private Long appendOffset;
+  private Long appendLength;
+  private String appendDigest;
+  private String appendChunkKey;
   private String finalizingIdentity;
   private Boolean finalizingReplace;
+  private String finalizingTargetIdentity;
+  private String finalizingQuarantineKey;
+  private SharedFolderUploadFinalizationState finalizationState;
   @Indexed private Instant expiresAt;
   private SharedFolderUploadState state;
   private Instant createdAt;

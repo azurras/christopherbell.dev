@@ -20,8 +20,19 @@ public interface WindowsSharedFolderNativeBridge {
   /** Opens the configured root by its absolute native name and returns a retained directory handle. */
   NativeHandle openRoot(Path rootPath, int objectAttributes);
 
+  /** Opens a retained mutation root while denying external delete/rename sharing. */
+  default NativeHandle openRootForMutation(Path rootPath, int objectAttributes) {
+    throw unsupportedMutation();
+  }
+
   /** Opens one validated child relative to an already trusted directory handle. */
   NativeHandle openRelative(NativeHandle parent, String name, OpenKind kind, int objectAttributes);
+
+  /** Pins one existing descendant against external delete/rename without requesting DELETE access. */
+  default NativeHandle openRelativePinned(
+      NativeHandle parent, String name, OpenKind kind, int objectAttributes) {
+    throw unsupportedMutation();
+  }
 
   /** Opens one existing child with DELETE access for a later handle-relative rename or delete. */
   default NativeHandle openRelativeForMutation(

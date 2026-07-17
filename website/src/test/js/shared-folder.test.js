@@ -14,6 +14,12 @@ import {
   uploadProgressPercent,
   uploadIsTerminal,
   uploadResumeMatchesFile,
+  uploadChunkSize,
+  verifyCommittedUploadPrefix,
+  retryUploadOperation,
+  createUploadOperationGate,
+  runUploadWorkflow,
+  cancelUploadWorkflow,
   moveMutationPayload,
 } from '../../main/resources/static/js/lib/shared-folder.js';
 
@@ -50,6 +56,166 @@ test('effective write access and resumable upload progress are explicit', () => 
   assert.equal(uploadResumeMatchesFile(
     { parentPath: 'docs', name: 'video.mkv', expectedBytes: 10 },
     { name: 'other.mkv', size: 10 }, 'docs'), false);
+});
+
+test('resume authenticates every committed server chunk and uses the configured chunk size', async () => {
+  const bytes = new TextEncoder().encode('abcdefgh');
+  const file = new Blob([bytes]);
+  const digests = new Map([
+    ['abcd', 'proof-1'],
+    ['ef', 'proof-2'],
+  ]);
+  const status = {
+    nextOffset: 6,
+    chunkSizeBytes: 3,
+    committedChunks: [
+      { offset: 0, length: 4, sha256: 'proof-1' },
+      { offset: 4, length: 2, sha256: 'proof-2' },
+    ],
+  };
+  const digest = async chunk => digests.get(new TextDecoder().decode(await chunk.arrayBuffer()));
+
+  assert.equal(uploadChunkSize(status), 3);
+  await verifyCommittedUploadPrefix(status, file, digest);
+  await assert.rejects(
+    verifyCommittedUploadPrefix(status, new Blob(['abcdZZgh']), digest),
+    /does not match the committed upload prefix/);
+  assert.throws(() => uploadChunkSize({ chunkSizeBytes: 0 }), /chunk size/);
+});
+
+test('bounded retry handles only network and 5xx failures', async () => {
+  let attempts = 0;
+  const result = await retryUploadOperation(async () => {
+    attempts += 1;
+    if (attempts < 3) throw Object.assign(new Error('temporary'), { status: 503 });
+    return 'ok';
+  }, { delays: [0, 0] });
+  assert.equal(result, 'ok');
+  assert.equal(attempts, 3);
+
+  attempts = 0;
+  await assert.rejects(retryUploadOperation(async () => {
+    attempts += 1;
+    throw Object.assign(new Error('conflict'), { status: 409 });
+  }, { delays: [0, 0] }), /conflict/);
+  assert.equal(attempts, 1);
+});
+
+test('operation gate rejects double submit and pause aborts without cancelling server state', async () => {
+  const gate = createUploadOperationGate();
+  let release;
+  const first = gate.start(signal => new Promise(resolve => {
+    release = () => resolve(signal.aborted ? 'paused' : 'done');
+  }));
+  assert.equal(gate.start(async () => 'duplicate'), null);
+  assert.equal(gate.pause(), true);
+  release();
+  assert.equal(await first, 'paused');
+  assert.equal(gate.active(), false);
+  assert.equal(await gate.start(async () => 'resumed'), 'resumed');
+});
+
+test('mocked browser workflow retries, chunks from server config, gates duplicates, and replaces explicitly', async () => {
+  const file = Object.assign(new Blob(['abcdefgh']), { name: 'target.bin' });
+  const gate = createUploadOperationGate();
+  const chunks = [];
+  let firstChunkAttempts = 0;
+  let createRequest;
+  let completedReplace;
+  const operation = gate.start(signal => runUploadWorkflow({
+    parentPath: 'docs', file, signal, resume: null,
+    digest: async () => 'digest',
+    loadStatus: async () => { throw new Error('unexpected resume'); },
+    listEntries: async () => ({ entries: [{ name: 'target.bin', observedToken: 'target-proof' }] }),
+    confirmReplace: () => true,
+    createUpload: async request => {
+      createRequest = request;
+      return { id: 'u1', name: file.name, expectedBytes: file.size, nextOffset: 0,
+        state: 'ACTIVE', chunkSizeBytes: 3, committedChunks: [] };
+    },
+    putChunk: async (upload, offset, chunk) => {
+      if (offset === 0 && firstChunkAttempts++ === 0) {
+        throw Object.assign(new Error('temporary'), { status: 503 });
+      }
+      chunks.push([offset, chunk.size]);
+      return { ...upload, nextOffset: offset + chunk.size };
+    },
+    completeUpload: async (upload, replace) => {
+      completedReplace = replace;
+      return { ...upload, state: 'COMPLETED' };
+    },
+  }));
+  assert.equal(gate.start(async () => 'duplicate-drop-or-submit'), null);
+  assert.equal((await operation).state, 'COMPLETED');
+  assert.deepEqual(chunks, [[0, 3], [3, 3], [6, 2]]);
+  assert.equal(firstChunkAttempts, 2);
+  assert.equal(createRequest.targetObservedToken, 'target-proof');
+  assert.equal(completedReplace, true);
+});
+
+test('mocked browser workflow pauses without cancel, resumes, and rejects changed local bytes', async () => {
+  const file = Object.assign(new Blob(['abc']), { name: 'resume.bin' });
+  const resume = { id: 'u2', parentPath: 'docs', name: file.name, expectedBytes: file.size };
+  const active = { id: 'u2', parentPath: 'docs', name: file.name, expectedBytes: file.size,
+    nextOffset: 0, state: 'ACTIVE', chunkSizeBytes: 3, committedChunks: [] };
+  const gate = createUploadOperationGate();
+  let cancelCalls = 0;
+  const paused = gate.start(signal => runUploadWorkflow({
+    parentPath: 'docs', file, resume, signal, digest: async () => 'unused',
+    loadStatus: async () => active,
+    listEntries: async () => ({ entries: [] }), confirmReplace: () => false,
+    createUpload: async () => active,
+    putChunk: async (_upload, _offset, _chunk, requestSignal) => new Promise((resolve, reject) =>
+      requestSignal.addEventListener('abort', () => reject(new DOMException('paused', 'AbortError')),
+        { once: true })),
+    completeUpload: async upload => upload,
+    cancelUpload: async () => { cancelCalls += 1; },
+  }));
+  assert.equal(gate.pause(), true);
+  await assert.rejects(paused, error => error.name === 'AbortError');
+  assert.equal(cancelCalls, 0);
+
+  const resumed = await runUploadWorkflow({
+    parentPath: 'docs', file, resume, digest: async () => 'unused',
+    loadStatus: async () => active,
+    listEntries: async () => ({ entries: [] }), confirmReplace: () => false,
+    createUpload: async () => active,
+    putChunk: async (upload, offset, chunk) => ({ ...upload, nextOffset: offset + chunk.size }),
+    completeUpload: async upload => ({ ...upload, state: 'COMPLETED' }),
+  });
+  assert.equal(resumed.state, 'COMPLETED');
+
+  const changedStatus = { ...active, nextOffset: 3,
+    committedChunks: [{ offset: 0, length: 3, sha256: 'original-proof' }] };
+  await assert.rejects(runUploadWorkflow({
+    parentPath: 'docs', file: Object.assign(new Blob(['xyz']), { name: 'resume.bin' }), resume,
+    digest: async () => 'changed-proof', loadStatus: async () => changedStatus,
+    listEntries: async () => ({ entries: [] }), confirmReplace: () => false,
+    createUpload: async () => active,
+    putChunk: async () => { throw new Error('must not upload changed bytes'); },
+    completeUpload: async upload => upload,
+  }), /does not match the committed upload prefix/);
+});
+
+test('cancel waits for aborted append settlement and retries the normal APPENDING conflict', async () => {
+  const gate = createUploadOperationGate();
+  let appendSettled = false;
+  const upload = gate.start(signal => new Promise((resolve, reject) => {
+    signal.addEventListener('abort', () => {
+      appendSettled = true;
+      reject(new DOMException('paused', 'AbortError'));
+    }, { once: true });
+  }));
+  upload.catch(() => {});
+  let cancels = 0;
+  const cancelled = await cancelUploadWorkflow(gate, async () => {
+    assert.equal(appendSettled, true);
+    cancels += 1;
+    if (cancels === 1) throw Object.assign(new Error('append rollback pending'), { status: 409 });
+    return { state: 'CANCELLED' };
+  }, { delays: [0] });
+  assert.equal(cancelled.state, 'CANCELLED');
+  assert.equal(cancels, 2);
 });
 
 test('shared-folder write API paths encode identifiers and expose resumable upload actions', () => {
@@ -112,6 +278,9 @@ test('shared-folder shell owns a responsive single-column mobile layout and down
   assert.match(page, /localStorage/);
   assert.match(page, /crypto\.subtle\.digest/);
   assert.match(page, /uploadCancel/);
+  assert.match(page, /runUploadWorkflow/);
+  assert.match(page, /uploadOperationGate/);
+  assert.doesNotMatch(page, /UPLOAD_CHUNK_BYTES/);
   assert.match(page, /dragover/);
   assert.match(page, /API\.sharedFolder\.folders/);
   assert.match(page, /API\.sharedFolder\.rename/);

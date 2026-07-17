@@ -2,7 +2,9 @@ package dev.christopherbell.sharedfolder.upload;
 
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.configuration.SharedFolderProperties;
+import dev.christopherbell.configuration.filter.RequestPayloadTooLargeException;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
+import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderMutationBoundary;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeBoundaryException;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeFileMetadata;
@@ -35,12 +37,14 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class SharedFolderUploadService {
   private static final Duration SESSION_TTL = Duration.ofHours(24);
+  private static final Duration APPEND_LEASE_TTL = Duration.ofMinutes(2);
   private static final int COPY_BUFFER_SIZE = 16 * 1024;
 
   private final SharedFolderAccessService access;
   private final SharedFolderUploadSessionRepository sessions;
   private final SharedFolderProperties properties;
   private final WindowsSharedFolderMutationBoundary nativeBoundary;
+  private final String serviceInstanceId = UUID.randomUUID().toString();
 
   /** Creates the upload coordinator. */
   public SharedFolderUploadService(
@@ -66,8 +70,9 @@ public class SharedFolderUploadService {
   /** Starts an owned upload after validating a safe relative destination and private staging root. */
   public SharedFolderUploadStatus create(SharedFolderUploadCreateRequest request) {
     Account account = access.requireWrite();
-    if (request == null || !properties.enabled()) {
-      throw conflict();
+    validateCreateRequest(request);
+    if (!properties.enabled()) {
+      throw unavailable();
     }
     if (request.expectedBytes() > properties.maxUpload().toBytes()) {
       throw tooLarge();
@@ -102,13 +107,14 @@ public class SharedFolderUploadService {
   }
 
   /** Streams one ordered chunk with a SHA-256 check; identical ordered retries are idempotent. */
-  public synchronized SharedFolderUploadStatus append(
+  public SharedFolderUploadStatus append(
       String id, long offset, InputStream body, String suppliedDigest) {
     Account account = access.requireWrite();
-    SharedFolderUploadSession session = ownedActive(id, account);
     String expectedDigest = normalizeDigest(suppliedDigest);
+    requireEnabled();
+    SharedFolderUploadSession session = ownedForAppend(id, account, offset, expectedDigest);
     if (nativeBoundary.nativeMode()) {
-      return appendNative(session, offset, body, expectedDigest);
+      return appendNative(session, account, offset, body, expectedDigest);
     }
     Path staging;
     try {
@@ -123,9 +129,17 @@ public class SharedFolderUploadService {
       Chunk chunk = stageChunk(staging, session, offset, body, expectedDigest);
       boolean appendStarted = false;
       try {
+        try {
+          session = acquireAppendLease(session, account, offset, chunk.digest(), chunk.length(), null);
+        } catch (ResponseStatusException leaseConflict) {
+          return status(awaitMatchingCommittedChunk(
+              session.getId(), account, offset, chunk.digest(), chunk.length()));
+        }
+        reconcilePortableAppendLength(stagingPath(staging, session), offset);
         appendStarted = true;
         appendStagedChunk(stagingPath(staging, session), chunk.path());
         recordChunk(session, offset, chunk.digest(), chunk.length());
+        clearAppendLease(session);
         session.setUpdatedAt(Instant.now());
         try {
           return status(sessions.save(session));
@@ -136,6 +150,12 @@ public class SharedFolderUploadService {
         if (appendStarted) {
           rollbackPortableAppend(stagingPath(staging, session), offset);
           forgetChunk(session, offset);
+          clearAppendLease(session);
+          try {
+            sessions.save(session);
+          } catch (RuntimeException ignored) {
+            // The expired durable lease will reconcile the physical length on another instance.
+          }
         }
         if (exception instanceof ResponseStatusException responseStatusException) {
           throw responseStatusException;
@@ -146,19 +166,25 @@ public class SharedFolderUploadService {
       }
     } catch (ResponseStatusException exception) {
       throw exception;
+    } catch (RequestPayloadTooLargeException exception) {
+      throw tooLarge();
     } catch (IOException | ArithmeticException | SecurityException exception) {
       throw conflict();
     }
   }
 
   /** Returns current owned upload progress and performs the same fresh write authorization check. */
-  public synchronized SharedFolderUploadStatus status(String id) {
-    return status(reconcilePending(ownedActiveOrTerminal(id, access.requireWrite())));
+  public SharedFolderUploadStatus status(String id) {
+    Account account = access.requireWrite();
+    requireEnabled();
+    return status(reconcilePending(ownedActiveOrTerminal(id, account)));
   }
 
   /** Cancels an active owned upload and removes only its private random staging file. */
-  public synchronized SharedFolderUploadStatus cancel(String id) {
-    SharedFolderUploadSession session = ownedActiveOrTerminal(id, access.requireWrite());
+  public SharedFolderUploadStatus cancel(String id) {
+    Account account = access.requireWrite();
+    requireEnabled();
+    SharedFolderUploadSession session = ownedActiveOrTerminal(id, account);
     if (session.getState() == SharedFolderUploadState.CANCELLED) {
       return status(session);
     }
@@ -177,9 +203,9 @@ public class SharedFolderUploadService {
     }
     if (nativeBoundary.nativeMode()) {
       try {
-        nativeBoundary.deleteStaging(session.getStagingKey());
-      } catch (NativeBoundaryException | SecurityException ignored) {
-        // The owner-visible state remains pending/cancelled; private orphan cleanup is safe to retry.
+        nativeBoundary.deleteStagingIfExists(session.getStagingKey());
+      } catch (NativeBoundaryException | SecurityException exception) {
+        throw conflict();
       }
       session.setState(SharedFolderUploadState.CANCELLED);
       session.setUpdatedAt(Instant.now());
@@ -204,8 +230,10 @@ public class SharedFolderUploadService {
   }
 
   /** Rechecks ownership, target conflict, disk and same-volume identity before an atomic finalize. */
-  public synchronized SharedFolderUploadStatus complete(String id, boolean replace) {
-    SharedFolderUploadSession session = ownedActiveOrTerminal(id, access.requireWrite());
+  public SharedFolderUploadStatus complete(String id, boolean replace) {
+    Account account = access.requireWrite();
+    requireEnabled();
+    SharedFolderUploadSession session = ownedActiveOrTerminal(id, account);
     Boolean pendingReplace = session.getFinalizingReplace();
     session = reconcilePending(session);
     if (pendingReplace != null && session.getState() == SharedFolderUploadState.ACTIVE) {
@@ -246,9 +274,21 @@ public class SharedFolderUploadService {
       if (session.getState() == SharedFolderUploadState.ACTIVE) {
         BasicFileAttributes stagedAttributes = Files.readAttributes(
             stagedFile, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        session = beginFinalizing(session, portableIdentity(stagedAttributes), replace);
+        session = beginFinalizing(
+            session,
+            portableIdentity(stagedAttributes),
+            replace,
+            existingTarget == null ? null : portableIdentity(Files.readAttributes(
+                existingTarget, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS)));
+        if (replace) {
+          afterPhysicalFinalizationTransition(SharedFolderUploadFinalizationState.PREPARED);
+        }
       }
-      moveAtomically(stagedFile, target, replace);
+      if (replace) {
+        session = finalizePortableReplacement(session, stagedFile, target, existingTarget);
+      } else {
+        moveAtomically(stagedFile, target, false);
+      }
       session.setState(SharedFolderUploadState.COMPLETED);
       session.setUpdatedAt(Instant.now());
       try {
@@ -320,7 +360,8 @@ public class SharedFolderUploadService {
   }
 
   private SharedFolderUploadStatus appendNative(
-      SharedFolderUploadSession session, long offset, InputStream body, String suppliedDigest) {
+      SharedFolderUploadSession session, Account account, long offset,
+      InputStream body, String suppliedDigest) {
     try {
       requireNativeReserve(session.getExpectedBytes() - session.getNextOffset());
       if (offset < session.getNextOffset()) {
@@ -342,6 +383,13 @@ public class SharedFolderUploadService {
           }
           stagedChunk.flush();
         }
+        try {
+          session = acquireAppendLease(
+              session, account, offset, chunk.digest(), chunk.length(), chunkKey);
+        } catch (ResponseStatusException leaseConflict) {
+          return status(awaitMatchingCommittedChunk(
+              session.getId(), account, offset, chunk.digest(), chunk.length()));
+        }
         appendStarted = true;
         appendNativeChunk(session, chunkKey, offset);
       } catch (RuntimeException exception) {
@@ -358,16 +406,25 @@ public class SharedFolderUploadService {
         }
       }
       recordChunk(session, offset, chunk.digest(), chunk.length());
+      clearAppendLease(session);
       session.setUpdatedAt(Instant.now());
       try {
         return status(sessions.save(session));
       } catch (RuntimeException exception) {
         rollbackNativeAppend(session.getStagingKey(), offset);
         forgetChunk(session, offset);
+        clearAppendLease(session);
+        try {
+          sessions.save(session);
+        } catch (RuntimeException ignored) {
+          // Another instance will recover the expired lease and physical offset.
+        }
         throw conflict();
       }
     } catch (ResponseStatusException exception) {
       throw exception;
+    } catch (RequestPayloadTooLargeException exception) {
+      throw tooLarge();
     } catch (IOException | ArithmeticException | NativeBoundaryException | SecurityException exception) {
       throw conflict();
     }
@@ -404,7 +461,15 @@ public class SharedFolderUploadService {
       SharedFolderUploadSession session, String chunkKey, long expectedOffset) {
     try (var target = nativeBoundary.staging(session.getStagingKey());
         var source = nativeBoundary.staging(chunkKey)) {
-      if (target.metadata().size() != expectedOffset || target.seek(expectedOffset) != expectedOffset) {
+      long physicalSize = target.metadata().size();
+      if (physicalSize < expectedOffset) {
+        throw conflict();
+      }
+      if (physicalSize > expectedOffset) {
+        target.truncate(expectedOffset);
+        target.flush();
+      }
+      if (target.seek(expectedOffset) != expectedOffset) {
         throw conflict();
       }
       source.seek(0);
@@ -433,6 +498,91 @@ public class SharedFolderUploadService {
     session.getChunkDigests().put(Long.toString(offset), digest);
     session.getChunkLengths().put(Long.toString(offset), length);
     session.setNextOffset(Math.addExact(offset, length));
+  }
+
+  private SharedFolderUploadSession acquireAppendLease(
+      SharedFolderUploadSession previous,
+      Account account,
+      long offset,
+      String digest,
+      long length,
+      String chunkKey) {
+    SharedFolderUploadSession current = ownedActive(previous.getId(), account);
+    if (current.getNextOffset() != offset) {
+      throw conflict();
+    }
+    current.setState(SharedFolderUploadState.APPENDING);
+    current.setAppendLeaseToken(serviceInstanceId + ":" + UUID.randomUUID());
+    current.setAppendLeaseExpiresAt(Instant.now().plus(APPEND_LEASE_TTL));
+    current.setAppendOffset(offset);
+    current.setAppendLength(length);
+    current.setAppendDigest(digest);
+    current.setAppendChunkKey(chunkKey);
+    current.setUpdatedAt(Instant.now());
+    try {
+      return sessions.save(current);
+    } catch (RuntimeException exception) {
+      throw conflict();
+    }
+  }
+
+  private void clearAppendLease(SharedFolderUploadSession session) {
+    session.setState(SharedFolderUploadState.ACTIVE);
+    session.setAppendLeaseToken(null);
+    session.setAppendLeaseExpiresAt(null);
+    session.setAppendOffset(null);
+    session.setAppendLength(null);
+    session.setAppendDigest(null);
+    session.setAppendChunkKey(null);
+  }
+
+  private void reconcilePortableAppendLength(Path stagingFile, long committedOffset)
+      throws IOException {
+    if (Files.notExists(stagingFile, LinkOption.NOFOLLOW_LINKS)) {
+      if (committedOffset == 0) {
+        return;
+      }
+      throw conflict();
+    }
+    long size = Files.size(stagingFile);
+    if (size < committedOffset) {
+      throw conflict();
+    }
+    if (size > committedOffset) {
+      rollbackPortableAppend(stagingFile, committedOffset);
+    }
+  }
+
+  private SharedFolderUploadSession reconcileExpiredAppendLease(
+      SharedFolderUploadSession session) {
+    if (session.getState() != SharedFolderUploadState.APPENDING
+        || session.getAppendLeaseExpiresAt() != null
+            && session.getAppendLeaseExpiresAt().isAfter(Instant.now())) {
+      return session;
+    }
+    try {
+      if (nativeBoundary.nativeMode()) {
+        rollbackNativeAppend(session.getStagingKey(), session.getNextOffset());
+        if (session.getAppendChunkKey() != null) {
+          try {
+            nativeBoundary.deleteStaging(session.getAppendChunkKey());
+          } catch (RuntimeException ignored) {
+            // The random private chunk is harmless and remains eligible for bounded cleanup.
+          }
+        }
+      } else {
+        reconcilePortableAppendLength(
+            stagingPath(stagingDirectory(), session), session.getNextOffset());
+        if (session.getAppendChunkKey() != null) {
+          Files.deleteIfExists(stagingDirectory().resolve(session.getAppendChunkKey()));
+        }
+      }
+      clearAppendLease(session);
+      session.setUpdatedAt(Instant.now());
+      return sessions.save(session);
+    } catch (IOException | RuntimeException exception) {
+      throw conflict();
+    }
   }
 
   private void forgetChunk(SharedFolderUploadSession session, long offset) {
@@ -475,11 +625,20 @@ public class SharedFolderUploadService {
       requireNativeReserve(0);
       if (session.getState() == SharedFolderUploadState.ACTIVE) {
         try (var staged = nativeBoundary.staging(session.getStagingKey())) {
-          session = beginFinalizing(session, nativeIdentity(staged.metadata()), replace);
+          session = beginFinalizing(
+              session, nativeIdentity(staged.metadata()), replace,
+              target == null ? null : nativeIdentity(target));
+          if (replace) {
+            afterPhysicalFinalizationTransition(SharedFolderUploadFinalizationState.PREPARED);
+          }
         }
       }
-      nativeBoundary.finalizeStaging(
-          session.getStagingKey(), session.getParentPath(), session.getName(), replace, target);
+      if (replace) {
+        session = finalizeNativeReplacement(session, target);
+      } else {
+        nativeBoundary.finalizeStaging(
+            session.getStagingKey(), session.getParentPath(), session.getName(), false, null);
+      }
       session.setState(SharedFolderUploadState.COMPLETED);
       session.setUpdatedAt(Instant.now());
       try {
@@ -532,9 +691,12 @@ public class SharedFolderUploadService {
   }
 
   private SharedFolderUploadSession beginFinalizing(
-      SharedFolderUploadSession session, String identity, boolean replace) {
+      SharedFolderUploadSession session, String identity, boolean replace, String targetIdentity) {
     session.setFinalizingIdentity(identity);
     session.setFinalizingReplace(replace);
+    session.setFinalizingTargetIdentity(targetIdentity);
+    session.setFinalizingQuarantineKey(replace ? UUID.randomUUID().toString() : null);
+    session.setFinalizationState(SharedFolderUploadFinalizationState.PREPARED);
     session.setState(SharedFolderUploadState.FINALIZING);
     session.setUpdatedAt(Instant.now());
     try {
@@ -543,19 +705,78 @@ public class SharedFolderUploadService {
       session.setState(SharedFolderUploadState.ACTIVE);
       session.setFinalizingIdentity(null);
       session.setFinalizingReplace(null);
+      session.setFinalizingTargetIdentity(null);
+      session.setFinalizingQuarantineKey(null);
+      session.setFinalizationState(null);
       throw conflict();
     }
   }
 
+  private SharedFolderUploadSession finalizePortableReplacement(
+      SharedFolderUploadSession session, Path stagedFile, Path target, Path observedTarget)
+      throws IOException {
+    Path quarantine = uploadQuarantineDirectory().resolve(session.getFinalizingQuarantineKey());
+    if (observedTarget != null) {
+      requireSameFileStore(stagedFile, quarantine.getParent());
+      moveAtomically(observedTarget, quarantine, false);
+      if (!portableIdentityMatches(quarantine, session.getFinalizingTargetIdentity())) {
+        throw conflict();
+      }
+    }
+    afterPhysicalFinalizationTransition(SharedFolderUploadFinalizationState.TARGET_QUARANTINED);
+    session = saveFinalizationPhase(session, SharedFolderUploadFinalizationState.TARGET_QUARANTINED);
+    moveAtomically(stagedFile, target, false);
+    afterPhysicalFinalizationTransition(SharedFolderUploadFinalizationState.SOURCE_MOVED);
+    session = saveFinalizationPhase(session, SharedFolderUploadFinalizationState.SOURCE_MOVED);
+    Files.delete(quarantine);
+    return session;
+  }
+
+  private SharedFolderUploadSession finalizeNativeReplacement(
+      SharedFolderUploadSession session, NativeFileMetadata expectedTarget) {
+    NativeFileMetadata quarantined = nativeBoundary.quarantineVisible(
+        relativePath(session), session.getFinalizingQuarantineKey(), expectedTarget);
+    if (!Objects.equals(session.getFinalizingTargetIdentity(), nativeIdentity(quarantined))) {
+      throw conflict();
+    }
+    afterPhysicalFinalizationTransition(SharedFolderUploadFinalizationState.TARGET_QUARANTINED);
+    session = saveFinalizationPhase(session, SharedFolderUploadFinalizationState.TARGET_QUARANTINED);
+    nativeBoundary.finalizeStaging(
+        session.getStagingKey(), session.getParentPath(), session.getName(), false, null);
+    afterPhysicalFinalizationTransition(SharedFolderUploadFinalizationState.SOURCE_MOVED);
+    session = saveFinalizationPhase(session, SharedFolderUploadFinalizationState.SOURCE_MOVED);
+    nativeBoundary.deleteQuarantine(session.getFinalizingQuarantineKey(), quarantined);
+    return session;
+  }
+
+  private SharedFolderUploadSession saveFinalizationPhase(
+      SharedFolderUploadSession session, SharedFolderUploadFinalizationState state) {
+    session.setFinalizationState(state);
+    session.setUpdatedAt(Instant.now());
+    try {
+      return sessions.save(session);
+    } catch (RuntimeException exception) {
+      throw conflict();
+    }
+  }
+
+  /** Test seam for process death immediately after a physical finalization transition. */
+  protected void afterPhysicalFinalizationTransition(SharedFolderUploadFinalizationState state) {
+    // Process death is outside Java control; tests inject it at the same durable boundary.
+  }
+
   private SharedFolderUploadSession reconcilePending(SharedFolderUploadSession session) {
     if (session.getState() == SharedFolderUploadState.CANCEL_PENDING) {
-      if (stagingExists(session)) {
+      if (!deletePendingStaging(session)) {
         return session;
       }
       return transition(session, SharedFolderUploadState.CANCELLED);
     }
     if (session.getState() != SharedFolderUploadState.FINALIZING) {
       return session;
+    }
+    if (Boolean.TRUE.equals(session.getFinalizingReplace())) {
+      return reconcileReplacementFinalization(session);
     }
     if (targetMatchesFinalizingIdentity(session)) {
       return transition(session, SharedFolderUploadState.COMPLETED);
@@ -564,6 +785,110 @@ public class SharedFolderUploadService {
       return transition(session, SharedFolderUploadState.ACTIVE);
     }
     return session;
+  }
+
+  private SharedFolderUploadSession reconcileReplacementFinalization(
+      SharedFolderUploadSession session) {
+    try {
+      if (nativeBoundary.nativeMode()) {
+        return reconcileNativeReplacementFinalization(session);
+      }
+      Path target = properties.root().toAbsolutePath().normalize().resolve(relativePath(session));
+      Path staging = stagingPath(stagingDirectory(), session);
+      Path quarantine = uploadQuarantineDirectory().resolve(session.getFinalizingQuarantineKey());
+      boolean sourceAtTarget = portableIdentityMatches(target, session.getFinalizingIdentity());
+      boolean sourceAtStaging = portableIdentityMatches(staging, session.getFinalizingIdentity());
+      boolean originalAtTarget = portableIdentityMatches(
+          target, session.getFinalizingTargetIdentity());
+      boolean originalAtQuarantine = portableIdentityMatches(
+          quarantine, session.getFinalizingTargetIdentity());
+      if (sourceAtTarget) {
+        if (originalAtQuarantine) Files.delete(quarantine);
+        return transition(session, SharedFolderUploadState.COMPLETED);
+      }
+      if (sourceAtStaging && originalAtTarget && Files.notExists(quarantine)) {
+        return transition(session, SharedFolderUploadState.ACTIVE);
+      }
+      if (sourceAtStaging && Files.notExists(target) && originalAtQuarantine) {
+        moveAtomically(quarantine, target, false);
+        return transition(session, SharedFolderUploadState.ACTIVE);
+      }
+      return markRestorePending(session);
+    } catch (RuntimeException | IOException exception) {
+      return markRestorePending(session);
+    }
+  }
+
+  private SharedFolderUploadSession reconcileNativeReplacementFinalization(
+      SharedFolderUploadSession session) {
+    NativeFileMetadata target = nativeMetadataOrNull(relativePath(session));
+    NativeFileMetadata staging = nativeStagingMetadataOrNull(session.getStagingKey());
+    NativeFileMetadata quarantine = nativeQuarantineMetadataOrNull(
+        session.getFinalizingQuarantineKey());
+    boolean sourceAtTarget = nativeIdentityMatches(target, session.getFinalizingIdentity());
+    boolean sourceAtStaging = nativeIdentityMatches(staging, session.getFinalizingIdentity());
+    boolean originalAtTarget = nativeIdentityMatches(
+        target, session.getFinalizingTargetIdentity());
+    boolean originalAtQuarantine = nativeIdentityMatches(
+        quarantine, session.getFinalizingTargetIdentity());
+    try {
+      if (sourceAtTarget) {
+        if (originalAtQuarantine) {
+          nativeBoundary.deleteQuarantine(session.getFinalizingQuarantineKey(), quarantine);
+        }
+        return transition(session, SharedFolderUploadState.COMPLETED);
+      }
+      if (sourceAtStaging && originalAtTarget && quarantine == null) {
+        return transition(session, SharedFolderUploadState.ACTIVE);
+      }
+      if (sourceAtStaging && target == null && originalAtQuarantine) {
+        nativeBoundary.restoreQuarantine(
+            session.getFinalizingQuarantineKey(), session.getParentPath(), session.getName(),
+            quarantine);
+        return transition(session, SharedFolderUploadState.ACTIVE);
+      }
+      return markRestorePending(session);
+    } catch (RuntimeException exception) {
+      return markRestorePending(session);
+    }
+  }
+
+  private SharedFolderUploadSession markRestorePending(SharedFolderUploadSession session) {
+    session.setFinalizationState(SharedFolderUploadFinalizationState.RESTORE_PENDING);
+    session.setUpdatedAt(Instant.now());
+    try {
+      return sessions.save(session);
+    } catch (RuntimeException ignored) {
+      return session;
+    }
+  }
+
+  private NativeFileMetadata nativeMetadataOrNull(String path) {
+    try {
+      return nativeBoundary.metadata(path);
+    } catch (RuntimeException exception) {
+      return null;
+    }
+  }
+
+  private NativeFileMetadata nativeStagingMetadataOrNull(String key) {
+    try (var staging = nativeBoundary.staging(key)) {
+      return staging.metadata();
+    } catch (RuntimeException exception) {
+      return null;
+    }
+  }
+
+  private NativeFileMetadata nativeQuarantineMetadataOrNull(String key) {
+    try {
+      return nativeBoundary.quarantineMetadata(key);
+    } catch (RuntimeException exception) {
+      return null;
+    }
+  }
+
+  private boolean nativeIdentityMatches(NativeFileMetadata metadata, String expected) {
+    return metadata != null && Objects.equals(expected, nativeIdentity(metadata));
   }
 
   private boolean targetMatchesFinalizingIdentity(SharedFolderUploadSession session) {
@@ -609,6 +934,34 @@ public class SharedFolderUploadService {
     } catch (RuntimeException | IOException exception) {
       return false;
     }
+  }
+
+  private boolean deletePendingStaging(SharedFolderUploadSession session) {
+    try {
+      if (nativeBoundary.nativeMode()) {
+        nativeBoundary.deleteStagingIfExists(session.getStagingKey());
+      } else {
+        Files.deleteIfExists(stagingPath(stagingDirectory(), session));
+      }
+      return true;
+    } catch (RuntimeException | IOException exception) {
+      return false;
+    }
+  }
+
+  private Path uploadQuarantineDirectory() throws IOException {
+    Path root = Files.createDirectories(properties.systemRoot().toAbsolutePath().normalize()
+        .resolve("shared-folder-upload-quarantine"));
+    if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(root)) {
+      throw new IOException("private upload quarantine is unavailable");
+    }
+    return root;
+  }
+
+  private boolean portableIdentityMatches(Path path, String expected) throws IOException {
+    return expected != null && Files.exists(path, LinkOption.NOFOLLOW_LINKS)
+        && Objects.equals(expected, portableIdentity(Files.readAttributes(
+            path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS)));
   }
 
   private SharedFolderUploadSession transition(
@@ -729,24 +1082,105 @@ public class SharedFolderUploadService {
     if (session.getState() != SharedFolderUploadState.ACTIVE) {
       throw conflict();
     }
-    if (!session.getExpiresAt().isAfter(Instant.now())) {
-      session.setState(SharedFolderUploadState.EXPIRED);
-      session.setUpdatedAt(Instant.now());
-      sessions.save(session);
+    return session;
+  }
+
+  private SharedFolderUploadSession ownedForAppend(
+      String id, Account account, long offset, String digest) {
+    SharedFolderUploadSession session = ownedActiveOrTerminal(id, account);
+    if (session.getState() == SharedFolderUploadState.APPENDING
+        && Objects.equals(session.getAppendOffset(), offset)
+        && constantTimeEquals(session.getAppendDigest(), digest)) {
+      long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+      while (session.getState() == SharedFolderUploadState.APPENDING
+          && System.nanoTime() < deadline) {
+        try {
+          Thread.sleep(10);
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+          throw conflict();
+        }
+        session = ownedActiveOrTerminal(id, account);
+      }
+    }
+    if (session.getState() != SharedFolderUploadState.ACTIVE) {
       throw conflict();
     }
     return session;
   }
 
+  private SharedFolderUploadSession awaitMatchingCommittedChunk(
+      String id, Account account, long offset, String digest, long length) {
+    long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+    SharedFolderUploadSession session;
+    do {
+      session = ownedActiveOrTerminal(id, account);
+      if (session.getState() == SharedFolderUploadState.ACTIVE
+          && session.getNextOffset() == offset + length
+          && constantTimeEquals(session.getChunkDigests().get(Long.toString(offset)), digest)
+          && Objects.equals(session.getChunkLengths().get(Long.toString(offset)), length)) {
+        return session;
+      }
+      if (session.getState() != SharedFolderUploadState.APPENDING
+          || !Objects.equals(session.getAppendOffset(), offset)
+          || !constantTimeEquals(session.getAppendDigest(), digest)) {
+        throw conflict();
+      }
+      try {
+        Thread.sleep(10);
+      } catch (InterruptedException exception) {
+        Thread.currentThread().interrupt();
+        throw conflict();
+      }
+    } while (System.nanoTime() < deadline);
+    throw conflict();
+  }
+
   private SharedFolderUploadSession ownedActiveOrTerminal(String id, Account account) {
     if (id == null || id.isBlank()) {
-      throw conflict();
+      throw invalid();
     }
-    SharedFolderUploadSession session = sessions.findById(id).orElseThrow(this::conflict);
+    SharedFolderUploadSession session = sessions.findById(id).orElseThrow(this::notFound);
     if (!Objects.equals(session.getOwnerId(), requiredAccountId(account))) {
-      throw conflict();
+      throw notFound();
+    }
+    session = reconcileExpiredAppendLease(session);
+    if (session.getState() == SharedFolderUploadState.ACTIVE
+        && (session.getExpiresAt() == null || !session.getExpiresAt().isAfter(Instant.now()))) {
+      session.setState(SharedFolderUploadState.EXPIRED);
+      session.setUpdatedAt(Instant.now());
+      session = sessions.save(session);
     }
     return session;
+  }
+
+  private void validateCreateRequest(SharedFolderUploadCreateRequest request) {
+    if (request == null || request.expectedBytes() <= 0) {
+      throw invalid();
+    }
+    try {
+      SharedFolderPathResolver.safeRelativeSegments(request.parentPath(), true);
+      SharedFolderPathResolver.validateSingleWindowsName(request.name());
+    } catch (UnsafeSharedPathException exception) {
+      throw invalid();
+    }
+    if (request.targetObservedToken() != null
+        && (request.targetObservedToken().isBlank() || request.targetObservedToken().length() > 256)) {
+      throw invalid();
+    }
+    if (request.sha256() != null) {
+      try {
+        normalizeDigest(request.sha256());
+      } catch (ResponseStatusException exception) {
+        throw invalid();
+      }
+    }
+  }
+
+  private void requireEnabled() {
+    if (!properties.enabled()) {
+      throw unavailable();
+    }
   }
 
   private Path stagingDirectory() throws IOException {
@@ -781,12 +1215,13 @@ public class SharedFolderUploadService {
     }
   }
 
-  private void moveAtomically(Path source, Path target, boolean replace) throws IOException {
+  protected void moveAtomically(Path source, Path target, boolean replace) throws IOException {
     try {
       if (replace) {
         Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
       } else {
-        Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+        // ATOMIC_MOVE may replace an existing target even without REPLACE_EXISTING on Windows.
+        Files.move(source, target);
       }
     } catch (AtomicMoveNotSupportedException exception) {
       throw conflict();
@@ -806,8 +1241,19 @@ public class SharedFolderUploadService {
   }
 
   private SharedFolderUploadStatus status(SharedFolderUploadSession session) {
+    var committedChunks = session.getChunkLengths().entrySet().stream()
+        .map(entry -> {
+          long offset = Long.parseLong(entry.getKey());
+          return new SharedFolderUploadChunkProof(
+              offset, entry.getValue(), session.getChunkDigests().get(entry.getKey()));
+        })
+        .filter(proof -> proof.offset() >= 0 && proof.length() > 0 && proof.sha256() != null
+            && proof.offset() + proof.length() <= session.getNextOffset())
+        .sorted(java.util.Comparator.comparingLong(SharedFolderUploadChunkProof::offset))
+        .toList();
     return new SharedFolderUploadStatus(session.getId(), session.getParentPath(), session.getName(),
-        session.getExpectedBytes(), session.getNextOffset(), session.getState(), session.getExpiresAt());
+        session.getExpectedBytes(), session.getNextOffset(), session.getState(), session.getExpiresAt(),
+        properties.uploadChunk().toBytes(), committedChunks);
   }
 
   private String normalizeDigest(String digest) {
@@ -847,8 +1293,21 @@ public class SharedFolderUploadService {
     return new ResponseStatusException(HttpStatus.CONFLICT, "Shared-folder upload conflict");
   }
 
+  private ResponseStatusException notFound() {
+    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Shared-folder upload was not found");
+  }
+
   private ResponseStatusException tooLarge() {
     return new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Shared-folder upload chunk is too large");
+  }
+
+  private ResponseStatusException invalid() {
+    return new ResponseStatusException(HttpStatus.BAD_REQUEST, "Shared-folder upload request is invalid");
+  }
+
+  private ResponseStatusException unavailable() {
+    return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+        "Shared-folder upload boundary is unavailable");
   }
 
   private ResponseStatusException insufficientStorage() {

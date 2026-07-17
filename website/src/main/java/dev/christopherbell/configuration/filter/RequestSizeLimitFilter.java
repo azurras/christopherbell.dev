@@ -144,6 +144,4 @@ public class RequestSizeLimitFilter extends OncePerRequestFilter {
     }
   }
 
-  private static class RequestPayloadTooLargeException extends IOException {
-  }
 }

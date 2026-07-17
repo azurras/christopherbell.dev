@@ -31,6 +31,7 @@ final class JnaWindowsSharedFolderNativeBridge implements WindowsSharedFolderNat
   private static final int FILE_READ_ATTRIBUTES = 0x0080;
   private static final int SYNCHRONIZE = 0x00100000;
   private static final int DELETE = 0x00010000;
+  private static final int FILE_SHARE_READ_WRITE = 0x0003;
   private static final int FILE_SHARE_READ_WRITE_DELETE = 0x0007;
   private static final int FILE_OPEN = 1;
   private static final int FILE_CREATE = 2;
@@ -64,19 +65,31 @@ final class JnaWindowsSharedFolderNativeBridge implements WindowsSharedFolderNat
   @Override
   public NativeHandle openRoot(Path rootPath, int objectAttributes) {
     String absolute = rootPath.toAbsolutePath().normalize().toString();
-    return open(ntPath(absolute), null, OpenKind.DIRECTORY, objectAttributes, FILE_OPEN, false);
+    return open(ntPath(absolute), null, OpenKind.DIRECTORY, objectAttributes, FILE_OPEN, false, false);
+  }
+
+  @Override
+  public NativeHandle openRootForMutation(Path rootPath, int objectAttributes) {
+    String absolute = rootPath.toAbsolutePath().normalize().toString();
+    return open(ntPath(absolute), null, OpenKind.DIRECTORY, objectAttributes, FILE_OPEN, false, true);
   }
 
   @Override
   public NativeHandle openRelative(
       NativeHandle parent, String name, OpenKind kind, int objectAttributes) {
-    return open(name, nativeHandle(parent), kind, objectAttributes, FILE_OPEN, false);
+    return open(name, nativeHandle(parent), kind, objectAttributes, FILE_OPEN, false, false);
+  }
+
+  @Override
+  public NativeHandle openRelativePinned(
+      NativeHandle parent, String name, OpenKind kind, int objectAttributes) {
+    return open(name, nativeHandle(parent), kind, objectAttributes, FILE_OPEN, false, true);
   }
 
   @Override
   public NativeHandle openRelativeForMutation(
       NativeHandle parent, String name, OpenKind kind, int objectAttributes) {
-    return open(name, nativeHandle(parent), kind, objectAttributes, FILE_OPEN, true);
+    return open(name, nativeHandle(parent), kind, objectAttributes, FILE_OPEN, true, true);
   }
 
   @Override
@@ -85,7 +98,7 @@ final class JnaWindowsSharedFolderNativeBridge implements WindowsSharedFolderNat
     if (kind == OpenKind.ANY) {
       throw new NativeBoundaryException("native create kind is invalid", 0);
     }
-    return open(name, nativeHandle(parent), kind, objectAttributes, FILE_CREATE, true);
+    return open(name, nativeHandle(parent), kind, objectAttributes, FILE_CREATE, true, true);
   }
 
   @Override
@@ -319,7 +332,7 @@ final class JnaWindowsSharedFolderNativeBridge implements WindowsSharedFolderNat
 
   private NativeHandle open(
       String objectName, HANDLE root, OpenKind kind, int objectAttributes,
-      int disposition, boolean mutation) {
+      int disposition, boolean mutation, boolean denyDeleteSharing) {
     UnicodeString name = new UnicodeString(objectName);
     ObjectAttributes attributes = new ObjectAttributes(root, name.getPointer(), objectAttributes);
     IoStatusBlock statusBlock = new IoStatusBlock();
@@ -343,7 +356,8 @@ final class JnaWindowsSharedFolderNativeBridge implements WindowsSharedFolderNat
     }
     int status = ntDll().NtCreateFile(
         result, access, attributes, statusBlock, null, FILE_ATTRIBUTE_NORMAL,
-        FILE_SHARE_READ_WRITE_DELETE, disposition, options, null, 0);
+        denyDeleteSharing ? FILE_SHARE_READ_WRITE : FILE_SHARE_READ_WRITE_DELETE,
+        disposition, options, null, 0);
     if (status != 0) {
       throw new NativeBoundaryException("native relative open failed", status);
     }

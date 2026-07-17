@@ -7,6 +7,7 @@ import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.Nativ
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.OpenKind;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import java.util.ArrayList;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
@@ -26,6 +27,7 @@ public final class WindowsSharedFolderMutationBoundary {
   private static final int SAFE_OBJECT_ATTRIBUTES = WindowsSharedFolderNativeBridge.OBJ_CASE_INSENSITIVE
       | WindowsSharedFolderNativeBridge.OBJ_DONT_REPARSE;
   private static final String STAGING_DIRECTORY = "shared-folder-upload-staging";
+  private static final String MUTATION_QUARANTINE_DIRECTORY = "shared-folder-mutation-quarantine";
 
   private final Path configuredRoot;
   private final Path configuredSystemRoot;
@@ -36,6 +38,7 @@ public final class WindowsSharedFolderMutationBoundary {
   private volatile NativeHandle rootHandle;
   private volatile NativeHandle systemRootHandle;
   private volatile NativeHandle stagingRootHandle;
+  private volatile NativeHandle mutationQuarantineRootHandle;
 
   public WindowsSharedFolderMutationBoundary(SharedFolderProperties properties) {
     this(properties.root(), properties.systemRoot(), new JnaWindowsSharedFolderNativeBridge(),
@@ -71,8 +74,8 @@ public final class WindowsSharedFolderMutationBoundary {
       if (!shouldActivate || rootHandle != null) {
         return;
       }
-      rootHandle = bridge.openRoot(configuredRoot, SAFE_OBJECT_ATTRIBUTES);
-      systemRootHandle = bridge.openRoot(configuredSystemRoot, SAFE_OBJECT_ATTRIBUTES);
+      rootHandle = bridge.openRootForMutation(configuredRoot, SAFE_OBJECT_ATTRIBUTES);
+      systemRootHandle = bridge.openRootForMutation(configuredSystemRoot, SAFE_OBJECT_ATTRIBUTES);
       if (!bridge.metadata(rootHandle).directory() || !bridge.metadata(systemRootHandle).directory()) {
         closeAll();
         throw unavailable();
@@ -94,7 +97,7 @@ public final class WindowsSharedFolderMutationBoundary {
     lifecycleLock.readLock().lock();
     try {
       requireActive();
-      OpenedHandle handle = openVisible(relativePath, OpenKind.ANY, false, false);
+      OpenedHandle handle = openVisible(relativePath, OpenKind.ANY, false, false, false);
       try {
         return bridge.metadata(handle.handle());
       } finally {
@@ -110,7 +113,7 @@ public final class WindowsSharedFolderMutationBoundary {
     lifecycleLock.readLock().lock();
     try {
       requireActive();
-      OpenedHandle handle = openVisible(relativePath, OpenKind.DIRECTORY, true, false);
+      OpenedHandle handle = openVisible(relativePath, OpenKind.DIRECTORY, true, false, false);
       try {
         NativeFileMetadata metadata = bridge.metadata(handle.handle());
         if (!metadata.directory()) {
@@ -141,7 +144,7 @@ public final class WindowsSharedFolderMutationBoundary {
     try {
       requireActive();
       SharedFolderPathResolver.validateSingleWindowsName(name);
-      OpenedHandle parent = openVisible(parentPath, OpenKind.DIRECTORY, true, false);
+      OpenedHandle parent = openVisible(parentPath, OpenKind.DIRECTORY, true, true, false);
       try {
         NativeHandle created = bridge.createRelative(parent.handle(), name, OpenKind.DIRECTORY,
             SAFE_OBJECT_ATTRIBUTES);
@@ -179,16 +182,22 @@ public final class WindowsSharedFolderMutationBoundary {
     try {
       requireActive();
       SharedFolderPathResolver.validateSingleWindowsName(name);
-      OpenedHandle source = openVisible(sourcePath, OpenKind.ANY, false, true);
-      OpenedHandle destination = openVisible(destinationParentPath, OpenKind.DIRECTORY, true, false);
+      OpenedHandle source = openVisible(sourcePath, OpenKind.ANY, false, true, true);
+      OpenedHandle destination = openVisible(
+          destinationParentPath, OpenKind.DIRECTORY, true, true, false);
       OpenedHandle target = expectedTarget == null ? null
-          : openVisible(relative(destinationParentPath, name), OpenKind.ANY, false, false);
+          : openVisible(relative(destinationParentPath, name), OpenKind.ANY, false, true, true);
       try {
         requireSameObservation(expectedSource, bridge.metadata(source.handle()));
         if (target != null) {
           requireSameObservation(expectedTarget, bridge.metadata(target.handle()));
         }
-        bridge.rename(source.handle(), destination.handle(), name, replace);
+        if (replace) {
+          requireReplacementTarget(target);
+          replacePinned(source.handle(), destination.handle(), name, target);
+        } else {
+          bridge.rename(source.handle(), destination.handle(), name, false);
+        }
       } finally {
         if (target != null) {
           target.close();
@@ -213,7 +222,7 @@ public final class WindowsSharedFolderMutationBoundary {
     lifecycleLock.readLock().lock();
     try {
       requireActive();
-      OpenedHandle source = openVisible(sourcePath, OpenKind.ANY, false, true);
+      OpenedHandle source = openVisible(sourcePath, OpenKind.ANY, false, true, true);
       try {
         requireSameObservation(expectedSource, bridge.metadata(source.handle()));
         bridge.delete(source.handle());
@@ -271,9 +280,10 @@ public final class WindowsSharedFolderMutationBoundary {
       SharedFolderPathResolver.validateSingleWindowsName(name);
       NativeHandle source = bridge.openRelativeForMutation(
           stagingRoot(), key, OpenKind.FILE, SAFE_OBJECT_ATTRIBUTES);
-      OpenedHandle destination = openVisible(destinationParentPath, OpenKind.DIRECTORY, true, false);
+      OpenedHandle destination = openVisible(
+          destinationParentPath, OpenKind.DIRECTORY, true, true, false);
       OpenedHandle target = expectedTarget == null ? null
-          : openVisible(relative(destinationParentPath, name), OpenKind.ANY, false, false);
+          : openVisible(relative(destinationParentPath, name), OpenKind.ANY, false, true, true);
       try {
         if (bridge.metadata(source).identity().volumeSerial()
             != bridge.metadata(destination.handle()).identity().volumeSerial()) {
@@ -282,7 +292,12 @@ public final class WindowsSharedFolderMutationBoundary {
         if (target != null) {
           requireSameObservation(expectedTarget, bridge.metadata(target.handle()));
         }
-        bridge.rename(source, destination.handle(), name, replace);
+        if (replace) {
+          requireReplacementTarget(target);
+          replacePinned(source, destination.handle(), name, target);
+        } else {
+          bridge.rename(source, destination.handle(), name, false);
+        }
       } finally {
         if (target != null) {
           target.close();
@@ -303,6 +318,120 @@ public final class WindowsSharedFolderMutationBoundary {
     }
   }
 
+  /** Deletes staging or confirms that NTFS already reports the private key absent. */
+  public boolean deleteStagingIfExists(String key) {
+    try {
+      deleteStaging(key);
+      return true;
+    } catch (NativeBoundaryException exception) {
+      if (exception.ntStatus() == 0xC0000034 || exception.ntStatus() == 0xC000003A) {
+        return true;
+      }
+      throw exception;
+    }
+  }
+
+  /** Moves the exact observed visible target into a caller-chosen private journal key. */
+  public NativeFileMetadata quarantineVisible(
+      String visiblePath, String quarantineKey, NativeFileMetadata expectedTarget) {
+    mutationLock.lock();
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(quarantineKey);
+      OpenedHandle target = openVisible(visiblePath, OpenKind.ANY, false, true, true);
+      try {
+        requireSameObservation(expectedTarget, bridge.metadata(target.handle()));
+        requireReplacementTarget(target);
+        if (bridge.metadata(target.handle()).identity().volumeSerial()
+            != bridge.metadata(mutationQuarantineRoot()).identity().volumeSerial()) {
+          throw new NativeBoundaryException("replacement roots are on different volumes", 0);
+        }
+        bridge.rename(target.handle(), mutationQuarantineRoot(), quarantineKey, false);
+        return bridge.metadata(target.handle());
+      } finally {
+        target.close();
+      }
+    } finally {
+      lifecycleLock.readLock().unlock();
+      mutationLock.unlock();
+    }
+  }
+
+  /** Moves the exact observed visible source to a visible name without replacement. */
+  public NativeFileMetadata moveVisibleNoReplace(
+      String sourcePath, String destinationParentPath, String name,
+      NativeFileMetadata expectedSource) {
+    return rename(sourcePath, destinationParentPath, name, false, expectedSource, null);
+  }
+
+  /** Returns metadata for a private mutation-quarantine entry. */
+  public NativeFileMetadata quarantineMetadata(String quarantineKey) {
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(quarantineKey);
+      NativeHandle handle = bridge.openRelativeForMutation(
+          mutationQuarantineRoot(), quarantineKey, OpenKind.ANY, SAFE_OBJECT_ATTRIBUTES);
+      try {
+        return bridge.metadata(handle);
+      } finally {
+        closeQuietly(handle);
+      }
+    } finally {
+      lifecycleLock.readLock().unlock();
+    }
+  }
+
+  /** Restores the exact quarantined item only when the visible name is still free. */
+  public NativeFileMetadata restoreQuarantine(
+      String quarantineKey, String destinationParentPath, String name,
+      NativeFileMetadata expectedTarget) {
+    mutationLock.lock();
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(quarantineKey);
+      SharedFolderPathResolver.validateSingleWindowsName(name);
+      NativeHandle source = bridge.openRelativeForMutation(
+          mutationQuarantineRoot(), quarantineKey, OpenKind.ANY, SAFE_OBJECT_ATTRIBUTES);
+      OpenedHandle destination = openVisible(
+          destinationParentPath, OpenKind.DIRECTORY, true, true, false);
+      try {
+        requireSameObservation(expectedTarget, bridge.metadata(source));
+        bridge.rename(source, destination.handle(), name, false);
+      } finally {
+        destination.close();
+        closeQuietly(source);
+      }
+      return metadata(relative(destinationParentPath, name));
+    } finally {
+      lifecycleLock.readLock().unlock();
+      mutationLock.unlock();
+    }
+  }
+
+  /** Deletes the exact quarantined item after a committed replacement. */
+  public void deleteQuarantine(String quarantineKey, NativeFileMetadata expectedTarget) {
+    mutationLock.lock();
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(quarantineKey);
+      NativeHandle target = bridge.openRelativeForMutation(
+          mutationQuarantineRoot(), quarantineKey, OpenKind.ANY, SAFE_OBJECT_ATTRIBUTES);
+      try {
+        requireSameObservation(expectedTarget, bridge.metadata(target));
+        bridge.delete(target);
+      } finally {
+        closeQuietly(target);
+      }
+    } finally {
+      lifecycleLock.readLock().unlock();
+      mutationLock.unlock();
+    }
+  }
+
   /** Restores a just-finalized visible file to its private staging key after metadata save fails. */
   public void restoreFinalized(
       String visiblePath, String stagingKey, NativeFileMetadata expectedVisible) {
@@ -311,7 +440,7 @@ public final class WindowsSharedFolderMutationBoundary {
     try {
       requireActive();
       validateStagingKey(stagingKey);
-      OpenedHandle source = openVisible(visiblePath, OpenKind.FILE, false, true);
+      OpenedHandle source = openVisible(visiblePath, OpenKind.FILE, false, true, true);
       try {
         requireSameObservation(expectedVisible, bridge.metadata(source.handle()));
         bridge.rename(source.handle(), stagingRoot(), stagingKey, false);
@@ -335,7 +464,7 @@ public final class WindowsSharedFolderMutationBoundary {
       requireActive();
       if (stagingRootHandle == null) {
         try {
-          stagingRootHandle = bridge.openRelative(systemRootHandle, STAGING_DIRECTORY,
+          stagingRootHandle = bridge.openRelativeForMutation(systemRootHandle, STAGING_DIRECTORY,
               OpenKind.DIRECTORY, SAFE_OBJECT_ATTRIBUTES);
         } catch (NativeBoundaryException missing) {
           stagingRootHandle = bridge.createRelative(systemRootHandle, STAGING_DIRECTORY,
@@ -354,27 +483,94 @@ public final class WindowsSharedFolderMutationBoundary {
     }
   }
 
+  private NativeHandle mutationQuarantineRoot() {
+    NativeHandle current = mutationQuarantineRootHandle;
+    if (current != null) {
+      return current;
+    }
+    lifecycleLock.readLock().unlock();
+    lifecycleLock.writeLock().lock();
+    try {
+      requireActive();
+      if (mutationQuarantineRootHandle == null) {
+        try {
+          mutationQuarantineRootHandle = bridge.openRelativeForMutation(
+              systemRootHandle, MUTATION_QUARANTINE_DIRECTORY,
+              OpenKind.DIRECTORY, SAFE_OBJECT_ATTRIBUTES);
+        } catch (NativeBoundaryException missing) {
+          mutationQuarantineRootHandle = bridge.createRelative(
+              systemRootHandle, MUTATION_QUARANTINE_DIRECTORY,
+              OpenKind.DIRECTORY, SAFE_OBJECT_ATTRIBUTES);
+        }
+        if (!bridge.metadata(mutationQuarantineRootHandle).directory()) {
+          closeQuietly(mutationQuarantineRootHandle);
+          mutationQuarantineRootHandle = null;
+          throw unavailable();
+        }
+      }
+      return mutationQuarantineRootHandle;
+    } finally {
+      lifecycleLock.readLock().lock();
+      lifecycleLock.writeLock().unlock();
+    }
+  }
+
+  private void requireReplacementTarget(OpenedHandle target) {
+    if (target == null) {
+      throw new NativeBoundaryException("observed replacement target is required", 0);
+    }
+    NativeFileMetadata metadata = bridge.metadata(target.handle());
+    if (metadata.directory() && !bridge.listDirectory(target.handle()).isEmpty()) {
+      throw new NativeBoundaryException("non-empty replacement directory conflicts", 0);
+    }
+  }
+
+  private void replacePinned(
+      NativeHandle source, NativeHandle destination, String name, OpenedHandle target) {
+    NativeHandle quarantineRoot = mutationQuarantineRoot();
+    long volume = bridge.metadata(destination).identity().volumeSerial();
+    if (bridge.metadata(source).identity().volumeSerial() != volume
+        || bridge.metadata(target.handle()).identity().volumeSerial() != volume
+        || bridge.metadata(quarantineRoot).identity().volumeSerial() != volume) {
+      throw new NativeBoundaryException("replacement roots are on different volumes", 0);
+    }
+    String quarantineKey = java.util.UUID.randomUUID().toString();
+    bridge.rename(target.handle(), quarantineRoot, quarantineKey, false);
+    try {
+      bridge.rename(source, destination, name, false);
+    } catch (NativeBoundaryException failure) {
+      try {
+        bridge.rename(target.handle(), destination, name, false);
+      } catch (NativeBoundaryException restoreFailure) {
+        failure.addSuppressed(restoreFailure);
+      }
+      throw failure;
+    }
+    bridge.delete(target.handle());
+  }
+
   private OpenedHandle openVisible(
-      String relativePath, OpenKind finalKind, boolean allowEmpty, boolean mutation) {
+      String relativePath, OpenKind finalKind, boolean allowEmpty,
+      boolean pinChain, boolean finalMutation) {
     List<String> segments = safeSegments(relativePath, allowEmpty);
     NativeHandle current = rootHandle;
-    boolean owned = false;
+    List<NativeHandle> owned = new ArrayList<>();
     try {
       for (int index = 0; index < segments.size(); index++) {
         OpenKind kind = index + 1 == segments.size() ? finalKind : OpenKind.DIRECTORY;
-        NativeHandle next = mutation && index + 1 == segments.size()
+        boolean leaf = index + 1 == segments.size();
+        NativeHandle next = finalMutation && leaf
             ? bridge.openRelativeForMutation(current, segments.get(index), kind, SAFE_OBJECT_ATTRIBUTES)
-            : bridge.openRelative(current, segments.get(index), kind, SAFE_OBJECT_ATTRIBUTES);
-        if (owned) {
-          closeQuietly(current);
-        }
+            : pinChain
+                ? bridge.openRelativePinned(current, segments.get(index), kind, SAFE_OBJECT_ATTRIBUTES)
+                : bridge.openRelative(current, segments.get(index), kind, SAFE_OBJECT_ATTRIBUTES);
         current = next;
-        owned = true;
+        owned.add(next);
       }
       return new OpenedHandle(current, owned);
     } catch (NativeBoundaryException exception) {
-      if (owned) {
-        closeQuietly(current);
+      for (int index = owned.size() - 1; index >= 0; index--) {
+        closeQuietly(owned.get(index));
       }
       throw exception;
     }
@@ -427,6 +623,10 @@ public final class WindowsSharedFolderMutationBoundary {
   }
 
   private void closeAll() {
+    if (mutationQuarantineRootHandle != null) {
+      closeQuietly(mutationQuarantineRootHandle);
+      mutationQuarantineRootHandle = null;
+    }
     if (stagingRootHandle != null) {
       closeQuietly(stagingRootHandle);
       stagingRootHandle = null;
@@ -495,9 +695,9 @@ public final class WindowsSharedFolderMutationBoundary {
 
   private final class OpenedHandle {
     private NativeHandle handle;
-    private final boolean owned;
+    private final List<NativeHandle> owned;
 
-    private OpenedHandle(NativeHandle handle, boolean owned) {
+    private OpenedHandle(NativeHandle handle, List<NativeHandle> owned) {
       this.handle = handle;
       this.owned = owned;
     }
@@ -505,9 +705,12 @@ public final class WindowsSharedFolderMutationBoundary {
     NativeHandle handle() { return handle; }
 
     void close() {
-      if (owned && handle != null) {
-        closeQuietly(handle);
+      if (handle != null) {
         handle = null;
+        for (int index = owned.size() - 1; index >= 0; index--) {
+          closeQuietly(owned.get(index));
+        }
+        owned.clear();
       }
     }
   }
@@ -521,9 +724,12 @@ public final class WindowsSharedFolderMutationBoundary {
       return new NativeBoundaryException("native shared-folder boundary is inactive", 0);
     }
     @Override public NativeHandle openRoot(Path path, int flags) { throw unavailable(); }
+    @Override public NativeHandle openRootForMutation(Path path, int flags) { throw unavailable(); }
     @Override public NativeHandle openRelative(NativeHandle parent, String name, OpenKind kind, int flags) {
       throw unavailable();
     }
+    @Override public NativeHandle openRelativePinned(
+        NativeHandle parent, String name, OpenKind kind, int flags) { throw unavailable(); }
     @Override public NativeFileMetadata metadata(NativeHandle handle) { throw unavailable(); }
     @Override public List<DirectoryEntry> listDirectory(NativeHandle directory) { throw unavailable(); }
     @Override public int read(NativeHandle handle, byte[] buffer, int offset, int length) { throw unavailable(); }

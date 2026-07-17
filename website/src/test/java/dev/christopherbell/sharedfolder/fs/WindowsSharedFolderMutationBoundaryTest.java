@@ -33,6 +33,25 @@ class WindowsSharedFolderMutationBoundaryTest {
   }
 
   @Test
+  void mutationRootsAndCompleteAncestorChainsDenyDeleteSharingUntilRenameCompletes() {
+    RecordingBridge bridge = new RecordingBridge();
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        Path.of("C:/shared"), Path.of("C:/system"), bridge);
+
+    boundary.rename("documents/archive/old.txt", "documents/destination", "new.txt", false);
+
+    assertThat(bridge.mutationRoots).containsExactly("C:\\shared", "C:\\system");
+    assertThat(bridge.mutationOpenNames)
+        .contains("documents", "archive", "old.txt", "destination");
+    int rename = bridge.events.indexOf("rename:old.txt:new.txt");
+    assertThat(rename).isGreaterThanOrEqualTo(0);
+    assertThat(bridge.events.indexOf("close:documents")).isGreaterThan(rename);
+    assertThat(bridge.events.indexOf("close:archive")).isGreaterThan(rename);
+    assertThat(bridge.events.indexOf("close:destination")).isGreaterThan(rename);
+    boundary.destroy();
+  }
+
+  @Test
   void stagesWritesFlushesAndFinalizesAcrossRetainedSameVolumeRoots() {
     RecordingBridge bridge = new RecordingBridge();
     WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
@@ -115,6 +134,25 @@ class WindowsSharedFolderMutationBoundaryTest {
   }
 
   @Test
+  void explicitReplacementQuarantinesThePinnedTargetBeforeANoReplaceSourceMove() {
+    RecordingBridge bridge = new RecordingBridge();
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        Path.of("C:/shared"), Path.of("C:/system"), bridge);
+    NativeFileMetadata source = boundary.metadata("documents/old.txt");
+    NativeFileMetadata target = boundary.metadata("documents/target.txt");
+
+    boundary.rename("documents/old.txt", "documents", "target.txt", true, source, target);
+
+    assertThat(bridge.renames).hasSize(2);
+    assertThat(bridge.renames.get(0).sourceName()).isEqualTo("target.txt");
+    assertThat(bridge.renames.get(0).replace()).isFalse();
+    assertThat(bridge.renames.get(0).targetName()).matches("[0-9a-f-]{36}");
+    assertThat(bridge.renames.get(1)).isEqualTo(new Rename("old.txt", "target.txt", false));
+    assertThat(bridge.deleted).contains("target.txt");
+    boundary.destroy();
+  }
+
+  @Test
   void reserveQueriesUseTheRetainedSystemRootVolumeHandle() {
     RecordingBridge bridge = new RecordingBridge();
     WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
@@ -139,6 +177,9 @@ class WindowsSharedFolderMutationBoundaryTest {
     private final List<String> deleted = new ArrayList<>();
     private final List<String> closed = new ArrayList<>();
     private final List<String> usableSpaceHandles = new ArrayList<>();
+    private final List<String> mutationRoots = new ArrayList<>();
+    private final List<String> mutationOpenNames = new ArrayList<>();
+    private final List<String> events = new ArrayList<>();
     private long stagingVolume = 7;
     private boolean changeIdentityOnMutationOpen;
     private boolean mutationSourceOpened;
@@ -152,6 +193,12 @@ class WindowsSharedFolderMutationBoundaryTest {
     }
 
     @Override
+    public NativeHandle openRootForMutation(Path rootPath, int attributes) {
+      mutationRoots.add(rootPath.toString());
+      return openRoot(rootPath, attributes);
+    }
+
+    @Override
     public NativeHandle openRelative(NativeHandle parent, String name, OpenKind kind, int attributes) {
       openRequests.add(new OpenRequest(parent, attributes));
       if (changeTargetIdentityOnNextOpen && name.equals("target.txt")) {
@@ -162,8 +209,16 @@ class WindowsSharedFolderMutationBoundaryTest {
     }
 
     @Override
+    public NativeHandle openRelativePinned(
+        NativeHandle parent, String name, OpenKind kind, int attributes) {
+      mutationOpenNames.add(name);
+      return openRelative(parent, name, kind, attributes);
+    }
+
+    @Override
     public NativeHandle openRelativeForMutation(
         NativeHandle parent, String name, OpenKind kind, int attributes) {
+      mutationOpenNames.add(name);
       if (changeIdentityOnMutationOpen && name.equals("old.txt")) {
         mutationSourceOpened = true;
       }
@@ -179,6 +234,7 @@ class WindowsSharedFolderMutationBoundaryTest {
 
     @Override
     public void rename(NativeHandle source, NativeHandle destinationParent, String name, boolean replace) {
+      events.add("rename:" + source.value() + ":" + name);
       renames.add(new Rename(source.value().toString(), name, replace));
     }
 
@@ -205,7 +261,10 @@ class WindowsSharedFolderMutationBoundaryTest {
       usableSpaceHandles.add(handle.value().toString());
       return 987_654_321L;
     }
-    @Override public void close(NativeHandle handle) { closed.add(handle.value().toString()); }
+    @Override public void close(NativeHandle handle) {
+      events.add("close:" + handle.value());
+      closed.add(handle.value().toString());
+    }
 
     private NativeFileIdentity identity(long volume, byte firstByte) {
       byte[] fileId = new byte[16];

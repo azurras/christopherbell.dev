@@ -17,7 +17,9 @@ import {
   renderPreviewText,
   uploadProgressPercent,
   uploadIsTerminal,
-  uploadResumeMatchesFile,
+  createUploadOperationGate,
+  runUploadWorkflow,
+  cancelUploadWorkflow,
 } from './lib/shared-folder.js';
 import {
   clearSharedFolderStreamingAuth,
@@ -28,7 +30,7 @@ import {
 const root = typeof document === 'undefined' ? null : document.getElementById('shared-folder-app');
 let currentPreviewLostAccess = false;
 const UPLOAD_RESUME_KEY = 'shared-folder-upload-resume-v1';
-const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+const uploadOperationGate = createUploadOperationGate();
 
 function clear(node) {
   while (node?.firstChild) node.removeChild(node.firstChild);
@@ -241,7 +243,7 @@ async function chunkDigest(chunk) {
   return base64Url(await crypto.subtle.digest('SHA-256', await chunk.arrayBuffer()));
 }
 
-async function putUploadChunk(upload, offset, chunk) {
+async function putUploadChunk(upload, offset, chunk, signal) {
   const response = await fetch(API.sharedFolder.uploadChunk(upload.id, offset), {
     method: 'PUT',
     headers: authHeaders({
@@ -250,6 +252,7 @@ async function putUploadChunk(upload, offset, chunk) {
     }),
     body: chunk,
     cache: 'no-store',
+    signal,
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -260,58 +263,33 @@ async function putUploadChunk(upload, offset, chunk) {
   return data.payload ?? data;
 }
 
-async function uploadFile(parentPath, file) {
-  let resume = storedUpload();
-  let upload;
-  let replace = Boolean(resume?.replace);
-  if (resume && uploadResumeMatchesFile(resume, file, parentPath)) {
-    upload = await fetchJson(API.sharedFolder.uploadStatus(resume.id), {
-      headers: authHeaders(),
-      redirectOnUnauthorized: false,
-      cache: 'no-store',
-    });
-    if (uploadIsTerminal(upload)) {
-      clearStoredUpload();
-      throw new Error(`The saved upload is ${String(upload.state).toLowerCase()}; choose the file again.`);
-    }
-  } else {
-    if (resume) throw new Error('Cancel the saved upload or choose the same file before starting another.');
-    const listing = await fetchJson(API.sharedFolder.entries(parentPath), {
-      headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
-    });
-    const target = listing.entries?.find(entry =>
-      String(entry.name).toLocaleLowerCase() === String(file.name).toLocaleLowerCase());
-    if (target) {
-      replace = window.confirm(`Replace the existing ${target.name}?`);
-      if (!replace) throw new Error('Upload cancelled because the target already exists.');
-    }
-    upload = await fetchJson(API.sharedFolder.uploads, {
-      method: 'POST',
-      headers: authHeaders(),
-      redirectOnUnauthorized: false,
-      cache: 'no-store',
-      body: JSON.stringify({
-        parentPath,
-        name: file.name,
-        expectedBytes: file.size,
-        targetObservedToken: target?.observedToken || null,
+async function uploadFile(parentPath, file, signal) {
+  const upload = await runUploadWorkflow({
+    parentPath,
+    file,
+    resume: storedUpload(),
+    signal,
+    digest: chunkDigest,
+    loadStatus: (id, requestSignal) => fetchJson(API.sharedFolder.uploadStatus(id), {
+      headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store', signal: requestSignal,
+    }),
+    listEntries: (path, requestSignal) => fetchJson(API.sharedFolder.entries(path), {
+      headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store', signal: requestSignal,
+    }),
+    confirmReplace: target => window.confirm(`Replace the existing ${target.name}?`),
+    createUpload: (request, requestSignal) => fetchJson(API.sharedFolder.uploads, {
+      method: 'POST', headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
+      body: JSON.stringify(request), signal: requestSignal,
+    }),
+    putChunk: (current, offset, chunk, requestSignal) =>
+      putUploadChunk(current, offset, chunk, requestSignal),
+    completeUpload: (current, replace, requestSignal) =>
+      fetchJson(API.sharedFolder.uploadComplete(current.id), {
+        method: 'POST', headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
+        body: JSON.stringify({ replace }), signal: requestSignal,
       }),
-    });
-    storeUpload(upload, replace);
-  }
-  renderUploadProgress(upload, `Uploading ${file.name}`);
-  while (upload.nextOffset < upload.expectedBytes) {
-    const end = Math.min(upload.expectedBytes, upload.nextOffset + UPLOAD_CHUNK_BYTES);
-    const chunk = file.slice(upload.nextOffset, end);
-    upload = await putUploadChunk(upload, upload.nextOffset, chunk);
-    renderUploadProgress(upload);
-  }
-  upload = await fetchJson(API.sharedFolder.uploadComplete(upload.id), {
-    method: 'POST',
-    headers: authHeaders(),
-    redirectOnUnauthorized: false,
-    cache: 'no-store',
-    body: JSON.stringify({ replace }),
+    onCreated: storeUpload,
+    onProgress: current => renderUploadProgress(current, `Uploading ${file.name}`),
   });
   clearStoredUpload();
   renderUploadProgress(upload, `${file.name} uploaded.`);
@@ -326,6 +304,7 @@ async function configureUploadPanel(path, account) {
   const form = document.getElementById('shared-upload-form');
   const fileInput = document.getElementById('shared-upload-file');
   const cancel = document.getElementById('shared-upload-cancel');
+  const pause = document.getElementById('shared-upload-pause');
   const resume = storedUpload();
   if (resume) {
     try {
@@ -343,6 +322,20 @@ async function configureUploadPanel(path, account) {
       else throw error;
     }
   }
+  const startUpload = file => {
+    const operation = uploadOperationGate.start(signal => uploadFile(path, file, signal));
+    if (!operation) {
+      status('An upload is already in progress. Pause it before choosing another file.');
+      return;
+    }
+    void operation
+      .then(() => status('Upload complete. Refresh to view the file.'))
+      .catch(error => {
+        if (error?.name === 'AbortError') status('Upload paused. Choose the same file to resume.');
+        else if (isSharedFolderAccessDenied(error)) handleSharedFolderAccessLoss(error.status);
+        else status(error?.message || 'Upload failed. You can resume or cancel it.');
+      });
+  };
   form?.addEventListener('submit', event => {
     event.preventDefault();
     const file = fileInput?.files?.[0];
@@ -350,12 +343,7 @@ async function configureUploadPanel(path, account) {
       status('Choose a file to upload.');
       return;
     }
-    void uploadFile(path, file)
-      .then(() => status('Upload complete. Refresh to view the file.'))
-      .catch(error => {
-        if (isSharedFolderAccessDenied(error)) handleSharedFolderAccessLoss(error.status);
-        else status(error?.message || 'Upload failed. You can resume or cancel it.');
-      });
+    startUpload(file);
   });
   panel.addEventListener('dragover', event => {
     event.preventDefault();
@@ -367,19 +355,17 @@ async function configureUploadPanel(path, account) {
     panel.classList.remove('is-dragging');
     const file = event.dataTransfer?.files?.[0];
     if (!file) return;
-    void uploadFile(path, file)
-      .then(() => status('Upload complete. Refresh to view the file.'))
-      .catch(error => {
-        if (isSharedFolderAccessDenied(error)) handleSharedFolderAccessLoss(error.status);
-        else status(error?.message || 'Upload failed. You can resume or cancel it.');
-      });
+    startUpload(file);
+  });
+  pause?.addEventListener('click', () => {
+    if (uploadOperationGate.pause()) status('Pausing upload…');
   });
   cancel?.addEventListener('click', () => {
     const saved = storedUpload();
     if (!saved) return;
-    void fetchJson(API.sharedFolder.uploadCancel(saved.id), {
+    void cancelUploadWorkflow(uploadOperationGate, () => fetchJson(API.sharedFolder.uploadCancel(saved.id), {
       method: 'DELETE', headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
-    }).then(upload => {
+    })).then(upload => {
       clearStoredUpload();
       renderUploadProgress(upload, `${upload.name} upload cancelled.`);
       status('Upload cancelled.');

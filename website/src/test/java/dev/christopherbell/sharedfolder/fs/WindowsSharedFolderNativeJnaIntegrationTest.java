@@ -2,6 +2,7 @@ package dev.christopherbell.sharedfolder.fs;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeHandle;
 import dev.christopherbell.configuration.SharedFolderProperties;
@@ -10,6 +11,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -109,6 +112,67 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
   }
 
   @Test
+  void realDeleteChainBlocksExternalSourceAndAncestorRenameAfterValidation() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("delete-chain-root"));
+    Path systemRoot = Files.createDirectory(temp.resolve("delete-chain-system"));
+    Path outside = Files.createDirectory(temp.resolve("delete-chain-outside"));
+    Path ancestor = Files.createDirectories(root.resolve("documents/archive"));
+    Path source = Files.writeString(ancestor.resolve("source.txt"), "inside");
+    InterceptingBridge bridge = new InterceptingBridge();
+    AtomicReference<Throwable> sourceMove = new AtomicReference<>();
+    AtomicReference<Throwable> ancestorMove = new AtomicReference<>();
+    bridge.beforeDelete = () -> {
+      sourceMove.set(catchThrowable(() -> Files.move(source, outside.resolve("source.txt"))));
+      ancestorMove.set(catchThrowable(() -> Files.move(
+          root.resolve("documents"), outside.resolve("documents"))));
+    };
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        root, systemRoot, bridge);
+    try {
+      var observed = boundary.metadata("documents/archive/source.txt");
+      boundary.delete("documents/archive/source.txt", observed);
+
+      assertThat(sourceMove.get()).isInstanceOf(java.io.IOException.class);
+      assertThat(ancestorMove.get()).isInstanceOf(java.io.IOException.class);
+      assertThat(Files.exists(source)).isFalse();
+      assertThat(outside).isEmptyDirectory();
+    } finally {
+      boundary.destroy();
+    }
+  }
+
+  @Test
+  void realRenameChainBlocksExternalSourceAndAncestorRenameAfterValidation() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("rename-chain-root"));
+    Path systemRoot = Files.createDirectory(temp.resolve("rename-chain-system"));
+    Path outside = Files.createDirectory(temp.resolve("rename-chain-outside"));
+    Path ancestor = Files.createDirectories(root.resolve("documents/archive"));
+    Path source = Files.writeString(ancestor.resolve("source.txt"), "inside");
+    InterceptingBridge bridge = new InterceptingBridge();
+    AtomicReference<Throwable> sourceMove = new AtomicReference<>();
+    AtomicReference<Throwable> ancestorMove = new AtomicReference<>();
+    bridge.beforeRename = () -> {
+      sourceMove.set(catchThrowable(() -> Files.move(source, outside.resolve("source.txt"))));
+      ancestorMove.set(catchThrowable(() -> Files.move(
+          root.resolve("documents"), outside.resolve("documents"))));
+    };
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        root, systemRoot, bridge);
+    try {
+      var observed = boundary.metadata("documents/archive/source.txt");
+      boundary.rename("documents/archive/source.txt", "documents/archive", "renamed.txt", false,
+          observed);
+
+      assertThat(sourceMove.get()).isInstanceOf(java.io.IOException.class);
+      assertThat(ancestorMove.get()).isInstanceOf(java.io.IOException.class);
+      assertThat(Files.readString(ancestor.resolve("renamed.txt"))).isEqualTo("inside");
+      assertThat(outside).isEmptyDirectory();
+    } finally {
+      boundary.destroy();
+    }
+  }
+
+  @Test
   void realBoundaryReopensStagingForAppendThenFinalizesAndDeletesByHandle() throws Exception {
     Path root = Files.createDirectory(temp.resolve("visible-root"));
     Path systemRoot = Files.createDirectory(temp.resolve("system-root"));
@@ -198,5 +262,62 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
   private static boolean junctionTestEnabled() {
     return Boolean.getBoolean("sharedFolder.runWindowsNativeJunctionTest")
         || Boolean.parseBoolean(System.getenv("SHARED_FOLDER_RUN_WINDOWS_NATIVE_JUNCTION_TEST"));
+  }
+
+  private static final class InterceptingBridge implements WindowsSharedFolderNativeBridge {
+    private final JnaWindowsSharedFolderNativeBridge delegate =
+        new JnaWindowsSharedFolderNativeBridge();
+    private Runnable beforeDelete = () -> {};
+    private Runnable beforeRename = () -> {};
+
+    @Override public NativeHandle openRoot(Path path, int flags) {
+      return delegate.openRoot(path, flags);
+    }
+    @Override public NativeHandle openRootForMutation(Path path, int flags) {
+      return delegate.openRootForMutation(path, flags);
+    }
+    @Override public NativeHandle openRelative(NativeHandle parent, String name, OpenKind kind, int flags) {
+      return delegate.openRelative(parent, name, kind, flags);
+    }
+    @Override public NativeHandle openRelativePinned(
+        NativeHandle parent, String name, OpenKind kind, int flags) {
+      return delegate.openRelativePinned(parent, name, kind, flags);
+    }
+    @Override public NativeHandle openRelativeForMutation(
+        NativeHandle parent, String name, OpenKind kind, int flags) {
+      return delegate.openRelativeForMutation(parent, name, kind, flags);
+    }
+    @Override public NativeHandle createRelative(
+        NativeHandle parent, String name, OpenKind kind, int flags) {
+      return delegate.createRelative(parent, name, kind, flags);
+    }
+    @Override public NativeFileMetadata metadata(NativeHandle handle) {
+      return delegate.metadata(handle);
+    }
+    @Override public List<DirectoryEntry> listDirectory(NativeHandle directory) {
+      return delegate.listDirectory(directory);
+    }
+    @Override public int read(NativeHandle handle, byte[] buffer, int offset, int length) {
+      return delegate.read(handle, buffer, offset, length);
+    }
+    @Override public long seek(NativeHandle handle, long offset) {
+      return delegate.seek(handle, offset);
+    }
+    @Override public int write(NativeHandle handle, byte[] buffer, int offset, int length) {
+      return delegate.write(handle, buffer, offset, length);
+    }
+    @Override public void flush(NativeHandle handle) { delegate.flush(handle); }
+    @Override public void truncate(NativeHandle handle, long size) { delegate.truncate(handle, size); }
+    @Override public void rename(
+        NativeHandle source, NativeHandle destinationParent, String name, boolean replace) {
+      beforeRename.run();
+      delegate.rename(source, destinationParent, name, replace);
+    }
+    @Override public void delete(NativeHandle source) {
+      beforeDelete.run();
+      delegate.delete(source);
+    }
+    @Override public long usableSpace(NativeHandle handle) { return delegate.usableSpace(handle); }
+    @Override public void close(NativeHandle handle) { delegate.close(handle); }
   }
 }
