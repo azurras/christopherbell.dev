@@ -1,0 +1,4 @@
+app:
+  shared-folder:
+    root: build/shared-folder/test/shared
+    system-root: build/shared-folder/test/system

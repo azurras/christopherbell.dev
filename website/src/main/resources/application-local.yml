@@ -4,6 +4,10 @@ command-center:
   actions:
     mode: SIMULATED
     power-actions-enabled: true
+app:
+  shared-folder:
+    root: build/shared-folder/local/shared
+    system-root: build/shared-folder/local/system
 spring:
   mongodb:
     database: christopherbell

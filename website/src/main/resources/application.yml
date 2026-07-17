@@ -40,6 +40,16 @@ command-center:
 app:
   jwt:
     secret: ${APP_JWT_SECRET:local-development-jwt-secret-change-me-at-least-32-bytes}
+  shared-folder:
+    root: build/shared-folder/default/shared
+    system-root: build/shared-folder/default/system
+    max-upload: 10GB
+    upload-chunk: 8MB
+    minimum-free-space: 100GB
+    transcode-cache-limit: 250GB
+    recycle-retention: 30d
+    audit-retention: 180d
+    enabled: false
 posts:
   expiration:
     enabled: true

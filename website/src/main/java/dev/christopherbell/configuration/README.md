@@ -23,6 +23,9 @@ Owns application-wide Spring and web infrastructure.
   when the immediate remote address is listed in `client-ip.trusted-proxies`.
 - MongoDB auditing configuration under `mongo`.
 - Shared configuration properties that do not yet need a subpackage.
+- `SharedFolderProperties` binds `app.shared-folder` storage roots, resource limits, retention
+  windows, and the feature gate. Local/test roots stay build-owned; production uses
+  environment-overridable dedicated Windows roots.
 - Other cross-cutting configuration that should not belong to a single feature package.
 
 ## Command Center Configuration
