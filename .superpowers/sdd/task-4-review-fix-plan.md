@@ -125,3 +125,26 @@ owns a one-operation gate and AbortController and retries only transient failure
 - [ ] Verify the worktree-local Gradle caches are absent and the progress ledger remains
   review-rejected.
 - [ ] Commit the complete green fix and send the SHA/report path for independent review.
+
+### Task 7: Second independent re-review remediation
+
+**Files:** Mutation recovery/session models and services, mutation/upload service tests, and these
+SDD artifacts.
+
+- [x] Add RED portable/native concurrency tests proving live mutation/finalization leases cannot be
+  reconciled by status, complete, startup, or another service at PREPARED or physical quarantine.
+- [x] Add optimistic lease claim/refresh behavior and explicitly expire simulated crash leases.
+- [x] Add RED mutation/upload tests for non-empty replacement directories, post-quarantine child
+  creation, same-size in-place content edits, and observed target disappearance.
+- [x] Add content-sensitive portable replacement identity and repeated pre-move quarantine checks;
+  restore before source/staging movement on failure.
+- [x] Replace portable case-only UUID two-step rename with one atomic attempt and prove injected
+  failure never strands the source; retain real Windows case-only coverage.
+- [x] Add portable and real-native commit-then-throw append tests; reload durable ACTIVE proof and
+  reconcile only exact matching APPENDING leases without truncating committed bytes.
+- [x] Validate append id/offset/body/digest as 400 and classify native upload missing/conflict/
+  unavailable statuses through real service tests.
+- [x] Prove portable/native explicit replacement target disappearance is 409 with source/staging
+  intact.
+- [ ] Record final full verification, commit, and request another fresh independent review while
+  retaining Task 4 as review-rejected/in progress.

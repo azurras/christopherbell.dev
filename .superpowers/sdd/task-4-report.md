@@ -110,3 +110,47 @@ Additional verification:
 Task 4 retains physical delete by design. Task 5 replaces it with recycle behavior and connects
 mutations to the persistent audit sink. Task 4 remains in progress until an independent reviewer
 approves this remediation.
+
+## Second Independent Re-review and Remediation
+
+The independent re-review of commit `7975b9e8e0818ffaca7100c03042538f35e046b7`
+rejected Task 4 again with four Critical and four Important findings. This remediation remains
+review-rejected pending another fresh review and closes the reported gaps as follows:
+
+- Mutation recovery and upload finalization now use bounded writer leases. Live PREPARED and
+  TARGET_QUARANTINED work is invisible to competing recovery, while expired work must be claimed by
+  optimistic version before any physical action. Portable and real Windows-native latch tests cover
+  mutation, replacement upload, and non-replacement upload windows.
+- Portable mutation and upload replacement reject non-empty directories before displacement and
+  recheck quarantine emptiness before source/staging movement. Regular-file replacement identities
+  include SHA-256, detecting an in-place same-size edit that stable metadata alone missed.
+- An explicitly observed replacement target that disappears returns 409 before source/staging
+  movement in portable and native modes. The original source or private upload staging remains
+  intact.
+- Portable case-only rename is one atomic provider operation. Injected failure and the Windows
+  regression prove the source never becomes a visible random UUID.
+- Portable and real Windows-native append tests simulate Mongo committing ACTIVE progress and then
+  throwing. The service reloads matching durable chunk proof, returns consistent progress, and an
+  identical retry neither truncates nor duplicates bytes. A proven APPENDING result is reconciled
+  only for the exact writer lease after that lease is durably expired.
+- Append id, offset, body, and required SHA-256 digest are validated as 400 before authorization,
+  repository, or native-boundary interaction. Real service tests classify native missing as 404,
+  collision/share as 409, and unknown/inactive failures as 503.
+
+Observed RED runs failed each new regression before production changes: live work was recovered by
+competitors, non-empty/modified/disappeared targets were displaced, case-only failure stranded a
+UUID name, final progress-save exceptions truncated committed bytes, malformed append requests
+returned conflict or threw, and native upload statuses collapsed to 409. The corresponding focused
+GREEN runs now pass.
+
+The final full verification for this second remediation used the external Gradle caches and
+`SHARED_FOLDER_RUN_WINDOWS_NATIVE_JUNCTION_TEST=true`:
+
+- `gradlew.bat --no-daemon --project-cache-dir ... test`: 767 `website` tests and 93 `cbell-lib`
+  tests passed (860 aggregate); 0 failed, 0 errored, 0 skipped.
+- `gradlew.bat --no-daemon --project-cache-dir ... :website:jsTest`: 150 passed; 0 failed,
+  0 skipped.
+- The focused mutation/upload service run passed all 48 tests, including real native lease,
+  recovery, append acknowledgement, replacement integrity, and target-disappearance coverage.
+
+Task 4 remains in progress and requires a fresh independent review of the new remediation commit.

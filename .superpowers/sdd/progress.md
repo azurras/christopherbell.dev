@@ -8,7 +8,7 @@ Baseline: `gradlew.bat test :website:jsTest --console=plain` succeeded; browser 
 Task 1: complete (commits 9108f9c..0b025da, review clean; fresh `:website:test :website:jsTest` BUILD SUCCESSFUL, 122 JS tests passed)
 Task 2: complete (commits 0b025da..ff23809, review clean; fresh `:website:test` BUILD SUCCESSFUL)
 Task 3: complete (commits ff23809..8602985, final review approved with no findings; fresh `:website:test :website:jsTest` BUILD SUCCESSFUL, 141 JS tests, real Windows junction test enabled)
-Task 4: in progress (implementation commit `a40c9596`; independent review rejected with 2 Critical and 6 Important findings; all remediation implemented and fully verified; independent re-review required)
+Task 4: in progress (implementation `a40c9596` rejected with 2 Critical/6 Important; remediation `7975b9e8` rejected with 4 Critical/4 Important; second remediation implemented and fully verified; fresh independent re-review required)
 Task 5: pending
 Task 6: pending
 Task 7: pending

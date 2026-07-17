@@ -38,6 +38,8 @@ public class SharedFolderUploadSession {
   private String finalizingTargetIdentity;
   private String finalizingQuarantineKey;
   private SharedFolderUploadFinalizationState finalizationState;
+  private String finalizationLeaseToken;
+  private Instant finalizationLeaseExpiresAt;
   @Indexed private Instant expiresAt;
   private SharedFolderUploadState state;
   private Instant createdAt;

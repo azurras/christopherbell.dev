@@ -23,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.security.MessageDigest;
 import java.util.UUID;
 import java.time.Instant;
 import org.springframework.http.HttpStatus;
@@ -35,10 +36,12 @@ import org.springframework.web.server.ResponseStatusException;
 /** Performs conflict-safe shared-folder mutations after a fresh write authorization decision. */
 @Service
 public class SharedFolderMutationService {
+  private static final java.time.Duration OPERATION_LEASE_TTL = java.time.Duration.ofMinutes(2);
   private final SharedFolderAccessService access;
   private final SharedFolderProperties properties;
   private final WindowsSharedFolderMutationBoundary nativeBoundary;
   private final SharedFolderMutationRecoveryRepository recoveries;
+  private final String serviceInstanceId = UUID.randomUUID().toString();
 
   /** Creates the portable mutation service used by non-Windows test and local providers. */
   public SharedFolderMutationService(
@@ -248,6 +251,7 @@ public class SharedFolderMutationService {
       requireCurrentToken(resolver, request.path(), source, request.observedToken());
       if (existingTarget != null) {
         requireCurrentToken(resolver, targetRelative, existingTarget, request.replacedObservedToken());
+        requirePortableReplacementTarget(existingTarget);
         if (recoveries == null) {
           replaceThroughQuarantine(source, target, existingTarget);
         } else {
@@ -363,10 +367,17 @@ public class SharedFolderMutationService {
   }
 
   private void moveCaseOnly(Path source, Path target, SharedFolderPathResolver resolver) throws IOException {
-    Path temporary = source.getParent().resolve("__shared-folder-case-" + UUID.randomUUID());
-    moveAtomically(source, temporary, false);
-    resolver.recheckForMutation(temporary.getParent());
-    moveAtomically(temporary, target, false);
+    resolver.recheckForMutation(source.getParent());
+    moveCaseOnlyAtomically(source, target);
+  }
+
+  /** Performs one provider-guaranteed atomic case-only rename or leaves the source unchanged. */
+  protected void moveCaseOnlyAtomically(Path source, Path target) throws IOException {
+    try {
+      Files.move(source, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+    } catch (AtomicMoveNotSupportedException exception) {
+      throw conflict();
+    }
   }
 
   protected void moveAtomically(Path source, Path target, boolean replace) throws IOException {
@@ -433,10 +444,11 @@ public class SharedFolderMutationService {
     recovery.setDestinationParentPath(request.destinationPath());
     recovery.setName(request.name());
     recovery.setSourceIdentity(portableStableIdentity(source));
-    recovery.setTargetIdentity(portableStableIdentity(target));
+    recovery.setTargetIdentity(portableReplacementIdentity(target));
     recovery.setQuarantineKey(UUID.randomUUID().toString());
     recovery.setNativeMode(false);
     recovery.setState(SharedFolderMutationRecoveryState.PREPARED);
+    assignOperationLease(recovery, now);
     recovery.setCreatedAt(now);
     recovery.setUpdatedAt(now);
     return recoveries.save(recovery);
@@ -460,6 +472,7 @@ public class SharedFolderMutationService {
     recovery.setQuarantineKey(UUID.randomUUID().toString());
     recovery.setNativeMode(true);
     recovery.setState(SharedFolderMutationRecoveryState.PREPARED);
+    assignOperationLease(recovery, now);
     recovery.setCreatedAt(now);
     recovery.setUpdatedAt(now);
     return recoveries.save(recovery);
@@ -469,9 +482,17 @@ public class SharedFolderMutationService {
       SharedFolderMutationRecovery recovery,
       NativeFileMetadata expectedSource,
       NativeFileMetadata expectedTarget) {
-    NativeFileMetadata quarantined = nativeBoundary.quarantineVisible(
-        relativePath(recovery.getDestinationParentPath(), recovery.getName()),
-        recovery.getQuarantineKey(), expectedTarget);
+    NativeFileMetadata quarantined;
+    try {
+      quarantined = nativeBoundary.quarantineVisible(
+          relativePath(recovery.getDestinationParentPath(), recovery.getName()),
+          recovery.getQuarantineKey(), expectedTarget);
+    } catch (NativeBoundaryException exception) {
+      if (isNativeMissing(exception)) {
+        throw conflict();
+      }
+      throw exception;
+    }
     if (!java.util.Objects.equals(
         recovery.getTargetIdentity(), nativeStableIdentity(quarantined))) {
       throw conflict();
@@ -479,6 +500,7 @@ public class SharedFolderMutationService {
     afterPhysicalMutationTransition(SharedFolderMutationRecoveryState.TARGET_QUARANTINED);
     recovery.setState(SharedFolderMutationRecoveryState.TARGET_QUARANTINED);
     recovery.setUpdatedAt(Instant.now());
+    refreshOperationLease(recovery);
     recovery = recoveries.save(recovery);
     try {
       NativeFileMetadata moved = nativeBoundary.moveVisibleNoReplace(
@@ -487,6 +509,7 @@ public class SharedFolderMutationService {
       afterPhysicalMutationTransition(SharedFolderMutationRecoveryState.SOURCE_MOVED);
       recovery.setState(SharedFolderMutationRecoveryState.SOURCE_MOVED);
       recovery.setUpdatedAt(Instant.now());
+      refreshOperationLease(recovery);
       recovery = recoveries.save(recovery);
       nativeBoundary.deleteQuarantine(recovery.getQuarantineKey(), quarantined);
       recoveries.deleteById(recovery.getId());
@@ -494,8 +517,9 @@ public class SharedFolderMutationService {
     } catch (RuntimeException failure) {
       recovery.setState(SharedFolderMutationRecoveryState.RESTORE_PENDING);
       recovery.setUpdatedAt(Instant.now());
+      refreshOperationLease(recovery);
       recoveries.save(recovery);
-      reconcileRecovery(recovery);
+      reconcileClaimedRecovery(recovery);
       throw failure;
     }
   }
@@ -505,28 +529,58 @@ public class SharedFolderMutationService {
       throws IOException {
     Path quarantine = mutationQuarantineRoot().resolve(recovery.getQuarantineKey());
     requireSameFileStore(source, quarantine.getParent());
-    moveAtomically(observedTarget, quarantine, false);
-    if (!identityMatches(quarantine, recovery.getTargetIdentity())) {
+    if (!portableReplacementIdentityMatches(observedTarget, recovery.getTargetIdentity())) {
+      recoveries.deleteById(recovery.getId());
       throw conflict();
     }
-    afterPhysicalMutationTransition(SharedFolderMutationRecoveryState.TARGET_QUARANTINED);
-    recovery.setState(SharedFolderMutationRecoveryState.TARGET_QUARANTINED);
-    recovery.setUpdatedAt(Instant.now());
-    recovery = recoveries.save(recovery);
+    moveAtomically(observedTarget, quarantine, false);
     try {
+      if (!portableReplacementIdentityMatches(quarantine, recovery.getTargetIdentity())) {
+        throw conflict();
+      }
+      afterPhysicalMutationTransition(SharedFolderMutationRecoveryState.TARGET_QUARANTINED);
+      if (!portableReplacementIdentityMatches(quarantine, recovery.getTargetIdentity())) {
+        throw conflict();
+      }
+      recovery.setState(SharedFolderMutationRecoveryState.TARGET_QUARANTINED);
+      recovery.setUpdatedAt(Instant.now());
+      refreshOperationLease(recovery);
+      recovery = recoveries.save(recovery);
       moveAtomically(source, target, false);
       afterPhysicalMutationTransition(SharedFolderMutationRecoveryState.SOURCE_MOVED);
       recovery.setState(SharedFolderMutationRecoveryState.SOURCE_MOVED);
       recovery.setUpdatedAt(Instant.now());
+      refreshOperationLease(recovery);
       recovery = recoveries.save(recovery);
       Files.delete(quarantine);
       recoveries.deleteById(recovery.getId());
     } catch (IOException | RuntimeException failure) {
       recovery.setState(SharedFolderMutationRecoveryState.RESTORE_PENDING);
       recovery.setUpdatedAt(Instant.now());
+      refreshOperationLease(recovery);
       recoveries.save(recovery);
-      reconcileRecovery(recovery);
+      restoreOwnedPortableReplacement(recovery, source, target, quarantine);
       throw failure;
+    }
+  }
+
+  private void restoreOwnedPortableReplacement(
+      SharedFolderMutationRecovery recovery, Path source, Path target, Path quarantine) {
+    try {
+      if (identityMatches(target, recovery.getSourceIdentity())) {
+        reconcileClaimedRecovery(recovery);
+        return;
+      }
+      if (Files.notExists(target, LinkOption.NOFOLLOW_LINKS)
+          && Files.exists(source, LinkOption.NOFOLLOW_LINKS)
+          && Files.exists(quarantine, LinkOption.NOFOLLOW_LINKS)) {
+        moveAtomically(quarantine, target, false);
+        recoveries.deleteById(recovery.getId());
+        return;
+      }
+      reconcileClaimedRecovery(recovery);
+    } catch (IOException | RuntimeException restoreFailure) {
+      // The durable RESTORE_PENDING record retains every path and private key for later recovery.
     }
   }
 
@@ -557,6 +611,14 @@ public class SharedFolderMutationService {
   }
 
   private void reconcileRecovery(SharedFolderMutationRecovery recovery) {
+    SharedFolderMutationRecovery claimed = claimExpiredRecovery(recovery);
+    if (claimed == null) {
+      return;
+    }
+    reconcileClaimedRecovery(claimed);
+  }
+
+  private void reconcileClaimedRecovery(SharedFolderMutationRecovery recovery) {
     if (recovery.isNativeMode()) {
       reconcileNativeRecovery(recovery);
       return;
@@ -567,9 +629,10 @@ public class SharedFolderMutationService {
         recovery.getDestinationParentPath(), recovery.getName())).normalize();
     Path quarantine = mutationQuarantineRoot().resolve(recovery.getQuarantineKey());
     try {
-      boolean quarantineMatches = identityMatches(quarantine, recovery.getTargetIdentity());
+      boolean quarantineMatches = portableReplacementIdentityMatches(
+          quarantine, recovery.getTargetIdentity());
       boolean sourceAtTarget = identityMatches(target, recovery.getSourceIdentity());
-      boolean targetOriginal = identityMatches(target, recovery.getTargetIdentity());
+      boolean targetOriginal = portableReplacementIdentityMatches(target, recovery.getTargetIdentity());
       if (sourceAtTarget) {
         if (quarantineMatches) {
           Files.delete(quarantine);
@@ -594,6 +657,32 @@ public class SharedFolderMutationService {
       throw new ResponseStatusException(HttpStatus.CONFLICT,
           "Shared-folder replacement recovery is pending");
     }
+  }
+
+  private SharedFolderMutationRecovery claimExpiredRecovery(
+      SharedFolderMutationRecovery candidate) {
+    Instant now = Instant.now();
+    if (candidate.getOperationLeaseExpiresAt() != null
+        && candidate.getOperationLeaseExpiresAt().isAfter(now)) {
+      return null;
+    }
+    candidate.setOperationLeaseToken(serviceInstanceId + ":recovery:" + UUID.randomUUID());
+    candidate.setOperationLeaseExpiresAt(now.plus(OPERATION_LEASE_TTL));
+    candidate.setUpdatedAt(now);
+    try {
+      return recoveries.save(candidate);
+    } catch (RuntimeException optimisticConflict) {
+      return null;
+    }
+  }
+
+  private void assignOperationLease(SharedFolderMutationRecovery recovery, Instant now) {
+    recovery.setOperationLeaseToken(serviceInstanceId + ":operation:" + UUID.randomUUID());
+    recovery.setOperationLeaseExpiresAt(now.plus(OPERATION_LEASE_TTL));
+  }
+
+  private void refreshOperationLease(SharedFolderMutationRecovery recovery) {
+    recovery.setOperationLeaseExpiresAt(Instant.now().plus(OPERATION_LEASE_TTL));
   }
 
   private void reconcileNativeRecovery(SharedFolderMutationRecovery recovery) {
@@ -677,6 +766,51 @@ public class SharedFolderMutationService {
   private boolean identityMatches(Path path, String expected) throws IOException {
     return Files.exists(path, LinkOption.NOFOLLOW_LINKS)
         && java.util.Objects.equals(expected, portableStableIdentity(path));
+  }
+
+  private boolean portableReplacementIdentityMatches(Path path, String expected) throws IOException {
+    return Files.exists(path, LinkOption.NOFOLLOW_LINKS)
+        && java.util.Objects.equals(expected, portableReplacementIdentity(path));
+  }
+
+  private String portableReplacementIdentity(Path path) throws IOException {
+    BasicFileAttributes before = Files.readAttributes(
+        path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+    String metadata = portableStableIdentity(path) + ":" + before.size() + ":"
+        + before.lastModifiedTime().toMillis();
+    if (before.isDirectory()) {
+      try (var children = Files.list(path)) {
+        if (children.findAny().isPresent()) throw conflict();
+      }
+      return metadata + ":empty-directory";
+    }
+    if (!before.isRegularFile()) throw conflict();
+    MessageDigest digest = sha256Digest();
+    try (var input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
+      byte[] buffer = new byte[16 * 1024];
+      for (int count; (count = input.read(buffer)) != -1;) digest.update(buffer, 0, count);
+    }
+    BasicFileAttributes after = Files.readAttributes(
+        path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+    if (before.size() != after.size()
+        || !before.lastModifiedTime().equals(after.lastModifiedTime())
+        || !java.util.Objects.equals(before.fileKey(), after.fileKey())) {
+      throw conflict();
+    }
+    return metadata + ":sha256:"
+        + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(digest.digest());
+  }
+
+  private MessageDigest sha256Digest() {
+    try {
+      return MessageDigest.getInstance("SHA-256");
+    } catch (java.security.NoSuchAlgorithmException exception) {
+      throw new IllegalStateException("SHA-256 is required", exception);
+    }
+  }
+
+  private void requirePortableReplacementTarget(Path target) throws IOException {
+    portableReplacementIdentity(target);
   }
 
   private String portableStableIdentity(Path path) throws IOException {
@@ -791,7 +925,7 @@ public class SharedFolderMutationService {
   private ResponseStatusException nativeFailure(
       NativeBoundaryException exception, boolean zeroMeansOperationConflict) {
     int status = exception.ntStatus();
-    if (status == 0xC0000034 || status == 0xC000003A || status == 2 || status == 3) {
+    if (isNativeMissing(exception)) {
       return notFound();
     }
     if (status == 0xC0000035 || status == 0xC0000043 || status == 32
@@ -800,6 +934,11 @@ public class SharedFolderMutationService {
       return conflict();
     }
     return unavailable();
+  }
+
+  private boolean isNativeMissing(NativeBoundaryException exception) {
+    int status = exception.ntStatus();
+    return status == 0xC0000034 || status == 0xC000003A || status == 2 || status == 3;
   }
 
 }

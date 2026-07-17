@@ -24,6 +24,8 @@ public class SharedFolderMutationRecovery {
   private String quarantineKey;
   private boolean nativeMode;
   private SharedFolderMutationRecoveryState state;
+  private String operationLeaseToken;
+  private Instant operationLeaseExpiresAt;
   private Instant createdAt;
   @Indexed private Instant updatedAt;
 
@@ -41,6 +43,8 @@ public class SharedFolderMutationRecovery {
     copy.setQuarantineKey(quarantineKey);
     copy.setNativeMode(nativeMode);
     copy.setState(state);
+    copy.setOperationLeaseToken(operationLeaseToken);
+    copy.setOperationLeaseExpiresAt(operationLeaseExpiresAt);
     copy.setCreatedAt(createdAt);
     copy.setUpdatedAt(updatedAt);
     return copy;

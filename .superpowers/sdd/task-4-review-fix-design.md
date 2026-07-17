@@ -84,3 +84,28 @@ Each review item begins with a focused failing regression test. Final verificati
 shared-folder tests, real Windows native and explicitly enabled junction tests, full Java tests,
 all JavaScript tests, touched JavaScript syntax checks, diff checks, and cache hygiene using
 external Gradle user and project caches.
+
+## Second independent re-review remediation
+
+The second independent review of commit `7975b9e8e0818ffaca7100c03042538f35e046b7`
+identified four Critical and four Important concurrency and replacement-integrity gaps. Durable
+mutation journals and upload finalization records therefore carry per-writer lease tokens and
+bounded expiries. Startup, status, complete, and pre-operation recovery skip live leases; an expired
+record must be claimed through its Mongo optimistic version before physical reconciliation. The
+writer refreshes its lease at each durable physical phase, and only the exact ended writer token may
+be expired during ambiguous-save reconciliation.
+
+Portable replacement identity is content-sensitive for ordinary files (stable metadata plus
+SHA-256) and requires replacement directories to be empty. Identity and directory emptiness are
+checked before displacement, immediately after quarantine, and once more after the physical-phase
+test seam before source/staging movement. An observed replacement target that disappears is a 409
+with source or staging intact in portable and native modes. Case-only portable rename is one atomic
+rename attempt and fails closed when the provider cannot guarantee it; no visible UUID intermediate
+name exists.
+
+Append validates id, non-negative offset, body, and a required 32-byte base64url SHA-256 digest as
+400 before authorization, repository, or native-boundary work. A final progress save that commits
+and then throws is resolved by reloading durable ACTIVE chunk proof and never truncating committed
+bytes. Durable APPENDING is reconciled only when the exact matching lease has been proven and first
+expired through an optimistic save. Native missing, collision/share, and unknown failures map to
+404, 409, and 503 respectively through real service tests.
