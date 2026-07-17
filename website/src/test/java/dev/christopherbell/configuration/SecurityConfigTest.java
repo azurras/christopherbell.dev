@@ -99,6 +99,23 @@ class SecurityConfigTest {
     assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(preview)));
   }
 
+  @Test
+  @DisplayName("Shared-folder worker bootstrap is public only for its exact anonymous GET")
+  void publicMatchers_whenSharedFolderWorkerRequested_matchesOnlyTheExactGet() throws Exception {
+    var worker = request("GET", "/shared-folder-auth-sw.js");
+    worker.setQueryString("cache=1");
+    var post = request("POST", "/shared-folder-auth-sw.js");
+    var extra = request("GET", "/shared-folder-auth-sw.js/extra");
+    var sourceMap = request("GET", "/shared-folder-auth-sw.js.map");
+    var sharedFolderApi = request("GET", "/api/shared-folder/2026-07-17/entries");
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(worker)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(post)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(extra)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(sourceMap)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(sharedFolderApi)));
+  }
+
   private MockHttpServletRequest request(String method, String path) {
     var request = new MockHttpServletRequest(method, path);
     request.setServletPath(path);

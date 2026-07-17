@@ -13,7 +13,9 @@ Owns reusable browser-side modules that are not tied to one page.
 - `shared-folder-streaming.js` defines the exact shared-folder API scope, request cloning that
   preserves `Range` while attaching the per-client JWT in the service worker, worker readiness,
   logout/401 token cleanup, and actionable 401/403 streaming states. Worker forwarding uses
-  `cache: 'no-store'`; it never places bearer data in a URL.
+  `cache: 'no-store'`; it never places bearer data in a URL. Its root worker script is installed
+  through the exact public `GET /shared-folder-auth-sw.js` bootstrap route, not through a public
+  shared-folder API prefix.
 - `composer.js` initializes reusable post composer behavior.
 - `composer-preview.js` turns draft post text into a live, sanitized preview
   using the same mention linking and rich embed rendering as feed cards.

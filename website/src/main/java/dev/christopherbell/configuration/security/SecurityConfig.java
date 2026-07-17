@@ -42,6 +42,7 @@ public class SecurityConfig {
   private static final String[] PUBLIC_URLS = {
       "/",
       "/shared",
+      "GET:/shared-folder-auth-sw.js",
       "/api/accounts" + APIVersion.V20241215 + "/login",
       "/api/accounts" + APIVersion.V20241215 + "/create",
       "/api/accounts" + APIVersion.V20241215 + "/password-reset/request",

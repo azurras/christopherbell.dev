@@ -123,8 +123,10 @@ Owns browser-side behavior for server-rendered pages.
   shown inline. The worker receives no token in a URL, attaches it only to the exact versioned
   shared-folder API prefix, preserves `Range`, forwards with `cache: 'no-store'`, and clears its
   per-client token on 401 or logout. Text and native-stream 401/403 responses use one actionable
-  access-loss handler. The shared nav adds Shared Folder only after the current-account API reports
-  effective read access.
+  access-loss handler. Its root bootstrap script is intentionally public for exact anonymous
+  `GET /shared-folder-auth-sw.js` so installation can happen before it has a bearer token; all
+  shared-folder API requests stay protected. The shared nav adds Shared Folder only after the
+  current-account API reports effective read access.
 
 ## Design Notes
 

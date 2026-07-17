@@ -315,6 +315,29 @@ local run. It passed on this Windows host with a real `mklink /J` swap target:
 $env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; $env:SHARED_FOLDER_RUN_WINDOWS_NATIVE_JUNCTION_TEST = 'true'; .\gradlew.bat --no-daemon :website:test --tests dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeJnaIntegrationTest.junctionRaceIsRejectedWhenExplicitNativeIntegrationIsEnabled
 ```
 
+## Worker Bootstrap Matcher Remediation — 2026-07-17
+
+- `prepareSharedFolderStreamingAuth()` installs the root-scoped
+  `/shared-folder-auth-sw.js` before a service worker can attach the JWT. `SecurityConfig` therefore
+  permits only an exact anonymous `GET` for that static script; it does not permit POST, trailing
+  paths, source-map names, or any `/api/shared-folder/**` request.
+
+### RED
+
+```powershell
+$env:GRADLE_USER_HOME = Join-Path $env:TEMP 'shared-folder-portal-gradle-task3'; .\gradlew.bat --no-daemon :website:test --tests dev.christopherbell.configuration.SecurityConfigTest --tests dev.christopherbell.configuration.security.SharedFolderWorkerStaticResourceTest
+```
+
+Result: exit `1`; the exact worker GET matcher was absent and the anonymous static-resource
+retrieval test could not reach the bootstrap asset.
+
+### GREEN
+
+The same focused command now exits `0`. The matcher test proves only the exact GET (including one
+with a query string) is public; POST, trailing path, `.map`, and shared-folder API paths
+are not. Anonymous MockMvc retrieves the real worker content, while the protected API still returns
+`401`.
+
 ## Full Verification
 
 ```powershell

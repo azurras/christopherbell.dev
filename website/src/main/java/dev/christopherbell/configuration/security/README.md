@@ -9,6 +9,9 @@ Owns Spring Security wiring and request authentication infrastructure.
 - `SharedFolderNoStoreFilter` runs before shared-folder authentication and applies
   `Cache-Control: private, no-store` only to the exact versioned shared-folder API prefix,
   including authentication and authorization failures.
+- The root worker bootstrap `/shared-folder-auth-sw.js` is public only for an exact `GET` so an
+  anonymous browser can install it before the worker has a JWT to forward. Its POSTs, near-miss
+  paths, and every `/api/shared-folder/**` endpoint remain protected.
 
 ## Design Notes
 
