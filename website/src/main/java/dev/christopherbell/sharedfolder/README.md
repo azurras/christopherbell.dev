@@ -9,8 +9,9 @@ operations exist.
   Windows-safe relative names. It rejects drive-qualified and UNC forms, alternate streams,
   dot segments, unsafe DOS names, all ISO control characters, links, NTFS reparse points, and
   filesystem mounts. Every existing segment must retain a canonical identity beneath the root and
-  stay on its file store. Callers recheck an existing selected path immediately before any
-  mutation.
+  stay on its file store. Linux reads `/proc/self/mountinfo` and fails closed when its mount facts
+  are unavailable or malformed; the Windows provider relies on native reparse-point and
+  file-store checks. Callers recheck an existing selected path immediately before any mutation.
 - `security` reloads the authenticated account from MongoDB for every decision. A persisted
   active approved account needs a shared-folder capability; ADMIN has read and write implicitly,
   and write implies read. JWTs intentionally carry no shared-folder capability.

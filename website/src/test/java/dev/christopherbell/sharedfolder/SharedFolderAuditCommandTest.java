@@ -47,4 +47,18 @@ class SharedFolderAuditCommandTest {
         "203.0.113.8", 42L, "rejected", "x".repeat(65)))
         .isInstanceOf(IllegalArgumentException.class);
   }
+
+  @Test
+  void rejectsC1ControlCharactersInBoundedPathAndClientIpFields() {
+    Instant occurredAt = Instant.parse("2026-07-17T12:00:00Z");
+
+    assertThatThrownBy(() -> new SharedFolderAuditCommand(
+        "account-1", "DOWNLOAD_STARTED", "music" + '\u0085' + "/song.mp3", occurredAt,
+        "203.0.113.8", 42L, "accepted", null))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> new SharedFolderAuditCommand(
+        "account-1", "DOWNLOAD_STARTED", "music/song.mp3", occurredAt,
+        "203.0.113." + '\u009f', 42L, "accepted", null))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
 }

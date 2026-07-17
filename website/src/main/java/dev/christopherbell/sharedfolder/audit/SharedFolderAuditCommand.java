@@ -76,7 +76,7 @@ public record SharedFolderAuditCommand(
   }
 
   private static boolean containsControlCharacter(String value) {
-    return value.codePoints().anyMatch(codePoint -> codePoint <= 0x1f || codePoint == 0x7f);
+    return value.codePoints().anyMatch(Character::isISOControl);
   }
 
   private static boolean containsEncodedSeparator(String value) {

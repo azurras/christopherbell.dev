@@ -148,6 +148,18 @@ class SharedFolderPathResolverTest {
   }
 
   @Test
+  void rejectsRootWhenProductionMountMetadataIsUnavailable() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("shared"));
+    var boundary = new NioSharedFolderFileSystemBoundary(
+        canonicalPath -> {
+          throw new IOException("mount metadata is unavailable");
+        });
+
+    assertThatThrownBy(() -> new SharedFolderPathResolver(root, boundary))
+        .isInstanceOf(UnsafeSharedPathException.class);
+  }
+
+  @Test
   void rejectsFilesystemMountInExistingAncestor() throws Exception {
     Path root = Files.createDirectory(temp.resolve("shared"));
     Files.createDirectories(root.resolve("music/live"));

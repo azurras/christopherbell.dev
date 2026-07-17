@@ -6,11 +6,26 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.stream.Stream;
+import java.util.Locale;
+import java.util.Objects;
 
 /** Real NIO-backed implementation of the shared-folder filesystem boundary. */
 public class NioSharedFolderFileSystemBoundary implements SharedFolderFileSystemBoundary {
-  private static final Path LINUX_MOUNT_INFO = Path.of("/proc/self/mountinfo");
+  private final SharedFolderMountMetadata mountMetadata;
+
+  /** Creates the default fail-closed boundary for the current operating-system provider. */
+  public NioSharedFolderFileSystemBoundary() {
+    this(defaultMountMetadata());
+  }
+
+  /**
+   * Creates a boundary with explicit mount metadata for a controlled filesystem provider.
+   *
+   * @param mountMetadata source of canonical mount facts; unavailable facts must throw
+   */
+  public NioSharedFolderFileSystemBoundary(SharedFolderMountMetadata mountMetadata) {
+    this.mountMetadata = Objects.requireNonNull(mountMetadata, "mount metadata is required");
+  }
 
   @Override
   public Path absoluteNormalized(Path path) {
@@ -48,13 +63,10 @@ public class NioSharedFolderFileSystemBoundary implements SharedFolderFileSystem
   public boolean isMountPoint(Path path) throws IOException {
     Path canonicalPath = realPathNoFollow(path);
     Path parent = canonicalPath.getParent();
-    if (parent == null) {
-      return false;
-    }
-    if (!sameFileStore(canonicalPath, parent)) {
+    if (parent != null && !sameFileStore(canonicalPath, parent)) {
       return true;
     }
-    return isListedLinuxMount(canonicalPath);
+    return mountMetadata.isMountPoint(canonicalPath);
   }
 
   @Override
@@ -62,46 +74,16 @@ public class NioSharedFolderFileSystemBoundary implements SharedFolderFileSystem
     return Files.getAttribute(path, "dos:attributes", LinkOption.NOFOLLOW_LINKS);
   }
 
-  private boolean isListedLinuxMount(Path canonicalPath) throws IOException {
-    if (!Files.isReadable(LINUX_MOUNT_INFO)) {
-      return false;
+  private static SharedFolderMountMetadata defaultMountMetadata() {
+    String operatingSystem = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+    if (operatingSystem.contains("linux")) {
+      return new LinuxSharedFolderMountMetadata();
     }
-    try (Stream<String> lines = Files.lines(LINUX_MOUNT_INFO)) {
-      return lines
-          .map(NioSharedFolderFileSystemBoundary::mountPointFrom)
-          .filter(mountPoint -> mountPoint != null)
-          .map(Path::of)
-          .map(this::absoluteNormalized)
-          .anyMatch(canonicalPath::equals);
+    if (operatingSystem.contains("windows")) {
+      return canonicalPath -> false;
     }
-  }
-
-  private static String mountPointFrom(String mountInfoLine) {
-    int separator = mountInfoLine.indexOf(" - ");
-    if (separator < 0) {
-      return null;
-    }
-    String[] fields = mountInfoLine.substring(0, separator).split(" ");
-    if (fields.length < 5) {
-      return null;
-    }
-    return unescapeMountInfoPath(fields[4]);
-  }
-
-  private static String unescapeMountInfoPath(String value) {
-    StringBuilder unescaped = new StringBuilder(value.length());
-    for (int index = 0; index < value.length(); index++) {
-      char character = value.charAt(index);
-      if (character == '\\' && index + 3 < value.length()
-          && value.charAt(index + 1) >= '0' && value.charAt(index + 1) <= '7'
-          && value.charAt(index + 2) >= '0' && value.charAt(index + 2) <= '7'
-          && value.charAt(index + 3) >= '0' && value.charAt(index + 3) <= '7') {
-        unescaped.append((char) Integer.parseInt(value.substring(index + 1, index + 4), 8));
-        index += 3;
-      } else {
-        unescaped.append(character);
-      }
-    }
-    return unescaped.toString();
+    return canonicalPath -> {
+      throw new IOException("Mount metadata is unavailable for this filesystem provider");
+    };
   }
 }
