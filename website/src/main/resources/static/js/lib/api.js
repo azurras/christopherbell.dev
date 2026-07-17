@@ -71,6 +71,20 @@ export const API = {
     preferences: '/api/notifications/2025-09-14/preferences',
     markRead: (id) => `/api/notifications/2025-09-14/${encodeURIComponent(id)}/read`,
   },
+  sharedFolder: {
+    entries: (path = '') => {
+      const params = new URLSearchParams({ path: String(path || '') });
+      return `/api/shared-folder/2026-07-17/entries?${params}`;
+    },
+    content: (path) => {
+      const params = new URLSearchParams({ path: String(path || '') });
+      return `/api/shared-folder/2026-07-17/content?${params}`;
+    },
+    preview: (path) => {
+      const params = new URLSearchParams({ path: String(path || '') });
+      return `/api/shared-folder/2026-07-17/preview?${params}`;
+    },
+  },
   location: {
     zipCoordinate: (zipCode) => `/api/location/zip/${encodeURIComponent(zipCode)}`,
     importCensusZipCoordinates: '/api/location/zip/import/census',

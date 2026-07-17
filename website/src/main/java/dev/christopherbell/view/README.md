@@ -11,6 +11,9 @@ Owns server-side routing for HTML pages.
   template contains no telemetry, logs, credentials, challenges, or action data;
   its browser module reveals and populates the console only after a fresh admin
   role check, while the private API independently enforces authorization.
+- `content` serves `/shared` as another public, data-free shell. Its module redirects unauthenticated
+  visitors and obtains listing data only from the separately protected shared-folder read API after
+  a fresh effective-read check.
 - `tools` serves Raising Canes Box Index, VIN Decoder, and ZIP Coordinates pages.
 - `voidroutes` serves Void, profile, messages, notifications, public user feeds, and post pages.
 - `wfl` serves What's For Lunch, WFL restaurant profiles, favorites, and top-rated lists.

@@ -157,6 +157,17 @@ public class ViewControllerTest {
   }
 
   @Test
+  @DisplayName("Shared folder renders only a data-free public shell")
+  public void getSharedFolderPage_rendersDataFreeShell() throws Exception {
+    mockMvc
+        .perform(get("/shared"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("id=\"shared-folder-app\"")))
+        .andExpect(content().string(containsString("/js/shared-folder.js")))
+        .andExpect(content().string(not(containsString("A:\\Shared"))));
+  }
+
+  @Test
   @DisplayName("Public user page renders canonical username social URL")
   public void getPublicUserPage_rendersUsernameSocialUrl() throws Exception {
     mockMvc

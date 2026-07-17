@@ -39,7 +39,7 @@ const {
   toolsMenuItems
 } = await import('../../main/resources/static/js/components/nav.js');
 
-const { adminMenuItems } = await import('../../main/resources/static/js/components/nav.js');
+const { adminMenuItems, profileMenuItems } = await import('../../main/resources/static/js/components/nav.js');
 
 test('messages nav link sends signed-out users to login and back to messages', () => {
   assert.equal(messagesNavHref(false), '/login?redirect=%2Fmessages');
@@ -123,4 +123,12 @@ test('admin menu alone exposes back office and command center', () => {
     { href: '/back-office', label: 'Back Office' },
     { href: '/command-center', label: 'Command Center' },
   ]);
+});
+
+test('shared folder nav item appears only after the account reports effective read access', () => {
+  assert.equal(profileMenuItems(false, false).some((item) => item.href === '/shared'), false);
+  assert.deepEqual(profileMenuItems(false, true).find((item) => item.href === '/shared'),
+    { href: '/shared', label: 'Shared Folder' });
+  assert.deepEqual(profileMenuItems(true, true).find((item) => item.href === '/shared'),
+    { href: '/shared', label: 'Shared Folder' });
 });

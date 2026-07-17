@@ -3,6 +3,7 @@ package dev.christopherbell.configuration.security;
 import dev.christopherbell.configuration.ClientIpProperties;
 import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.configuration.RateLimitProperties;
+import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.configuration.filter.RateLimitFilter;
 import dev.christopherbell.configuration.filter.RequestSizeLimitFilter;
 import dev.christopherbell.libs.api.APIVersion;
@@ -33,11 +34,13 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 @Configuration
 @EnableMethodSecurity
 @EnableWebSecurity
-@EnableConfigurationProperties({ClientIpProperties.class, RateLimitProperties.class})
+@EnableConfigurationProperties({
+    ClientIpProperties.class, RateLimitProperties.class, SharedFolderProperties.class})
 public class SecurityConfig {
 
   private static final String[] PUBLIC_URLS = {
       "/",
+      "/shared",
       "/api/accounts" + APIVersion.V20241215 + "/login",
       "/api/accounts" + APIVersion.V20241215 + "/create",
       "/api/accounts" + APIVersion.V20241215 + "/password-reset/request",

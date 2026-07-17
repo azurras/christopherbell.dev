@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Shared Folder', 'Private files shared through christopherbell.dev.', 'https://www.christopherbell.dev/shared', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
+  <title>Shared Folder</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+  <link rel="stylesheet" type="text/css" href="/css/main.css" />
+</head>
+<body class="site-page void-shell-page shared-folder-page">
+  <div id="nav"></div>
+  <main id="shared-folder-app" class="site-main shared-folder-main d-none" data-auth-required="true" aria-labelledby="shared-folder-title">
+    <header class="shared-folder-hero">
+      <div>
+        <p class="thread-label">Private signal / shared storage</p>
+        <h1 id="shared-folder-title">Shared Folder</h1>
+      </div>
+      <p id="shared-folder-status" role="status" aria-live="polite">Checking access</p>
+    </header>
+    <nav id="shared-breadcrumbs" class="shared-folder-breadcrumbs" aria-label="Shared folder path"></nav>
+    <section id="shared-toolbar" class="shared-folder-toolbar" aria-label="Folder actions"></section>
+    <div class="shared-folder-layout">
+      <section id="shared-list" class="shared-folder-list" aria-label="Folder contents" aria-live="polite"></section>
+      <section id="shared-preview" class="shared-folder-preview" aria-label="File preview" hidden></section>
+    </div>
+  </main>
+  <footer id="footer"></footer>
+  <script type="module" src="/js/app.js"></script>
+  <script type="module" src="/js/shared-folder.js"></script>
+</body>
+</html>

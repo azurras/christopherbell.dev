@@ -63,6 +63,16 @@ public class ContentViewController {
   }
 
   /**
+   * Serves the data-free shared-folder page shell.
+   *
+   * @return {@code shared-folder.html}
+   */
+  @GetMapping(value = "/shared")
+  public String getSharedFolderPage() {
+    return "shared-folder.html";
+  }
+
+  /**
    * Serves the report page.
    *
    * @return {@code report.html}

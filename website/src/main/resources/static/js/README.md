@@ -114,6 +114,12 @@ Owns browser-side behavior for server-rendered pages.
   polling/backoff decisions, cursor-generation decisions, text-only log copying,
   dialog clearing, and countdown helpers. Any 401/403—including one from a stale
   request generation—tears down and hides the console before redirecting.
+- `shared-folder.js` owns the read-only Shared Folder shell: it redirects visitors without a token,
+  checks the current account's effective shared read capability, renders relative-path breadcrumbs
+  and accessible button controls, copies same-origin `/shared?path=` links, starts attachment
+  downloads, and inserts text previews only with `textContent`. Its helper module owns the
+  one-time URL encoding, capability check, breadcrumbs, and safe text rendering. The shared nav
+  adds Shared Folder only after the current-account API reports effective read access.
 
 ## Design Notes
 
