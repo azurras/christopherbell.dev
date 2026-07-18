@@ -206,20 +206,11 @@ class PortableSharedFolderPrivateBoundaryTest {
   }
 
   @Test
-  void moveOutRemovesASubstitutedUnsafeLeafFromTheVisibleTarget() throws Exception {
+  void moveOutFailsClosedBeforeAnyPathBasedPrivateTransition() throws Exception {
     Path systemRoot = Files.createDirectory(temp.resolve("move-out-swap-system"));
     Path visible = Files.createDirectory(temp.resolve("visible"));
-    Path outside = Files.writeString(temp.resolve("move-out-outside"), "outside");
-    Path displaced = systemRoot.resolve("displaced-private-file");
     PortableSharedFolderPrivateBoundary boundary =
-        new PortableSharedFolderPrivateBoundary(systemRoot) {
-          @Override
-          protected void afterMoveOutIdentityBeforeMove(Path source, Path target)
-              throws java.io.IOException {
-            Files.move(source, displaced);
-            Files.createLink(source, outside);
-          }
-        };
+        new PortableSharedFolderPrivateBoundary(systemRoot);
     boundary.operateOnRegularFile(
         "shared-folder-upload-staging", "session",
         PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
@@ -233,8 +224,61 @@ class PortableSharedFolderPrivateBoundaryTest {
             PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
 
     assertThat(Files.notExists(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)).isTrue();
-    assertThat(Files.readString(outside)).isEqualTo("outside");
-    assertThat(Files.readString(displaced)).isEqualTo("private");
+    assertThat(Files.readString(systemRoot.resolve(
+        "shared-folder-upload-staging/session"))).isEqualTo("private");
+  }
+
+  @Test
+  void moveOutCannotDeleteAnyVisibleRacerWithoutARetainedCapability() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("move-out-visible-racer-system"));
+    Path visible = Files.createDirectory(temp.resolve("move-out-visible-racer"));
+    PortableSharedFolderPrivateBoundary boundary =
+        new PortableSharedFolderPrivateBoundary(systemRoot);
+    boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "session",
+        PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
+          channel.write(ByteBuffer.wrap("private".getBytes()));
+          return null;
+        });
+
+    Path target = Files.writeString(visible.resolve("published.bin"), "racer");
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.moveOut(
+        "shared-folder-upload-staging", "session", target)).isInstanceOf(
+            PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
+
+    assertThat(Files.readString(target)).isEqualTo("racer");
+    assertThat(Files.readString(systemRoot.resolve(
+        "shared-folder-upload-staging/session"))).isEqualTo("private");
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+  void nativePrivateChannelTransfersReturnOnLegalZeroProgress() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("native-zero-progress-system"));
+    PortableSharedFolderPrivateBoundary boundary =
+        new PortableSharedFolderPrivateBoundary(systemRoot);
+
+    boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "session",
+        PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
+          channel.write(ByteBuffer.wrap("private".getBytes()));
+          java.nio.channels.WritableByteChannel blockedTarget =
+              new java.nio.channels.WritableByteChannel() {
+                @Override public int write(ByteBuffer source) { return 0; }
+                @Override public boolean isOpen() { return true; }
+                @Override public void close() { }
+              };
+          java.nio.channels.ReadableByteChannel blockedSource =
+              new java.nio.channels.ReadableByteChannel() {
+                @Override public int read(ByteBuffer target) { return 0; }
+                @Override public boolean isOpen() { return true; }
+                @Override public void close() { }
+              };
+
+          assertThat(channel.transferTo(0, channel.size(), blockedTarget)).isZero();
+          assertThat(channel.transferFrom(blockedSource, channel.size(), 10)).isZero();
+          return null;
+        });
   }
 
   @Test

@@ -4,7 +4,7 @@ Date: 2026-07-17
 
 Branch: `codex/shared-folder-portal`
 
-Status: Fifth review rejected; sixth remediation implementation and verification complete; fresh independent review required
+Status: Sixth review rejected; seventh remediation implementation and verification complete; fresh independent review required
 
 ## Review Outcome and Remediation
 
@@ -366,4 +366,50 @@ All Gradle state remained in the external user and project caches, with
 - No worktree-local `.gradle*` directory exists.
 
 Task 4 remains in progress and review-rejected until the sixth candidate is committed, reviewed
+across `8602985d..HEAD`, approved with no Critical or Important findings, and pushed.
+
+## Sixth Independent Re-review
+
+The whole-change review of local commit `14f00cf26b68d0cec1af2248ca6f157324bdac3b`
+rejected Task 4 with three Critical, one Important, and one Minor finding. The commit was not
+pushed. Portable visible rename/move/delete still performed a pathname operation after its final
+observation check, portable replacement could persist a target identity newer than the caller's
+observation, post-move cleanup could delete an unrelated visible racer, and plain portable moves
+did not guarantee the atomic transitions assumed by recovery. The custom native file-channel
+transfer loops also lacked a zero-progress exit.
+
+## Sixth-Review Remediation RED/GREEN Evidence
+
+The remediation resolves the shared root cause by failing closed rather than claiming a provider
+guarantee Java does not expose:
+
+- A new mutation regression was RED while unsupported portable rename, move, and delete still
+  changed the observed source. Deployable operations now return 503 before reconciliation or any
+  visible-path transition unless the retained native boundary is active.
+- A new upload regression was RED while portable completion published private staging. Unsupported
+  completion now returns 503 with the target absent, private staging intact, and the durable session
+  still ACTIVE. Pending portable finalization recovery is also unavailable rather than path-mutating.
+- Portable private move-out regressions now prove the boundary refuses the transition before an
+  unsafe substitute can be exposed and cannot delete a pre-existing visible racer. Move-in is
+  equally unavailable without a retained provider mutation capability.
+- Legacy portable mutation/finalization state-machine tests are isolated behind an explicit
+  test-only marker that the Spring production boundary never supplies. They preserve coordination
+  coverage without advertising those pathname operations as deployable security guarantees.
+- Native file-channel transfer loops now return on legal zero progress instead of spinning.
+
+## Seventh Candidate Verification Before Review
+
+All Gradle state remained in external user and project caches, with
+`SHARED_FOLDER_RUN_WINDOWS_NATIVE_JUNCTION_TEST=true` for native and junction coverage.
+
+- The complete affected repository-claim, mutation, upload, portable-boundary, native-boundary,
+  and real-JNA set passed, including the explicitly enabled junction regressions.
+- `:website:test :website:jsTest` passed: 815 `website` tests and 93 `cbell-lib` tests passed
+  (908 Java tests total), plus 153 JavaScript tests; 0 failures, 0 errors, and 0 skipped.
+- A forced full Java `test --rerun-tasks` executed all 12 tasks and passed 907 tests before the
+  final zero-progress regression was added; the subsequent complete Java gate passed all 908.
+- `git diff --check` passed with only expected line-ending notices.
+- No worktree-local `.gradle*` directory exists.
+
+Task 4 remains in progress and review-rejected until the seventh candidate is committed, reviewed
 across `8602985d..HEAD`, approved with no Critical or Important findings, and pushed.

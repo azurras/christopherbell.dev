@@ -181,3 +181,22 @@ Explicit replacement creation treats an observed target that disappears as 409 i
 native paths. Native private-directory initialization creates only after an exact missing status;
 unknown or unavailable opens fail closed. Append reserve checks include both staging growth and the
 temporary chunk copy, with overflow treated as an unreservable peak.
+
+## Sixth independent re-review remediation
+
+The sixth whole-change review of `14f00cf26b68d0cec1af2248ca6f157324bdac3b`
+identified three Critical, one Important, and one Minor issue, all rooted in deployable portable
+pathname mutation. No Java provider contract can bind a later pathname move/delete to the exact
+observed leaf or guarantee an atomic no-replace transition after the final identity check.
+
+Deployable visible writes therefore require the retained native Windows mutation boundary. Folder
+creation, rename, move, delete, upload finalization, and finalization recovery return 503 before a
+visible transition when that capability is unavailable. Portable reads and private upload staging,
+append, status, and cancellation remain supported. Legacy portable mutation state-machine tests use
+an explicit test-only marker that Spring production construction never supplies; those tests do not
+represent a deployable provider capability.
+
+Portable private move-in/move-out is likewise unavailable outside that test-only state-machine
+harness, eliminating path-based journal transitions and post-move cleanup of an unowned visible
+racer. The custom retained Windows file channel stops transfer operations on legal zero progress
+instead of spinning.

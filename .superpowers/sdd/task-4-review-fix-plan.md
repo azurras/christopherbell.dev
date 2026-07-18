@@ -276,5 +276,25 @@ the approved append validation-before-authorization precedence remains unchanged
   status and propagate unknown/unavailable opens.
 - [x] Add a RED native append reserve test; include temporary chunk duplication plus final staging
   growth in the peak requirement.
-- [ ] Commit the sixth candidate, request a fresh whole-change review, and retain Task 4 as
+- [x] Commit the sixth candidate, request a fresh whole-change review, and retain Task 4 as
   review-rejected until approval and remote push.
+
+### Task 15: Sixth independent review remediation
+
+**Review result:** Commit `14f00cf2` was rejected with three Critical, one Important, and one
+Minor finding. All Critical/Important findings depend on deployable portable visible pathname
+mutations lacking a retained provider capability or guaranteed atomic transition.
+
+- [x] Add a RED contract test proving unsupported portable rename, move, and delete return 503
+  before changing the observed source.
+- [x] Add a RED upload test proving unsupported portable finalization returns 503 while preserving
+  private staging and ACTIVE durable state.
+- [x] Make deployable visible mutation, finalization, startup recovery, and status recovery require
+  the retained native boundary; skip unowned legacy portable journals rather than path-mutating.
+- [x] Disable deployable portable private move-in/move-out and prove neither an unsafe substitute
+  nor a later visible racer can be deleted or exposed by that boundary.
+- [x] Isolate legacy portable coordination tests behind an explicit test-only boundary marker that
+  Spring production never constructs.
+- [x] Stop custom native `FileChannel` transfer loops on legal zero progress.
+- [ ] Update records, commit the seventh candidate, and request a fresh whole-change review while
+  retaining Task 4 as review-rejected until approval and remote push.

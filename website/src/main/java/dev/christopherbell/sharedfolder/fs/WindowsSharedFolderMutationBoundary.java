@@ -33,6 +33,7 @@ public final class WindowsSharedFolderMutationBoundary {
   private final Path configuredSystemRoot;
   private final WindowsSharedFolderNativeBridge bridge;
   private final boolean shouldActivate;
+  private final boolean testOnlyPortableMode;
   private final ReentrantReadWriteLock lifecycleLock = new ReentrantReadWriteLock(true);
   private final ReentrantLock mutationLock = new ReentrantLock(true);
   private volatile NativeHandle rootHandle;
@@ -42,27 +43,35 @@ public final class WindowsSharedFolderMutationBoundary {
 
   public WindowsSharedFolderMutationBoundary(SharedFolderProperties properties) {
     this(properties.root(), properties.systemRoot(), new JnaWindowsSharedFolderNativeBridge(),
-        properties.enabled() && isWindows());
+        properties.enabled() && isWindows(), false);
   }
 
   private WindowsSharedFolderMutationBoundary(
       Path configuredRoot, Path configuredSystemRoot, WindowsSharedFolderNativeBridge bridge,
-      boolean shouldActivate) {
+      boolean shouldActivate, boolean testOnlyPortableMode) {
     this.configuredRoot = Objects.requireNonNull(configuredRoot, "shared-folder root is required");
     this.configuredSystemRoot = Objects.requireNonNull(configuredSystemRoot, "system root is required");
     this.bridge = Objects.requireNonNull(bridge, "native bridge is required");
     this.shouldActivate = shouldActivate;
+    this.testOnlyPortableMode = testOnlyPortableMode;
   }
 
+  /** Test-only marker for legacy path-provider algorithm tests; never used by Spring production. */
   public static WindowsSharedFolderMutationBoundary inactive() {
     return new WindowsSharedFolderMutationBoundary(Path.of("."), Path.of("."),
-        new UnsupportedBridge(), false);
+        new UnsupportedBridge(), false, true);
+  }
+
+  /** Represents a deployed provider with no retained visible-mutation capability. */
+  public static WindowsSharedFolderMutationBoundary unsupportedProvider() {
+    return new WindowsSharedFolderMutationBoundary(Path.of("."), Path.of("."),
+        new UnsupportedBridge(), false, false);
   }
 
   static WindowsSharedFolderMutationBoundary forTest(
       Path root, Path systemRoot, WindowsSharedFolderNativeBridge bridge) {
     WindowsSharedFolderMutationBoundary result =
-        new WindowsSharedFolderMutationBoundary(root, systemRoot, bridge, true);
+        new WindowsSharedFolderMutationBoundary(root, systemRoot, bridge, true, false);
     result.initialize();
     return result;
   }
@@ -90,6 +99,9 @@ public final class WindowsSharedFolderMutationBoundary {
 
   /** Whether Windows writes must use this boundary and may never fall back to path-based NIO. */
   public boolean nativeMode() { return shouldActivate; }
+
+  /** True only for explicit unit-test construction that does not represent a deployable mode. */
+  public boolean testOnlyPortableMode() { return testOnlyPortableMode; }
 
   public boolean active() { return rootHandle != null && systemRootHandle != null; }
 

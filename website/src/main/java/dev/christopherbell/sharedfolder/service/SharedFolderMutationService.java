@@ -74,17 +74,20 @@ public class SharedFolderMutationService {
     this.properties = properties;
     this.nativeBoundary = nativeBoundary;
     this.recoveries = recoveries;
-    this.privateBoundary = new PortableSharedFolderPrivateBoundary(properties.systemRoot());
+    this.privateBoundary = nativeBoundary.testOnlyPortableMode()
+        ? PortableSharedFolderPrivateBoundary.testOnlyWithPathMoves(properties.systemRoot())
+        : new PortableSharedFolderPrivateBoundary(properties.systemRoot());
   }
 
   /** Creates one new directory under a decoded, existing relative parent path. */
   public SharedDirectoryEntry createFolder(SharedFolderCreateFolderRequest request) {
     Account account = access.requireWrite();
     validateCreateFolder(request);
-    reconcileOwner(account);
     if (!properties.enabled()) {
       throw unavailable();
     }
+    requireRetainedVisibleMutationBoundary();
+    reconcileOwner(account);
     if (nativeBoundary.nativeMode()) {
       try {
         String relative = relativePath(request.parentPath(), request.name());
@@ -143,10 +146,11 @@ public class SharedFolderMutationService {
   public SharedDirectoryEntry rename(SharedFolderRenameRequest request) {
     Account account = access.requireWrite();
     validateRename(request);
-    reconcileOwner(account);
     if (!properties.enabled()) {
       throw unavailable();
     }
+    requireRetainedVisibleMutationBoundary();
+    reconcileOwner(account);
     String parentPath = parentPath(request.path());
     String targetRelative = relativePath(parentPath, request.name());
     if (nativeBoundary.nativeMode()) {
@@ -200,10 +204,11 @@ public class SharedFolderMutationService {
   public SharedDirectoryEntry move(SharedFolderMoveRequest request) {
     Account account = access.requireWrite();
     validateMove(request);
-    reconcileOwner(account);
     if (!properties.enabled()) {
       throw unavailable();
     }
+    requireRetainedVisibleMutationBoundary();
+    reconcileOwner(account);
     String targetName = request.name();
     String targetRelative = relativePath(request.destinationPath(), targetName);
     if (nativeBoundary.nativeMode()) {
@@ -312,10 +317,11 @@ public class SharedFolderMutationService {
   public void delete(SharedFolderDeleteRequest request) {
     Account account = access.requireWrite();
     validateDelete(request);
-    reconcileOwner(account);
     if (!properties.enabled()) {
       throw unavailable();
     }
+    requireRetainedVisibleMutationBoundary();
+    reconcileOwner(account);
     if (nativeBoundary.nativeMode()) {
       try {
         NativeFileMetadata observed = nativeBoundary.metadata(request.path());
@@ -645,7 +651,8 @@ public class SharedFolderMutationService {
   /** Reconciles a bounded oldest-first journal batch once native roots are initialized. */
   @EventListener(ApplicationReadyEvent.class)
   public void reconcileStartup() {
-    if (recoveries == null) {
+    if (recoveries == null
+        || !nativeBoundary.nativeMode() && !nativeBoundary.testOnlyPortableMode()) {
       return;
     }
     for (SharedFolderMutationRecovery recovery : recoveries.findTop100ByOrderByUpdatedAtAsc()) {
@@ -664,6 +671,9 @@ public class SharedFolderMutationService {
   }
 
   private void reconcileRecovery(SharedFolderMutationRecovery recovery) {
+    if (!recovery.isNativeMode() && !nativeBoundary.testOnlyPortableMode()) {
+      return;
+    }
     SharedFolderMutationRecovery claimed = claimExpiredRecovery(recovery);
     if (claimed == null) {
       return;
@@ -1062,6 +1072,12 @@ public class SharedFolderMutationService {
   private void requireSameFileStore(Path first, Path second) throws IOException {
     if (!Files.getFileStore(first).equals(Files.getFileStore(second))) {
       throw conflict();
+    }
+  }
+
+  private void requireRetainedVisibleMutationBoundary() {
+    if (!nativeBoundary.nativeMode() && !nativeBoundary.testOnlyPortableMode()) {
+      throw unavailable();
     }
   }
 

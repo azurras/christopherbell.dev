@@ -47,6 +47,32 @@ class SharedFolderUploadServiceTest {
   @TempDir Path temp;
 
   @Test
+  void portableCompletionFailsClosedAndPreservesPrivateStaging() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("portable-complete-fail-closed"));
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadService uploads = new SharedFolderUploadService(
+        access, repository(stored), properties(root),
+        WindowsSharedFolderMutationBoundary.unsupportedProvider());
+    byte[] content = "private-staging".getBytes();
+    SharedFolderUploadStatus upload = uploads.create(new SharedFolderUploadCreateRequest(
+        "", "visible.bin", content.length, sha256(content), null));
+    uploads.append(upload.id(), 0, new ByteArrayInputStream(content), sha256(content));
+    String stagingKey = stored.get(upload.id()).getStagingKey();
+
+    assertStatus(503, () -> uploads.complete(upload.id(), false));
+
+    assertThat(Files.notExists(root.resolve("visible.bin"))).isTrue();
+    assertThat(Files.readString(properties(root).systemRoot()
+        .resolve("shared-folder-upload-staging").resolve(stagingKey)))
+        .isEqualTo("private-staging");
+    assertThat(stored.get(upload.id()).getState()).isEqualTo(SharedFolderUploadState.ACTIVE);
+  }
+
+  @Test
   void replacementCompletionStopsBeforeQuarantineWhenTheFencedScanLosesItsLease()
       throws Exception {
     Path root = Files.createDirectories(temp.resolve("lost-finalizer-lease"));
@@ -1341,6 +1367,7 @@ class SharedFolderUploadServiceTest {
     WindowsSharedFolderMutationBoundary boundary = mock(WindowsSharedFolderMutationBoundary.class);
     SharedFolderUploadService uploads = new SharedFolderUploadService(
         access, repository, properties(root), boundary);
+    org.mockito.Mockito.clearInvocations(boundary);
     String digest = sha256(new byte[] {1});
 
     assertStatus(400, () -> uploads.append(null, 0, new ByteArrayInputStream(new byte[] {1}), digest));
@@ -1494,6 +1521,7 @@ class SharedFolderUploadServiceTest {
       Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
       WindowsSharedFolderMutationBoundary boundary = mock(WindowsSharedFolderMutationBoundary.class);
       when(boundary.nativeMode()).thenReturn(nativeMode);
+      when(boundary.testOnlyPortableMode()).thenReturn(!nativeMode);
       SharedFolderUploadService uploads = new SharedFolderUploadService(
           access, repository(stored), properties(root), boundary);
       assertStatus(400, () -> uploads.status(""));

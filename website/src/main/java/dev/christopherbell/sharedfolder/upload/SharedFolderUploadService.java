@@ -73,7 +73,9 @@ public class SharedFolderUploadService {
     this.sessions = sessions;
     this.properties = properties;
     this.nativeBoundary = nativeBoundary;
-    this.privateBoundary = new PortableSharedFolderPrivateBoundary(properties.systemRoot());
+    this.privateBoundary = nativeBoundary.testOnlyPortableMode()
+        ? PortableSharedFolderPrivateBoundary.testOnlyWithPathMoves(properties.systemRoot())
+        : new PortableSharedFolderPrivateBoundary(properties.systemRoot());
   }
 
   /** Starts an owned upload after validating a safe relative destination and private staging root. */
@@ -269,6 +271,9 @@ public class SharedFolderUploadService {
     Account account = access.requireWrite();
     requireEnabled();
     SharedFolderUploadSession session = ownedActiveOrTerminal(id, account);
+    if (!nativeBoundary.nativeMode() && !nativeBoundary.testOnlyPortableMode()) {
+      throw unavailable();
+    }
     Boolean pendingReplace = session.getFinalizingReplace();
     session = reconcilePending(session);
     if (session.getState() == SharedFolderUploadState.FINALIZING
@@ -965,6 +970,9 @@ public class SharedFolderUploadService {
     }
     if (session.getState() != SharedFolderUploadState.FINALIZING) {
       return session;
+    }
+    if (!nativeBoundary.nativeMode() && !nativeBoundary.testOnlyPortableMode()) {
+      throw unavailable();
     }
     if (finalizationLeaseIsLive(session)) {
       return session;

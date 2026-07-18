@@ -40,6 +40,27 @@ class SharedFolderMutationServiceTest {
   @TempDir Path temp;
 
   @Test
+  void portableVisibleMutationsFailClosedWithoutRetainedProviderCapabilities() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("portable-fail-closed"));
+    Files.createDirectories(root.resolve("destination"));
+    Files.writeString(root.resolve("source.txt"), "source");
+    SharedFolderMutationService mutations = new SharedFolderMutationService(
+        mock(SharedFolderAccessService.class), properties(root),
+        WindowsSharedFolderMutationBoundary.unsupportedProvider());
+    String observed = mutations.observedToken("source.txt");
+
+    assertStatus(503, () -> mutations.rename(
+        new SharedFolderRenameRequest("source.txt", "renamed.txt", observed)));
+    assertStatus(503, () -> mutations.move(new SharedFolderMoveRequest(
+        "source.txt", "destination", "moved.txt", observed, false, null)));
+    assertStatus(503, () -> mutations.delete(new SharedFolderDeleteRequest("source.txt", observed)));
+
+    assertThat(Files.readString(root.resolve("source.txt"))).isEqualTo("source");
+    assertThat(Files.notExists(root.resolve("renamed.txt"))).isTrue();
+    assertThat(Files.notExists(root.resolve("destination/moved.txt"))).isTrue();
+  }
+
+  @Test
   void createFolderRequiresFreshWriteAccessAndReturnsOnlyRelativeMetadata() throws Exception {
     Path root = Files.createDirectories(temp.resolve("shared"));
     SharedFolderAccessService access = mock(SharedFolderAccessService.class);

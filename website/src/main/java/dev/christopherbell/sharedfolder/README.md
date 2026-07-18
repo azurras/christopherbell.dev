@@ -16,8 +16,8 @@ feature.
   later stream open. There is no path-based NIO read fallback in that Windows mode. A fair JVM
   lifecycle lock prevents the root handle from closing during an in-process traversal, but the
   held native root is the security boundary; application locks and ACLs are defense in depth only.
-  Non-Windows test/local providers retain the portable NIO resolver with no claim of this native
-  handle-relative race guarantee.
+  Non-Windows test/local providers retain the portable NIO resolver for reads and private upload
+  staging only; deployable visible writes fail with `503` without a retained mutation capability.
 - `security` reloads the authenticated account from MongoDB for every decision. A persisted
   active approved account needs a shared-folder capability; ADMIN has read and write implicitly,
   and write implies read. JWTs intentionally carry no shared-folder capability.
@@ -38,10 +38,12 @@ Both configured roots must exist before the application starts. The system root 
 non-linked, non-reparse, non-mount directory on the same filesystem as the visible root; the
 application deliberately does not create that configured root. Deployment grants the website
 service identity access to the pre-created root. The application may create only its validated
-direct staging and quarantine children beneath it. Portable operations capture canonical path,
-file identity, filesystem, mount, link, and reparse facts for every ancestor and recheck them
-immediately before and after each private create, open, move, and delete. An unavailable or changed
-private boundary fails with `503 Service Unavailable` and never falls back to an unchecked path.
+direct staging and quarantine children beneath it. Portable private create/open/delete operations
+capture canonical path, file identity, filesystem, mount, link, and reparse facts for every
+ancestor and recheck them around the operation. Portable private-to-visible and visible-to-private
+moves are unavailable because a Java pathname move cannot bind the transitioned leaf to the
+earlier observation. An unavailable or changed private boundary fails with `503 Service
+Unavailable` and never falls back to an unchecked production path.
 
 ## Read-Only Portal
 
@@ -71,19 +73,23 @@ private boundary fails with `503 Service Unavailable` and never falls back to an
 - Every existing source is addressed with an opaque observed token from a fresh listing. A stale
   source, collision, or changed replacement target returns `409 Conflict`. Replacing an existing
   destination is never implicit: the client must opt in and supply that destination's current
-  observed token. Portable no-replace moves use filesystem create-new semantics rather than
-  relying on platform-specific atomic-move replacement behavior.
+  observed token. Providers without a retained leaf mutation capability return `503` before any
+  visible transition; they do not attempt a portable pathname move/delete.
 - Enabled Windows deployments perform create, write, flush, truncate, rename, move, and delete
   with retained native directory handles and `NtCreateFile`/`NtSetInformationFile`. Opens are
   relative and use `OBJ_DONT_REPARSE`; source and replacement-target file IDs are rechecked while
   held. Mutations have no path-based NIO fallback in native mode. Volume capacity is queried from
   the retained system-root handle and arithmetic overflow fails closed.
+- Portable mutation coordination remains covered by an explicit test-only harness. Spring
+  production construction never supplies that marker, so it is not a deployable mode.
 
 ## Resumable Uploads
 
 - Upload sessions are owner-scoped, optimistic-versioned Mongo records. Private staging lives
   under the configured system root, never the visible shared root, and finalization is a
-  same-volume handle-relative rename. Ordered chunks are streamed to disk, SHA-256 checked, and
+  same-volume handle-relative rename on the retained native boundary. Without that boundary,
+  completion returns `503` while retaining private staging for a later supported deployment.
+  Ordered chunks are streamed to disk, SHA-256 checked, and
   idempotent at the recorded offset; concurrent append/terminal operations serialize around the
   durable session state.
 - The browser sends 8 MiB chunks, shows byte progress, supports cancel and drag/drop, and can

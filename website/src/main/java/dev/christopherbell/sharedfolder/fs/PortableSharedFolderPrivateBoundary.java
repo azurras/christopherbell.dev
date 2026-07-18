@@ -35,16 +35,29 @@ public class PortableSharedFolderPrivateBoundary {
   private final List<Identity> configuredChain;
   private final IOException initializationFailure;
   private final Map<String, Identity> directories = new ConcurrentHashMap<>();
+  private final boolean testOnlyPathMoves;
 
   public PortableSharedFolderPrivateBoundary(Path configuredRoot) {
-    this(configuredRoot, new NioSharedFolderFileSystemBoundary());
+    this(configuredRoot, new NioSharedFolderFileSystemBoundary(), false);
   }
 
   public PortableSharedFolderPrivateBoundary(
       Path configuredRoot, SharedFolderFileSystemBoundary fileSystem) {
+    this(configuredRoot, fileSystem, false);
+  }
+
+  /** Test-only legacy provider used to exercise durable state machines without production writes. */
+  public static PortableSharedFolderPrivateBoundary testOnlyWithPathMoves(Path configuredRoot) {
+    return new PortableSharedFolderPrivateBoundary(
+        configuredRoot, new NioSharedFolderFileSystemBoundary(), true);
+  }
+
+  private PortableSharedFolderPrivateBoundary(
+      Path configuredRoot, SharedFolderFileSystemBoundary fileSystem, boolean testOnlyPathMoves) {
     if (configuredRoot == null) throw new IllegalArgumentException("system root is required");
     this.configuredRoot = configuredRoot.toAbsolutePath().normalize();
     this.fileSystem = java.util.Objects.requireNonNull(fileSystem);
+    this.testOnlyPathMoves = testOnlyPathMoves;
     List<Identity> captured = List.of();
     IOException failure = null;
     try {
@@ -327,42 +340,37 @@ public class PortableSharedFolderPrivateBoundary {
   /** Moves one ordinary visible leaf into a definitely absent private name. */
   public void moveInto(String directory, String key, Path source) throws IOException {
     Objects.requireNonNull(source, "move source is required");
-    try {
-      Path target = verifiedFile(directory, key);
-      verifyForOperation();
-      LeafIdentity sourceIdentity = leafIdentity(source, false);
-      if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
-        throw new FileAlreadyExistsException(target.toString());
-      }
-      Files.move(source, target);
-      verifyMovedIdentityOrDelete(target, sourceIdentity);
-      verifyForOperation();
-    } catch (BoundaryUnavailableException exception) {
-      throw exception;
-    } catch (SecurityException exception) {
-      throw unavailable(exception);
+    if (!testOnlyPathMoves) {
+      throw unavailable(new IOException(
+          "portable private moves require a retained provider mutation capability"));
     }
+    Path target = verifiedFile(directory, key);
+    verifyForOperation();
+    LeafIdentity sourceIdentity = leafIdentity(source, false);
+    if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+      throw new FileAlreadyExistsException(target.toString());
+    }
+    Files.move(source, target);
+    verifyMovedIdentity(target, sourceIdentity);
+    verifyForOperation();
   }
 
   /** Moves one verified private leaf to a definitely absent visible name. */
   public void moveOut(String directory, String key, Path target) throws IOException {
     Objects.requireNonNull(target, "move target is required");
-    try {
-      Path source = verifiedFile(directory, key);
-      verifyForOperation();
-      LeafIdentity sourceIdentity = leafIdentity(source, false);
-      if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
-        throw new FileAlreadyExistsException(target.toString());
-      }
-      afterMoveOutIdentityBeforeMove(source, target);
-      Files.move(source, target);
-      verifyMovedIdentityOrDelete(target, sourceIdentity);
-      verifyForOperation();
-    } catch (BoundaryUnavailableException exception) {
-      throw exception;
-    } catch (SecurityException exception) {
-      throw unavailable(exception);
+    if (!testOnlyPathMoves) {
+      throw unavailable(new IOException(
+          "portable private moves require a retained provider mutation capability"));
     }
+    Path source = verifiedFile(directory, key);
+    verifyForOperation();
+    LeafIdentity sourceIdentity = leafIdentity(source, false);
+    if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+      throw new FileAlreadyExistsException(target.toString());
+    }
+    Files.move(source, target);
+    verifyMovedIdentity(target, sourceIdentity);
+    verifyForOperation();
   }
 
   /** Test seam after a private channel opens but before its named leaf is re-read. */
@@ -371,23 +379,10 @@ public class PortableSharedFolderPrivateBoundary {
   /** Test seam after the retained Windows delete-denial guard and before the Java channel opens. */
   protected void beforePrivateFileChannelOpen(Path path, FileAccess access) throws IOException { }
 
-  /** Test seam after move-out validates its source but before the path move. */
-  protected void afterMoveOutIdentityBeforeMove(Path source, Path target) throws IOException { }
-
-  private void verifyMovedIdentityOrDelete(Path target, LeafIdentity sourceIdentity)
-      throws IOException {
-    try {
-      LeafIdentity movedIdentity = leafIdentity(target, false);
-      if (!sourceIdentity.sameObject(movedIdentity)) {
-        throw unavailable(new IOException("private shared-folder moved leaf identity changed"));
-      }
-    } catch (IOException | RuntimeException failure) {
-      try {
-        Files.deleteIfExists(target);
-      } catch (IOException cleanupFailure) {
-        failure.addSuppressed(cleanupFailure);
-      }
-      throw failure;
+  private void verifyMovedIdentity(Path target, LeafIdentity sourceIdentity) throws IOException {
+    LeafIdentity movedIdentity = leafIdentity(target, false);
+    if (!sourceIdentity.sameObject(movedIdentity)) {
+      throw unavailable(new IOException("private shared-folder moved leaf identity changed"));
     }
   }
 
@@ -744,9 +739,11 @@ public class PortableSharedFolderPrivateBoundary {
       while (transferred < count) {
         buffer.clear().limit((int) Math.min(buffer.capacity(), count - transferred));
         int read = read(buffer, position + transferred);
-        if (read < 0) break;
+        if (read <= 0) break;
         buffer.flip();
-        while (buffer.hasRemaining()) target.write(buffer);
+        while (buffer.hasRemaining()) {
+          if (target.write(buffer) == 0) return transferred;
+        }
         transferred += read;
       }
       return transferred;
@@ -759,10 +756,14 @@ public class PortableSharedFolderPrivateBoundary {
       while (transferred < count) {
         buffer.clear().limit((int) Math.min(buffer.capacity(), count - transferred));
         int read = source.read(buffer);
-        if (read < 0) break;
+        if (read <= 0) break;
         buffer.flip();
         long writePosition = position + transferred;
-        while (buffer.hasRemaining()) writePosition += write(buffer, writePosition);
+        while (buffer.hasRemaining()) {
+          int written = write(buffer, writePosition);
+          if (written == 0) return transferred;
+          writePosition += written;
+        }
         transferred += read;
       }
       return transferred;
