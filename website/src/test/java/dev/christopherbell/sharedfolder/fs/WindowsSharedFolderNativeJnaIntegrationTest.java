@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeHandle;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeBoundaryException;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeFileMetadata;
 import dev.christopherbell.configuration.SharedFolderProperties;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -173,6 +175,98 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
   }
 
   @Test
+  void realMutationLeavesBlockSameSizeWritesAndDirectoryChildCreationAtFinalTransition()
+      throws Exception {
+    Path root = Files.createDirectory(temp.resolve("write-share-root"));
+    Path systemRoot = Files.createDirectory(temp.resolve("write-share-system"));
+    Path documents = Files.createDirectory(root.resolve("documents"));
+    Path source = Files.writeString(documents.resolve("source.txt"), "source");
+    Path target = Files.writeString(documents.resolve("target.txt"), "target");
+    InterceptingBridge bridge = new InterceptingBridge();
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        root, systemRoot, bridge);
+    try {
+      AtomicReference<Throwable> sourceWrite = new AtomicReference<>();
+      bridge.beforeRename = () -> sourceWrite.set(catchThrowable(
+          () -> Files.writeString(source, "racer!")));
+      boundary.rename("documents/source.txt", "documents", "renamed.txt", false,
+          boundary.metadata("documents/source.txt"));
+      assertThat(sourceWrite.get()).isInstanceOf(java.io.IOException.class);
+      assertThat(Files.readString(documents.resolve("renamed.txt"))).isEqualTo("source");
+
+      AtomicReference<Throwable> targetWrite = new AtomicReference<>();
+      bridge.beforeRename = () -> targetWrite.set(catchThrowable(
+          () -> Files.writeString(target, "racer!")));
+      String targetKey = "66666666-6666-6666-6666-666666666666";
+      NativeFileMetadata targetMetadata = boundary.metadata("documents/target.txt");
+      boundary.quarantineVisible("documents/target.txt", targetKey, targetMetadata);
+      assertThat(targetWrite.get()).isInstanceOf(java.io.IOException.class);
+      bridge.beforeRename = () -> {};
+      boundary.restoreQuarantine(targetKey, "documents", "target.txt", targetMetadata);
+      assertThat(Files.readString(target)).isEqualTo("target");
+
+      Path targetDirectory = Files.createDirectory(documents.resolve("empty-target"));
+      AtomicReference<Throwable> childCreate = new AtomicReference<>();
+      java.util.concurrent.atomic.AtomicBoolean attemptChildCreate =
+          new java.util.concurrent.atomic.AtomicBoolean(true);
+      AtomicReference<java.util.List<String>> quarantinedPaths = new AtomicReference<>();
+      bridge.beforeRename = () -> {
+        if (attemptChildCreate.compareAndSet(true, false)) {
+          childCreate.set(catchThrowable(
+              () -> Files.writeString(targetDirectory.resolve("racer.txt"), "outside")));
+        }
+      };
+      bridge.afterRename = () -> quarantinedPaths.compareAndSet(null, catchPaths(systemRoot));
+      String directoryKey = "77777777-7777-7777-7777-777777777777";
+      NativeFileMetadata directoryMetadata = boundary.metadata("documents/empty-target");
+      Throwable directoryRace = catchThrowable(() -> boundary.quarantineVisible(
+          "documents/empty-target", directoryKey, directoryMetadata));
+      assertThat(directoryRace).isInstanceOf(NativeBoundaryException.class)
+          .hasMessageContaining("non-empty");
+      assertThat(directoryRace.getSuppressed()).isEmpty();
+      assertThat(childCreate.get()).isNull();
+      assertThat(quarantinedPaths.get()).as("paths immediately after quarantine")
+          .anyMatch(path -> path.endsWith("racer.txt"));
+      assertThat(targetDirectory).exists();
+      java.util.List<String> remaining = Files.walk(root)
+          .map(path -> root.relativize(path).toString()).toList();
+      assertThat(remaining).as("remaining visible paths: %s", remaining)
+          .contains("documents\\empty-target\\racer.txt");
+      assertThat(Files.readString(targetDirectory.resolve("racer.txt"))).isEqualTo("outside");
+    } finally {
+      boundary.destroy();
+    }
+  }
+
+  @Test
+  void realUploadFinalizationBlocksSameSizeStagingWriteAtFinalTransition() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("upload-write-share-root"));
+    Path systemRoot = Files.createDirectory(temp.resolve("upload-write-share-system"));
+    InterceptingBridge bridge = new InterceptingBridge();
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        root, systemRoot, bridge);
+    String key = "88888888-8888-8888-8888-888888888888";
+    try {
+      try (var staging = boundary.createStaging(key)) {
+        byte[] content = "staged".getBytes(StandardCharsets.UTF_8);
+        staging.write(content, 0, content.length);
+        staging.flush();
+      }
+      Path stagedPath = systemRoot.resolve("shared-folder-upload-staging").resolve(key);
+      AtomicReference<Throwable> stagingWrite = new AtomicReference<>();
+      bridge.beforeRename = () -> stagingWrite.set(catchThrowable(
+          () -> Files.writeString(stagedPath, "racer!")));
+
+      boundary.finalizeStaging(key, "", "uploaded.bin", false);
+
+      assertThat(stagingWrite.get()).isInstanceOf(java.io.IOException.class);
+      assertThat(Files.readString(root.resolve("uploaded.bin"))).isEqualTo("staged");
+    } finally {
+      boundary.destroy();
+    }
+  }
+
+  @Test
   void realBoundaryReopensStagingForAppendThenFinalizesAndDeletesByHandle() throws Exception {
     Path root = Files.createDirectory(temp.resolve("visible-root"));
     Path systemRoot = Files.createDirectory(temp.resolve("system-root"));
@@ -269,6 +363,7 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
         new JnaWindowsSharedFolderNativeBridge();
     private Runnable beforeDelete = () -> {};
     private Runnable beforeRename = () -> {};
+    private Runnable afterRename = () -> {};
 
     @Override public NativeHandle openRoot(Path path, int flags) {
       return delegate.openRoot(path, flags);
@@ -286,6 +381,10 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
     @Override public NativeHandle openRelativeForMutation(
         NativeHandle parent, String name, OpenKind kind, int flags) {
       return delegate.openRelativeForMutation(parent, name, kind, flags);
+    }
+    @Override public NativeHandle openRelativeForExclusiveMutation(
+        NativeHandle parent, String name, OpenKind kind, int flags) {
+      return delegate.openRelativeForExclusiveMutation(parent, name, kind, flags);
     }
     @Override public NativeHandle createRelative(
         NativeHandle parent, String name, OpenKind kind, int flags) {
@@ -312,6 +411,7 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
         NativeHandle source, NativeHandle destinationParent, String name, boolean replace) {
       beforeRename.run();
       delegate.rename(source, destinationParent, name, replace);
+      afterRename.run();
     }
     @Override public void delete(NativeHandle source) {
       beforeDelete.run();
@@ -319,5 +419,13 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
     }
     @Override public long usableSpace(NativeHandle handle) { return delegate.usableSpace(handle); }
     @Override public void close(NativeHandle handle) { delegate.close(handle); }
+  }
+
+  private static java.util.List<String> catchPaths(Path root) {
+    try (var paths = Files.walk(root)) {
+      return paths.map(Path::toString).toList();
+    } catch (java.io.IOException exception) {
+      throw new AssertionError(exception);
+    }
   }
 }

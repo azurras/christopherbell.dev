@@ -109,3 +109,45 @@ and then throws is resolved by reloading durable ACTIVE chunk proof and never tr
 bytes. Durable APPENDING is reconciled only when the exact matching lease has been proven and first
 expired through an optimistic save. Native missing, collision/share, and unknown failures map to
 404, 409, and 503 respectively through real service tests.
+
+## Third independent re-review remediation
+
+The third whole-change review of `fc7847a06276897ea42f12b79d85942b55177436`
+identified four Critical, four Important, and one Minor issue. Native visible mutation leaves now
+need a bridge open mode that requests mutation access while sharing read only. Root and ancestor
+handles retain their existing read/write sharing and delete denial so traversal stays compatible,
+but the final source and observed-target leaf deny both write and delete sharing from the last
+metadata recheck through rename, quarantine, or deletion. Native durable replacement and upload
+replacement use those leaf capabilities, so equal-size external writes and child creation cannot
+invalidate identity after validation.
+
+Leases are renewable capabilities rather than fixed delays. Mutation recovery and upload session
+repositories expose atomic `@Query`/`@Update` renewal methods keyed by id, exact token, state, and
+current phase; renewal changes expiry and update time without incrementing `@Version`, so a writer's
+entity version remains usable. Content-digest loops renew periodically, and every physical
+transition first fences on a successful renewal. Losing the token stops the old writer before the
+next physical action. Expired APPENDING recovery first changes the exact expired lease token to a
+new recovery token through optimistic save, then fences/renews that claim before truncation or
+private-chunk deletion; a stale reconciler never touches bytes after another instance restores
+ACTIVE or starts a new append.
+
+Portable case-only rename first establishes whether the differently spelled name is the same
+object. A case-insensitive provider may perform one atomic same-object rename. A case-sensitive
+provider treats a differently cased existing object as a normal collision and uses one strict
+no-replace move when the target is absent; it never uses an atomic-move option that providers may
+interpret as overwrite. Browser replacement adopts the server-listed canonical target name and
+path, persists that spelling for resume, and still proves every committed prefix chunk before a
+case-insensitive local-name match. Mutation payloads use the canonical listed replacement name.
+
+Portable private storage requires a pre-created ordinary system root. A dedicated private-root
+boundary captures canonical, file-key, file-store, link/reparse, and mount facts for every existing
+ancestor and the root, rejects unsafe providers, creates only validated direct children without
+following links, and rechecks the full identity chain immediately before and after every staging or
+quarantine create/open/move/delete. Visible-root failures and private-root failures are classified
+as missing (404), conflict (409), or unavailable/unsafe (503) rather than folded into 409. Native
+create, append, complete, and cancel use the same exact NTSTATUS classifier; status zero and unknown
+statuses are 503 unless the operation itself explicitly created a semantic conflict.
+
+The browser does not retry upload-session POST. A single ambiguous create may leave an owner-scoped
+private orphan that expires normally; chunk PUT, status GET, and idempotent complete behavior keep
+their bounded transient retry policy.

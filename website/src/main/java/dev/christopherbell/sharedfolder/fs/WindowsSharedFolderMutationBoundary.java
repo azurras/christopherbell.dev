@@ -128,6 +128,28 @@ public final class WindowsSharedFolderMutationBoundary {
     }
   }
 
+  /** Returns the provider-listed spelling for one existing case-insensitive child. */
+  public String canonicalChildName(String parentPath, String requestedName) {
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      SharedFolderPathResolver.validateSingleWindowsName(requestedName);
+      OpenedHandle parent = openVisible(parentPath, OpenKind.DIRECTORY, true, false, false);
+      try {
+        return bridge.listDirectory(parent.handle()).stream()
+            .filter(entry -> !entry.name().equals(".") && !entry.name().equals(".."))
+            .filter(entry -> entry.name().equalsIgnoreCase(requestedName))
+            .map(WindowsSharedFolderNativeBridge.DirectoryEntry::name)
+            .findFirst().orElseThrow(() -> new NativeBoundaryException(
+                "native shared-folder child is missing", 0xC0000034));
+      } finally {
+        parent.close();
+      }
+    } finally {
+      lifecycleLock.readLock().unlock();
+    }
+  }
+
   /** Queries reserve capacity from the retained system-root volume capability, never a pathname. */
   public long usableSystemBytes() {
     lifecycleLock.readLock().lock();
@@ -182,11 +204,13 @@ public final class WindowsSharedFolderMutationBoundary {
     try {
       requireActive();
       SharedFolderPathResolver.validateSingleWindowsName(name);
-      OpenedHandle source = openVisible(sourcePath, OpenKind.ANY, false, true, true);
+      OpenedHandle source = openVisible(
+          sourcePath, observedKind(expectedSource), false, true, true);
       OpenedHandle destination = openVisible(
           destinationParentPath, OpenKind.DIRECTORY, true, true, false);
       OpenedHandle target = expectedTarget == null ? null
-          : openVisible(relative(destinationParentPath, name), OpenKind.ANY, false, true, true);
+          : openVisible(relative(destinationParentPath, name), observedKind(expectedTarget),
+              false, true, true);
       try {
         requireSameObservation(expectedSource, bridge.metadata(source.handle()));
         if (target != null) {
@@ -222,7 +246,8 @@ public final class WindowsSharedFolderMutationBoundary {
     lifecycleLock.readLock().lock();
     try {
       requireActive();
-      OpenedHandle source = openVisible(sourcePath, OpenKind.ANY, false, true, true);
+      OpenedHandle source = openVisible(
+          sourcePath, observedKind(expectedSource), false, true, true);
       try {
         requireSameObservation(expectedSource, bridge.metadata(source.handle()));
         bridge.delete(source.handle());
@@ -278,12 +303,13 @@ public final class WindowsSharedFolderMutationBoundary {
       requireActive();
       validateStagingKey(key);
       SharedFolderPathResolver.validateSingleWindowsName(name);
-      NativeHandle source = bridge.openRelativeForMutation(
+      NativeHandle source = bridge.openRelativeForExclusiveMutation(
           stagingRoot(), key, OpenKind.FILE, SAFE_OBJECT_ATTRIBUTES);
       OpenedHandle destination = openVisible(
           destinationParentPath, OpenKind.DIRECTORY, true, true, false);
       OpenedHandle target = expectedTarget == null ? null
-          : openVisible(relative(destinationParentPath, name), OpenKind.ANY, false, true, true);
+          : openVisible(relative(destinationParentPath, name), observedKind(expectedTarget),
+              false, true, true);
       try {
         if (bridge.metadata(source).identity().volumeSerial()
             != bridge.metadata(destination.handle()).identity().volumeSerial()) {
@@ -339,7 +365,8 @@ public final class WindowsSharedFolderMutationBoundary {
     try {
       requireActive();
       validateStagingKey(quarantineKey);
-      OpenedHandle target = openVisible(visiblePath, OpenKind.ANY, false, true, true);
+      OpenedHandle target = openVisible(
+          visiblePath, observedKind(expectedTarget), false, true, true);
       try {
         requireSameObservation(expectedTarget, bridge.metadata(target.handle()));
         requireReplacementTarget(target);
@@ -348,6 +375,12 @@ public final class WindowsSharedFolderMutationBoundary {
           throw new NativeBoundaryException("replacement roots are on different volumes", 0);
         }
         bridge.rename(target.handle(), mutationQuarantineRoot(), quarantineKey, false);
+        try {
+          requireReplacementTarget(target);
+        } catch (NativeBoundaryException failure) {
+          restoreJustQuarantinedVisible(visiblePath, target.handle(), failure);
+          throw failure;
+        }
         return bridge.metadata(target.handle());
       } finally {
         target.close();
@@ -393,7 +426,7 @@ public final class WindowsSharedFolderMutationBoundary {
       requireActive();
       validateStagingKey(quarantineKey);
       SharedFolderPathResolver.validateSingleWindowsName(name);
-      NativeHandle source = bridge.openRelativeForMutation(
+      NativeHandle source = bridge.openRelativeForExclusiveMutation(
           mutationQuarantineRoot(), quarantineKey, OpenKind.ANY, SAFE_OBJECT_ATTRIBUTES);
       OpenedHandle destination = openVisible(
           destinationParentPath, OpenKind.DIRECTORY, true, true, false);
@@ -418,7 +451,7 @@ public final class WindowsSharedFolderMutationBoundary {
     try {
       requireActive();
       validateStagingKey(quarantineKey);
-      NativeHandle target = bridge.openRelativeForMutation(
+      NativeHandle target = bridge.openRelativeForExclusiveMutation(
           mutationQuarantineRoot(), quarantineKey, OpenKind.ANY, SAFE_OBJECT_ATTRIBUTES);
       try {
         requireSameObservation(expectedTarget, bridge.metadata(target));
@@ -520,8 +553,26 @@ public final class WindowsSharedFolderMutationBoundary {
       throw new NativeBoundaryException("observed replacement target is required", 0);
     }
     NativeFileMetadata metadata = bridge.metadata(target.handle());
-    if (metadata.directory() && !bridge.listDirectory(target.handle()).isEmpty()) {
+    if (metadata.directory() && bridge.listDirectory(target.handle()).stream()
+        .anyMatch(entry -> !entry.name().equals(".") && !entry.name().equals(".."))) {
       throw new NativeBoundaryException("non-empty replacement directory conflicts", 0);
+    }
+  }
+
+  private void restoreJustQuarantinedVisible(
+      String visiblePath, NativeHandle target, NativeBoundaryException failure) {
+    List<String> segments = safeSegments(visiblePath, false);
+    String name = segments.getLast();
+    String parentPath = String.join("/", segments.subList(0, segments.size() - 1));
+    try {
+      OpenedHandle parent = openVisible(parentPath, OpenKind.DIRECTORY, true, true, false);
+      try {
+        bridge.rename(target, parent.handle(), name, false);
+      } finally {
+        parent.close();
+      }
+    } catch (NativeBoundaryException restoreFailure) {
+      failure.addSuppressed(restoreFailure);
     }
   }
 
@@ -560,7 +611,8 @@ public final class WindowsSharedFolderMutationBoundary {
         OpenKind kind = index + 1 == segments.size() ? finalKind : OpenKind.DIRECTORY;
         boolean leaf = index + 1 == segments.size();
         NativeHandle next = finalMutation && leaf
-            ? bridge.openRelativeForMutation(current, segments.get(index), kind, SAFE_OBJECT_ATTRIBUTES)
+            ? bridge.openRelativeForExclusiveMutation(
+                current, segments.get(index), kind, SAFE_OBJECT_ATTRIBUTES)
             : pinChain
                 ? bridge.openRelativePinned(current, segments.get(index), kind, SAFE_OBJECT_ATTRIBUTES)
                 : bridge.openRelative(current, segments.get(index), kind, SAFE_OBJECT_ATTRIBUTES);
@@ -586,6 +638,14 @@ public final class WindowsSharedFolderMutationBoundary {
 
   private String relative(String parent, String name) {
     return parent == null || parent.isEmpty() ? name : parent + "/" + name;
+  }
+
+  private OpenKind observedKind(NativeFileMetadata metadata) {
+    if (metadata == null) {
+      return OpenKind.ANY;
+    }
+    return metadata.directory() ? OpenKind.DIRECTORY
+        : metadata.regularFile() ? OpenKind.FILE : OpenKind.ANY;
   }
 
   private void validateStagingKey(String key) {

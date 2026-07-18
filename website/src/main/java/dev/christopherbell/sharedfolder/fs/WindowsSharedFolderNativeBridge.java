@@ -40,6 +40,12 @@ public interface WindowsSharedFolderNativeBridge {
     throw unsupportedMutation();
   }
 
+  /** Opens a final mutation leaf while denying external write and delete sharing. */
+  default NativeHandle openRelativeForExclusiveMutation(
+      NativeHandle parent, String name, OpenKind kind, int objectAttributes) {
+    throw unsupportedMutation();
+  }
+
   /** Creates one new child relative to a retained trusted directory handle without overwrite. */
   default NativeHandle createRelative(
       NativeHandle parent, String name, OpenKind kind, int objectAttributes) {

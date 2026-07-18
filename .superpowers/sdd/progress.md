@@ -5,10 +5,15 @@ Branch base: `9108f9cb936aa80eb10f235210c6b101e16496c4`
 Branch: `codex/shared-folder-portal`
 Baseline: `gradlew.bat test :website:jsTest --console=plain` succeeded; browser tests 120 passed, 0 failed.
 
+Workflow checkpoint: each numbered task is complete only after RED/GREEN implementation,
+task/regression verification, approving independent review with all Critical/Important findings
+resolved, commit, and push of the reviewed task branch. Do not start the next numbered task before
+that remote checkpoint exists. Failed review/remediation cycles remain within the active task.
+
 Task 1: complete (commits 9108f9c..0b025da, review clean; fresh `:website:test :website:jsTest` BUILD SUCCESSFUL, 122 JS tests passed)
 Task 2: complete (commits 0b025da..ff23809, review clean; fresh `:website:test` BUILD SUCCESSFUL)
 Task 3: complete (commits ff23809..8602985, final review approved with no findings; fresh `:website:test :website:jsTest` BUILD SUCCESSFUL, 141 JS tests, real Windows junction test enabled)
-Task 4: in progress (implementation `a40c9596` rejected with 2 Critical/6 Important; remediation `7975b9e8` rejected with 4 Critical/4 Important; second remediation implemented and fully verified; fresh independent re-review required)
+Task 4: in progress (implementation `a40c9596` rejected 2C/6I; `7975b9e8` rejected 4C/4I; `fc7847a0` rejected 4C/4I/1M; third remediation implementation and full verification green at 887 Java/152 JS tests; fourth whole-change review required before the reviewed commit is pushed)
 Task 5: pending
 Task 6: pending
 Task 7: pending

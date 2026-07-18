@@ -173,10 +173,10 @@ public final class SharedFolderPathResolver {
   private Path parseRelative(String raw, boolean allowEmpty) {
     List<String> segments = safeRelativeSegments(raw, allowEmpty);
     if (segments.isEmpty()) {
-      return Path.of("");
+      return root.getFileSystem().getPath("");
     }
     try {
-      Path relative = Path.of(raw);
+      Path relative = root.getFileSystem().getPath(raw);
       if (relative.isAbsolute() || relative.getRoot() != null) {
         throw unsafe("Shared-folder paths must be relative");
       }

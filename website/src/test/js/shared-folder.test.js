@@ -54,6 +54,9 @@ test('effective write access and resumable upload progress are explicit', () => 
     { parentPath: 'docs', name: 'video.mkv', expectedBytes: 10 },
     { name: 'video.mkv', size: 10 }, 'docs'), true);
   assert.equal(uploadResumeMatchesFile(
+    { parentPath: 'docs', name: 'Video.MKV', expectedBytes: 10 },
+    { name: 'video.mkv', size: 10 }, 'docs'), true);
+  assert.equal(uploadResumeMatchesFile(
     { parentPath: 'docs', name: 'video.mkv', expectedBytes: 10 },
     { name: 'other.mkv', size: 10 }, 'docs'), false);
 });
@@ -153,6 +156,62 @@ test('mocked browser workflow retries, chunks from server config, gates duplicat
   assert.equal(completedReplace, true);
 });
 
+test('replacement uses canonical server spelling and upload-session create is never retried', async () => {
+  const file = Object.assign(new Blob(['x']), { name: 'foo.mkv' });
+  let createRequest;
+  const completed = await runUploadWorkflow({
+    parentPath: 'media', file, resume: null, digest: async () => 'digest',
+    loadStatus: async () => { throw new Error('unexpected resume'); },
+    listEntries: async () => ({ entries: [{ name: 'Foo.mkv', observedToken: 'target-proof' }] }),
+    confirmReplace: () => true,
+    createUpload: async request => {
+      createRequest = request;
+      return { id: 'u-canonical', parentPath: 'media', name: request.name,
+        expectedBytes: 1, nextOffset: 0, state: 'ACTIVE', chunkSizeBytes: 1,
+        committedChunks: [] };
+    },
+    putChunk: async upload => ({ ...upload, nextOffset: 1 }),
+    completeUpload: async upload => ({ ...upload, state: 'COMPLETED' }),
+  });
+  assert.equal(completed.state, 'COMPLETED');
+  assert.equal(createRequest.name, 'Foo.mkv');
+  assert.equal(createRequest.targetObservedToken, 'target-proof');
+
+  let attempts = 0;
+  await assert.rejects(runUploadWorkflow({
+    parentPath: 'media', file, resume: null, digest: async () => 'digest',
+    loadStatus: async () => { throw new Error('unexpected resume'); },
+    listEntries: async () => ({ entries: [] }), confirmReplace: () => false,
+    createUpload: async () => {
+      attempts += 1;
+      throw Object.assign(new Error('ambiguous create'), { status: 503 });
+    },
+    putChunk: async () => { throw new Error('must not upload'); },
+    completeUpload: async upload => upload,
+  }), /ambiguous create/);
+  assert.equal(attempts, 1);
+});
+
+test('case-insensitive resume still proves the committed local prefix', async () => {
+  const file = Object.assign(new Blob(['abc']), { name: 'resume.bin' });
+  const resume = { id: 'u-case', parentPath: 'docs', name: 'Resume.BIN', expectedBytes: 3 };
+  const active = { ...resume, nextOffset: 3, state: 'ACTIVE', chunkSizeBytes: 3,
+    committedChunks: [{ offset: 0, length: 3, sha256: 'proof' }] };
+  let createCalls = 0;
+
+  const completed = await runUploadWorkflow({
+    parentPath: 'docs', file, resume, digest: async () => 'proof',
+    loadStatus: async () => active, listEntries: async () => ({ entries: [] }),
+    confirmReplace: () => false,
+    createUpload: async () => { createCalls += 1; return active; },
+    putChunk: async () => { throw new Error('prefix is already committed'); },
+    completeUpload: async upload => ({ ...upload, state: 'COMPLETED' }),
+  });
+
+  assert.equal(completed.state, 'COMPLETED');
+  assert.equal(createCalls, 0);
+});
+
 test('mocked browser workflow pauses without cancel, resumes, and rejects changed local bytes', async () => {
   const file = Object.assign(new Blob(['abc']), { name: 'resume.bin' });
   const resume = { id: 'u2', parentPath: 'docs', name: file.name, expectedBytes: file.size };
@@ -236,8 +295,8 @@ test('move payload requires an explicit observed replacement token', () => {
     observedToken: 'source-token', replace: false, replacedObservedToken: null,
   });
   assert.deepEqual(moveMutationPayload(
-    source, 'archive', 'a.txt', { observedToken: 'target-token' }), {
-    path: 'docs/a.txt', destinationPath: 'archive', name: 'a.txt',
+    source, 'archive', 'a.txt', { name: 'A.txt', observedToken: 'target-token' }), {
+    path: 'docs/a.txt', destinationPath: 'archive', name: 'A.txt',
     observedToken: 'source-token', replace: true, replacedObservedToken: 'target-token',
   });
 });

@@ -34,6 +34,15 @@ feature.
 flag. Local and test profiles use build-owned paths; production roots use environment-overridable
 `A:/Shared` and `A:/Shared-System` defaults.
 
+Both configured roots must exist before the application starts. The system root is an ordinary,
+non-linked, non-reparse, non-mount directory on the same filesystem as the visible root; the
+application deliberately does not create that configured root. Deployment grants the website
+service identity access to the pre-created root. The application may create only its validated
+direct staging and quarantine children beneath it. Portable operations capture canonical path,
+file identity, filesystem, mount, link, and reparse facts for every ancestor and recheck them
+immediately before and after each private create, open, move, and delete. An unavailable or changed
+private boundary fails with `503 Service Unavailable` and never falls back to an unchecked path.
+
 ## Read-Only Portal
 
 - `GET /shared` is a public, data-free HTML shell only. It contains no folder data and the browser
@@ -79,7 +88,12 @@ flag. Local and test profiles use build-owned paths; production roots use enviro
   durable session state.
 - The browser sends 8 MiB chunks, shows byte progress, supports cancel and drag/drop, and can
   resume a matching local file after refresh. Browser resume storage contains only the session
-  identifier and non-secret file metadata—never an observed token or bearer credential.
+  identifier and non-secret file metadata—never an observed token or bearer credential. A
+  case-insensitive resume match still re-hashes every committed prefix chunk before trusting local
+  bytes. Explicit replacement uses the canonical spelling returned by the server listing.
+- Creating an upload session is intentionally attempted once because POST is not idempotent; an
+  ambiguous failure may leave only an owner-scoped expiring session. Chunk PUT, status, complete,
+  and cancellation retain their bounded retry/reconciliation behavior.
 - The configured per-file maximum returns `413 Payload Too Large`; insufficient capacity after
   the configured reserve returns `507 Insufficient Storage`. Finalization and cancellation use
   durable `FINALIZING` and `CANCEL_PENDING` phases so a database save failure after the physical

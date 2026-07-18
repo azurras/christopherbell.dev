@@ -52,6 +52,25 @@ class WindowsSharedFolderMutationBoundaryTest {
   }
 
   @Test
+  void finalVisibleAndStagingMutationLeavesUseExclusiveWriteAndDeleteDenial() {
+    RecordingBridge bridge = new RecordingBridge();
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        Path.of("C:/shared"), Path.of("C:/system"), bridge);
+
+    NativeFileMetadata source = boundary.metadata("documents/source.txt");
+    NativeFileMetadata target = boundary.metadata("documents/target.txt");
+    boundary.rename("documents/source.txt", "documents", "target.txt", true, source, target);
+    boundary.createStaging("55555555-5555-5555-5555-555555555555").close();
+    boundary.finalizeStaging(
+        "55555555-5555-5555-5555-555555555555", "documents", "upload.bin", false);
+
+    assertThat(bridge.exclusiveMutationOpenNames)
+        .contains("source.txt", "target.txt", "55555555-5555-5555-5555-555555555555");
+    assertThat(bridge.mutationOpenNames).contains("documents");
+    boundary.destroy();
+  }
+
+  @Test
   void stagesWritesFlushesAndFinalizesAcrossRetainedSameVolumeRoots() {
     RecordingBridge bridge = new RecordingBridge();
     WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
@@ -179,6 +198,7 @@ class WindowsSharedFolderMutationBoundaryTest {
     private final List<String> usableSpaceHandles = new ArrayList<>();
     private final List<String> mutationRoots = new ArrayList<>();
     private final List<String> mutationOpenNames = new ArrayList<>();
+    private final List<String> exclusiveMutationOpenNames = new ArrayList<>();
     private final List<String> events = new ArrayList<>();
     private long stagingVolume = 7;
     private boolean changeIdentityOnMutationOpen;
@@ -223,6 +243,13 @@ class WindowsSharedFolderMutationBoundaryTest {
         mutationSourceOpened = true;
       }
       return openRelative(parent, name, kind, attributes);
+    }
+
+    @Override
+    public NativeHandle openRelativeForExclusiveMutation(
+        NativeHandle parent, String name, OpenKind kind, int attributes) {
+      exclusiveMutationOpenNames.add(name);
+      return openRelativeForMutation(parent, name, kind, attributes);
     }
 
     @Override

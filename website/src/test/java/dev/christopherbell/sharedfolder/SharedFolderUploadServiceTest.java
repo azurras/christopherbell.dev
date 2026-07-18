@@ -47,6 +47,213 @@ class SharedFolderUploadServiceTest {
   @TempDir Path temp;
 
   @Test
+  void replacementCompletionStopsBeforeQuarantineWhenTheFencedScanLosesItsLease()
+      throws Exception {
+    Path root = Files.createDirectories(temp.resolve("lost-finalizer-lease"));
+    Files.write(root.resolve("target.bin"), new byte[256 * 1024]);
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadSessionRepository repository = repository(stored);
+    SharedFolderUploadService uploads = new SharedFolderUploadService(
+        access, repository, properties(root));
+    byte[] content = "replacement".getBytes();
+    SharedFolderUploadStatus upload = uploads.create(new SharedFolderUploadCreateRequest(
+        "", "target.bin", content.length, sha256(content),
+        new SharedFolderMutationService(access, properties(root)).observedToken("target.bin")));
+    uploads.append(upload.id(), 0, new ByteArrayInputStream(content), sha256(content));
+    org.mockito.Mockito.doReturn(0L).when(repository)
+        .renewFinalizationLease(any(), any(), any(), any(), any());
+
+    assertConflict(() -> uploads.complete(upload.id(), true));
+
+    verify(repository, org.mockito.Mockito.atLeastOnce())
+        .renewFinalizationLease(any(), any(), any(), any(), any());
+    assertThat(Files.size(root.resolve("target.bin"))).isEqualTo(256 * 1024);
+    assertThat(Files.exists(properties(root).systemRoot().resolve("shared-folder-upload-staging")
+        .resolve(stored.get(upload.id()).getStagingKey()))).isTrue();
+    try (var quarantined = Files.list(properties(root).systemRoot()
+        .resolve("shared-folder-upload-quarantine"))) {
+      assertThat(quarantined).isEmpty();
+    }
+  }
+
+  @Test
+  void slowSubMegabyteUploadScanRenewsByTimeBeforeTheOriginalShortLeaseExpires()
+      throws Exception {
+    Path root = Files.createDirectories(temp.resolve("timed-finalizer-heartbeat"));
+    Files.write(root.resolve("target.bin"), new byte[32 * 1024]);
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadSessionRepository repository = repository(stored);
+    java.util.concurrent.atomic.AtomicReference<Instant> clock =
+        new java.util.concurrent.atomic.AtomicReference<>(Instant.parse("2026-07-17T12:00:00Z"));
+    SharedFolderUploadService uploads = new SharedFolderUploadService(
+        access, repository, properties(root)) {
+      @Override protected Instant leaseNow() {
+        return clock.getAndUpdate(value -> value.plusMillis(40));
+      }
+      @Override protected Duration finalizationLeaseDuration() { return Duration.ofMillis(100); }
+    };
+    byte[] content = "replacement".getBytes();
+    SharedFolderUploadStatus upload = uploads.create(new SharedFolderUploadCreateRequest(
+        "", "target.bin", content.length, sha256(content),
+        new SharedFolderMutationService(access, properties(root)).observedToken("target.bin")));
+    uploads.append(upload.id(), 0, new ByteArrayInputStream(content), sha256(content));
+
+    uploads.complete(upload.id(), true);
+
+    verify(repository, org.mockito.Mockito.atLeast(4))
+        .renewFinalizationLease(any(), any(), any(), any(), any());
+    assertThat(Files.readString(root.resolve("target.bin"))).isEqualTo("replacement");
+  }
+
+  @Test
+  void expiredUploadRecoveryStopsWhenItsRecoveryTokenIsLostDuringIdentityScan()
+      throws Exception {
+    Path root = Files.createDirectories(temp.resolve("lost-upload-recovery-lease"));
+    Files.write(root.resolve("target.bin"), new byte[256 * 1024]);
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadSessionRepository repository = repository(stored);
+    SharedFolderUploadService crashing = new SharedFolderUploadService(
+        access, repository, properties(root)) {
+      @Override
+      protected void afterPhysicalFinalizationTransition(SharedFolderUploadFinalizationState state) {
+        if (state == SharedFolderUploadFinalizationState.TARGET_QUARANTINED) {
+          throw new AssertionError("simulated process death");
+        }
+      }
+    };
+    byte[] content = "replacement".getBytes();
+    SharedFolderUploadStatus upload = crashing.create(new SharedFolderUploadCreateRequest(
+        "", "target.bin", content.length, sha256(content),
+        new SharedFolderMutationService(access, properties(root)).observedToken("target.bin")));
+    crashing.append(upload.id(), 0, new ByteArrayInputStream(content), sha256(content));
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> crashing.complete(upload.id(), true))
+        .isInstanceOf(AssertionError.class);
+    SharedFolderUploadSession durable = stored.get(upload.id());
+    durable.setFinalizationLeaseExpiresAt(Instant.EPOCH);
+    org.mockito.Mockito.doReturn(0L).when(repository)
+        .renewFinalizationLease(any(), any(), any(), any(), any());
+
+    SharedFolderUploadService recovering = new SharedFolderUploadService(
+        access, repository, properties(root));
+    assertConflict(() -> recovering.status(upload.id()));
+
+    assertThat(Files.notExists(root.resolve("target.bin"))).isTrue();
+    assertThat(Files.exists(properties(root).systemRoot().resolve("shared-folder-upload-staging")
+        .resolve(durable.getStagingKey()))).isTrue();
+    assertThat(Files.size(properties(root).systemRoot().resolve("shared-folder-upload-quarantine")
+        .resolve(durable.getFinalizingQuarantineKey()))).isEqualTo(256 * 1024);
+    assertThat(stored.get(upload.id()).getFinalizationState())
+        .isEqualTo(SharedFolderUploadFinalizationState.PREPARED);
+  }
+
+  @Test
+  void appendWriterStopsBeforeChangingStagingWhenItsFencedLeaseIsLost() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("lost-append-writer-lease"));
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadSessionRepository repository = repository(stored);
+    SharedFolderUploadService uploads = new SharedFolderUploadService(
+        access, repository, properties(root));
+    byte[] content = "chunk".getBytes();
+    SharedFolderUploadStatus upload = uploads.create(new SharedFolderUploadCreateRequest(
+        "", "target.bin", content.length, sha256(content), null));
+    org.mockito.Mockito.doReturn(0L).when(repository)
+        .renewAppendLease(any(), any(), org.mockito.ArgumentMatchers.anyLong(), any(), any());
+
+    assertConflict(() -> uploads.append(
+        upload.id(), 0, new ByteArrayInputStream(content), sha256(content)));
+
+    verify(repository, org.mockito.Mockito.atLeastOnce())
+        .renewAppendLease(any(), any(), org.mockito.ArgumentMatchers.anyLong(), any(), any());
+    Path staging = properties(root).systemRoot().resolve("shared-folder-upload-staging")
+        .resolve(stored.get(upload.id()).getStagingKey());
+    assertThat(Files.notExists(staging) || Files.size(staging) == 0L).isTrue();
+    assertThat(stored.get(upload.id()).getNextOffset()).isZero();
+    assertThat(stored.get(upload.id()).getChunkDigests()).isEmpty();
+    assertThat(stored.get(upload.id()).getChunkLengths()).isEmpty();
+  }
+
+  @Test
+  void onlyOneOfTwoStaleReconcilersCanClaimAnExpiredAppendBeforeTruncation()
+      throws Exception {
+    Path root = Files.createDirectories(temp.resolve("two-stale-append-reconcilers"));
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadSessionRepository repository = repository(stored);
+    SharedFolderProperties sharedProperties = properties(root);
+    SharedFolderUploadService setup = new SharedFolderUploadService(
+        access, repository, sharedProperties);
+    SharedFolderUploadStatus upload = setup.create(new SharedFolderUploadCreateRequest(
+        "", "target.bin", 8, null, null));
+    SharedFolderUploadSession stale = stored.get(upload.id());
+    stale.setState(SharedFolderUploadState.APPENDING);
+    stale.setAppendLeaseToken("expired-writer");
+    stale.setAppendLeaseExpiresAt(Instant.EPOCH);
+    stale.setAppendOffset(0L);
+    stale.setAppendLength(8L);
+    stale.setAppendDigest(sha256("unowned!".getBytes()));
+    Path staging = sharedProperties.systemRoot().resolve("shared-folder-upload-staging")
+        .resolve(stale.getStagingKey());
+    Files.writeString(staging, "unowned!");
+    CountDownLatch bothLoadedStaleLease = new CountDownLatch(2);
+    java.util.concurrent.atomic.AtomicInteger physicalTransitions =
+        new java.util.concurrent.atomic.AtomicInteger();
+    class RacingRecoveryService extends SharedFolderUploadService {
+      RacingRecoveryService() { super(access, repository, sharedProperties); }
+      @Override protected void beforeExpiredAppendLeaseClaim() {
+        bothLoadedStaleLease.countDown();
+        try {
+          if (!bothLoadedStaleLease.await(5, TimeUnit.SECONDS)) {
+            throw new AssertionError("reconcilers did not overlap");
+          }
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+          throw new AssertionError(exception);
+        }
+      }
+      @Override protected void beforeExpiredAppendPhysicalTransition() {
+        physicalTransitions.incrementAndGet();
+      }
+    }
+    var executor = Executors.newFixedThreadPool(2);
+    try {
+      var first = executor.submit(() -> new RacingRecoveryService().status(upload.id()));
+      var second = executor.submit(() -> new RacingRecoveryService().status(upload.id()));
+      assertThat(first.get(10, TimeUnit.SECONDS).state())
+          .isIn(SharedFolderUploadState.ACTIVE, SharedFolderUploadState.APPENDING);
+      assertThat(second.get(10, TimeUnit.SECONDS).state())
+          .isIn(SharedFolderUploadState.ACTIVE, SharedFolderUploadState.APPENDING);
+    } finally {
+      executor.shutdownNow();
+    }
+
+    verify(repository, org.mockito.Mockito.times(2))
+        .claimExpiredAppendLease(any(), any(), org.mockito.ArgumentMatchers.anyLong(),
+            any(), any(), any(), any());
+    assertThat(physicalTransitions).hasValue(1);
+    assertThat(Files.size(staging)).isZero();
+    assertThat(stored.get(upload.id()).getState()).isEqualTo(SharedFolderUploadState.ACTIVE);
+  }
+
+  @Test
   void acceptsOrderedIdenticalChunkRetryAndAtomicallyFinalizes() throws Exception {
     Path root = Files.createDirectories(temp.resolve("shared"));
     Account account = new Account();
@@ -206,6 +413,7 @@ class SharedFolderUploadServiceTest {
     });
     when(repository.findById(any(String.class))).thenAnswer(invocation ->
         java.util.Optional.ofNullable(stored.get(invocation.getArgument(0))).map(this::copy));
+    stubFinalizationRenewal(repository, stored);
     SharedFolderUploadService uploads = new SharedFolderUploadService(access, repository, properties(root));
     byte[] bytes = "retry-once".getBytes();
     SharedFolderUploadStatus upload = uploads.create(new SharedFolderUploadCreateRequest(
@@ -243,6 +451,7 @@ class SharedFolderUploadServiceTest {
     });
     when(repository.findById(any(String.class))).thenAnswer(invocation ->
         java.util.Optional.ofNullable(stored.get(invocation.getArgument(0))).map(this::copy));
+    stubFinalizationRenewal(repository, stored);
     SharedFolderUploadService uploads = new SharedFolderUploadService(access, repository, properties(root));
     byte[] bytes = "recover-finalize".getBytes();
     SharedFolderUploadStatus upload = uploads.create(new SharedFolderUploadCreateRequest(
@@ -541,6 +750,8 @@ class SharedFolderUploadServiceTest {
       assertThat(Files.readAllBytes(properties.systemRoot()
           .resolve("shared-folder-upload-staging").resolve(stagingKey))).isEqualTo(replacement);
       assertThat(Files.notExists(root.resolve("target.bin"))).isTrue();
+      assertThat(sessions.get(upload.id()).getState()).isEqualTo(SharedFolderUploadState.ACTIVE);
+      assertThat(sessions.get(upload.id()).getFinalizationState()).isNull();
     } finally {
       boundary.destroy();
     }
@@ -680,14 +891,15 @@ class SharedFolderUploadServiceTest {
     SharedFolderUploadService uploads = new SharedFolderUploadService(
         access, repository(sessions), properties(root)) {
       @Override
-      protected void appendStagedChunk(Path stagingFile, Path chunk) throws java.io.IOException {
+      protected void appendStagedChunk(
+          SharedFolderUploadSession session, Path stagingFile, Path chunk) throws java.io.IOException {
         if (failPartialWrite.compareAndSet(true, false)) {
           byte[] bytes = Files.readAllBytes(chunk);
           Files.write(stagingFile, java.util.Arrays.copyOf(bytes, Math.max(1, bytes.length / 2)),
               java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
           throw new java.io.IOException("simulated mid-append failure");
         }
-        super.appendStagedChunk(stagingFile, chunk);
+        super.appendStagedChunk(session, stagingFile, chunk);
       }
     };
     byte[] bytes = "partial-write".getBytes();
@@ -1046,6 +1258,60 @@ class SharedFolderUploadServiceTest {
   }
 
   @Test
+  void nativeAppendCompleteAndCancelPreserveExactMissingConflictAndUnavailableStatuses()
+      throws Exception {
+    Path root = Files.createDirectories(temp.resolve("native-lifecycle-status"));
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    for (int[] contract : java.util.List.of(
+        new int[] {0xC0000034, 404},
+        new int[] {0xC0000043, 409},
+        new int[] {0xC0000001, 503},
+        new int[] {0, 503})) {
+      var failure = new dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge
+          .NativeBoundaryException("native lifecycle failure", contract[0]);
+
+      Map<String, SharedFolderUploadSession> appendStored = new ConcurrentHashMap<>();
+      SharedFolderUploadSession appendSession = activeSession(
+          "append-" + contract[1] + "-" + contract[0], account.getId(), "append-staging");
+      appendStored.put(appendSession.getId(), appendSession);
+      WindowsSharedFolderMutationBoundary appendBoundary = mock(WindowsSharedFolderMutationBoundary.class);
+      when(appendBoundary.nativeMode()).thenReturn(true);
+      when(appendBoundary.usableSystemBytes()).thenReturn(Long.MAX_VALUE);
+      when(appendBoundary.createStaging(any())).thenThrow(failure);
+      SharedFolderUploadService append = new SharedFolderUploadService(
+          access, repository(appendStored), properties(root), appendBoundary);
+      assertStatus(contract[1], () -> append.append(appendSession.getId(), 0,
+          new ByteArrayInputStream(new byte[] {1}), sha256(new byte[] {1})));
+
+      Map<String, SharedFolderUploadSession> completeStored = new ConcurrentHashMap<>();
+      SharedFolderUploadSession completeSession = activeSession(
+          "complete-" + contract[1] + "-" + contract[0], account.getId(), "complete-staging");
+      completeSession.setNextOffset(1);
+      completeStored.put(completeSession.getId(), completeSession);
+      WindowsSharedFolderMutationBoundary completeBoundary = mock(WindowsSharedFolderMutationBoundary.class);
+      when(completeBoundary.nativeMode()).thenReturn(true);
+      when(completeBoundary.staging("complete-staging")).thenThrow(failure);
+      SharedFolderUploadService complete = new SharedFolderUploadService(
+          access, repository(completeStored), properties(root), completeBoundary);
+      assertStatus(contract[1], () -> complete.complete(completeSession.getId(), false));
+
+      Map<String, SharedFolderUploadSession> cancelStored = new ConcurrentHashMap<>();
+      SharedFolderUploadSession cancelSession = activeSession(
+          "cancel-" + contract[1] + "-" + contract[0], account.getId(), "cancel-staging");
+      cancelStored.put(cancelSession.getId(), cancelSession);
+      WindowsSharedFolderMutationBoundary cancelBoundary = mock(WindowsSharedFolderMutationBoundary.class);
+      when(cancelBoundary.nativeMode()).thenReturn(true);
+      when(cancelBoundary.deleteStagingIfExists("cancel-staging")).thenThrow(failure);
+      SharedFolderUploadService cancel = new SharedFolderUploadService(
+          access, repository(cancelStored), properties(root), cancelBoundary);
+      assertStatus(contract[1], () -> cancel.cancel(cancelSession.getId()));
+    }
+  }
+
+  @Test
   void uploadStatusContractUsesExact400404409And503AcrossPortableAndNativeModes() throws Exception {
     Path root = Files.createDirectories(temp.resolve("upload-status-contract"));
     Account account = new Account();
@@ -1074,6 +1340,112 @@ class SharedFolderUploadServiceTest {
           access, repository(new ConcurrentHashMap<>()), disabled, boundary);
       assertStatus(503, () -> unavailable.create(new SharedFolderUploadCreateRequest(
           "", "file.bin", 1, null, null)));
+    }
+  }
+
+  @Test
+  void portableLifecycleMapsMissingParentsAndUnavailableVisibleOrPrivateRootsExactly()
+      throws Exception {
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+
+    Path availableRoot = Files.createDirectories(temp.resolve("portable-status-root"));
+    SharedFolderUploadService available = new SharedFolderUploadService(
+        access, repository(new ConcurrentHashMap<>()), properties(availableRoot));
+    assertStatus(404, () -> available.create(new SharedFolderUploadCreateRequest(
+        "missing-parent", "target.bin", 1, null, null)));
+
+    SharedFolderUploadService unavailableVisible = new SharedFolderUploadService(
+        access, repository(new ConcurrentHashMap<>()), properties(temp.resolve("absent-visible-root")));
+    assertStatus(503, () -> unavailableVisible.create(new SharedFolderUploadCreateRequest(
+        "", "target.bin", 1, null, null)));
+
+    Path privateRootFile = temp.resolve("private-root-file");
+    Files.writeString(privateRootFile, "not-a-directory");
+    SharedFolderProperties badPrivateProperties = new SharedFolderProperties(
+        availableRoot, privateRootFile, DataSize.ofGigabytes(10), DataSize.ofMegabytes(8),
+        DataSize.ofBytes(1), DataSize.ofGigabytes(1), Duration.ofDays(30),
+        Duration.ofDays(180), true);
+    SharedFolderUploadService unavailablePrivate = new SharedFolderUploadService(
+        access, repository(new ConcurrentHashMap<>()), badPrivateProperties);
+    assertStatus(503, () -> unavailablePrivate.create(new SharedFolderUploadCreateRequest(
+        "", "target.bin", 1, null, null)));
+
+    Path lifecycleRoot = Files.createDirectories(temp.resolve("portable-lifecycle-root"));
+    SharedFolderProperties lifecycleProperties = properties(lifecycleRoot);
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadService lifecycle = new SharedFolderUploadService(
+        access, repository(stored), lifecycleProperties);
+    byte[] content = new byte[] {7};
+    SharedFolderUploadStatus upload = lifecycle.create(new SharedFolderUploadCreateRequest(
+        "", "target.bin", content.length, sha256(content), null));
+    lifecycle.append(upload.id(), 0, new ByteArrayInputStream(content), sha256(content));
+    SharedFolderUploadStatus recovering = lifecycle.create(new SharedFolderUploadCreateRequest(
+        "", "recovering.bin", content.length, sha256(content), null));
+    lifecycle.append(recovering.id(), 0, new ByteArrayInputStream(content), sha256(content));
+    SharedFolderUploadSession recoveringSession = stored.get(recovering.id());
+    recoveringSession.setState(SharedFolderUploadState.FINALIZING);
+    recoveringSession.setFinalizingIdentity("expected-staging-identity");
+    recoveringSession.setFinalizingReplace(false);
+    recoveringSession.setFinalizationLeaseToken("expired-lease");
+    recoveringSession.setFinalizationLeaseExpiresAt(Instant.EPOCH);
+    SharedFolderUploadStatus replacing = lifecycle.create(new SharedFolderUploadCreateRequest(
+        "", "replacing.bin", content.length, sha256(content), null));
+    lifecycle.append(replacing.id(), 0, new ByteArrayInputStream(content), sha256(content));
+    SharedFolderUploadSession replacingSession = stored.get(replacing.id());
+    replacingSession.setState(SharedFolderUploadState.FINALIZING);
+    replacingSession.setFinalizingIdentity("expected-staging-identity");
+    replacingSession.setFinalizingReplace(true);
+    replacingSession.setFinalizingTargetIdentity("expected-target-identity");
+    replacingSession.setFinalizingQuarantineKey("expected-quarantine-key");
+    replacingSession.setFinalizationState(SharedFolderUploadFinalizationState.PREPARED);
+    replacingSession.setFinalizationLeaseToken("expired-replacement-lease");
+    replacingSession.setFinalizationLeaseExpiresAt(Instant.EPOCH);
+    Path staging = lifecycleProperties.systemRoot().resolve("shared-folder-upload-staging");
+    Path displaced = lifecycleProperties.systemRoot().resolve("displaced-staging");
+    Files.move(staging, displaced);
+    Files.createDirectory(staging);
+
+    assertStatus(503, () -> lifecycle.complete(upload.id(), false));
+    assertStatus(503, () -> lifecycle.cancel(upload.id()));
+    assertStatus(503, () -> lifecycle.status(upload.id()));
+    assertStatus(503, () -> lifecycle.status(recovering.id()));
+    assertStatus(503, () -> lifecycle.status(replacing.id()));
+    assertThat(Files.notExists(staging.resolve(stored.get(upload.id()).getStagingKey()))).isTrue();
+    assertThat(Files.exists(displaced.resolve(stored.get(upload.id()).getStagingKey()))).isTrue();
+  }
+
+  @Test
+  @EnabledOnOs(OS.WINDOWS)
+  void explicitReplacementUploadPreservesObservedTargetSpellingInPortableAndNativeModes()
+      throws Exception {
+    for (boolean nativeMode : java.util.List.of(false, true)) {
+      Path root = Files.createDirectories(temp.resolve("canonical-upload-" + nativeMode));
+      Files.writeString(root.resolve("Target.bin"), "target");
+      SharedFolderProperties properties = properties(root);
+      WindowsSharedFolderMutationBoundary boundary = nativeMode
+          ? new WindowsSharedFolderMutationBoundary(properties)
+          : WindowsSharedFolderMutationBoundary.inactive();
+      if (nativeMode) boundary.initialize();
+      try {
+        Account account = new Account();
+        account.setId("account-1");
+        SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+        when(access.requireWrite()).thenReturn(account);
+        String observed = new SharedFolderMutationService(access, properties, boundary)
+            .observedToken("Target.bin");
+        SharedFolderUploadService uploads = new SharedFolderUploadService(
+            access, repository(new ConcurrentHashMap<>()), properties, boundary);
+
+        SharedFolderUploadStatus upload = uploads.create(new SharedFolderUploadCreateRequest(
+            "", "target.bin", 1, null, observed));
+
+        assertThat(upload.name()).isEqualTo("Target.bin");
+      } finally {
+        if (nativeMode) boundary.destroy();
+      }
     }
   }
 
@@ -1170,6 +1542,7 @@ class SharedFolderUploadServiceTest {
     });
     when(repository.findById(any(String.class))).thenAnswer(invocation ->
         java.util.Optional.ofNullable(sessions.get(invocation.getArgument(0))).map(this::copy));
+    stubFinalizationRenewal(repository, sessions);
     return repository;
   }
 
@@ -1197,7 +1570,62 @@ class SharedFolderUploadServiceTest {
     });
     when(repository.findById(any(String.class))).thenAnswer(invocation ->
         java.util.Optional.ofNullable(sessions.get(invocation.getArgument(0))).map(this::copy));
+    stubFinalizationRenewal(repository, sessions);
     return repository;
+  }
+
+  private void stubFinalizationRenewal(
+      SharedFolderUploadSessionRepository repository,
+      Map<String, SharedFolderUploadSession> sessions) {
+    org.mockito.Mockito.doAnswer(invocation -> {
+      synchronized (sessions) {
+        SharedFolderUploadSession current = sessions.get(invocation.getArgument(0));
+        Instant now = invocation.getArgument(3);
+        if (current == null
+            || current.getState() != SharedFolderUploadState.APPENDING
+            || !java.util.Objects.equals(current.getAppendLeaseToken(), invocation.getArgument(1))
+            || !java.util.Objects.equals(current.getAppendOffset(), invocation.getArgument(2))
+            || current.getAppendLeaseExpiresAt() == null
+            || current.getAppendLeaseExpiresAt().isAfter(now)) {
+          return 0L;
+        }
+        current.setAppendLeaseToken(invocation.getArgument(4));
+        current.setAppendLeaseExpiresAt(invocation.getArgument(5));
+        current.setUpdatedAt(invocation.getArgument(6));
+        return 1L;
+      }
+    }).when(repository).claimExpiredAppendLease(
+        any(), any(), org.mockito.ArgumentMatchers.anyLong(), any(), any(), any(), any());
+    org.mockito.Mockito.doAnswer(invocation -> {
+      synchronized (sessions) {
+        SharedFolderUploadSession current = sessions.get(invocation.getArgument(0));
+        if (current == null
+            || current.getState() != SharedFolderUploadState.APPENDING
+            || !java.util.Objects.equals(current.getAppendLeaseToken(), invocation.getArgument(1))
+            || !java.util.Objects.equals(current.getAppendOffset(), invocation.getArgument(2))) {
+          return 0L;
+        }
+        current.setAppendLeaseExpiresAt(invocation.getArgument(3));
+        current.setUpdatedAt(invocation.getArgument(4));
+        return 1L;
+      }
+    }).when(repository).renewAppendLease(
+        any(), any(), org.mockito.ArgumentMatchers.anyLong(), any(), any());
+    org.mockito.Mockito.doAnswer(invocation -> {
+      synchronized (sessions) {
+        SharedFolderUploadSession current = sessions.get(invocation.getArgument(0));
+        if (current == null
+            || current.getState() != SharedFolderUploadState.FINALIZING
+            || !java.util.Objects.equals(
+                current.getFinalizationLeaseToken(), invocation.getArgument(1))
+            || current.getFinalizationState() != invocation.getArgument(2)) {
+          return 0L;
+        }
+        current.setFinalizationLeaseExpiresAt(invocation.getArgument(3));
+        current.setUpdatedAt(invocation.getArgument(4));
+        return 1L;
+      }
+    }).when(repository).renewFinalizationLease(any(), any(), any(), any(), any());
   }
 
   private SharedFolderUploadSession activeSession(String id, String ownerId, String stagingKey) {

@@ -4,7 +4,7 @@ Date: 2026-07-17
 
 Branch: `codex/shared-folder-portal`
 
-Status: Implementation fixes complete; independent re-review required
+Status: Third remediation implementation and verification complete; fourth independent re-review required
 
 ## Review Outcome and Remediation
 
@@ -154,3 +154,87 @@ The final full verification for this second remediation used the external Gradle
   recovery, append acknowledgement, replacement integrity, and target-disappearance coverage.
 
 Task 4 remains in progress and requires a fresh independent review of the new remediation commit.
+
+## Third Independent Re-review
+
+The whole-change review of `fc7847a06276897ea42f12b79d85942b55177436`
+rejected Task 4 with four Critical, four Important, and one Minor finding. The active remediation
+scope is native leaf write-share denial, renewable token/version fencing, pre-cleanup APPENDING
+claim, provider-safe case-only rename, exact native and portable upload status classification,
+contained pre-created private-root operations, canonical case-insensitive replacement spelling,
+and removal of retry from non-idempotent upload-session creation. Task 4 remains review-rejected;
+RED/GREEN and final verification evidence will be appended after implementation.
+
+## Third Remediation RED/GREEN Evidence
+
+The fourth review candidate closes every finding reported against `fc7847a0` while preserving all
+earlier regression groups:
+
+- Native leaf write-denial and renewable-fencing regressions failed before the dedicated
+  read-share-only leaf open, repository renewal queries, time-or-byte digest heartbeats, and
+  pre-transition fences. The fake bridge, real JNA, short-lease mutation, upload-finalization, and
+  append-recovery tests pass after those changes.
+- The stale APPENDING reconciler test failed before recovery first claimed the exact expired lease.
+  It now proves a losing service cannot truncate bytes after another instance restores ACTIVE and
+  begins a new append.
+- Case-sensitive spelling tests failed before strict no-replace provider behavior. Both a
+  differently cased collision and a target-creation race now preserve both files; real Windows
+  case-only coverage remains green.
+- Native create/append/complete/cancel tests initially collapsed status zero, unknown statuses, or
+  missing replacement targets into incorrect conflict/not-found results. Exact missing, conflict,
+  and unavailable classification now passes through the real services.
+- The checked private capability test first failed to compile because staging/quarantine services
+  still accepted raw paths. Substitution tests then exposed the Windows short-path versus canonical
+  root spelling. The final boundary uses the captured canonical root, rechecks root and every
+  ancestor immediately before and after each operation, and rejects direct-child substitution,
+  root substitution, ancestor substitution, mounted children, unsupported providers, and a real
+  Windows junction before the callback runs. No outside write or delete occurs.
+- Portable lifecycle recovery tests first returned a normal pending status after private storage
+  disappeared. Cancel-pending, ordinary finalization, and replacement-finalization status recovery
+  now propagate the typed unavailable result as 503.
+- Portable/native canonical replacement tests were RED because `Target.bin` requested as
+  `target.bin` either conflicted or returned the caller spelling. Both services now retain the
+  observed canonical spelling.
+- Four browser regressions were RED before the final frontend changes: case-insensitive resume was
+  rejected, canonical replacement used the local spelling, committed-prefix resume was refused,
+  and move used the lowercase name. They pass with canonical listing propagation and prefix proof.
+  A failing upload-session POST is attempted exactly once.
+
+An initial whole-Java run reported one suite-level failure in
+`durableReplacementRacerLeavesRestorePendingWithEveryPayloadPreserved` (884 of 885 passed). The
+same test passed immediately in isolation and the complete 25-test mutation class passed unchanged.
+The final clean whole-suite run below includes that regression and all newly added tests.
+
+## Third Remediation Final Verification
+
+All Gradle state remained in the external user and project caches. The real Windows junction flag
+was enabled for the whole Java run.
+
+```powershell
+$env:GRADLE_USER_HOME='C:\Users\Christopher\AppData\Local\Temp\cbdev-gradle-shared-folder-portal'
+$env:SHARED_FOLDER_RUN_WINDOWS_NATIVE_JUNCTION_TEST='true'
+.\gradlew.bat --no-daemon `
+  --project-cache-dir 'C:\Users\Christopher\AppData\Local\Temp\cbdev-project-cache-shared-folder-portal' `
+  test --console=plain
+```
+
+Result: BUILD SUCCESSFUL; 794 `website` tests and 93 `cbell-lib` tests passed (887 aggregate),
+with 0 failures, 0 errors, and 0 skipped. The portable private-boundary class passed all 8 tests,
+including the explicitly enabled real Windows junction regression.
+
+```powershell
+.\gradlew.bat --no-daemon `
+  --project-cache-dir 'C:\Users\Christopher\AppData\Local\Temp\cbdev-project-cache-shared-folder-portal' `
+  :website:jsTest --console=plain
+```
+
+Result: BUILD SUCCESSFUL; 152 JavaScript tests passed with 0 failures and 0 skipped. The focused
+shared-folder browser file passed all 17 tests during remediation.
+
+Additional verification:
+
+- `node --check` passed for the shared-folder page module, library module, and test file.
+- `git diff --check` passed with only expected line-ending notices.
+- No worktree-local `.gradle*` directory exists.
+- The progress ledger remains Task 4 in progress/review-rejected until a fresh reviewer approves
+  the whole change from `8602985d` through the new review commit.

@@ -30,7 +30,8 @@ export function uploadIsTerminal(status) {
 /** Require the same decoded destination, name, and byte length before resuming local bytes. */
 export function uploadResumeMatchesFile(session, file, parentPath) {
   return String(session?.parentPath ?? '') === String(parentPath ?? '')
-    && String(session?.name ?? '') === String(file?.name ?? '')
+    && String(session?.name ?? '').toLocaleLowerCase()
+      === String(file?.name ?? '').toLocaleLowerCase()
     && Number(session?.expectedBytes) === Number(file?.size);
 }
 
@@ -123,12 +124,12 @@ export async function runUploadWorkflow(options) {
       replace = Boolean(confirmReplace(target));
       if (!replace) throw new Error('Upload cancelled because the target already exists.');
     }
-    upload = await retryUploadOperation(() => createUpload({
+    upload = await createUpload({
       parentPath,
-      name: file.name,
+      name: target?.name || file.name,
       expectedBytes: file.size,
       targetObservedToken: target?.observedToken || null,
-    }, signal), { signal });
+    }, signal);
     onCreated(upload, replace);
   }
   onProgress(upload);
@@ -208,7 +209,7 @@ export function moveMutationPayload(source, destinationPath, name, replacement =
   return {
     path: source.path,
     destinationPath: String(destinationPath ?? ''),
-    name: String(name ?? ''),
+    name: String(replacement?.name || name || ''),
     observedToken: source.observedToken,
     replace: Boolean(replacement?.observedToken),
     replacedObservedToken: replacement?.observedToken || null,

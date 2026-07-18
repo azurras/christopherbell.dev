@@ -146,5 +146,86 @@ SDD artifacts.
   unavailable statuses through real service tests.
 - [x] Prove portable/native explicit replacement target disappearance is 409 with source/staging
   intact.
-- [ ] Record final full verification, commit, and request another fresh independent review while
+- [x] Record final full verification, commit, and request another fresh independent review while
   retaining Task 4 as review-rejected/in progress.
+
+### Task 8: Native leaf write denial and renewable fencing
+
+**Files:**
+- Modify: `website/src/main/java/dev/christopherbell/sharedfolder/fs/WindowsSharedFolderNativeBridge.java`
+- Modify: `website/src/main/java/dev/christopherbell/sharedfolder/fs/JnaWindowsSharedFolderNativeBridge.java`
+- Modify: `website/src/main/java/dev/christopherbell/sharedfolder/fs/WindowsSharedFolderMutationBoundary.java`
+- Modify: mutation/upload repositories and services.
+- Test: native boundary/JNA integration and mutation/upload service tests.
+
+**Interfaces:** `openRelativeForExclusiveMutation(...)` opens only a final visible mutation leaf
+with mutation access and `FILE_SHARE_READ`. Repository renewal methods match id + exact lease token
++ state/phase and return the numeric modified-document count without changing `@Version`.
+
+- [x] Add fake-bridge and real Windows RED races for same-size source/target writes and directory
+  child creation after the final native recheck in rename/delete, durable mutation replacement, and
+  upload replacement.
+- [x] Implement exclusive visible-leaf opens while retaining compatible root/ancestor sharing; run
+  the focused fake/JNA tests GREEN.
+- [x] Add short-lease RED tests that pause multi-block digest/recovery, attempt a competing claim,
+  and prove token loss stops the old writer before its next physical transition.
+- [x] Add atomic lease renewal, periodic digest/recovery heartbeat, and pre-transition fencing; run
+  mutation/upload lease tests GREEN.
+
+### Task 9: APPENDING claim and strict case-only rename
+
+**Files:** upload repository/service/tests and mutation service/tests.
+
+**Interfaces:** APPENDING recovery optimistically saves a new recovery token and expiry for the
+exact expired lease before physical cleanup. Case-only rename calls a provider-safe one-step helper
+only after same-object/collision determination.
+
+- [x] Add a RED two-instance stale APPENDING reconciler test where the winner restores ACTIVE and a
+  new append starts before the loser reaches cleanup; assert the loser cannot truncate new bytes.
+- [x] Claim/fence APPENDING before truncate/delete, heartbeat the physical append window, and run
+  portable/native append concurrency tests GREEN.
+- [x] Add RED case-sensitive differently-cased-target and target-creation races, plus real Windows
+  case-only success/failure, preserving both files on conflict.
+- [x] Implement same-object proof and strict no-replace provider behavior; run mutation tests GREEN.
+
+### Task 10: Exact upload errors and portable private-root capability
+
+**Files:**
+- Create: `website/src/main/java/dev/christopherbell/sharedfolder/fs/PortableSharedFolderPrivateBoundary.java`
+- Modify: upload/mutation services and shared-folder documentation.
+- Test: portable upload service and filesystem-boundary tests.
+
+**Interfaces:** The portable private boundary accepts only a pre-created ordinary system root,
+captures/rechecks its full ancestor/root identity chain, and exposes safe direct-child staging and
+quarantine operations. Typed boundary failures map to 404/409/503.
+
+- [x] Add native real-service RED tests for create/append/complete/cancel missing, collision/share,
+  status-zero, and unknown status classification.
+- [x] Add portable real-service RED tests for missing visible parent/item, absent/non-directory/
+  linked/provider-unavailable visible root, and unavailable private root across lifecycle methods.
+- [x] Add RED symlink/junction and ancestor/root substitution tests proving no outside private write
+  or delete; document the pre-created system-root contract.
+- [x] Implement exact native/portable classification and private-root capability rechecks; run all
+  focused service/filesystem tests GREEN.
+
+### Task 11: Canonical replacement spelling and non-retried create
+
+**Files:** shared-folder browser library/page code, JS tests, mutation/upload service parity tests,
+and frontend documentation.
+
+**Interfaces:** Listing matches return the canonical server entry name/path. Create upload and move
+payloads use that spelling for explicit replacement. Resume name matching is case-insensitive only
+with the existing committed-prefix proof. `createUpload` executes once without transient retry.
+
+- [x] Add browser RED workflow tests for replacing `Foo.mkv` with local `foo.mkv`, canonical move
+  payloads, case-insensitive resume with prefix proof, and a failed create POST attempted once.
+- [x] Add portable/native service RED parity tests for case-insensitive explicit replacement.
+- [x] Implement canonical spelling propagation and non-retried create; run JS/service tests GREEN.
+
+### Task 12: Third remediation report, verification, and commit
+
+- [x] Preserve all prior three review regression groups and record honest RED/GREEN evidence.
+- [x] Run focused fake/native/JNA/junction tests with the native environment flag, full Java tests,
+  all 150+ JavaScript tests, touched JavaScript syntax, diff check, and external-cache hygiene.
+- [ ] Update design, plan, report, feature/frontend docs, and progress; commit while Task 4 remains
+  in progress/review-rejected and request a fourth whole-change review.
