@@ -4,7 +4,7 @@ Date: 2026-07-17
 
 Branch: `codex/shared-folder-portal`
 
-Status: Seventh review rejected; eighth remediation implementation and verification complete; fresh independent review required
+Status: Complete; eighth whole-change review approved with no Critical or Important findings
 
 ## Review Outcome and Remediation
 
@@ -436,5 +436,18 @@ partially written current buffer when the next write returned zero.
 - `git diff --check` passed with only expected line-ending notices, and no worktree-local
   `.gradle*` directory exists.
 
-Task 4 remains in progress and review-rejected until the eighth candidate is committed, reviewed
-across `8602985d..HEAD`, approved with no Critical or Important findings, and pushed.
+## Eighth Independent Re-review and Completion
+
+The whole-change review of local commit `8d1d3da2c68eb6b35c790e6465b77519efd38349`
+approved Task 4 with zero Critical, zero Important, and one Minor finding. The reviewer accepted the
+retained native mutation boundary, unsupported-provider fail-closed routing, authorization,
+containment, concurrency fencing, durable recovery, status mappings, regression coverage, and the
+corrected native-channel zero-progress accounting.
+
+The accepted Minor finding is limited to unused custom-channel edge-case validation:
+`transferTo`/`transferFrom` should throw `IllegalArgumentException` for a negative `position` or
+`count`. Current product callbacks do not invoke those transfer methods, so this does not block the
+security or production behavior delivered by Task 4. The item is retained in the progress ledger
+for final review.
+
+The approved Task 4 branch checkpoint is committed and pushed before Task 5 begins.

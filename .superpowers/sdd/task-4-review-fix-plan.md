@@ -311,5 +311,9 @@ file-channel accounting remained.
   progress is included in the returned count.
 - [x] Stop gathering writes on zero without spinning and preserve accumulated progress.
 - [x] Track current-buffer transfer progress in both directions before returning on zero.
-- [ ] Update records, commit the eighth candidate, and request another fresh whole-change review
+- [x] Update records, commit the eighth candidate, and request another fresh whole-change review
   while retaining Task 4 as review-rejected until approval and remote push.
+
+**Completion result:** The eighth whole-change review approved commit `8d1d3da2` with zero
+Critical, zero Important, and one accepted Minor custom-channel argument-validation finding. Task 4
+is complete after this reviewed checkpoint and its completion records are pushed.

@@ -210,3 +210,11 @@ transfer-from track progress within the current buffer, so a partial write follo
 every byte already transferred rather than only previously completed buffers. A package-private
 channel factory provides deterministic bridge-level contract tests without exposing handles or
 changing production construction.
+
+## Eighth independent re-review outcome
+
+The eighth whole-change review of `8d1d3da2c68eb6b35c790e6465b77519efd38349`
+approved Task 4 with zero Critical, zero Important, and one Minor finding. The accepted Minor is
+limited to negative `position`/`count` validation on custom `FileChannel` transfer methods that no
+current product callback invokes. It remains recorded for final review and does not weaken the
+approved production mutation, containment, recovery, or authorization contracts.
