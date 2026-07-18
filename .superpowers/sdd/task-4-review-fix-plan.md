@@ -296,5 +296,20 @@ mutations lacking a retained provider capability or guaranteed atomic transition
 - [x] Isolate legacy portable coordination tests behind an explicit test-only boundary marker that
   Spring production never constructs.
 - [x] Stop custom native `FileChannel` transfer loops on legal zero progress.
-- [ ] Update records, commit the seventh candidate, and request a fresh whole-change review while
+- [x] Update records, commit the seventh candidate, and request a fresh whole-change review while
   retaining Task 4 as review-rejected until approval and remote push.
+
+### Task 16: Seventh independent review remediation
+
+**Review result:** Commit `42c446ba` was rejected with zero Critical, one Important, and zero Minor
+findings. Production fail-closed capability routing was accepted; only partial zero-progress native
+file-channel accounting remained.
+
+- [x] Add deterministic bridge-backed gathering-write coverage for a partial write followed by
+  legal zero progress.
+- [x] Add deterministic transfer-to and transfer-from coverage proving partial current-buffer
+  progress is included in the returned count.
+- [x] Stop gathering writes on zero without spinning and preserve accumulated progress.
+- [x] Track current-buffer transfer progress in both directions before returning on zero.
+- [ ] Update records, commit the eighth candidate, and request another fresh whole-change review
+  while retaining Task 4 as review-rejected until approval and remote push.

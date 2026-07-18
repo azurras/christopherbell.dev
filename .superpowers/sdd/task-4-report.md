@@ -4,7 +4,7 @@ Date: 2026-07-17
 
 Branch: `codex/shared-folder-portal`
 
-Status: Sixth review rejected; seventh remediation implementation and verification complete; fresh independent review required
+Status: Seventh review rejected; eighth remediation implementation and verification complete; fresh independent review required
 
 ## Review Outcome and Remediation
 
@@ -412,4 +412,29 @@ All Gradle state remained in external user and project caches, with
 - No worktree-local `.gradle*` directory exists.
 
 Task 4 remains in progress and review-rejected until the seventh candidate is committed, reviewed
+across `8602985d..HEAD`, approved with no Critical or Important findings, and pushed.
+
+## Seventh Independent Re-review
+
+The whole-change review of local commit `42c446ba3fc623e92010536f30fe2694a0f01f66`
+rejected Task 4 with zero Critical, one Important, and zero Minor findings. The production retained
+boundary routing, unsupported-provider 503 behavior, old portable-journal handling, Spring
+construction, and racer preservation were accepted. The remaining issue was confined to the custom
+native `FileChannel`: gathering write could spin on zero, and transfer methods undercounted a
+partially written current buffer when the next write returned zero.
+
+## Seventh-Review Remediation and Eighth Candidate Verification
+
+- A deterministic mocked native bridge now returns a partial write followed by zero. Gathering
+  write returns the partial count and leaves the buffer at the correct position instead of spinning.
+- Deterministic transfer-to and transfer-from channels prove partial current-buffer progress is
+  included in the returned count before a zero-progress return.
+- The earlier real Windows immediate-zero regression remains green.
+- `test :website:jsTest` passed with the native/junction flag enabled: 816 `website` tests and 93
+  `cbell-lib` tests passed (909 Java tests total), plus 153 JavaScript tests; 0 failures, 0 errors,
+  and 0 skipped.
+- `git diff --check` passed with only expected line-ending notices, and no worktree-local
+  `.gradle*` directory exists.
+
+Task 4 remains in progress and review-rejected until the eighth candidate is committed, reviewed
 across `8602985d..HEAD`, approved with no Critical or Important findings, and pushed.

@@ -653,13 +653,20 @@ public class PortableSharedFolderPrivateBoundary {
 
   private record WindowsLeafFacts(Object identity, int linkCount) { }
 
+  /** Package-private seam for deterministic channel-contract tests. */
+  static FileChannel nativeFileChannelForTest(
+      WindowsSharedFolderNativeBridge bridge,
+      WindowsSharedFolderNativeBridge.NativeHandle handle) {
+    return new NativeFileChannel(bridge, handle);
+  }
+
   private static final class NativeFileChannel extends FileChannel {
-    private final JnaWindowsSharedFolderNativeBridge bridge;
+    private final WindowsSharedFolderNativeBridge bridge;
     private WindowsSharedFolderNativeBridge.NativeHandle handle;
     private long position;
 
     private NativeFileChannel(
-        JnaWindowsSharedFolderNativeBridge bridge,
+        WindowsSharedFolderNativeBridge bridge,
         WindowsSharedFolderNativeBridge.NativeHandle handle) {
       this.bridge = bridge;
       this.handle = handle;
@@ -707,7 +714,11 @@ public class PortableSharedFolderPrivateBoundary {
       java.util.Objects.checkFromIndexSize(offset, length, sources.length);
       long total = 0;
       for (int index = offset; index < offset + length; index++) {
-        while (sources[index].hasRemaining()) total += write(sources[index]);
+        while (sources[index].hasRemaining()) {
+          int written = write(sources[index]);
+          if (written == 0) return total;
+          total += written;
+        }
       }
       return total;
     }
@@ -741,10 +752,13 @@ public class PortableSharedFolderPrivateBoundary {
         int read = read(buffer, position + transferred);
         if (read <= 0) break;
         buffer.flip();
+        long currentBufferTransferred = 0;
         while (buffer.hasRemaining()) {
-          if (target.write(buffer) == 0) return transferred;
+          int written = target.write(buffer);
+          if (written == 0) return transferred + currentBufferTransferred;
+          currentBufferTransferred += written;
         }
-        transferred += read;
+        transferred += currentBufferTransferred;
       }
       return transferred;
     }
@@ -759,12 +773,14 @@ public class PortableSharedFolderPrivateBoundary {
         if (read <= 0) break;
         buffer.flip();
         long writePosition = position + transferred;
+        long currentBufferTransferred = 0;
         while (buffer.hasRemaining()) {
           int written = write(buffer, writePosition);
-          if (written == 0) return transferred;
+          if (written == 0) return transferred + currentBufferTransferred;
           writePosition += written;
+          currentBufferTransferred += written;
         }
-        transferred += read;
+        transferred += currentBufferTransferred;
       }
       return transferred;
     }

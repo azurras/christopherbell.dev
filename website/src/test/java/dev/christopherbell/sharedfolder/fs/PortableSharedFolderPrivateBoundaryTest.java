@@ -282,6 +282,63 @@ class PortableSharedFolderPrivateBoundaryTest {
   }
 
   @Test
+  void nativePrivateChannelCountsPartialProgressBeforeAZeroWrite() throws Exception {
+    WindowsSharedFolderNativeBridge bridge =
+        org.mockito.Mockito.mock(WindowsSharedFolderNativeBridge.class);
+    var handle = new WindowsSharedFolderNativeBridge.NativeHandle(new Object());
+    var identity = new WindowsSharedFolderNativeBridge.NativeFileIdentity(1, new byte[16]);
+    org.mockito.Mockito.when(bridge.metadata(handle)).thenReturn(
+        new WindowsSharedFolderNativeBridge.NativeFileMetadata(
+            identity, false, true, 8, java.time.Instant.EPOCH));
+    org.mockito.Mockito.when(bridge.write(
+        org.mockito.ArgumentMatchers.eq(handle), org.mockito.ArgumentMatchers.any(byte[].class),
+        org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+        .thenReturn(2, 0, 2, 0);
+    org.mockito.Mockito.when(bridge.read(
+        org.mockito.ArgumentMatchers.eq(handle), org.mockito.ArgumentMatchers.any(byte[].class),
+        org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+        .thenAnswer(invocation -> {
+          byte[] destination = invocation.getArgument(1);
+          System.arraycopy("data".getBytes(), 0, destination, 0, 4);
+          return 4;
+        });
+
+    try (var channel = PortableSharedFolderPrivateBoundary.nativeFileChannelForTest(
+        bridge, handle)) {
+      ByteBuffer gathering = ByteBuffer.wrap("four".getBytes());
+      assertThat(channel.write(new ByteBuffer[] {gathering}, 0, 1)).isEqualTo(2);
+      assertThat(gathering.position()).isEqualTo(2);
+
+      AtomicBoolean firstTargetWrite = new AtomicBoolean(true);
+      java.nio.channels.WritableByteChannel partialTarget =
+          new java.nio.channels.WritableByteChannel() {
+            @Override public int write(ByteBuffer source) {
+              if (!firstTargetWrite.compareAndSet(true, false)) return 0;
+              source.position(source.position() + 2);
+              return 2;
+            }
+            @Override public boolean isOpen() { return true; }
+            @Override public void close() { }
+          };
+      assertThat(channel.transferTo(0, 4, partialTarget)).isEqualTo(2);
+
+      java.nio.channels.ReadableByteChannel fourByteSource =
+          new java.nio.channels.ReadableByteChannel() {
+            private boolean read;
+            @Override public int read(ByteBuffer target) {
+              if (read) return -1;
+              read = true;
+              target.put("more".getBytes());
+              return 4;
+            }
+            @Override public boolean isOpen() { return true; }
+            @Override public void close() { }
+          };
+      assertThat(channel.transferFrom(fourByteSource, 0, 4)).isEqualTo(2);
+    }
+  }
+
+  @Test
   void rejectsPrivateDirectorySubstitutionBeforeTheLeafOperationRuns() throws Exception {
     Path systemRoot = Files.createDirectory(temp.resolve("system"));
     PortableSharedFolderPrivateBoundary boundary =

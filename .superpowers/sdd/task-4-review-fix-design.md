@@ -200,3 +200,13 @@ Portable private move-in/move-out is likewise unavailable outside that test-only
 harness, eliminating path-based journal transitions and post-move cleanup of an unowned visible
 racer. The custom retained Windows file channel stops transfer operations on legal zero progress
 instead of spinning.
+
+## Seventh independent re-review remediation
+
+The seventh whole-change review of `42c446ba3fc623e92010536f30fe2694a0f01f66`
+accepted the production mutation boundary and found one remaining Important custom-channel issue.
+Gathering writes now return accumulated progress when a scalar write returns zero. Transfer-to and
+transfer-from track progress within the current buffer, so a partial write followed by zero reports
+every byte already transferred rather than only previously completed buffers. A package-private
+channel factory provides deterministic bridge-level contract tests without exposing handles or
+changing production construction.
