@@ -253,5 +253,28 @@ approved Task 4 design, which deliberately requires that precedence only for app
   regression.
 - [x] Make the replacement-racer test deterministic, fix null-file-key identity ambiguity, and run
   the focused concurrency/recovery tests repeatedly.
-- [ ] Remove the duplicate import, update documentation/report/progress, run full Java/JS/native/
+- [x] Remove the duplicate import, update documentation/report/progress, run full Java/JS/native/
   junction verification, commit a fifth candidate, and request another whole-change review.
+
+### Task 14: Fifth independent review remediation
+
+**Review result:** Commit `09a0e766` was rejected with three Critical and four Important findings.
+Scheduled unattended expiry cleanup remains assigned to Task 8 in the primary Builder plan, and
+the approved append validation-before-authorization precedence remains unchanged.
+
+- [x] Add a repository RED test proving every expired mutation, append, and finalization lease
+  claim invalidates stale optimistic entity versions; increment `@Version` atomically and reload
+  exact claim proof before physical recovery.
+- [x] Add RED create-new and mid-operation substitution tests; bind private file operations to a
+  retained provider identity and, on Windows, a native handle-backed file channel.
+- [x] Add a RED move-out substitution test; remove an unsafe substituted leaf from the visible
+  destination while preserving outside content.
+- [x] Remove metadata-only stable-identity fallback and require provider-backed file identity.
+- [x] Add portable/native RED tests for an observed replacement target disappearing during initial
+  creation; return 409 without consuming source or staging data.
+- [x] Add a RED native private-directory initialization test; create only after an exact missing
+  status and propagate unknown/unavailable opens.
+- [x] Add a RED native append reserve test; include temporary chunk duplication plus final staging
+  growth in the peak requirement.
+- [ ] Commit the sixth candidate, request a fresh whole-change review, and retain Task 4 as
+  review-rejected until approval and remote push.

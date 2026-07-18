@@ -186,6 +186,32 @@ class WindowsSharedFolderMutationBoundaryTest {
     boundary.destroy();
   }
 
+  @Test
+  void privateDirectoryInitializationCreatesOnlyAfterAnExactMissingStatus() {
+    RecordingBridge unavailableBridge = new RecordingBridge();
+    NativeBoundaryException unavailableFailure =
+        new NativeBoundaryException("private directory unavailable", 0);
+    unavailableBridge.privateDirectoryOpenFailure = unavailableFailure;
+    WindowsSharedFolderMutationBoundary unavailable = WindowsSharedFolderMutationBoundary.forTest(
+        Path.of("C:/shared"), Path.of("C:/system"), unavailableBridge);
+
+    assertThatThrownBy(() -> unavailable.createStaging(
+        "77777777-7777-7777-7777-777777777777"))
+        .isSameAs(unavailableFailure);
+    assertThat(unavailableBridge.createdNames).doesNotContain("shared-folder-upload-staging");
+    unavailable.destroy();
+
+    RecordingBridge missingBridge = new RecordingBridge();
+    missingBridge.privateDirectoryOpenFailure =
+        new NativeBoundaryException("private directory missing", 0xC0000034);
+    WindowsSharedFolderMutationBoundary missing = WindowsSharedFolderMutationBoundary.forTest(
+        Path.of("C:/shared"), Path.of("C:/system"), missingBridge);
+    missing.createStaging("88888888-8888-8888-8888-888888888888").close();
+
+    assertThat(missingBridge.createdNames).contains("shared-folder-upload-staging");
+    missing.destroy();
+  }
+
   private record OpenRequest(WindowsSharedFolderNativeBridge.NativeHandle parent, int attributes) {}
   private record Rename(String sourceName, String targetName, boolean replace) {}
 
@@ -194,6 +220,7 @@ class WindowsSharedFolderMutationBoundaryTest {
     private final NativeHandle systemRoot = new NativeHandle("system-root");
     private final List<OpenRequest> openRequests = new ArrayList<>();
     private final List<NativeHandle> createdParents = new ArrayList<>();
+    private final List<String> createdNames = new ArrayList<>();
     private final List<Rename> renames = new ArrayList<>();
     private final List<String> writes = new ArrayList<>();
     private final List<String> flushed = new ArrayList<>();
@@ -209,6 +236,7 @@ class WindowsSharedFolderMutationBoundaryTest {
     private boolean mutationSourceOpened;
     private boolean changeTargetIdentityOnNextOpen;
     private boolean targetRaced;
+    private NativeBoundaryException privateDirectoryOpenFailure;
 
     @Override
     public NativeHandle openRoot(Path rootPath, int attributes) {
@@ -243,6 +271,13 @@ class WindowsSharedFolderMutationBoundaryTest {
     public NativeHandle openRelativeForMutation(
         NativeHandle parent, String name, OpenKind kind, int attributes) {
       mutationOpenNames.add(name);
+      if (privateDirectoryOpenFailure != null
+          && (name.equals("shared-folder-upload-staging")
+              || name.equals("shared-folder-mutation-quarantine"))) {
+        NativeBoundaryException failure = privateDirectoryOpenFailure;
+        privateDirectoryOpenFailure = null;
+        throw failure;
+      }
       if (changeIdentityOnMutationOpen && name.equals("old.txt")) {
         mutationSourceOpened = true;
       }
@@ -260,6 +295,7 @@ class WindowsSharedFolderMutationBoundaryTest {
     public NativeHandle createRelative(NativeHandle parent, String name, OpenKind kind, int attributes) {
       openRequests.add(new OpenRequest(parent, attributes));
       createdParents.add(parent);
+      createdNames.add(name);
       return new NativeHandle(name);
     }
 

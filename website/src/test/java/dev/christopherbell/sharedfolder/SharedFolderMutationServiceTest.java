@@ -1046,6 +1046,7 @@ class SharedFolderMutationServiceTest {
         current.setOperationLeaseToken(invocation.getArgument(4));
         current.setOperationLeaseExpiresAt(invocation.getArgument(5));
         current.setUpdatedAt(invocation.getArgument(6));
+        current.setVersion(current.getVersion() == null ? 0L : current.getVersion() + 1L);
         return 1L;
       }
     }).when(repository).claimExpiredOperationLease(

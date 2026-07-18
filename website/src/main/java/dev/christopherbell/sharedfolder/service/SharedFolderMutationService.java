@@ -970,7 +970,7 @@ public class SharedFolderMutationService {
     heartbeat.run();
     var before = privateMetadata(key);
     BasicFileAttributes attributes = before.attributes();
-    String metadata = portableStableIdentity(attributes) + ":" + attributes.size() + ":"
+    String metadata = privateStableIdentity(before) + ":" + attributes.size() + ":"
         + attributes.lastModifiedTime().toMillis();
     if (attributes.isDirectory()) {
       if (!privateDirectoryIsEmpty(key)) throw conflict();
@@ -1049,15 +1049,14 @@ public class SharedFolderMutationService {
   private String portableStableIdentity(Path path) throws IOException {
     BasicFileAttributes attributes = Files.readAttributes(
         path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-    return portableStableIdentity(attributes);
+    return dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary
+        .stableIdentity(path) + ":" + attributes.isDirectory();
   }
 
-  private String portableStableIdentity(BasicFileAttributes attributes) {
-    Object key = attributes.fileKey();
-    String identity = key == null
-        ? attributes.creationTime() + ":" + attributes.size() + ":" + attributes.lastModifiedTime()
-        : key.toString();
-    return identity + ":" + attributes.isDirectory();
+  private String privateStableIdentity(
+      dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary.PrivateLeafMetadata
+          metadata) {
+    return metadata.stableIdentity() + ":" + metadata.attributes().isDirectory();
   }
 
   private void requireSameFileStore(Path first, Path second) throws IOException {

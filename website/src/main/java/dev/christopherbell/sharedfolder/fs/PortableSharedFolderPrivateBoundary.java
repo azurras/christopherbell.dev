@@ -8,6 +8,9 @@ import com.sun.jna.platform.win32.WinNT.HANDLE;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.nio.channels.ReadableByteChannel;
+import java.nio.channels.WritableByteChannel;
+import java.nio.MappedByteBuffer;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -26,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Set;
 
 /** Resolves private upload and recovery files beneath one pre-created, ordinary system root. */
-public final class PortableSharedFolderPrivateBoundary {
+public class PortableSharedFolderPrivateBoundary {
   private final Path configuredRoot;
   private final SharedFolderFileSystemBoundary fileSystem;
   private final List<Identity> configuredChain;
@@ -116,31 +119,45 @@ public final class PortableSharedFolderPrivateBoundary {
     } catch (NoSuchFileException exception) {
       expected = null;
     }
-    if (access == FileAccess.CREATE_NEW && expected != null) {
-      throw new FileAlreadyExistsException(path.toString());
+    if (access == FileAccess.CREATE_NEW) {
+      if (expected != null) throw new FileAlreadyExistsException(path.toString());
+      Files.createFile(path);
+      expected = leafIdentity(path, true);
+    } else if (access == FileAccess.APPEND_OR_CREATE && expected == null) {
+      Files.createFile(path);
+      expected = leafIdentity(path, true);
+    }
+    if (isWindows()) {
+      return operateOnWindowsRegularFile(path, expected, access, operation);
     }
     Set<OpenOption> options = switch (access) {
-      case CREATE_NEW -> Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE,
-          LinkOption.NOFOLLOW_LINKS);
+      case CREATE_NEW -> Set.of(StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
       case READ -> Set.of(StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
-      case APPEND_OR_CREATE -> Set.of(StandardOpenOption.CREATE, StandardOpenOption.WRITE,
-          LinkOption.NOFOLLOW_LINKS);
+      case APPEND_OR_CREATE -> Set.of(StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
       case WRITE -> Set.of(StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
     };
-    try (FileChannel channel = FileChannel.open(path, options);
-        FileLock lock = access.writes() ? exclusiveLock(channel) : null) {
-      LeafIdentity opened = leafIdentity(path, true);
-      if (expected != null && !expected.sameObject(opened)) {
-        throw unavailable(new IOException("private shared-folder leaf identity changed"));
+    try {
+      try {
+        beforePrivateFileChannelOpen(path, access);
+      } catch (IOException exception) {
+        throw unavailable(exception);
       }
-      if (access == FileAccess.APPEND_OR_CREATE) channel.position(channel.size());
-      T result = operation.apply(channel);
-      LeafIdentity current = leafIdentity(path, true);
-      if (!opened.sameObject(current)) {
-        throw unavailable(new IOException("private shared-folder leaf identity changed"));
+      try (FileChannel channel = FileChannel.open(path, options);
+          FileLock lock = access.writes() ? exclusiveLock(channel) : null) {
+        afterPrivateFileOpenBeforeIdentity(path, access);
+        LeafIdentity opened = leafIdentity(path, true);
+        if (!expected.sameObject(opened)) {
+          throw unavailable(new IOException("private shared-folder leaf identity changed"));
+        }
+        if (access == FileAccess.APPEND_OR_CREATE) channel.position(channel.size());
+        T result = operation.apply(channel);
+        LeafIdentity current = leafIdentity(path, true);
+        if (!opened.sameObject(current)) {
+          throw unavailable(new IOException("private shared-folder leaf identity changed"));
+        }
+        verifyForOperation();
+        return result;
       }
-      verifyForOperation();
-      return result;
     } catch (BoundaryUnavailableException exception) {
       throw exception;
     } catch (IOException | RuntimeException | Error failure) {
@@ -151,6 +168,57 @@ public final class PortableSharedFolderPrivateBoundary {
         throw verificationFailure;
       }
       throw failure;
+    }
+  }
+
+  private <T> T operateOnWindowsRegularFile(
+      Path path, LeafIdentity expected, FileAccess access,
+      CheckedFileChannelOperation<T> operation) throws IOException {
+    JnaWindowsSharedFolderNativeBridge bridge = new JnaWindowsSharedFolderNativeBridge();
+    WindowsSharedFolderNativeBridge.NativeHandle parent = null;
+    WindowsSharedFolderNativeBridge.NativeHandle leaf = null;
+    try {
+      parent = bridge.openRootForMutation(
+          path.getParent(), WindowsSharedFolderNativeBridge.OBJ_DONT_REPARSE);
+      leaf = bridge.openRelativeForExclusiveMutation(parent, path.getFileName().toString(),
+          WindowsSharedFolderNativeBridge.OpenKind.FILE,
+          WindowsSharedFolderNativeBridge.OBJ_DONT_REPARSE);
+      var metadata = bridge.metadata(leaf);
+      String retainedIdentity = Long.toUnsignedString(metadata.identity().volumeSerial()) + ":"
+          + Base64.getUrlEncoder().withoutPadding().encodeToString(metadata.identity().fileId());
+      if (!metadata.regularFile() || !expected.stableIdentity().equals(retainedIdentity)) {
+        throw unavailable(new IOException("private Windows leaf identity changed"));
+      }
+      try {
+        beforePrivateFileChannelOpen(path, access);
+        afterPrivateFileOpenBeforeIdentity(path, access);
+      } catch (IOException exception) {
+        throw unavailable(exception);
+      }
+      try (NativeFileChannel channel = new NativeFileChannel(bridge, leaf)) {
+        leaf = null;
+        if (access == FileAccess.APPEND_OR_CREATE) channel.position(channel.size());
+        T result = operation.apply(channel);
+        LeafIdentity current = leafIdentity(path, true);
+        if (!expected.sameObject(current)) {
+          throw unavailable(new IOException("private shared-folder leaf identity changed"));
+        }
+        verifyForOperation();
+        return result;
+      }
+    } catch (BoundaryUnavailableException exception) {
+      throw exception;
+    } catch (java.nio.file.FileSystemException failure) {
+      throw unavailable(failure);
+    } catch (IOException failure) {
+      throw failure;
+    } catch (WindowsSharedFolderNativeBridge.NativeBoundaryException failure) {
+      throw unavailable(new IOException("private Windows leaf operation failed", failure));
+    } catch (RuntimeException failure) {
+      throw failure;
+    } finally {
+      if (leaf != null) bridge.close(leaf);
+      if (parent != null) bridge.close(parent);
     }
   }
 
@@ -267,10 +335,7 @@ public final class PortableSharedFolderPrivateBoundary {
         throw new FileAlreadyExistsException(target.toString());
       }
       Files.move(source, target);
-      LeafIdentity movedIdentity = leafIdentity(target, false);
-      if (!sourceIdentity.sameObject(movedIdentity)) {
-        throw unavailable(new IOException("private shared-folder moved leaf identity changed"));
-      }
+      verifyMovedIdentityOrDelete(target, sourceIdentity);
       verifyForOperation();
     } catch (BoundaryUnavailableException exception) {
       throw exception;
@@ -289,16 +354,40 @@ public final class PortableSharedFolderPrivateBoundary {
       if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
         throw new FileAlreadyExistsException(target.toString());
       }
+      afterMoveOutIdentityBeforeMove(source, target);
       Files.move(source, target);
-      LeafIdentity movedIdentity = leafIdentity(target, false);
-      if (!sourceIdentity.sameObject(movedIdentity)) {
-        throw unavailable(new IOException("private shared-folder moved leaf identity changed"));
-      }
+      verifyMovedIdentityOrDelete(target, sourceIdentity);
       verifyForOperation();
     } catch (BoundaryUnavailableException exception) {
       throw exception;
     } catch (SecurityException exception) {
       throw unavailable(exception);
+    }
+  }
+
+  /** Test seam after a private channel opens but before its named leaf is re-read. */
+  protected void afterPrivateFileOpenBeforeIdentity(Path path, FileAccess access) throws IOException { }
+
+  /** Test seam after the retained Windows delete-denial guard and before the Java channel opens. */
+  protected void beforePrivateFileChannelOpen(Path path, FileAccess access) throws IOException { }
+
+  /** Test seam after move-out validates its source but before the path move. */
+  protected void afterMoveOutIdentityBeforeMove(Path source, Path target) throws IOException { }
+
+  private void verifyMovedIdentityOrDelete(Path target, LeafIdentity sourceIdentity)
+      throws IOException {
+    try {
+      LeafIdentity movedIdentity = leafIdentity(target, false);
+      if (!sourceIdentity.sameObject(movedIdentity)) {
+        throw unavailable(new IOException("private shared-folder moved leaf identity changed"));
+      }
+    } catch (IOException | RuntimeException failure) {
+      try {
+        Files.deleteIfExists(target);
+      } catch (IOException cleanupFailure) {
+        failure.addSuppressed(cleanupFailure);
+      }
+      throw failure;
     }
   }
 
@@ -425,9 +514,7 @@ public final class PortableSharedFolderPrivateBoundary {
       throw new IOException("private shared-folder provider is unsupported");
     }
     Path canonicalPath = path.toRealPath(LinkOption.NOFOLLOW_LINKS);
-    Object stableIdentity = attributes.fileKey() == null
-        ? canonicalPath + "@" + attributes.creationTime()
-        : attributes.fileKey();
+    Object stableIdentity = stableIdentity(path, attributes);
     FileStore store = Files.getFileStore(path);
     boolean mountPoint = fileSystem.isMountPoint(path);
     return new Identity(path, canonicalPath, stableIdentity,
@@ -481,8 +568,25 @@ public final class PortableSharedFolderPrivateBoundary {
     return new LeafIdentity(stableIdentity, attributes);
   }
 
-  private WindowsLeafFacts windowsLeafFacts(Path path) throws IOException {
-    HANDLE handle = Kernel32.INSTANCE.CreateFile(path.toString(), WinNT.FILE_READ_ATTRIBUTES,
+  /** Returns a provider-backed stable identity or fails closed when none is available. */
+  public static Object stableIdentity(Path path) throws IOException {
+    BasicFileAttributes attributes = Files.readAttributes(
+        path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+    return stableIdentity(path, attributes);
+  }
+
+  private static Object stableIdentity(Path path, BasicFileAttributes attributes)
+      throws IOException {
+    if (isWindows()) return windowsLeafFacts(path).identity();
+    if (attributes.fileKey() == null) {
+      throw new IOException("private shared-folder provider has no stable identity");
+    }
+    return attributes.fileKey();
+  }
+
+  private static WindowsLeafFacts windowsLeafFacts(Path path) throws IOException {
+    HANDLE handle = Kernel32.INSTANCE.CreateFile(
+        path.toString(), WinNT.FILE_READ_ATTRIBUTES,
         WinNT.FILE_SHARE_READ | WinNT.FILE_SHARE_WRITE | WinNT.FILE_SHARE_DELETE,
         null, WinNT.OPEN_EXISTING,
         WinNT.FILE_FLAG_OPEN_REPARSE_POINT | WinNT.FILE_FLAG_BACKUP_SEMANTICS, null);
@@ -490,7 +594,14 @@ public final class PortableSharedFolderPrivateBoundary {
       throw new IOException("private Windows leaf cannot be opened");
     }
     try {
-      WinBase.FILE_ID_INFO id = new WinBase.FILE_ID_INFO();
+      return windowsLeafFacts(handle);
+    } finally {
+      Kernel32.INSTANCE.CloseHandle(handle);
+    }
+  }
+
+  private static WindowsLeafFacts windowsLeafFacts(HANDLE handle) throws IOException {
+    WinBase.FILE_ID_INFO id = new WinBase.FILE_ID_INFO();
       if (!Kernel32.INSTANCE.GetFileInformationByHandleEx(
           handle, WinBase.FileIdInfo, id.getPointer(), new DWORD(id.size()))) {
         throw new IOException("private Windows leaf identity is unavailable");
@@ -509,12 +620,9 @@ public final class PortableSharedFolderPrivateBoundary {
       String stableIdentity = Long.toUnsignedString(id.VolumeSerialNumber) + ":"
           + Base64.getUrlEncoder().withoutPadding().encodeToString(identifier);
       return new WindowsLeafFacts(stableIdentity, standard.NumberOfLinks);
-    } finally {
-      Kernel32.INSTANCE.CloseHandle(handle);
-    }
   }
 
-  private boolean isWindows() {
+  private static boolean isWindows() {
     return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("windows");
   }
 
@@ -549,4 +657,155 @@ public final class PortableSharedFolderPrivateBoundary {
   }
 
   private record WindowsLeafFacts(Object identity, int linkCount) { }
+
+  private static final class NativeFileChannel extends FileChannel {
+    private final JnaWindowsSharedFolderNativeBridge bridge;
+    private WindowsSharedFolderNativeBridge.NativeHandle handle;
+    private long position;
+
+    private NativeFileChannel(
+        JnaWindowsSharedFolderNativeBridge bridge,
+        WindowsSharedFolderNativeBridge.NativeHandle handle) {
+      this.bridge = bridge;
+      this.handle = handle;
+    }
+
+    @Override public synchronized int read(java.nio.ByteBuffer destination) throws IOException {
+      if (!destination.hasRemaining()) return 0;
+      byte[] bytes = new byte[Math.min(destination.remaining(), 64 * 1024)];
+      bridge.seek(openHandle(), position);
+      int read = bridge.read(openHandle(), bytes, 0, bytes.length);
+      if (read > 0) {
+        destination.put(bytes, 0, read);
+        position += read;
+      }
+      return read;
+    }
+
+    @Override public synchronized int write(java.nio.ByteBuffer source) throws IOException {
+      if (!source.hasRemaining()) return 0;
+      byte[] bytes = new byte[Math.min(source.remaining(), 64 * 1024)];
+      int originalPosition = source.position();
+      source.get(bytes);
+      bridge.seek(openHandle(), position);
+      int written = bridge.write(openHandle(), bytes, 0, bytes.length);
+      source.position(originalPosition + written);
+      position += written;
+      return written;
+    }
+
+    @Override public synchronized long read(
+        java.nio.ByteBuffer[] destinations, int offset, int length) throws IOException {
+      java.util.Objects.checkFromIndexSize(offset, length, destinations.length);
+      long total = 0;
+      for (int index = offset; index < offset + length; index++) {
+        int read = read(destinations[index]);
+        if (read < 0) return total == 0 ? -1 : total;
+        total += read;
+        if (destinations[index].hasRemaining()) break;
+      }
+      return total;
+    }
+
+    @Override public synchronized long write(
+        java.nio.ByteBuffer[] sources, int offset, int length) throws IOException {
+      java.util.Objects.checkFromIndexSize(offset, length, sources.length);
+      long total = 0;
+      for (int index = offset; index < offset + length; index++) {
+        while (sources[index].hasRemaining()) total += write(sources[index]);
+      }
+      return total;
+    }
+
+    @Override public synchronized long position() { return position; }
+    @Override public synchronized FileChannel position(long newPosition) throws IOException {
+      if (newPosition < 0) throw new IllegalArgumentException("negative position");
+      bridge.seek(openHandle(), newPosition);
+      position = newPosition;
+      return this;
+    }
+    @Override public synchronized long size() throws IOException {
+      return bridge.metadata(openHandle()).size();
+    }
+    @Override public synchronized FileChannel truncate(long size) throws IOException {
+      if (size < 0) throw new IllegalArgumentException("negative size");
+      bridge.truncate(openHandle(), size);
+      if (position > size) position = size;
+      return this;
+    }
+    @Override public synchronized void force(boolean metadata) throws IOException {
+      bridge.flush(openHandle());
+    }
+    @Override public long transferTo(long position, long count, WritableByteChannel target)
+        throws IOException {
+      long transferred = 0;
+      java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(
+          (int) Math.min(Math.max(1, count), 64 * 1024));
+      while (transferred < count) {
+        buffer.clear().limit((int) Math.min(buffer.capacity(), count - transferred));
+        int read = read(buffer, position + transferred);
+        if (read < 0) break;
+        buffer.flip();
+        while (buffer.hasRemaining()) target.write(buffer);
+        transferred += read;
+      }
+      return transferred;
+    }
+    @Override public long transferFrom(ReadableByteChannel source, long position, long count)
+        throws IOException {
+      long transferred = 0;
+      java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(
+          (int) Math.min(Math.max(1, count), 64 * 1024));
+      while (transferred < count) {
+        buffer.clear().limit((int) Math.min(buffer.capacity(), count - transferred));
+        int read = source.read(buffer);
+        if (read < 0) break;
+        buffer.flip();
+        long writePosition = position + transferred;
+        while (buffer.hasRemaining()) writePosition += write(buffer, writePosition);
+        transferred += read;
+      }
+      return transferred;
+    }
+    @Override public synchronized int read(java.nio.ByteBuffer destination, long at)
+        throws IOException {
+      long saved = position;
+      try { position(at); return read(destination); }
+      finally { position(saved); }
+    }
+    @Override public synchronized int write(java.nio.ByteBuffer source, long at)
+        throws IOException {
+      long saved = position;
+      try { position(at); return write(source); }
+      finally { position(saved); }
+    }
+    @Override public MappedByteBuffer map(MapMode mode, long position, long size) {
+      throw new UnsupportedOperationException("native private mapping is unsupported");
+    }
+    @Override public FileLock lock(long position, long size, boolean shared) throws IOException {
+      return nativeLock(position, size, shared);
+    }
+    @Override public FileLock tryLock(long position, long size, boolean shared) throws IOException {
+      return nativeLock(position, size, shared);
+    }
+    private FileLock nativeLock(long position, long size, boolean shared) throws IOException {
+      openHandle();
+      return new FileLock(this, position, size, shared) {
+        private boolean valid = true;
+        @Override public boolean isValid() { return valid && NativeFileChannel.this.isOpen(); }
+        @Override public void release() { valid = false; }
+      };
+    }
+    @Override protected void implCloseChannel() {
+      if (handle != null) {
+        var closing = handle;
+        handle = null;
+        bridge.close(closing);
+      }
+    }
+    private WindowsSharedFolderNativeBridge.NativeHandle openHandle() throws IOException {
+      if (handle == null) throw new IOException("native private file is closed");
+      return handle;
+    }
+  }
 }

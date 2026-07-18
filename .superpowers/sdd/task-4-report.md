@@ -4,7 +4,7 @@ Date: 2026-07-17
 
 Branch: `codex/shared-folder-portal`
 
-Status: Third remediation implementation and verification complete; fourth independent re-review required
+Status: Fifth review rejected; sixth remediation implementation and verification complete; fresh independent review required
 
 ## Review Outcome and Remediation
 
@@ -312,3 +312,58 @@ All Gradle state remained in the external user and project caches, and
 
 Task 4 remains in progress and review-rejected until the fifth candidate is committed, independently
 reviewed across `8602985d..HEAD`, approved with no Critical or Important findings, and pushed.
+
+## Fifth Independent Re-review
+
+The whole-change review of local commit `09a0e7669c80e3c025137352caefbd4c62527495`
+rejected Task 4 with three Critical and four Important findings. The commit was not pushed. The
+confirmed remediation scope was atomic claim version fencing, binding portable private operations
+to the named retained leaf, cleaning an unsafe move-out substitution from the visible destination,
+provider-backed stable identity, consistent 409 semantics for initially disappeared replacement
+targets, exact missing-only native private-directory creation, and reserve accounting for temporary
+chunk duplication.
+
+The reviewer also confirmed the existing scope decisions: unattended expiry cleanup remains a
+later Task 8 requirement, and append input validation retains its approved precedence before
+authorization. Task 4 remains review-rejected pending a new whole-change review.
+
+## Fifth-Review Remediation RED/GREEN Evidence
+
+Each confirmed finding received a focused regression before its production change:
+
+- Atomic mutation, append, and finalization lease-claim tests failed because the database updates
+  changed token/expiry without changing `@Version`. Claims now increment the version, and recovery
+  reloads exact durable claim proof before physical work.
+- Create-new and retained-leaf substitution tests failed because the callback channel was not
+  proven to belong to the named private leaf. Stable provider identity is mandatory; Windows uses
+  a retained native leaf handle as the file-channel capability and denies concurrent rename.
+- The move-out substitution test exposed an unsafe leaf at the visible destination. Post-move
+  identity or link-count failure now deletes that moved leaf before propagating the failure, while
+  outside content remains unchanged.
+- Initial replacement-disappearance tests returned inconsistent missing/unavailable results.
+  Portable and native create paths now return semantic 409 when the caller supplied an observed
+  target token and the target has disappeared.
+- Native private-directory initialization treated all open failures as absence. It now creates
+  only after an exact missing NTSTATUS or Win32 status and rethrows unknown/unavailable failures.
+- Native append reserve admitted staging growth without accounting for the temporary chunk copy.
+  The peak calculation now includes both concurrent byte sets and fails with 507 before creation.
+
+All new regressions were observed RED before their corresponding fixes and GREEN afterward.
+
+## Sixth Candidate Verification Before Review
+
+All Gradle state remained in the external user and project caches, with
+`SHARED_FOLDER_RUN_WINDOWS_NATIVE_JUNCTION_TEST=true` for the native and junction coverage.
+
+- The complete affected mutation, upload, repository-claim, portable-boundary, native-boundary,
+  and real-JNA test set passed.
+- `:website:test :website:jsTest` passed: 811 `website` tests and 93 `cbell-lib` tests passed
+  (904 Java tests total), plus 153 JavaScript tests; 0 failures, 0 errors, and 0 skipped.
+- A forced full Java `test --rerun-tasks` passed the same 904 tests from fresh task execution.
+- The two mutation replacement-racer tests and upload replacement-racer test passed five forced
+  runs each (15 executions total), with no rerun-only acceptance.
+- `git diff --check` passed with only expected line-ending notices.
+- No worktree-local `.gradle*` directory exists.
+
+Task 4 remains in progress and review-rejected until the sixth candidate is committed, reviewed
+across `8602985d..HEAD`, approved with no Critical or Important findings, and pushed.

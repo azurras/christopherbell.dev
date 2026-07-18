@@ -131,7 +131,110 @@ class PortableSharedFolderPrivateBoundaryTest {
             PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
 
     assertThat(Files.readString(outside)).isEqualTo("outside");
-    assertThat(Files.readString(displaced)).isEqualTo("changed");
+    if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("windows")) {
+      assertThat(Files.notExists(displaced)).isTrue();
+      assertThat(Files.readString(leaf)).isEqualTo("private");
+    } else {
+      assertThat(Files.readString(displaced)).isEqualTo("changed");
+    }
+  }
+
+  @Test
+  void createNewBindsTheOpenedChannelToTheNamedPrivateLeaf() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("create-new-swap-system"));
+    Path attacker = Files.writeString(temp.resolve("attacker-file"), "attacker");
+    Path displaced = systemRoot.resolve("displaced-created-file");
+    AtomicBoolean callbackInvoked = new AtomicBoolean();
+    PortableSharedFolderPrivateBoundary boundary =
+        new PortableSharedFolderPrivateBoundary(systemRoot) {
+          @Override
+          protected void afterPrivateFileOpenBeforeIdentity(
+              Path path, FileAccess access) throws java.io.IOException {
+            if (access == FileAccess.CREATE_NEW) {
+              Files.move(path, displaced);
+              Files.copy(attacker, path);
+            }
+          }
+        };
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "new-chunk",
+        PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
+          callbackInvoked.set(true);
+          channel.write(ByteBuffer.wrap("payload".getBytes()));
+          return null;
+        })).isInstanceOf(
+            PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
+
+    assertThat(callbackInvoked).isFalse();
+    Path named = systemRoot.resolve("shared-folder-upload-staging/new-chunk");
+    if (System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("windows")) {
+      assertThat(Files.size(named)).isZero();
+      assertThat(Files.notExists(displaced)).isTrue();
+    } else {
+      assertThat(Files.readString(named)).isEqualTo("attacker");
+      assertThat(Files.size(displaced)).isZero();
+    }
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+  void windowsPrivateLeafGuardDeniesRenameBeforeTheFileChannelOpens() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("create-new-guard-system"));
+    Path displaced = temp.resolve("guard-displaced");
+    AtomicBoolean callbackInvoked = new AtomicBoolean();
+    PortableSharedFolderPrivateBoundary boundary =
+        new PortableSharedFolderPrivateBoundary(systemRoot) {
+          @Override
+          protected void beforePrivateFileChannelOpen(Path path, FileAccess access)
+              throws java.io.IOException {
+            Files.move(path, displaced);
+          }
+        };
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "guarded-chunk",
+        PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
+          callbackInvoked.set(true);
+          return null;
+        })).isInstanceOf(java.io.IOException.class);
+
+    assertThat(callbackInvoked).isFalse();
+    assertThat(Files.exists(systemRoot.resolve(
+        "shared-folder-upload-staging/guarded-chunk"))).isTrue();
+    assertThat(Files.notExists(displaced)).isTrue();
+  }
+
+  @Test
+  void moveOutRemovesASubstitutedUnsafeLeafFromTheVisibleTarget() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("move-out-swap-system"));
+    Path visible = Files.createDirectory(temp.resolve("visible"));
+    Path outside = Files.writeString(temp.resolve("move-out-outside"), "outside");
+    Path displaced = systemRoot.resolve("displaced-private-file");
+    PortableSharedFolderPrivateBoundary boundary =
+        new PortableSharedFolderPrivateBoundary(systemRoot) {
+          @Override
+          protected void afterMoveOutIdentityBeforeMove(Path source, Path target)
+              throws java.io.IOException {
+            Files.move(source, displaced);
+            Files.createLink(source, outside);
+          }
+        };
+    boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "session",
+        PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
+          channel.write(ByteBuffer.wrap("private".getBytes()));
+          return null;
+        });
+
+    Path target = visible.resolve("published.bin");
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.moveOut(
+        "shared-folder-upload-staging", "session", target)).isInstanceOf(
+            PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
+
+    assertThat(Files.notExists(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)).isTrue();
+    assertThat(Files.readString(outside)).isEqualTo("outside");
+    assertThat(Files.readString(displaced)).isEqualTo("private");
   }
 
   @Test

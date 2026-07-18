@@ -24,7 +24,7 @@ public interface SharedFolderUploadSessionRepository
       + "{ 'finalizationLeaseExpiresAt': { '$lte': ?3 } }, "
       + "{ 'finalizationLeaseExpiresAt': null }] }")
   @Update("{ '$set': { 'finalizationLeaseToken': ?4, 'finalizationLeaseExpiresAt': ?5, "
-      + "'updatedAt': ?6 } }")
+      + "'updatedAt': ?6 }, '$inc': { 'version': 1 } }")
   long claimExpiredFinalizationLease(
       String id,
       String expiredFinalizationLeaseToken,
@@ -47,7 +47,8 @@ public interface SharedFolderUploadSessionRepository
   /** Atomically transfers one exact expired APPENDING lease to a single reconciler. */
   @Query("{ '_id': ?0, 'state': 'APPENDING', 'appendLeaseToken': ?1, 'appendOffset': ?2, "
       + "'appendLeaseExpiresAt': { '$lte': ?3 } }")
-  @Update("{ '$set': { 'appendLeaseToken': ?4, 'appendLeaseExpiresAt': ?5, 'updatedAt': ?6 } }")
+  @Update("{ '$set': { 'appendLeaseToken': ?4, 'appendLeaseExpiresAt': ?5, 'updatedAt': ?6 }, "
+      + "'$inc': { 'version': 1 } }")
   long claimExpiredAppendLease(
       String id,
       String expiredAppendLeaseToken,

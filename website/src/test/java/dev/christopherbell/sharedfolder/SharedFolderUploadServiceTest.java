@@ -797,6 +797,37 @@ class SharedFolderUploadServiceTest {
   }
 
   @Test
+  void explicitReplacementUploadRequiresTheObservedTargetDuringInitialCreation()
+      throws Exception {
+    Path root = Files.createDirectories(temp.resolve("upload-initial-disappeared-target"));
+    Path target = Files.writeString(root.resolve("target.bin"), "observed");
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    SharedFolderProperties properties = properties(root);
+    String token = new SharedFolderMutationService(access, properties).observedToken("target.bin");
+    Files.delete(target);
+    SharedFolderUploadService portable = new SharedFolderUploadService(
+        access, repository(new ConcurrentHashMap<>()), properties);
+
+    assertConflict(() -> portable.create(new SharedFolderUploadCreateRequest(
+        "", "target.bin", 1, null, token)));
+
+    WindowsSharedFolderMutationBoundary nativeBoundary = mock(
+        WindowsSharedFolderMutationBoundary.class);
+    when(nativeBoundary.nativeMode()).thenReturn(true);
+    when(nativeBoundary.canonicalChildName("", "target.bin")).thenThrow(
+        new dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge
+            .NativeBoundaryException("missing replacement", 0xC0000034));
+    SharedFolderUploadService nativeUploads = new SharedFolderUploadService(
+        access, repository(new ConcurrentHashMap<>()), properties, nativeBoundary);
+
+    assertConflict(() -> nativeUploads.create(new SharedFolderUploadCreateRequest(
+        "", "target.bin", 1, null, token)));
+  }
+
+  @Test
   void livePortableFinalizationIsInvisibleToStatusAndCompetingComplete() throws Exception {
     for (boolean replace : java.util.List.of(false, true)) {
       for (SharedFolderUploadFinalizationState phase : replace
@@ -1663,6 +1694,34 @@ class SharedFolderUploadServiceTest {
     }
   }
 
+  @Test
+  void nativeAppendReservesTemporaryChunkPlusFinalStagingGrowth() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("native-append-peak-shared"));
+    Path system = Files.createDirectories(temp.resolve("native-append-peak-system"));
+    SharedFolderProperties properties = new SharedFolderProperties(
+        root, system, DataSize.ofGigabytes(1), DataSize.ofBytes(4),
+        DataSize.ofBytes(10), DataSize.ofGigabytes(1),
+        Duration.ofDays(1), Duration.ofDays(1), true);
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadSession session = activeSession("peak", account.getId(), "staging");
+    session.setExpectedBytes(4);
+    stored.put(session.getId(), session);
+    WindowsSharedFolderMutationBoundary boundary = mock(WindowsSharedFolderMutationBoundary.class);
+    when(boundary.nativeMode()).thenReturn(true);
+    when(boundary.usableSystemBytes()).thenReturn(14L);
+    SharedFolderUploadService uploads = new SharedFolderUploadService(
+        access, repository(stored), properties, boundary);
+
+    assertStatus(507, () -> uploads.append(
+        session.getId(), 0, new ByteArrayInputStream(new byte[] {1, 2, 3, 4}),
+        sha256(new byte[] {1, 2, 3, 4})));
+    verify(boundary, org.mockito.Mockito.never()).createStaging(any());
+  }
+
   @SuppressWarnings("unchecked")
   private SharedFolderUploadSessionRepository repository(
       Map<String, SharedFolderUploadSession> sessions) {
@@ -1733,6 +1792,7 @@ class SharedFolderUploadServiceTest {
         current.setAppendLeaseToken(invocation.getArgument(4));
         current.setAppendLeaseExpiresAt(invocation.getArgument(5));
         current.setUpdatedAt(invocation.getArgument(6));
+        current.setVersion(current.getVersion() == null ? 0L : current.getVersion() + 1L);
         return 1L;
       }
     }).when(repository).claimExpiredAppendLease(
@@ -1783,6 +1843,7 @@ class SharedFolderUploadServiceTest {
         current.setFinalizationLeaseToken(invocation.getArgument(4));
         current.setFinalizationLeaseExpiresAt(invocation.getArgument(5));
         current.setUpdatedAt(invocation.getArgument(6));
+        current.setVersion(current.getVersion() == null ? 0L : current.getVersion() + 1L);
         return 1L;
       }
     }).when(repository).claimExpiredFinalizationLease(

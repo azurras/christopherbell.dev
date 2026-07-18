@@ -161,3 +161,23 @@ mutation file handles.
 The browser does not retry upload-session POST. A single ambiguous create may leave an owner-scoped
 private orphan that expires normally; chunk PUT, status GET, and idempotent complete behavior keep
 their bounded transient retry policy.
+
+## Fifth independent re-review remediation
+
+The fifth whole-change review of `09a0e7669c80e3c025137352caefbd4c62527495`
+identified three Critical and four Important issues. Atomic expired-lease claims now increment the
+Mongo `@Version`, and every claimant reloads and proves the claimed token, state, phase, and offset
+before touching physical data. A stale ordinary save therefore cannot overwrite a recovery claim
+or commit progress after recovery truncates uncommitted bytes.
+
+Portable private leaves use provider-backed stable identities only; metadata fingerprints are not
+treated as object identity. On Windows, the portable fallback retains native parent and leaf
+handles and performs file-channel operations through the held leaf handle, denying concurrent
+write, delete, and rename. Create-new explicitly captures the identity of the created named leaf.
+Move-out validation removes any substituted unsafe leaf from the visible destination before
+reporting failure, preserving outside content and preventing an unsafe visible artifact.
+
+Explicit replacement creation treats an observed target that disappears as 409 in portable and
+native paths. Native private-directory initialization creates only after an exact missing status;
+unknown or unavailable opens fail closed. Append reserve checks include both staging growth and the
+temporary chunk copy, with overflow treated as an unreservable peak.

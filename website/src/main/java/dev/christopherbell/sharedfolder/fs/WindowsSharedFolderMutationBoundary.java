@@ -487,6 +487,12 @@ public final class WindowsSharedFolderMutationBoundary {
     }
   }
 
+  private boolean isMissing(NativeBoundaryException exception) {
+    if (exception.kind() != NativeBoundaryException.Kind.STATUS) return false;
+    int status = exception.ntStatus();
+    return status == 0xC0000034 || status == 0xC000003A || status == 2 || status == 3;
+  }
+
   private NativeHandle stagingRoot() {
     NativeHandle current = stagingRootHandle;
     if (current != null) {
@@ -501,6 +507,7 @@ public final class WindowsSharedFolderMutationBoundary {
           stagingRootHandle = bridge.openRelativeForMutation(systemRootHandle, STAGING_DIRECTORY,
               OpenKind.DIRECTORY, SAFE_OBJECT_ATTRIBUTES);
         } catch (NativeBoundaryException missing) {
+          if (!isMissing(missing)) throw missing;
           stagingRootHandle = bridge.createRelative(systemRootHandle, STAGING_DIRECTORY,
               OpenKind.DIRECTORY, SAFE_OBJECT_ATTRIBUTES);
         }
@@ -532,6 +539,7 @@ public final class WindowsSharedFolderMutationBoundary {
               systemRootHandle, MUTATION_QUARANTINE_DIRECTORY,
               OpenKind.DIRECTORY, SAFE_OBJECT_ATTRIBUTES);
         } catch (NativeBoundaryException missing) {
+          if (!isMissing(missing)) throw missing;
           mutationQuarantineRootHandle = bridge.createRelative(
               systemRootHandle, MUTATION_QUARANTINE_DIRECTORY,
               OpenKind.DIRECTORY, SAFE_OBJECT_ATTRIBUTES);

@@ -25,7 +25,7 @@ public interface SharedFolderMutationRecoveryRepository
   @Query("{ '_id': ?0, 'operationLeaseToken': ?1, 'state': ?2, '$or': ["
       + "{ 'operationLeaseExpiresAt': { '$lte': ?3 } }, { 'operationLeaseExpiresAt': null }] }")
   @Update("{ '$set': { 'operationLeaseToken': ?4, 'operationLeaseExpiresAt': ?5, "
-      + "'updatedAt': ?6 } }")
+      + "'updatedAt': ?6 }, '$inc': { 'version': 1 } }")
   long claimExpiredOperationLease(
       String id,
       String expiredOperationLeaseToken,
