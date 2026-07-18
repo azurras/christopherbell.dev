@@ -280,7 +280,7 @@ public final class WindowsSharedFolderMutationBoundary {
     try {
       requireActive();
       validateStagingKey(key);
-      return new NativeStagingFile(bridge.openRelativeForMutation(
+      return new NativeStagingFile(bridge.openRelativeForExclusiveMutation(
           stagingRoot(), key, OpenKind.FILE, SAFE_OBJECT_ATTRIBUTES));
     } finally {
       lifecycleLock.readLock().unlock();
@@ -313,7 +313,8 @@ public final class WindowsSharedFolderMutationBoundary {
       try {
         if (bridge.metadata(source).identity().volumeSerial()
             != bridge.metadata(destination.handle()).identity().volumeSerial()) {
-          throw new NativeBoundaryException("staging and visible roots are on different volumes", 0);
+          throw NativeBoundaryException.unavailable(
+              "staging and visible roots are on different volumes");
         }
         if (target != null) {
           requireSameObservation(expectedTarget, bridge.metadata(target.handle()));
@@ -372,7 +373,7 @@ public final class WindowsSharedFolderMutationBoundary {
         requireReplacementTarget(target);
         if (bridge.metadata(target.handle()).identity().volumeSerial()
             != bridge.metadata(mutationQuarantineRoot()).identity().volumeSerial()) {
-          throw new NativeBoundaryException("replacement roots are on different volumes", 0);
+          throw NativeBoundaryException.unavailable("replacement roots are on different volumes");
         }
         bridge.rename(target.handle(), mutationQuarantineRoot(), quarantineKey, false);
         try {
@@ -550,12 +551,12 @@ public final class WindowsSharedFolderMutationBoundary {
 
   private void requireReplacementTarget(OpenedHandle target) {
     if (target == null) {
-      throw new NativeBoundaryException("observed replacement target is required", 0);
+      throw NativeBoundaryException.conflict("observed replacement target is required");
     }
     NativeFileMetadata metadata = bridge.metadata(target.handle());
     if (metadata.directory() && bridge.listDirectory(target.handle()).stream()
         .anyMatch(entry -> !entry.name().equals(".") && !entry.name().equals(".."))) {
-      throw new NativeBoundaryException("non-empty replacement directory conflicts", 0);
+      throw NativeBoundaryException.conflict("non-empty replacement directory conflicts");
     }
   }
 
@@ -583,7 +584,7 @@ public final class WindowsSharedFolderMutationBoundary {
     if (bridge.metadata(source).identity().volumeSerial() != volume
         || bridge.metadata(target.handle()).identity().volumeSerial() != volume
         || bridge.metadata(quarantineRoot).identity().volumeSerial() != volume) {
-      throw new NativeBoundaryException("replacement roots are on different volumes", 0);
+      throw NativeBoundaryException.unavailable("replacement roots are on different volumes");
     }
     String quarantineKey = java.util.UUID.randomUUID().toString();
     bridge.rename(target.handle(), quarantineRoot, quarantineKey, false);
@@ -670,7 +671,7 @@ public final class WindowsSharedFolderMutationBoundary {
         || expected.regularFile() != current.regularFile()
         || expected.size() != current.size()
         || !expected.modifiedAt().equals(current.modifiedAt())) {
-      throw new NativeBoundaryException("native shared-folder item changed", 0);
+      throw NativeBoundaryException.conflict("native shared-folder item changed");
     }
   }
 
@@ -747,7 +748,7 @@ public final class WindowsSharedFolderMutationBoundary {
 
     private NativeHandle requireOpen() {
       if (handle == null) {
-        throw new NativeBoundaryException("native staging handle is closed", 0);
+        throw NativeBoundaryException.conflict("native staging handle is closed");
       }
       return handle;
     }
@@ -781,7 +782,7 @@ public final class WindowsSharedFolderMutationBoundary {
 
   private static final class UnsupportedBridge implements WindowsSharedFolderNativeBridge {
     private NativeBoundaryException unavailable() {
-      return new NativeBoundaryException("native shared-folder boundary is inactive", 0);
+      return NativeBoundaryException.unavailable("native shared-folder boundary is inactive");
     }
     @Override public NativeHandle openRoot(Path path, int flags) { throw unavailable(); }
     @Override public NativeHandle openRootForMutation(Path path, int flags) { throw unavailable(); }

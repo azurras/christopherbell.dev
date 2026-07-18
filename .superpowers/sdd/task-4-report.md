@@ -238,3 +238,77 @@ Additional verification:
 - No worktree-local `.gradle*` directory exists.
 - The progress ledger remains Task 4 in progress/review-rejected until a fresh reviewer approves
   the whole change from `8602985d` through the new review commit.
+
+## Fourth Independent Re-review
+
+The whole-change review of local commit `0675a6db` rejected Task 4 with three Critical, seven
+Important, and two Minor findings. The commit was not pushed. Confirmed remediation scope is:
+
+- atomic exact-expiry claims for mutation and finalization leases;
+- renew-before-mutate append fencing and exclusive native write handles;
+- provider-backed private leaf capabilities that reject symlink, hardlink, and substitution races;
+- 409 for initially disappeared explicit replacement targets;
+- typed native missing/conflict/unavailable mapping in normal and recovery paths;
+- authoritative server-session matching before browser resume; and
+- deterministic replacement-racer identity/test behavior.
+
+Two review suggestions do not change Task 4 scope. Scheduled unattended expired-staging cleanup is
+already an explicit Task 8 requirement in the primary Builder plan. Universal validation before
+authorization contradicts the approved Task 4 design, which deliberately grants that precedence
+to append id/offset/body/digest validation while other protected operations authorize first.
+
+Task 4 remains review-rejected while the fifth review candidate is developed and verified.
+
+## Fourth-Review Remediation RED/GREEN Evidence
+
+The fifth candidate addresses every confirmed fourth-review finding while retaining the two scoped
+technical rebuttals above:
+
+- The mutation and finalization renewal-race tests first failed to compile without exact repository
+  claim methods. Exact token/state/phase/expiry compare-and-set updates now prevent a stale snapshot
+  from stealing a renewed lease, and both services reload the claimed token as proof.
+- The blocked-read append regression first failed to compile without a pre-write seam. Portable and
+  native append now renew after a blocking read and before truncate, write, force/flush, and cleanup;
+  losing the lease leaves staging unchanged. Native staging files deny external write/delete sharing.
+- Removing raw private-leaf callbacks initially left both services unable to compile. The replacement
+  API retains no-follow `FileChannel` capabilities and exclusive write locks, rejects symlinks,
+  hardlinks, reparse points, unsupported providers, and identity substitution, and owns private
+  moves/deletes without returning a `Path`. All 11 portable boundary tests pass, including the real
+  Windows junction test and a retained-channel substitution race that leaves the outside file intact.
+- The real native staging regression initially failed because restricting the generic create primitive
+  also restricted retained directory handles and caused `STATUS_SHARING_VIOLATION` on unrelated
+  quarantine renames. File creation now uses read-only sharing while directory creation preserves
+  directory-compatible sharing. A real-JNA regression proves the held staging handle rejects an
+  external write without blocking unrelated quarantine.
+- Portable and native initial replacement-disappearance tests were RED before explicit missing-target
+  handling. Both now return 409 while preserving the source or upload staging bytes.
+- Native status-zero and unavailable recovery tests were RED when metadata failures were treated as
+  missing or were classified by call-site booleans. Typed missing/conflict/unavailable failures now
+  propagate 404/409/503 through ordinary and recovery paths.
+- The forged local browser resume test failed with `Missing expected rejection` before status
+  revalidation. Resume now compares the authoritative server parent, name, size, and destination
+  before sending any bytes.
+- Replacement racer tests no longer depend on provider-specific `Files.move` collision behavior.
+  The two mutation racers and the upload replacement racer passed five forced runs each (15 test
+  executions) without a rerun-only acceptance. Null-file-key identity fallback now includes creation
+  time, size, last-modified time, and item kind.
+
+The duplicate import was removed. Scheduled unattended expiry cleanup remains Task 8, and the
+approved append-only validation precedence remains unchanged.
+
+## Fifth Candidate Verification Before Review
+
+All Gradle state remained in the external user and project caches, and
+`SHARED_FOLDER_RUN_WINDOWS_NATIVE_JUNCTION_TEST=true` was set for native/junction runs.
+
+- Focused mutation, upload, portable-boundary, and real-JNA classes: 110 tests passed.
+- Full Java run: 804 `website` tests and 93 `cbell-lib` tests passed (897 aggregate), with 0
+  failures, 0 errors, and 0 skipped. A second full `--rerun-tasks` execution passed the same 897
+  tests from fresh task execution.
+- Full JavaScript run: 153 tests passed, with 0 failures and 0 skipped.
+- `node --check` passed for the touched shared-folder library and test files.
+- `git diff --check` passed with only expected line-ending notices.
+- No worktree-local `.gradle*` directory exists.
+
+Task 4 remains in progress and review-rejected until the fifth candidate is committed, independently
+reviewed across `8602985d..HEAD`, approved with no Critical or Important findings, and pushed.

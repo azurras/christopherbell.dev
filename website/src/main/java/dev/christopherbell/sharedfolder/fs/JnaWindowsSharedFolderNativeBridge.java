@@ -111,8 +111,8 @@ final class JnaWindowsSharedFolderNativeBridge implements WindowsSharedFolderNat
     if (kind == OpenKind.ANY) {
       throw new NativeBoundaryException("native create kind is invalid", 0);
     }
-    return open(name, nativeHandle(parent), kind, objectAttributes, FILE_CREATE, true,
-        FILE_SHARE_READ_WRITE);
+    int shareMode = kind == OpenKind.FILE ? FILE_SHARE_READ : FILE_SHARE_READ_WRITE;
+    return open(name, nativeHandle(parent), kind, objectAttributes, FILE_CREATE, true, shareMode);
   }
 
   @Override

@@ -148,6 +148,16 @@ as missing (404), conflict (409), or unavailable/unsafe (503) rather than folded
 create, append, complete, and cancel use the same exact NTSTATUS classifier; status zero and unknown
 statuses are 503 unless the operation itself explicitly created a semantic conflict.
 
+Private regular-file contents are never exposed to upload or mutation services as raw paths. The
+portable boundary opens them with `NOFOLLOW_LINKS`, requires a stable provider identity and a link
+count of one, retains a channel and exclusive write lock through the operation, and rechecks the
+leaf and ancestor identities afterward. Symlinks, Windows reparse points, hardlinks, unsupported
+providers, and mid-operation name substitution fail closed. Boundary-owned move and delete methods
+validate the private leaf before and after no-replace transitions. The pre-created system root is a
+service-private trust boundary and must grant mutation access only to the website service identity;
+Windows production additionally uses retained native handles and denies write/delete sharing on
+mutation file handles.
+
 The browser does not retry upload-session POST. A single ambiguous create may leave an owner-scoped
 private orphan that expires normally; chunk PUT, status GET, and idempotent complete behavior keep
 their bounded transient retry policy.

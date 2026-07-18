@@ -227,5 +227,31 @@ with the existing committed-prefix proof. `createUpload` executes once without t
 - [x] Preserve all prior three review regression groups and record honest RED/GREEN evidence.
 - [x] Run focused fake/native/JNA/junction tests with the native environment flag, full Java tests,
   all 150+ JavaScript tests, touched JavaScript syntax, diff check, and external-cache hygiene.
-- [ ] Update design, plan, report, feature/frontend docs, and progress; commit while Task 4 remains
+- [x] Update design, plan, report, feature/frontend docs, and progress; commit while Task 4 remains
   in progress/review-rejected and request a fourth whole-change review.
+
+### Task 13: Fourth independent review remediation
+
+**Review result:** Commit `0675a6db` was rejected with three Critical, seven Important, and two
+Minor findings. Independent technical verification confirmed the three Critical findings and
+Important findings 1, 2, 4, 6, and 7. Scheduled unattended expiry cleanup remains assigned to
+Task 8 in the primary Builder plan. Universal validation-before-authorization contradicts the
+approved Task 4 design, which deliberately requires that precedence only for append inputs.
+
+- [x] Add RED renew-versus-claim races for mutation and upload finalization; replace stale
+  optimistic `save` claims with exact token/state/phase/expiry atomic claims and reload proof.
+- [x] Add RED blocked-read/expired-lease append races; renew before truncate/write/flush and retain
+  exclusive native append-target handles plus a portable physical-write fence.
+- [x] Add RED private-leaf symlink, hardlink, and mid-operation substitution tests; replace raw
+  leaf `Path` callbacks with provider-backed no-follow capabilities and fail unsupported providers
+  closed as 503.
+- [x] Add RED portable/native initial target-disappearance tests and preserve 409 with source and
+  staging intact.
+- [x] Add typed native missing/conflict/unavailable failures; propagate exact recovery errors and
+  remove status-zero call-site booleans.
+- [x] Revalidate authoritative server status before browser resume and add a forged local-record
+  regression.
+- [x] Make the replacement-racer test deterministic, fix null-file-key identity ambiguity, and run
+  the focused concurrency/recovery tests repeatedly.
+- [ ] Remove the duplicate import, update documentation/report/progress, run full Java/JS/native/
+  junction verification, commit a fifth candidate, and request another whole-change review.

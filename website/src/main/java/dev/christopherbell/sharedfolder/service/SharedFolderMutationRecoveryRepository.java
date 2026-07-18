@@ -20,4 +20,18 @@ public interface SharedFolderMutationRecoveryRepository
       SharedFolderMutationRecoveryState state,
       java.time.Instant operationLeaseExpiresAt,
       java.time.Instant updatedAt);
+
+  /** Atomically transfers one exact expired mutation lease to a single reconciler. */
+  @Query("{ '_id': ?0, 'operationLeaseToken': ?1, 'state': ?2, '$or': ["
+      + "{ 'operationLeaseExpiresAt': { '$lte': ?3 } }, { 'operationLeaseExpiresAt': null }] }")
+  @Update("{ '$set': { 'operationLeaseToken': ?4, 'operationLeaseExpiresAt': ?5, "
+      + "'updatedAt': ?6 } }")
+  long claimExpiredOperationLease(
+      String id,
+      String expiredOperationLeaseToken,
+      SharedFolderMutationRecoveryState state,
+      java.time.Instant expiredAtOrBefore,
+      String recoveryOperationLeaseToken,
+      java.time.Instant recoveryOperationLeaseExpiresAt,
+      java.time.Instant updatedAt);
 }

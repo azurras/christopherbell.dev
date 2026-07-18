@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
@@ -41,13 +42,96 @@ class PortableSharedFolderPrivateBoundaryTest {
     PortableSharedFolderPrivateBoundary boundary =
         new PortableSharedFolderPrivateBoundary(systemRoot);
 
-    boundary.operateOnFile("shared-folder-upload-staging", "session-1", file -> {
-      Files.writeString(file, "payload");
+    boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "session-1",
+        PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
+      channel.write(ByteBuffer.wrap("payload".getBytes()));
       return null;
     });
 
     assertThat(Files.readString(systemRoot.resolve("shared-folder-upload-staging/session-1")))
         .isEqualTo("payload");
+  }
+
+  @Test
+  void rejectsSymlinkPrivateLeavesBeforeChannelOperations() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("linked-system"));
+    PortableSharedFolderPrivateBoundary boundary =
+        new PortableSharedFolderPrivateBoundary(systemRoot);
+    Path staging = boundary.directory("shared-folder-upload-staging");
+    Path outside = Files.writeString(temp.resolve("outside-file"), "outside");
+    AtomicBoolean invoked = new AtomicBoolean();
+    Path symlink = staging.resolve("symlink-leaf");
+    try {
+      Files.createSymbolicLink(symlink, outside);
+      org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+          "shared-folder-upload-staging", "symlink-leaf",
+          PortableSharedFolderPrivateBoundary.FileAccess.WRITE, channel -> {
+            invoked.set(true);
+            channel.write(ByteBuffer.wrap("changed".getBytes()));
+            return null;
+          })).isInstanceOf(
+              PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
+      assertThat(invoked).isFalse();
+      assertThat(Files.readString(outside)).isEqualTo("outside");
+    } catch (UnsupportedOperationException | java.nio.file.FileSystemException exception) {
+      org.junit.jupiter.api.Assumptions.assumeTrue(false,
+          "symbolic-link capability unavailable: " + exception.getMessage());
+    }
+
+  }
+
+  @Test
+  void rejectsHardlinkPrivateLeavesBeforeChannelOperations() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("hardlinked-system"));
+    PortableSharedFolderPrivateBoundary boundary =
+        new PortableSharedFolderPrivateBoundary(systemRoot);
+    Path staging = boundary.directory("shared-folder-upload-staging");
+    Path outside = Files.writeString(temp.resolve("hardlink-outside-file"), "outside");
+    AtomicBoolean invoked = new AtomicBoolean();
+    Path hardlink = staging.resolve("hardlink-leaf");
+    try {
+      Files.createLink(hardlink, outside);
+    } catch (UnsupportedOperationException | java.nio.file.FileSystemException exception) {
+      org.junit.jupiter.api.Assumptions.assumeTrue(false,
+          "hard-link capability unavailable: " + exception.getMessage());
+    }
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "hardlink-leaf",
+        PortableSharedFolderPrivateBoundary.FileAccess.WRITE, channel -> {
+          invoked.set(true);
+          channel.write(ByteBuffer.wrap("changed".getBytes()));
+          return null;
+        })).isInstanceOf(
+            PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
+    assertThat(invoked).isFalse();
+    assertThat(Files.readString(outside)).isEqualTo("outside");
+  }
+
+  @Test
+  void retainedChannelCannotBeRedirectedByMidOperationLeafSubstitution() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("leaf-swap-system"));
+    PortableSharedFolderPrivateBoundary boundary =
+        new PortableSharedFolderPrivateBoundary(systemRoot);
+    Path staging = boundary.directory("shared-folder-upload-staging");
+    Path leaf = Files.writeString(staging.resolve("session-1"), "private");
+    Path displaced = staging.resolve("displaced");
+    Path outside = Files.writeString(temp.resolve("leaf-swap-outside"), "outside");
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "session-1",
+        PortableSharedFolderPrivateBoundary.FileAccess.WRITE, channel -> {
+          Files.move(leaf, displaced);
+          Files.createLink(leaf, outside);
+          channel.position(0);
+          channel.write(ByteBuffer.wrap("changed".getBytes()));
+          channel.truncate("changed".length());
+          return null;
+        })).isInstanceOf(
+            PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
+
+    assertThat(Files.readString(outside)).isEqualTo("outside");
+    assertThat(Files.readString(displaced)).isEqualTo("changed");
   }
 
   @Test
@@ -60,10 +144,11 @@ class PortableSharedFolderPrivateBoundaryTest {
     Files.createDirectory(staging);
     AtomicBoolean invoked = new AtomicBoolean();
 
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnFile(
-        "shared-folder-upload-staging", "session-1", file -> {
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "session-1",
+        PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
           invoked.set(true);
-          Files.writeString(file, "outside-write");
+          channel.write(ByteBuffer.wrap("outside-write".getBytes()));
           return null;
         })).isInstanceOf(
             PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
@@ -84,10 +169,10 @@ class PortableSharedFolderPrivateBoundaryTest {
     Files.createDirectory(systemRoot);
     AtomicBoolean invoked = new AtomicBoolean();
 
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnFile(
-        "shared-folder-upload-staging", "session-1", file -> {
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "session-1",
+        PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
           invoked.set(true);
-          Files.deleteIfExists(file);
           return null;
         })).isInstanceOf(
             PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
@@ -112,10 +197,11 @@ class PortableSharedFolderPrivateBoundaryTest {
     Files.createDirectory(systemRoot);
     AtomicBoolean invoked = new AtomicBoolean();
 
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnFile(
-        "shared-folder-upload-staging", "session-1", file -> {
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "session-1",
+        PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
           invoked.set(true);
-          Files.writeString(file, "outside-write");
+          channel.write(ByteBuffer.wrap("outside-write".getBytes()));
           return null;
         })).isInstanceOf(
             PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
@@ -141,8 +227,9 @@ class PortableSharedFolderPrivateBoundaryTest {
         new PortableSharedFolderPrivateBoundary(systemRoot, facts);
     AtomicBoolean invoked = new AtomicBoolean();
 
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnFile(
-        "shared-folder-upload-staging", "session-1", file -> {
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+        "shared-folder-upload-staging", "session-1",
+        PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
           invoked.set(true);
           return null;
         })).isInstanceOf(
@@ -174,10 +261,11 @@ class PortableSharedFolderPrivateBoundaryTest {
     try {
       PortableSharedFolderPrivateBoundary boundary =
           new PortableSharedFolderPrivateBoundary(systemRoot);
-      org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnFile(
-          "shared-folder-upload-staging", "session-1", file -> {
+      org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+          "shared-folder-upload-staging", "session-1",
+          PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
             invoked.set(true);
-            Files.writeString(file, "outside-write");
+            channel.write(ByteBuffer.wrap("outside-write".getBytes()));
             return null;
           })).isInstanceOf(
               PortableSharedFolderPrivateBoundary.BoundaryUnavailableException.class);
@@ -202,8 +290,9 @@ class PortableSharedFolderPrivateBoundaryTest {
           new PortableSharedFolderPrivateBoundary(systemRoot, facts);
       AtomicBoolean invoked = new AtomicBoolean();
 
-      org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnFile(
-          "shared-folder-upload-staging", "session-1", file -> {
+      org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+          "shared-folder-upload-staging", "session-1",
+          PortableSharedFolderPrivateBoundary.FileAccess.CREATE_NEW, channel -> {
             invoked.set(true);
             return null;
           })).isInstanceOf(

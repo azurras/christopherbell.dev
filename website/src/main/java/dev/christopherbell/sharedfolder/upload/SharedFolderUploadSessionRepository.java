@@ -18,6 +18,22 @@ public interface SharedFolderUploadSessionRepository
       java.time.Instant finalizationLeaseExpiresAt,
       java.time.Instant updatedAt);
 
+  /** Atomically transfers one exact expired FINALIZING lease to a single reconciler. */
+  @Query("{ '_id': ?0, 'state': 'FINALIZING', 'finalizationLeaseToken': ?1, "
+      + "'finalizationState': ?2, '$or': ["
+      + "{ 'finalizationLeaseExpiresAt': { '$lte': ?3 } }, "
+      + "{ 'finalizationLeaseExpiresAt': null }] }")
+  @Update("{ '$set': { 'finalizationLeaseToken': ?4, 'finalizationLeaseExpiresAt': ?5, "
+      + "'updatedAt': ?6 } }")
+  long claimExpiredFinalizationLease(
+      String id,
+      String expiredFinalizationLeaseToken,
+      SharedFolderUploadFinalizationState finalizationState,
+      java.time.Instant expiredAtOrBefore,
+      String recoveryFinalizationLeaseToken,
+      java.time.Instant recoveryFinalizationLeaseExpiresAt,
+      java.time.Instant updatedAt);
+
   /** Extends only the exact APPENDING writer and offset without advancing document version. */
   @Query("{ '_id': ?0, 'state': 'APPENDING', 'appendLeaseToken': ?1, 'appendOffset': ?2 }")
   @Update("{ '$set': { 'appendLeaseExpiresAt': ?3, 'updatedAt': ?4 } }")

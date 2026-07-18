@@ -267,6 +267,34 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
   }
 
   @Test
+  void heldExclusiveStagingHandleDeniesExternalWritesWithoutBlockingUnrelatedQuarantine()
+      throws Exception {
+    Path root = Files.createDirectory(temp.resolve("independent-visible-root"));
+    Path systemRoot = Files.createDirectory(temp.resolve("independent-system-root"));
+    Files.writeString(root.resolve("target.bin"), "target");
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        root, systemRoot, new JnaWindowsSharedFolderNativeBridge());
+    String stagingKey = "11111111-1111-1111-1111-111111111111";
+    String quarantineKey = "22222222-2222-2222-2222-222222222222";
+    try {
+      boundary.createStaging(stagingKey).close();
+      Path stagingPath = systemRoot.resolve("shared-folder-upload-staging").resolve(stagingKey);
+      NativeFileMetadata target = boundary.metadata("target.bin");
+      try (var ignored = boundary.staging(stagingKey)) {
+        assertThat(catchThrowable(() -> Files.writeString(stagingPath, "racer")))
+            .isInstanceOf(java.io.IOException.class);
+        NativeFileMetadata quarantined =
+            boundary.quarantineVisible("target.bin", quarantineKey, target);
+        assertThat(quarantined.identity().sameFile(target.identity())).isTrue();
+      }
+      boundary.restoreQuarantine(quarantineKey, "", "target.bin", target);
+      assertThat(Files.readString(root.resolve("target.bin"))).isEqualTo("target");
+    } finally {
+      boundary.destroy();
+    }
+  }
+
+  @Test
   void realBoundaryReopensStagingForAppendThenFinalizesAndDeletesByHandle() throws Exception {
     Path root = Files.createDirectory(temp.resolve("visible-root"));
     Path systemRoot = Files.createDirectory(temp.resolve("system-root"));

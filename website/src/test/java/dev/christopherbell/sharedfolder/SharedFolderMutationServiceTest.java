@@ -194,13 +194,16 @@ class SharedFolderMutationServiceTest {
     Files.writeString(docs.resolve("source.txt"), "source");
     Files.writeString(docs.resolve("target.txt"), "observed-target");
     SharedFolderProperties properties = properties(root);
+    AtomicBoolean injectedRacer = new AtomicBoolean();
     SharedFolderMutationService mutations = new SharedFolderMutationService(
         mock(SharedFolderAccessService.class), properties) {
       @Override
       protected void moveAtomically(Path source, Path target, boolean replace) throws java.io.IOException {
         if (source.getFileName().toString().equals("source.txt")
-            && target.getFileName().toString().equals("target.txt")) {
+            && target.getFileName().toString().equals("target.txt")
+            && injectedRacer.compareAndSet(false, true)) {
           Files.writeString(target, "racer");
+          throw new java.nio.file.FileAlreadyExistsException(target.toString());
         }
         super.moveAtomically(source, target, replace);
       }
@@ -213,6 +216,7 @@ class SharedFolderMutationServiceTest {
 
     assertThat(Files.readString(docs.resolve("source.txt"))).isEqualTo("source");
     assertThat(Files.readString(docs.resolve("target.txt"))).isEqualTo("racer");
+    assertThat(injectedRacer).isTrue();
     assertThat(Files.walk(system)
         .filter(Files::isRegularFile)
         .anyMatch(path -> {
@@ -331,6 +335,57 @@ class SharedFolderMutationServiceTest {
   }
 
   @Test
+  void renewedMutationLeaseCannotBeStolenByAStaleExpiredRecoveryClaim() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("renew-before-mutation-claim"));
+    Path docs = Files.createDirectories(root.resolve("docs"));
+    Files.writeString(docs.resolve("source.txt"), "source");
+    Files.writeString(docs.resolve("target.txt"), "target");
+    SharedFolderProperties properties = properties(root);
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    Map<String, SharedFolderMutationRecovery> records = new ConcurrentHashMap<>();
+    SharedFolderMutationRecoveryRepository repository = recoveryRepository(records);
+    SharedFolderMutationService crashing = new SharedFolderMutationService(
+        access, properties, WindowsSharedFolderMutationBoundary.inactive(), repository) {
+      @Override
+      protected void afterPhysicalMutationTransition(SharedFolderMutationRecoveryState state) {
+        if (state == SharedFolderMutationRecoveryState.PREPARED) {
+          throw new AssertionError("simulated process death");
+        }
+      }
+    };
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> crashing.move(
+        new SharedFolderMoveRequest("docs/source.txt", "docs", "target.txt",
+            crashing.observedToken("docs/source.txt"), true,
+            crashing.observedToken("docs/target.txt"))))
+        .isInstanceOf(AssertionError.class);
+    SharedFolderMutationRecovery stored = records.values().iterator().next();
+    String writerToken = stored.getOperationLeaseToken();
+    stored.setOperationLeaseExpiresAt(Instant.EPOCH);
+    Instant renewedUntil = Instant.now().plusSeconds(300);
+    org.mockito.Mockito.doAnswer(invocation -> {
+      SharedFolderMutationRecovery current = records.get(invocation.getArgument(0));
+      current.setOperationLeaseExpiresAt(renewedUntil);
+      current.setUpdatedAt(Instant.now());
+      return 0L;
+    }).when(repository).claimExpiredOperationLease(
+        any(), any(), any(), any(), any(), any(), any());
+
+    new SharedFolderMutationService(
+        access, properties, WindowsSharedFolderMutationBoundary.inactive(), repository)
+        .reconcileStartup();
+
+    assertThat(records).hasSize(1);
+    assertThat(records.values().iterator().next().getOperationLeaseToken()).isEqualTo(writerToken);
+    assertThat(records.values().iterator().next().getOperationLeaseExpiresAt())
+        .isEqualTo(renewedUntil);
+    assertThat(Files.readString(docs.resolve("source.txt"))).isEqualTo("source");
+    assertThat(Files.readString(docs.resolve("target.txt"))).isEqualTo("target");
+  }
+
+  @Test
   @EnabledOnOs(OS.WINDOWS)
   void nativeJournalRecoversPostQuarantineAndPostMoveWhenQuarantineIsAlreadyGone() throws Exception {
     for (SharedFolderMutationRecoveryState crashPhase : java.util.List.of(
@@ -443,6 +498,42 @@ class SharedFolderMutationServiceTest {
   }
 
   @Test
+  @EnabledOnOs(OS.WINDOWS)
+  void explicitReplacementRequiresTheObservedTargetAtInitialLookupInPortableAndNativeModes()
+      throws Exception {
+    for (boolean nativeMode : java.util.List.of(false, true)) {
+      Path root = Files.createDirectories(temp.resolve("initial-target-missing-" + nativeMode));
+      Path docs = Files.createDirectories(root.resolve("docs"));
+      Files.writeString(docs.resolve("source.txt"), "source");
+      Files.writeString(docs.resolve("target.txt"), "target");
+      SharedFolderProperties properties = properties(root);
+      Account account = new Account();
+      account.setId("account-1");
+      SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+      when(access.requireWrite()).thenReturn(account);
+      WindowsSharedFolderMutationBoundary boundary = nativeMode
+          ? new WindowsSharedFolderMutationBoundary(properties)
+          : WindowsSharedFolderMutationBoundary.inactive();
+      if (nativeMode) boundary.initialize();
+      try {
+        SharedFolderMutationService mutations = new SharedFolderMutationService(
+            access, properties, boundary, recoveryRepository(new ConcurrentHashMap<>()));
+        String sourceToken = mutations.observedToken("docs/source.txt");
+        String targetToken = mutations.observedToken("docs/target.txt");
+        Files.delete(docs.resolve("target.txt"));
+
+        assertStatus(409, () -> mutations.move(new SharedFolderMoveRequest(
+            "docs/source.txt", "docs", "target.txt", sourceToken, true, targetToken)));
+
+        assertThat(Files.readString(docs.resolve("source.txt"))).isEqualTo("source");
+        assertThat(Files.notExists(docs.resolve("target.txt"))).isTrue();
+      } finally {
+        if (nativeMode) boundary.destroy();
+      }
+    }
+  }
+
+  @Test
   void nativeStatusTranslationDistinguishesMissingConflictAndUnavailable() {
     SharedFolderAccessService access = mock(SharedFolderAccessService.class);
     WindowsSharedFolderMutationBoundary boundary = mock(WindowsSharedFolderMutationBoundary.class);
@@ -451,6 +542,7 @@ class SharedFolderMutationServiceTest {
         access, properties(temp.resolve("native-status-root")), boundary);
 
     for (var mapping : java.util.Map.of(
+        0, 503,
         0xC0000034, 404,
         0xC0000035, 409,
         0xC0000043, 409,
@@ -461,6 +553,45 @@ class SharedFolderMutationServiceTest {
           .when(boundary).metadata("missing.txt");
       assertStatus(mapping.getValue(), () -> mutations.observedToken("missing.txt"));
     }
+  }
+
+  @Test
+  void nativeRecoveryPropagatesUnavailableMetadataInsteadOfTreatingItAsMissing() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("native-recovery-unavailable"));
+    SharedFolderProperties properties = properties(root);
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    Map<String, SharedFolderMutationRecovery> records = new ConcurrentHashMap<>();
+    SharedFolderMutationRecovery recovery = new SharedFolderMutationRecovery();
+    recovery.setId("recovery-1");
+    recovery.setOwnerId("account-1");
+    recovery.setSourcePath("source.txt");
+    recovery.setDestinationParentPath("");
+    recovery.setName("target.txt");
+    recovery.setSourceIdentity("source-identity");
+    recovery.setTargetIdentity("target-identity");
+    recovery.setQuarantineKey("quarantine-key");
+    recovery.setNativeMode(true);
+    recovery.setState(SharedFolderMutationRecoveryState.PREPARED);
+    recovery.setOperationLeaseToken("expired-token");
+    recovery.setOperationLeaseExpiresAt(Instant.EPOCH);
+    recovery.setCreatedAt(Instant.EPOCH);
+    recovery.setUpdatedAt(Instant.EPOCH);
+    records.put(recovery.getId(), recovery);
+    SharedFolderMutationRecoveryRepository repository = recoveryRepository(records);
+    WindowsSharedFolderMutationBoundary boundary = mock(WindowsSharedFolderMutationBoundary.class);
+    when(boundary.nativeMode()).thenReturn(true);
+    when(boundary.metadata(any())).thenThrow(
+        new dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeBoundaryException(
+            "native metadata unavailable", 0));
+    SharedFolderMutationService mutations = new SharedFolderMutationService(
+        access, properties, boundary, repository);
+
+    assertStatus(503, mutations::reconcileStartup);
+
+    assertThat(records).containsKey(recovery.getId());
+    verify(boundary, org.mockito.Mockito.never()).restoreQuarantine(
+        any(), any(), any(), any());
+    verify(boundary, org.mockito.Mockito.never()).deleteQuarantine(any(), any());
   }
 
   @Test
@@ -723,6 +854,7 @@ class SharedFolderMutationServiceTest {
     when(access.requireWrite()).thenReturn(account);
     Map<String, SharedFolderMutationRecovery> records = new ConcurrentHashMap<>();
     SharedFolderProperties properties = properties(root);
+    AtomicBoolean injectedRacer = new AtomicBoolean();
     SharedFolderMutationService mutations = new SharedFolderMutationService(
         access, properties, WindowsSharedFolderMutationBoundary.inactive(),
         recoveryRepository(records)) {
@@ -730,8 +862,10 @@ class SharedFolderMutationServiceTest {
       protected void moveAtomically(Path source, Path target, boolean replace)
           throws java.io.IOException {
         if (source.getFileName().toString().equals("source.txt")
-            && target.getFileName().toString().equals("target.txt")) {
+            && target.getFileName().toString().equals("target.txt")
+            && injectedRacer.compareAndSet(false, true)) {
           Files.writeString(target, "racer");
+          throw new java.nio.file.FileAlreadyExistsException(target.toString());
         }
         super.moveAtomically(source, target, replace);
       }
@@ -744,6 +878,7 @@ class SharedFolderMutationServiceTest {
 
     assertThat(Files.readString(docs.resolve("source.txt"))).isEqualTo("source");
     assertThat(Files.readString(docs.resolve("target.txt"))).isEqualTo("racer");
+    assertThat(injectedRacer).isTrue();
     assertThat(records).hasSize(1);
     SharedFolderMutationRecovery recovery = records.values().iterator().next();
     assertThat(recovery.getState()).isEqualTo(SharedFolderMutationRecoveryState.RESTORE_PENDING);
@@ -896,6 +1031,25 @@ class SharedFolderMutationServiceTest {
         return 1L;
       }
     }).when(repository).renewOperationLease(any(), any(), any(), any(), any());
+    org.mockito.Mockito.doAnswer(invocation -> {
+      synchronized (records) {
+        SharedFolderMutationRecovery current = records.get(invocation.getArgument(0));
+        Instant now = invocation.getArgument(3);
+        if (current == null
+            || !java.util.Objects.equals(
+                current.getOperationLeaseToken(), invocation.getArgument(1))
+            || current.getState() != invocation.getArgument(2)
+            || current.getOperationLeaseExpiresAt() != null
+                && current.getOperationLeaseExpiresAt().isAfter(now)) {
+          return 0L;
+        }
+        current.setOperationLeaseToken(invocation.getArgument(4));
+        current.setOperationLeaseExpiresAt(invocation.getArgument(5));
+        current.setUpdatedAt(invocation.getArgument(6));
+        return 1L;
+      }
+    }).when(repository).claimExpiredOperationLease(
+        any(), any(), any(), any(), any(), any(), any());
     org.mockito.Mockito.doAnswer(invocation -> {
       records.remove(invocation.getArgument(0));
       return null;

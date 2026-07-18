@@ -212,6 +212,24 @@ test('case-insensitive resume still proves the committed local prefix', async ()
   assert.equal(createCalls, 0);
 });
 
+test('resume revalidates the authoritative server destination before sending bytes', async () => {
+  const file = Object.assign(new Blob(['abc']), { name: 'resume.bin' });
+  const resume = { id: 'u-forged', parentPath: 'docs', name: 'resume.bin', expectedBytes: 3 };
+  const server = { ...resume, parentPath: 'other', nextOffset: 0, state: 'ACTIVE',
+    chunkSizeBytes: 3, committedChunks: [] };
+  let putCalls = 0;
+
+  await assert.rejects(runUploadWorkflow({
+    parentPath: 'docs', file, resume, digest: async () => 'proof',
+    loadStatus: async () => server, listEntries: async () => ({ entries: [] }),
+    confirmReplace: () => false, createUpload: async () => server,
+    putChunk: async status => { putCalls += 1; return { ...status, nextOffset: 3 }; },
+    completeUpload: async status => ({ ...status, state: 'COMPLETED' }),
+  }), /server upload does not match/i);
+
+  assert.equal(putCalls, 0);
+});
+
 test('mocked browser workflow pauses without cancel, resumes, and rejects changed local bytes', async () => {
   const file = Object.assign(new Blob(['abc']), { name: 'resume.bin' });
   const resume = { id: 'u2', parentPath: 'docs', name: file.name, expectedBytes: file.size };

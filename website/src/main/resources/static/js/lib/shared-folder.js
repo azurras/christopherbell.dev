@@ -111,6 +111,9 @@ export async function runUploadWorkflow(options) {
   let replace = Boolean(resume?.replace);
   if (resume && uploadResumeMatchesFile(resume, file, parentPath)) {
     upload = await retryUploadOperation(() => loadStatus(resume.id, signal), { signal });
+    if (!uploadResumeMatchesFile(upload, file, parentPath)) {
+      throw new Error('The server upload does not match the selected destination and file.');
+    }
     if (uploadIsTerminal(upload)) {
       throw new Error(`The saved upload is ${String(upload.state).toLowerCase()}; choose the file again.`);
     }

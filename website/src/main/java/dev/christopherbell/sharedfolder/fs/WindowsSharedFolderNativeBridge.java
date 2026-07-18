@@ -163,18 +163,34 @@ public interface WindowsSharedFolderNativeBridge {
 
   /** Native failure with an optional raw NTSTATUS for fail-closed error mapping. */
   final class NativeBoundaryException extends RuntimeException {
+    public enum Kind { STATUS, CONFLICT, UNAVAILABLE }
+
     private final int ntStatus;
+    private final Kind kind;
 
     public NativeBoundaryException(String message, int ntStatus) {
-      super(message);
-      this.ntStatus = ntStatus;
+      this(message, ntStatus, ntStatus == 0 ? Kind.UNAVAILABLE : Kind.STATUS, null);
     }
 
     public NativeBoundaryException(String message, int ntStatus, Throwable cause) {
+      this(message, ntStatus, ntStatus == 0 ? Kind.UNAVAILABLE : Kind.STATUS, cause);
+    }
+
+    private NativeBoundaryException(String message, int ntStatus, Kind kind, Throwable cause) {
       super(message, cause);
       this.ntStatus = ntStatus;
+      this.kind = kind;
     }
 
     public int ntStatus() { return ntStatus; }
+    public Kind kind() { return kind; }
+
+    public static NativeBoundaryException conflict(String message) {
+      return new NativeBoundaryException(message, 0, Kind.CONFLICT, null);
+    }
+
+    public static NativeBoundaryException unavailable(String message) {
+      return new NativeBoundaryException(message, 0, Kind.UNAVAILABLE, null);
+    }
   }
 }

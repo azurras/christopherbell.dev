@@ -61,11 +61,15 @@ class WindowsSharedFolderMutationBoundaryTest {
     NativeFileMetadata target = boundary.metadata("documents/target.txt");
     boundary.rename("documents/source.txt", "documents", "target.txt", true, source, target);
     boundary.createStaging("55555555-5555-5555-5555-555555555555").close();
+    boundary.staging("55555555-5555-5555-5555-555555555555").close();
     boundary.finalizeStaging(
         "55555555-5555-5555-5555-555555555555", "documents", "upload.bin", false);
 
     assertThat(bridge.exclusiveMutationOpenNames)
         .contains("source.txt", "target.txt", "55555555-5555-5555-5555-555555555555");
+    assertThat(java.util.Collections.frequency(
+        bridge.exclusiveMutationOpenNames, "55555555-5555-5555-5555-555555555555"))
+        .isEqualTo(2);
     assertThat(bridge.mutationOpenNames).contains("documents");
     boundary.destroy();
   }
