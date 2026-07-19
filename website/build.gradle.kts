@@ -36,7 +36,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
 
     // Host metrics; Windows sensor binaries are pinned generated resources below.
-    implementation("com.github.oshi:oshi-core:7.4.0")
+    implementation("com.github.oshi:oshi-core:7.4.1")
     implementation("net.java.dev.jna:jna-platform-jpms:5.19.1")
 
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
