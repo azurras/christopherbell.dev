@@ -34,6 +34,7 @@ import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.PasswordUtil;
 import dev.christopherbell.post.PostRepository;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -57,6 +58,7 @@ public class AccountServiceTest {
   @Mock private AccountRepository accountRepository;
   @Mock private PasswordResetNotificationService passwordResetNotificationService;
   @Mock private PostRepository postRepository;
+  @Mock private SharedFolderAuditRecorder sharedFolderAudit;
   private AccountService accountService;
 
   @BeforeEach
@@ -73,7 +75,8 @@ public class AccountServiceTest {
         passwordResetService,
         profileService,
         followService,
-        moderationService);
+        moderationService,
+        sharedFolderAudit);
   }
 
   @Test
@@ -767,6 +770,10 @@ public class AccountServiceTest {
         InvalidRequestException.class,
         () -> accountService.updateSharedFolderPermissions(
             account.getId(), new SharedFolderPermissionUpdate(false, true)));
+    verify(sharedFolderAudit, org.mockito.Mockito.times(2)).recordCurrent(
+        "PERMISSION_CHANGE", account.getId(), null, "accepted", null);
+    verify(sharedFolderAudit).recordCurrent(
+        "PERMISSION_CHANGE", account.getId(), null, "rejected", "invalid_request");
   }
 
   private String hashResetToken(String token) throws Exception {

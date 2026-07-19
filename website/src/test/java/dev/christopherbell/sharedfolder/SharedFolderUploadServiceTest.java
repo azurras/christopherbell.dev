@@ -398,7 +398,9 @@ class SharedFolderUploadServiceTest {
           }
         };
     MockMvc mvc = MockMvcBuilders.standaloneSetup(new SharedFolderWriteController(
-            mock(SharedFolderMutationService.class), uploads))
+        mock(SharedFolderMutationService.class), uploads,
+        mock(dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService.class),
+        mock(dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder.class)))
         .setControllerAdvice(new ControllerExceptionHandler())
         .addFilters(unknownLength, new RequestSizeLimitFilter(1_000_000, 4))
         .build();

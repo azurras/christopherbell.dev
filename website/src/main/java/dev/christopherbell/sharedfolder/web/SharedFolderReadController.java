@@ -5,6 +5,8 @@ import static dev.christopherbell.libs.api.APIVersion.V20260717;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewResponse;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
+import dev.christopherbell.account.model.Account;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService;
 import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService.SharedFolderDownload;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
@@ -30,26 +32,36 @@ public class SharedFolderReadController {
   private final SharedFolderBrowserService browser;
   private final SharedFolderDownloadService downloads;
   private final SharedFolderPreviewService previews;
+  private final SharedFolderAuditRecorder audit;
 
   /** Creates the protected read-only endpoint group. */
   public SharedFolderReadController(
       SharedFolderAccessService access,
       SharedFolderBrowserService browser,
       SharedFolderDownloadService downloads,
-      SharedFolderPreviewService previews) {
+      SharedFolderPreviewService previews,
+      SharedFolderAuditRecorder audit) {
     this.access = access;
     this.browser = browser;
     this.downloads = downloads;
     this.previews = previews;
+    this.audit = audit;
   }
 
   /** Lists a decoded relative directory path after refreshing effective read access. */
   @GetMapping("/entries")
   public ResponseEntity<SharedDirectoryResponse> list(@RequestParam(defaultValue = "") String path) {
-    access.requireRead();
-    return ResponseEntity.ok()
-        .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
-        .body(browser.list(path));
+    try {
+      Account account = access.requireRead();
+      SharedDirectoryResponse response = browser.list(path);
+      audit.recordFor(account, "LIST", path, null, "accepted", null);
+      return ResponseEntity.ok()
+          .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+          .body(response);
+    } catch (RuntimeException failure) {
+      audit.recordFailure("LIST", path, failure);
+      throw failure;
+    }
   }
 
   /**
@@ -63,11 +75,12 @@ public class SharedFolderReadController {
   public ResponseEntity<ResourceRegion> content(
       @RequestParam String path,
       @RequestHeader HttpHeaders headers) {
-    access.requireRead();
-    List<String> ranges = headers.get(HttpHeaders.RANGE);
-    String range = ranges == null || ranges.isEmpty() ? null : String.join(",", ranges);
     try {
+      access.requireRead();
+      List<String> ranges = headers.get(HttpHeaders.RANGE);
+      String range = ranges == null || ranges.isEmpty() ? null : String.join(",", ranges);
       SharedFolderDownload download = downloads.open(path, range);
+      audit.recordLogicalAccess("DOWNLOAD_STARTED", path, download.totalLength());
       ResourceRegion body = new ResourceRegion(
           download.resource(), download.start(), download.length());
       HttpHeaders responseHeaders = new HttpHeaders();
@@ -85,28 +98,38 @@ public class SharedFolderReadController {
       return new ResponseEntity<>(body, responseHeaders,
           download.partial() ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK);
     } catch (SharedFolderRangeNotSatisfiableException exception) {
+      audit.recordRejected("DOWNLOAD_STARTED", path, "invalid_range");
       return rangeNotSatisfiable(exception.totalLength());
+    } catch (RuntimeException failure) {
+      audit.recordFailure("DOWNLOAD_STARTED", path, failure);
+      throw failure;
     }
   }
 
   /** Returns a bounded text preview or a streamed allowlisted media preview. */
   @GetMapping("/preview")
   public ResponseEntity<?> preview(@RequestParam String path) {
-    access.requireRead();
-    SharedFolderPreview preview = previews.open(path);
-    HttpHeaders headers = new HttpHeaders();
-    headers.set("X-Content-Type-Options", "nosniff");
-    headers.setCacheControl("private, no-store");
-    if (preview.kind() == dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind.TEXT) {
-      return ResponseEntity.ok().headers(headers)
-          .body(new SharedFolderPreviewResponse(preview.text(), preview.truncated()));
+    try {
+      Account account = access.requireRead();
+      SharedFolderPreview preview = previews.open(path);
+      audit.recordFor(account, "PREVIEW_STARTED", path, null, "accepted", null);
+      HttpHeaders headers = new HttpHeaders();
+      headers.set("X-Content-Type-Options", "nosniff");
+      headers.setCacheControl("private, no-store");
+      if (preview.kind() == dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind.TEXT) {
+        return ResponseEntity.ok().headers(headers)
+            .body(new SharedFolderPreviewResponse(preview.text(), preview.truncated()));
+      }
+      headers.setContentType(preview.mediaType());
+      headers.set(HttpHeaders.CONTENT_DISPOSITION, preview.disposition());
+      if (preview.kind() == dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind.PDF) {
+        headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
+      }
+      return new ResponseEntity<>(preview.resource(), headers, HttpStatus.OK);
+    } catch (RuntimeException failure) {
+      audit.recordFailure("PREVIEW_STARTED", path, failure);
+      throw failure;
     }
-    headers.setContentType(preview.mediaType());
-    headers.set(HttpHeaders.CONTENT_DISPOSITION, preview.disposition());
-    if (preview.kind() == dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind.PDF) {
-      headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
-    }
-    return new ResponseEntity<>(preview.resource(), headers, HttpStatus.OK);
   }
 
   private ResponseEntity<ResourceRegion> rangeNotSatisfiable(long totalLength) {

@@ -2,6 +2,7 @@ package dev.christopherbell.sharedfolder.fs;
 
 import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeBoundaryException;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.DirectoryEntry;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeFileMetadata;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeHandle;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.OpenKind;
@@ -28,6 +29,8 @@ public final class WindowsSharedFolderMutationBoundary {
       | WindowsSharedFolderNativeBridge.OBJ_DONT_REPARSE;
   private static final String STAGING_DIRECTORY = "shared-folder-upload-staging";
   private static final String MUTATION_QUARANTINE_DIRECTORY = "shared-folder-mutation-quarantine";
+  private static final String RECYCLE_DIRECTORY = "shared-folder-recycle";
+  private static final String RECYCLE_REPLACED_DIRECTORY = "shared-folder-recycle-replaced";
 
   private final Path configuredRoot;
   private final Path configuredSystemRoot;
@@ -40,6 +43,8 @@ public final class WindowsSharedFolderMutationBoundary {
   private volatile NativeHandle systemRootHandle;
   private volatile NativeHandle stagingRootHandle;
   private volatile NativeHandle mutationQuarantineRootHandle;
+  private volatile NativeHandle recycleRootHandle;
+  private volatile NativeHandle recycleReplacedRootHandle;
 
   public WindowsSharedFolderMutationBoundary(SharedFolderProperties properties) {
     this(properties.root(), properties.systemRoot(), new JnaWindowsSharedFolderNativeBridge(),
@@ -404,6 +409,249 @@ public final class WindowsSharedFolderMutationBoundary {
     }
   }
 
+  /** Atomically moves the exact observed visible leaf into the retained private recycle root. */
+  public NativeFileMetadata recycleVisible(
+      String visiblePath, String recycleKey, NativeFileMetadata expectedSource) {
+    mutationLock.lock();
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(recycleKey);
+      OpenedHandle source = openVisible(
+          visiblePath, observedKind(expectedSource), false, true, true);
+      try {
+        NativeFileMetadata current = bridge.metadata(source.handle());
+        requireSameObservation(expectedSource, current);
+        if (current.identity().volumeSerial()
+            != bridge.metadata(recycleRoot()).identity().volumeSerial()) {
+          throw NativeBoundaryException.unavailable("recycle roots are on different volumes");
+        }
+        bridge.rename(source.handle(), recycleRoot(), recycleKey, false);
+        return bridge.metadata(source.handle());
+      } finally {
+        source.close();
+      }
+    } finally {
+      lifecycleLock.readLock().unlock();
+      mutationLock.unlock();
+    }
+  }
+
+  /** Returns retained-handle metadata for one private recycle payload. */
+  public NativeFileMetadata recycleMetadata(String recycleKey) {
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(recycleKey);
+      NativeHandle handle = bridge.openRelativeForMutation(
+          recycleRoot(), recycleKey, OpenKind.ANY, SAFE_OBJECT_ATTRIBUTES);
+      try {
+        return bridge.metadata(handle);
+      } finally {
+        closeQuietly(handle);
+      }
+    } finally {
+      lifecycleLock.readLock().unlock();
+    }
+  }
+
+  /** Restores an identity-bound recycle payload, with optional identity-bound replacement. */
+  public NativeFileMetadata restoreRecycle(
+      String recycleKey, String destinationParentPath, String name,
+      NativeFileMetadata expectedSource, boolean replace, NativeFileMetadata expectedTarget) {
+    return restoreRecycle(recycleKey, destinationParentPath, name, expectedSource, replace,
+        expectedTarget, replace ? java.util.UUID.randomUUID().toString() : null);
+  }
+
+  /** Restores with a caller-journaled replacement key for crash-safe displaced-target recovery. */
+  public NativeFileMetadata restoreRecycle(
+      String recycleKey, String destinationParentPath, String name,
+      NativeFileMetadata expectedSource, boolean replace, NativeFileMetadata expectedTarget,
+      String replacementKey) {
+    mutationLock.lock();
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(recycleKey);
+      if (replace) validateStagingKey(replacementKey);
+      SharedFolderPathResolver.validateSingleWindowsName(name);
+      NativeHandle source = bridge.openRelativeForExclusiveMutation(
+          recycleRoot(), recycleKey, observedKind(expectedSource), SAFE_OBJECT_ATTRIBUTES);
+      OpenedHandle destination = openVisible(
+          destinationParentPath, OpenKind.DIRECTORY, true, true, false);
+      OpenedHandle target = expectedTarget == null ? null
+          : openVisible(relative(destinationParentPath, name), observedKind(expectedTarget),
+              false, true, true);
+      try {
+        NativeFileMetadata currentSource = bridge.metadata(source);
+        requireSameObservation(expectedSource, currentSource);
+        if (currentSource.identity().volumeSerial()
+            != bridge.metadata(destination.handle()).identity().volumeSerial()) {
+          throw NativeBoundaryException.unavailable("recycle roots are on different volumes");
+        }
+        if (replace) {
+          if (target == null) {
+            throw NativeBoundaryException.conflict("observed restore target is required");
+          }
+          requireSameObservation(expectedTarget, bridge.metadata(target.handle()));
+          requireReplacementTarget(target);
+          replaceRecyclePinned(source, destination.handle(), name, target, replacementKey);
+        } else {
+          if (target != null) {
+            throw NativeBoundaryException.conflict("restore target conflicts");
+          }
+          bridge.rename(source, destination.handle(), name, false);
+        }
+      } finally {
+        if (target != null) target.close();
+        destination.close();
+        closeQuietly(source);
+      }
+      return metadata(relative(destinationParentPath, name));
+    } finally {
+      lifecycleLock.readLock().unlock();
+      mutationLock.unlock();
+    }
+  }
+
+  /** Returns retained-handle metadata for one displaced restore target. */
+  public NativeFileMetadata recycleReplacementMetadata(String replacementKey) {
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(replacementKey);
+      NativeHandle handle = bridge.openRelativeForMutation(
+          recycleReplacedRoot(), replacementKey, OpenKind.ANY, SAFE_OBJECT_ATTRIBUTES);
+      try {
+        return bridge.metadata(handle);
+      } finally {
+        closeQuietly(handle);
+      }
+    } finally {
+      lifecycleLock.readLock().unlock();
+    }
+  }
+
+  /** Restores a displaced target when the recycle payload never reached the visible name. */
+  public NativeFileMetadata restoreRecycleReplacement(
+      String replacementKey, String destinationParentPath, String name,
+      NativeFileMetadata expectedReplacement) {
+    mutationLock.lock();
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(replacementKey);
+      SharedFolderPathResolver.validateSingleWindowsName(name);
+      NativeHandle source = bridge.openRelativeForExclusiveMutation(
+          recycleReplacedRoot(), replacementKey, observedKind(expectedReplacement),
+          SAFE_OBJECT_ATTRIBUTES);
+      OpenedHandle destination = openVisible(
+          destinationParentPath, OpenKind.DIRECTORY, true, true, false);
+      try {
+        requireSameObservation(expectedReplacement, bridge.metadata(source));
+        bridge.rename(source, destination.handle(), name, false);
+      } finally {
+        destination.close();
+        closeQuietly(source);
+      }
+      return metadata(relative(destinationParentPath, name));
+    } finally {
+      lifecycleLock.readLock().unlock();
+      mutationLock.unlock();
+    }
+  }
+
+  /** Deletes the exact displaced restore target after a completed restore. */
+  public void deleteRecycleReplacement(
+      String replacementKey, NativeFileMetadata expectedReplacement) {
+    mutationLock.lock();
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(replacementKey);
+      NativeHandle target = bridge.openRelativeForExclusiveMutation(
+          recycleReplacedRoot(), replacementKey, observedKind(expectedReplacement),
+          SAFE_OBJECT_ATTRIBUTES);
+      try {
+        requireSameObservation(expectedReplacement, bridge.metadata(target));
+        bridge.delete(target);
+      } finally {
+        closeQuietly(target);
+      }
+    } finally {
+      lifecycleLock.readLock().unlock();
+      mutationLock.unlock();
+    }
+  }
+
+  /** Permanently deletes the exact identity-bound payload from the private recycle root. */
+  public void deleteRecycle(String recycleKey, NativeFileMetadata expectedSource) {
+    mutationLock.lock();
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(recycleKey);
+      NativeHandle source = bridge.openRelativeForExclusiveMutation(
+          recycleRoot(), recycleKey, observedKind(expectedSource), SAFE_OBJECT_ATTRIBUTES);
+      try {
+        requireSameObservation(expectedSource, bridge.metadata(source));
+        bridge.delete(source);
+      } finally {
+        closeQuietly(source);
+      }
+    } finally {
+      lifecycleLock.readLock().unlock();
+      mutationLock.unlock();
+    }
+  }
+
+  /** Recursively deletes an identity-bound recycle payload through retained native handles. */
+  public void deleteRecycleTree(String recycleKey, NativeFileMetadata expectedSource) {
+    mutationLock.lock();
+    lifecycleLock.readLock().lock();
+    try {
+      requireActive();
+      validateStagingKey(recycleKey);
+      NativeHandle source = bridge.openRelativeForExclusiveMutation(
+          recycleRoot(), recycleKey, observedKind(expectedSource), SAFE_OBJECT_ATTRIBUTES);
+      try {
+        requireSameObservation(expectedSource, bridge.metadata(source));
+        deleteNativeTree(source, expectedSource);
+      } finally {
+        closeQuietly(source);
+      }
+    } finally {
+      lifecycleLock.readLock().unlock();
+      mutationLock.unlock();
+    }
+  }
+
+  private void deleteNativeTree(NativeHandle handle, NativeFileMetadata expected) {
+    requireSameObservation(expected, bridge.metadata(handle));
+    if (expected.directory()) {
+      for (DirectoryEntry entry : bridge.listDirectory(handle)) {
+        if (entry.name().equals(".") || entry.name().equals("..")) continue;
+        SharedFolderPathResolver.validateSingleWindowsName(entry.name());
+        if (entry.reparsePoint() || entry.directory() == entry.regularFile()) {
+          throw unavailable();
+        }
+        NativeFileMetadata childExpected = new NativeFileMetadata(
+            entry.identity(), entry.directory(), entry.regularFile(), entry.size(),
+            entry.modifiedAt());
+        NativeHandle child = bridge.openRelativeForExclusiveMutation(
+            handle, entry.name(), observedKind(childExpected), SAFE_OBJECT_ATTRIBUTES);
+        try {
+          requireSameObservation(childExpected, bridge.metadata(child));
+          deleteNativeTree(child, childExpected);
+        } finally {
+          closeQuietly(child);
+        }
+      }
+      requireSameObservation(expected, bridge.metadata(handle));
+    }
+    bridge.delete(handle);
+  }
+
   /** Moves the exact observed visible source to a visible name without replacement. */
   public NativeFileMetadata moveVisibleNoReplace(
       String sourcePath, String destinationParentPath, String name,
@@ -569,6 +817,66 @@ public final class WindowsSharedFolderMutationBoundary {
     }
   }
 
+  private NativeHandle recycleRoot() {
+    NativeHandle current = recycleRootHandle;
+    if (current != null) return current;
+    lifecycleLock.readLock().unlock();
+    lifecycleLock.writeLock().lock();
+    try {
+      requireActive();
+      if (recycleRootHandle == null) {
+        try {
+          recycleRootHandle = bridge.openRelativeForMutation(
+              systemRootHandle, RECYCLE_DIRECTORY, OpenKind.DIRECTORY, SAFE_OBJECT_ATTRIBUTES);
+        } catch (NativeBoundaryException missing) {
+          if (!isMissing(missing)) throw missing;
+          recycleRootHandle = bridge.createRelative(
+              systemRootHandle, RECYCLE_DIRECTORY, OpenKind.DIRECTORY, SAFE_OBJECT_ATTRIBUTES);
+        }
+        if (!bridge.metadata(recycleRootHandle).directory()) {
+          closeQuietly(recycleRootHandle);
+          recycleRootHandle = null;
+          throw unavailable();
+        }
+      }
+      return recycleRootHandle;
+    } finally {
+      lifecycleLock.readLock().lock();
+      lifecycleLock.writeLock().unlock();
+    }
+  }
+
+  private NativeHandle recycleReplacedRoot() {
+    NativeHandle current = recycleReplacedRootHandle;
+    if (current != null) return current;
+    lifecycleLock.readLock().unlock();
+    lifecycleLock.writeLock().lock();
+    try {
+      requireActive();
+      if (recycleReplacedRootHandle == null) {
+        try {
+          recycleReplacedRootHandle = bridge.openRelativeForMutation(
+              systemRootHandle, RECYCLE_REPLACED_DIRECTORY,
+              OpenKind.DIRECTORY, SAFE_OBJECT_ATTRIBUTES);
+        } catch (NativeBoundaryException missing) {
+          if (!isMissing(missing)) throw missing;
+          recycleReplacedRootHandle = bridge.createRelative(
+              systemRootHandle, RECYCLE_REPLACED_DIRECTORY,
+              OpenKind.DIRECTORY, SAFE_OBJECT_ATTRIBUTES);
+        }
+        if (!bridge.metadata(recycleReplacedRootHandle).directory()) {
+          closeQuietly(recycleReplacedRootHandle);
+          recycleReplacedRootHandle = null;
+          throw unavailable();
+        }
+      }
+      return recycleReplacedRootHandle;
+    } finally {
+      lifecycleLock.readLock().lock();
+      lifecycleLock.writeLock().unlock();
+    }
+  }
+
   private void requireReplacementTarget(OpenedHandle target) {
     if (target == null) {
       throw NativeBoundaryException.conflict("observed replacement target is required");
@@ -608,6 +916,30 @@ public final class WindowsSharedFolderMutationBoundary {
     }
     String quarantineKey = java.util.UUID.randomUUID().toString();
     bridge.rename(target.handle(), quarantineRoot, quarantineKey, false);
+    try {
+      bridge.rename(source, destination, name, false);
+    } catch (NativeBoundaryException failure) {
+      try {
+        bridge.rename(target.handle(), destination, name, false);
+      } catch (NativeBoundaryException restoreFailure) {
+        failure.addSuppressed(restoreFailure);
+      }
+      throw failure;
+    }
+    bridge.delete(target.handle());
+  }
+
+  private void replaceRecyclePinned(
+      NativeHandle source, NativeHandle destination, String name, OpenedHandle target,
+      String replacementKey) {
+    NativeHandle replacementRoot = recycleReplacedRoot();
+    long volume = bridge.metadata(destination).identity().volumeSerial();
+    if (bridge.metadata(source).identity().volumeSerial() != volume
+        || bridge.metadata(target.handle()).identity().volumeSerial() != volume
+        || bridge.metadata(replacementRoot).identity().volumeSerial() != volume) {
+      throw NativeBoundaryException.unavailable("recycle replacement roots are on different volumes");
+    }
+    bridge.rename(target.handle(), replacementRoot, replacementKey, false);
     try {
       bridge.rename(source, destination, name, false);
     } catch (NativeBoundaryException failure) {
@@ -704,6 +1036,14 @@ public final class WindowsSharedFolderMutationBoundary {
   }
 
   private void closeAll() {
+    if (recycleReplacedRootHandle != null) {
+      closeQuietly(recycleReplacedRootHandle);
+      recycleReplacedRootHandle = null;
+    }
+    if (recycleRootHandle != null) {
+      closeQuietly(recycleRootHandle);
+      recycleRootHandle = null;
+    }
     if (mutationQuarantineRootHandle != null) {
       closeQuietly(mutationQuarantineRootHandle);
       mutationQuarantineRootHandle = null;

@@ -8,6 +8,8 @@ import dev.christopherbell.sharedfolder.model.SharedFolderDeleteRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderMoveRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderRenameRequest;
 import dev.christopherbell.sharedfolder.service.SharedFolderMutationService;
+import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadCompleteRequest;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadCreateRequest;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadService;
@@ -39,38 +41,56 @@ public class SharedFolderWriteController {
 
   private final SharedFolderMutationService mutations;
   private final SharedFolderUploadService uploads;
+  private final SharedFolderRecycleService recycle;
+  private final SharedFolderAuditRecorder audit;
 
   /** Creates the protected write controller. Services refresh persisted write access per operation. */
   public SharedFolderWriteController(
-      SharedFolderMutationService mutations, SharedFolderUploadService uploads) {
+      SharedFolderMutationService mutations,
+      SharedFolderUploadService uploads,
+      SharedFolderRecycleService recycle,
+      SharedFolderAuditRecorder audit) {
     this.mutations = mutations;
     this.uploads = uploads;
+    this.recycle = recycle;
+    this.audit = audit;
   }
 
   /** Creates one direct child directory. */
   @PostMapping("/folders")
   public ResponseEntity<SharedDirectoryEntry> createFolder(
       @Valid @RequestBody SharedFolderCreateFolderRequest request) {
-    return ResponseEntity.status(HttpStatus.CREATED).headers(noStore()).body(mutations.createFolder(request));
+    String requestedPath = request.parentPath().isEmpty() ? request.name()
+        : request.parentPath() + "/" + request.name();
+    SharedDirectoryEntry result = audited(
+        "CREATE_FOLDER", requestedPath, () -> mutations.createFolder(request));
+    audit.recordCurrent("CREATE_FOLDER", result.path(), 0L, "accepted", null);
+    return ResponseEntity.status(HttpStatus.CREATED).headers(noStore()).body(result);
   }
 
   /** Renames one observed item. */
   @PatchMapping("/entries/rename")
   public ResponseEntity<SharedDirectoryEntry> rename(
       @Valid @RequestBody SharedFolderRenameRequest request) {
-    return ResponseEntity.ok().headers(noStore()).body(mutations.rename(request));
+    SharedDirectoryEntry result = audited(
+        "RENAME", request.path(), () -> mutations.rename(request));
+    audit.recordCurrent("RENAME", result.path(), result.size(), "accepted", null);
+    return ResponseEntity.ok().headers(noStore()).body(result);
   }
 
   /** Moves one observed item and requires explicit replacement intent. */
   @PostMapping("/entries/move")
   public ResponseEntity<SharedDirectoryEntry> move(@Valid @RequestBody SharedFolderMoveRequest request) {
-    return ResponseEntity.ok().headers(noStore()).body(mutations.move(request));
+    SharedDirectoryEntry result = audited(
+        "MOVE", request.path(), () -> mutations.move(request));
+    audit.recordCurrent("MOVE", result.path(), result.size(), "accepted", null);
+    return ResponseEntity.ok().headers(noStore()).body(result);
   }
 
-  /** Physically deletes one observed item until the later recycle layer replaces this route's seam. */
+  /** Moves one observed item into isolated recoverable storage. */
   @DeleteMapping("/entries")
   public ResponseEntity<Void> delete(@Valid @RequestBody SharedFolderDeleteRequest request) {
-    mutations.delete(request);
+    audited("RECYCLE", request.path(), () -> recycle.recycle(request));
     return ResponseEntity.noContent().headers(noStore()).build();
   }
 
@@ -78,13 +98,22 @@ public class SharedFolderWriteController {
   @PostMapping("/uploads")
   public ResponseEntity<SharedFolderUploadStatus> createUpload(
       @Valid @RequestBody SharedFolderUploadCreateRequest request) {
-    return ResponseEntity.status(HttpStatus.CREATED).headers(noStore()).body(uploads.create(request));
+    String requestedPath = request.parentPath().isEmpty() ? request.name()
+        : request.parentPath() + "/" + request.name();
+    SharedFolderUploadStatus result = audited(
+        "UPLOAD_START", requestedPath, () -> uploads.create(request));
+    String path = result.parentPath().isEmpty() ? result.name() : result.parentPath() + "/" + result.name();
+    audit.recordCurrent("UPLOAD_START", path, result.expectedBytes(), "accepted", null);
+    return ResponseEntity.status(HttpStatus.CREATED).headers(noStore()).body(result);
   }
 
   /** Returns owned upload progress. */
   @GetMapping("/uploads/{id}")
   public ResponseEntity<SharedFolderUploadStatus> uploadStatus(@PathVariable String id) {
-    return ResponseEntity.ok().headers(noStore()).body(uploads.status(id));
+    SharedFolderUploadStatus result = audited(
+        "UPLOAD_STATUS", id, () -> uploads.status(id));
+    audit.recordCurrent("UPLOAD_STATUS", id, result.expectedBytes(), "accepted", null);
+    return ResponseEntity.ok().headers(noStore()).body(result);
   }
 
   /** Streams exactly one bounded ordered upload chunk; Spring decodes the identifier once. */
@@ -103,18 +132,34 @@ public class SharedFolderWriteController {
   public ResponseEntity<SharedFolderUploadStatus> completeUpload(
       @PathVariable String id,
       @RequestBody(required = false) SharedFolderUploadCompleteRequest request) {
-    return ResponseEntity.ok().headers(noStore()).body(uploads.complete(id, request != null && request.replace()));
+    SharedFolderUploadStatus result = audited(
+        "UPLOAD_FINALIZE", id,
+        () -> uploads.complete(id, request != null && request.replace()));
+    audit.recordCurrent("UPLOAD_FINALIZE", id, result.expectedBytes(), "accepted", null);
+    return ResponseEntity.ok().headers(noStore()).body(result);
   }
 
   /** Cancels an owned upload and removes its private staging bytes. */
   @DeleteMapping("/uploads/{id}")
   public ResponseEntity<SharedFolderUploadStatus> cancelUpload(@PathVariable String id) {
-    return ResponseEntity.ok().headers(noStore()).body(uploads.cancel(id));
+    SharedFolderUploadStatus result = audited(
+        "UPLOAD_CANCEL", id, () -> uploads.cancel(id));
+    audit.recordCurrent("UPLOAD_CANCEL", id, result.nextOffset(), "accepted", null);
+    return ResponseEntity.ok().headers(noStore()).body(result);
   }
 
   private HttpHeaders noStore() {
     HttpHeaders headers = new HttpHeaders();
     headers.setCacheControl("private, no-store");
     return headers;
+  }
+
+  private <T> T audited(String action, String resource, java.util.function.Supplier<T> operation) {
+    try {
+      return operation.get();
+    } catch (RuntimeException failure) {
+      audit.recordFailure(action, resource, failure);
+      throw failure;
+    }
   }
 }

@@ -95,6 +95,21 @@ export const API = {
       const params = new URLSearchParams({ path: String(path || '') });
       return `/api/shared-folder/2026-07-17/preview?${params}`;
     },
+    admin: {
+      audit: (filters = {}) => {
+        const params = new URLSearchParams();
+        Object.entries(filters).forEach(([key, value]) => {
+          if (value !== undefined && value !== null && String(value) !== '') {
+            params.set(key, String(value));
+          }
+        });
+        const query = params.toString();
+        return `/api/shared-folder/2026-07-17/admin/audit${query ? `?${query}` : ''}`;
+      },
+      recycle: '/api/shared-folder/2026-07-17/admin/recycle',
+      restore: (id) => `/api/shared-folder/2026-07-17/admin/recycle/${encodeURIComponent(id)}/restore`,
+      purge: (id) => `/api/shared-folder/2026-07-17/admin/recycle/${encodeURIComponent(id)}`,
+    },
   },
   location: {
     zipCoordinate: (zipCode) => `/api/location/zip/${encodeURIComponent(zipCode)}`,

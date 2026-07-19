@@ -26,13 +26,22 @@ public class SharedFolderAccessService {
   private final AccountRepository accountRepository;
 
   /** Requires a fresh effective shared-folder read capability. */
-  public void requireRead() {
-    require(AccountPermission.SHARED_FOLDER_READ, "Shared-folder read access required");
+  public Account requireRead() {
+    return require(AccountPermission.SHARED_FOLDER_READ, "Shared-folder read access required");
   }
 
   /** Requires a fresh effective shared-folder write capability. */
   public Account requireWrite() {
     return require(AccountPermission.SHARED_FOLDER_WRITE, "Shared-folder write access required");
+  }
+
+  /** Requires a fresh active, approved administrator account for shared-folder administration. */
+  public Account requireAdmin() {
+    Account account = currentActiveApprovedAccount();
+    if (account.getRole() != Role.ADMIN) {
+      throw new AccessDeniedException("Shared-folder administrator access required");
+    }
+    return account;
   }
 
   /**

@@ -17,6 +17,7 @@ import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.Role;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
@@ -60,6 +61,7 @@ public class AccountService {
   private final AccountProfileService accountProfileService;
   private final AccountFollowService accountFollowService;
   private final AccountModerationService accountModerationService;
+  private final SharedFolderAuditRecorder sharedFolderAudit;
 
   /**
    * Approves an account by setting its approvedBy field to the current user's ID and changing its
@@ -367,9 +369,13 @@ public class AccountService {
       String accountId,
       SharedFolderPermissionUpdate request) throws InvalidRequestException, ResourceNotFoundException {
     if (request == null || request.read() == null || request.write() == null) {
+      sharedFolderAudit.recordCurrent(
+          "PERMISSION_CHANGE", safeAuditAccountId(accountId), null, "rejected", "invalid_request");
       throw new InvalidRequestException("Shared-folder permissions are required.");
     }
     if (!request.read() && request.write()) {
+      sharedFolderAudit.recordCurrent(
+          "PERMISSION_CHANGE", safeAuditAccountId(accountId), null, "rejected", "invalid_request");
       throw new InvalidRequestException("Shared-folder write requires read.");
     }
 
@@ -383,6 +389,13 @@ public class AccountService {
       next.add(AccountPermission.SHARED_FOLDER_WRITE);
     }
     account.setPermissions(next);
-    return accountMapper.toAccount(accountRepository.save(account));
+    AccountDetail saved = accountMapper.toAccount(accountRepository.save(account));
+    sharedFolderAudit.recordCurrent(
+        "PERMISSION_CHANGE", accountId, null, "accepted", null);
+    return saved;
+  }
+
+  private String safeAuditAccountId(String accountId) {
+    return accountId == null || accountId.isBlank() ? "unknown" : accountId;
   }
 }

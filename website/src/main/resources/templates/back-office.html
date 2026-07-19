@@ -63,6 +63,9 @@
               <li class="nav-item" role="presentation">
                 <button class="nav-link" id="tab-operations" data-bs-toggle="pill" data-bs-target="#panel-operations" type="button" role="tab">Operations</button>
               </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-shared-folder" data-bs-toggle="pill" data-bs-target="#panel-shared-folder" type="button" role="tab">Shared Folder</button>
+              </li>
             </ul>
             <div class="tab-content">
               <div class="tab-pane fade show active" id="panel-reports" role="tabpanel">
@@ -187,6 +190,40 @@
                       <button type="button" class="btn btn-outline-secondary operation-button" data-operation="blog-load">Load Blog Posts</button>
                     </div>
                     <div id="contentOperationStatus" class="operation-result">Content data has not been loaded yet.</div>
+                  </section>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="panel-shared-folder" role="tabpanel">
+                <div class="operations-grid">
+                  <section class="operation-panel" aria-labelledby="sharedAuditTitle">
+                    <div class="queue-panel-header">
+                      <div>
+                        <p class="home-kicker mb-1">Shared Folder</p>
+                        <h2 id="sharedAuditTitle">Audit History</h2>
+                      </div>
+                    </div>
+                    <form class="operation-form" id="sharedAuditFilters">
+                      <div class="row g-2">
+                        <div class="col-md-3"><input aria-label="Filter by account ID" class="form-control" name="accountId" placeholder="Account ID" /></div>
+                        <div class="col-md-3"><input aria-label="Filter by action" class="form-control" name="action" placeholder="Action" /></div>
+                        <div class="col-md-3"><input aria-label="Filter by outcome" class="form-control" name="outcome" placeholder="Outcome" /></div>
+                        <div class="col-md-3"><input aria-label="Filter by relative path" class="form-control" name="path" placeholder="Relative path" /></div>
+                        <div class="col-md-5"><label class="form-label">From<input class="form-control" name="from" type="datetime-local" /></label></div>
+                        <div class="col-md-5"><label class="form-label">To<input class="form-control" name="to" type="datetime-local" /></label></div>
+                        <div class="col-md-2 d-flex align-items-end"><button class="btn btn-primary w-100" type="submit">Filter</button></div>
+                      </div>
+                    </form>
+                    <div id="sharedAuditList" class="queue-list" aria-live="polite"></div>
+                  </section>
+                  <section class="operation-panel" aria-labelledby="sharedRecycleTitle">
+                    <div class="queue-panel-header">
+                      <div>
+                        <p class="home-kicker mb-1">Private Retention</p>
+                        <h2 id="sharedRecycleTitle">Recycle Area</h2>
+                      </div>
+                    </div>
+                    <p class="queue-age">Restore never overwrites unless you explicitly choose replace. Permanent purge requires the exact typed phrase.</p>
+                    <div id="sharedRecycleList" class="queue-list" aria-live="polite"></div>
                   </section>
                 </div>
               </div>

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeBoundaryException;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.DirectoryEntry;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeFileMetadata;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -187,6 +188,65 @@ class WindowsSharedFolderMutationBoundaryTest {
   }
 
   @Test
+  void recycleMovesAndRestoresTheExactObservedLeafThroughRetainedPrivateHandles() {
+    RecordingBridge bridge = new RecordingBridge();
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        Path.of("C:/shared"), Path.of("C:/system"), bridge);
+    NativeFileMetadata observed = boundary.metadata("documents/report.pdf");
+    String key = "99999999-9999-9999-9999-999999999999";
+
+    NativeFileMetadata recycled = boundary.recycleVisible("documents/report.pdf", key, observed);
+    assertThat(boundary.recycleMetadata(key).identity().sameFile(recycled.identity())).isTrue();
+    NativeFileMetadata restored = boundary.restoreRecycle(
+        key, "documents", "report.pdf", recycled, false, null);
+
+    assertThat(restored.identity().sameFile(recycled.identity())).isTrue();
+    assertThat(bridge.renames).containsExactly(
+        new Rename("report.pdf", key, false),
+        new Rename(key, "report.pdf", false));
+    assertThat(bridge.exclusiveMutationOpenNames).contains("report.pdf", key);
+    assertThat(bridge.mutationOpenNames).contains("shared-folder-recycle");
+    boundary.destroy();
+    assertThat(bridge.closed).contains("shared-folder-recycle");
+  }
+
+  @Test
+  void recycleRestoreReplacementPinsAndDisplacesTheObservedCurrentTarget() {
+    RecordingBridge bridge = new RecordingBridge();
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        Path.of("C:/shared"), Path.of("C:/system"), bridge);
+    String key = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    NativeFileMetadata recycled = boundary.metadata(key);
+    NativeFileMetadata target = boundary.metadata("documents/report.pdf");
+
+    boundary.restoreRecycle(key, "documents", "report.pdf", recycled, true, target);
+
+    assertThat(bridge.renames).hasSize(2);
+    assertThat(bridge.renames.get(0).sourceName()).isEqualTo("report.pdf");
+    assertThat(bridge.renames.get(0).targetName()).matches("[0-9a-f-]{36}");
+    assertThat(bridge.renames.get(1)).isEqualTo(new Rename(key, "report.pdf", false));
+    assertThat(bridge.deleted).contains("report.pdf");
+    boundary.destroy();
+  }
+
+  @Test
+  void recursiveRecyclePurgeDeletesChildrenThroughRetainedHandlesBeforeTheParent() {
+    RecordingBridge bridge = new RecordingBridge();
+    String key = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+    bridge.directoryHandles.add(key);
+    bridge.directoryChildren.put(key, List.of(new DirectoryEntry(
+        "child.txt", bridge.identity(7, (byte) 0), false, true, false, 0, MODIFIED)));
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        Path.of("C:/shared"), Path.of("C:/system"), bridge);
+
+    NativeFileMetadata expected = boundary.recycleMetadata(key);
+    boundary.deleteRecycleTree(key, expected);
+
+    assertThat(bridge.deleted).containsSubsequence("child.txt", key);
+    boundary.destroy();
+  }
+
+  @Test
   void privateDirectoryInitializationCreatesOnlyAfterAnExactMissingStatus() {
     RecordingBridge unavailableBridge = new RecordingBridge();
     NativeBoundaryException unavailableFailure =
@@ -237,6 +297,9 @@ class WindowsSharedFolderMutationBoundaryTest {
     private boolean changeTargetIdentityOnNextOpen;
     private boolean targetRaced;
     private NativeBoundaryException privateDirectoryOpenFailure;
+    private final java.util.Set<String> directoryHandles = new java.util.HashSet<>();
+    private final java.util.Map<String, List<DirectoryEntry>> directoryChildren =
+        new java.util.HashMap<>();
 
     @Override
     public NativeHandle openRoot(Path rootPath, int attributes) {
@@ -273,7 +336,8 @@ class WindowsSharedFolderMutationBoundaryTest {
       mutationOpenNames.add(name);
       if (privateDirectoryOpenFailure != null
           && (name.equals("shared-folder-upload-staging")
-              || name.equals("shared-folder-mutation-quarantine"))) {
+              || name.equals("shared-folder-mutation-quarantine")
+              || name.equals("shared-folder-recycle"))) {
         NativeBoundaryException failure = privateDirectoryOpenFailure;
         privateDirectoryOpenFailure = null;
         throw failure;
@@ -307,15 +371,18 @@ class WindowsSharedFolderMutationBoundaryTest {
 
     @Override
     public NativeFileMetadata metadata(NativeHandle handle) {
-      boolean directory = !handle.value().toString().contains(".")
-          && !handle.value().toString().matches("[0-9a-f-]{36}");
+      boolean directory = directoryHandles.contains(handle.value().toString())
+          || !handle.value().toString().contains(".")
+              && !handle.value().toString().matches("[0-9a-f-]{36}");
       long volume = handle.value().toString().matches("[0-9a-f-]{36}") ? stagingVolume : 7;
       byte identityByte = mutationSourceOpened && handle.value().equals("old.txt")
           || targetRaced && handle.value().equals("target.txt") ? (byte) 1 : 0;
       return new NativeFileMetadata(identity(volume, identityByte), directory, !directory, 0, MODIFIED);
     }
 
-    @Override public List<DirectoryEntry> listDirectory(NativeHandle directory) { return List.of(); }
+    @Override public List<DirectoryEntry> listDirectory(NativeHandle directory) {
+      return directoryChildren.getOrDefault(directory.value().toString(), List.of());
+    }
     @Override public int read(NativeHandle handle, byte[] buffer, int offset, int length) { return -1; }
     @Override public long seek(NativeHandle handle, long offset) { return offset; }
     @Override public int write(NativeHandle handle, byte[] buffer, int offset, int length) {

@@ -12,6 +12,7 @@ import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.MappedByteBuffer;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
@@ -414,6 +415,57 @@ public class PortableSharedFolderPrivateBoundary {
     if (!deleteIfExists(directory, key)) {
       throw new NoSuchFileException(key);
     }
+  }
+
+  /** Recursively deletes one verified private tree without following links or reparse points. */
+  public boolean deleteTreeIfExists(String directory, String key) throws IOException {
+    try {
+      Path path = verifiedFile(directory, key);
+      verifyForOperation();
+      final LeafIdentity expected;
+      try {
+        expected = leafIdentity(path, false);
+      } catch (NoSuchFileException exception) {
+        return false;
+      }
+      deleteVerifiedTree(path, expected);
+      if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+        throw unavailable(new IOException("private shared-folder tree remained after deletion"));
+      }
+      verifyForOperation();
+      return true;
+    } catch (BoundaryUnavailableException exception) {
+      throw exception;
+    } catch (SecurityException exception) {
+      throw unavailable(exception);
+    }
+  }
+
+  /** Recursively deletes one verified private tree and fails when it is absent. */
+  public void deleteTree(String directory, String key) throws IOException {
+    if (!deleteTreeIfExists(directory, key)) {
+      throw new NoSuchFileException(key);
+    }
+  }
+
+  private void deleteVerifiedTree(Path path, LeafIdentity expected) throws IOException {
+    LeafIdentity current = leafIdentity(path, false);
+    if (!expected.sameObject(current)) {
+      throw unavailable(new IOException("private shared-folder tree identity changed"));
+    }
+    if (current.attributes().isDirectory()) {
+      try (DirectoryStream<Path> children = Files.newDirectoryStream(path)) {
+        for (Path child : children) {
+          LeafIdentity childIdentity = leafIdentity(child, false);
+          deleteVerifiedTree(child, childIdentity);
+        }
+      }
+      current = leafIdentity(path, false);
+      if (!expected.sameObject(current)) {
+        throw unavailable(new IOException("private shared-folder directory identity changed"));
+      }
+    }
+    Files.delete(path);
   }
 
   private Path verifiedFile(String directory, String key) throws BoundaryUnavailableException {

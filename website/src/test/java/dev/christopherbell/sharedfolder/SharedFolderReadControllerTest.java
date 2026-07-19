@@ -25,6 +25,7 @@ import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService.SharedFolderPreview;
 import dev.christopherbell.sharedfolder.service.SharedFolderRangeNotSatisfiableException;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import dev.christopherbell.sharedfolder.web.SharedFolderReadController;
 import jakarta.servlet.FilterChain;
@@ -70,6 +71,7 @@ class SharedFolderReadControllerTest {
   @MockitoBean private SharedFolderBrowserService browser;
   @MockitoBean private SharedFolderDownloadService downloads;
   @MockitoBean private SharedFolderPreviewService previews;
+  @MockitoBean private SharedFolderAuditRecorder audit;
 
   @Test
   void everyReadRoute_whenAnonymous_returnsUnauthorized() throws Exception {

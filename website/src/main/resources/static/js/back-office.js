@@ -8,6 +8,12 @@ import {
   rolePromotionOptions,
   sharedFolderPermissionState,
 } from './lib/back-office-users.js';
+import {
+  purgeConfirmation,
+  sharedAuditFilters,
+  sharedAuditMarkup,
+  sharedRecycleMarkup,
+} from './lib/back-office-shared-folder.js';
 import { authHeaders, fetchJson, formatWhen, sanitize } from './lib/util.js';
 
 const content = document.getElementById('backOfficeContent');
@@ -29,6 +35,9 @@ const vehicleOperationStatus = document.getElementById('vehicleOperationStatus')
 const contentOperationStatus = document.getElementById('contentOperationStatus');
 const vehicleVinForm = document.getElementById('vehicleVinForm');
 const vehicleVinBatchForm = document.getElementById('vehicleVinBatchForm');
+const sharedAuditForm = document.getElementById('sharedAuditFilters');
+const sharedAuditList = document.getElementById('sharedAuditList');
+const sharedRecycleList = document.getElementById('sharedRecycleList');
 
 let accounts = [];
 let reports = [];
@@ -36,6 +45,8 @@ let activities = [];
 let restaurants = [];
 let vehicles = [];
 let blogPosts = [];
+let sharedAuditEvents = [];
+let sharedRecycleItems = [];
 
 function showAlert(msg) {
   if (!alertBox) return;
@@ -56,6 +67,8 @@ function setLoading() {
   renderOperationResult(locationOperationStatus, 'Census ZIP coordinates have not been imported in this session.');
   renderOperationResult(vehicleOperationStatus, 'Vehicle state has not been loaded yet.');
   renderOperationResult(contentOperationStatus, 'Content data has not been loaded yet.');
+  renderState(sharedAuditList, 'Loading shared-folder audit…');
+  renderState(sharedRecycleList, 'Loading recycle items…');
 }
 
 function renderState(container, message) {
@@ -413,6 +426,53 @@ async function refreshDashboard() {
   renderReports();
   renderUsers();
   renderActivity();
+  try {
+    await refreshSharedAdministration();
+  } catch (err) {
+    if (err?.status === 401 || err?.status === 403) throw err;
+    renderState(sharedAuditList, 'Shared-folder audit is temporarily unavailable.');
+    renderState(sharedRecycleList, 'Recycle administration is temporarily unavailable.');
+    showAlert(err?.message || 'Shared-folder administration is temporarily unavailable.');
+  }
+}
+
+async function refreshSharedAdministration(filters = sharedAuditFilters(sharedAuditForm)) {
+  [sharedAuditEvents, sharedRecycleItems] = await Promise.all([
+    fetchJson(API.sharedFolder.admin.audit(filters), { headers: authHeaders() }),
+    fetchJson(API.sharedFolder.admin.recycle, { headers: authHeaders() }),
+  ]);
+  sharedAuditList.innerHTML = sharedAuditMarkup(sharedAuditEvents || []);
+  sharedRecycleList.innerHTML = sharedRecycleMarkup(sharedRecycleItems || []);
+}
+
+async function handleSharedRecycleAction(button) {
+  const id = button.getAttribute('data-id');
+  const action = button.getAttribute('data-shared-recycle-action');
+  if (!id || !action) return;
+  button.disabled = true;
+  clearAlert();
+  try {
+    if (action === 'restore' || action === 'replace') {
+      if (action === 'replace' && !window.confirm('Replace the current item at the original path?')) return;
+      await fetchJson(API.sharedFolder.admin.restore(id), {
+        method: 'POST', headers: authHeaders(), body: JSON.stringify({ replace: action === 'replace' }),
+      });
+    } else if (action === 'purge') {
+      const typed = window.prompt(`Type PURGE ${id} to permanently delete this recycled item.`) || '';
+      if (!purgeConfirmation(id, typed)) {
+        showAlert('Permanent purge confirmation did not match.');
+        return;
+      }
+      await fetchJson(API.sharedFolder.admin.purge(id), {
+        method: 'DELETE', headers: authHeaders(), body: JSON.stringify({ confirmation: typed }),
+      });
+    }
+    await refreshSharedAdministration();
+  } catch (err) {
+    showAlert(err.message || 'Shared-folder administration failed.');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function wflCountsMarkup() {
@@ -764,6 +824,12 @@ function wireEvents() {
       return;
     }
 
+    const recycleButton = action.closest?.('[data-shared-recycle-action]');
+    if (recycleButton instanceof HTMLButtonElement) {
+      handleSharedRecycleAction(recycleButton);
+      return;
+    }
+
     const canesReviewButton = action.closest?.('[data-canes-box-review]');
     if (canesReviewButton instanceof HTMLButtonElement) {
       reviewCanesBoxMetro(canesReviewButton).catch(err => showAlert(err.message || 'Failed to review price.'));
@@ -842,6 +908,16 @@ function wireEvents() {
       vehicleVinBatchForm.reset();
     } catch (err) {
       showAlert(err.message || 'Failed to create vehicle batch.');
+    }
+  });
+
+  sharedAuditForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearAlert();
+    try {
+      await refreshSharedAdministration(sharedAuditFilters(sharedAuditForm));
+    } catch (err) {
+      showAlert(err.message || 'Failed to load shared-folder administration.');
     }
   });
 

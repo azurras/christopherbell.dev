@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -15,6 +16,11 @@ import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntryType;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
 import dev.christopherbell.sharedfolder.service.SharedFolderMutationService;
+import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditEvent;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import dev.christopherbell.sharedfolder.web.SharedFolderAdminController;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadService;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadState;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadStatus;
@@ -46,7 +52,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest(SharedFolderWriteController.class)
+@WebMvcTest({SharedFolderWriteController.class, SharedFolderAdminController.class})
 @Import({ControllerExceptionHandler.class, SharedFolderNoStoreFilter.class,
     SharedFolderWriteControllerTest.SecurityConfiguration.class})
 class SharedFolderWriteControllerTest {
@@ -55,6 +61,66 @@ class SharedFolderWriteControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private SharedFolderMutationService mutations;
   @MockitoBean private SharedFolderUploadService uploads;
+  @MockitoBean private SharedFolderRecycleService recycle;
+  @MockitoBean private SharedFolderAuditQueryService auditQueries;
+  @MockitoBean private SharedFolderAuditRecorder auditRecorder;
+
+  @Test
+  @WithMockUser(authorities = "ADMIN")
+  void adminCanFilterAuditAndListRestoreOrPurgeRecycleItems() throws Exception {
+    when(auditQueries.search(any())).thenReturn(java.util.List.of(new SharedFolderAuditEvent(
+        "audit-1", "account-1", "RECYCLE", "docs/report.pdf", 42L, "accepted", null,
+        "203.0.113.8", Instant.parse("2026-07-18T12:00:00Z"),
+        Instant.parse("2027-01-14T12:00:00Z"))));
+    when(recycle.list()).thenReturn(java.util.List.of());
+
+    mockMvc.perform(get(BASE + "/admin/audit")
+            .queryParam("accountId", "account-1")
+            .queryParam("action", "RECYCLE")
+            .queryParam("outcome", "accepted")
+            .queryParam("path", "docs/report.pdf"))
+        .andExpect(status().isOk())
+        .andExpect(header().string("Cache-Control", "private, no-store"))
+        .andExpect(jsonPath("$[0].relativePath").value("docs/report.pdf"));
+    mockMvc.perform(get(BASE + "/admin/recycle"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$").isArray());
+    mockMvc.perform(post(BASE + "/admin/recycle/item-1/restore")
+            .contentType("application/json").content("{\"replace\":true}"))
+        .andExpect(status().isOk());
+    mockMvc.perform(delete(BASE + "/admin/recycle/item-1")
+            .contentType("application/json").content("{\"confirmation\":\"PURGE item-1\"}"))
+        .andExpect(status().isNoContent());
+
+    org.mockito.Mockito.verify(recycle).restore("item-1", true);
+    org.mockito.Mockito.verify(recycle).purge("item-1", "PURGE item-1");
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void nonAdminCannotUseAuditOrRecycleAdministration() throws Exception {
+    mockMvc.perform(get(BASE + "/admin/audit")).andExpect(status().isForbidden());
+    mockMvc.perform(get(BASE + "/admin/recycle")).andExpect(status().isForbidden());
+    org.mockito.Mockito.verifyNoInteractions(auditQueries);
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void deleteRouteMovesTheObservedItemToRecycleInsteadOfPhysicallyDeletingIt() throws Exception {
+    when(recycle.recycle(any())).thenReturn(
+        new dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleItem(
+            "item-1", "docs/report.pdf", "account-1",
+            Instant.parse("2026-07-18T12:00:00Z"),
+            Instant.parse("2026-08-17T12:00:00Z"), "payload-1", 42L, false,
+            "fingerprint", dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleState.RECYCLED));
+    mockMvc.perform(delete(BASE + "/entries").contentType("application/json")
+            .content("{\"path\":\"docs/report.pdf\",\"observedToken\":\"opaque\"}"))
+        .andExpect(status().isNoContent())
+        .andExpect(header().string("Cache-Control", "private, no-store"));
+
+    org.mockito.Mockito.verify(recycle).recycle(any());
+    org.mockito.Mockito.verifyNoInteractions(mutations);
+  }
 
   @Test
   void anonymousWriteAndUploadRoutesAreUnauthorizedAndNeverStored() throws Exception {
