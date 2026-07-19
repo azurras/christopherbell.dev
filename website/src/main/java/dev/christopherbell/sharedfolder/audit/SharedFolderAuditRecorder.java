@@ -7,7 +7,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -21,12 +22,13 @@ import org.springframework.web.server.ResponseStatusException;
 @Slf4j
 public final class SharedFolderAuditRecorder {
   private static final Duration LOGICAL_ACCESS_WINDOW = Duration.ofMinutes(5);
+  private static final int MAX_LOGICAL_ACCESS_ENTRIES = 10_000;
 
   private final SharedFolderAuditSink sink;
   private final PermissionService permissions;
   private final ClientIpResolver clientIps;
   private final Clock clock;
-  private final ConcurrentHashMap<String, Instant> logicalAccess = new ConcurrentHashMap<>();
+  private final Map<String, Instant> logicalAccess = new LinkedHashMap<>();
 
   public SharedFolderAuditRecorder(
       SharedFolderAuditSink sink,
@@ -67,19 +69,22 @@ public final class SharedFolderAuditRecorder {
       accountId = "unknown";
     }
     String key = accountId + "\n" + action + "\n" + resource;
-    final boolean[] shouldRecord = {false};
-    logicalAccess.compute(key, (ignored, previous) -> {
-      if (previous == null || !previous.plus(LOGICAL_ACCESS_WINDOW).isAfter(now)) {
-        shouldRecord[0] = true;
-        return now;
+    boolean shouldRecord;
+    synchronized (logicalAccess) {
+      Instant previous = logicalAccess.get(key);
+      shouldRecord = previous == null || !previous.plus(LOGICAL_ACCESS_WINDOW).isAfter(now);
+      if (shouldRecord) {
+        if (previous != null) logicalAccess.remove(key);
+        while (logicalAccess.size() >= MAX_LOGICAL_ACCESS_ENTRIES) {
+          var oldest = logicalAccess.entrySet().iterator();
+          if (!oldest.hasNext()) break;
+          oldest.next();
+          oldest.remove();
+        }
+        logicalAccess.put(key, now);
       }
-      return previous;
-    });
-    if (shouldRecord[0]) record(accountId, action, resource, size, "accepted", null);
-    if (logicalAccess.size() > 10_000) {
-      logicalAccess.entrySet().removeIf(entry ->
-          !entry.getValue().plus(LOGICAL_ACCESS_WINDOW).isAfter(now));
     }
+    if (shouldRecord) record(accountId, action, resource, size, "accepted", null);
   }
 
   /** Records a rejected attempt without allowing an unsafe raw path into persistence. */

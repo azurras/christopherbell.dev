@@ -18,6 +18,7 @@ import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
@@ -62,6 +63,7 @@ public class AccountService {
   private final AccountFollowService accountFollowService;
   private final AccountModerationService accountModerationService;
   private final SharedFolderAuditRecorder sharedFolderAudit;
+  private final SharedFolderAccessService sharedFolderAccess;
 
   /**
    * Approves an account by setting its approvedBy field to the current user's ID and changing its
@@ -368,31 +370,42 @@ public class AccountService {
   public AccountDetail updateSharedFolderPermissions(
       String accountId,
       SharedFolderPermissionUpdate request) throws InvalidRequestException, ResourceNotFoundException {
-    if (request == null || request.read() == null || request.write() == null) {
-      sharedFolderAudit.recordCurrent(
-          "PERMISSION_CHANGE", safeAuditAccountId(accountId), null, "rejected", "invalid_request");
-      throw new InvalidRequestException("Shared-folder permissions are required.");
-    }
-    if (!request.read() && request.write()) {
-      sharedFolderAudit.recordCurrent(
-          "PERMISSION_CHANGE", safeAuditAccountId(accountId), null, "rejected", "invalid_request");
-      throw new InvalidRequestException("Shared-folder write requires read.");
-    }
+    String auditResource = safeAuditAccountId(accountId);
+    try {
+      sharedFolderAccess.requireAdmin();
+      if (request == null || request.read() == null || request.write() == null) {
+        throw new InvalidRequestException("Shared-folder permissions are required.");
+      }
+      if (!request.read() && request.write()) {
+        throw new InvalidRequestException("Shared-folder write requires read.");
+      }
 
-    var account = accountRepository.findById(accountId)
-        .orElseThrow(() -> new ResourceNotFoundException("Account not found."));
-    var next = EnumSet.noneOf(AccountPermission.class);
-    if (request.read()) {
-      next.add(AccountPermission.SHARED_FOLDER_READ);
+      var account = accountRepository.findById(accountId)
+          .orElseThrow(() -> new ResourceNotFoundException("Account not found."));
+      var next = EnumSet.noneOf(AccountPermission.class);
+      if (request.read()) {
+        next.add(AccountPermission.SHARED_FOLDER_READ);
+      }
+      if (request.write()) {
+        next.add(AccountPermission.SHARED_FOLDER_WRITE);
+      }
+      account.setPermissions(next);
+      AccountDetail saved = accountMapper.toAccount(accountRepository.save(account));
+      sharedFolderAudit.recordCurrent(
+          "PERMISSION_CHANGE", auditResource, null, "accepted", null);
+      return saved;
+    } catch (InvalidRequestException failure) {
+      sharedFolderAudit.recordCurrent(
+          "PERMISSION_CHANGE", auditResource, null, "rejected", "invalid_request");
+      throw failure;
+    } catch (ResourceNotFoundException failure) {
+      sharedFolderAudit.recordCurrent(
+          "PERMISSION_CHANGE", auditResource, null, "rejected", "not_found");
+      throw failure;
+    } catch (RuntimeException failure) {
+      sharedFolderAudit.recordFailure("PERMISSION_CHANGE", auditResource, failure);
+      throw failure;
     }
-    if (request.write()) {
-      next.add(AccountPermission.SHARED_FOLDER_WRITE);
-    }
-    account.setPermissions(next);
-    AccountDetail saved = accountMapper.toAccount(accountRepository.save(account));
-    sharedFolderAudit.recordCurrent(
-        "PERMISSION_CHANGE", accountId, null, "accepted", null);
-    return saved;
   }
 
   private String safeAuditAccountId(String accountId) {

@@ -15,6 +15,7 @@ import dev.christopherbell.sharedfolder.audit.SharedFolderAuditSink;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -70,5 +71,23 @@ class SharedFolderAuditRecorderTest {
     verify(sink).record(captor.capture());
     org.assertj.core.api.Assertions.assertThat(captor.getValue().relativePathOrResourceId())
         .isEqualTo("invalid-path");
+  }
+
+  @Test
+  void logicalAccessDeduplicationNeverExceedsItsFixedHeapBound() {
+    PermissionService permissions = mock(PermissionService.class);
+    when(permissions.getSelfId()).thenReturn("account-1");
+    var recorder = new SharedFolderAuditRecorder(
+        command -> { }, permissions, mock(ClientIpResolver.class),
+        Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC));
+
+    for (int index = 0; index < 10_050; index++) {
+      recorder.recordLogicalAccess("DOWNLOAD_STARTED", "files/file-" + index, 1L);
+    }
+
+    @SuppressWarnings("unchecked")
+    Map<String, Instant> entries = (Map<String, Instant>)
+        org.springframework.test.util.ReflectionTestUtils.getField(recorder, "logicalAccess");
+    org.assertj.core.api.Assertions.assertThat(entries).hasSize(10_000);
   }
 }

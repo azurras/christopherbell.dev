@@ -441,10 +441,9 @@ public class AccountController {
       value = V20260717 + "/{accountId}/shared-folder-permissions",
       consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE)
-  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<AccountDetail>> updateSharedFolderPermissions(
       @PathVariable String accountId,
-      @Valid @RequestBody SharedFolderPermissionUpdate request) throws Exception {
+      @RequestBody SharedFolderPermissionUpdate request) throws Exception {
     return ResponseEntity.ok(Response.<AccountDetail>builder()
         .payload(accountService.updateSharedFolderPermissions(accountId, request))
         .success(true)

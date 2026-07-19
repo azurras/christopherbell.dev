@@ -95,7 +95,9 @@ public class AccountControllerTest {
   @DisplayName("Shared folder permissions: non-admin is forbidden")
   @WithMockUser(authorities = {"USER"})
   public void updateSharedFolderPermissions_whenNonAdmin_ReturnsForbidden() throws Exception {
-    when(permissionService.hasAuthority("ADMIN")).thenReturn(false);
+    when(accountService.updateSharedFolderPermissions(
+        eq("acc-42"), eq(new SharedFolderPermissionUpdate(true, true))))
+        .thenThrow(new org.springframework.security.access.AccessDeniedException("fresh denial"));
 
     mockMvc
         .perform(patch("/api/accounts/2026-07-17/{accountId}/shared-folder-permissions", "acc-42")
@@ -104,13 +106,17 @@ public class AccountControllerTest {
             .contentType(MediaType.APPLICATION_JSON_VALUE))
         .andExpect(status().isForbidden());
 
-    verifyNoInteractions(accountService);
+    verify(accountService).updateSharedFolderPermissions(
+        eq("acc-42"), eq(new SharedFolderPermissionUpdate(true, true)));
   }
 
   @Test
   @DisplayName("Shared folder permissions: missing capability field returns 400")
   @WithMockUser(authorities = {"ADMIN"})
   public void updateSharedFolderPermissions_whenFieldMissing_ReturnsBadRequest() throws Exception {
+    var request = new SharedFolderPermissionUpdate(null, true);
+    when(accountService.updateSharedFolderPermissions(eq("acc-42"), eq(request)))
+        .thenThrow(new InvalidRequestException("Shared-folder permissions are required."));
     mockMvc
         .perform(patch("/api/accounts/2026-07-17/{accountId}/shared-folder-permissions", "acc-42")
             .with(csrf())
@@ -118,7 +124,7 @@ public class AccountControllerTest {
             .contentType(MediaType.APPLICATION_JSON_VALUE))
         .andExpect(status().isBadRequest());
 
-    verifyNoInteractions(accountService);
+    verify(accountService).updateSharedFolderPermissions(eq("acc-42"), eq(request));
   }
 
   @Test

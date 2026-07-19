@@ -234,6 +234,7 @@ class WindowsSharedFolderMutationBoundaryTest {
     RecordingBridge bridge = new RecordingBridge();
     String key = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
     bridge.directoryHandles.add(key);
+    bridge.mutateDirectoryMetadataAfterChildDelete = true;
     bridge.directoryChildren.put(key, List.of(new DirectoryEntry(
         "child.txt", bridge.identity(7, (byte) 0), false, true, false, 0, MODIFIED)));
     WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
@@ -296,6 +297,7 @@ class WindowsSharedFolderMutationBoundaryTest {
     private boolean mutationSourceOpened;
     private boolean changeTargetIdentityOnNextOpen;
     private boolean targetRaced;
+    private boolean mutateDirectoryMetadataAfterChildDelete;
     private NativeBoundaryException privateDirectoryOpenFailure;
     private final java.util.Set<String> directoryHandles = new java.util.HashSet<>();
     private final java.util.Map<String, List<DirectoryEntry>> directoryChildren =
@@ -377,7 +379,12 @@ class WindowsSharedFolderMutationBoundaryTest {
       long volume = handle.value().toString().matches("[0-9a-f-]{36}") ? stagingVolume : 7;
       byte identityByte = mutationSourceOpened && handle.value().equals("old.txt")
           || targetRaced && handle.value().equals("target.txt") ? (byte) 1 : 0;
-      return new NativeFileMetadata(identity(volume, identityByte), directory, !directory, 0, MODIFIED);
+      boolean changedDirectory = mutateDirectoryMetadataAfterChildDelete && directory
+          && !deleted.isEmpty();
+      return new NativeFileMetadata(
+          identity(volume, identityByte), directory, !directory,
+          changedDirectory ? deleted.size() : 0,
+          changedDirectory ? MODIFIED.plusSeconds(1) : MODIFIED);
     }
 
     @Override public List<DirectoryEntry> listDirectory(NativeHandle directory) {

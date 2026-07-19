@@ -647,7 +647,7 @@ public final class WindowsSharedFolderMutationBoundary {
           closeQuietly(child);
         }
       }
-      requireSameObservation(expected, bridge.metadata(handle));
+      requireSameIdentityAndKind(expected, bridge.metadata(handle));
     }
     bridge.delete(handle);
   }
@@ -1023,6 +1023,16 @@ public final class WindowsSharedFolderMutationBoundary {
         || expected.regularFile() != current.regularFile()
         || expected.size() != current.size()
         || !expected.modifiedAt().equals(current.modifiedAt())) {
+      throw NativeBoundaryException.conflict("native shared-folder item changed");
+    }
+  }
+
+  private void requireSameIdentityAndKind(
+      NativeFileMetadata expected, NativeFileMetadata current) {
+    if (expected == null) return;
+    if (!expected.identity().sameFile(current.identity())
+        || expected.directory() != current.directory()
+        || expected.regularFile() != current.regularFile()) {
       throw NativeBoundaryException.conflict("native shared-folder item changed");
     }
   }

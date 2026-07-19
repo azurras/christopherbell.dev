@@ -76,3 +76,27 @@ Additional verification:
 Task 5 remains incomplete until a local candidate commit receives an independent whole-change
 review with zero Critical and zero Important findings, all required remediation is reverified, and
 the approved checkpoint is committed and pushed.
+
+## First Independent Review and Remediation
+
+The first whole-change review of candidate `8509899f` rejected Task 5 with zero Critical, four
+Important, and zero Minor findings. No rejected candidate was pushed. Each finding received a
+focused regression before its production fix:
+
+- Native recursive purge no longer compares directory size or modified time after intentionally
+  deleting its children. It still requires the same retained identity and item kind before deleting
+  the parent. The fake native bridge now changes parent metadata after child deletion, matching real
+  filesystem behavior while proving the child-first purge completes.
+- Shared-folder permission changes no longer rely on a day-long JWT ADMIN claim. Every authenticated
+  attempt enters the service, which requires a fresh persisted active, approved ADMIN before any
+  mutation. A stale demoted/suspended/unapproved admin is denied.
+- The permission operation now audits success plus validation, fresh authorization, missing target,
+  and persistence failures through bounded safe categories. Controller validation delegates the
+  complete request shape to this audited service boundary.
+- Logical content-access deduplication now uses a synchronized insertion-ordered map with deterministic
+  eldest eviction. A 10,050-path regression proves the heap-resident cache remains exactly bounded at
+  10,000 entries.
+
+The native/junction-enabled full gate after remediation passed 932 Java tests and 157 JavaScript
+tests with zero failures, errors, or skips (`BUILD SUCCESSFUL` in 2m 8s). Task 5 remains a review
+candidate until a new whole-change review approves the complete range.
