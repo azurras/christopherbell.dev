@@ -9,9 +9,10 @@ import {
   sharedFolderPermissionState,
 } from './lib/back-office-users.js';
 import {
-  runSharedRecycleAction,
+  createSharedRecycleActionHandler,
   sharedAuditFilters,
   sharedAuditMarkup,
+  sharedRecycleButton,
   sharedRecycleMarkup,
 } from './lib/back-office-shared-folder.js';
 import { authHeaders, fetchJson, formatWhen, sanitize } from './lib/util.js';
@@ -445,33 +446,17 @@ async function refreshSharedAdministration(filters = sharedAuditFilters(sharedAu
   sharedRecycleList.innerHTML = sharedRecycleMarkup(sharedRecycleItems || []);
 }
 
-async function handleSharedRecycleAction(button) {
-  const id = button.getAttribute('data-id');
-  const action = button.getAttribute('data-shared-recycle-action');
-  if (!id || !action) return;
-  button.disabled = true;
-  clearAlert();
-  try {
-    const completed = await runSharedRecycleAction({
-      id,
-      action,
-      confirmReplace: () => window.confirm('Replace the current item at the original path?'),
-      promptPurge: () => window.prompt(
-          `Type PURGE ${id} to permanently delete this recycled item.`),
-      restore: (itemId, replace) => fetchJson(API.sharedFolder.admin.restore(itemId), {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify({ replace }),
-      }),
-      purge: (itemId, confirmation) => fetchJson(API.sharedFolder.admin.purge(itemId), {
-        method: 'DELETE', headers: authHeaders(), body: JSON.stringify({ confirmation }),
-      }),
-    });
-    if (completed) await refreshSharedAdministration();
-  } catch (err) {
-    showAlert(err.message || 'Shared-folder administration failed.');
-  } finally {
-    button.disabled = false;
-  }
-}
+const handleSharedRecycleAction = createSharedRecycleActionHandler({
+  api: API.sharedFolder.admin,
+  fetchJson,
+  authHeaders,
+  refresh: refreshSharedAdministration,
+  clearAlert,
+  showAlert,
+  confirmReplace: () => window.confirm('Replace the current item at the original path?'),
+  promptPurge: id => window.prompt(
+      `Type PURGE ${id} to permanently delete this recycled item.`),
+});
 
 function wflCountsMarkup() {
   const withCoordinates = restaurants.filter(restaurant =>
@@ -822,8 +807,8 @@ function wireEvents() {
       return;
     }
 
-    const recycleButton = action.closest?.('[data-shared-recycle-action]');
-    if (recycleButton instanceof HTMLButtonElement) {
+    const recycleButton = sharedRecycleButton(action, HTMLButtonElement);
+    if (recycleButton) {
       handleSharedRecycleAction(recycleButton);
       return;
     }

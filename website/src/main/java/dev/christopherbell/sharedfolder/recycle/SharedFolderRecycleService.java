@@ -28,6 +28,7 @@ import java.util.UUID;
 import java.util.Base64;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -41,6 +42,8 @@ import org.springframework.web.server.ResponseStatusException;
 public class SharedFolderRecycleService {
   private static final String RECYCLE_DIRECTORY = "shared-folder-recycle";
   private static final String REPLACED_DIRECTORY = "shared-folder-recycle-replaced";
+  private static final int ADMIN_LIST_LIMIT = 200;
+  private static final int CLEANUP_BATCH_LIMIT = 100;
 
   private final SharedFolderAccessService access;
   private final SharedFolderProperties properties;
@@ -135,7 +138,8 @@ public class SharedFolderRecycleService {
   public List<SharedFolderRecycleItem> list() {
     access.requireAdmin();
     requireEnabled();
-    return repository.findByStateOrderByDeletedAtDesc(SharedFolderRecycleState.RECYCLED);
+    return repository.findByStateOrderByDeletedAtDesc(
+        SharedFolderRecycleState.RECYCLED, PageRequest.of(0, ADMIN_LIST_LIMIT));
   }
 
   /** Restores to the original path, replacing only when the administrator explicitly requested it. */
@@ -230,8 +234,10 @@ public class SharedFolderRecycleService {
     if (!properties.enabled()) return 0;
     reconcilePending();
     int purged = 0;
-    for (SharedFolderRecycleItem item : repository.findByStateAndExpiresAtBefore(
-        SharedFolderRecycleState.RECYCLED, clock.instant())) {
+    for (SharedFolderRecycleItem item :
+        repository.findByStateAndExpiresAtBeforeOrderByExpiresAtAsc(
+            SharedFolderRecycleState.RECYCLED, clock.instant(),
+            PageRequest.of(0, CLEANUP_BATCH_LIMIT))) {
       try {
         purgeInternal(item);
         if (audit != null) audit.recordSystem(

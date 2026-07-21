@@ -14,7 +14,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 /** Prevents browser and intermediary caches from retaining any protected shared-folder response. */
 public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
-  private static final String API_PREFIX = "/api/shared-folder" + V20260717 + "/";
+  private static final String SHARED_API_PREFIX = "/api/shared-folder" + V20260717 + "/";
+  private static final String ACCOUNT_API_PREFIX = "/api/accounts" + V20260717 + "/";
   private static final String NO_STORE = "private, no-store";
   private final SharedFolderAuditRecorder audit;
 
@@ -29,7 +30,8 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
 
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
-    return !request.getRequestURI().startsWith(API_PREFIX);
+    String uri = request.getRequestURI();
+    return !uri.startsWith(SHARED_API_PREFIX) && !isPermissionRequest(uri, request.getMethod());
   }
 
   @Override
@@ -51,12 +53,16 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
   }
 
   private AuditAttempt attempt(HttpServletRequest request) {
-    String path = request.getRequestURI().substring(API_PREFIX.length());
+    String uri = request.getRequestURI();
     String method = request.getMethod();
+    if (isPermissionRequest(uri, method)) {
+      return new AuditAttempt("PERMISSION_CHANGE", "account-permissions");
+    }
+    String path = uri.substring(SHARED_API_PREFIX.length());
     if (path.equals("entries") && method.equals("GET")) {
       return new AuditAttempt("LIST", request.getParameter("path"));
     }
-    if (path.equals("entries/content")) {
+    if (path.equals("content")) {
       return new AuditAttempt("DOWNLOAD_STARTED", request.getParameter("path"));
     }
     if (path.equals("preview")) {
@@ -69,6 +75,9 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
       return new AuditAttempt("RECYCLE", "request");
     }
     if (path.equals("uploads")) return new AuditAttempt("UPLOAD_START", "request");
+    if (path.matches("uploads/[^/]+/chunks/[^/]+")) {
+      return new AuditAttempt("UPLOAD_APPEND", "upload");
+    }
     if (path.matches("uploads/[^/]+/complete")) {
       return new AuditAttempt("UPLOAD_FINALIZE", "upload");
     }
@@ -85,6 +94,12 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
       return new AuditAttempt("PURGE", "recycle-item");
     }
     return new AuditAttempt("REQUEST", "shared-folder");
+  }
+
+  private boolean isPermissionRequest(String uri, String method) {
+    return "PATCH".equals(method) && uri.startsWith(ACCOUNT_API_PREFIX)
+        && uri.substring(ACCOUNT_API_PREFIX.length())
+            .matches("[^/]+/shared-folder-permissions");
   }
 
   private String failureCategory(int status) {

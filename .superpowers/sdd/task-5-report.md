@@ -127,3 +127,29 @@ retention continuation/auditing, HTTP-boundary rejection auditing, unrelated sec
 and Back Office action decisions. The final clean native/junction-enabled gate passed all 938 Java
 tests and 159 JavaScript tests with zero failures, errors, or skips (`BUILD SUCCESSFUL` in 1m 1s).
 Task 5 remains a review candidate until the remediated whole range receives independent approval.
+
+## Fourth Independent Review and Remediation
+
+The next fresh whole-change review of `09d2f408..eeedb566` rejected Task 5 with zero Critical,
+three Important, and three Minor findings. No rejected candidate was pushed. All six findings were
+remediated with regression coverage:
+
+- Native restore and displaced-target recovery now establish cleanup immediately after each
+  successful retained-handle open. A target-open race proves the already-open recycle source and
+  both destination ancestor chains are closed.
+- The shared audit HTTP boundary now covers malformed account permission requests before controller
+  entry and maps the real `/content` and `/uploads/{id}/chunks/{offset}` routes to their proper audit
+  families. Malformed target account IDs use a fixed bounded resource, and malformed JSON is
+  correctly classified as HTTP 400.
+- Recycle administration returns at most 200 newest items, while each scheduled retention pass
+  processes at most 100 oldest-expired items. This bounds response size, repository materialization,
+  and time spent holding the service mutation monitor.
+- Outcome and exact relative-path audit filters now have matching time-ordered Mongo compound
+  indexes.
+- The actual Back Office handler and delegation selection are extracted into tested wiring. The
+  regression proves restore/replace/purge URL selection, HTTP methods, authorization headers,
+  request bodies, refresh behavior, and button recovery.
+
+The final clean native/junction-enabled gate passed all 944 Java tests and 160 JavaScript tests with
+zero failures, errors, or skips (`BUILD SUCCESSFUL` in 1m 1s). Task 5 remains a review candidate
+until this complete remediated range receives independent approval.

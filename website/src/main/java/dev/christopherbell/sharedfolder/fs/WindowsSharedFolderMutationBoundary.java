@@ -477,34 +477,40 @@ public final class WindowsSharedFolderMutationBoundary {
       SharedFolderPathResolver.validateSingleWindowsName(name);
       NativeHandle source = bridge.openRelativeForExclusiveMutation(
           recycleRoot(), recycleKey, observedKind(expectedSource), SAFE_OBJECT_ATTRIBUTES);
-      OpenedHandle destination = openVisible(
-          destinationParentPath, OpenKind.DIRECTORY, true, true, false);
-      OpenedHandle target = expectedTarget == null ? null
-          : openVisible(relative(destinationParentPath, name), observedKind(expectedTarget),
-              false, true, true);
       try {
-        NativeFileMetadata currentSource = bridge.metadata(source);
-        requireSameObservation(expectedSource, currentSource);
-        if (currentSource.identity().volumeSerial()
-            != bridge.metadata(destination.handle()).identity().volumeSerial()) {
-          throw NativeBoundaryException.unavailable("recycle roots are on different volumes");
-        }
-        if (replace) {
-          if (target == null) {
-            throw NativeBoundaryException.conflict("observed restore target is required");
+        OpenedHandle destination = openVisible(
+            destinationParentPath, OpenKind.DIRECTORY, true, true, false);
+        try {
+          OpenedHandle target = expectedTarget == null ? null
+              : openVisible(relative(destinationParentPath, name), observedKind(expectedTarget),
+                  false, true, true);
+          try {
+            NativeFileMetadata currentSource = bridge.metadata(source);
+            requireSameObservation(expectedSource, currentSource);
+            if (currentSource.identity().volumeSerial()
+                != bridge.metadata(destination.handle()).identity().volumeSerial()) {
+              throw NativeBoundaryException.unavailable("recycle roots are on different volumes");
+            }
+            if (replace) {
+              if (target == null) {
+                throw NativeBoundaryException.conflict("observed restore target is required");
+              }
+              requireSameObservation(expectedTarget, bridge.metadata(target.handle()));
+              requireReplacementTarget(target);
+              replaceRecyclePinned(source, destination.handle(), name, target, replacementKey);
+            } else {
+              if (target != null) {
+                throw NativeBoundaryException.conflict("restore target conflicts");
+              }
+              bridge.rename(source, destination.handle(), name, false);
+            }
+          } finally {
+            if (target != null) target.close();
           }
-          requireSameObservation(expectedTarget, bridge.metadata(target.handle()));
-          requireReplacementTarget(target);
-          replaceRecyclePinned(source, destination.handle(), name, target, replacementKey);
-        } else {
-          if (target != null) {
-            throw NativeBoundaryException.conflict("restore target conflicts");
-          }
-          bridge.rename(source, destination.handle(), name, false);
+        } finally {
+          destination.close();
         }
       } finally {
-        if (target != null) target.close();
-        destination.close();
         closeQuietly(source);
       }
       return metadata(relative(destinationParentPath, name));
@@ -545,13 +551,16 @@ public final class WindowsSharedFolderMutationBoundary {
       NativeHandle source = bridge.openRelativeForExclusiveMutation(
           recycleReplacedRoot(), replacementKey, observedKind(expectedReplacement),
           SAFE_OBJECT_ATTRIBUTES);
-      OpenedHandle destination = openVisible(
-          destinationParentPath, OpenKind.DIRECTORY, true, true, false);
       try {
-        requireSameObservation(expectedReplacement, bridge.metadata(source));
-        bridge.rename(source, destination.handle(), name, false);
+        OpenedHandle destination = openVisible(
+            destinationParentPath, OpenKind.DIRECTORY, true, true, false);
+        try {
+          requireSameObservation(expectedReplacement, bridge.metadata(source));
+          bridge.rename(source, destination.handle(), name, false);
+        } finally {
+          destination.close();
+        }
       } finally {
-        destination.close();
         closeQuietly(source);
       }
       return metadata(relative(destinationParentPath, name));

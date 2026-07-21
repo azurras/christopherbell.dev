@@ -14,7 +14,11 @@ import org.springframework.data.mongodb.core.mapping.Document;
     @CompoundIndex(name = "shared_audit_account_occurred_desc",
         def = "{'accountId': 1, 'occurredAt': -1}"),
     @CompoundIndex(name = "shared_audit_action_occurred_desc",
-        def = "{'action': 1, 'occurredAt': -1}")
+        def = "{'action': 1, 'occurredAt': -1}"),
+    @CompoundIndex(name = "shared_audit_outcome_occurred_desc",
+        def = "{'outcome': 1, 'occurredAt': -1}"),
+    @CompoundIndex(name = "shared_audit_path_occurred_desc",
+        def = "{'relativePath': 1, 'occurredAt': -1}")
 })
 public record SharedFolderAuditEvent(
     @Id String id,

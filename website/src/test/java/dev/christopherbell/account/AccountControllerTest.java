@@ -33,6 +33,8 @@ import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.test.TestUtil;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,12 +53,14 @@ import org.springframework.test.web.servlet.MockMvc;
 @Import({
     ControllerExceptionHandler.class,
     ControllerSliceSecurityTestConfig.class,
+    SharedFolderNoStoreFilter.class,
     AccountControllerTest.MethodSecurityTestConfig.class
 })
 public class AccountControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private AccountService accountService;
+  @MockitoBean private SharedFolderAuditRecorder sharedFolderAudit;
 
   @BeforeEach
   void allowMethodSecuredControllerCalls() {
@@ -125,6 +129,22 @@ public class AccountControllerTest {
         .andExpect(status().isBadRequest());
 
     verify(accountService).updateSharedFolderPermissions(eq("acc-42"), eq(request));
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: malformed JSON rejection is audited before service entry")
+  @WithMockUser(authorities = {"ADMIN"})
+  void malformedSharedFolderPermissionBodyIsAudited() throws Exception {
+    mockMvc.perform(patch("/api/accounts" + APIVersion.V20260717
+            + "/acc-42/shared-folder-permissions")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"read\":"))
+        .andExpect(status().isBadRequest());
+
+    verify(sharedFolderAudit).recordRejected(
+        "PERMISSION_CHANGE", "account-permissions", "invalid_request");
+    verifyNoInteractions(accountService);
   }
 
   @Test

@@ -821,6 +821,19 @@ public class AccountServiceTest {
         "PERMISSION_CHANGE", account.getId(), persistenceFailure);
   }
 
+  @Test
+  @DisplayName("Shared folder permissions: malformed target ids use a bounded audit resource")
+  void malformedSharedFolderPermissionTargetIsSafelyAudited() {
+    String unsafeId = "bad:id/with\\separators";
+
+    assertThrows(InvalidRequestException.class,
+        () -> accountService.updateSharedFolderPermissions(
+            unsafeId, new SharedFolderPermissionUpdate(false, true)));
+
+    verify(sharedFolderAudit).recordCurrent(
+        "PERMISSION_CHANGE", "invalid-account", null, "rejected", "invalid_request");
+  }
+
   private String hashResetToken(String token) throws Exception {
     var digest = MessageDigest.getInstance("SHA-256");
     var hash = digest.digest(token.getBytes(StandardCharsets.UTF_8));

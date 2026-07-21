@@ -230,6 +230,30 @@ class WindowsSharedFolderMutationBoundaryTest {
   }
 
   @Test
+  void restoreClosesAlreadyOpenedHandlesWhenTheObservedTargetOpenRaces() {
+    RecordingBridge bridge = new RecordingBridge();
+    WindowsSharedFolderMutationBoundary boundary = WindowsSharedFolderMutationBoundary.forTest(
+        Path.of("C:/shared"), Path.of("C:/system"), bridge);
+    String key = "abababab-abab-abab-abab-abababababab";
+    NativeFileMetadata recycled = boundary.metadata(key);
+    NativeFileMetadata target = boundary.metadata("documents/report.pdf");
+    int sourceClosesBefore = java.util.Collections.frequency(bridge.closed, key);
+    int destinationClosesBefore = java.util.Collections.frequency(bridge.closed, "documents");
+    bridge.failExclusiveMutationOpenName = "report.pdf";
+
+    assertThatThrownBy(() -> boundary.restoreRecycle(
+        key, "documents", "report.pdf", recycled, true, target, key))
+        .isInstanceOf(NativeBoundaryException.class)
+        .hasMessageContaining("raced");
+
+    assertThat(java.util.Collections.frequency(bridge.closed, key))
+        .isEqualTo(sourceClosesBefore + 1);
+    assertThat(java.util.Collections.frequency(bridge.closed, "documents"))
+        .isEqualTo(destinationClosesBefore + 2);
+    boundary.destroy();
+  }
+
+  @Test
   void recursiveRecyclePurgeDeletesChildrenThroughRetainedHandlesBeforeTheParent() {
     RecordingBridge bridge = new RecordingBridge();
     String key = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
@@ -298,6 +322,7 @@ class WindowsSharedFolderMutationBoundaryTest {
     private boolean changeTargetIdentityOnNextOpen;
     private boolean targetRaced;
     private boolean mutateDirectoryMetadataAfterChildDelete;
+    private String failExclusiveMutationOpenName;
     private NativeBoundaryException privateDirectoryOpenFailure;
     private final java.util.Set<String> directoryHandles = new java.util.HashSet<>();
     private final java.util.Map<String, List<DirectoryEntry>> directoryChildren =
@@ -354,6 +379,9 @@ class WindowsSharedFolderMutationBoundaryTest {
     public NativeHandle openRelativeForExclusiveMutation(
         NativeHandle parent, String name, OpenKind kind, int attributes) {
       exclusiveMutationOpenNames.add(name);
+      if (name.equals(failExclusiveMutationOpenName)) {
+        throw NativeBoundaryException.conflict("observed target raced");
+      }
       return openRelativeForMutation(parent, name, kind, attributes);
     }
 

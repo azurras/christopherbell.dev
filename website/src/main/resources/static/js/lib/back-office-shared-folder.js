@@ -102,3 +102,46 @@ export async function runSharedRecycleAction({
   await purge(id, typed);
   return true;
 }
+
+export function sharedRecycleButton(target, ButtonType) {
+  const button = target?.closest?.('[data-shared-recycle-action]');
+  return typeof ButtonType === 'function' && button instanceof ButtonType ? button : null;
+}
+
+export function createSharedRecycleActionHandler({
+  api,
+  fetchJson,
+  authHeaders,
+  refresh,
+  clearAlert,
+  showAlert,
+  confirmReplace,
+  promptPurge,
+}) {
+  return async button => {
+    const id = button?.getAttribute?.('data-id');
+    const action = button?.getAttribute?.('data-shared-recycle-action');
+    if (!id || !action) return;
+    button.disabled = true;
+    clearAlert();
+    try {
+      const completed = await runSharedRecycleAction({
+        id,
+        action,
+        confirmReplace,
+        promptPurge: () => promptPurge(id),
+        restore: (itemId, replace) => fetchJson(api.restore(itemId), {
+          method: 'POST', headers: authHeaders(), body: JSON.stringify({ replace }),
+        }),
+        purge: (itemId, confirmation) => fetchJson(api.purge(itemId), {
+          method: 'DELETE', headers: authHeaders(), body: JSON.stringify({ confirmation }),
+        }),
+      });
+      if (completed) await refresh();
+    } catch (err) {
+      showAlert(err?.message || 'Shared-folder administration failed.');
+    } finally {
+      button.disabled = false;
+    }
+  };
+}

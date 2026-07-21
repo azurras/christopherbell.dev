@@ -409,6 +409,7 @@ public class AccountService {
   }
 
   private String safeAuditAccountId(String accountId) {
-    return accountId == null || accountId.isBlank() ? "unknown" : accountId;
+    return accountId != null && accountId.length() <= 128
+        && accountId.matches("[A-Za-z0-9._-]+") ? accountId : "invalid-account";
   }
 }

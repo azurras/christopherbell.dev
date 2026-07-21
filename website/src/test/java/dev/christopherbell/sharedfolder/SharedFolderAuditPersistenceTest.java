@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.util.unit.DataSize;
 
 class SharedFolderAuditPersistenceTest {
@@ -49,6 +50,16 @@ class SharedFolderAuditPersistenceTest {
 
     assertThat(indexed).isNotNull();
     assertThat(indexed.expireAfter()).isEqualTo("0s");
+  }
+
+  @Test
+  void filteredOutcomeAndPathQueriesHaveTimeOrderedCompoundIndexes() {
+    CompoundIndexes indexes = SharedFolderAuditEvent.class.getAnnotation(CompoundIndexes.class);
+
+    assertThat(indexes).isNotNull();
+    assertThat(java.util.Arrays.stream(indexes.value()).map(index -> index.def()))
+        .contains("{'outcome': 1, 'occurredAt': -1}",
+            "{'relativePath': 1, 'occurredAt': -1}");
   }
 
   private SharedFolderProperties properties(Duration auditRetention) {

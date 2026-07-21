@@ -50,4 +50,32 @@ class SharedFolderNoStoreFilterTest {
     org.mockito.Mockito.verify(audit).recordRejected(
         "AUDIT_BROWSE", "audit", "access_denied");
   }
+
+  @Test
+  void mapsRejectedDownloadsChunksAndPermissionUpdatesToTheirRealAuditFamilies()
+      throws Exception {
+    SharedFolderAuditRecorder audit = org.mockito.Mockito.mock(SharedFolderAuditRecorder.class);
+    var filter = new SharedFolderNoStoreFilter(audit);
+
+    reject(filter, "GET", "/api/shared-folder/2026-07-17/content", 403);
+    reject(filter, "PUT", "/api/shared-folder/2026-07-17/uploads/u-1/chunks/0", 409);
+    reject(filter, "PATCH",
+        "/api/accounts/2026-07-17/bad%3Aid/shared-folder-permissions", 400);
+
+    org.mockito.Mockito.verify(audit).recordRejected(
+        "DOWNLOAD_STARTED", null, "access_denied");
+    org.mockito.Mockito.verify(audit).recordRejected(
+        "UPLOAD_APPEND", "upload", "conflict");
+    org.mockito.Mockito.verify(audit).recordRejected(
+        "PERMISSION_CHANGE", "account-permissions", "invalid_request");
+  }
+
+  private void reject(
+      SharedFolderNoStoreFilter filter, String method, String uri, int status) throws Exception {
+    var request = new MockHttpServletRequest(method, uri);
+    var response = new MockHttpServletResponse();
+    filter.doFilter(request, response, (ignoredRequest, ignoredResponse) ->
+        ((jakarta.servlet.http.HttpServletResponse) ignoredResponse).setStatus(status));
+    assertThat(response.getHeader("Cache-Control")).isEqualTo("private, no-store");
+  }
 }

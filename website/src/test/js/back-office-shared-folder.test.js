@@ -7,6 +7,8 @@ const {
   sharedAuditFilters,
   purgeConfirmation,
   runSharedRecycleAction,
+  createSharedRecycleActionHandler,
+  sharedRecycleButton,
 } = await import('../../main/resources/static/js/lib/back-office-shared-folder.js');
 
 test('shared-folder audit markup escapes untrusted values and shows bounded event facts', () => {
@@ -104,4 +106,58 @@ test('purge action rejects a mismatched phrase before calling the API', async ()
     purge: async () => { called = true; },
   }), /did not match/);
   assert.equal(called, false);
+});
+
+test('actual Back Office handler wires delegation URLs methods bodies and refresh', async () => {
+  class FakeButton {
+    constructor(id, action) { this.id = id; this.action = action; this.disabled = false; }
+    getAttribute(name) {
+      return name === 'data-id' ? this.id
+        : name === 'data-shared-recycle-action' ? this.action : null;
+    }
+  }
+  const button = new FakeButton('item-7', 'replace');
+  const target = { closest: selector =>
+    selector === '[data-shared-recycle-action]' ? button : null };
+  assert.equal(sharedRecycleButton(target, FakeButton), button);
+
+  const calls = [];
+  let refreshes = 0;
+  const handle = createSharedRecycleActionHandler({
+    api: {
+      restore: id => `/admin/recycle/${id}/restore`,
+      purge: id => `/admin/recycle/${id}`,
+    },
+    fetchJson: async (url, options) => calls.push([url, options]),
+    authHeaders: () => ({ Authorization: 'Bearer test' }),
+    refresh: async () => { refreshes += 1; },
+    clearAlert: () => {},
+    showAlert: message => { throw new Error(message); },
+    confirmReplace: () => true,
+    promptPurge: () => 'PURGE item-7',
+  });
+
+  await handle(button);
+  assert.deepEqual(calls, [[
+    '/admin/recycle/item-7/restore',
+    {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test' },
+      body: JSON.stringify({ replace: true }),
+    },
+  ]]);
+  assert.equal(refreshes, 1);
+  assert.equal(button.disabled, false);
+
+  button.action = 'purge';
+  await handle(button);
+  assert.deepEqual(calls[1], [
+    '/admin/recycle/item-7',
+    {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer test' },
+      body: JSON.stringify({ confirmation: 'PURGE item-7' }),
+    },
+  ]);
+  assert.equal(refreshes, 2);
 });

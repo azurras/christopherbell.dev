@@ -35,11 +35,27 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.data.domain.Pageable;
 
 class SharedFolderRecycleServiceTest {
   private static final Instant NOW = Instant.parse("2026-07-18T12:00:00Z");
 
   @TempDir Path temp;
+
+  @Test
+  void recycleAdministrationAndCleanupUseBoundedRepositoryQueries() throws Exception {
+    Fixture fixture = fixture();
+
+    fixture.recycle.list();
+    fixture.recycle.cleanupExpired();
+
+    verify(fixture.repository).findByStateOrderByDeletedAtDesc(
+        org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED),
+        org.mockito.ArgumentMatchers.argThat((Pageable page) -> page.getPageSize() == 200));
+    verify(fixture.repository).findByStateAndExpiresAtBeforeOrderByExpiresAtAsc(
+        org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(),
+        org.mockito.ArgumentMatchers.argThat((Pageable page) -> page.getPageSize() == 100));
+  }
 
   @Test
   void deleteMovesObservedItemToPrivateRecycleAndAdminRestoresIt() throws Exception {
@@ -389,11 +405,12 @@ class SharedFolderRecycleServiceTest {
     });
     when(repository.findById(any())).thenAnswer(invocation ->
         Optional.ofNullable(records.get(invocation.<String>getArgument(0))));
-    when(repository.findByStateOrderByDeletedAtDesc(SharedFolderRecycleState.RECYCLED))
+    when(repository.findByStateOrderByDeletedAtDesc(
+        org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any()))
         .thenAnswer(ignored -> records.values().stream()
             .filter(item -> item.state() == SharedFolderRecycleState.RECYCLED).toList());
-    when(repository.findByStateAndExpiresAtBefore(
-        org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any()))
+    when(repository.findByStateAndExpiresAtBeforeOrderByExpiresAtAsc(
+        org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(), any()))
         .thenAnswer(invocation -> records.values().stream()
             .filter(item -> item.state() == SharedFolderRecycleState.RECYCLED)
             .filter(item -> item.expiresAt().isBefore(invocation.getArgument(1)))
@@ -412,7 +429,7 @@ class SharedFolderRecycleServiceTest {
     var recycle = new SharedFolderRecycleService(
         access, properties, boundary, repository,
         Clock.fixed(NOW, ZoneOffset.UTC), audit);
-    return new Fixture(root, system, access, records, mutations, recycle, audit);
+    return new Fixture(root, system, access, records, repository, mutations, recycle, audit);
   }
 
   private NativeFixture nativeFixture(
@@ -457,6 +474,7 @@ class SharedFolderRecycleServiceTest {
       Path system,
       SharedFolderAccessService access,
       LinkedHashMap<String, SharedFolderRecycleItem> records,
+      SharedFolderRecycleRepository repository,
       SharedFolderMutationService mutations,
       SharedFolderRecycleService recycle,
       SharedFolderAuditRecorder audit) {}

@@ -185,7 +185,8 @@ public class ControllerExceptionHandler {
     return switch (e.getClass().getName()) {
       case "org.springframework.web.HttpMediaTypeNotSupportedException" -> HttpStatus.UNSUPPORTED_MEDIA_TYPE;
       case "org.springframework.web.HttpMediaTypeNotAcceptableException" -> HttpStatus.NOT_ACCEPTABLE;
-      case "org.springframework.web.bind.MethodArgumentNotValidException",
+      case "org.springframework.http.converter.HttpMessageNotReadableException",
+          "org.springframework.web.bind.MethodArgumentNotValidException",
           "org.springframework.web.method.annotation.HandlerMethodValidationException" -> HttpStatus.BAD_REQUEST;
       default -> null;
     };
