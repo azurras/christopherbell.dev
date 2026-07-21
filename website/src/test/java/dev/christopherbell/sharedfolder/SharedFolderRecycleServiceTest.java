@@ -55,6 +55,8 @@ class SharedFolderRecycleServiceTest {
     verify(fixture.repository).findByStateAndExpiresAtBeforeOrderByExpiresAtAsc(
         org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(),
         org.mockito.ArgumentMatchers.argThat((Pageable page) -> page.getPageSize() == 100));
+    verify(fixture.repository).findByStateIn(
+        any(), org.mockito.ArgumentMatchers.argThat((Pageable page) -> page.getPageSize() == 100));
   }
 
   @Test
@@ -240,6 +242,14 @@ class SharedFolderRecycleServiceTest {
     assertThat(fixture.records).doesNotContainKeys(completed.id(), purging.id());
     assertThat(replacedRoot.resolve(completedReplacement)).doesNotExist();
     assertThat(recycleRoot.resolve(preparing.payloadKey())).exists();
+    verify(fixture.audit).recordSystem(
+        "RECYCLE_RECOVERY", preparing.originalPath(), preparing.size(), "accepted", null);
+    verify(fixture.audit, org.mockito.Mockito.times(2)).recordSystem(
+        org.mockito.ArgumentMatchers.eq("RESTORE_RECOVERY"), any(), any(),
+        org.mockito.ArgumentMatchers.eq("accepted"),
+        org.mockito.ArgumentMatchers.isNull());
+    verify(fixture.audit).recordSystem(
+        "PURGE_RECOVERY", purging.originalPath(), purging.size(), "accepted", null);
   }
 
   @Test
@@ -415,7 +425,7 @@ class SharedFolderRecycleServiceTest {
             .filter(item -> item.state() == SharedFolderRecycleState.RECYCLED)
             .filter(item -> item.expiresAt().isBefore(invocation.getArgument(1)))
             .toList());
-    when(repository.findByStateIn(any())).thenAnswer(invocation -> {
+    when(repository.findByStateIn(any(), any())).thenAnswer(invocation -> {
       @SuppressWarnings("unchecked")
       List<SharedFolderRecycleState> states = invocation.getArgument(0);
       return records.values().stream().filter(item -> states.contains(item.state())).toList();
@@ -446,7 +456,7 @@ class SharedFolderRecycleServiceTest {
     var records = new LinkedHashMap<String, SharedFolderRecycleItem>();
     for (SharedFolderRecycleItem item : items) records.put(item.id(), item);
     SharedFolderRecycleRepository repository = mock(SharedFolderRecycleRepository.class);
-    when(repository.findByStateIn(any())).thenAnswer(invocation -> List.copyOf(records.values()));
+    when(repository.findByStateIn(any(), any())).thenAnswer(invocation -> List.copyOf(records.values()));
     org.mockito.Mockito.doAnswer(invocation -> {
       records.remove(invocation.<String>getArgument(0));
       return null;

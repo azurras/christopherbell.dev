@@ -74,6 +74,23 @@ class SharedFolderAuditRecorderTest {
   }
 
   @Test
+  void requestMarkerTracksRecordedOutcomeForHttpBoundaryDeduplication() {
+    var request = new MockHttpServletRequest();
+    RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+    var recorder = new SharedFolderAuditRecorder(
+        command -> { }, mock(PermissionService.class), mock(ClientIpResolver.class),
+        Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC));
+
+    recorder.recordCurrent(
+        "PERMISSION_CHANGE", "account-1", null, "rejected", "invalid_request");
+
+    org.assertj.core.api.Assertions.assertThat(
+        recorder.currentRequestAlreadyRecorded("PERMISSION_CHANGE", "rejected")).isTrue();
+    org.assertj.core.api.Assertions.assertThat(
+        recorder.currentRequestAlreadyRecorded("PERMISSION_CHANGE", "accepted")).isFalse();
+  }
+
+  @Test
   void logicalAccessDeduplicationNeverExceedsItsFixedHeapBound() {
     PermissionService permissions = mock(PermissionService.class);
     when(permissions.getSelfId()).thenReturn("account-1");

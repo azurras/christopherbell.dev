@@ -153,3 +153,22 @@ remediated with regression coverage:
 The final clean native/junction-enabled gate passed all 944 Java tests and 160 JavaScript tests with
 zero failures, errors, or skips (`BUILD SUCCESSFUL` in 1m 1s). Task 5 remains a review candidate
 until this complete remediated range receives independent approval.
+
+## Fifth Independent Review and Remediation
+
+The fifth fresh whole-change review of `09d2f408..81cced78` rejected Task 5 with zero Critical,
+three Important, and one Minor finding. No rejected candidate was pushed. The remediation completes
+the remaining cross-cutting audit and bounding requirements:
+
+- Startup and scheduled recycle reconciliation now materialize and process at most 100 pending
+  records per pass, matching the bounded retention cleanup contract.
+- Every successful upload chunk records an accepted `UPLOAD_APPEND` event with its safe session ID
+  and committed offset.
+- Every completed durable recycle, restore, or purge reconciliation records an accepted fixed system
+  recovery action; failed scheduled reconciliations record only a bounded safe failure category.
+- Request-scoped action/outcome markers let the HTTP rejection boundary skip a permission failure
+  already recorded by the service, while pre-controller malformed requests still receive an event.
+
+The clean native/junction-enabled full gate passed all 946 Java tests and 160 JavaScript tests with
+zero failures, errors, or skips (`BUILD SUCCESSFUL` in 57s). Task 5 remains a review candidate until
+the complete remediated range receives independent approval.

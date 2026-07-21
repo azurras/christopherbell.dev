@@ -118,7 +118,10 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
   }
 
   private void recordRejected(AuditAttempt attempt, String category) {
-    if (audit != null) audit.recordRejected(attempt.action(), attempt.resource(), category);
+    if (audit != null
+        && !audit.currentRequestAlreadyRecorded(attempt.action(), "rejected")) {
+      audit.recordRejected(attempt.action(), attempt.resource(), category);
+    }
   }
 
   private record AuditAttempt(String action, String resource) {}

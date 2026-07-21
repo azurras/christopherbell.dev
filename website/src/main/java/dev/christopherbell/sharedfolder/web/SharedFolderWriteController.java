@@ -123,8 +123,10 @@ public class SharedFolderWriteController {
       @PathVariable long offset,
       @RequestHeader(CHUNK_DIGEST_HEADER) String digest,
       HttpServletRequest request) throws IOException {
-    return ResponseEntity.ok().headers(noStore())
-        .body(uploads.append(id, offset, request.getInputStream(), digest));
+    SharedFolderUploadStatus result = uploads.append(
+        id, offset, request.getInputStream(), digest);
+    audit.recordCurrent("UPLOAD_APPEND", id, result.nextOffset(), "accepted", null);
+    return ResponseEntity.ok().headers(noStore()).body(result);
   }
 
   /** Atomically finalizes an owned upload with an explicit replacement flag. */

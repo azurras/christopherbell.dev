@@ -78,4 +78,19 @@ class SharedFolderNoStoreFilterTest {
         ((jakarta.servlet.http.HttpServletResponse) ignoredResponse).setStatus(status));
     assertThat(response.getHeader("Cache-Control")).isEqualTo("private, no-store");
   }
+
+  @Test
+  void doesNotDuplicateARejectedPermissionEventAlreadyRecordedByTheService() throws Exception {
+    SharedFolderAuditRecorder audit = org.mockito.Mockito.mock(SharedFolderAuditRecorder.class);
+    org.mockito.Mockito.when(audit.currentRequestAlreadyRecorded(
+        "PERMISSION_CHANGE", "rejected")).thenReturn(true);
+    var filter = new SharedFolderNoStoreFilter(audit);
+
+    reject(filter, "PATCH",
+        "/api/accounts/2026-07-17/account-1/shared-folder-permissions", 403);
+
+    org.mockito.Mockito.verify(audit, org.mockito.Mockito.never()).recordRejected(
+        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.anyString());
+  }
 }

@@ -44,6 +44,7 @@ public class SharedFolderRecycleService {
   private static final String REPLACED_DIRECTORY = "shared-folder-recycle-replaced";
   private static final int ADMIN_LIST_LIMIT = 200;
   private static final int CLEANUP_BATCH_LIMIT = 100;
+  private static final int RECOVERY_BATCH_LIMIT = 100;
 
   private final SharedFolderAccessService access;
   private final SharedFolderProperties properties;
@@ -260,10 +261,12 @@ public class SharedFolderRecycleService {
     for (SharedFolderRecycleItem item : repository.findByStateIn(List.of(
         SharedFolderRecycleState.PREPARING,
         SharedFolderRecycleState.RESTORING,
-        SharedFolderRecycleState.PURGING))) {
+        SharedFolderRecycleState.PURGING), PageRequest.of(0, RECOVERY_BATCH_LIMIT))) {
       try {
         if (reconcileItem(item)) reconciled++;
       } catch (RuntimeException failure) {
+        if (audit != null) audit.recordSystemFailure(
+            recoveryAction(item), item.originalPath(), item.size(), failure);
         log.warn("Shared-folder recycle reconciliation deferred for item {}", item.id());
       }
     }
@@ -371,7 +374,13 @@ public class SharedFolderRecycleService {
 
   private boolean reconcileItem(SharedFolderRecycleItem item) {
     try {
-      return nativeBoundary.nativeMode() ? reconcileNative(item) : reconcilePortable(item);
+      boolean reconciled = nativeBoundary.nativeMode()
+          ? reconcileNative(item) : reconcilePortable(item);
+      if (reconciled && audit != null) {
+        audit.recordSystem(
+            recoveryAction(item), item.originalPath(), item.size(), "accepted", null);
+      }
+      return reconciled;
     } catch (ResponseStatusException exception) {
       throw exception;
     } catch (NativeBoundaryException exception) {
@@ -379,6 +388,15 @@ public class SharedFolderRecycleService {
     } catch (IOException | SecurityException exception) {
       throw unavailable();
     }
+  }
+
+  private String recoveryAction(SharedFolderRecycleItem item) {
+    return switch (item.state()) {
+      case PREPARING -> "RECYCLE_RECOVERY";
+      case RESTORING -> "RESTORE_RECOVERY";
+      case PURGING -> "PURGE_RECOVERY";
+      case RECYCLED -> "RECYCLE_RECOVERY";
+    };
   }
 
   private boolean reconcilePortable(SharedFolderRecycleItem item) throws IOException {

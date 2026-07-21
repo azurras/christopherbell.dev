@@ -9,6 +9,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -23,6 +25,8 @@ import org.springframework.web.server.ResponseStatusException;
 public final class SharedFolderAuditRecorder {
   private static final Duration LOGICAL_ACCESS_WINDOW = Duration.ofMinutes(5);
   private static final int MAX_LOGICAL_ACCESS_ENTRIES = 10_000;
+  private static final String REQUEST_AUDIT_MARKERS =
+      SharedFolderAuditRecorder.class.getName() + ".request-markers";
 
   private final SharedFolderAuditSink sink;
   private final PermissionService permissions;
@@ -116,6 +120,14 @@ public final class SharedFolderAuditRecorder {
     recordRejected(action, resource, failureCategory(failure));
   }
 
+  /** Reports whether this request already emitted the same action/outcome audit fact. */
+  public boolean currentRequestAlreadyRecorded(String action, String outcome) {
+    HttpServletRequest request = currentRequest();
+    if (request == null) return false;
+    Object markers = request.getAttribute(REQUEST_AUDIT_MARKERS);
+    return markers instanceof Set<?> set && set.contains(marker(action, outcome));
+  }
+
   private String failureCategory(RuntimeException failure) {
     String category = "failure";
     if (failure instanceof AccessDeniedException) {
@@ -140,6 +152,7 @@ public final class SharedFolderAuditRecorder {
   private void record(
       String accountId, String action, String resource, Long size,
       String outcome, String failureCategory) {
+    markCurrentRequest(action, outcome);
     try {
       sink.record(new SharedFolderAuditCommand(
           safeAccountId(accountId), action, safeResource(resource), clock.instant(),
@@ -148,6 +161,21 @@ public final class SharedFolderAuditRecorder {
       // Audit degradation must not expose persistence or filesystem diagnostics to the caller.
       log.warn("Shared-folder audit record could not be persisted");
     }
+  }
+
+  private void markCurrentRequest(String action, String outcome) {
+    HttpServletRequest request = currentRequest();
+    if (request == null) return;
+    Object existing = request.getAttribute(REQUEST_AUDIT_MARKERS);
+    @SuppressWarnings("unchecked")
+    Set<String> markers = existing instanceof Set<?> set
+        ? (Set<String>) set : new HashSet<>();
+    markers.add(marker(action, outcome));
+    request.setAttribute(REQUEST_AUDIT_MARKERS, markers);
+  }
+
+  private String marker(String action, String outcome) {
+    return action + "\n" + outcome;
   }
 
   private String safeAccountId(String value) {
@@ -168,12 +196,19 @@ public final class SharedFolderAuditRecorder {
   }
 
   private String currentClientIp() {
-    var attributes = RequestContextHolder.getRequestAttributes();
-    if (attributes instanceof ServletRequestAttributes servlet) {
-      HttpServletRequest request = servlet.getRequest();
+    HttpServletRequest request = currentRequest();
+    if (request != null) {
       String value = clientIps.resolveClientIp(request);
       return value == null || value.isBlank() ? "unknown" : value;
     }
     return "unknown";
+  }
+
+  private HttpServletRequest currentRequest() {
+    var attributes = RequestContextHolder.getRequestAttributes();
+    if (attributes instanceof ServletRequestAttributes servlet) {
+      return servlet.getRequest();
+    }
+    return null;
   }
 }

@@ -193,6 +193,9 @@ class SharedFolderWriteControllerTest {
         .andExpect(status().isOk())
         .andExpect(header().string("Cache-Control", "private, no-store"))
         .andExpect(jsonPath("$.nextOffset").value(3));
+
+    org.mockito.Mockito.verify(auditRecorder).recordCurrent(
+        "UPLOAD_APPEND", "session-1", 3L, "accepted", null);
   }
 
   @ParameterizedTest
