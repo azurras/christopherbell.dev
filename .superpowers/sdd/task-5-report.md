@@ -172,3 +172,27 @@ the remaining cross-cutting audit and bounding requirements:
 The clean native/junction-enabled full gate passed all 946 Java tests and 160 JavaScript tests with
 zero failures, errors, or skips (`BUILD SUCCESSFUL` in 57s). Task 5 remains a review candidate until
 the complete remediated range receives independent approval.
+
+## Sixth Independent Review and Remediation
+
+The sixth fresh whole-change review of `09d2f408..97b6e96f` rejected Task 5 with zero Critical,
+four Important, and zero Minor findings. No rejected candidate was pushed. The remediation closes
+each boundary explicitly:
+
+- The outer shared-folder audit filter now binds and completes request context around the entire
+  downstream security/application chain. Pre-controller rejections retain the trusted client IP,
+  and post-dispatch service markers reliably suppress duplicate permission rejection events.
+- Repeated HTTP 429 responses use a separate insertion-ordered, 10,000-entry, five-minute
+  client/action/category deduplication window. Exhausted rate-limit buckets therefore cannot force
+  one Mongo write per rejected request.
+- PREPARING recovery deletes metadata only when the visible object has the persisted stable source
+  identity. RESTORING recovery with a journaled but missing private replacement resets only when the
+  visible target matches the persisted replacement fingerprint. Portable and native regressions
+  prove ambiguous missing-artifact states remain durable and are not reported as accepted.
+- Valid resources that exceed the 512-character audit field bound are converted to a deterministic
+  SHA-256 resource identifier before cache insertion and persistence. Exact-path admin filters apply
+  the same conversion, keeping long-path events both memory-bounded and searchable.
+
+The clean native/junction-enabled full gate passed all 952 Java tests and 160 JavaScript tests with
+zero failures, errors, or skips (`BUILD SUCCESSFUL` in 56s). Task 5 remains a review candidate until
+the complete remediated range receives independent approval.

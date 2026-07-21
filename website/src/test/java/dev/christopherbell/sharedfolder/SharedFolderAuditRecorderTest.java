@@ -107,4 +107,30 @@ class SharedFolderAuditRecorderTest {
         org.springframework.test.util.ReflectionTestUtils.getField(recorder, "logicalAccess");
     org.assertj.core.api.Assertions.assertThat(entries).hasSize(10_000);
   }
+
+  @Test
+  void overlongValidPathsUseABoundedDeterministicAuditIdentifierAndCacheKey() {
+    SharedFolderAuditSink sink = mock(SharedFolderAuditSink.class);
+    PermissionService permissions = mock(PermissionService.class);
+    when(permissions.getSelfId()).thenReturn("account-1");
+    var recorder = new SharedFolderAuditRecorder(
+        sink, permissions, mock(ClientIpResolver.class),
+        Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC));
+    String longPath = String.join("/", java.util.Collections.nCopies(
+        150, "valid-segment"));
+
+    recorder.recordLogicalAccess("DOWNLOAD_STARTED", longPath, 42L);
+    recorder.recordLogicalAccess("DOWNLOAD_STARTED", longPath, 42L);
+
+    var captor = org.mockito.ArgumentCaptor.forClass(
+        dev.christopherbell.sharedfolder.audit.SharedFolderAuditCommand.class);
+    verify(sink, times(1)).record(captor.capture());
+    org.assertj.core.api.Assertions.assertThat(captor.getValue().relativePathOrResourceId())
+        .matches("resource-sha256-[0-9a-f]{64}");
+    @SuppressWarnings("unchecked")
+    Map<String, Instant> entries = (Map<String, Instant>)
+        org.springframework.test.util.ReflectionTestUtils.getField(recorder, "logicalAccess");
+    org.assertj.core.api.Assertions.assertThat(entries.keySet())
+        .allSatisfy(key -> org.assertj.core.api.Assertions.assertThat(key.length()).isLessThan(256));
+  }
 }

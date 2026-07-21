@@ -46,7 +46,8 @@ public final class SharedFolderAuditQueryService {
       } catch (UnsafeSharedPathException exception) {
         throw badRequest();
       }
-      criteria.add(Criteria.where("relativePath").is(safe.relativePath()));
+      criteria.add(Criteria.where("relativePath")
+          .is(SharedFolderAuditCommand.boundedResource(safe.relativePath())));
     }
     if (safe.from() != null || safe.to() != null) {
       Criteria occurred = Criteria.where("occurredAt");

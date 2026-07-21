@@ -11,6 +11,9 @@ import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import org.springframework.http.HttpHeaders;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 /** Prevents browser and intermediary caches from retaining any protected shared-folder response. */
 public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
@@ -39,16 +42,27 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
       HttpServletRequest request,
       HttpServletResponse response,
       FilterChain filterChain) throws ServletException, IOException {
-    response.setHeader(HttpHeaders.CACHE_CONTROL, NO_STORE);
-    AuditAttempt attempt = attempt(request);
+    RequestAttributes previous = RequestContextHolder.getRequestAttributes();
+    ServletRequestAttributes bound = previous == null
+        ? new ServletRequestAttributes(request) : null;
+    if (bound != null) RequestContextHolder.setRequestAttributes(bound);
     try {
-      filterChain.doFilter(request, response);
-    } catch (ServletException | IOException | RuntimeException failure) {
-      recordRejected(attempt, "failure");
-      throw failure;
-    }
-    if (response.getStatus() >= 400) {
-      recordRejected(attempt, failureCategory(response.getStatus()));
+      response.setHeader(HttpHeaders.CACHE_CONTROL, NO_STORE);
+      AuditAttempt attempt = attempt(request);
+      try {
+        filterChain.doFilter(request, response);
+      } catch (ServletException | IOException | RuntimeException failure) {
+        recordRejected(attempt, "failure");
+        throw failure;
+      }
+      if (response.getStatus() >= 400) {
+        recordRejected(attempt, failureCategory(response.getStatus()));
+      }
+    } finally {
+      if (bound != null) {
+        bound.requestCompleted();
+        RequestContextHolder.resetRequestAttributes();
+      }
     }
   }
 
@@ -120,7 +134,11 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
   private void recordRejected(AuditAttempt attempt, String category) {
     if (audit != null
         && !audit.currentRequestAlreadyRecorded(attempt.action(), "rejected")) {
-      audit.recordRejected(attempt.action(), attempt.resource(), category);
+      if ("rate_limited".equals(category)) {
+        audit.recordRejectedOnce(attempt.action(), attempt.resource(), category);
+      } else {
+        audit.recordRejected(attempt.action(), attempt.resource(), category);
+      }
     }
   }
 

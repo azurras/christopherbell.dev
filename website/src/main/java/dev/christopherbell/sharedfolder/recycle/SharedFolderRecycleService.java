@@ -417,6 +417,10 @@ public class SharedFolderRecycleService {
           yield true;
         }
         if (!payload && visible) {
+          if (!portableIdentity(target, resolver.readHandle(target).attributes())
+              .equals(item.sourceIdentity())) {
+            yield false;
+          }
           repository.deleteById(item.id());
           yield true;
         }
@@ -434,6 +438,12 @@ public class SharedFolderRecycleService {
             yield true;
           }
           if (!replacement) {
+            if (item.replacementKey() != null) {
+              if (!visible) yield false;
+              String visibleFingerprint = SharedFolderObservedItemTokens.token(
+                  item.originalPath(), resolver.readHandle(target).attributes());
+              if (!item.replacementFingerprint().equals(visibleFingerprint)) yield false;
+            }
             repository.save(item.recycledAgain());
             yield true;
           }
@@ -477,6 +487,7 @@ public class SharedFolderRecycleService {
           yield true;
         }
         if (payload == null && visible != null) {
+          if (!nativeStableIdentity(visible).equals(item.sourceIdentity())) yield false;
           repository.deleteById(item.id());
           yield true;
         }
@@ -494,6 +505,12 @@ public class SharedFolderRecycleService {
             yield true;
           }
           if (replacement == null) {
+            if (item.replacementKey() != null) {
+              if (visible == null
+                  || !item.replacementFingerprint().equals(nativeFingerprint(visible))) {
+                yield false;
+              }
+            }
             repository.save(item.recycledAgain());
             yield true;
           }

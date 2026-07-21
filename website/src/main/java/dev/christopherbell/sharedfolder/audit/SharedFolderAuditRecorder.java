@@ -33,6 +33,7 @@ public final class SharedFolderAuditRecorder {
   private final ClientIpResolver clientIps;
   private final Clock clock;
   private final Map<String, Instant> logicalAccess = new LinkedHashMap<>();
+  private final Map<String, Instant> rejectedAccess = new LinkedHashMap<>();
 
   public SharedFolderAuditRecorder(
       SharedFolderAuditSink sink,
@@ -85,7 +86,8 @@ public final class SharedFolderAuditRecorder {
     } catch (RuntimeException exception) {
       accountId = "unknown";
     }
-    String key = accountId + "\n" + action + "\n" + resource;
+    String safeResource = safeResource(resource);
+    String key = accountId + "\n" + action + "\n" + safeResource;
     boolean shouldRecord;
     synchronized (logicalAccess) {
       Instant previous = logicalAccess.get(key);
@@ -101,7 +103,29 @@ public final class SharedFolderAuditRecorder {
         logicalAccess.put(key, now);
       }
     }
-    if (shouldRecord) record(accountId, action, resource, size, "accepted", null);
+    if (shouldRecord) record(accountId, action, safeResource, size, "accepted", null);
+  }
+
+  /** Records at most one matching rejection per client/action/category window. */
+  public void recordRejectedOnce(String action, String resource, String failureCategory) {
+    Instant now = clock.instant();
+    String key = currentClientIp() + "\n" + action + "\n" + failureCategory;
+    boolean shouldRecord;
+    synchronized (rejectedAccess) {
+      Instant previous = rejectedAccess.get(key);
+      shouldRecord = previous == null || !previous.plus(LOGICAL_ACCESS_WINDOW).isAfter(now);
+      if (shouldRecord) {
+        if (previous != null) rejectedAccess.remove(key);
+        while (rejectedAccess.size() >= MAX_LOGICAL_ACCESS_ENTRIES) {
+          var oldest = rejectedAccess.entrySet().iterator();
+          if (!oldest.hasNext()) break;
+          oldest.next();
+          oldest.remove();
+        }
+        rejectedAccess.put(key, now);
+      }
+    }
+    if (shouldRecord) recordRejected(action, resource, failureCategory);
   }
 
   /** Records a rejected attempt without allowing an unsafe raw path into persistence. */
@@ -183,7 +207,7 @@ public final class SharedFolderAuditRecorder {
   }
 
   private String safeResource(String value) {
-    return value == null || value.isEmpty() ? "root" : value;
+    return SharedFolderAuditCommand.boundedResource(value);
   }
 
   private String safeRejectedResource(String resource) {

@@ -7,6 +7,12 @@ import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import dev.christopherbell.configuration.ClientIpResolver;
+import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditSink;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 
 class SharedFolderNoStoreFilterTest {
   @Test
@@ -92,5 +98,52 @@ class SharedFolderNoStoreFilterTest {
     org.mockito.Mockito.verify(audit, org.mockito.Mockito.never()).recordRejected(
         org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
         org.mockito.ArgumentMatchers.anyString());
+  }
+
+  @Test
+  void bindsTheRealRequestForClientIpAndServiceAuditDeduplication() throws Exception {
+    SharedFolderAuditSink sink = org.mockito.Mockito.mock(SharedFolderAuditSink.class);
+    PermissionService permissions = org.mockito.Mockito.mock(PermissionService.class);
+    ClientIpResolver clientIps = org.mockito.Mockito.mock(ClientIpResolver.class);
+    org.mockito.Mockito.when(permissions.getSelfId()).thenReturn("admin-1");
+    org.mockito.Mockito.when(clientIps.resolveClientIp(org.mockito.ArgumentMatchers.any()))
+        .thenReturn("203.0.113.8");
+    var recorder = new SharedFolderAuditRecorder(
+        sink, permissions, clientIps,
+        Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC));
+    var filter = new SharedFolderNoStoreFilter(recorder);
+    var request = new MockHttpServletRequest(
+        "PATCH", "/api/accounts/2026-07-17/account-1/shared-folder-permissions");
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(request, response, (ignoredRequest, ignoredResponse) -> {
+      recorder.recordCurrent(
+          "PERMISSION_CHANGE", "account-1", null, "rejected", "access_denied");
+      ((jakarta.servlet.http.HttpServletResponse) ignoredResponse).setStatus(403);
+    });
+
+    var captor = org.mockito.ArgumentCaptor.forClass(
+        dev.christopherbell.sharedfolder.audit.SharedFolderAuditCommand.class);
+    org.mockito.Mockito.verify(sink).record(captor.capture());
+    assertThat(captor.getValue().clientIp()).isEqualTo("203.0.113.8");
+  }
+
+  @Test
+  void repeatedRateLimitResponsesEmitOneBoundedAuditFactPerClientWindow() throws Exception {
+    SharedFolderAuditSink sink = org.mockito.Mockito.mock(SharedFolderAuditSink.class);
+    PermissionService permissions = org.mockito.Mockito.mock(PermissionService.class);
+    ClientIpResolver clientIps = org.mockito.Mockito.mock(ClientIpResolver.class);
+    org.mockito.Mockito.when(clientIps.resolveClientIp(org.mockito.ArgumentMatchers.any()))
+        .thenReturn("203.0.113.9");
+    var recorder = new SharedFolderAuditRecorder(
+        sink, permissions, clientIps,
+        Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC));
+    var filter = new SharedFolderNoStoreFilter(recorder);
+
+    reject(filter, "GET", "/api/shared-folder/2026-07-17/entries", 429);
+    reject(filter, "GET", "/api/shared-folder/2026-07-17/entries", 429);
+
+    org.mockito.Mockito.verify(sink, org.mockito.Mockito.times(1))
+        .record(org.mockito.ArgumentMatchers.any());
   }
 }

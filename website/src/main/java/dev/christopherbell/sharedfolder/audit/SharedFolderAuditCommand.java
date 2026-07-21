@@ -1,6 +1,10 @@
 package dev.christopherbell.sharedfolder.audit;
 
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Locale;
 
 /**
@@ -29,7 +33,7 @@ public record SharedFolderAuditCommand(
   public SharedFolderAuditCommand {
     accountId = requiredToken(accountId, "account id", MAX_ACCOUNT_ID_LENGTH);
     action = requiredToken(action, "action", MAX_ACTION_LENGTH);
-    relativePathOrResourceId = safeRelativePathOrResourceId(relativePathOrResourceId);
+    relativePathOrResourceId = validatedResource(relativePathOrResourceId);
     if (occurredAt == null) {
       throw new IllegalArgumentException("Audit timestamp is required");
     }
@@ -44,7 +48,7 @@ public record SharedFolderAuditCommand(
     }
   }
 
-  private static String safeRelativePathOrResourceId(String value) {
+  static String validatedResource(String value) {
     if (value == null || value.isEmpty() || value.length() > MAX_PATH_OR_RESOURCE_ID_LENGTH
         || containsControlCharacter(value) || value.startsWith("/") || value.startsWith("\\")
         || value.indexOf('\\') >= 0 || value.indexOf(':') >= 0 || containsEncodedSeparator(value)) {
@@ -57,6 +61,21 @@ public record SharedFolderAuditCommand(
       }
     }
     return value;
+  }
+
+  static String boundedResource(String value) {
+    String candidate = value == null || value.isEmpty() ? "root" : value;
+    try {
+      return validatedResource(candidate);
+    } catch (IllegalArgumentException exception) {
+      try {
+        byte[] digest = MessageDigest.getInstance("SHA-256")
+            .digest(candidate.getBytes(StandardCharsets.UTF_8));
+        return "resource-sha256-" + HexFormat.of().formatHex(digest);
+      } catch (NoSuchAlgorithmException impossible) {
+        return "resource-unavailable";
+      }
+    }
   }
 
   private static String requiredClientIp(String value) {

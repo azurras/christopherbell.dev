@@ -294,6 +294,38 @@ class SharedFolderRecycleServiceTest {
   }
 
   @Test
+  void reconciliationDefersMissingPrivateArtifactsWithoutVisibleIdentityProof()
+      throws Exception {
+    Fixture fixture = fixture();
+    Files.writeString(fixture.root.resolve("preparing-race.txt"), "different-visible");
+    SharedFolderRecycleItem preparing = new SharedFolderRecycleItem(
+        "preparing-race", "preparing-race.txt", "writer-1", NOW,
+        NOW.plus(Duration.ofDays(30)), "11111111-1111-1111-1111-111111111111",
+        8, false, "original-fingerprint", SharedFolderRecycleState.PREPARING,
+        null, null, "original-stable-identity:false:true");
+
+    Files.writeString(fixture.root.resolve("restore-race.txt"), "payload");
+    SharedFolderRecycleItem recycled = fixture.recycle.recycle(new SharedFolderDeleteRequest(
+        "restore-race.txt", fixture.mutations.observedToken("restore-race.txt")));
+    Files.writeString(fixture.root.resolve("restore-race.txt"), "replacement-that-changed");
+    SharedFolderRecycleItem restoring = recycled.withRestore(
+        "22222222-2222-2222-2222-222222222222", "expected-replacement-fingerprint");
+
+    fixture.records.clear();
+    fixture.records.put(preparing.id(), preparing);
+    fixture.records.put(restoring.id(), restoring);
+
+    assertThat(fixture.recycle.reconcilePending()).isZero();
+    assertThat(fixture.records.get(preparing.id()).state())
+        .isEqualTo(SharedFolderRecycleState.PREPARING);
+    assertThat(fixture.records.get(restoring.id()).state())
+        .isEqualTo(SharedFolderRecycleState.RESTORING);
+    org.mockito.Mockito.verify(fixture.audit, org.mockito.Mockito.never()).recordSystem(
+        org.mockito.ArgumentMatchers.endsWith("_RECOVERY"), any(), any(),
+        org.mockito.ArgumentMatchers.eq("accepted"), org.mockito.ArgumentMatchers.isNull());
+  }
+
+  @Test
   void replacementJournalFieldsMustBePresentTogether() {
     assertThatThrownBy(() -> new SharedFolderRecycleItem(
         "item-id", "file.txt", "writer-1", NOW, NOW.plus(Duration.ofDays(30)),
@@ -391,6 +423,44 @@ class SharedFolderRecycleServiceTest {
     assertThat(fixture.recycle.reconcilePending()).isEqualTo(2);
     verify(boundary).deleteRecycleTree(purging.payloadKey(), partiallyPurged);
     assertThat(fixture.records).doesNotContainKeys(purging.id(), restoring.id());
+  }
+
+  @Test
+  void nativeReconciliationAlsoDefersUnprovenMissingPrivateArtifacts() throws Exception {
+    byte[] expectedId = new byte[16];
+    expectedId[0] = 3;
+    byte[] otherId = new byte[16];
+    otherId[0] = 9;
+    NativeFileIdentity expectedIdentity = new NativeFileIdentity(11, expectedId);
+    NativeFileIdentity otherIdentity = new NativeFileIdentity(11, otherId);
+    String encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(expectedId);
+    String stable = "11:" + encoded + ":false:true";
+    String full = stable + ":8:" + NOW;
+    SharedFolderRecycleItem preparing = new SharedFolderRecycleItem(
+        "native-preparing-race", "native-preparing.txt", "writer-1", NOW,
+        NOW.plus(Duration.ofDays(30)), "33333333-3333-3333-3333-333333333333",
+        8, false, full, SharedFolderRecycleState.PREPARING, null, null, stable);
+    SharedFolderRecycleItem restoring = new SharedFolderRecycleItem(
+        "native-restoring-race", "native-restoring.txt", "writer-1", NOW,
+        NOW.plus(Duration.ofDays(30)), "44444444-4444-4444-4444-444444444444",
+        8, false, full, SharedFolderRecycleState.RESTORING,
+        "55555555-5555-5555-5555-555555555555", "expected-replacement", stable);
+    WindowsSharedFolderMutationBoundary boundary = mock(WindowsSharedFolderMutationBoundary.class);
+    when(boundary.nativeMode()).thenReturn(true);
+    when(boundary.recycleMetadata(preparing.payloadKey())).thenThrow(
+        new NativeBoundaryException("missing", 2));
+    when(boundary.recycleMetadata(restoring.payloadKey())).thenReturn(
+        new NativeFileMetadata(expectedIdentity, false, true, 8, NOW));
+    when(boundary.recycleReplacementMetadata(restoring.replacementKey())).thenThrow(
+        new NativeBoundaryException("missing", 2));
+    when(boundary.metadata(preparing.originalPath())).thenReturn(
+        new NativeFileMetadata(otherIdentity, false, true, 8, NOW));
+    when(boundary.metadata(restoring.originalPath())).thenReturn(
+        new NativeFileMetadata(otherIdentity, false, true, 30, NOW.plusSeconds(1)));
+    NativeFixture fixture = nativeFixture(boundary, preparing, restoring);
+
+    assertThat(fixture.recycle.reconcilePending()).isZero();
+    assertThat(fixture.records).containsKeys(preparing.id(), restoring.id());
   }
 
   private Fixture fixture() throws Exception {

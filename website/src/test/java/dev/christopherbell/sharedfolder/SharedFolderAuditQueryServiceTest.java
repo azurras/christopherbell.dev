@@ -59,6 +59,26 @@ class SharedFolderAuditQueryServiceTest {
     org.mockito.Mockito.verifyNoInteractions(mongo);
   }
 
+  @Test
+  void overlongValidPathFilterUsesTheSameBoundedIdentifierAsPersistence() {
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    MongoTemplate mongo = mock(MongoTemplate.class);
+    var service = new SharedFolderAuditQueryService(access, mongo);
+    String longPath = String.join("/", java.util.Collections.nCopies(
+        150, "valid-segment"));
+    when(mongo.find(org.mockito.ArgumentMatchers.any(Query.class),
+        eq(SharedFolderAuditEvent.class))).thenReturn(List.of());
+
+    service.search(new SharedFolderAuditFilter(
+        null, null, null, longPath, null, null, 25));
+
+    var captor = org.mockito.ArgumentCaptor.forClass(Query.class);
+    verify(mongo).find(captor.capture(), eq(SharedFolderAuditEvent.class));
+    assertThat(captor.getValue().getQueryObject().toString())
+        .containsPattern("resource-sha256-[0-9a-f]{64}")
+        .doesNotContain(longPath);
+  }
+
   private void assertBadRequest(org.assertj.core.api.ThrowableAssert.ThrowingCallable action) {
     assertThatThrownBy(action).isInstanceOfSatisfying(ResponseStatusException.class,
         exception -> assertThat(exception.getStatusCode().value()).isEqualTo(400));
