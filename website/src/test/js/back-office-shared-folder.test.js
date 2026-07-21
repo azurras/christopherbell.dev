@@ -6,6 +6,7 @@ const {
   sharedRecycleMarkup,
   sharedAuditFilters,
   purgeConfirmation,
+  runSharedRecycleAction,
 } = await import('../../main/resources/static/js/lib/back-office-shared-folder.js');
 
 test('shared-folder audit markup escapes untrusted values and shows bounded event facts', () => {
@@ -65,4 +66,42 @@ test('invalid audit dates are omitted instead of breaking the admin filter', () 
   } };
 
   assert.deepEqual(sharedAuditFilters(form), {});
+});
+
+test('restore replace and purge actions call only the explicitly confirmed API operation', async () => {
+  const calls = [];
+  const restore = async (id, replace) => calls.push(['restore', id, replace]);
+  const purge = async (id, confirmation) => calls.push(['purge', id, confirmation]);
+
+  assert.equal(await runSharedRecycleAction({
+    id: 'item-1', action: 'restore', confirmReplace: () => false,
+    promptPurge: () => '', restore, purge,
+  }), true);
+  assert.equal(await runSharedRecycleAction({
+    id: 'item-1', action: 'replace', confirmReplace: () => false,
+    promptPurge: () => '', restore, purge,
+  }), false);
+  assert.equal(await runSharedRecycleAction({
+    id: 'item-1', action: 'replace', confirmReplace: () => true,
+    promptPurge: () => '', restore, purge,
+  }), true);
+  assert.equal(await runSharedRecycleAction({
+    id: 'item-1', action: 'purge', confirmReplace: () => false,
+    promptPurge: () => 'PURGE item-1', restore, purge,
+  }), true);
+  assert.deepEqual(calls, [
+    ['restore', 'item-1', false],
+    ['restore', 'item-1', true],
+    ['purge', 'item-1', 'PURGE item-1'],
+  ]);
+});
+
+test('purge action rejects a mismatched phrase before calling the API', async () => {
+  let called = false;
+  await assert.rejects(() => runSharedRecycleAction({
+    id: 'item-1', action: 'purge', confirmReplace: () => false,
+    promptPurge: () => 'purge item-1', restore: async () => {},
+    purge: async () => { called = true; },
+  }), /did not match/);
+  assert.equal(called, false);
 });

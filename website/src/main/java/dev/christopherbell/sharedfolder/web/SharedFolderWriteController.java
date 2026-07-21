@@ -155,11 +155,6 @@ public class SharedFolderWriteController {
   }
 
   private <T> T audited(String action, String resource, java.util.function.Supplier<T> operation) {
-    try {
-      return operation.get();
-    } catch (RuntimeException failure) {
-      audit.recordFailure(action, resource, failure);
-      throw failure;
-    }
+    return operation.get();
   }
 }

@@ -93,12 +93,11 @@ public class SharedFolderAdminController {
   }
 
   private <T> T audited(String action, String resource, java.util.function.Supplier<T> operation) {
-    try {
-      return operation.get();
-    } catch (RuntimeException failure) {
-      recorder.recordFailure(action, resource, failure);
-      throw failure;
+    T result = operation.get();
+    if (action.equals("AUDIT_BROWSE") || action.equals("RECYCLE_BROWSE")) {
+      recorder.recordCurrent(action, resource, null, "accepted", null);
     }
+    return result;
   }
 
   public record RestoreRequest(@NotNull Boolean replace) {}

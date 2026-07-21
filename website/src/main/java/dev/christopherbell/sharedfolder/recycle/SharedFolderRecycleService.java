@@ -115,7 +115,7 @@ public class SharedFolderRecycleService {
       }
       SharedFolderRecycleItem item = preparing(
           id, request.path(), account, now, payloadKey, rechecked.size(), rechecked.isDirectory(),
-          finalToken);
+          finalToken, portableIdentity(source, rechecked));
       repository.save(item);
       privateBoundary.moveInto(RECYCLE_DIRECTORY, payloadKey, source);
       SharedFolderRecycleItem recycled = repository.save(
@@ -232,8 +232,16 @@ public class SharedFolderRecycleService {
     int purged = 0;
     for (SharedFolderRecycleItem item : repository.findByStateAndExpiresAtBefore(
         SharedFolderRecycleState.RECYCLED, clock.instant())) {
-      purgeInternal(item);
-      purged++;
+      try {
+        purgeInternal(item);
+        if (audit != null) audit.recordSystem(
+            "RETENTION_PURGE", item.originalPath(), item.size(), "accepted", null);
+        purged++;
+      } catch (RuntimeException failure) {
+        if (audit != null) audit.recordSystemFailure(
+            "RETENTION_PURGE", item.originalPath(), item.size(), failure);
+        log.warn("Shared-folder retention purge deferred for item {}", item.id());
+      }
     }
     return purged;
   }
@@ -266,7 +274,7 @@ public class SharedFolderRecycleService {
       }
       SharedFolderRecycleItem item = preparing(
           id, request.path(), account, now, key, observed.size(), observed.directory(),
-          nativeFingerprint(observed));
+          nativeFingerprint(observed), nativeStableIdentity(observed));
       repository.save(item);
       NativeFileMetadata moved = nativeBoundary.recycleVisible(request.path(), key, observed);
       if (!item.sourceFingerprint().equals(nativeFingerprint(moved))) {
@@ -331,15 +339,19 @@ public class SharedFolderRecycleService {
       throw unavailable();
     }
     try {
-      SharedFolderRecycleItem purging = repository.save(
-          item.withState(SharedFolderRecycleState.PURGING));
       if (nativeBoundary.nativeMode()) {
-        NativeFileMetadata payload = nativeBoundary.recycleMetadata(purging.payloadKey());
-        requireNativeFingerprint(purging, payload);
+        NativeFileMetadata payload = nativeBoundary.recycleMetadata(item.payloadKey());
+        requireNativeFingerprint(item, payload);
+        SharedFolderRecycleItem purging = repository.save(
+            item.withState(SharedFolderRecycleState.PURGING));
         nativeBoundary.deleteRecycleTree(purging.payloadKey(), payload);
         repository.deleteById(purging.id());
         return;
       }
+      requirePortableFingerprint(
+          item.sourceFingerprint(), RECYCLE_DIRECTORY, item.payloadKey(), item.originalPath());
+      SharedFolderRecycleItem purging = repository.save(
+          item.withState(SharedFolderRecycleState.PURGING));
       privateBoundary.deleteTreeIfExists(RECYCLE_DIRECTORY, purging.payloadKey());
       repository.deleteById(purging.id());
     } catch (ResponseStatusException exception) {
@@ -403,8 +415,8 @@ public class SharedFolderRecycleService {
           }
           yield false;
         }
-        if (visible && visibleFingerprint(resolver, item.originalPath(), target)
-            .equals(item.sourceFingerprint())) {
+        if (visible && portableIdentity(
+            target, resolver.readHandle(target).attributes()).equals(item.sourceIdentity())) {
           if (replacement) {
             requirePortableFingerprint(item.replacementFingerprint(), REPLACED_DIRECTORY,
                 item.replacementKey(), item.originalPath());
@@ -417,8 +429,8 @@ public class SharedFolderRecycleService {
       }
       case PURGING -> {
         if (payload) {
-          requirePortableFingerprint(
-              item.sourceFingerprint(), RECYCLE_DIRECTORY, item.payloadKey(), item.originalPath());
+          requirePortableIdentity(
+              item.sourceIdentity(), RECYCLE_DIRECTORY, item.payloadKey());
           privateBoundary.deleteTree(RECYCLE_DIRECTORY, item.payloadKey());
         }
         repository.deleteById(item.id());
@@ -463,7 +475,7 @@ public class SharedFolderRecycleService {
           }
           yield false;
         }
-        if (visible != null && nativeFingerprint(visible).equals(item.sourceFingerprint())) {
+        if (visible != null && nativeStableIdentity(visible).equals(item.sourceIdentity())) {
           if (replacement != null) {
             requireNativeReplacementFingerprint(item, replacement);
             nativeBoundary.deleteRecycleReplacement(item.replacementKey(), replacement);
@@ -475,7 +487,7 @@ public class SharedFolderRecycleService {
       }
       case PURGING -> {
         if (payload != null) {
-          requireNativeFingerprint(item, payload);
+          requireNativeIdentity(item, payload);
           nativeBoundary.deleteRecycleTree(item.payloadKey(), payload);
         }
         repository.deleteById(item.id());
@@ -516,16 +528,32 @@ public class SharedFolderRecycleService {
     if (!SharedFolderObservedItemTokens.matches(expected, current)) throw conflict();
   }
 
+  private void requirePortableIdentity(
+      String expected, String directory, String key) throws IOException {
+    var metadata = privateBoundary.metadata(directory, key);
+    String current = portableIdentity(metadata.stableIdentity(), metadata.attributes());
+    if (!expected.equals(current)) throw conflict();
+  }
+
+  private String portableIdentity(Path path, BasicFileAttributes attributes) throws IOException {
+    return portableIdentity(PortableSharedFolderPrivateBoundary.stableIdentity(path), attributes);
+  }
+
+  private String portableIdentity(Object stableIdentity, BasicFileAttributes attributes) {
+    return stableIdentity + ":" + attributes.isDirectory() + ":" + attributes.isRegularFile();
+  }
+
   private SharedFolderRecycleItem preparing(
       String id, String path, Account account, Instant now, String key, long size,
-      boolean directory, String fingerprint) {
+      boolean directory, String fingerprint, String sourceIdentity) {
     if (account == null || account.getId() == null || account.getId().isBlank()) {
       throw new org.springframework.security.access.AccessDeniedException(
           "Shared-folder access denied");
     }
     return new SharedFolderRecycleItem(
         id, path, account.getId(), now, now.plus(properties.recycleRetention()), key,
-        size, directory, fingerprint, SharedFolderRecycleState.PREPARING);
+        size, directory, fingerprint, SharedFolderRecycleState.PREPARING, null, null,
+        sourceIdentity);
   }
 
   private SharedFolderRecycleItem current(String id) {
@@ -572,6 +600,10 @@ public class SharedFolderRecycleService {
         + ":" + metadata.size() + ":" + metadata.modifiedAt();
   }
 
+  private String nativeStableIdentity(NativeFileMetadata metadata) {
+    return nativeIdentity(metadata) + ":" + metadata.directory() + ":" + metadata.regularFile();
+  }
+
   private String nativeIdentity(NativeFileMetadata metadata) {
     return metadata.identity().volumeSerial() + ":"
         + Base64.getUrlEncoder().withoutPadding().encodeToString(metadata.identity().fileId());
@@ -580,6 +612,11 @@ public class SharedFolderRecycleService {
   private void requireNativeFingerprint(
       SharedFolderRecycleItem item, NativeFileMetadata metadata) {
     if (!item.sourceFingerprint().equals(nativeFingerprint(metadata))) throw conflict();
+  }
+
+  private void requireNativeIdentity(
+      SharedFolderRecycleItem item, NativeFileMetadata metadata) {
+    if (!item.sourceIdentity().equals(nativeStableIdentity(metadata))) throw conflict();
   }
 
   private void requireNativeReplacementFingerprint(

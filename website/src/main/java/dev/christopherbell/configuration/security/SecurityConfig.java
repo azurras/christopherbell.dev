@@ -8,9 +8,11 @@ import dev.christopherbell.configuration.filter.RateLimitFilter;
 import dev.christopherbell.configuration.filter.RequestSizeLimitFilter;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -161,8 +163,12 @@ public class SecurityConfig {
 
   /** Applies no-store headers before authentication can return a protected shared-folder error. */
   @Bean
-  public SharedFolderNoStoreFilter sharedFolderNoStoreFilter() {
-    return new SharedFolderNoStoreFilter();
+  public SharedFolderNoStoreFilter sharedFolderNoStoreFilter(
+      ObjectProvider<SharedFolderAuditRecorder> auditRecorder) {
+    SharedFolderAuditRecorder recorder = auditRecorder.getIfAvailable();
+    return recorder == null
+        ? new SharedFolderNoStoreFilter()
+        : new SharedFolderNoStoreFilter(recorder);
   }
 
   /**

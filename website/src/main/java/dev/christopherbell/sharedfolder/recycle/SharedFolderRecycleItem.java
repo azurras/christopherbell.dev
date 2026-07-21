@@ -26,7 +26,8 @@ public record SharedFolderRecycleItem(
     String sourceFingerprint,
     SharedFolderRecycleState state,
     String replacementKey,
-    String replacementFingerprint) {
+    String replacementFingerprint,
+    String sourceIdentity) {
 
   /** Compatibility constructor for records without an active replacement journal. */
   public SharedFolderRecycleItem(
@@ -34,14 +35,25 @@ public record SharedFolderRecycleItem(
       Instant expiresAt, String payloadKey, long size, boolean directory,
       String sourceFingerprint, SharedFolderRecycleState state) {
     this(id, originalPath, deletedByAccountId, deletedAt, expiresAt, payloadKey, size, directory,
-        sourceFingerprint, state, null, null);
+        sourceFingerprint, state, null, null, sourceFingerprint);
+  }
+
+  /** Compatibility constructor for records created before stable recovery identity was explicit. */
+  public SharedFolderRecycleItem(
+      String id, String originalPath, String deletedByAccountId, Instant deletedAt,
+      Instant expiresAt, String payloadKey, long size, boolean directory,
+      String sourceFingerprint, SharedFolderRecycleState state,
+      String replacementKey, String replacementFingerprint) {
+    this(id, originalPath, deletedByAccountId, deletedAt, expiresAt, payloadKey, size, directory,
+        sourceFingerprint, state, replacementKey, replacementFingerprint, sourceFingerprint);
   }
 
   public SharedFolderRecycleItem {
     if (id == null || id.isBlank() || originalPath == null || originalPath.isBlank()
         || deletedByAccountId == null || deletedByAccountId.isBlank()
         || deletedAt == null || expiresAt == null || payloadKey == null || payloadKey.isBlank()
-        || size < 0 || sourceFingerprint == null || sourceFingerprint.isBlank() || state == null) {
+        || size < 0 || sourceFingerprint == null || sourceFingerprint.isBlank()
+        || sourceIdentity == null || sourceIdentity.isBlank() || state == null) {
       throw new IllegalArgumentException("Recycle metadata is incomplete");
     }
     if ((replacementKey == null) != (replacementFingerprint == null)) {
@@ -52,13 +64,13 @@ public record SharedFolderRecycleItem(
   public SharedFolderRecycleItem withState(SharedFolderRecycleState next) {
     return new SharedFolderRecycleItem(id, originalPath, deletedByAccountId, deletedAt, expiresAt,
         payloadKey, size, directory, sourceFingerprint, next, replacementKey,
-        replacementFingerprint);
+        replacementFingerprint, sourceIdentity);
   }
 
   public SharedFolderRecycleItem withExpiresAt(Instant nextExpiry) {
     return new SharedFolderRecycleItem(id, originalPath, deletedByAccountId, deletedAt, nextExpiry,
         payloadKey, size, directory, sourceFingerprint, state, replacementKey,
-        replacementFingerprint);
+        replacementFingerprint, sourceIdentity);
   }
 
   public SharedFolderRecycleItem withRestore(String key, String fingerprint) {
@@ -67,12 +79,12 @@ public record SharedFolderRecycleItem(
     }
     return new SharedFolderRecycleItem(id, originalPath, deletedByAccountId, deletedAt, expiresAt,
         payloadKey, size, directory, sourceFingerprint, SharedFolderRecycleState.RESTORING,
-        key, fingerprint);
+        key, fingerprint, sourceIdentity);
   }
 
   public SharedFolderRecycleItem recycledAgain() {
     return new SharedFolderRecycleItem(id, originalPath, deletedByAccountId, deletedAt, expiresAt,
         payloadKey, size, directory, sourceFingerprint, SharedFolderRecycleState.RECYCLED,
-        null, null);
+        null, null, sourceIdentity);
   }
 }

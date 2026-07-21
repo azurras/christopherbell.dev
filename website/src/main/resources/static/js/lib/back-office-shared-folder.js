@@ -76,3 +76,29 @@ export function sharedAuditFilters(form) {
 export function purgeConfirmation(id, value) {
   return String(value || '') === `PURGE ${id}`;
 }
+
+export async function runSharedRecycleAction({
+  id,
+  action,
+  confirmReplace,
+  promptPurge,
+  restore,
+  purge,
+}) {
+  if (!id || !['restore', 'replace', 'purge'].includes(action)) return false;
+  if (action === 'restore') {
+    await restore(id, false);
+    return true;
+  }
+  if (action === 'replace') {
+    if (!confirmReplace()) return false;
+    await restore(id, true);
+    return true;
+  }
+  const typed = promptPurge() || '';
+  if (!purgeConfirmation(id, typed)) {
+    throw new Error('Permanent purge confirmation did not match.');
+  }
+  await purge(id, typed);
+  return true;
+}

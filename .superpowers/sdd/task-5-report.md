@@ -1,6 +1,6 @@
 # Task 5 Report - Recycle Retention and Audit Administration
 
-Date: 2026-07-18
+Date: 2026-07-21
 
 Branch: `codex/shared-folder-portal`
 
@@ -63,7 +63,7 @@ $env:SHARED_FOLDER_RUN_WINDOWS_NATIVE_JUNCTION_TEST='true'
   test :website:jsTest --console=plain
 ```
 
-Result: BUILD SUCCESSFUL in 1m 50s. All 929 Java tests and 157 JavaScript tests passed, with
+Initial candidate result: BUILD SUCCESSFUL in 1m 50s. All 929 Java tests and 157 JavaScript tests passed, with
 0 failures, 0 errors, and 0 skipped. The real JNA mutation tests and explicitly enabled junction
 tests passed.
 
@@ -100,3 +100,30 @@ focused regression before its production fix:
 The native/junction-enabled full gate after remediation passed 932 Java tests and 157 JavaScript
 tests with zero failures, errors, or skips (`BUILD SUCCESSFUL` in 2m 8s). Task 5 remains a review
 candidate until a new whole-change review approves the complete range.
+
+## Third Independent Review and Remediation
+
+A fresh whole-change review of `09d2f408..69e70508` rejected Task 5 with zero Critical, four
+Important, and two Minor findings. No rejected candidate was pushed. The remediation addresses the
+entire set:
+
+- Recycle records now retain a stable filesystem identity separately from the mutable full
+  fingerprint. Restore and partially completed recursive-purge recovery accept the same object after
+  expected content or directory-metadata changes, while manual and scheduled purge still perform a
+  strict full-fingerprint check before entering the destructive `PURGING` state.
+- A shared HTTP boundary now audits validation, method-security, authentication, and other rejected
+  shared-folder API responses that occur outside controller methods. Fixed action/resource mappings
+  and bounded failure categories prevent request bodies, tokens, absolute paths, and exception text
+  from entering audit records.
+- Retention cleanup records accepted and rejected `RETENTION_PURGE` system events and continues with
+  later expired items after one item fails. Successful audit and recycle browsing are also recorded.
+- Back Office tests now exercise the actual restore, replace-confirmation, and exact typed-purge
+  interaction wiring, including cancellation and mismatch paths that make no API request.
+- Security configuration tolerates unrelated sliced controller tests in which the shared-folder
+  audit component is intentionally absent; production still injects the real recorder.
+
+Focused RED/GREEN verification covered portable and native partial purge, edited restored objects,
+retention continuation/auditing, HTTP-boundary rejection auditing, unrelated security slice wiring,
+and Back Office action decisions. The final clean native/junction-enabled gate passed all 938 Java
+tests and 159 JavaScript tests with zero failures, errors, or skips (`BUILD SUCCESSFUL` in 1m 1s).
+Task 5 remains a review candidate until the remediated whole range receives independent approval.

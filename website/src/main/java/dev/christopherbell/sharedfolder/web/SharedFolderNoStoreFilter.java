@@ -7,13 +7,25 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import org.springframework.http.HttpHeaders;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /** Prevents browser and intermediary caches from retaining any protected shared-folder response. */
 public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
   private static final String API_PREFIX = "/api/shared-folder" + V20260717 + "/";
   private static final String NO_STORE = "private, no-store";
+  private final SharedFolderAuditRecorder audit;
+
+  public SharedFolderNoStoreFilter() {
+    this(null);
+  }
+
+  @Autowired
+  public SharedFolderNoStoreFilter(SharedFolderAuditRecorder audit) {
+    this.audit = audit;
+  }
 
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -26,6 +38,73 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
       HttpServletResponse response,
       FilterChain filterChain) throws ServletException, IOException {
     response.setHeader(HttpHeaders.CACHE_CONTROL, NO_STORE);
-    filterChain.doFilter(request, response);
+    AuditAttempt attempt = attempt(request);
+    try {
+      filterChain.doFilter(request, response);
+    } catch (ServletException | IOException | RuntimeException failure) {
+      recordRejected(attempt, "failure");
+      throw failure;
+    }
+    if (response.getStatus() >= 400) {
+      recordRejected(attempt, failureCategory(response.getStatus()));
+    }
   }
+
+  private AuditAttempt attempt(HttpServletRequest request) {
+    String path = request.getRequestURI().substring(API_PREFIX.length());
+    String method = request.getMethod();
+    if (path.equals("entries") && method.equals("GET")) {
+      return new AuditAttempt("LIST", request.getParameter("path"));
+    }
+    if (path.equals("entries/content")) {
+      return new AuditAttempt("DOWNLOAD_STARTED", request.getParameter("path"));
+    }
+    if (path.equals("preview")) {
+      return new AuditAttempt("PREVIEW_STARTED", request.getParameter("path"));
+    }
+    if (path.equals("folders")) return new AuditAttempt("CREATE_FOLDER", "request");
+    if (path.equals("entries/rename")) return new AuditAttempt("RENAME", "request");
+    if (path.equals("entries/move")) return new AuditAttempt("MOVE", "request");
+    if (path.equals("entries") && method.equals("DELETE")) {
+      return new AuditAttempt("RECYCLE", "request");
+    }
+    if (path.equals("uploads")) return new AuditAttempt("UPLOAD_START", "request");
+    if (path.matches("uploads/[^/]+/complete")) {
+      return new AuditAttempt("UPLOAD_FINALIZE", "upload");
+    }
+    if (path.matches("uploads/[^/]+")) {
+      return new AuditAttempt(method.equals("PUT") ? "UPLOAD_APPEND"
+          : method.equals("DELETE") ? "UPLOAD_CANCEL" : "UPLOAD_STATUS", "upload");
+    }
+    if (path.equals("admin/audit")) return new AuditAttempt("AUDIT_BROWSE", "audit");
+    if (path.equals("admin/recycle")) return new AuditAttempt("RECYCLE_BROWSE", "recycle");
+    if (path.matches("admin/recycle/[^/]+/restore")) {
+      return new AuditAttempt("RESTORE", "recycle-item");
+    }
+    if (path.matches("admin/recycle/[^/]+")) {
+      return new AuditAttempt("PURGE", "recycle-item");
+    }
+    return new AuditAttempt("REQUEST", "shared-folder");
+  }
+
+  private String failureCategory(int status) {
+    return switch (status) {
+      case 400 -> "invalid_request";
+      case 401, 403 -> "access_denied";
+      case 404 -> "not_found";
+      case 409 -> "conflict";
+      case 413 -> "too_large";
+      case 416 -> "invalid_range";
+      case 429 -> "rate_limited";
+      case 503 -> "unavailable";
+      case 507 -> "insufficient_storage";
+      default -> "failure";
+    };
+  }
+
+  private void recordRejected(AuditAttempt attempt, String category) {
+    if (audit != null) audit.recordRejected(attempt.action(), attempt.resource(), category);
+  }
+
+  private record AuditAttempt(String action, String resource) {}
 }

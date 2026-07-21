@@ -59,7 +59,6 @@ public class SharedFolderReadController {
           .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
           .body(response);
     } catch (RuntimeException failure) {
-      audit.recordFailure("LIST", path, failure);
       throw failure;
     }
   }
@@ -98,10 +97,8 @@ public class SharedFolderReadController {
       return new ResponseEntity<>(body, responseHeaders,
           download.partial() ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK);
     } catch (SharedFolderRangeNotSatisfiableException exception) {
-      audit.recordRejected("DOWNLOAD_STARTED", path, "invalid_range");
       return rangeNotSatisfiable(exception.totalLength());
     } catch (RuntimeException failure) {
-      audit.recordFailure("DOWNLOAD_STARTED", path, failure);
       throw failure;
     }
   }
@@ -127,7 +124,6 @@ public class SharedFolderReadController {
       }
       return new ResponseEntity<>(preview.resource(), headers, HttpStatus.OK);
     } catch (RuntimeException failure) {
-      audit.recordFailure("PREVIEW_STARTED", path, failure);
       throw failure;
     }
   }

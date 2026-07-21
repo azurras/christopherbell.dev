@@ -59,6 +59,19 @@ public final class SharedFolderAuditRecorder {
         outcome, failureCategory);
   }
 
+  /** Records unattended lifecycle work under a fixed non-user account id. */
+  public void recordSystem(
+      String action, String resource, Long size, String outcome, String failureCategory) {
+    record("system", action, resource, size, outcome, failureCategory);
+  }
+
+  /** Records an unattended failure with the same closed failure categories as request work. */
+  public void recordSystemFailure(
+      String action, String resource, Long size, RuntimeException failure) {
+    record("system", action, safeRejectedResource(resource), size, "rejected",
+        failureCategory(failure));
+  }
+
   /** Records only the first content/range request in a short logical playback/download window. */
   public void recordLogicalAccess(String action, String resource, Long size) {
     Instant now = clock.instant();
@@ -100,6 +113,10 @@ public final class SharedFolderAuditRecorder {
 
   /** Maps an operation failure to a fixed safe category without persisting exception text. */
   public void recordFailure(String action, String resource, RuntimeException failure) {
+    recordRejected(action, resource, failureCategory(failure));
+  }
+
+  private String failureCategory(RuntimeException failure) {
     String category = "failure";
     if (failure instanceof AccessDeniedException) {
       category = "access_denied";
@@ -117,7 +134,7 @@ public final class SharedFolderAuditRecorder {
         default -> "failure";
       };
     }
-    recordRejected(action, resource, category);
+    return category;
   }
 
   private void record(
@@ -139,6 +156,15 @@ public final class SharedFolderAuditRecorder {
 
   private String safeResource(String value) {
     return value == null || value.isEmpty() ? "root" : value;
+  }
+
+  private String safeRejectedResource(String resource) {
+    try {
+      SharedFolderPathResolver.safeRelativeSegments(resource, true);
+      return safeResource(resource);
+    } catch (RuntimeException exception) {
+      return "invalid-path";
+    }
   }
 
   private String currentClientIp() {

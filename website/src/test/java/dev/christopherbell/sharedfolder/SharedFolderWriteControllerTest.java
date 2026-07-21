@@ -94,6 +94,10 @@ class SharedFolderWriteControllerTest {
 
     org.mockito.Mockito.verify(recycle).restore("item-1", true);
     org.mockito.Mockito.verify(recycle).purge("item-1", "PURGE item-1");
+    org.mockito.Mockito.verify(auditRecorder).recordCurrent(
+        "AUDIT_BROWSE", "docs/report.pdf", null, "accepted", null);
+    org.mockito.Mockito.verify(auditRecorder).recordCurrent(
+        "RECYCLE_BROWSE", "recycle", null, "accepted", null);
   }
 
   @Test
@@ -102,6 +106,22 @@ class SharedFolderWriteControllerTest {
     mockMvc.perform(get(BASE + "/admin/audit")).andExpect(status().isForbidden());
     mockMvc.perform(get(BASE + "/admin/recycle")).andExpect(status().isForbidden());
     org.mockito.Mockito.verifyNoInteractions(auditQueries);
+    org.mockito.Mockito.verify(auditRecorder).recordRejected(
+        "AUDIT_BROWSE", "audit", "access_denied");
+    org.mockito.Mockito.verify(auditRecorder).recordRejected(
+        "RECYCLE_BROWSE", "recycle", "access_denied");
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void malformedMutationBodyIsAuditedAtTheHttpBoundary() throws Exception {
+    mockMvc.perform(post(BASE + "/folders")
+            .contentType("application/json")
+            .content("{\"parentPath\":\"\",\"name\":\"\"}"))
+        .andExpect(status().isBadRequest());
+
+    org.mockito.Mockito.verify(auditRecorder).recordRejected(
+        "CREATE_FOLDER", "request", "invalid_request");
   }
 
   @Test

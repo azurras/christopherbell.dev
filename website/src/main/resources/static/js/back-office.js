@@ -9,7 +9,7 @@ import {
   sharedFolderPermissionState,
 } from './lib/back-office-users.js';
 import {
-  purgeConfirmation,
+  runSharedRecycleAction,
   sharedAuditFilters,
   sharedAuditMarkup,
   sharedRecycleMarkup,
@@ -452,22 +452,20 @@ async function handleSharedRecycleAction(button) {
   button.disabled = true;
   clearAlert();
   try {
-    if (action === 'restore' || action === 'replace') {
-      if (action === 'replace' && !window.confirm('Replace the current item at the original path?')) return;
-      await fetchJson(API.sharedFolder.admin.restore(id), {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify({ replace: action === 'replace' }),
-      });
-    } else if (action === 'purge') {
-      const typed = window.prompt(`Type PURGE ${id} to permanently delete this recycled item.`) || '';
-      if (!purgeConfirmation(id, typed)) {
-        showAlert('Permanent purge confirmation did not match.');
-        return;
-      }
-      await fetchJson(API.sharedFolder.admin.purge(id), {
-        method: 'DELETE', headers: authHeaders(), body: JSON.stringify({ confirmation: typed }),
-      });
-    }
-    await refreshSharedAdministration();
+    const completed = await runSharedRecycleAction({
+      id,
+      action,
+      confirmReplace: () => window.confirm('Replace the current item at the original path?'),
+      promptPurge: () => window.prompt(
+          `Type PURGE ${id} to permanently delete this recycled item.`),
+      restore: (itemId, replace) => fetchJson(API.sharedFolder.admin.restore(itemId), {
+        method: 'POST', headers: authHeaders(), body: JSON.stringify({ replace }),
+      }),
+      purge: (itemId, confirmation) => fetchJson(API.sharedFolder.admin.purge(itemId), {
+        method: 'DELETE', headers: authHeaders(), body: JSON.stringify({ confirmation }),
+      }),
+    });
+    if (completed) await refreshSharedAdministration();
   } catch (err) {
     showAlert(err.message || 'Shared-folder administration failed.');
   } finally {

@@ -11,12 +11,16 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderMutationBoundary;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeBoundaryException;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeFileIdentity;
+import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderNativeBridge.NativeFileMetadata;
 import dev.christopherbell.sharedfolder.model.SharedFolderDeleteRequest;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleItem;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleRepository;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleState;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.service.SharedFolderMutationService;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -100,6 +104,8 @@ class SharedFolderRecycleServiceTest {
     assertThat(fixture.records).containsKey(current.id()).doesNotContainKey(expired.id());
     assertThat(fixture.system.resolve("shared-folder-recycle").resolve(expired.payloadKey()))
         .doesNotExist();
+    verify(fixture.audit).recordSystem(
+        "RETENTION_PURGE", expired.originalPath(), expired.size(), "accepted", null);
 
     assertStatus(400, () -> fixture.recycle.purge(current.id(), "PURGE"));
     assertStatus(400, () -> fixture.recycle.purge(current.id(), current.id()));
@@ -107,6 +113,34 @@ class SharedFolderRecycleServiceTest {
 
     verify(fixture.access, org.mockito.Mockito.times(3)).requireAdmin();
     assertThat(fixture.records).doesNotContainKey(current.id());
+  }
+
+  @Test
+  void retentionCleanupAuditsFailureAndContinuesWithLaterExpiredItems() throws Exception {
+    Fixture fixture = fixture();
+    Files.writeString(fixture.root.resolve("changed.txt"), "original");
+    SharedFolderRecycleItem changed = fixture.recycle.recycle(new SharedFolderDeleteRequest(
+        "changed.txt", fixture.mutations.observedToken("changed.txt")));
+    changed = changed.withExpiresAt(NOW.minusSeconds(1));
+    fixture.records.put(changed.id(), changed);
+    Files.writeString(fixture.system.resolve("shared-folder-recycle").resolve(changed.payloadKey()),
+        "changed after recycle");
+
+    Files.writeString(fixture.root.resolve("purgeable.txt"), "purgeable");
+    SharedFolderRecycleItem purgeable = fixture.recycle.recycle(new SharedFolderDeleteRequest(
+        "purgeable.txt", fixture.mutations.observedToken("purgeable.txt")));
+    purgeable = purgeable.withExpiresAt(NOW.minusSeconds(1));
+    fixture.records.put(purgeable.id(), purgeable);
+
+    assertThat(fixture.recycle.cleanupExpired()).isEqualTo(1);
+    assertThat(fixture.records).containsKey(changed.id()).doesNotContainKey(purgeable.id());
+    verify(fixture.audit).recordSystemFailure(
+        org.mockito.ArgumentMatchers.eq("RETENTION_PURGE"),
+        org.mockito.ArgumentMatchers.eq(changed.originalPath()),
+        org.mockito.ArgumentMatchers.eq(changed.size()),
+        org.mockito.ArgumentMatchers.any(RuntimeException.class));
+    verify(fixture.audit).recordSystem(
+        "RETENTION_PURGE", purgeable.originalPath(), purgeable.size(), "accepted", null);
   }
 
   @Test
@@ -152,7 +186,14 @@ class SharedFolderRecycleServiceTest {
     fixture.records.put(pending.id(), pending.withRestore(replacementKey, currentToken));
 
     Files.writeString(fixture.root.resolve("completed.txt"), "restored");
+    Path completedPath = fixture.root.resolve("completed.txt");
     String restoredToken = fixture.mutations.observedToken("completed.txt");
+    var completedAttributes = Files.readAttributes(
+        completedPath, java.nio.file.attribute.BasicFileAttributes.class);
+    String completedIdentity =
+        dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary
+            .stableIdentity(completedPath)
+        + ":" + completedAttributes.isDirectory() + ":" + completedAttributes.isRegularFile();
     String completedPayload = "cccccccc-cccc-cccc-cccc-cccccccccccc";
     String completedReplacement = "dddddddd-dddd-dddd-dddd-dddddddddddd";
     Files.writeString(replacedRoot.resolve(completedReplacement), "displaced");
@@ -164,7 +205,7 @@ class SharedFolderRecycleServiceTest {
     SharedFolderRecycleItem completed = new SharedFolderRecycleItem(
         "completed-id", "completed.txt", "writer-1", NOW, NOW.plus(Duration.ofDays(30)),
         completedPayload, 8, false, restoredToken, SharedFolderRecycleState.RESTORING,
-        completedReplacement, completedReplacementFingerprint);
+        completedReplacement, completedReplacementFingerprint, completedIdentity);
     fixture.records.put(completed.id(), completed);
 
     SharedFolderRecycleItem purging = new SharedFolderRecycleItem(
@@ -236,6 +277,96 @@ class SharedFolderRecycleServiceTest {
         .hasMessageContaining("Replacement journal");
   }
 
+  @Test
+  void reconciliationCompletesAPartiallyDeletedDirectoryPurge() throws Exception {
+    Fixture fixture = fixture();
+    Path folder = Files.createDirectories(fixture.root.resolve("partial/sub"));
+    Files.writeString(folder.resolve("first.txt"), "first");
+    Files.writeString(folder.resolve("second.txt"), "second");
+    SharedFolderRecycleItem item = fixture.recycle.recycle(new SharedFolderDeleteRequest(
+        "partial", fixture.mutations.observedToken("partial")));
+    fixture.records.put(item.id(), item.withState(SharedFolderRecycleState.PURGING));
+    Path payload = fixture.system.resolve("shared-folder-recycle").resolve(item.payloadKey());
+    Files.delete(payload.resolve("sub/first.txt"));
+
+    assertThat(fixture.recycle.reconcilePending()).isEqualTo(1);
+    assertThat(payload).doesNotExist();
+    assertThat(fixture.records).doesNotContainKey(item.id());
+  }
+
+  @Test
+  void reconciliationRecognizesAModifiedRestoredIdentityWithAndWithoutReplacement()
+      throws Exception {
+    Fixture fixture = fixture();
+    Path recycleRoot = Files.createDirectories(fixture.system.resolve("shared-folder-recycle"));
+    Path replacedRoot = Files.createDirectories(
+        fixture.system.resolve("shared-folder-recycle-replaced"));
+
+    Files.writeString(fixture.root.resolve("plain.txt"), "recycled");
+    SharedFolderRecycleItem plain = fixture.recycle.recycle(new SharedFolderDeleteRequest(
+        "plain.txt", fixture.mutations.observedToken("plain.txt")));
+    Files.move(recycleRoot.resolve(plain.payloadKey()), fixture.root.resolve("plain.txt"));
+    Files.writeString(fixture.root.resolve("plain.txt"), "edited after restore");
+    fixture.records.put(plain.id(), plain.withRestore(null, null));
+
+    Files.writeString(fixture.root.resolve("replace.txt"), "recycled");
+    SharedFolderRecycleItem replacing = fixture.recycle.recycle(new SharedFolderDeleteRequest(
+        "replace.txt", fixture.mutations.observedToken("replace.txt")));
+    Files.writeString(fixture.root.resolve("replace.txt"), "displaced");
+    String replacementFingerprint =
+        dev.christopherbell.sharedfolder.service.SharedFolderObservedItemTokens.token(
+            "replace.txt", Files.readAttributes(fixture.root.resolve("replace.txt"),
+                java.nio.file.attribute.BasicFileAttributes.class));
+    String replacementKey = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+    Files.move(fixture.root.resolve("replace.txt"), replacedRoot.resolve(replacementKey));
+    Files.move(recycleRoot.resolve(replacing.payloadKey()), fixture.root.resolve("replace.txt"));
+    Files.writeString(fixture.root.resolve("replace.txt"), "edited replacement restore");
+    fixture.records.put(replacing.id(), replacing.withRestore(
+        replacementKey, replacementFingerprint));
+
+    assertThat(fixture.recycle.reconcilePending()).isEqualTo(2);
+    assertThat(fixture.records).doesNotContainKeys(plain.id(), replacing.id());
+    assertThat(replacedRoot.resolve(replacementKey)).doesNotExist();
+  }
+
+  @Test
+  void nativeReconciliationUsesStableIdentityAfterPartialPurgeAndCompletedRestore()
+      throws Exception {
+    byte[] fileId = new byte[16];
+    fileId[0] = 7;
+    NativeFileIdentity identity = new NativeFileIdentity(11, fileId);
+    String encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(fileId);
+    String nativeIdentity = "11:" + encoded;
+    String directoryStable = nativeIdentity + ":true:false";
+    String directoryFull = directoryStable + ":2:" + NOW;
+    String fileStable = nativeIdentity + ":false:true";
+    String fileFull = fileStable + ":8:" + NOW;
+    SharedFolderRecycleItem purging = new SharedFolderRecycleItem(
+        "native-purge", "folder", "writer-1", NOW, NOW.plus(Duration.ofDays(30)),
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", 2, true, directoryFull,
+        SharedFolderRecycleState.PURGING, null, null, directoryStable);
+    SharedFolderRecycleItem restoring = new SharedFolderRecycleItem(
+        "native-restore", "edited.txt", "writer-1", NOW, NOW.plus(Duration.ofDays(30)),
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", 8, false, fileFull,
+        SharedFolderRecycleState.RESTORING, null, null, fileStable);
+    WindowsSharedFolderMutationBoundary boundary = mock(WindowsSharedFolderMutationBoundary.class);
+    when(boundary.nativeMode()).thenReturn(true);
+    NativeFileMetadata partiallyPurged = new NativeFileMetadata(
+        identity, true, false, 1, NOW.plusSeconds(1));
+    when(boundary.recycleMetadata(purging.payloadKey())).thenReturn(partiallyPurged);
+    when(boundary.recycleMetadata(restoring.payloadKey())).thenThrow(
+        new NativeBoundaryException("missing", 2));
+    when(boundary.metadata(purging.originalPath())).thenThrow(
+        new NativeBoundaryException("missing", 2));
+    when(boundary.metadata(restoring.originalPath())).thenReturn(new NativeFileMetadata(
+        identity, false, true, 20, NOW.plusSeconds(2)));
+    NativeFixture fixture = nativeFixture(boundary, purging, restoring);
+
+    assertThat(fixture.recycle.reconcilePending()).isEqualTo(2);
+    verify(boundary).deleteRecycleTree(purging.payloadKey(), partiallyPurged);
+    assertThat(fixture.records).doesNotContainKeys(purging.id(), restoring.id());
+  }
+
   private Fixture fixture() throws Exception {
     Path root = Files.createDirectories(temp.resolve("shared"));
     Path system = Files.createDirectories(temp.resolve("system"));
@@ -244,6 +375,7 @@ class SharedFolderRecycleServiceTest {
         DataSize.ofBytes(1), DataSize.ofGigabytes(1), Duration.ofDays(30),
         Duration.ofDays(180), true);
     SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    SharedFolderAuditRecorder audit = mock(SharedFolderAuditRecorder.class);
     Account writer = account("writer-1", Role.USER);
     Account admin = account("admin-1", Role.ADMIN);
     when(access.requireWrite()).thenReturn(writer);
@@ -279,8 +411,32 @@ class SharedFolderRecycleServiceTest {
     var mutations = new SharedFolderMutationService(access, properties, boundary);
     var recycle = new SharedFolderRecycleService(
         access, properties, boundary, repository,
-        Clock.fixed(NOW, ZoneOffset.UTC));
-    return new Fixture(root, system, access, records, mutations, recycle);
+        Clock.fixed(NOW, ZoneOffset.UTC), audit);
+    return new Fixture(root, system, access, records, mutations, recycle, audit);
+  }
+
+  private NativeFixture nativeFixture(
+      WindowsSharedFolderMutationBoundary boundary, SharedFolderRecycleItem... items)
+      throws Exception {
+    Path root = Files.createDirectories(temp.resolve("native-shared"));
+    Path system = Files.createDirectories(temp.resolve("native-system"));
+    SharedFolderProperties properties = new SharedFolderProperties(
+        root, system, DataSize.ofGigabytes(10), DataSize.ofMegabytes(8),
+        DataSize.ofBytes(1), DataSize.ofGigabytes(1), Duration.ofDays(30),
+        Duration.ofDays(180), true);
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    SharedFolderAuditRecorder audit = mock(SharedFolderAuditRecorder.class);
+    var records = new LinkedHashMap<String, SharedFolderRecycleItem>();
+    for (SharedFolderRecycleItem item : items) records.put(item.id(), item);
+    SharedFolderRecycleRepository repository = mock(SharedFolderRecycleRepository.class);
+    when(repository.findByStateIn(any())).thenAnswer(invocation -> List.copyOf(records.values()));
+    org.mockito.Mockito.doAnswer(invocation -> {
+      records.remove(invocation.<String>getArgument(0));
+      return null;
+    }).when(repository).deleteById(any());
+    SharedFolderRecycleService recycle = new SharedFolderRecycleService(
+        access, properties, boundary, repository, Clock.fixed(NOW, ZoneOffset.UTC), audit);
+    return new NativeFixture(records, recycle);
   }
 
   private Account account(String id, Role role) {
@@ -302,5 +458,10 @@ class SharedFolderRecycleServiceTest {
       SharedFolderAccessService access,
       LinkedHashMap<String, SharedFolderRecycleItem> records,
       SharedFolderMutationService mutations,
+      SharedFolderRecycleService recycle,
+      SharedFolderAuditRecorder audit) {}
+
+  private record NativeFixture(
+      LinkedHashMap<String, SharedFolderRecycleItem> records,
       SharedFolderRecycleService recycle) {}
 }
