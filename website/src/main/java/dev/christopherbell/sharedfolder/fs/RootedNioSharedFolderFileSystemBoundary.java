@@ -3,6 +3,8 @@ package dev.christopherbell.sharedfolder.fs;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 
@@ -26,7 +28,14 @@ final class RootedNioSharedFolderFileSystemBoundary implements SharedFolderFileS
 
   @Override
   public boolean existsNoFollow(Path path) {
-    return delegate.existsNoFollow(contained(path));
+    if (path == null) {
+      throw new UnsafeSharedPathException("Shared-folder path is required");
+    }
+    Path candidate = path.toAbsolutePath().normalize();
+    if (!candidate.startsWith(root)) {
+      throw outsideRoot();
+    }
+    return Files.exists(candidate, LinkOption.NOFOLLOW_LINKS);
   }
 
   @Override
@@ -46,7 +55,15 @@ final class RootedNioSharedFolderFileSystemBoundary implements SharedFolderFileS
 
   @Override
   public boolean sameFileStore(Path first, Path second) throws IOException {
-    return delegate.sameFileStore(contained(first), contained(second));
+    if (first == null || second == null) {
+      throw new UnsafeSharedPathException("Shared-folder path is required");
+    }
+    Path firstCandidate = first.toAbsolutePath().normalize();
+    Path secondCandidate = second.toAbsolutePath().normalize();
+    if (!firstCandidate.startsWith(root) || !secondCandidate.startsWith(root)) {
+      throw outsideRoot();
+    }
+    return Files.getFileStore(firstCandidate).equals(Files.getFileStore(secondCandidate));
   }
 
   @Override
@@ -70,13 +87,21 @@ final class RootedNioSharedFolderFileSystemBoundary implements SharedFolderFileS
   }
 
   private Path contained(Path path) {
+    Path candidate = absoluteCandidate(path);
+    if (!candidate.startsWith(root)) {
+      throw outsideRoot();
+    }
+    return candidate;
+  }
+
+  private Path absoluteCandidate(Path path) {
     if (path == null) {
       throw new UnsafeSharedPathException("Shared-folder path is required");
     }
-    Path candidate = path.toAbsolutePath().normalize();
-    if (!candidate.startsWith(root)) {
-      throw new UnsafeSharedPathException("Shared-folder path escapes the configured root");
-    }
-    return candidate;
+    return path.toAbsolutePath().normalize();
+  }
+
+  private UnsafeSharedPathException outsideRoot() {
+    return new UnsafeSharedPathException("Shared-folder path escapes the configured root");
   }
 }
