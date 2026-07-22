@@ -53,7 +53,7 @@ class SharedFolderNoStoreFilterTest {
 
     org.mockito.Mockito.verify(audit).recordRejected(
         "CREATE_FOLDER", "request", "invalid_request");
-    org.mockito.Mockito.verify(audit).recordRejected(
+    org.mockito.Mockito.verify(audit).recordRejectedOnce(
         "AUDIT_BROWSE", "audit", "access_denied");
   }
 
@@ -68,7 +68,7 @@ class SharedFolderNoStoreFilterTest {
     reject(filter, "PATCH",
         "/api/accounts/2026-07-17/bad%3Aid/shared-folder-permissions", 400);
 
-    org.mockito.Mockito.verify(audit).recordRejected(
+    org.mockito.Mockito.verify(audit).recordRejectedOnce(
         "DOWNLOAD_STARTED", null, "access_denied");
     org.mockito.Mockito.verify(audit).recordRejected(
         "UPLOAD_APPEND", "upload", "conflict");
@@ -142,6 +142,24 @@ class SharedFolderNoStoreFilterTest {
 
     reject(filter, "GET", "/api/shared-folder/2026-07-17/entries", 429);
     reject(filter, "GET", "/api/shared-folder/2026-07-17/entries", 429);
+
+    org.mockito.Mockito.verify(sink, org.mockito.Mockito.times(1))
+        .record(org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void repeatedAnonymousDenialsEmitOneBoundedAuditFactPerClientWindow() throws Exception {
+    SharedFolderAuditSink sink = org.mockito.Mockito.mock(SharedFolderAuditSink.class);
+    ClientIpResolver clientIps = org.mockito.Mockito.mock(ClientIpResolver.class);
+    org.mockito.Mockito.when(clientIps.resolveClientIp(org.mockito.ArgumentMatchers.any()))
+        .thenReturn("203.0.113.10");
+    var recorder = new SharedFolderAuditRecorder(
+        sink, org.mockito.Mockito.mock(PermissionService.class), clientIps,
+        Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC));
+    var filter = new SharedFolderNoStoreFilter(recorder);
+
+    reject(filter, "GET", "/api/shared-folder/2026-07-17/entries", 401);
+    reject(filter, "GET", "/api/shared-folder/2026-07-17/entries", 401);
 
     org.mockito.Mockito.verify(sink, org.mockito.Mockito.times(1))
         .record(org.mockito.ArgumentMatchers.any());

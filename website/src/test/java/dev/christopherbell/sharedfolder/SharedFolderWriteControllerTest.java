@@ -72,7 +72,7 @@ class SharedFolderWriteControllerTest {
         "audit-1", "account-1", "RECYCLE", "docs/report.pdf", 42L, "accepted", null,
         "203.0.113.8", Instant.parse("2026-07-18T12:00:00Z"),
         Instant.parse("2027-01-14T12:00:00Z"))));
-    when(recycle.list()).thenReturn(java.util.List.of());
+    when(recycle.list(3)).thenReturn(java.util.List.of());
 
     mockMvc.perform(get(BASE + "/admin/audit")
             .queryParam("accountId", "account-1")
@@ -82,7 +82,7 @@ class SharedFolderWriteControllerTest {
         .andExpect(status().isOk())
         .andExpect(header().string("Cache-Control", "private, no-store"))
         .andExpect(jsonPath("$[0].relativePath").value("docs/report.pdf"));
-    mockMvc.perform(get(BASE + "/admin/recycle"))
+    mockMvc.perform(get(BASE + "/admin/recycle").queryParam("page", "3"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$").isArray());
     mockMvc.perform(post(BASE + "/admin/recycle/item-1/restore")
@@ -94,6 +94,7 @@ class SharedFolderWriteControllerTest {
 
     org.mockito.Mockito.verify(recycle).restore("item-1", true);
     org.mockito.Mockito.verify(recycle).purge("item-1", "PURGE item-1");
+    org.mockito.Mockito.verify(recycle).list(3);
     org.mockito.Mockito.verify(auditRecorder).recordCurrent(
         "AUDIT_BROWSE", "docs/report.pdf", null, "accepted", null);
     org.mockito.Mockito.verify(auditRecorder).recordCurrent(
@@ -106,9 +107,9 @@ class SharedFolderWriteControllerTest {
     mockMvc.perform(get(BASE + "/admin/audit")).andExpect(status().isForbidden());
     mockMvc.perform(get(BASE + "/admin/recycle")).andExpect(status().isForbidden());
     org.mockito.Mockito.verifyNoInteractions(auditQueries);
-    org.mockito.Mockito.verify(auditRecorder).recordRejected(
+    org.mockito.Mockito.verify(auditRecorder).recordRejectedOnce(
         "AUDIT_BROWSE", "audit", "access_denied");
-    org.mockito.Mockito.verify(auditRecorder).recordRejected(
+    org.mockito.Mockito.verify(auditRecorder).recordRejectedOnce(
         "RECYCLE_BROWSE", "recycle", "access_denied");
   }
 

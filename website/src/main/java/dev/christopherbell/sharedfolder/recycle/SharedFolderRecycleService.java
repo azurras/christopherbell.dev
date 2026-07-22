@@ -43,6 +43,7 @@ public class SharedFolderRecycleService {
   private static final String RECYCLE_DIRECTORY = "shared-folder-recycle";
   private static final String REPLACED_DIRECTORY = "shared-folder-recycle-replaced";
   private static final int ADMIN_LIST_LIMIT = 200;
+  private static final int MAX_ADMIN_LIST_PAGE = 10_000;
   private static final int CLEANUP_BATCH_LIMIT = 100;
   private static final int RECOVERY_BATCH_LIMIT = 100;
 
@@ -53,6 +54,8 @@ public class SharedFolderRecycleService {
   private final Clock clock;
   private final PortableSharedFolderPrivateBoundary privateBoundary;
   private final SharedFolderAuditRecorder audit;
+  private int cleanupPage;
+  private int recoveryPage;
 
   public SharedFolderRecycleService(
       SharedFolderAccessService access,
@@ -137,10 +140,16 @@ public class SharedFolderRecycleService {
 
   /** Lists current recoverable entries for a freshly authorized administrator. */
   public List<SharedFolderRecycleItem> list() {
+    return list(0);
+  }
+
+  /** Lists one bounded page so administrators can reach every recoverable entry. */
+  public List<SharedFolderRecycleItem> list(int page) {
     access.requireAdmin();
     requireEnabled();
+    if (page < 0 || page > MAX_ADMIN_LIST_PAGE) throw badRequest();
     return repository.findByStateOrderByDeletedAtDesc(
-        SharedFolderRecycleState.RECYCLED, PageRequest.of(0, ADMIN_LIST_LIMIT));
+        SharedFolderRecycleState.RECYCLED, PageRequest.of(page, ADMIN_LIST_LIMIT));
   }
 
   /** Restores to the original path, replacing only when the administrator explicitly requested it. */
@@ -235,10 +244,12 @@ public class SharedFolderRecycleService {
     if (!properties.enabled()) return 0;
     reconcilePending();
     int purged = 0;
-    for (SharedFolderRecycleItem item :
-        repository.findByStateAndExpiresAtBeforeOrderByExpiresAtAsc(
+    List<SharedFolderRecycleItem> batch =
+        repository.findByStateAndExpiresAtBeforeOrderByExpiresAtAscIdAsc(
             SharedFolderRecycleState.RECYCLED, clock.instant(),
-            PageRequest.of(0, CLEANUP_BATCH_LIMIT))) {
+            PageRequest.of(cleanupPage, CLEANUP_BATCH_LIMIT));
+    cleanupPage = nextMaintenancePage(cleanupPage, batch.size(), CLEANUP_BATCH_LIMIT);
+    for (SharedFolderRecycleItem item : batch) {
       try {
         purgeInternal(item);
         if (audit != null) audit.recordSystem(
@@ -258,10 +269,12 @@ public class SharedFolderRecycleService {
   public synchronized int reconcilePending() {
     if (!properties.enabled()) return 0;
     int reconciled = 0;
-    for (SharedFolderRecycleItem item : repository.findByStateIn(List.of(
+    List<SharedFolderRecycleItem> batch = repository.findByStateInOrderByDeletedAtAscIdAsc(List.of(
         SharedFolderRecycleState.PREPARING,
         SharedFolderRecycleState.RESTORING,
-        SharedFolderRecycleState.PURGING), PageRequest.of(0, RECOVERY_BATCH_LIMIT))) {
+        SharedFolderRecycleState.PURGING), PageRequest.of(recoveryPage, RECOVERY_BATCH_LIMIT));
+    recoveryPage = nextMaintenancePage(recoveryPage, batch.size(), RECOVERY_BATCH_LIMIT);
+    for (SharedFolderRecycleItem item : batch) {
       try {
         if (reconcileItem(item)) reconciled++;
       } catch (RuntimeException failure) {
@@ -271,6 +284,10 @@ public class SharedFolderRecycleService {
       }
     }
     return reconciled;
+  }
+
+  private int nextMaintenancePage(int current, int batchSize, int limit) {
+    return batchSize < limit || current == Integer.MAX_VALUE ? 0 : current + 1;
   }
 
   private SharedFolderRecycleItem recycleNative(

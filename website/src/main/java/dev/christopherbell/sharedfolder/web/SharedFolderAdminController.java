@@ -63,9 +63,10 @@ public class SharedFolderAdminController {
   }
 
   @GetMapping("/recycle")
-  public ResponseEntity<List<SharedFolderRecycleEntry>> recycle() {
+  public ResponseEntity<List<SharedFolderRecycleEntry>> recycle(
+      @RequestParam(defaultValue = "0") int page) {
     return ResponseEntity.ok().headers(noStore())
-        .body(audited("RECYCLE_BROWSE", "recycle", () -> recycle.list().stream()
+        .body(audited("RECYCLE_BROWSE", "recycle", () -> recycle.list(page).stream()
             .map(SharedFolderRecycleEntry::from).toList()));
   }
 

@@ -13,9 +13,9 @@ public interface SharedFolderRecycleRepository
   List<SharedFolderRecycleItem> findByStateOrderByDeletedAtDesc(
       SharedFolderRecycleState state, Pageable page);
 
-  List<SharedFolderRecycleItem> findByStateAndExpiresAtBeforeOrderByExpiresAtAsc(
+  List<SharedFolderRecycleItem> findByStateAndExpiresAtBeforeOrderByExpiresAtAscIdAsc(
       SharedFolderRecycleState state, Instant cutoff, Pageable page);
 
-  List<SharedFolderRecycleItem> findByStateIn(
+  List<SharedFolderRecycleItem> findByStateInOrderByDeletedAtAscIdAsc(
       List<SharedFolderRecycleState> states, Pageable page);
 }

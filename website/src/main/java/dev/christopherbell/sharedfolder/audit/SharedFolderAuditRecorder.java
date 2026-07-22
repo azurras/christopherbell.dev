@@ -25,6 +25,7 @@ import org.springframework.web.server.ResponseStatusException;
 public final class SharedFolderAuditRecorder {
   private static final Duration LOGICAL_ACCESS_WINDOW = Duration.ofMinutes(5);
   private static final int MAX_LOGICAL_ACCESS_ENTRIES = 10_000;
+  private static final int MAX_REJECTED_EVENTS_PER_WINDOW = 1_000;
   private static final String REQUEST_AUDIT_MARKERS =
       SharedFolderAuditRecorder.class.getName() + ".request-markers";
 
@@ -34,6 +35,8 @@ public final class SharedFolderAuditRecorder {
   private final Clock clock;
   private final Map<String, Instant> logicalAccess = new LinkedHashMap<>();
   private final Map<String, Instant> rejectedAccess = new LinkedHashMap<>();
+  private Instant rejectedWindowStarted;
+  private int rejectedWindowCount;
 
   public SharedFolderAuditRecorder(
       SharedFolderAuditSink sink,
@@ -112,17 +115,19 @@ public final class SharedFolderAuditRecorder {
     String key = currentClientIp() + "\n" + action + "\n" + failureCategory;
     boolean shouldRecord;
     synchronized (rejectedAccess) {
+      if (rejectedWindowStarted == null
+          || !rejectedWindowStarted.plus(LOGICAL_ACCESS_WINDOW).isAfter(now)) {
+        rejectedAccess.clear();
+        rejectedWindowStarted = now;
+        rejectedWindowCount = 0;
+      }
       Instant previous = rejectedAccess.get(key);
-      shouldRecord = previous == null || !previous.plus(LOGICAL_ACCESS_WINDOW).isAfter(now);
+      shouldRecord = rejectedWindowCount < MAX_REJECTED_EVENTS_PER_WINDOW
+          && (previous == null || !previous.plus(LOGICAL_ACCESS_WINDOW).isAfter(now));
       if (shouldRecord) {
         if (previous != null) rejectedAccess.remove(key);
-        while (rejectedAccess.size() >= MAX_LOGICAL_ACCESS_ENTRIES) {
-          var oldest = rejectedAccess.entrySet().iterator();
-          if (!oldest.hasNext()) break;
-          oldest.next();
-          oldest.remove();
-        }
         rejectedAccess.put(key, now);
+        rejectedWindowCount++;
       }
     }
     if (shouldRecord) recordRejected(action, resource, failureCategory);

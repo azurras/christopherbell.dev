@@ -304,6 +304,8 @@ test('shared-folder write API paths encode identifiers and expose resumable uplo
     '/api/shared-folder/2026-07-17/uploads/session%2Fid/chunks/8192');
   assert.equal(API.sharedFolder.uploadComplete('session/id'),
     '/api/shared-folder/2026-07-17/uploads/session%2Fid/complete');
+  assert.equal(API.sharedFolder.admin.recycle(3),
+    '/api/shared-folder/2026-07-17/admin/recycle?page=3');
 });
 
 test('move payload requires an explicit observed replacement token', () => {

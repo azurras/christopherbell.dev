@@ -106,7 +106,7 @@ export const API = {
         const query = params.toString();
         return `/api/shared-folder/2026-07-17/admin/audit${query ? `?${query}` : ''}`;
       },
-      recycle: '/api/shared-folder/2026-07-17/admin/recycle',
+      recycle: (page = 0) => `/api/shared-folder/2026-07-17/admin/recycle?page=${encodeURIComponent(page)}`,
       restore: (id) => `/api/shared-folder/2026-07-17/admin/recycle/${encodeURIComponent(id)}/restore`,
       purge: (id) => `/api/shared-folder/2026-07-17/admin/recycle/${encodeURIComponent(id)}`,
     },

@@ -133,4 +133,22 @@ class SharedFolderAuditRecorderTest {
     org.assertj.core.api.Assertions.assertThat(entries.keySet())
         .allSatisfy(key -> org.assertj.core.api.Assertions.assertThat(key.length()).isLessThan(256));
   }
+
+  @Test
+  void rejectedAuditIngressHasAPerWindowGlobalCeilingAcrossSpoofableClients() {
+    SharedFolderAuditSink sink = mock(SharedFolderAuditSink.class);
+    ClientIpResolver clientIps = mock(ClientIpResolver.class);
+    var recorder = new SharedFolderAuditRecorder(
+        sink, mock(PermissionService.class), clientIps,
+        Clock.fixed(Instant.parse("2026-07-18T12:00:00Z"), ZoneOffset.UTC));
+
+    for (int index = 0; index < 1_050; index++) {
+      var request = new MockHttpServletRequest();
+      RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+      when(clientIps.resolveClientIp(request)).thenReturn("198.51.100." + index);
+      recorder.recordRejectedOnce("LIST", "", "access_denied");
+    }
+
+    verify(sink, times(1_000)).record(any());
+  }
 }

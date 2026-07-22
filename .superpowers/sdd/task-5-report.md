@@ -196,3 +196,28 @@ each boundary explicitly:
 The clean native/junction-enabled full gate passed all 952 Java tests and 160 JavaScript tests with
 zero failures, errors, or skips (`BUILD SUCCESSFUL` in 56s). Task 5 remains a review candidate until
 the complete remediated range receives independent approval.
+
+## Seventh Independent Review and Remediation
+
+The seventh fresh whole-change review of `09d2f408..71cbd12a` rejected Task 5 with zero Critical,
+two Important, and two Minor findings. No rejected candidate was pushed. The remediation addresses
+the progress, ingress, and administrator-observability gaps:
+
+- Retention cleanup and durable-state recovery now use stable `deletedAt`/expiry plus ID ordering
+  and rotating bounded pages. A full page of permanently failing or ambiguous records advances to
+  the next page on the following pass, so later work cannot remain permanently starved.
+- Anonymous access denials and rate-limit responses share a five-minute per-client/action/category
+  deduplication window with a hard global ceiling of 1,000 emitted events per window. Spoofing many
+  apparent client IPs cannot restore the former 10,000-write ingress rate.
+- Recycle administration accepts a validated bounded page number, and Back Office exposes Previous
+  and Next controls with honest disabled states so administrators can reach entries beyond the
+  newest 200.
+- Back Office audit cards now safely escape and display both `failureCategory` and `clientIp` in
+  addition to the existing account, action, resource, outcome, and occurrence time.
+
+RED coverage first failed on the missing stable repository queries, paged service API, global
+rejection ceiling, audit diagnostics, and recycle navigation. The clean Windows native/junction-
+enabled full gate then passed all 955 Java tests and 161 JavaScript tests with zero failures,
+errors, or skips (`BUILD SUCCESSFUL` in 1m 13s). No worktree-local Gradle directory exists and
+production port 8080 remained untouched. Task 5 remains a review candidate until the complete
+remediated range receives independent approval.

@@ -9,7 +9,17 @@ const {
   runSharedRecycleAction,
   createSharedRecycleActionHandler,
   sharedRecycleButton,
+  sharedRecyclePagination,
 } = await import('../../main/resources/static/js/lib/back-office-shared-folder.js');
+
+test('recycle pagination exposes later bounded pages and prevents empty navigation', () => {
+  assert.deepEqual(sharedRecyclePagination(0, 200), {
+    label: 'Page 1', previousDisabled: true, nextDisabled: false,
+  });
+  assert.deepEqual(sharedRecyclePagination(2, 42), {
+    label: 'Page 3', previousDisabled: false, nextDisabled: true,
+  });
+});
 
 test('shared-folder audit markup escapes untrusted values and shows bounded event facts', () => {
   const markup = sharedAuditMarkup([{
@@ -17,12 +27,16 @@ test('shared-folder audit markup escapes untrusted values and shows bounded even
     action: 'RECYCLE',
     relativePath: 'docs/<script>.txt',
     outcome: 'accepted',
+    failureCategory: '<b>access_denied</b>',
+    clientIp: '<img src=x onerror=alert(2)>',
     occurredAt: '2026-07-18T12:00:00Z',
   }]);
 
   assert.match(markup, /RECYCLE/);
   assert.match(markup, /docs\/&lt;script&gt;\.txt/);
-  assert.doesNotMatch(markup, /<script>|<img/);
+  assert.match(markup, /&lt;b&gt;access_denied&lt;\/b&gt;/);
+  assert.match(markup, /&lt;img src=x onerror=alert\(2\)&gt;/);
+  assert.doesNotMatch(markup, /<script>|<img|<b>/);
 });
 
 test('recycle markup exposes restore, explicit replace, and purge controls without HTML injection', () => {

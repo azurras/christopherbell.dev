@@ -26,10 +26,21 @@ export function sharedAuditMarkup(events) {
       <div class="queue-card-meta">
         <span>${escapeHtml(event.accountId || 'unknown')}</span>
         <span>${escapeHtml(event.outcome || 'unknown')}</span>
+        <span>Failure: ${escapeHtml(event.failureCategory || '—')}</span>
+        <span>Client: ${escapeHtml(event.clientIp || 'unknown')}</span>
         <time>${escapeHtml(when(event.occurredAt))}</time>
       </div>
     </article>
   `).join('');
+}
+
+export function sharedRecyclePagination(page, itemCount, pageSize = 200) {
+  const safePage = Number.isInteger(page) && page >= 0 ? page : 0;
+  return {
+    label: `Page ${safePage + 1}`,
+    previousDisabled: safePage === 0,
+    nextDisabled: !Number.isInteger(itemCount) || itemCount < pageSize,
+  };
 }
 
 export function sharedRecycleMarkup(items) {

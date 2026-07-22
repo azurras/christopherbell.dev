@@ -134,7 +134,7 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
   private void recordRejected(AuditAttempt attempt, String category) {
     if (audit != null
         && !audit.currentRequestAlreadyRecorded(attempt.action(), "rejected")) {
-      if ("rate_limited".equals(category)) {
+      if ("rate_limited".equals(category) || "access_denied".equals(category)) {
         audit.recordRejectedOnce(attempt.action(), attempt.resource(), category);
       } else {
         audit.recordRejected(attempt.action(), attempt.resource(), category);

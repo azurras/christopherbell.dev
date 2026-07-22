@@ -12,6 +12,7 @@ import {
   createSharedRecycleActionHandler,
   sharedAuditFilters,
   sharedAuditMarkup,
+  sharedRecyclePagination,
   sharedRecycleButton,
   sharedRecycleMarkup,
 } from './lib/back-office-shared-folder.js';
@@ -39,6 +40,9 @@ const vehicleVinBatchForm = document.getElementById('vehicleVinBatchForm');
 const sharedAuditForm = document.getElementById('sharedAuditFilters');
 const sharedAuditList = document.getElementById('sharedAuditList');
 const sharedRecycleList = document.getElementById('sharedRecycleList');
+const sharedRecyclePrevious = document.getElementById('sharedRecyclePrevious');
+const sharedRecycleNext = document.getElementById('sharedRecycleNext');
+const sharedRecyclePage = document.getElementById('sharedRecyclePage');
 
 let accounts = [];
 let reports = [];
@@ -48,6 +52,7 @@ let vehicles = [];
 let blogPosts = [];
 let sharedAuditEvents = [];
 let sharedRecycleItems = [];
+let sharedRecyclePageNumber = 0;
 
 function showAlert(msg) {
   if (!alertBox) return;
@@ -440,10 +445,14 @@ async function refreshDashboard() {
 async function refreshSharedAdministration(filters = sharedAuditFilters(sharedAuditForm)) {
   [sharedAuditEvents, sharedRecycleItems] = await Promise.all([
     fetchJson(API.sharedFolder.admin.audit(filters), { headers: authHeaders() }),
-    fetchJson(API.sharedFolder.admin.recycle, { headers: authHeaders() }),
+    fetchJson(API.sharedFolder.admin.recycle(sharedRecyclePageNumber), { headers: authHeaders() }),
   ]);
   sharedAuditList.innerHTML = sharedAuditMarkup(sharedAuditEvents || []);
   sharedRecycleList.innerHTML = sharedRecycleMarkup(sharedRecycleItems || []);
+  const pagination = sharedRecyclePagination(sharedRecyclePageNumber, sharedRecycleItems?.length);
+  if (sharedRecyclePage) sharedRecyclePage.textContent = pagination.label;
+  if (sharedRecyclePrevious) sharedRecyclePrevious.disabled = pagination.previousDisabled;
+  if (sharedRecycleNext) sharedRecycleNext.disabled = pagination.nextDisabled;
 }
 
 const handleSharedRecycleAction = createSharedRecycleActionHandler({
@@ -901,6 +910,27 @@ function wireEvents() {
       await refreshSharedAdministration(sharedAuditFilters(sharedAuditForm));
     } catch (err) {
       showAlert(err.message || 'Failed to load shared-folder administration.');
+    }
+  });
+
+  sharedRecyclePrevious?.addEventListener('click', async () => {
+    if (sharedRecyclePageNumber === 0) return;
+    sharedRecyclePageNumber--;
+    try {
+      await refreshSharedAdministration();
+    } catch (err) {
+      sharedRecyclePageNumber++;
+      showAlert(err?.message || 'Failed to load the previous recycle page.');
+    }
+  });
+  sharedRecycleNext?.addEventListener('click', async () => {
+    if ((sharedRecycleItems?.length || 0) < 200) return;
+    sharedRecyclePageNumber++;
+    try {
+      await refreshSharedAdministration();
+    } catch (err) {
+      sharedRecyclePageNumber--;
+      showAlert(err?.message || 'Failed to load the next recycle page.');
     }
   });
 
