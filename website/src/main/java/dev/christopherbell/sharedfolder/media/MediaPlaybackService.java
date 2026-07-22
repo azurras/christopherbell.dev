@@ -37,6 +37,11 @@ public class MediaPlaybackService {
   private final SharedFolderMediaProperties properties;
   private final Clock clock;
   private final Supplier<String> ids;
+  /**
+   * Serializes admission and lifecycle transitions that establish the single published descriptor.
+   * The critical section performs only bounded Mongo queries/documents and verified private-root
+   * metadata or marker operations; it never waits for the worker or invokes a media process.
+   */
   private final Object admissionLock = new Object();
 
   @Autowired
@@ -165,7 +170,7 @@ public class MediaPlaybackService {
         try {
           storage.requestCancellation(job);
         } catch (IOException failure) {
-          throw unavailable();
+          throw unavailable(failure);
         }
         if (jobs.cancelActive(id, account.getId(), clock.instant()) != 1) {
           job = owned(id, account.getId());
@@ -268,6 +273,9 @@ public class MediaPlaybackService {
         if (failure.getStatusCode() != HttpStatus.NOT_FOUND) throw failure;
         rejectChangedSource(refreshed);
         publishNextIfIdleLocked();
+      } catch (MediaStorage.MediaDescriptorProtocolException failure) {
+        rejectProtocolFailure(refreshed, "descriptor_invalid");
+        publishNextIfIdleLocked();
       } catch (IOException failure) {
         terminal(refreshed, MediaJobStatus.FAILED, "storage_unavailable", clock.instant());
         audit.recordSystemFailure("MEDIA_PUBLISH_FAILED", refreshed.getSourcePath(), null,
@@ -290,6 +298,8 @@ public class MediaPlaybackService {
       } catch (ResponseStatusException failure) {
         if (failure.getStatusCode() != HttpStatus.NOT_FOUND) throw failure;
         rejectChangedSource(next);
+      } catch (MediaStorage.MediaDescriptorProtocolException failure) {
+        rejectProtocolFailure(next, "descriptor_invalid");
       } catch (IOException failure) {
         terminal(next, MediaJobStatus.FAILED, "storage_unavailable", clock.instant());
         audit.recordSystemFailure("MEDIA_PUBLISH_FAILED", next.getSourcePath(), null,
@@ -302,6 +312,9 @@ public class MediaPlaybackService {
     if (publishedActiveJob().isEmpty()) {
       try {
         publish(job, source);
+      } catch (MediaStorage.MediaDescriptorProtocolException failure) {
+        rejectProtocolFailure(job, "descriptor_invalid");
+        throw unavailable(failure);
       } catch (IOException failure) {
         terminal(job, MediaJobStatus.FAILED, "storage_unavailable", clock.instant());
         throw unavailable(failure);
@@ -347,6 +360,14 @@ public class MediaPlaybackService {
   private java.util.Optional<MediaStorage.MediaWorkerStatus> readWorkerStatus(MediaJob job) {
     try {
       return storage.readStatus(job, properties.maxOutput().toBytes());
+    } catch (MediaStorage.MediaOutputLimitException failure) {
+      rejectProtocolFailure(job, "output_limit");
+      publishNextIfIdleLocked();
+      return java.util.Optional.empty();
+    } catch (MediaStorage.MediaWorkerProtocolException failure) {
+      rejectProtocolFailure(job, "invalid_worker_status");
+      publishNextIfIdleLocked();
+      return java.util.Optional.empty();
     } catch (IOException failure) {
       throw unavailable(failure);
     }
@@ -373,6 +394,12 @@ public class MediaPlaybackService {
         "rejected", "source_changed");
   }
 
+  private void rejectProtocolFailure(MediaJob job, String failureCategory) {
+    terminal(job, MediaJobStatus.FAILED, failureCategory, clock.instant());
+    audit.recordSystem("MEDIA_FAILED", job.getSourcePath(), job.getOutputBytes(),
+        "rejected", failureCategory);
+  }
+
   private void requireCapacity(String ownerId) {
     if (jobs.countByStatusIn(MediaJobStatus.active()) >= properties.queueCapacity()
         || jobs.countByOwnerIdAndStatusIn(ownerId, MediaJobStatus.active())
@@ -390,7 +417,7 @@ public class MediaPlaybackService {
       }
       return total;
     } catch (ArithmeticException exception) {
-      throw insufficientStorage();
+      throw insufficientStorage(exception);
     }
   }
 
@@ -402,9 +429,9 @@ public class MediaPlaybackService {
         throw insufficientStorage();
       }
     } catch (ArithmeticException exception) {
-      throw insufficientStorage();
+      throw insufficientStorage(exception);
     } catch (IOException failure) {
-      throw unavailable();
+      throw unavailable(failure);
     }
   }
 
@@ -435,8 +462,10 @@ public class MediaPlaybackService {
         }
         more = slice.hasNext();
       } while (more);
-    } catch (ArithmeticException | IOException failure) {
-      throw unavailable();
+    } catch (ArithmeticException failure) {
+      throw insufficientStorage(failure);
+    } catch (IOException failure) {
+      throw unavailable(failure);
     }
   }
 
@@ -519,7 +548,11 @@ public class MediaPlaybackService {
   }
 
   private ResponseStatusException insufficientStorage() {
+    return insufficientStorage(null);
+  }
+
+  private ResponseStatusException insufficientStorage(Throwable cause) {
     return new ResponseStatusException(HttpStatus.INSUFFICIENT_STORAGE,
-        "Media conversion is paused to preserve disk space.");
+        "Media conversion is paused to preserve disk space.", cause);
   }
 }

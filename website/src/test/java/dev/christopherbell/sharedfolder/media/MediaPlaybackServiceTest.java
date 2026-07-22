@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,8 +25,12 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -258,6 +263,52 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
+  void concurrentAdmissionsPublishExactlyOneWorkerDescriptor() throws Exception {
+    AtomicInteger ids = new AtomicInteger();
+    AtomicReference<MediaJob> published = new AtomicReference<>();
+    when(jobs.save(any())).thenAnswer(invocation -> {
+      MediaJob saved = invocation.getArgument(0);
+      if (saved.isDescriptorPublished() && !saved.getStatus().terminal()) published.set(saved);
+      return saved;
+    });
+    when(jobs.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(
+        MediaJobStatus.active())).thenAnswer(ignored -> Optional.ofNullable(published.get()));
+    MediaPlaybackService concurrent = new MediaPlaybackService(
+        access, jobs, audit, sources, storage, folderProperties, mediaProperties,
+        Clock.fixed(NOW, ZoneOffset.UTC), () -> "job-" + ids.incrementAndGet());
+    MediaSourceSnapshot first = source("video/first.mkv", 30, NOW.minusSeconds(2));
+    MediaSourceSnapshot second = source("video/second.mkv", 40, NOW.minusSeconds(3));
+    when(sources.resolve(first.relativePath())).thenReturn(first);
+    when(sources.resolve(second.relativePath())).thenReturn(second);
+    when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(any(), any()))
+        .thenReturn(Optional.empty());
+    CountDownLatch waiting = new CountDownLatch(2);
+    CountDownLatch start = new CountDownLatch(1);
+
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var firstAdmission = executor.submit(() -> {
+        waiting.countDown();
+        start.await();
+        return concurrent.requestFallback(first.relativePath(), MediaOutputProfile.VIDEO_MP4);
+      });
+      var secondAdmission = executor.submit(() -> {
+        waiting.countDown();
+        start.await();
+        return concurrent.requestFallback(second.relativePath(), MediaOutputProfile.VIDEO_MP4);
+      });
+      assertThat(waiting.await(2, TimeUnit.SECONDS)).isTrue();
+      start.countDown();
+      firstAdmission.get(2, TimeUnit.SECONDS);
+      secondAdmission.get(2, TimeUnit.SECONDS);
+    }
+
+    try (var descriptors = Files.list(folderProperties.systemRoot().resolve(MediaStorage.JOBS))) {
+      assertThat(descriptors.filter(path -> path.getFileName().toString().endsWith(".json")))
+          .hasSize(1);
+    }
+  }
+
+  @Test
   void admissionRejectsGlobalAndPerAccountQueueSaturation() {
     MediaSourceSnapshot source = source("video/source.mkv", 30, NOW.minusSeconds(2));
     when(sources.resolve(source.relativePath())).thenReturn(source);
@@ -406,6 +457,73 @@ class MediaPlaybackServiceTest {
     media.promoteQueuedJob();
 
     assertThat(storage.readDescriptor("job-1")).contains("\"jobId\":\"job-1\"");
+  }
+
+  @Test
+  void schedulerRejectsAPartialDescriptorAndAdvancesTheQueue() throws Exception {
+    MediaJob published = job("job-1", "6".repeat(64), MediaJobStatus.QUEUED);
+    published.setDescriptorPublished(true);
+    MediaJob next = job("job-2", "7".repeat(64), MediaJobStatus.QUEUED);
+    next.setSourcePath("video/next.mkv");
+    MediaSourceSnapshot publishedSource = source(
+        published.getSourcePath(), published.getSourceSize(), published.getSourceModifiedAt());
+    MediaSourceSnapshot nextSource = source(
+        next.getSourcePath(), next.getSourceSize(), next.getSourceModifiedAt());
+    published.setCacheKey(MediaCacheKeys.forSource(
+        publishedSource, published.getProfile(), published.getProfileVersion()));
+    next.setCacheKey(MediaCacheKeys.forSource(
+        nextSource, next.getProfile(), next.getProfileVersion()));
+    when(jobs.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(
+        MediaJobStatus.active())).thenAnswer(ignored ->
+            published.getStatus().terminal() ? Optional.empty() : Optional.of(published));
+    when(jobs.findFirstByStatusAndDescriptorPublishedFalseOrderByCreatedAtAsc(
+        MediaJobStatus.QUEUED)).thenReturn(Optional.of(next));
+    when(sources.resolve(published.getSourcePath())).thenReturn(publishedSource);
+    when(sources.resolve(next.getSourcePath())).thenReturn(nextSource);
+    Files.writeString(folderProperties.systemRoot().resolve(MediaStorage.JOBS)
+        .resolve("job-1.json"), "{\"schemaVersion\":");
+
+    media.promoteQueuedJob();
+
+    assertThat(published.getStatus()).isEqualTo(MediaJobStatus.FAILED);
+    assertThat(published.getFailureCategory()).isEqualTo("descriptor_invalid");
+    assertThat(storage.readDescriptor("job-2")).contains("\"jobId\":\"job-2\"");
+  }
+
+  @Test
+  void malformedAndOversizedWorkerStatusesBecomeDistinctTerminalFailures() throws Exception {
+    MediaJob malformed = job("job-1", "8".repeat(64), MediaJobStatus.QUEUED);
+    malformed.setDescriptorPublished(true);
+    when(jobs.findById("job-1")).thenReturn(Optional.of(malformed));
+    Files.writeString(folderProperties.systemRoot().resolve(MediaStorage.STATUS)
+        .resolve("job-1.json"), "not-json");
+
+    assertThat(media.job("job-1").status()).isEqualTo(MediaJobStatus.FAILED);
+    assertThat(malformed.getFailureCategory()).isEqualTo("invalid_worker_status");
+
+    MediaJob oversized = job("job-2", "9".repeat(64), MediaJobStatus.QUEUED);
+    oversized.setDescriptorPublished(true);
+    when(jobs.findById("job-2")).thenReturn(Optional.of(oversized));
+    storage.writeStatusForTest(oversized, MediaJobStatus.BUFFERING, 101, null);
+
+    assertThat(media.job("job-2").status()).isEqualTo(MediaJobStatus.FAILED);
+    assertThat(oversized.getFailureCategory()).isEqualTo("output_limit");
+  }
+
+  @Test
+  void storageFailuresRetainTheirOriginalCause() throws Exception {
+    MediaStorage failingStorage = mock(MediaStorage.class);
+    MediaJob queued = job("job-1", "a".repeat(64), MediaJobStatus.QUEUED);
+    when(jobs.findById("job-1")).thenReturn(Optional.of(queued));
+    doThrow(new java.io.IOException("cancel marker unavailable"))
+        .when(failingStorage).requestCancellation(queued);
+    MediaPlaybackService failing = new MediaPlaybackService(
+        access, jobs, audit, sources, failingStorage, folderProperties, mediaProperties,
+        Clock.fixed(NOW, ZoneOffset.UTC), () -> "unused");
+
+    assertThatThrownBy(() -> failing.cancel("job-1"))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasRootCauseMessage("cancel marker unavailable");
   }
 
   @Test

@@ -62,6 +62,23 @@ class MediaStorageTest {
     assertThat(output.toString()).doesNotContain("outside-secret");
   }
 
+  @Test
+  void workerStatusDistinguishesAbsenceProtocolFailureAndOutputLimit() throws Exception {
+    MediaJob job = job("job-1", "d".repeat(64));
+    assertThat(storage.readStatus(job, 100)).isEmpty();
+
+    Files.writeString(system.resolve(MediaStorage.STATUS).resolve("job-1.json"), "not-json");
+    assertThatThrownBy(() -> storage.readStatus(job, 100))
+        .isInstanceOf(IOException.class)
+        .hasMessageContaining("protocol");
+
+    Files.delete(system.resolve(MediaStorage.STATUS).resolve("job-1.json"));
+    storage.writeStatusForTest(job, MediaJobStatus.BUFFERING, 101, null);
+    assertThatThrownBy(() -> storage.readStatus(job, 100))
+        .isInstanceOf(IOException.class)
+        .hasMessageContaining("limit");
+  }
+
   private MediaStorage storage(Path shared, PortableSharedFolderPrivateBoundary boundary)
       throws Exception {
     SharedFolderProperties properties = new SharedFolderProperties(

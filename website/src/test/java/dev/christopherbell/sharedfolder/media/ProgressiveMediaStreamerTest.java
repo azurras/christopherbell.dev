@@ -12,6 +12,10 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -97,6 +101,47 @@ class ProgressiveMediaStreamerTest {
     assertThat(storage.deleteReady(job)).isFalse();
     selection.close();
     assertThat(storage.deleteReady(job)).isTrue();
+  }
+
+  @Test
+  void readyLeaseBlocksConcurrentEvictionDuringRangeSelection() throws Exception {
+    CountDownLatch lengthStarted = new CountDownLatch(1);
+    CountDownLatch continueLength = new CountDownLatch(1);
+    MediaStorage coordinated = new MediaStorage(folders) {
+      @Override
+      public OptionalLong readyLength(MediaJob current, long maximum) throws java.io.IOException {
+        lengthStarted.countDown();
+        try {
+          if (!continueLength.await(2, TimeUnit.SECONDS)) {
+            throw new java.io.IOException("Timed out coordinating ready selection");
+          }
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+          throw new java.io.IOException("Ready selection was interrupted", exception);
+        }
+        return super.readyLength(current, maximum);
+      }
+    };
+    coordinated.initialize();
+    job.setStatus(MediaJobStatus.READY);
+    coordinated.writeReadyForTest(job, "0123456789".getBytes());
+    ProgressiveMediaStreamer selecting = new ProgressiveMediaStreamer(
+        coordinated, jobs, new SharedFolderMediaProperties(
+            4, 2, Duration.ofMinutes(1), Duration.ofMillis(10), Duration.ofSeconds(1),
+            DataSize.ofBytes(4), DataSize.ofMegabytes(10)));
+
+    try (var executor = Executors.newSingleThreadExecutor()) {
+      var selectionFuture = executor.submit(() -> selecting.openReady(job, "bytes=2-5"));
+      assertThat(lengthStarted.await(2, TimeUnit.SECONDS)).isTrue();
+      assertThat(coordinated.deleteReady(job)).isFalse();
+      continueLength.countDown();
+      try (var selection = selectionFuture.get(2, TimeUnit.SECONDS)) {
+        assertThat(selection.length()).isEqualTo(4);
+      }
+    } finally {
+      continueLength.countDown();
+    }
+    assertThat(coordinated.deleteReady(job)).isTrue();
   }
 
   @Test

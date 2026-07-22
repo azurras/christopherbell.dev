@@ -88,8 +88,14 @@ public class MediaStorage {
       writeNew(JOBS, descriptor.jobId() + ".json", expected);
     } catch (FileAlreadyExistsException existing) {
       byte[] actual = readBounded(JOBS, descriptor.jobId() + ".json", 64 * 1024);
-      if (!mapper.readTree(actual).equals(mapper.valueToTree(descriptor.asMap()))) {
-        throw new IOException("Published media descriptor does not match its durable job");
+      try {
+        if (!mapper.readTree(actual).equals(mapper.valueToTree(descriptor.asMap()))) {
+          throw new MediaDescriptorProtocolException(
+              "Published media descriptor does not match its durable job");
+        }
+      } catch (JacksonException | IllegalArgumentException invalid) {
+        throw new MediaDescriptorProtocolException(
+            "Published media descriptor is incomplete or malformed", invalid);
       }
     }
     try {
@@ -124,7 +130,7 @@ public class MediaStorage {
   public long partialLength(MediaJob job, long maxOutputBytes) throws IOException {
     try {
       long size = boundary.metadata(PARTIAL, partialKey(job)).attributes().size();
-      if (size > maxOutputBytes) throw new IOException("Media output exceeded its limit");
+      if (size > maxOutputBytes) throw new MediaOutputLimitException();
       return size;
     } catch (NoSuchFileException exception) {
       return 0;
@@ -141,9 +147,8 @@ public class MediaStorage {
     try (ReadyLease ignored = ready ? acquireReadyLease(job) : null) {
       return boundary.operateOnRegularFile(directory, key, FileAccess.READ, channel -> {
         long size = channel.size();
-        if (size > maxOutputBytes || position > size) {
-          throw new IOException("Media output exceeded its limit");
-        }
+        if (size > maxOutputBytes) throw new MediaOutputLimitException();
+        if (position > size) throw new IOException("Media output changed during streaming");
         long remaining = Math.min(length, size - position);
         channel.position(position);
         ByteBuffer buffer = ByteBuffer.allocate(64 * 1024);
@@ -219,22 +224,34 @@ public class MediaStorage {
     } catch (NoSuchFileException exception) {
       return Optional.empty();
     }
+    final tools.jackson.databind.JsonNode root;
     try {
-      var root = mapper.readTree(
-          new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
-      if (root.path("schemaVersion").asInt(-1) != 1
-          || !job.getId().equals(root.path("jobId").asText(""))) return Optional.empty();
-      MediaJobStatus status = MediaJobStatus.valueOf(root.path("status").asText(""));
-      long outputBytes = root.path("outputBytes").asLong(-1);
-      if (outputBytes < 0 || outputBytes > maxOutputBytes) return Optional.empty();
-      String category = root.path("failureCategory").isMissingNode()
-          || root.path("failureCategory").isNull() ? null
-          : root.path("failureCategory").asText();
-      if (category != null && !category.matches("[a-z_]{1,40}")) return Optional.empty();
-      return Optional.of(new MediaWorkerStatus(status, outputBytes, category));
-    } catch (JacksonException | IllegalArgumentException exception) {
-      return Optional.empty();
+      root = mapper.readTree(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+    } catch (JacksonException | IllegalArgumentException invalid) {
+      throw new MediaWorkerProtocolException("Invalid media worker status protocol", invalid);
     }
+    if (root.path("schemaVersion").asInt(-1) != 1
+        || !job.getId().equals(root.path("jobId").asText(""))) {
+      throw new MediaWorkerProtocolException("Invalid media worker status protocol");
+    }
+    final MediaJobStatus status;
+    try {
+      status = MediaJobStatus.valueOf(root.path("status").asText(""));
+    } catch (IllegalArgumentException invalid) {
+      throw new MediaWorkerProtocolException("Invalid media worker status protocol", invalid);
+    }
+    long outputBytes = root.path("outputBytes").asLong(-1);
+    if (outputBytes < 0) {
+      throw new MediaWorkerProtocolException("Invalid media worker status protocol");
+    }
+    if (outputBytes > maxOutputBytes) throw new MediaOutputLimitException();
+    String category = root.path("failureCategory").isMissingNode()
+        || root.path("failureCategory").isNull() ? null
+        : root.path("failureCategory").asText();
+    if (category != null && !category.matches("[a-z_]{1,40}")) {
+      throw new MediaWorkerProtocolException("Invalid media worker status protocol");
+    }
+    return Optional.of(new MediaWorkerStatus(status, outputBytes, category));
   }
 
   void writeReadyForTest(MediaJob job, byte[] bytes) throws IOException {
@@ -346,6 +363,24 @@ public class MediaStorage {
   public static final class MediaOutputLimitException extends IOException {
     private MediaOutputLimitException() {
       super("Media output exceeded its limit");
+    }
+  }
+
+  /** Existing durable descriptor bytes conflict with the website-owned publication protocol. */
+  public static final class MediaDescriptorProtocolException extends IOException {
+    private MediaDescriptorProtocolException(String message) { super(message); }
+
+    private MediaDescriptorProtocolException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
+  /** Worker status bytes exist but do not satisfy the fixed website protocol. */
+  public static final class MediaWorkerProtocolException extends IOException {
+    private MediaWorkerProtocolException(String message) { super(message); }
+
+    private MediaWorkerProtocolException(String message, Throwable cause) {
+      super(message, cause);
     }
   }
 }

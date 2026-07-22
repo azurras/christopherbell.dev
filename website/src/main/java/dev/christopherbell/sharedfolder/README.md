@@ -129,7 +129,9 @@ Unavailable` and never falls back to an unchecked production path.
   count, and safe failure category. Spring serializes admission, cancellation, reconciliation, and
   descriptor publication under one bounded scheduler lock. It publishes only one active descriptor,
   recovers an interrupted publication idempotently, and advances unattended terminal jobs; the
-  worker adds its own cross-process lock in the worker task.
+  worker adds its own cross-process lock in the worker task. Missing status means no update;
+  malformed protocol, source revision changes, and output-limit violations are distinct terminal
+  failures, while private-storage failures remain retryable service unavailability.
 - `GET /media/jobs/{id}/stream` rechecks read access, restricts active work to its owner, and lets
   any current reader use a completed shared cache. A growing output streams sequentially after the
   configured initial buffer with bounded polling, then follows the worker's atomic ready-cache
