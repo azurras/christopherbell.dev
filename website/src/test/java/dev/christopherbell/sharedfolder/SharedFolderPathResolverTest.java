@@ -24,6 +24,12 @@ class SharedFolderPathResolverTest {
   @TempDir Path temp;
 
   @Test
+  void rejectsAMissingConfiguredRootWithThePathBoundaryFailure() {
+    assertThatThrownBy(() -> new SharedFolderPathResolver(null))
+        .isInstanceOf(UnsafeSharedPathException.class);
+  }
+
+  @Test
   void resolvesOnlyOrdinaryExistingDescendants() throws Exception {
     Path root = Files.createDirectory(temp.resolve("shared"));
     Files.createDirectories(root.resolve("music/live"));

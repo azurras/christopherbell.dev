@@ -37,7 +37,7 @@ public final class SharedFolderPathResolver {
    * @param root configured shared-folder root
    */
   public SharedFolderPathResolver(Path root) {
-    this(root, new NioSharedFolderFileSystemBoundary());
+    this(root, new RootedNioSharedFolderFileSystemBoundary(root));
   }
 
   /**

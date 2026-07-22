@@ -27,6 +27,20 @@ class NioSharedFolderFileSystemBoundaryTest {
   }
 
   @Test
+  void rootedBoundaryRejectsOutsidePathsBeforeFilesystemAccess() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("shared-rooted"));
+    Path child = Files.writeString(root.resolve("inside.txt"), "inside");
+    Path outside = Files.writeString(temp.resolve("outside.txt"), "outside");
+    var boundary = new RootedNioSharedFolderFileSystemBoundary(root);
+
+    assertThat(boundary.existsNoFollow(child)).isTrue();
+    assertThatThrownBy(() -> boundary.existsNoFollow(outside))
+        .isInstanceOf(UnsafeSharedPathException.class);
+    assertThatThrownBy(() -> boundary.sameFileStore(root, outside))
+        .isInstanceOf(UnsafeSharedPathException.class);
+  }
+
+  @Test
   void macOsDefaultBoundaryAcceptsAnOrdinaryDirectory() throws Exception {
     Path ordinaryDirectory = Files.createDirectory(temp.resolve("shared"));
     NioSharedFolderFileSystemBoundary boundary = macOsBoundary();
