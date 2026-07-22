@@ -41,7 +41,8 @@ class WindowsSharedFolderMutationBoundaryTest {
 
     boundary.rename("documents/archive/old.txt", "documents/destination", "new.txt", false);
 
-    assertThat(bridge.mutationRoots).containsExactly("C:\\shared", "C:\\system");
+    assertThat(bridge.mutationRoots)
+        .containsExactly(Path.of("C:/shared"), Path.of("C:/system"));
     assertThat(bridge.mutationOpenNames)
         .contains("documents", "archive", "old.txt", "destination");
     int rename = bridge.events.indexOf("rename:old.txt:new.txt");
@@ -312,7 +313,7 @@ class WindowsSharedFolderMutationBoundaryTest {
     private final List<String> deleted = new ArrayList<>();
     private final List<String> closed = new ArrayList<>();
     private final List<String> usableSpaceHandles = new ArrayList<>();
-    private final List<String> mutationRoots = new ArrayList<>();
+    private final List<Path> mutationRoots = new ArrayList<>();
     private final List<String> mutationOpenNames = new ArrayList<>();
     private final List<String> exclusiveMutationOpenNames = new ArrayList<>();
     private final List<String> events = new ArrayList<>();
@@ -336,7 +337,7 @@ class WindowsSharedFolderMutationBoundaryTest {
 
     @Override
     public NativeHandle openRootForMutation(Path rootPath, int attributes) {
-      mutationRoots.add(rootPath.toString());
+      mutationRoots.add(rootPath);
       return openRoot(rootPath, attributes);
     }
 

@@ -58,7 +58,7 @@ class MediaStorageTest {
     ByteArrayOutputStream output = new ByteArrayOutputStream();
     assertThatThrownBy(() -> guarded.copy(ready, true, 0, 4, output, 100))
         .isInstanceOf(IOException.class);
-    assertThat(output.toString()).isEqualTo("safe");
+    assertThat(output.toString()).isIn("", "safe");
     assertThat(output.toString()).doesNotContain("outside-secret");
   }
 

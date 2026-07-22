@@ -733,6 +733,10 @@ class SharedFolderMutationServiceTest {
   void caseOnlyRenameFailureNeverStrandsSourceUnderVisibleUuid() throws Exception {
     Path root = Files.createDirectories(temp.resolve("case-only-atomic-failure"));
     Files.writeString(root.resolve("Report.txt"), "content");
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        Files.exists(root.resolve("report.txt"))
+            && Files.isSameFile(root.resolve("Report.txt"), root.resolve("report.txt")),
+        "case-only rename requires a case-insensitive provider");
     SharedFolderAccessService access = mock(SharedFolderAccessService.class);
     SharedFolderMutationService mutations = new SharedFolderMutationService(access, properties(root)) {
       @Override
