@@ -8,6 +8,7 @@ import dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleEntry;
+import dev.christopherbell.sharedfolder.recycle.SharedFolderRecyclePage;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -63,11 +64,10 @@ public class SharedFolderAdminController {
   }
 
   @GetMapping("/recycle")
-  public ResponseEntity<List<SharedFolderRecycleEntry>> recycle(
+  public ResponseEntity<RecyclePageResponse> recycle(
       @RequestParam(defaultValue = "0") int page) {
-    return ResponseEntity.ok().headers(noStore())
-        .body(audited("RECYCLE_BROWSE", "recycle", () -> recycle.list(page).stream()
-            .map(SharedFolderRecycleEntry::from).toList()));
+    return ResponseEntity.ok().headers(noStore()).body(audited(
+        "RECYCLE_BROWSE", "recycle", () -> RecyclePageResponse.from(recycle.listPage(page))));
   }
 
   @PostMapping("/recycle/{id}/restore")
@@ -104,4 +104,13 @@ public class SharedFolderAdminController {
   public record RestoreRequest(@NotNull Boolean replace) {}
 
   public record PurgeRequest(@NotBlank String confirmation) {}
+
+  public record RecyclePageResponse(
+      List<SharedFolderRecycleEntry> items, int page, boolean hasNext) {
+    private static RecyclePageResponse from(SharedFolderRecyclePage source) {
+      return new RecyclePageResponse(
+          source.items().stream().map(SharedFolderRecycleEntry::from).toList(),
+          source.page(), source.hasNext());
+    }
+  }
 }

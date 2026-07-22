@@ -3,6 +3,7 @@ package dev.christopherbell.sharedfolder.recycle;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
@@ -10,7 +11,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface SharedFolderRecycleRepository
     extends MongoRepository<SharedFolderRecycleItem, String> {
-  List<SharedFolderRecycleItem> findByStateOrderByDeletedAtDesc(
+  Slice<SharedFolderRecycleItem> findByStateOrderByDeletedAtDesc(
       SharedFolderRecycleState state, Pageable page);
 
   List<SharedFolderRecycleItem> findByStateAndExpiresAtBeforeOrderByExpiresAtAscIdAsc(

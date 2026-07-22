@@ -142,7 +142,7 @@ public class AccountControllerTest {
             .content("{\"read\":"))
         .andExpect(status().isBadRequest());
 
-    verify(sharedFolderAudit).recordRejected(
+    verify(sharedFolderAudit).recordRejectedOnce(
         "PERMISSION_CHANGE", "account-permissions", "invalid_request");
     verifyNoInteractions(accountService);
   }

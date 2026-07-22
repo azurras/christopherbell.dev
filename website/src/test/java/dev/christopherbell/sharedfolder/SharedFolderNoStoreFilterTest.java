@@ -51,7 +51,7 @@ class SharedFolderNoStoreFilterTest {
     filter.doFilter(denied, deniedResponse, (request, response) ->
         ((jakarta.servlet.http.HttpServletResponse) response).setStatus(403));
 
-    org.mockito.Mockito.verify(audit).recordRejected(
+    org.mockito.Mockito.verify(audit).recordRejectedOnce(
         "CREATE_FOLDER", "request", "invalid_request");
     org.mockito.Mockito.verify(audit).recordRejectedOnce(
         "AUDIT_BROWSE", "audit", "access_denied");
@@ -70,9 +70,9 @@ class SharedFolderNoStoreFilterTest {
 
     org.mockito.Mockito.verify(audit).recordRejectedOnce(
         "DOWNLOAD_STARTED", null, "access_denied");
-    org.mockito.Mockito.verify(audit).recordRejected(
+    org.mockito.Mockito.verify(audit).recordRejectedOnce(
         "UPLOAD_APPEND", "upload", "conflict");
-    org.mockito.Mockito.verify(audit).recordRejected(
+    org.mockito.Mockito.verify(audit).recordRejectedOnce(
         "PERMISSION_CHANGE", "account-permissions", "invalid_request");
   }
 
@@ -163,5 +163,25 @@ class SharedFolderNoStoreFilterTest {
 
     org.mockito.Mockito.verify(sink, org.mockito.Mockito.times(1))
         .record(org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void thrownAuthorizationFailureUsesTheBoundedAccessDeniedPath() {
+    SharedFolderAuditRecorder audit = org.mockito.Mockito.mock(SharedFolderAuditRecorder.class);
+    var filter = new SharedFolderNoStoreFilter(audit);
+    var request = new MockHttpServletRequest(
+        "GET", "/api/shared-folder/2026-07-17/entries");
+    var response = new MockHttpServletResponse();
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+        filter.doFilter(request, response, (ignoredRequest, ignoredResponse) -> {
+          throw new org.springframework.security.access.AccessDeniedException("denied");
+        })).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+
+    org.mockito.Mockito.verify(audit).recordRejectedOnce(
+        "LIST", null, "access_denied");
+    org.mockito.Mockito.verify(audit, org.mockito.Mockito.never()).recordRejected(
+        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.anyString());
   }
 }

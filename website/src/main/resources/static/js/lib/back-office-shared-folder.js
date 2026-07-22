@@ -34,12 +34,12 @@ export function sharedAuditMarkup(events) {
   `).join('');
 }
 
-export function sharedRecyclePagination(page, itemCount, pageSize = 200) {
+export function sharedRecyclePagination(page, hasNext) {
   const safePage = Number.isInteger(page) && page >= 0 ? page : 0;
   return {
     label: `Page ${safePage + 1}`,
     previousDisabled: safePage === 0,
-    nextDisabled: !Number.isInteger(itemCount) || itemCount < pageSize,
+    nextDisabled: hasNext !== true,
   };
 }
 

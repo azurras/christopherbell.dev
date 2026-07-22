@@ -53,6 +53,7 @@ let blogPosts = [];
 let sharedAuditEvents = [];
 let sharedRecycleItems = [];
 let sharedRecyclePageNumber = 0;
+let sharedRecycleHasNext = false;
 
 function showAlert(msg) {
   if (!alertBox) return;
@@ -443,13 +444,19 @@ async function refreshDashboard() {
 }
 
 async function refreshSharedAdministration(filters = sharedAuditFilters(sharedAuditForm)) {
-  [sharedAuditEvents, sharedRecycleItems] = await Promise.all([
+  const [auditEvents, recyclePage] = await Promise.all([
     fetchJson(API.sharedFolder.admin.audit(filters), { headers: authHeaders() }),
     fetchJson(API.sharedFolder.admin.recycle(sharedRecyclePageNumber), { headers: authHeaders() }),
   ]);
+  sharedAuditEvents = auditEvents || [];
+  sharedRecycleItems = Array.isArray(recyclePage?.items) ? recyclePage.items : [];
+  sharedRecycleHasNext = recyclePage?.hasNext === true;
+  if (Number.isInteger(recyclePage?.page) && recyclePage.page >= 0) {
+    sharedRecyclePageNumber = recyclePage.page;
+  }
   sharedAuditList.innerHTML = sharedAuditMarkup(sharedAuditEvents || []);
   sharedRecycleList.innerHTML = sharedRecycleMarkup(sharedRecycleItems || []);
-  const pagination = sharedRecyclePagination(sharedRecyclePageNumber, sharedRecycleItems?.length);
+  const pagination = sharedRecyclePagination(sharedRecyclePageNumber, sharedRecycleHasNext);
   if (sharedRecyclePage) sharedRecyclePage.textContent = pagination.label;
   if (sharedRecyclePrevious) sharedRecyclePrevious.disabled = pagination.previousDisabled;
   if (sharedRecycleNext) sharedRecycleNext.disabled = pagination.nextDisabled;
@@ -924,7 +931,7 @@ function wireEvents() {
     }
   });
   sharedRecycleNext?.addEventListener('click', async () => {
-    if ((sharedRecycleItems?.length || 0) < 200) return;
+    if (!sharedRecycleHasNext) return;
     sharedRecyclePageNumber++;
     try {
       await refreshSharedAdministration();

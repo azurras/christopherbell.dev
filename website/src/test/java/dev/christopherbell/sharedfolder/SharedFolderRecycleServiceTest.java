@@ -36,6 +36,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.SliceImpl;
 import org.mockito.ArgumentCaptor;
 
 class SharedFolderRecycleServiceTest {
@@ -47,7 +48,7 @@ class SharedFolderRecycleServiceTest {
   void recycleAdministrationAndCleanupUseBoundedRepositoryQueries() throws Exception {
     Fixture fixture = fixture();
 
-    fixture.recycle.list(2);
+    fixture.recycle.listPage(2);
     fixture.recycle.cleanupExpired();
 
     verify(fixture.repository).findByStateOrderByDeletedAtDesc(
@@ -59,8 +60,8 @@ class SharedFolderRecycleServiceTest {
         org.mockito.ArgumentMatchers.argThat((Pageable page) -> page.getPageSize() == 100));
     verify(fixture.repository).findByStateInOrderByDeletedAtAscIdAsc(
         any(), org.mockito.ArgumentMatchers.argThat((Pageable page) -> page.getPageSize() == 100));
-    assertStatus(400, () -> fixture.recycle.list(-1));
-    assertStatus(400, () -> fixture.recycle.list(10_001));
+    assertStatus(400, () -> fixture.recycle.listPage(-1));
+    assertStatus(400, () -> fixture.recycle.listPage(10_001));
   }
 
   @Test
@@ -532,8 +533,12 @@ class SharedFolderRecycleServiceTest {
         Optional.ofNullable(records.get(invocation.<String>getArgument(0))));
     when(repository.findByStateOrderByDeletedAtDesc(
         org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any()))
-        .thenAnswer(ignored -> records.values().stream()
-            .filter(item -> item.state() == SharedFolderRecycleState.RECYCLED).toList());
+        .thenAnswer(invocation -> {
+          Pageable page = invocation.getArgument(1);
+          return new SliceImpl<>(records.values().stream()
+              .filter(item -> item.state() == SharedFolderRecycleState.RECYCLED).toList(),
+              page, false);
+        });
     when(repository.findByStateAndExpiresAtBeforeOrderByExpiresAtAscIdAsc(
         org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(), any()))
         .thenAnswer(invocation -> records.values().stream()

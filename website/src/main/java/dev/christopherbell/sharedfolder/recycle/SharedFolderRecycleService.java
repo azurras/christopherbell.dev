@@ -140,16 +140,18 @@ public class SharedFolderRecycleService {
 
   /** Lists current recoverable entries for a freshly authorized administrator. */
   public List<SharedFolderRecycleItem> list() {
-    return list(0);
+    return listPage(0).items();
   }
 
   /** Lists one bounded page so administrators can reach every recoverable entry. */
-  public List<SharedFolderRecycleItem> list(int page) {
+  public SharedFolderRecyclePage listPage(int page) {
     access.requireAdmin();
     requireEnabled();
     if (page < 0 || page > MAX_ADMIN_LIST_PAGE) throw badRequest();
-    return repository.findByStateOrderByDeletedAtDesc(
+    var result = repository.findByStateOrderByDeletedAtDesc(
         SharedFolderRecycleState.RECYCLED, PageRequest.of(page, ADMIN_LIST_LIMIT));
+    return new SharedFolderRecyclePage(
+        result.getContent(), page, page < MAX_ADMIN_LIST_PAGE && result.hasNext());
   }
 
   /** Restores to the original path, replacing only when the administrator explicitly requested it. */

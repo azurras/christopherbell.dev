@@ -72,7 +72,9 @@ class SharedFolderWriteControllerTest {
         "audit-1", "account-1", "RECYCLE", "docs/report.pdf", 42L, "accepted", null,
         "203.0.113.8", Instant.parse("2026-07-18T12:00:00Z"),
         Instant.parse("2027-01-14T12:00:00Z"))));
-    when(recycle.list(3)).thenReturn(java.util.List.of());
+    when(recycle.listPage(3)).thenReturn(
+        new dev.christopherbell.sharedfolder.recycle.SharedFolderRecyclePage(
+            java.util.List.of(), 3, false));
 
     mockMvc.perform(get(BASE + "/admin/audit")
             .queryParam("accountId", "account-1")
@@ -84,7 +86,9 @@ class SharedFolderWriteControllerTest {
         .andExpect(jsonPath("$[0].relativePath").value("docs/report.pdf"));
     mockMvc.perform(get(BASE + "/admin/recycle").queryParam("page", "3"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$").isArray());
+        .andExpect(jsonPath("$.items").isArray())
+        .andExpect(jsonPath("$.page").value(3))
+        .andExpect(jsonPath("$.hasNext").value(false));
     mockMvc.perform(post(BASE + "/admin/recycle/item-1/restore")
             .contentType("application/json").content("{\"replace\":true}"))
         .andExpect(status().isOk());
@@ -94,7 +98,7 @@ class SharedFolderWriteControllerTest {
 
     org.mockito.Mockito.verify(recycle).restore("item-1", true);
     org.mockito.Mockito.verify(recycle).purge("item-1", "PURGE item-1");
-    org.mockito.Mockito.verify(recycle).list(3);
+    org.mockito.Mockito.verify(recycle).listPage(3);
     org.mockito.Mockito.verify(auditRecorder).recordCurrent(
         "AUDIT_BROWSE", "docs/report.pdf", null, "accepted", null);
     org.mockito.Mockito.verify(auditRecorder).recordCurrent(
@@ -121,7 +125,7 @@ class SharedFolderWriteControllerTest {
             .content("{\"parentPath\":\"\",\"name\":\"\"}"))
         .andExpect(status().isBadRequest());
 
-    org.mockito.Mockito.verify(auditRecorder).recordRejected(
+    org.mockito.Mockito.verify(auditRecorder).recordRejectedOnce(
         "CREATE_FOLDER", "request", "invalid_request");
   }
 

@@ -221,3 +221,30 @@ enabled full gate then passed all 955 Java tests and 161 JavaScript tests with z
 errors, or skips (`BUILD SUCCESSFUL` in 1m 13s). No worktree-local Gradle directory exists and
 production port 8080 remained untouched. Task 5 remains a review candidate until the complete
 remediated range receives independent approval.
+
+## Eighth Independent Review and Remediation
+
+The eighth fresh whole-change review of `09d2f408..0ac45870` rejected Task 5 with zero Critical,
+one Important, and two Minor findings. No rejected candidate was pushed. The remediation closes
+the production filter-ordering hole and both concrete minor gaps:
+
+- A Spring Security authorization exception thrown through the no-store filter is now classified
+  from its bounded cause chain as `access_denied` before rethrow. Every rejection recorded at this
+  outer HTTP boundary—not only status-based 401/403/429 responses—uses the same deduplicated path
+  and hard 1,000-event global window ceiling. A regression throws the real Spring
+  `AccessDeniedException` and proves no call reaches the unbounded recorder method.
+- Recycle listing now uses a bounded Spring Data `Slice` and returns only safe public entry fields
+  plus authoritative `page` and `hasNext` metadata. Back Office navigation consumes that server
+  state, so an exactly full terminal page and the maximum allowed page both disable Next without
+  sending the administrator to an empty or rejected page.
+- The shared-folder package README now documents the implemented expiring audit persistence,
+  operation-time recorder injection, rejection categories, logical access deduplication, scheduled
+  recovery events, and administrator query support.
+
+The first full run correctly exposed one stale account-controller expectation for the old direct
+rejection method; that test was updated to assert the bounded method and passed in isolation. A
+forced clean Windows native/junction-enabled full rerun then executed every task and passed all 956
+Java tests and 161 JavaScript tests with zero failures, errors, or skips (`BUILD SUCCESSFUL` in
+1m 25s). No worktree-local Gradle directory exists and production port 8080 remained untouched.
+Task 5 remains a review candidate until the complete remediated range receives independent
+approval.

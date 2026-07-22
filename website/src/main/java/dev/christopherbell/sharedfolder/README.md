@@ -21,8 +21,9 @@ feature.
 - `security` reloads the authenticated account from MongoDB for every decision. A persisted
   active approved account needs a shared-folder capability; ADMIN has read and write implicitly,
   and write implies read. JWTs intentionally carry no shared-folder capability.
-- `audit` defines a bounded command and sink contract only. No audit persistence bean or
-  operation-time sink injection exists until the later persistence task.
+- `audit` persists bounded, expiring operation events through a best-effort sink. Request and
+  service boundaries inject the recorder for accepted work, safe rejection categories, logical
+  range deduplication, scheduled recovery, and administrator queries.
 - `model`, `service`, `upload`, and `web` provide authenticated directory listings,
   disk-streamed full or single-range downloads, safe previews, conflict-safe mutations, and
   resumable uploads. `web` accepts each path after Spring has decoded it once and passes that

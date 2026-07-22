@@ -12,11 +12,11 @@ const {
   sharedRecyclePagination,
 } = await import('../../main/resources/static/js/lib/back-office-shared-folder.js');
 
-test('recycle pagination exposes later bounded pages and prevents empty navigation', () => {
-  assert.deepEqual(sharedRecyclePagination(0, 200), {
+test('recycle pagination uses authoritative next-page state even for a terminal full page', () => {
+  assert.deepEqual(sharedRecyclePagination(0, true), {
     label: 'Page 1', previousDisabled: true, nextDisabled: false,
   });
-  assert.deepEqual(sharedRecyclePagination(2, 42), {
+  assert.deepEqual(sharedRecyclePagination(2, false), {
     label: 'Page 3', previousDisabled: false, nextDisabled: true,
   });
 });

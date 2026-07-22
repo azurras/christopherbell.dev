@@ -14,6 +14,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.server.ResponseStatusException;
 
 /** Prevents browser and intermediary caches from retaining any protected shared-folder response. */
 public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
@@ -52,7 +55,7 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
       try {
         filterChain.doFilter(request, response);
       } catch (ServletException | IOException | RuntimeException failure) {
-        recordRejected(attempt, "failure");
+        recordRejected(attempt, failureCategory(failure));
         throw failure;
       }
       if (response.getStatus() >= 400) {
@@ -131,14 +134,26 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
     };
   }
 
+  private String failureCategory(Throwable failure) {
+    Throwable current = failure;
+    for (int depth = 0; current != null && depth < 8; depth++) {
+      if (current instanceof AccessDeniedException
+          || current instanceof AuthenticationException) {
+        return "access_denied";
+      }
+      if (current instanceof ResponseStatusException status) {
+        return failureCategory(status.getStatusCode().value());
+      }
+      if (current == current.getCause()) break;
+      current = current.getCause();
+    }
+    return "failure";
+  }
+
   private void recordRejected(AuditAttempt attempt, String category) {
     if (audit != null
         && !audit.currentRequestAlreadyRecorded(attempt.action(), "rejected")) {
-      if ("rate_limited".equals(category) || "access_denied".equals(category)) {
-        audit.recordRejectedOnce(attempt.action(), attempt.resource(), category);
-      } else {
-        audit.recordRejected(attempt.action(), attempt.resource(), category);
-      }
+      audit.recordRejectedOnce(attempt.action(), attempt.resource(), category);
     }
   }
 
