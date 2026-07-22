@@ -14,8 +14,9 @@ Task 1: complete (commits 9108f9c..0b025da, review clean; fresh `:website:test :
 Task 2: complete (commits 0b025da..ff23809, review clean; fresh `:website:test` BUILD SUCCESSFUL)
 Task 3: complete (commits ff23809..8602985, final review approved with no findings; fresh `:website:test :website:jsTest` BUILD SUCCESSFUL, 141 JS tests, real Windows junction test enabled)
 Task 4: complete (commits 8602985..8d1d3da; eighth whole-change review approved 0C/0I/1M; fresh `test :website:jsTest` BUILD SUCCESSFUL, 909 Java tests and 153 JS tests passed; reviewed branch checkpoint pushed)
-Task 5: review candidate (recycle/audit/admin implementation and full verification complete;
-independent whole-change review required before completion/push)
+Task 5: complete (commits 09d2f408..54b1bae2; twelfth whole-change review approved
+0C/0I/0M; forced native/junction-enabled full gate passed 957 Java tests and 161 JS tests;
+reviewed branch checkpoint pushed)
 Task 6: pending
 Task 7: pending
 Task 8: pending

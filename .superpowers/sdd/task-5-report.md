@@ -4,7 +4,7 @@ Date: 2026-07-21
 
 Branch: `codex/shared-folder-portal`
 
-Status: Review candidate; independent whole-change approval required before completion and push
+Status: Complete; independent whole-change review approved with zero findings
 
 ## Delivered Behavior
 
@@ -274,26 +274,6 @@ tests and 161 JavaScript tests with zero failures, errors, or skips (`BUILD SUCC
 No worktree-local Gradle directory exists and production port 8080 remained untouched. Task 5
 remains a review candidate until the complete remediated range receives independent approval.
 
-## Eleventh Independent Review and Remediation
-
-The eleventh fresh whole-change review of `09d2f408..51d92311` rejected Task 5 with zero Critical,
-one Important, and zero Minor findings. The partial-purge state machine and durable retry model were
-approved, but two explicit permission rejection branches still used direct audit writes. No
-rejected candidate was pushed.
-
-- Invalid permission shapes and missing target accounts now call `recordRejectedOnce` with their
-  fixed `invalid_request` and `not_found` categories. Together with the already bounded fresh-auth
-  and persistence failure paths, every rejected permission outcome enters the same per-client
-  deduplication and hard 1,000-event global window ceiling.
-- Focused RED tests first demonstrated that all three explicit validation/missing-target cases
-  still invoked the old method. They passed after the service switched to the bounded method while
-  accepted permission changes retained their normal audit records.
-
-The forced Windows native/junction-enabled full gate re-executed every task and passed all 957 Java
-tests and 161 JavaScript tests with zero failures, errors, or skips (`BUILD SUCCESSFUL` in 1m 25s).
-No worktree-local Gradle directory exists and production port 8080 remained untouched. Task 5
-remains a review candidate until the complete remediated range receives independent approval.
-
 ## Tenth Independent Review and Remediation
 
 The tenth fresh whole-change review of `09d2f408..f477c55d` rejected Task 5 with zero Critical,
@@ -313,3 +293,34 @@ The forced Windows native/junction-enabled full gate re-executed every task and 
 tests and 161 JavaScript tests with zero failures, errors, or skips (`BUILD SUCCESSFUL` in 1m 17s).
 No worktree-local Gradle directory exists and production port 8080 remained untouched. Task 5
 remains a review candidate until the complete remediated range receives independent approval.
+
+## Eleventh Independent Review and Remediation
+
+The eleventh fresh whole-change review of `09d2f408..51d92311` rejected Task 5 with zero Critical,
+one Important, and zero Minor findings. The partial-purge state machine and durable retry model were
+approved, but two explicit permission rejection branches still used direct audit writes. No
+rejected candidate was pushed.
+
+- Invalid permission shapes and missing target accounts now call `recordRejectedOnce` with their
+  fixed `invalid_request` and `not_found` categories. Together with the already bounded fresh-auth
+  and persistence failure paths, every rejected permission outcome enters the same per-client
+  deduplication and hard 1,000-event global window ceiling.
+- Focused RED tests first demonstrated that all three explicit validation/missing-target cases
+  still invoked the old method. They passed after the service switched to the bounded method while
+  accepted permission changes retained their normal audit records.
+
+The forced Windows native/junction-enabled full gate re-executed every task and passed all 957 Java
+tests and 161 JavaScript tests with zero failures, errors, or skips (`BUILD SUCCESSFUL` in 1m 25s).
+No worktree-local Gradle directory exists and production port 8080 remained untouched.
+
+## Final Independent Approval
+
+The twelfth fresh whole-change review of `09d2f408..54b1bae2` approved Task 5 with zero Critical,
+zero Important, and zero Minor findings. It explicitly revalidated bounded permission rejection
+ingress, outer security-filter exception handling, persisted restart-safe maintenance deferrals,
+partial-purge `PURGING` preservation and recovery, deterministic indexed queries, fresh ADMIN
+authorization, safe recycle DTOs, and Back Office escaping and confirmations.
+
+Task 5 is complete at reviewed range `09d2f408..54b1bae2`. The final forced gate remains 957 Java
+tests and 161 JavaScript tests with zero failures, errors, or skips; production port 8080 was never
+touched during Task 5 development or verification.
