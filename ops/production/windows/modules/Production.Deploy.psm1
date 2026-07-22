@@ -95,26 +95,170 @@ function Test-CandidateRelease {
     }
 }
 
+function Set-ProductionWebsiteRecoveryPolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Suspended','Normal')]
+        [string]$Policy
+    )
+
+    $actions = if ($Policy -eq 'Normal') {
+        'restart/10000/restart/30000'
+    } else {
+        ''
+    }
+    $phase = if ($Policy -eq 'Normal') { 'restore' } else { 'suspend' }
+    try {
+        Invoke-CheckedProcess -FilePath 'sc.exe' -ArgumentList @(
+            'failure',
+            'ChristopherBellDev',
+            'reset=',
+            '3600',
+            'actions=',
+            $actions
+        ) | Out-Null
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            "Failed to $phase website service recovery.",
+            $_.Exception)
+    }
+}
+
+function Assert-ProductionWebsiteStopped {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateRange(1,65535)]
+        [int]$ProductionPort,
+        [ValidateRange(1,300)]
+        [int]$ServiceTimeoutSeconds = 30,
+        [ValidateRange(1,60000)]
+        [int]$PortTimeoutMilliseconds = 10000
+    )
+
+    try {
+        $service = Get-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+        $service.WaitForStatus(
+            [System.ServiceProcess.ServiceControllerStatus]::Stopped,
+            [timespan]::FromSeconds($ServiceTimeoutSeconds))
+        $service.Refresh()
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            "ChristopherBellDev did not reach Stopped within $ServiceTimeoutSeconds seconds.",
+            $_.Exception)
+    }
+    if ([string]$service.Status -ne 'Stopped') {
+        throw "ChristopherBellDev did not reach Stopped within $ServiceTimeoutSeconds seconds."
+    }
+
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        try {
+            $listeners = @(
+                Get-NetTCPConnection -State Listen -ErrorAction Stop |
+                    Where-Object LocalPort -eq $ProductionPort
+            )
+        } catch {
+            throw [System.InvalidOperationException]::new(
+                "Failed to inspect production port $ProductionPort.",
+                $_.Exception)
+        }
+        if ($listeners.Count -eq 0) { return }
+        if ($watch.ElapsedMilliseconds -ge $PortTimeoutMilliseconds) { break }
+        $remaining = $PortTimeoutMilliseconds - [int]$watch.ElapsedMilliseconds
+        Start-Sleep -Milliseconds ([Math]::Max(1, [Math]::Min(250, $remaining)))
+    } while ($true)
+
+    throw "Production port $ProductionPort remained open after ChristopherBellDev stopped."
+}
+
+function Stop-ProductionWebsiteService {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateRange(1,65535)]
+        [int]$ProductionPort,
+        [ValidateRange(1,300)]
+        [int]$ServiceTimeoutSeconds = 30,
+        [ValidateRange(1,60000)]
+        [int]$PortTimeoutMilliseconds = 10000
+    )
+
+    Set-ProductionWebsiteRecoveryPolicy -Policy Suspended
+    $operationFailure = $null
+    $restoreFailure = $null
+    try {
+        $stopFailure = $null
+        try {
+            Stop-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+        } catch {
+            $stopFailure = $_.Exception
+        }
+
+        try {
+            Assert-ProductionWebsiteStopped `
+                -ProductionPort $ProductionPort `
+                -ServiceTimeoutSeconds $ServiceTimeoutSeconds `
+                -PortTimeoutMilliseconds $PortTimeoutMilliseconds
+        } catch {
+            $stateFailure = $_.Exception
+            $operationFailure = if ($stopFailure) {
+                [System.AggregateException]::new(
+                    'Website service stop request and postcondition verification failed.',
+                    [System.Exception[]]@($stopFailure, $stateFailure))
+            } else {
+                $stateFailure
+            }
+        }
+    } finally {
+        try {
+            Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+        } catch {
+            $restoreFailure = $_.Exception
+        }
+    }
+
+    if ($restoreFailure) {
+        if ($operationFailure) {
+            throw [System.AggregateException]::new(
+                'Website service stop and recovery restoration both failed.',
+                [System.Exception[]]@($operationFailure, $restoreFailure))
+        }
+        throw [System.InvalidOperationException]::new(
+            'Failed to restore website service recovery after the planned stop.',
+            $restoreFailure)
+    }
+    if ($operationFailure) { throw $operationFailure }
+}
+
 function Switch-ProductionRelease {
     param($Config, [Parameter(Mandatory)][string]$Release)
     $release = Assert-ReleasePath $Config $Release
     $currentPath = Join-Path $Config.programDataRoot 'current'
     $previousPath = Join-Path $Config.programDataRoot 'previous'
     $old = Get-JunctionTarget $currentPath
-    Stop-Service ChristopherBellDev -ErrorAction Stop
+    Stop-ProductionWebsiteService -ProductionPort $Config.productionPort
     try {
         if ($old) { Set-AtomicJunction $Config $previousPath $old }
         Set-AtomicJunction $Config $currentPath $release
         Start-Service ChristopherBellDev
         Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
     } catch {
+        $deploymentFailure = $_.Exception
         if ($old) {
-            Stop-Service ChristopherBellDev -ErrorAction SilentlyContinue
-            Set-AtomicJunction $Config $currentPath $old
-            Start-Service ChristopherBellDev
-            Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
+            try {
+                Stop-ProductionWebsiteService -ProductionPort $Config.productionPort
+                Set-AtomicJunction $Config $currentPath $old
+                Start-Service ChristopherBellDev
+                Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
+            } catch {
+                throw [System.AggregateException]::new(
+                    'Production deployment and automatic rollback both failed.',
+                    [System.Exception[]]@($deploymentFailure, $_.Exception))
+            }
         }
-        throw
+        throw $deploymentFailure
     }
 }
 
@@ -148,4 +292,4 @@ function Invoke-ProductionDeploy {
     } finally { $lock.Dispose() }
 }
 
-Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,New-ReleaseFromOriginMain,Start-ProductionJar,Test-ProductionEndpoints,Test-CandidateRelease,Switch-ProductionRelease,Remove-ExpiredReleases
+Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,New-ReleaseFromOriginMain,Start-ProductionJar,Test-ProductionEndpoints,Test-CandidateRelease,Stop-ProductionWebsiteService,Switch-ProductionRelease,Remove-ExpiredReleases
