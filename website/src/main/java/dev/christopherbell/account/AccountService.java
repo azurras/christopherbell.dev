@@ -8,13 +8,17 @@ import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
+import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.Role;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
@@ -27,6 +31,7 @@ import dev.christopherbell.libs.security.UsernameSanitizer;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
@@ -57,6 +62,8 @@ public class AccountService {
   private final AccountProfileService accountProfileService;
   private final AccountFollowService accountFollowService;
   private final AccountModerationService accountModerationService;
+  private final SharedFolderAuditRecorder sharedFolderAudit;
+  private final SharedFolderAccessService sharedFolderAccess;
 
   /**
    * Approves an account by setting its approvedBy field to the current user's ID and changing its
@@ -349,5 +356,60 @@ public class AccountService {
   public AccountDetail updateAccount(AccountUpdateRequest request)
       throws InvalidRequestException, ResourceNotFoundException, ResourceExistsException {
     return accountModerationService.updateAccount(request);
+  }
+
+  /**
+   * Replaces an account's shared-folder capabilities without changing its role.
+   *
+   * @param accountId account whose capabilities are being changed
+   * @param request requested read and write state
+   * @return the saved account detail with its stored capabilities
+   * @throws InvalidRequestException if the request is malformed or enables write without read
+   * @throws ResourceNotFoundException if the account does not exist
+   */
+  public AccountDetail updateSharedFolderPermissions(
+      String accountId,
+      SharedFolderPermissionUpdate request) throws InvalidRequestException, ResourceNotFoundException {
+    String auditResource = safeAuditAccountId(accountId);
+    try {
+      sharedFolderAccess.requireAdmin();
+      if (request == null || request.read() == null || request.write() == null) {
+        throw new InvalidRequestException("Shared-folder permissions are required.");
+      }
+      if (!request.read() && request.write()) {
+        throw new InvalidRequestException("Shared-folder write requires read.");
+      }
+
+      var account = accountRepository.findById(accountId)
+          .orElseThrow(() -> new ResourceNotFoundException("Account not found."));
+      var next = EnumSet.noneOf(AccountPermission.class);
+      if (request.read()) {
+        next.add(AccountPermission.SHARED_FOLDER_READ);
+      }
+      if (request.write()) {
+        next.add(AccountPermission.SHARED_FOLDER_WRITE);
+      }
+      account.setPermissions(next);
+      AccountDetail saved = accountMapper.toAccount(accountRepository.save(account));
+      sharedFolderAudit.recordCurrent(
+          "PERMISSION_CHANGE", auditResource, null, "accepted", null);
+      return saved;
+    } catch (InvalidRequestException failure) {
+      sharedFolderAudit.recordRejectedOnce(
+          "PERMISSION_CHANGE", auditResource, "invalid_request");
+      throw failure;
+    } catch (ResourceNotFoundException failure) {
+      sharedFolderAudit.recordRejectedOnce(
+          "PERMISSION_CHANGE", auditResource, "not_found");
+      throw failure;
+    } catch (RuntimeException failure) {
+      sharedFolderAudit.recordFailureOnce("PERMISSION_CHANGE", auditResource, failure);
+      throw failure;
+    }
+  }
+
+  private String safeAuditAccountId(String accountId) {
+    return accountId != null && accountId.length() <= 128
+        && accountId.matches("[A-Za-z0-9._-]+") ? accountId : "invalid-account";
   }
 }

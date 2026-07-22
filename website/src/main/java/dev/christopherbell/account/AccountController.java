@@ -3,6 +3,7 @@ package dev.christopherbell.account;
 import static dev.christopherbell.libs.api.APIVersion.V20241215;
 import static dev.christopherbell.libs.api.APIVersion.V20250903;
 import static dev.christopherbell.libs.api.APIVersion.V20250914;
+import static dev.christopherbell.libs.api.APIVersion.V20260717;
 
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
@@ -10,6 +11,7 @@ import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.dto.AccountProfile;
+import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.libs.api.model.Response;
@@ -26,6 +28,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -421,6 +424,30 @@ public class AccountController {
             .payload(accountService.updateAccount(request))
             .success(true)
             .build(), HttpStatus.ACCEPTED);
+  }
+
+  /**
+   * Replaces the stored shared-folder capabilities for an account.
+   *
+   * <p>Requires {@code ADMIN} authority. This endpoint intentionally changes capabilities only;
+   * it does not change the account's role or JWT authorities.</p>
+   *
+   * @param accountId target account id
+   * @param request requested read and write state
+   * @return the saved account detail in the standard response envelope
+   * @throws Exception if validation or the account update fails
+   */
+  @PatchMapping(
+      value = V20260717 + "/{accountId}/shared-folder-permissions",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<Response<AccountDetail>> updateSharedFolderPermissions(
+      @PathVariable String accountId,
+      @RequestBody SharedFolderPermissionUpdate request) throws Exception {
+    return ResponseEntity.ok(Response.<AccountDetail>builder()
+        .payload(accountService.updateSharedFolderPermissions(accountId, request))
+        .success(true)
+        .build());
   }
 
   private String getBaseUrl(HttpServletRequest request) {

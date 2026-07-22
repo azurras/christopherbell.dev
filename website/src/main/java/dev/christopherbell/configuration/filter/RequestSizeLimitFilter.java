@@ -22,13 +22,17 @@ import org.springframework.web.filter.OncePerRequestFilter;
  */
 public class RequestSizeLimitFilter extends OncePerRequestFilter {
 
+  private static final java.util.regex.Pattern SHARED_UPLOAD_CHUNK = java.util.regex.Pattern.compile(
+      "^/api/shared-folder/2026-07-17/uploads/[^/]+/chunks/[0-9]+$");
+
   private final long maxSizeBytes;
+  private final long sharedUploadChunkMaxSizeBytes;
 
   /**
    * Creates a filter with a default limit of 1 MB.
    */
   public RequestSizeLimitFilter() {
-    this(1_000_000L);
+    this(1_000_000L, 8L * 1024 * 1024);
   }
 
   /**
@@ -37,21 +41,30 @@ public class RequestSizeLimitFilter extends OncePerRequestFilter {
    * @param maxSizeBytes maximum allowed request size in bytes
    */
   public RequestSizeLimitFilter(long maxSizeBytes) {
+    this(maxSizeBytes, 8L * 1024 * 1024);
+  }
+
+  /** Creates route-aware limits for ordinary requests and streamed shared-folder chunks. */
+  public RequestSizeLimitFilter(long maxSizeBytes, long sharedUploadChunkMaxSizeBytes) {
     this.maxSizeBytes = maxSizeBytes;
+    this.sharedUploadChunkMaxSizeBytes = sharedUploadChunkMaxSizeBytes;
   }
 
   @Override
   protected void doFilterInternal(HttpServletRequest request,
       HttpServletResponse response,
       FilterChain filterChain) throws ServletException, IOException {
+    long limit = "PUT".equalsIgnoreCase(request.getMethod())
+        && SHARED_UPLOAD_CHUNK.matcher(request.getRequestURI()).matches()
+        ? sharedUploadChunkMaxSizeBytes : maxSizeBytes;
     long contentLength = request.getContentLengthLong();
-    if (contentLength > maxSizeBytes) {
+    if (contentLength > limit) {
       response.setStatus(HttpStatus.PAYLOAD_TOO_LARGE.value());
       return;
     }
 
     try {
-      filterChain.doFilter(new SizeLimitedRequestWrapper(request, maxSizeBytes), response);
+      filterChain.doFilter(new SizeLimitedRequestWrapper(request, limit), response);
     } catch (RequestPayloadTooLargeException e) {
       response.setStatus(HttpStatus.PAYLOAD_TOO_LARGE.value());
     }
@@ -131,6 +144,4 @@ public class RequestSizeLimitFilter extends OncePerRequestFilter {
     }
   }
 
-  private static class RequestPayloadTooLargeException extends IOException {
-  }
 }

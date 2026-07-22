@@ -8,6 +8,7 @@
 import pubsub from './pubsub.js';
 import { API } from '../lib/api.js';
 import { authHeaders, fetchJson, formatWhen, getAuthToken, loginRedirectUrl, sanitize } from '../lib/util.js';
+import { accountHasSharedFolderRead } from '../lib/shared-folder.js';
 import {
     browserNotificationsToShow,
     notificationTargetUrl,
@@ -56,6 +57,14 @@ export function adminMenuItems(isAdmin) {
     ] : [];
 }
 
+/** Profile-menu destinations that require a current-account capability response. */
+export function profileMenuItems(isAdmin, hasSharedFolderRead) {
+    return [
+        ...adminMenuItems(isAdmin),
+        ...(hasSharedFolderRead ? [{ href: '/shared', label: 'Shared Folder' }] : []),
+    ];
+}
+
 /** Determine whether a nav href represents the current browser route. */
 export function isActiveNavHref(href, pathname = window.location.pathname) {
     const currentPath = String(pathname || '/').replace(/\/+$/, '') || '/';
@@ -96,6 +105,7 @@ class AppNav extends HTMLElement {
         this.notifications = this.notifications || [];
         this.notificationPreferences = this.notificationPreferences || null;
         this.unreadNotifications = this.unreadNotifications || 0;
+        this.sharedFolderRead = false;
         this.render();
         this.loadUserInfo();
         this.loadNotifications();
@@ -113,6 +123,7 @@ class AppNav extends HTMLElement {
             this.notifications = [];
             this.notificationPreferences = null;
             this.unreadNotifications = 0;
+            this.sharedFolderRead = false;
             this.render();
         });
     }
@@ -142,24 +153,30 @@ class AppNav extends HTMLElement {
 
     async loadUserInfo(force = false) {
         const token = getAuthToken();
-        if (!token) return;
-        if (!force && localStorage.getItem('cbellRole') && localStorage.getItem('cbellUsername')) {
+        if (!token) {
+            this.sharedFolderRead = false;
             return;
         }
         if (this.userLoadInFlight) return;
         this.userLoadInFlight = true;
         try {
-            const resp = await fetch('/api/accounts/2025-09-03/me', {
+            const resp = await fetch(API.accounts.me, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             const data = await resp.json().catch(() => ({}));
             if (resp.ok && data && data.payload) {
                 localStorage.setItem('cbellUsername', data.payload.username || '');
                 localStorage.setItem('cbellRole', data.payload.role || '');
+                this.sharedFolderRead = accountHasSharedFolderRead(data.payload);
+                this.render();
+            } else {
+                this.sharedFolderRead = false;
                 this.render();
             }
         } catch (_) {
             // Ignore profile fetch errors to keep nav usable.
+            this.sharedFolderRead = false;
+            this.render();
         } finally {
             this.userLoadInFlight = false;
         }
@@ -287,6 +304,7 @@ class AppNav extends HTMLElement {
         const messagesHref = messagesNavHref(isAuthenticated);
         const profileHref = isAuthenticated ? '/profile' : loginHref;
         const isAdmin = (localStorage.getItem('cbellRole') || '') === 'ADMIN';
+        const hasSharedFolderRead = Boolean(this.sharedFolderRead);
         const unread = Number(this.unreadNotifications || 0);
         const currentPath = window.location.pathname;
         const toolsActive = toolsMenuItems().some(item => isActiveNavHref(item.href, currentPath));
@@ -341,7 +359,7 @@ class AppNav extends HTMLElement {
                         <span class="avatar-initials">${initials}</span>
                     </button>
                     <div class="dropdown-menu dropdown-menu-end profile-menu">
-                        ${adminMenuItems(isAdmin).map(item => `<a class="dropdown-item" href="${item.href}">${item.label}</a>`).join('')}
+                        ${profileMenuItems(isAdmin, hasSharedFolderRead).map(item => `<a class="dropdown-item" href="${item.href}">${item.label}</a>`).join('')}
                         <a class="dropdown-item" href="${profileHref}">Profile</a>
                         <button id="logout" type="button" class="dropdown-item">Logout</button>
                     </div>

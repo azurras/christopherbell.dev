@@ -3,7 +3,19 @@
  */
 import { API } from './lib/api.js';
 import { canesBoxIndexResultMarkup } from './lib/back-office-canes-box-index.js';
-import { promotedRoleForAction, rolePromotionOptions } from './lib/back-office-users.js';
+import {
+  promotedRoleForAction,
+  rolePromotionOptions,
+  sharedFolderPermissionState,
+} from './lib/back-office-users.js';
+import {
+  createSharedRecycleActionHandler,
+  sharedAuditFilters,
+  sharedAuditMarkup,
+  sharedRecyclePagination,
+  sharedRecycleButton,
+  sharedRecycleMarkup,
+} from './lib/back-office-shared-folder.js';
 import { authHeaders, fetchJson, formatWhen, sanitize } from './lib/util.js';
 
 const content = document.getElementById('backOfficeContent');
@@ -16,6 +28,7 @@ const drawerBody = document.getElementById('drawerBody');
 const drawerClose = document.getElementById('drawerClose');
 const drawerKicker = document.getElementById('drawerKicker');
 const drawerTitle = document.getElementById('drawerTitle');
+const sharedFolderPermissionsTemplate = document.getElementById('sharedFolderPermissionsTemplate');
 const wflOperationStatus = document.getElementById('wflOperationStatus');
 const canesBoxIndexOperationStatus = document.getElementById('canesBoxIndexOperationStatus');
 const canesBoxManualPriceForm = document.getElementById('canesBoxManualPriceForm');
@@ -24,6 +37,12 @@ const vehicleOperationStatus = document.getElementById('vehicleOperationStatus')
 const contentOperationStatus = document.getElementById('contentOperationStatus');
 const vehicleVinForm = document.getElementById('vehicleVinForm');
 const vehicleVinBatchForm = document.getElementById('vehicleVinBatchForm');
+const sharedAuditForm = document.getElementById('sharedAuditFilters');
+const sharedAuditList = document.getElementById('sharedAuditList');
+const sharedRecycleList = document.getElementById('sharedRecycleList');
+const sharedRecyclePrevious = document.getElementById('sharedRecyclePrevious');
+const sharedRecycleNext = document.getElementById('sharedRecycleNext');
+const sharedRecyclePage = document.getElementById('sharedRecyclePage');
 
 let accounts = [];
 let reports = [];
@@ -31,6 +50,10 @@ let activities = [];
 let restaurants = [];
 let vehicles = [];
 let blogPosts = [];
+let sharedAuditEvents = [];
+let sharedRecycleItems = [];
+let sharedRecyclePageNumber = 0;
+let sharedRecycleHasNext = false;
 
 function showAlert(msg) {
   if (!alertBox) return;
@@ -51,6 +74,8 @@ function setLoading() {
   renderOperationResult(locationOperationStatus, 'Census ZIP coordinates have not been imported in this session.');
   renderOperationResult(vehicleOperationStatus, 'Vehicle state has not been loaded yet.');
   renderOperationResult(contentOperationStatus, 'Content data has not been loaded yet.');
+  renderState(sharedAuditList, 'Loading shared-folder audit…');
+  renderState(sharedRecycleList, 'Loading recycle items…');
 }
 
 function renderState(container, message) {
@@ -275,6 +300,9 @@ function openDrawer(type, id) {
       ? `${item.reason || 'Report'}`
       : `@${item.username || 'user'}`;
   drawerBody.innerHTML = type === 'report' ? reportDetails(item) : userDetails(item);
+  if (type === 'user') {
+    renderSharedFolderPermissions(item);
+  }
   drawer.classList.remove('d-none');
   drawer.setAttribute('aria-hidden', 'false');
 }
@@ -333,12 +361,30 @@ function userDetails(account) {
       ${detailRow('Updated', account.lastUpdatedOn ? formatWhen(account.lastUpdatedOn) : '—')}
       ${detailRow('ID', account.id)}
     </div>
+    <div id="sharedFolderPermissions"></div>
     <div class="detail-section">
       ${userActionSelect(account)}
       <button type="button" class="btn btn-outline-secondary btn-sm" data-user-posts="${sanitize(account.id || '')}">Load User Posts</button>
       <div id="drawerUserPosts" class="operation-result">Posts have not been loaded.</div>
     </div>
   `;
+}
+
+function renderSharedFolderPermissions(account) {
+  const host = document.getElementById('sharedFolderPermissions');
+  if (!host || !sharedFolderPermissionsTemplate) return;
+
+  const state = sharedFolderPermissionState(account);
+  const fragment = sharedFolderPermissionsTemplate.content.cloneNode(true);
+  const read = fragment.querySelector('[data-shared-folder-permission="read"]');
+  const write = fragment.querySelector('[data-shared-folder-permission="write"]');
+  [read, write].forEach(input => {
+    input.dataset.account = account.id || '';
+    input.disabled = state.disabled;
+  });
+  read.checked = state.read;
+  write.checked = state.write;
+  host.replaceChildren(fragment);
 }
 
 async function resolveReport(reportId, resolution) {
@@ -354,6 +400,14 @@ async function updateAccount(accountId, patch) {
     method: 'PUT',
     headers: authHeaders(),
     body: JSON.stringify({ id: accountId, ...patch }),
+  });
+}
+
+async function updateSharedFolderPermissions(accountId, { read, write }) {
+  return fetchJson(API.accounts.updateSharedFolderPermissions(accountId), {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ read, write }),
   });
 }
 
@@ -379,7 +433,46 @@ async function refreshDashboard() {
   renderReports();
   renderUsers();
   renderActivity();
+  try {
+    await refreshSharedAdministration();
+  } catch (err) {
+    if (err?.status === 401 || err?.status === 403) throw err;
+    renderState(sharedAuditList, 'Shared-folder audit is temporarily unavailable.');
+    renderState(sharedRecycleList, 'Recycle administration is temporarily unavailable.');
+    showAlert(err?.message || 'Shared-folder administration is temporarily unavailable.');
+  }
 }
+
+async function refreshSharedAdministration(filters = sharedAuditFilters(sharedAuditForm)) {
+  const [auditEvents, recyclePage] = await Promise.all([
+    fetchJson(API.sharedFolder.admin.audit(filters), { headers: authHeaders() }),
+    fetchJson(API.sharedFolder.admin.recycle(sharedRecyclePageNumber), { headers: authHeaders() }),
+  ]);
+  sharedAuditEvents = auditEvents || [];
+  sharedRecycleItems = Array.isArray(recyclePage?.items) ? recyclePage.items : [];
+  sharedRecycleHasNext = recyclePage?.hasNext === true;
+  if (Number.isInteger(recyclePage?.page) && recyclePage.page >= 0) {
+    sharedRecyclePageNumber = recyclePage.page;
+  }
+  sharedAuditList.innerHTML = sharedAuditMarkup(sharedAuditEvents || []);
+  sharedRecycleList.innerHTML = sharedRecycleMarkup(sharedRecycleItems || []);
+  const pagination = sharedRecyclePagination(sharedRecyclePageNumber, sharedRecycleHasNext);
+  if (sharedRecyclePage) sharedRecyclePage.textContent = pagination.label;
+  if (sharedRecyclePrevious) sharedRecyclePrevious.disabled = pagination.previousDisabled;
+  if (sharedRecycleNext) sharedRecycleNext.disabled = pagination.nextDisabled;
+}
+
+const handleSharedRecycleAction = createSharedRecycleActionHandler({
+  api: API.sharedFolder.admin,
+  fetchJson,
+  authHeaders,
+  refresh: refreshSharedAdministration,
+  clearAlert,
+  showAlert,
+  confirmReplace: () => window.confirm('Replace the current item at the original path?'),
+  promptPurge: id => window.prompt(
+      `Type PURGE ${id} to permanently delete this recycled item.`),
+});
 
 function wflCountsMarkup() {
   const withCoordinates = restaurants.filter(restaurant =>
@@ -668,6 +761,27 @@ async function handleUserAction(target) {
   }
 }
 
+async function handleSharedFolderPermissionChange(target) {
+  const accountId = target.dataset.account;
+  const permission = target.dataset.sharedFolderPermission;
+  const account = accounts.find(candidate => candidate.id === accountId);
+  if (!account || !permission) return;
+
+  const state = sharedFolderPermissionState(account, { [permission]: target.checked });
+  const controls = drawerBody?.querySelectorAll('[data-shared-folder-permission]') || [];
+  controls.forEach(control => {
+    control.disabled = true;
+  });
+  try {
+    await updateSharedFolderPermissions(accountId, state);
+    await refreshDashboard();
+    openDrawer('user', accountId);
+  } catch (err) {
+    showAlert(err.message || 'Failed to update shared-folder permissions.');
+    renderSharedFolderPermissions(account);
+  }
+}
+
 async function handleOperation(button) {
   const operation = button.getAttribute('data-operation');
   clearAlert();
@@ -709,6 +823,12 @@ function wireEvents() {
       return;
     }
 
+    const recycleButton = sharedRecycleButton(action, HTMLButtonElement);
+    if (recycleButton) {
+      handleSharedRecycleAction(recycleButton);
+      return;
+    }
+
     const canesReviewButton = action.closest?.('[data-canes-box-review]');
     if (canesReviewButton instanceof HTMLButtonElement) {
       reviewCanesBoxMetro(canesReviewButton).catch(err => showAlert(err.message || 'Failed to review price.'));
@@ -740,10 +860,11 @@ function wireEvents() {
 
   document.addEventListener('change', async (event) => {
     const target = event.target;
-    if (!(target instanceof HTMLSelectElement)) return;
-    if (target.classList.contains('report-action')) {
+    if (target instanceof HTMLInputElement && target.dataset.sharedFolderPermission) {
+      await handleSharedFolderPermissionChange(target);
+    } else if (target instanceof HTMLSelectElement && target.classList.contains('report-action')) {
       await handleReportAction(target);
-    } else if (target.classList.contains('user-action')) {
+    } else if (target instanceof HTMLSelectElement && target.classList.contains('user-action')) {
       await handleUserAction(target);
     }
   });
@@ -786,6 +907,37 @@ function wireEvents() {
       vehicleVinBatchForm.reset();
     } catch (err) {
       showAlert(err.message || 'Failed to create vehicle batch.');
+    }
+  });
+
+  sharedAuditForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearAlert();
+    try {
+      await refreshSharedAdministration(sharedAuditFilters(sharedAuditForm));
+    } catch (err) {
+      showAlert(err.message || 'Failed to load shared-folder administration.');
+    }
+  });
+
+  sharedRecyclePrevious?.addEventListener('click', async () => {
+    if (sharedRecyclePageNumber === 0) return;
+    sharedRecyclePageNumber--;
+    try {
+      await refreshSharedAdministration();
+    } catch (err) {
+      sharedRecyclePageNumber++;
+      showAlert(err?.message || 'Failed to load the previous recycle page.');
+    }
+  });
+  sharedRecycleNext?.addEventListener('click', async () => {
+    if (!sharedRecycleHasNext) return;
+    sharedRecyclePageNumber++;
+    try {
+      await refreshSharedAdministration();
+    } catch (err) {
+      sharedRecyclePageNumber--;
+      showAlert(err?.message || 'Failed to load the next recycle page.');
     }
   });
 

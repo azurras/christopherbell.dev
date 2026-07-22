@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -18,11 +19,13 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
+import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.passwordreset.PasswordResetNotificationService;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
@@ -32,6 +35,8 @@ import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.PasswordUtil;
 import dev.christopherbell.post.PostRepository;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -55,6 +60,8 @@ public class AccountServiceTest {
   @Mock private AccountRepository accountRepository;
   @Mock private PasswordResetNotificationService passwordResetNotificationService;
   @Mock private PostRepository postRepository;
+  @Mock private SharedFolderAuditRecorder sharedFolderAudit;
+  @Mock private SharedFolderAccessService sharedFolderAccess;
   private AccountService accountService;
 
   @BeforeEach
@@ -71,7 +78,11 @@ public class AccountServiceTest {
         passwordResetService,
         profileService,
         followService,
-        moderationService);
+        moderationService,
+        sharedFolderAudit,
+        sharedFolderAccess);
+    org.mockito.Mockito.lenient().when(sharedFolderAccess.requireAdmin()).thenReturn(
+        Account.builder().id("admin-1").role(Role.ADMIN).build());
   }
 
   @Test
@@ -741,6 +752,86 @@ public class AccountServiceTest {
     verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
     verify(accountRepository).findByUsernameIgnoreCase(eq("Chris.Bell"));
     verifyNoMoreInteractions(accountRepository);
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: write requires read and changes persist independently of role")
+  public void sharedFolderStateCannotBecomeWriteOnly() throws Exception {
+    var account = Account.builder().id("account-permissions").role(Role.USER).build();
+    when(accountRepository.findById(eq(account.getId()))).thenReturn(Optional.of(account));
+    when(accountRepository.save(eq(account))).thenReturn(account);
+    when(accountMapper.toAccount(eq(account))).thenReturn(AccountDetail.builder().id(account.getId()).build());
+
+    accountService.updateSharedFolderPermissions(
+        account.getId(), new SharedFolderPermissionUpdate(true, true));
+    assertEquals(
+        java.util.Set.of(AccountPermission.SHARED_FOLDER_READ, AccountPermission.SHARED_FOLDER_WRITE),
+        account.getPermissions());
+
+    accountService.updateSharedFolderPermissions(
+        account.getId(), new SharedFolderPermissionUpdate(false, false));
+    assertEquals(java.util.Set.of(), account.getPermissions());
+
+    assertThrows(
+        InvalidRequestException.class,
+        () -> accountService.updateSharedFolderPermissions(
+            account.getId(), new SharedFolderPermissionUpdate(false, true)));
+    verify(sharedFolderAudit, org.mockito.Mockito.times(2)).recordCurrent(
+        "PERMISSION_CHANGE", account.getId(), null, "accepted", null);
+    verify(sharedFolderAudit).recordRejectedOnce(
+        "PERMISSION_CHANGE", account.getId(), "invalid_request");
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: fresh persisted admin state is required")
+  void sharedFolderPermissionsRequireFreshAdminState() {
+    org.mockito.Mockito.doThrow(new org.springframework.security.access.AccessDeniedException(
+        "demoted")).when(sharedFolderAccess).requireAdmin();
+
+    assertThrows(
+        org.springframework.security.access.AccessDeniedException.class,
+        () -> accountService.updateSharedFolderPermissions(
+            "account-permissions", new SharedFolderPermissionUpdate(true, false)));
+
+    verify(sharedFolderAudit).recordFailureOnce(
+        eq("PERMISSION_CHANGE"), eq("account-permissions"), any(
+            org.springframework.security.access.AccessDeniedException.class));
+    verifyNoMoreInteractions(accountRepository);
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: not-found and persistence failures are rejected audit events")
+  void sharedFolderPermissionFailuresAreAudited() throws Exception {
+    when(accountRepository.findById("missing-account")).thenReturn(Optional.empty());
+
+    assertThrows(ResourceNotFoundException.class, () -> accountService.updateSharedFolderPermissions(
+        "missing-account", new SharedFolderPermissionUpdate(true, false)));
+    verify(sharedFolderAudit).recordRejectedOnce(
+        "PERMISSION_CHANGE", "missing-account", "not_found");
+
+    var account = Account.builder().id("save-failure").role(Role.USER).build();
+    when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+    var persistenceFailure = new org.springframework.dao.DataAccessResourceFailureException("mongo");
+    when(accountRepository.save(account)).thenThrow(persistenceFailure);
+
+    assertThrows(org.springframework.dao.DataAccessResourceFailureException.class,
+        () -> accountService.updateSharedFolderPermissions(
+            account.getId(), new SharedFolderPermissionUpdate(true, false)));
+    verify(sharedFolderAudit).recordFailureOnce(
+        "PERMISSION_CHANGE", account.getId(), persistenceFailure);
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: malformed target ids use a bounded audit resource")
+  void malformedSharedFolderPermissionTargetIsSafelyAudited() {
+    String unsafeId = "bad:id/with\\separators";
+
+    assertThrows(InvalidRequestException.class,
+        () -> accountService.updateSharedFolderPermissions(
+            unsafeId, new SharedFolderPermissionUpdate(false, true)));
+
+    verify(sharedFolderAudit).recordRejectedOnce(
+        "PERMISSION_CHANGE", "invalid-account", "invalid_request");
   }
 
   private String hashResetToken(String token) throws Exception {

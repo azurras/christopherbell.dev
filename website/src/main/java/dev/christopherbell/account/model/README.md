@@ -10,6 +10,9 @@ Owns account-domain request objects, enums, and persistence entities.
   reset flow input.
 - `AccountStatus` and `Role` constrain account state and authorization role
   values.
+- `AccountPermission` stores independent account capabilities. Shared-folder
+  read/write capabilities are persisted separately from roles so existing role
+  hierarchy and JWT authorities remain unchanged.
 - `dto` contains API-facing account response/update records.
 
 ## Design Notes

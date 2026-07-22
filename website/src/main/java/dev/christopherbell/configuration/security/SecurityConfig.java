@@ -3,12 +3,16 @@ package dev.christopherbell.configuration.security;
 import dev.christopherbell.configuration.ClientIpProperties;
 import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.configuration.RateLimitProperties;
+import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.configuration.filter.RateLimitFilter;
 import dev.christopherbell.configuration.filter.RequestSizeLimitFilter;
 import dev.christopherbell.libs.api.APIVersion;
+import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,11 +37,14 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 @Configuration
 @EnableMethodSecurity
 @EnableWebSecurity
-@EnableConfigurationProperties({ClientIpProperties.class, RateLimitProperties.class})
+@EnableConfigurationProperties({
+    ClientIpProperties.class, RateLimitProperties.class, SharedFolderProperties.class})
 public class SecurityConfig {
 
   private static final String[] PUBLIC_URLS = {
       "/",
+      "/shared",
+      "GET:/shared-folder-auth-sw.js",
       "/api/accounts" + APIVersion.V20241215 + "/login",
       "/api/accounts" + APIVersion.V20241215 + "/create",
       "/api/accounts" + APIVersion.V20241215 + "/password-reset/request",
@@ -97,7 +104,8 @@ public class SecurityConfig {
   public SecurityFilterChain securityFilterChain(HttpSecurity http,
       RateLimitFilter rateLimitFilter,
       JwtAuthenticationFilter jwtAuthenticationFilter,
-      RequestSizeLimitFilter requestSizeLimitFilter) throws Exception {
+      RequestSizeLimitFilter requestSizeLimitFilter,
+      SharedFolderNoStoreFilter sharedFolderNoStoreFilter) throws Exception {
     return http
         // Disable CSRF for APIs (use with care)
         .csrf(AbstractHttpConfigurer::disable)
@@ -112,6 +120,7 @@ public class SecurityConfig {
         .addFilterBefore(jwtAuthenticationFilter, AuthorizationFilter.class)
         .addFilterBefore(rateLimitFilter, JwtAuthenticationFilter.class)
         .addFilterBefore(requestSizeLimitFilter, RateLimitFilter.class)
+        .addFilterBefore(sharedFolderNoStoreFilter, RequestSizeLimitFilter.class)
         
         // Build the SecurityFilterChain
         .build();
@@ -148,8 +157,18 @@ public class SecurityConfig {
    * Configures the request size limiting filter bean.
    */
   @Bean
-  public RequestSizeLimitFilter requestSizeLimitFilter() {
-    return new RequestSizeLimitFilter();
+  public RequestSizeLimitFilter requestSizeLimitFilter(SharedFolderProperties sharedFolderProperties) {
+    return new RequestSizeLimitFilter(1_000_000L, sharedFolderProperties.uploadChunk().toBytes());
+  }
+
+  /** Applies no-store headers before authentication can return a protected shared-folder error. */
+  @Bean
+  public SharedFolderNoStoreFilter sharedFolderNoStoreFilter(
+      ObjectProvider<SharedFolderAuditRecorder> auditRecorder) {
+    SharedFolderAuditRecorder recorder = auditRecorder.getIfAvailable();
+    return recorder == null
+        ? new SharedFolderNoStoreFilter()
+        : new SharedFolderNoStoreFilter(recorder);
   }
 
   /**

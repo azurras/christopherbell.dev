@@ -1,5 +1,6 @@
 package dev.christopherbell.configuration;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.christopherbell.configuration.security.SecurityConfig;
@@ -82,6 +83,43 @@ class SecurityConfigTest {
     request.setServletPath(path);
 
     assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request)));
+  }
+
+  @Test
+  @DisplayName("Shared folder shell is public while every shared-folder API stays protected")
+  void publicMatchers_whenSharedFolderRequested_onlyMatchesPageShell() throws Exception {
+    var shell = request("GET", "/shared");
+    var entries = request("GET", "/api/shared-folder/2026-07-17/entries");
+    var content = request("HEAD", "/api/shared-folder/2026-07-17/content");
+    var preview = request("GET", "/api/shared-folder/2026-07-17/preview");
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(shell)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(entries)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(content)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(preview)));
+  }
+
+  @Test
+  @DisplayName("Shared-folder worker bootstrap is public only for its exact anonymous GET")
+  void publicMatchers_whenSharedFolderWorkerRequested_matchesOnlyTheExactGet() throws Exception {
+    var worker = request("GET", "/shared-folder-auth-sw.js");
+    worker.setQueryString("cache=1");
+    var post = request("POST", "/shared-folder-auth-sw.js");
+    var extra = request("GET", "/shared-folder-auth-sw.js/extra");
+    var sourceMap = request("GET", "/shared-folder-auth-sw.js.map");
+    var sharedFolderApi = request("GET", "/api/shared-folder/2026-07-17/entries");
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(worker)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(post)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(extra)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(sourceMap)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(sharedFolderApi)));
+  }
+
+  private MockHttpServletRequest request(String method, String path) {
+    var request = new MockHttpServletRequest(method, path);
+    request.setServletPath(path);
+    return request;
   }
 
   @SuppressWarnings("unchecked")

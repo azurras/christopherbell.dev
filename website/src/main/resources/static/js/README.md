@@ -92,7 +92,7 @@ Owns browser-side behavior for server-rendered pages.
   actions for other users.
 - `back-office.js` gates the Back Office to admins, renders report/user queues
   with repeat-report context, supports user approval/status changes/role
-  promotion, and exposes practical admin operations such as Location Census ZIP
+  promotion and shared-folder capability controls, and exposes practical admin operations such as Location Census ZIP
   coordinate import, WFL import/dedupe, Raising Canes Box Index collection and
   datapoint review, and vehicle VIN maintenance.
 - `command-center.js` gates the public data-free `/command-center` shell with a
@@ -114,6 +114,26 @@ Owns browser-side behavior for server-rendered pages.
   polling/backoff decisions, cursor-generation decisions, text-only log copying,
   dialog clearing, and countdown helpers. Any 401/403—including one from a stale
   request generation—tears down and hides the console before redirecting.
+- `shared-folder.js` owns the Shared Folder shell: it redirects visitors without a token,
+  checks the current account's effective shared read capability, renders relative-path breadcrumbs
+  and accessible button controls, copies same-origin `/shared?path=` links, starts native
+  attachment downloads and media previews without Blob buffering, and inserts text previews only
+  with `textContent`. Before assigning a protected native URL it waits for the shared-folder
+  service worker to acknowledge the current JWT; 401 redirects to login and 403/revocation is
+  shown inline. If a restarted worker has lost its per-client in-memory token, it asks only the
+  initiating controlled page for a one-shot recovery reply over a bounded message port; a missing
+  reply produces a controlled 401 rather than an unauthenticated network request. The worker
+  receives no token in a URL or persistent worker storage, attaches it only to the exact versioned
+  shared-folder API prefix, preserves `Range`, forwards with `cache: 'no-store'`, and clears its
+  per-client token on 401 or logout. Text and native-stream 401/403 responses use one actionable
+  access-loss handler. Its root bootstrap script is intentionally public for exact anonymous
+  `GET /shared-folder-auth-sw.js` so installation can happen before it has a bearer token; all
+  shared-folder API requests stay protected. Write-capable users can create folders, rename, move,
+  explicitly replace, and delete entries with observed tokens. The same module owns resumable
+  8 MiB chunk uploads, SHA-256 chunk digests, progress, cancel, drag/drop, explicit replacement,
+  and refresh recovery from non-secret local session metadata; terminal sessions clear that local
+  record. The shared nav adds Shared Folder only after the current-account API reports effective
+  read access.
 
 ## Design Notes
 

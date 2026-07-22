@@ -23,6 +23,9 @@ app:
     secret: ${APP_JWT_SECRET:}
   mail:
     from: ${APP_MAIL_FROM:noreply@christopherbell.dev}
+  shared-folder:
+    root: ${APP_SHARED_FOLDER_ROOT:A:/Shared}
+    system-root: ${APP_SHARED_FOLDER_SYSTEM_ROOT:A:/Shared-System}
 command-center:
   enabled: true
   sensor-libraries-enabled: true

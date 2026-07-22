@@ -29,6 +29,8 @@ export const API = {
     create: '/api/accounts/2024-12-15/create',
     approve: (id) => `/api/accounts/2025-09-03/approve/${encodeURIComponent(id)}`,
     update: '/api/accounts/2025-09-14',
+    updateSharedFolderPermissions: (id) =>
+      `/api/accounts/2026-07-17/${encodeURIComponent(id)}/shared-folder-permissions`,
     passwordResetRequest: '/api/accounts/2024-12-15/password-reset/request',
     passwordResetConfirm: '/api/accounts/2024-12-15/password-reset/confirm',
     me: '/api/accounts/2025-09-03/me',
@@ -68,6 +70,53 @@ export const API = {
     unreadCount: '/api/notifications/2025-09-14/unread-count',
     preferences: '/api/notifications/2025-09-14/preferences',
     markRead: (id) => `/api/notifications/2025-09-14/${encodeURIComponent(id)}/read`,
+  },
+  sharedFolder: {
+    folders: '/api/shared-folder/2026-07-17/folders',
+    rename: '/api/shared-folder/2026-07-17/entries/rename',
+    move: '/api/shared-folder/2026-07-17/entries/move',
+    delete: '/api/shared-folder/2026-07-17/entries',
+    uploads: '/api/shared-folder/2026-07-17/uploads',
+    uploadStatus: (id) => `/api/shared-folder/2026-07-17/uploads/${encodeURIComponent(id)}`,
+    uploadChunk: (id, offset) =>
+      `/api/shared-folder/2026-07-17/uploads/${encodeURIComponent(id)}/chunks/${encodeURIComponent(offset)}`,
+    uploadComplete: (id) =>
+      `/api/shared-folder/2026-07-17/uploads/${encodeURIComponent(id)}/complete`,
+    uploadCancel: (id) => `/api/shared-folder/2026-07-17/uploads/${encodeURIComponent(id)}`,
+    entries: (path = '') => {
+      const params = new URLSearchParams({ path: String(path || '') });
+      return `/api/shared-folder/2026-07-17/entries?${params}`;
+    },
+    content: (path) => {
+      const params = new URLSearchParams({ path: String(path || '') });
+      return `/api/shared-folder/2026-07-17/content?${params}`;
+    },
+    preview: (path) => {
+      const params = new URLSearchParams({ path: String(path || '') });
+      return `/api/shared-folder/2026-07-17/preview?${params}`;
+    },
+    media: {
+      playback: '/api/shared-folder/2026-07-17/media/playback',
+      fallback: '/api/shared-folder/2026-07-17/media/fallback',
+      job: (id) => `/api/shared-folder/2026-07-17/media/jobs/${encodeURIComponent(id)}`,
+      cancel: (id) => `/api/shared-folder/2026-07-17/media/jobs/${encodeURIComponent(id)}`,
+      stream: (id) => `/api/shared-folder/2026-07-17/media/jobs/${encodeURIComponent(id)}/stream`,
+    },
+    admin: {
+      audit: (filters = {}) => {
+        const params = new URLSearchParams();
+        Object.entries(filters).forEach(([key, value]) => {
+          if (value !== undefined && value !== null && String(value) !== '') {
+            params.set(key, String(value));
+          }
+        });
+        const query = params.toString();
+        return `/api/shared-folder/2026-07-17/admin/audit${query ? `?${query}` : ''}`;
+      },
+      recycle: (page = 0) => `/api/shared-folder/2026-07-17/admin/recycle?page=${encodeURIComponent(page)}`,
+      restore: (id) => `/api/shared-folder/2026-07-17/admin/recycle/${encodeURIComponent(id)}/restore`,
+      purge: (id) => `/api/shared-folder/2026-07-17/admin/recycle/${encodeURIComponent(id)}`,
+    },
   },
   location: {
     zipCoordinate: (zipCode) => `/api/location/zip/${encodeURIComponent(zipCode)}`,

@@ -11,6 +11,7 @@ import './components/footer.js';
 import './components/blog.js';
 import './components/gallery.js';
 import pubsub from './components/pubsub.js';
+import { clearSharedFolderStreamingAuth } from './lib/shared-folder-streaming.js';
 
 /** Wire core layout and global auth behavior once DOM is ready. */
 document.addEventListener('DOMContentLoaded', () => {
@@ -35,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     pubsub.subscribe('auth:logout', () => {
+        clearSharedFolderStreamingAuth();
         localStorage.removeItem('cbellLoginToken');
         localStorage.removeItem('cbellUsername');
         localStorage.removeItem('cbellRole');

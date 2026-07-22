@@ -10,6 +10,8 @@ Owns account API shapes that leave or enter the account feature.
 - `AccountProfile` is the intentionally smaller public profile response.
 - `AccountUsernameSuggestion` is the public-safe username-only response for
   signed-in autocomplete controls.
+- `SharedFolderPermissionUpdate` is the validated admin request for the
+  persisted shared-folder read/write state.
 
 ## Design Notes
 
@@ -19,6 +21,8 @@ Owns account API shapes that leave or enter the account feature.
   explicit and immutable.
 - Public request DTOs use Bean Validation annotations so malformed account
   input returns a consistent 400 response before service logic runs.
+- `AccountDetail` carries stored account capabilities for authorized account
+  reads; `AccountProfile` remains intentionally permission-free.
 
 ## Update This Doc
 
