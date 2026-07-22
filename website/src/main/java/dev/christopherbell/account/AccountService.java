@@ -395,12 +395,12 @@ public class AccountService {
           "PERMISSION_CHANGE", auditResource, null, "accepted", null);
       return saved;
     } catch (InvalidRequestException failure) {
-      sharedFolderAudit.recordCurrent(
-          "PERMISSION_CHANGE", auditResource, null, "rejected", "invalid_request");
+      sharedFolderAudit.recordRejectedOnce(
+          "PERMISSION_CHANGE", auditResource, "invalid_request");
       throw failure;
     } catch (ResourceNotFoundException failure) {
-      sharedFolderAudit.recordCurrent(
-          "PERMISSION_CHANGE", auditResource, null, "rejected", "not_found");
+      sharedFolderAudit.recordRejectedOnce(
+          "PERMISSION_CHANGE", auditResource, "not_found");
       throw failure;
     } catch (RuntimeException failure) {
       sharedFolderAudit.recordFailureOnce("PERMISSION_CHANGE", auditResource, failure);

@@ -778,8 +778,8 @@ public class AccountServiceTest {
             account.getId(), new SharedFolderPermissionUpdate(false, true)));
     verify(sharedFolderAudit, org.mockito.Mockito.times(2)).recordCurrent(
         "PERMISSION_CHANGE", account.getId(), null, "accepted", null);
-    verify(sharedFolderAudit).recordCurrent(
-        "PERMISSION_CHANGE", account.getId(), null, "rejected", "invalid_request");
+    verify(sharedFolderAudit).recordRejectedOnce(
+        "PERMISSION_CHANGE", account.getId(), "invalid_request");
   }
 
   @Test
@@ -806,8 +806,8 @@ public class AccountServiceTest {
 
     assertThrows(ResourceNotFoundException.class, () -> accountService.updateSharedFolderPermissions(
         "missing-account", new SharedFolderPermissionUpdate(true, false)));
-    verify(sharedFolderAudit).recordCurrent(
-        "PERMISSION_CHANGE", "missing-account", null, "rejected", "not_found");
+    verify(sharedFolderAudit).recordRejectedOnce(
+        "PERMISSION_CHANGE", "missing-account", "not_found");
 
     var account = Account.builder().id("save-failure").role(Role.USER).build();
     when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
@@ -830,8 +830,8 @@ public class AccountServiceTest {
         () -> accountService.updateSharedFolderPermissions(
             unsafeId, new SharedFolderPermissionUpdate(false, true)));
 
-    verify(sharedFolderAudit).recordCurrent(
-        "PERMISSION_CHANGE", "invalid-account", null, "rejected", "invalid_request");
+    verify(sharedFolderAudit).recordRejectedOnce(
+        "PERMISSION_CHANGE", "invalid-account", "invalid_request");
   }
 
   private String hashResetToken(String token) throws Exception {
