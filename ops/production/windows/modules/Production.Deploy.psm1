@@ -155,17 +155,30 @@ function Assert-ProductionWebsiteRecoveryPolicy {
         [string]$QueryOutput
     )
 
-    $resetMatch = [regex]::Match(
+    $resetLabelMatches = [regex]::Matches(
         $QueryOutput,
-        '(?im)^\s*RESET_PERIOD\s*\(in seconds\)\s*:\s*(?<Seconds>\d+)\s*$')
-    $resetPeriodSeconds = if ($resetMatch.Success) {
-        [int]$resetMatch.Groups['Seconds'].Value
+        '(?im)^[ \t]*RESET_PERIOD[ \t]*\(in seconds\)[ \t]*:')
+    $resetMatches = [regex]::Matches(
+        $QueryOutput,
+        '(?im)^[ \t]*RESET_PERIOD[ \t]*\(in seconds\)[ \t]*:[ \t]*(?<Seconds>\d+)[ \t]*\r?$')
+    $hasSingleResetField = $resetLabelMatches.Count -eq 1 -and $resetMatches.Count -eq 1
+    $resetPeriodSeconds = if ($hasSingleResetField) {
+        [int]$resetMatches[0].Groups['Seconds'].Value
+    } else {
+        $null
+    }
+    $failureActionFieldMatches = [regex]::Matches(
+        $QueryOutput,
+        '(?im)^[ \t]*FAILURE_ACTIONS[ \t]*:[ \t]*(?<Value>[^\r\n]*)\r?$')
+    $hasSingleFailureActionField = $failureActionFieldMatches.Count -eq 1
+    $failureActionFieldValue = if ($hasSingleFailureActionField) {
+        $failureActionFieldMatches[0].Groups['Value'].Value.Trim()
     } else {
         $null
     }
     $actionMatches = [regex]::Matches(
         $QueryOutput,
-        '(?im)^\s*(?:FAILURE_ACTIONS\s*:\s*)?(?<Action>RESTART|REBOOT|RUN COMMAND)\s*--\s*Delay\s*=\s*(?<Delay>\d+)\s*milliseconds\.\s*$')
+        '(?im)^[ \t]*(?:(?<Label>FAILURE_ACTIONS)[ \t]*:[ \t]*)?(?<Action>RESTART|REBOOT|RUN COMMAND)[ \t]*--[ \t]*Delay[ \t]*=[ \t]*(?<Delay>\d+)[ \t]*milliseconds\.[ \t]*\r?$')
     $actualActions = @(
         $actionMatches | ForEach-Object {
             "$($_.Groups['Action'].Value):$($_.Groups['Delay'].Value)"
@@ -173,20 +186,24 @@ function Assert-ProductionWebsiteRecoveryPolicy {
     )
     $delayLineCount = [regex]::Matches(
         $QueryOutput,
-        '(?im)--\s*Delay\s*=').Count
-    $hasEmptyActions = [regex]::IsMatch(
-        $QueryOutput,
-        '(?im)^\s*FAILURE_ACTIONS\s*:\s*$')
+        '(?im)--[ \t]*Delay[ \t]*=').Count
 
+    $expectedResetPeriodSeconds = if ($Policy -eq 'Suspended') { 0 } else { 3600 }
     $matchesExpectedPolicy = if ($Policy -eq 'Suspended') {
-        $resetPeriodSeconds -eq 3600 -and
-            $hasEmptyActions -and
+        $hasSingleResetField -and
+            $hasSingleFailureActionField -and
+            [string]::IsNullOrEmpty($failureActionFieldValue) -and
+            $resetPeriodSeconds -eq $expectedResetPeriodSeconds -and
             $delayLineCount -eq 0 -and
             $actualActions.Count -eq 0
     } else {
-        $resetPeriodSeconds -eq 3600 -and
+        $hasSingleResetField -and
+            $hasSingleFailureActionField -and
+            $resetPeriodSeconds -eq $expectedResetPeriodSeconds -and
             $delayLineCount -eq 2 -and
             $actualActions.Count -eq 2 -and
+            $actionMatches[0].Groups['Label'].Success -and
+            -not $actionMatches[1].Groups['Label'].Success -and
             $actualActions[0] -eq 'RESTART:10000' -and
             $actualActions[1] -eq 'RESTART:30000'
     }
@@ -207,7 +224,7 @@ function Assert-ProductionWebsiteRecoveryPolicy {
             'RESTART:10000, RESTART:30000'
         }
         throw [System.InvalidOperationException]::new(
-            "$Policy recovery policy verification failed. Expected reset period 3600 seconds and actions $expectedActions; received reset period $actualReset and actions $actualActionSummary.")
+            "$Policy recovery policy verification failed. Expected reset period $expectedResetPeriodSeconds seconds and actions $expectedActions; received reset period $actualReset and actions $actualActionSummary.")
     }
 }
 
@@ -226,13 +243,14 @@ function Set-ProductionWebsiteRecoveryPolicy {
     } else {
         ''
     }
+    $resetPeriodSeconds = if ($Policy -eq 'Normal') { 3600 } else { 0 }
     $phase = if ($Policy -eq 'Normal') { 'restore' } else { 'suspend' }
     try {
         Invoke-BoundedCheckedProcess -FilePath 'sc.exe' -ArgumentList @(
             'failure',
             'ChristopherBellDev',
             'reset=',
-            '3600',
+            [string]$resetPeriodSeconds,
             'actions=',
             $actions
         ) -TimeoutMilliseconds $RecoveryCommandTimeoutMilliseconds | Out-Null
