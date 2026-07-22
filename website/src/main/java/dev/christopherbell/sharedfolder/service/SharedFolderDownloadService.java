@@ -54,8 +54,9 @@ public class SharedFolderDownloadService {
     long totalLength = file.attributes().size();
     RangeSelection selection = rangeSelection(rangeHeader, totalLength);
     String name = file.name();
+    Resource resource = new SharedFolderReadResource(file.handle(), name, totalLength);
     return new SharedFolderDownload(
-        new SharedFolderReadResource(file.handle(), name, totalLength),
+        selectedResource(resource, selection),
         selection.start(),
         selection.length(),
         totalLength,
@@ -74,7 +75,8 @@ public class SharedFolderDownloadService {
       RangeSelection selection = rangeSelection(rangeHeader, totalLength);
       String name = decodedPath.substring(decodedPath.lastIndexOf('/') + 1);
       return new SharedFolderDownload(
-          target.resource(name), selection.start(), selection.length(), totalLength, selection.partial(),
+          selectedResource(target.resource(name), selection),
+          selection.start(), selection.length(), totalLength, selection.partial(),
           SharedFolderContentPolicy.mediaType(name, SharedFolderContentPolicy.previewKind(name)),
           SharedFolderContentPolicy.attachmentDisposition(name));
     } catch (UnsafeSharedPathException exception) {
@@ -123,6 +125,13 @@ public class SharedFolderDownloadService {
 
   private SharedFolderRangeNotSatisfiableException rangeNotSatisfiable(long totalLength) {
     return new SharedFolderRangeNotSatisfiableException(totalLength);
+  }
+
+  private Resource selectedResource(Resource resource, RangeSelection selection) {
+    if (!selection.partial()) {
+      return resource;
+    }
+    return new SharedFolderByteRangeResource(resource, selection.start(), selection.length());
   }
 
   private ResponseStatusException notFound() {

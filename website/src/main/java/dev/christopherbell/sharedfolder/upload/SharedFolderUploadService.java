@@ -742,6 +742,7 @@ public class SharedFolderUploadService {
     if (renewed != 1L) {
       throw new AppendLeaseLostException();
     }
+    advanceVersionAfterLeaseRenewal(session);
     session.setAppendLeaseExpiresAt(expiresAt);
     session.setUpdatedAt(now);
   }
@@ -1262,8 +1263,18 @@ public class SharedFolderUploadService {
     if (renewed != 1L) {
       throw new FinalizationLeaseLostException();
     }
+    advanceVersionAfterLeaseRenewal(session);
     session.setFinalizationLeaseExpiresAt(expiresAt);
     session.setUpdatedAt(now);
+  }
+
+  /** Keeps the in-memory aggregate aligned with the repository's atomic version increment. */
+  private void advanceVersionAfterLeaseRenewal(SharedFolderUploadSession session) {
+    Long version = session.getVersion();
+    if (version == null) {
+      throw new IllegalStateException("Persisted upload session has no optimistic-lock version");
+    }
+    session.setVersion(Math.incrementExact(version));
   }
 
   /** Test seam for deterministic short finalization leases. */

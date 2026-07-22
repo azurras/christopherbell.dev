@@ -683,7 +683,9 @@ class SharedFolderUploadServiceTest {
       if (candidate.getNextOffset() > 0 && failProgressSave.compareAndSet(true, false)) {
         throw new org.springframework.dao.OptimisticLockingFailureException("simulated concurrent save");
       }
+      SharedFolderUploadSession existing = stored.get(candidate.getId());
       SharedFolderUploadSession saved = copy(candidate);
+      saved.setVersion(existing == null ? 0L : existing.getVersion() + 1L);
       stored.put(saved.getId(), saved);
       return copy(saved);
     });
@@ -721,7 +723,9 @@ class SharedFolderUploadServiceTest {
           && failCompletedSave.compareAndSet(true, false)) {
         throw new org.springframework.dao.OptimisticLockingFailureException("simulated final save");
       }
+      SharedFolderUploadSession existing = stored.get(candidate.getId());
       SharedFolderUploadSession saved = copy(candidate);
+      saved.setVersion(existing == null ? 0L : existing.getVersion() + 1L);
       stored.put(saved.getId(), saved);
       return copy(saved);
     });
@@ -2114,6 +2118,7 @@ class SharedFolderUploadServiceTest {
         }
         current.setAppendLeaseExpiresAt(invocation.getArgument(3));
         current.setUpdatedAt(invocation.getArgument(4));
+        current.setVersion(current.getVersion() == null ? 0L : current.getVersion() + 1L);
         return 1L;
       }
     }).when(repository).renewAppendLease(
@@ -2130,6 +2135,7 @@ class SharedFolderUploadServiceTest {
         }
         current.setFinalizationLeaseExpiresAt(invocation.getArgument(3));
         current.setUpdatedAt(invocation.getArgument(4));
+        current.setVersion(current.getVersion() == null ? 0L : current.getVersion() + 1L);
         return 1L;
       }
     }).when(repository).renewFinalizationLease(any(), any(), any(), any(), any());

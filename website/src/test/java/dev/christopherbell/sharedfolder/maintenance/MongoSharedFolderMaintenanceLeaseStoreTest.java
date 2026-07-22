@@ -12,12 +12,31 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.annotation.PersistenceExceptionTranslationPostProcessor;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 class MongoSharedFolderMaintenanceLeaseStoreTest {
+
+  @Test
+  void repositoryCanBeProxiedUsingTheApplicationClassProxyMode() {
+    try (var context = new AnnotationConfigApplicationContext()) {
+      context.registerBean(MongoTemplate.class, () -> mock(MongoTemplate.class));
+      context.registerBean(PersistenceExceptionTranslationPostProcessor.class, () -> {
+        var postProcessor = new PersistenceExceptionTranslationPostProcessor();
+        postProcessor.setProxyTargetClass(true);
+        return postProcessor;
+      });
+      context.register(MongoSharedFolderMaintenanceLeaseStore.class);
+
+      context.refresh();
+
+      assertThat(context.getBean(SharedFolderMaintenanceLeaseStore.class)).isNotNull();
+    }
+  }
 
   @Test
   void acquisitionUsesOneFixedKeyAndMapsAtomicUpsertContentionToFalse() {

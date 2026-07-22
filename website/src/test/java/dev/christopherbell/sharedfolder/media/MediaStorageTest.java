@@ -13,6 +13,7 @@ import java.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.util.unit.DataSize;
 import tools.jackson.databind.ObjectMapper;
 
@@ -26,6 +27,23 @@ class MediaStorageTest {
     Path shared = Files.createDirectory(temp.resolve("shared"));
     system = Files.createDirectory(temp.resolve("system"));
     storage = storage(shared, new PortableSharedFolderPrivateBoundary(system));
+  }
+
+  @Test
+  void productionConstructorIsSelectedByTheRealSpringContext() {
+    SharedFolderProperties disabled = new SharedFolderProperties(
+        temp.resolve("disabled-shared"), temp.resolve("disabled-system"),
+        DataSize.ofGigabytes(1), DataSize.ofMegabytes(1),
+        DataSize.ofBytes(1), DataSize.ofBytes(10), Duration.ofDays(1),
+        Duration.ofDays(1), false);
+    try (var context = new AnnotationConfigApplicationContext()) {
+      context.registerBean(SharedFolderProperties.class, () -> disabled);
+      context.register(MediaStorage.class);
+
+      context.refresh();
+
+      assertThat(context.getBean(MediaStorage.class)).isNotNull();
+    }
   }
 
   @Test

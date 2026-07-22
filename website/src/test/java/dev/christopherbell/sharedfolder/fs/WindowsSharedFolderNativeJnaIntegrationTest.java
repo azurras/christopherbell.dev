@@ -328,6 +328,44 @@ class WindowsSharedFolderNativeJnaIntegrationTest {
   }
 
   @Test
+  void realBoundaryCopiesBetweenTwoExclusiveStagingHandles() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("copy-visible-root"));
+    Path systemRoot = Files.createDirectory(temp.resolve("copy-system-root"));
+    SharedFolderProperties properties = new SharedFolderProperties(
+        root, systemRoot, DataSize.ofGigabytes(1), DataSize.ofMegabytes(8), DataSize.ofBytes(1),
+        DataSize.ofMegabytes(10), Duration.ofDays(1), Duration.ofDays(1), true);
+    WindowsSharedFolderMutationBoundary boundary = new WindowsSharedFolderMutationBoundary(properties);
+    boundary.initialize();
+    String targetKey = "44444444-4444-4444-4444-444444444444";
+    String chunkKey = "55555555-5555-5555-5555-555555555555";
+    byte[] expected = "native append chunk".getBytes(StandardCharsets.UTF_8);
+    try {
+      boundary.createStaging(targetKey).close();
+      try (var chunk = boundary.createStaging(chunkKey)) {
+        assertThat(chunk.write(expected, 0, expected.length)).isEqualTo(expected.length);
+        chunk.flush();
+      }
+
+      try (var target = boundary.staging(targetKey);
+          var source = boundary.staging(chunkKey)) {
+        assertThat(target.seek(0)).isZero();
+        assertThat(source.seek(0)).isZero();
+        byte[] buffer = new byte[64];
+        int read = source.read(buffer, 0, buffer.length);
+        assertThat(read).isEqualTo(expected.length);
+        assertThat(target.write(buffer, 0, read)).isEqualTo(read);
+        target.flush();
+      }
+
+      assertThat(Files.readAllBytes(
+          systemRoot.resolve("shared-folder-upload-staging").resolve(targetKey)))
+          .containsExactly(expected);
+    } finally {
+      boundary.destroy();
+    }
+  }
+
+  @Test
   void junctionRaceIsRejectedWhenExplicitNativeIntegrationIsEnabled() throws Exception {
     Assumptions.assumeTrue(junctionTestEnabled(),
         "set SHARED_FOLDER_RUN_WINDOWS_NATIVE_JUNCTION_TEST=true on a capable Windows host");

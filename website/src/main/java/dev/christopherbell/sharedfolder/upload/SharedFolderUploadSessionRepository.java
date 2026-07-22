@@ -41,9 +41,10 @@ public interface SharedFolderUploadSessionRepository
       int newAttempts,
       Instant updatedAt);
 
-  /** Extends only the exact FINALIZING writer and phase without advancing document version. */
+  /** Extends only the exact FINALIZING writer and phase, advancing its optimistic-lock version. */
   @Query("{ '_id': ?0, 'state': 'FINALIZING', 'finalizationLeaseToken': ?1, 'finalizationState': ?2 }")
-  @Update("{ '$set': { 'finalizationLeaseExpiresAt': ?3, 'updatedAt': ?4 } }")
+  @Update("{ '$set': { 'finalizationLeaseExpiresAt': ?3, 'updatedAt': ?4 }, "
+      + "'$inc': { 'version': 1 } }")
   long renewFinalizationLease(
       String id,
       String finalizationLeaseToken,
@@ -67,9 +68,10 @@ public interface SharedFolderUploadSessionRepository
       java.time.Instant recoveryFinalizationLeaseExpiresAt,
       java.time.Instant updatedAt);
 
-  /** Extends only the exact APPENDING writer and offset without advancing document version. */
+  /** Extends only the exact APPENDING writer and offset, advancing its optimistic-lock version. */
   @Query("{ '_id': ?0, 'state': 'APPENDING', 'appendLeaseToken': ?1, 'appendOffset': ?2 }")
-  @Update("{ '$set': { 'appendLeaseExpiresAt': ?3, 'updatedAt': ?4 } }")
+  @Update("{ '$set': { 'appendLeaseExpiresAt': ?3, 'updatedAt': ?4 }, "
+      + "'$inc': { 'version': 1 } }")
   long renewAppendLease(
       String id,
       String appendLeaseToken,

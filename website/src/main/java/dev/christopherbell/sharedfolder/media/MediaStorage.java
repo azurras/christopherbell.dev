@@ -19,6 +19,7 @@ import java.util.OptionalLong;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -42,6 +43,7 @@ public class MediaStorage {
   private final Object readyLeaseLock = new Object();
   private volatile Long usableSpaceForTest;
 
+  @Autowired
   public MediaStorage(SharedFolderProperties properties) {
     this(properties.systemRoot(), properties.enabled(), new ObjectMapper());
   }

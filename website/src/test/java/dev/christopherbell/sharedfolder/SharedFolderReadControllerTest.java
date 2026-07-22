@@ -1,5 +1,6 @@
 package dev.christopherbell.sharedfolder;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.Mockito.verify;
@@ -112,6 +113,9 @@ class SharedFolderReadControllerTest {
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
         .andExpect(header().string(HttpHeaders.ACCEPT_RANGES, "bytes"))
         .andExpect(header().string(HttpHeaders.CONTENT_RANGE, "bytes 0-3/10"))
+        .andExpect(result -> assertThat(
+            result.getResponse().getHeaders(HttpHeaders.CONTENT_RANGE))
+            .containsExactly("bytes 0-3/10"))
         .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
             "attachment; filename=track.flac"));
 
@@ -159,6 +163,7 @@ class SharedFolderReadControllerTest {
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.ACCEPT_RANGES, "bytes"))
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
+        .andExpect(header().doesNotExist(HttpHeaders.CONTENT_RANGE))
         .andExpect(header().string(HttpHeaders.CONTENT_LENGTH, "10"));
 
     verify(downloads).open("music/track.flac", "bytes=0-1,4-5");
@@ -178,6 +183,7 @@ class SharedFolderReadControllerTest {
 
     mockMvc.perform(get(BASE + "/content").queryParam("path", "music/full.flac"))
         .andExpect(status().isOk())
+        .andExpect(header().doesNotExist(HttpHeaders.CONTENT_RANGE))
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
 
     mockMvc.perform(get(BASE + "/entries").queryParam("path", "missing"))

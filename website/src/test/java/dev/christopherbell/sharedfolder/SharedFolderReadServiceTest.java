@@ -74,10 +74,13 @@ class SharedFolderReadServiceTest {
     assertThat(transfer.length()).isEqualTo(4);
     assertThat(transfer.totalLength()).isEqualTo(10);
     assertThat(transfer.disposition().toString()).startsWith("attachment;");
+    assertThat(transfer.resource().contentLength()).isEqualTo(4);
     try (var input = transfer.resource().getInputStream()) {
-      input.skipNBytes(transfer.start());
-      assertThat(new String(input.readNBytes((int) transfer.length()), StandardCharsets.UTF_8))
-          .isEqualTo("2345");
+      assertThat(new String(input.readAllBytes(), StandardCharsets.UTF_8)).isEqualTo("2345");
+    }
+    try (var input = transfer.resource().getInputStream()) {
+      assertThat(input.skip(2)).isEqualTo(2);
+      assertThat(new String(input.readAllBytes(), StandardCharsets.UTF_8)).isEqualTo("45");
     }
   }
 

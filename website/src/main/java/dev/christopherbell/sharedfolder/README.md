@@ -62,7 +62,7 @@ Unavailable` and never falls back to an unchecked production path.
   `Cache-Control: private, no-store` before security or controller handling, so successful reads,
   range/HEAD responses, and protected errors cannot be retained by browser or intermediary caches.
 - `GET /entries` returns only decoded relative paths and ordinary-entry metadata. `GET /content`
-  uses a revalidating disk-backed resource plus `ResourceRegion` for disk streaming and supports
+  uses a revalidating disk-backed resource plus a bounded range resource for streaming and supports
   exactly one HTTP byte range, including correct `206`, `416`, `Content-Range`, `Accept-Ranges`,
   and `HEAD` semantics. It never calls `readAllBytes` or exposes an absolute local path.
 - `GET /preview` returns bounded UTF-8 text as JSON for text files; allowlisted raster image,
