@@ -1,8 +1,8 @@
 # Shared Folder Portal SDD Progress
 
 Plan: `C:\Users\Christopher\Developer\builder\docs\implementation-plans\2026-07-17-christopherbell-dev-shared-folder-portal.md`
-Branch base: `9108f9cb936aa80eb10f235210c6b101e16496c4`
-Branch: `codex/shared-folder-portal`
+Branch base: `d45ff0ec63e774ac301299477dc02da44546632b`
+Branch: `codex/shared-folder-worker`
 Baseline: `gradlew.bat test :website:jsTest --console=plain` succeeded; browser tests 120 passed, 0 failed.
 
 Workflow checkpoint: each numbered task is complete only after RED/GREEN implementation,
@@ -17,10 +17,12 @@ Task 4: complete (commits 8602985..8d1d3da; eighth whole-change review approved 
 Task 5: complete (commits 09d2f408..54b1bae2; twelfth whole-change review approved
 0C/0I/0M; forced native/junction-enabled full gate passed 957 Java tests and 161 JS tests;
 reviewed branch checkpoint pushed)
-Task 6: complete (commits 32958f7b..63849159; final whole-change review approved
-0 blockers/0 warnings; forced native/junction-enabled full gate passed 998 Java tests and 165 JS
-tests with zero failures, errors, or skips; reviewed branch checkpoint ready to push)
-Task 7: pending
+Task 6: complete (merged by PR #1218 as `d45ff0ec63e774ac301299477dc02da44546632b`;
+final whole-change review approved 0 blockers/0 warnings; cross-platform CI and CodeQL passed)
+Task 7: complete (commits d45ff0ec..405c8f83; final task review approved 0 Critical,
+0 Important, 0 Minor; fresh full Windows gate passed 143 Pester tests with 0 failures and
+3 elevation-gated skips; 20 PowerShell, 2 XML, and 2 JSON files parsed; reviewed branch
+checkpoint ready to push)
 Task 8: pending
 Task 9: pending
 Task 10: pending
