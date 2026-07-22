@@ -249,3 +249,59 @@ export function shouldActivateEntry(event) {
 export function isSharedFolderAccessDenied(error) {
   return error?.status === 401 || error?.status === 403;
 }
+
+/** Select one closed server-side output profile from trusted listing metadata. */
+export function mediaOutputProfile(entry) {
+  if (entry?.previewKind === 'VIDEO') return 'VIDEO_MP4';
+  if (entry?.previewKind === 'AUDIO') return 'AUDIO_M4A';
+  throw new Error('A media entry is required.');
+}
+
+/** Return safe UI text for every public media lifecycle state. */
+export function mediaStatusMessage(state) {
+  return ({
+    QUEUED: 'Waiting for the media converter…',
+    INSPECTING: 'Checking the media format…',
+    TRANSCODING: 'Converting media for this browser…',
+    BUFFERING: 'Starting progressive playback…',
+    READY: 'Media is ready.',
+    FAILED: 'This media could not be prepared.',
+    CANCELED: 'Media preparation was canceled.',
+    INSUFFICIENT_SPACE: 'Media conversion is paused to preserve disk space.',
+    TIMED_OUT: 'Media preparation timed out. You can retry it.',
+  })[String(state || '').toUpperCase()] || 'Preparing media…';
+}
+
+/** Poll an owned job until progressive bytes or a completed cache entry are playable. */
+export async function waitForPlayableMediaJob(initial, options) {
+  const {
+    load, onStatus = () => {}, signal,
+    delays = Array.from({ length: 240 }, () => 500),
+  } = options;
+  let job = initial;
+  for (let poll = 0; ; poll += 1) {
+    signal?.throwIfAborted();
+    onStatus(job);
+    if (job?.status === 'BUFFERING' || job?.status === 'READY') return job;
+    if (['FAILED', 'CANCELED', 'INSUFFICIENT_SPACE', 'TIMED_OUT'].includes(job?.status)) {
+      const error = new Error(mediaStatusMessage(job.status));
+      error.mediaStatus = job.status;
+      throw error;
+    }
+    if (poll >= delays.length) throw new Error('Media preparation is taking longer than expected.');
+    const delay = Math.max(0, Number(delays[poll]) || 0);
+    await new Promise((resolve, reject) => {
+      const abort = () => {
+        clearTimeout(timer);
+        reject(new DOMException('Media playback disconnected.', 'AbortError'));
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', abort);
+        resolve();
+      }, delay);
+      signal?.addEventListener('abort', abort, { once: true });
+    });
+    signal?.throwIfAborted();
+    job = await load(initial.jobId || initial.id, signal);
+  }
+}

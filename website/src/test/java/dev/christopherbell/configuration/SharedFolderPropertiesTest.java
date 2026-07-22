@@ -51,7 +51,31 @@ class SharedFolderPropertiesTest {
     assertThat(properties.systemRoot()).isEqualTo(Path.of("A:/Shared-System"));
   }
 
+  @Test
+  void bindsBoundedMediaQueueAndProgressiveDeliveryDefaults() throws IOException {
+    StandardEnvironment environment = environment(null);
+    SharedFolderMediaProperties media = Binder.get(environment)
+        .bind("app.shared-folder.media", SharedFolderMediaProperties.class)
+        .orElseThrow(() -> new AssertionError("shared-folder media configuration was not bound"));
+
+    assertThat(media.queueCapacity()).isEqualTo(8);
+    assertThat(media.perAccountQueueCapacity()).isEqualTo(2);
+    assertThat(media.jobTimeout()).isEqualTo(Duration.ofHours(2));
+    assertThat(media.progressivePollInterval()).isEqualTo(Duration.ofMillis(250));
+    assertThat(media.progressiveIdleTimeout()).isEqualTo(Duration.ofSeconds(30));
+    assertThat(media.initialBuffer()).isEqualTo(DataSize.ofMegabytes(2));
+    assertThat(media.maxOutput()).isEqualTo(DataSize.ofGigabytes(50));
+  }
+
   private SharedFolderProperties bindProfile(String profile) throws IOException {
+    StandardEnvironment environment = environment(profile);
+
+    return Binder.get(environment)
+        .bind("app.shared-folder", SharedFolderProperties.class)
+        .orElseThrow(() -> new AssertionError("shared-folder configuration was not bound"));
+  }
+
+  private StandardEnvironment environment(String profile) throws IOException {
     StandardEnvironment environment = new StandardEnvironment();
     MutablePropertySources sources = environment.getPropertySources();
     addFirst(sources, load("application.yml"));
@@ -59,9 +83,7 @@ class SharedFolderPropertiesTest {
       addFirst(sources, load("application-" + profile + ".yml"));
     }
 
-    return Binder.get(environment)
-        .bind("app.shared-folder", SharedFolderProperties.class)
-        .orElseThrow(() -> new AssertionError("shared-folder configuration was not bound"));
+    return environment;
   }
 
   private List<PropertySource<?>> load(String resourceName) throws IOException {

@@ -164,6 +164,12 @@ public final class WindowsSharedFolderReadBoundary {
     }
   }
 
+  /** Returns safe public metadata for a worker handoff without exposing native handle internals. */
+  public MediaFileMetadata mediaFileMetadata(String decodedPath) {
+    NativeReadTarget target = file(decodedPath);
+    return new MediaFileMetadata(target.metadata().size(), target.metadata().modifiedAt());
+  }
+
   private InputStream openVerifiedFile(NativeReadTarget target) throws IOException {
     lifecycleLock.readLock().lock();
     try {
@@ -280,6 +286,9 @@ public final class WindowsSharedFolderReadBoundary {
       return new NativeReadResource(this, filename, metadata.size());
     }
   }
+
+  /** Minimal immutable metadata used to bind a media job to one source revision. */
+  public record MediaFileMetadata(long size, java.time.Instant modifiedAt) {}
 
   private final class NativeReadResource extends AbstractResource {
     private final NativeReadTarget target;

@@ -20,6 +20,9 @@ import {
   createUploadOperationGate,
   runUploadWorkflow,
   cancelUploadWorkflow,
+  mediaOutputProfile,
+  mediaStatusMessage,
+  waitForPlayableMediaJob,
 } from './lib/shared-folder.js';
 import {
   clearSharedFolderStreamingAuth,
@@ -29,6 +32,7 @@ import {
 
 const root = typeof document === 'undefined' ? null : document.getElementById('shared-folder-app');
 let currentPreviewLostAccess = false;
+let currentMediaPlayback = null;
 const UPLOAD_RESUME_KEY = 'shared-folder-upload-resume-v1';
 const uploadOperationGate = createUploadOperationGate();
 
@@ -99,6 +103,8 @@ async function copyLink(entry) {
 }
 
 async function preview(entry) {
+  currentMediaPlayback?.abort();
+  currentMediaPlayback = null;
   const host = document.getElementById('shared-preview');
   clear(host);
   host.hidden = false;
@@ -142,10 +148,59 @@ async function preview(entry) {
   element.title = `${entry.name} preview`;
   if (element instanceof HTMLMediaElement) element.controls = true;
   if (entry.previewKind === 'PDF') element.setAttribute('sandbox', '');
-  element.addEventListener('error', () => {
-    if (!currentPreviewLostAccess) status('The preview could not be loaded.');
-  });
+  if (['AUDIO', 'VIDEO'].includes(entry.previewKind)) {
+    const controller = new AbortController();
+    currentMediaPlayback = controller;
+    element.addEventListener('error', () => {
+      if (currentPreviewLostAccess || controller.signal.aborted) return;
+      void requestMediaFallback(entry, element, host, controller.signal).catch(error => {
+        if (error?.name === 'AbortError') return;
+        if (isSharedFolderAccessDenied(error)) {
+          handleSharedFolderAccessLoss(error.status);
+          return;
+        }
+        status(error?.message || 'The media could not be prepared.');
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'btn btn-sm btn-outline-light';
+        retry.textContent = 'Retry media';
+        retry.addEventListener('click', () => {
+          retry.remove();
+          void requestMediaFallback(entry, element, host, controller.signal)
+            .catch(retryError => status(retryError?.message || 'The media could not be prepared.'));
+        }, { once: true });
+        host.append(retry);
+      });
+    }, { once: true });
+  } else {
+    element.addEventListener('error', () => {
+      if (!currentPreviewLostAccess) status('The preview could not be loaded.');
+    });
+  }
   host.append(element);
+}
+
+async function requestMediaFallback(entry, element, host, signal) {
+  signal?.throwIfAborted();
+  status('Preparing a browser-compatible version…');
+  const initial = await fetchJson(API.sharedFolder.media.fallback, {
+    method: 'POST', headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
+    body: JSON.stringify({ path: entry.path, profile: mediaOutputProfile(entry) }), signal,
+  });
+  const playable = await waitForPlayableMediaJob(initial, {
+    signal,
+    load: (id, requestSignal) => fetchJson(API.sharedFolder.media.job(id), {
+      headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
+      signal: requestSignal,
+    }),
+    onStatus: job => status(mediaStatusMessage(job.status)),
+  });
+  signal?.throwIfAborted();
+  if (!await prepareNativeStreaming()) return;
+  element.src = API.sharedFolder.media.stream(playable.jobId || playable.id);
+  element.load?.();
+  status(mediaStatusMessage(playable.status));
+  host.scrollIntoView?.({ block: 'nearest' });
 }
 
 async function mutationRequest(url, method, body) {

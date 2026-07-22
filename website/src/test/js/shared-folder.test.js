@@ -21,6 +21,9 @@ import {
   runUploadWorkflow,
   cancelUploadWorkflow,
   moveMutationPayload,
+  mediaOutputProfile,
+  mediaStatusMessage,
+  waitForPlayableMediaJob,
 } from '../../main/resources/static/js/lib/shared-folder.js';
 
 test('shared-folder API paths encode each decoded relative path once', () => {
@@ -30,6 +33,53 @@ test('shared-folder API paths encode each decoded relative path once', () => {
     '/api/shared-folder/2026-07-17/content?path=music%2Ftrack.flac');
   assert.equal(API.sharedFolder.preview('notes/<draft>.txt'),
     '/api/shared-folder/2026-07-17/preview?path=notes%2F%3Cdraft%3E.txt');
+  assert.equal(API.sharedFolder.media.fallback,
+    '/api/shared-folder/2026-07-17/media/fallback');
+  assert.equal(API.sharedFolder.media.job('job/id'),
+    '/api/shared-folder/2026-07-17/media/jobs/job%2Fid');
+  assert.equal(API.sharedFolder.media.stream('job/id'),
+    '/api/shared-folder/2026-07-17/media/jobs/job%2Fid/stream');
+});
+
+test('media profiles and every public job state have clear browser text', () => {
+  assert.equal(mediaOutputProfile({ previewKind: 'VIDEO' }), 'VIDEO_MP4');
+  assert.equal(mediaOutputProfile({ previewKind: 'AUDIO' }), 'AUDIO_M4A');
+  assert.throws(() => mediaOutputProfile({ previewKind: 'IMAGE' }), /media entry/);
+  for (const state of ['QUEUED', 'INSPECTING', 'TRANSCODING', 'BUFFERING', 'READY',
+    'FAILED', 'CANCELED', 'INSUFFICIENT_SPACE', 'TIMED_OUT']) {
+    assert.match(mediaStatusMessage(state), /\S/);
+  }
+  assert.equal(mediaStatusMessage('unknown'), 'Preparing media…');
+});
+
+test('media fallback polling begins progressive playback at buffering and supports cache hits', async () => {
+  const seen = [];
+  const states = ['INSPECTING', 'TRANSCODING', 'BUFFERING'];
+  const result = await waitForPlayableMediaJob({ id: 'job-1', status: 'QUEUED' }, {
+    load: async () => ({ id: 'job-1', status: states.shift() }),
+    onStatus: job => seen.push(job.status), delays: [0, 0, 0],
+  });
+  assert.equal(result.status, 'BUFFERING');
+  assert.deepEqual(seen, ['QUEUED', 'INSPECTING', 'TRANSCODING', 'BUFFERING']);
+
+  const ready = await waitForPlayableMediaJob({ id: 'cache-1', status: 'READY' }, {
+    load: async () => { throw new Error('cache hit must not poll'); },
+    onStatus: () => {}, delays: [],
+  });
+  assert.equal(ready.status, 'READY');
+});
+
+test('media fallback polling stops on safe terminal state and disconnect', async () => {
+  await assert.rejects(waitForPlayableMediaJob({ id: 'job-1', status: 'FAILED' }, {
+    load: async () => { throw new Error('must not poll'); }, onStatus: () => {}, delays: [],
+  }), /could not be prepared/);
+
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(waitForPlayableMediaJob({ id: 'job-1', status: 'QUEUED' }, {
+    load: async () => ({ id: 'job-1', status: 'BUFFERING' }), onStatus: () => {},
+    signal: controller.signal, delays: [0],
+  }), error => error.name === 'AbortError');
 });
 
 test('effective read access includes admins and stored write capability', () => {
@@ -366,4 +416,7 @@ test('shared-folder shell owns a responsive single-column mobile layout and down
   assert.match(page, /API\.sharedFolder\.move/);
   assert.match(page, /API\.sharedFolder\.delete/);
   assert.match(page, /window\.confirm/);
+  assert.match(page, /requestMediaFallback/);
+  assert.match(page, /waitForPlayableMediaJob/);
+  assert.match(page, /API\.sharedFolder\.media\.stream/);
 });

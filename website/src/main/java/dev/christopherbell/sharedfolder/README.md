@@ -107,6 +107,34 @@ Unavailable` and never falls back to an unchecked production path.
   operation can be reconciled from stable file identity instead of duplicating or losing work.
   Terminal sessions report `COMPLETED`, `CANCELLED`, or `EXPIRED` and cannot accept more chunks.
 
+## Media Playback and Worker Handoff
+
+- The browser first tries the original authenticated media URL. Browser-native containers such as
+  FLAC, M4A, MP3, Ogg, WAV, MP4, Ogg Video, and WebM normally play directly; Matroska is listed as
+  video so an unsupported browser can request a fallback. A native playback error requests one
+  fixed `VIDEO_MP4` or `AUDIO_M4A` profile. The website never accepts an executable, codec, or
+  extra-argument field and never launches a media process.
+- Media jobs are owner-scoped Mongo records with bounded global and per-account admission. Their
+  cache identity includes the relative source path, size, modification time, fixed profile, and
+  profile version. Ready matches are reused; changed source metadata or profile versions create a
+  different cache identity. Queue saturation returns `429`, reserve denial returns `507`, and a
+  private-storage failure returns `503`.
+- Worker handoff JSON lives only below fixed private system-root directories. It contains schema
+  version 1, opaque job/cache IDs, validated absolute source/output/status/cancellation paths,
+  source revision facts, a fixed profile enum, deadline, maximum output size, and initial buffer
+  size. Worker status JSON is size-bounded and accepted only for the matching opaque job with a
+  known state, bounded output count, and safe failure category. Spring accepts only one processing
+  job at a time; the worker adds its own cross-process lock in the worker task.
+- `GET /media/jobs/{id}/stream` rechecks read access and ownership. A growing output streams
+  sequentially after the configured initial buffer with bounded polling, then follows the
+  worker's atomic ready-cache publish. Completed outputs regain normal single-range semantics.
+  Seeking is intentionally limited while the derivative is still growing and becomes available
+  when the job is ready. Client disconnects stop that response without canceling shared server
+  state; explicit owner cancellation publishes a fixed marker for the worker.
+- The cache defaults to 250 GB, uses least-recently-used file timestamps, and excludes active or
+  currently streamed outputs from eviction. Media conversion also preserves the default 100 GB
+  free-space reserve and caps each output independently.
+
 ## Update This Doc
 
 Update this README when resolver or native-handle guarantees, effective access rules, mutation

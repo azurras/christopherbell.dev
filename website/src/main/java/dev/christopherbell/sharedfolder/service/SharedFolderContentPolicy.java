@@ -16,7 +16,7 @@ final class SharedFolderContentPolicy {
           SharedFolderPreviewKind.TEXT;
       case "avif", "gif", "jpeg", "jpg", "png", "webp" -> SharedFolderPreviewKind.IMAGE;
       case "flac", "m4a", "mp3", "ogg", "wav" -> SharedFolderPreviewKind.AUDIO;
-      case "mp4", "ogv", "webm" -> SharedFolderPreviewKind.VIDEO;
+      case "mkv", "mp4", "ogv", "webm" -> SharedFolderPreviewKind.VIDEO;
       case "pdf" -> SharedFolderPreviewKind.PDF;
       default -> SharedFolderPreviewKind.NONE;
     };
@@ -41,6 +41,7 @@ final class SharedFolderContentPolicy {
         default -> MediaType.APPLICATION_OCTET_STREAM;
       };
       case VIDEO -> switch (extension(filename)) {
+        case "mkv" -> MediaType.parseMediaType("video/x-matroska");
         case "mp4" -> MediaType.parseMediaType("video/mp4");
         case "ogv" -> MediaType.parseMediaType("video/ogg");
         case "webm" -> MediaType.parseMediaType("video/webm");

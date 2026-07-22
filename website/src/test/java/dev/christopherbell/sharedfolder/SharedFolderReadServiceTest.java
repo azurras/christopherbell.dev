@@ -44,17 +44,19 @@ class SharedFolderReadServiceTest {
   void listingReturnsOnlyRelativeMetadataAndSafePreviewKinds() throws Exception {
     Path music = Files.createDirectories(root.resolve("music"));
     Files.writeString(music.resolve("track.flac"), "FLAC fixture");
+    Files.writeString(music.resolve("movie.mkv"), "Matroska fixture");
     Files.writeString(music.resolve("notes.txt"), "notes");
 
     var response = new SharedFolderBrowserService(properties).list("music");
 
     assertThat(response.path()).isEqualTo("music");
     assertThat(response.entries()).extracting("name")
-        .containsExactly("notes.txt", "track.flac");
+        .containsExactly("movie.mkv", "notes.txt", "track.flac");
     assertThat(response.entries()).extracting("path")
-        .containsExactly("music/notes.txt", "music/track.flac");
+        .containsExactly("music/movie.mkv", "music/notes.txt", "music/track.flac");
     assertThat(response.entries()).extracting("previewKind")
-        .containsExactly(SharedFolderPreviewKind.TEXT, SharedFolderPreviewKind.AUDIO);
+        .containsExactly(SharedFolderPreviewKind.VIDEO, SharedFolderPreviewKind.TEXT,
+            SharedFolderPreviewKind.AUDIO);
     assertThat(response.entries()).extracting("observedToken")
         .allSatisfy(token -> assertThat((String) token).isNotBlank());
     assertThat(response.toString()).doesNotContain(root.toString());

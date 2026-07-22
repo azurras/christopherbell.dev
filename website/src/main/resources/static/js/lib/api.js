@@ -95,6 +95,13 @@ export const API = {
       const params = new URLSearchParams({ path: String(path || '') });
       return `/api/shared-folder/2026-07-17/preview?${params}`;
     },
+    media: {
+      playback: '/api/shared-folder/2026-07-17/media/playback',
+      fallback: '/api/shared-folder/2026-07-17/media/fallback',
+      job: (id) => `/api/shared-folder/2026-07-17/media/jobs/${encodeURIComponent(id)}`,
+      cancel: (id) => `/api/shared-folder/2026-07-17/media/jobs/${encodeURIComponent(id)}`,
+      stream: (id) => `/api/shared-folder/2026-07-17/media/jobs/${encodeURIComponent(id)}/stream`,
+    },
     admin: {
       audit: (filters = {}) => {
         const params = new URLSearchParams();
