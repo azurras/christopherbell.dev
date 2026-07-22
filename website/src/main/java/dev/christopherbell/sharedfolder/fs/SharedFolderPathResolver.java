@@ -257,7 +257,10 @@ public final class SharedFolderPathResolver {
       verifyRoot();
       Path current = root;
       for (Path segment : root.relativize(candidate)) {
-        current = current.resolve(segment);
+        current = current.resolve(segment).toAbsolutePath().normalize();
+        if (!current.startsWith(root)) {
+          throw unsafe("Shared-folder path escapes the configured root");
+        }
         ExistingIdentity identity = inspectExistingSegment(current, false);
         if (!identity.canonicalPath().startsWith(canonicalRoot)) {
           throw unsafe("Shared-folder path canonical identity escapes the configured root");
@@ -275,18 +278,22 @@ public final class SharedFolderPathResolver {
   }
 
   private ExistingIdentity inspectExistingSegment(Path path, boolean rootPath) throws IOException {
-    if (!fileSystem.existsNoFollow(path)) {
+    Path candidate = path.toAbsolutePath().normalize();
+    if (!candidate.startsWith(root)) {
+      throw unsafe("Shared-folder path escapes the configured root");
+    }
+    if (!fileSystem.existsNoFollow(candidate)) {
       throw unsafe(rootPath ? "Shared-folder root must exist" : "Shared-folder path does not exist");
     }
-    BasicFileAttributes attributes = fileSystem.readAttributesNoFollow(path);
+    BasicFileAttributes attributes = fileSystem.readAttributesNoFollow(candidate);
     if (rootPath && !attributes.isDirectory()) {
       throw unsafe("Shared-folder root must be an existing directory");
     }
-    requireOrdinary(path, attributes);
-    if (fileSystem.isMountPoint(path)) {
+    requireOrdinary(candidate, attributes);
+    if (fileSystem.isMountPoint(candidate)) {
       throw unsafe("Shared-folder paths cannot contain filesystem mount points");
     }
-    Path canonicalPath = fileSystem.realPath(path);
+    Path canonicalPath = fileSystem.realPath(candidate);
     return new ExistingIdentity(canonicalPath, attributes.fileKey(), attributes);
   }
 
