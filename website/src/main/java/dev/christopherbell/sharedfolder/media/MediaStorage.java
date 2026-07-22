@@ -87,7 +87,13 @@ public class MediaStorage {
     try {
       writeNew(JOBS, descriptor.jobId() + ".json", expected);
     } catch (FileAlreadyExistsException existing) {
-      byte[] actual = readBounded(JOBS, descriptor.jobId() + ".json", 64 * 1024);
+      final byte[] actual;
+      try {
+        actual = readBounded(JOBS, descriptor.jobId() + ".json", 64 * 1024);
+      } catch (MediaDocumentSizeException oversized) {
+        throw new MediaDescriptorProtocolException(
+            "Published media descriptor exceeds its protocol limit", oversized);
+      }
       try {
         if (!mapper.readTree(actual).equals(mapper.valueToTree(descriptor.asMap()))) {
           throw new MediaDescriptorProtocolException(
@@ -223,6 +229,9 @@ public class MediaStorage {
       bytes = readBounded(STATUS, job.getId() + ".json", STATUS_LIMIT_BYTES);
     } catch (NoSuchFileException exception) {
       return Optional.empty();
+    } catch (MediaDocumentSizeException oversized) {
+      throw new MediaWorkerProtocolException(
+          "Media worker status exceeds its protocol limit", oversized);
     }
     final tools.jackson.databind.JsonNode root;
     try {
@@ -289,7 +298,7 @@ public class MediaStorage {
 
   private byte[] readBounded(String directory, String key, int limit) throws IOException {
     return boundary.operateOnRegularFile(directory, key, FileAccess.READ, channel -> {
-      if (channel.size() > limit) throw new IOException("Private media document is too large");
+      if (channel.size() > limit) throw new MediaDocumentSizeException();
       ByteArrayOutputStream output = new ByteArrayOutputStream((int) channel.size());
       ByteBuffer buffer = ByteBuffer.allocate(4096);
       while (channel.read(buffer) > 0) {
@@ -382,5 +391,9 @@ public class MediaStorage {
     private MediaWorkerProtocolException(String message, Throwable cause) {
       super(message, cause);
     }
+  }
+
+  private static final class MediaDocumentSizeException extends IOException {
+    private MediaDocumentSizeException() { super("Private media document is too large"); }
   }
 }

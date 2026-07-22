@@ -309,6 +309,52 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
+  void cancellationAndAdmissionDoNotOverlapLifecycleDecisions() throws Exception {
+    CountDownLatch cancellationEntered = new CountDownLatch(1);
+    CountDownLatch admissionInsideLifecycle = new CountDownLatch(1);
+    AtomicBoolean overlapped = new AtomicBoolean();
+    MediaStorage coordinatedStorage = new MediaStorage(folderProperties) {
+      @Override
+      public void requestCancellation(MediaJob current) throws java.io.IOException {
+        cancellationEntered.countDown();
+        try {
+          overlapped.set(admissionInsideLifecycle.await(500, TimeUnit.MILLISECONDS));
+        } catch (InterruptedException exception) {
+          Thread.currentThread().interrupt();
+          throw new java.io.IOException("Cancellation coordination was interrupted", exception);
+        }
+        super.requestCancellation(current);
+      }
+    };
+    coordinatedStorage.initialize();
+    MediaPlaybackService concurrent = new MediaPlaybackService(
+        access, jobs, audit, sources, coordinatedStorage, folderProperties, mediaProperties,
+        Clock.fixed(NOW, ZoneOffset.UTC), () -> "job-2");
+    MediaJob first = job("job-1", "b".repeat(64), MediaJobStatus.QUEUED);
+    first.setDescriptorPublished(true);
+    when(jobs.findById("job-1")).thenReturn(Optional.of(first));
+    when(jobs.cancelActive("job-1", "account-1", NOW)).thenReturn(1L);
+    MediaSourceSnapshot second = source("video/second.mkv", 40, NOW.minusSeconds(3));
+    when(sources.resolve(second.relativePath())).thenReturn(second);
+    when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(any(), any()))
+        .thenAnswer(ignored -> {
+          admissionInsideLifecycle.countDown();
+          return Optional.empty();
+        });
+
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var cancellation = executor.submit(() -> concurrent.cancel("job-1"));
+      assertThat(cancellationEntered.await(2, TimeUnit.SECONDS)).isTrue();
+      var admission = executor.submit(() ->
+          concurrent.requestFallback(second.relativePath(), MediaOutputProfile.VIDEO_MP4));
+      cancellation.get(2, TimeUnit.SECONDS);
+      admission.get(2, TimeUnit.SECONDS);
+    }
+
+    assertThat(overlapped).isFalse();
+  }
+
+  @Test
   void admissionRejectsGlobalAndPerAccountQueueSaturation() {
     MediaSourceSnapshot source = source("video/source.mkv", 30, NOW.minusSeconds(2));
     when(sources.resolve(source.relativePath())).thenReturn(source);
@@ -491,6 +537,26 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
+  void schedulerClassifiesOversizedDescriptorAsProtocolFailure() throws Exception {
+    MediaJob published = job("job-1", "c".repeat(64), MediaJobStatus.QUEUED);
+    published.setDescriptorPublished(true);
+    MediaSourceSnapshot source = source(
+        published.getSourcePath(), published.getSourceSize(), published.getSourceModifiedAt());
+    published.setCacheKey(MediaCacheKeys.forSource(
+        source, published.getProfile(), published.getProfileVersion()));
+    when(jobs.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(
+        MediaJobStatus.active())).thenReturn(Optional.of(published));
+    when(sources.resolve(published.getSourcePath())).thenReturn(source);
+    Files.write(folderProperties.systemRoot().resolve(MediaStorage.JOBS).resolve("job-1.json"),
+        new byte[65 * 1024]);
+
+    media.promoteQueuedJob();
+
+    assertThat(published.getStatus()).isEqualTo(MediaJobStatus.FAILED);
+    assertThat(published.getFailureCategory()).isEqualTo("descriptor_invalid");
+  }
+
+  @Test
   void malformedAndOversizedWorkerStatusesBecomeDistinctTerminalFailures() throws Exception {
     MediaJob malformed = job("job-1", "8".repeat(64), MediaJobStatus.QUEUED);
     malformed.setDescriptorPublished(true);
@@ -508,6 +574,18 @@ class MediaPlaybackServiceTest {
 
     assertThat(media.job("job-2").status()).isEqualTo(MediaJobStatus.FAILED);
     assertThat(oversized.getFailureCategory()).isEqualTo("output_limit");
+  }
+
+  @Test
+  void oversizedWorkerStatusDocumentIsAProtocolFailure() throws Exception {
+    MediaJob oversized = job("job-1", "d".repeat(64), MediaJobStatus.QUEUED);
+    oversized.setDescriptorPublished(true);
+    when(jobs.findById("job-1")).thenReturn(Optional.of(oversized));
+    Files.write(folderProperties.systemRoot().resolve(MediaStorage.STATUS).resolve("job-1.json"),
+        new byte[17 * 1024]);
+
+    assertThat(media.job("job-1").status()).isEqualTo(MediaJobStatus.FAILED);
+    assertThat(oversized.getFailureCategory()).isEqualTo("invalid_worker_status");
   }
 
   @Test
