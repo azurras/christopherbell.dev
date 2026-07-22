@@ -106,6 +106,9 @@ public class NioSharedFolderFileSystemBoundary implements SharedFolderFileSystem
     if (operatingSystem.contains("windows")) {
       return canonicalPath -> false;
     }
+    if (operatingSystem.contains("mac")) {
+      return canonicalPath -> canonicalPath.getParent() == null;
+    }
     return canonicalPath -> {
       throw new IOException("Mount metadata is unavailable for this filesystem provider");
     };

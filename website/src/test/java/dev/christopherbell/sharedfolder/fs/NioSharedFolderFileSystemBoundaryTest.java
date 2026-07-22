@@ -28,6 +28,35 @@ class NioSharedFolderFileSystemBoundaryTest {
   }
 
   @Test
+  void macOsDefaultBoundaryAcceptsAnOrdinaryDirectory() throws Exception {
+    Path ordinaryDirectory = Files.createDirectory(temp.resolve("shared"));
+    NioSharedFolderFileSystemBoundary boundary = macOsBoundary();
+
+    assertThat(boundary.isMountPoint(ordinaryDirectory)).isFalse();
+  }
+
+  @Test
+  void macOsDefaultBoundaryRejectsTheFilesystemRoot() throws Exception {
+    NioSharedFolderFileSystemBoundary boundary = macOsBoundary();
+
+    assertThat(boundary.isMountPoint(temp.getRoot())).isTrue();
+  }
+
+  private static NioSharedFolderFileSystemBoundary macOsBoundary() {
+    String originalOperatingSystem = System.getProperty("os.name");
+    try {
+      System.setProperty("os.name", "Mac OS X");
+      return new NioSharedFolderFileSystemBoundary();
+    } finally {
+      if (originalOperatingSystem == null) {
+        System.clearProperty("os.name");
+      } else {
+        System.setProperty("os.name", originalOperatingSystem);
+      }
+    }
+  }
+
+  @Test
   void failsClosedWhenMountMetadataCannotBeRead() throws Exception {
     Path root = Files.createDirectory(temp.resolve("shared"));
     Path child = Files.createDirectory(root.resolve("music"));

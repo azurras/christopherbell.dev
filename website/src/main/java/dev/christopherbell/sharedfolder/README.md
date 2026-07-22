@@ -17,7 +17,9 @@ feature.
   lifecycle lock prevents the root handle from closing during an in-process traversal, but the
   held native root is the security boundary; application locks and ACLs are defense in depth only.
   Non-Windows test/local providers retain the portable NIO resolver for reads and private upload
-  staging only; deployable visible writes fail with `503` without a retained mutation capability.
+  staging only. On macOS, the portable boundary rejects filesystem roots directly and detects
+  nested mounts through the parent/child file-store comparison. Deployable visible writes fail
+  with `503` without a retained mutation capability.
 - `security` reloads the authenticated account from MongoDB for every decision. A persisted
   active approved account needs a shared-folder capability; ADMIN has read and write implicitly,
   and write implies read. JWTs intentionally carry no shared-folder capability.
