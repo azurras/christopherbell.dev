@@ -65,6 +65,8 @@ Baseline: focused deployment and operations Pester passed 21/21 with 0 failures 
 Task 1: complete (commits 4429d11c..92a28aac; task review approved 0 Critical,
 0 Important, 0 Minor; fresh focused verification passed 28/28 Pester tests;
 PowerShell parser, export, diff, and remote-head checks passed)
-Task 2: in progress
-Task 3: pending
+Task 2: complete (commits a6d10286..013d3025; re-review approved 0 Critical,
+0 Important, 0 Minor after the test-evidence fix wave; fresh focused verification
+passed 30/30 Pester tests; parser, diff, and remote-head checks passed)
+Task 3: in progress
 Task 4: pending
