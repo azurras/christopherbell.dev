@@ -1,6 +1,7 @@
 package dev.christopherbell.sharedfolder;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -11,22 +12,28 @@ import static org.mockito.Mockito.when;
 
 import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceHostLock;
 import dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceService;
 import dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceLease;
 import dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceLeaseStore;
 import dev.christopherbell.sharedfolder.media.MediaPlaybackService;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadService;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class SharedFolderMaintenanceServiceTest {
+  @TempDir Path temp;
 
   @Test
   void disabledFeatureDoesNoMaintenanceWork() {
@@ -35,7 +42,8 @@ class SharedFolderMaintenanceServiceTest {
     assertFalse(fixture.service.maintain());
 
     verifyNoInteractions(
-        fixture.uploads, fixture.recycle, fixture.media, fixture.audit, fixture.lease);
+        fixture.uploads, fixture.recycle, fixture.media, fixture.audit, fixture.hostLock,
+        fixture.lease);
   }
 
   @Test
@@ -49,6 +57,7 @@ class SharedFolderMaintenanceServiceTest {
     verify(fixture.media).evictReadyCache();
     verify(fixture.media).reconcileWorkerStatuses();
     verify(fixture.lease).release();
+    verify(fixture.hostHandle).close();
   }
 
   @Test
@@ -99,45 +108,128 @@ class SharedFolderMaintenanceServiceTest {
 
     verify(fixture.lease).acquire();
     verify(fixture.lease, org.mockito.Mockito.never()).release();
+    verify(fixture.hostHandle).close();
     verifyNoInteractions(fixture.uploads, fixture.recycle, fixture.media);
   }
 
   @Test
-  void twoServiceInstancesCannotOverlapAndReleasePermitsThePeer() throws Exception {
+  void hostLockPreventsOverlapAfterTheMongoLeaseExpiresAndThenPermitsThePeer()
+      throws Exception {
     SharedLeaseStore store = new SharedLeaseStore();
-    Clock clock = Clock.fixed(Instant.parse("2026-07-22T12:00:00Z"), ZoneOffset.UTC);
+    MutableClock clock = new MutableClock(Instant.parse("2026-07-22T12:00:00Z"));
     SharedFolderMaintenanceLease firstLease = new SharedFolderMaintenanceLease(
         store, clock, Duration.ofMinutes(30), () -> "owner-a");
     SharedFolderMaintenanceLease peerLease = new SharedFolderMaintenanceLease(
         store, clock, Duration.ofMinutes(30), () -> "owner-b");
+    Path systemRoot = Files.createDirectory(temp.resolve("expiry-system-root"));
+    SharedFolderMaintenanceHostLock firstHostLock =
+        new SharedFolderMaintenanceHostLock(systemRoot);
+    SharedFolderMaintenanceHostLock peerHostLock =
+        new SharedFolderMaintenanceHostLock(systemRoot);
     SharedFolderProperties properties = mock(SharedFolderProperties.class);
     org.mockito.Mockito.when(properties.enabled()).thenReturn(true);
-    SharedFolderUploadService uploads = mock(SharedFolderUploadService.class);
-    SharedFolderRecycleService recycle = mock(SharedFolderRecycleService.class);
-    MediaPlaybackService media = mock(MediaPlaybackService.class);
+    SharedFolderUploadService firstUploads = mock(SharedFolderUploadService.class);
+    SharedFolderRecycleService firstRecycle = mock(SharedFolderRecycleService.class);
+    MediaPlaybackService firstMedia = mock(MediaPlaybackService.class);
+    SharedFolderUploadService peerUploads = mock(SharedFolderUploadService.class);
+    SharedFolderRecycleService peerRecycle = mock(SharedFolderRecycleService.class);
+    MediaPlaybackService peerMedia = mock(MediaPlaybackService.class);
     SharedFolderAuditRecorder audit = mock(SharedFolderAuditRecorder.class);
     SharedFolderMaintenanceService first = new SharedFolderMaintenanceService(
-        properties, uploads, recycle, media, audit, firstLease);
+        properties, firstUploads, firstRecycle, firstMedia, audit, firstHostLock, firstLease);
     SharedFolderMaintenanceService peer = new SharedFolderMaintenanceService(
-        properties, uploads, recycle, media, audit, peerLease);
+        properties, peerUploads, peerRecycle, peerMedia, audit, peerHostLock, peerLease);
     CountDownLatch entered = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
     doAnswer(invocation -> {
       entered.countDown();
       assertTrue(release.await(5, TimeUnit.SECONDS));
       return 0;
-    }).when(uploads).expireAbandoned();
+    }).when(firstUploads).expireAbandoned();
 
     try (var executor = Executors.newSingleThreadExecutor()) {
       var active = executor.submit(first::maintain);
       assertTrue(entered.await(5, TimeUnit.SECONDS));
+      clock.advance(Duration.ofMinutes(31));
       assertFalse(peer.maintain());
+      verifyNoInteractions(peerUploads, peerRecycle, peerMedia);
       release.countDown();
-      assertTrue(active.get(5, TimeUnit.SECONDS));
+      assertFalse(active.get(5, TimeUnit.SECONDS));
     }
 
     assertTrue(peer.maintain());
-    verify(uploads, times(2)).expireAbandoned();
+    verify(firstUploads).expireAbandoned();
+    verify(peerUploads).expireAbandoned();
+  }
+
+  @Test
+  void hostLockContentionDoesNotAcquireMongoLeaseOrRunEffects() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("contention-system-root"));
+    SharedFolderMaintenanceHostLock owner = new SharedFolderMaintenanceHostLock(systemRoot);
+    SharedFolderMaintenanceHostLock contender = new SharedFolderMaintenanceHostLock(systemRoot);
+    Fixture fixture = fixture(true, contender);
+
+    try (SharedFolderMaintenanceHostLock.Handle ignored = owner.tryAcquire().orElseThrow()) {
+      assertFalse(fixture.service.maintain());
+    }
+
+    verifyNoInteractions(fixture.lease, fixture.uploads, fixture.recycle, fixture.media);
+  }
+
+  @Test
+  void mongoContentionReleasesTheHostLockForAPeer() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("mongo-contention-system-root"));
+    Fixture fixture = fixture(true, new SharedFolderMaintenanceHostLock(systemRoot));
+    when(fixture.lease.acquire()).thenReturn(false);
+
+    assertFalse(fixture.service.maintain());
+
+    try (SharedFolderMaintenanceHostLock.Handle ignored =
+        new SharedFolderMaintenanceHostLock(systemRoot).tryAcquire().orElseThrow()) {
+      verifyNoInteractions(fixture.uploads, fixture.recycle, fixture.media);
+    }
+  }
+
+  @Test
+  void mongoLeaseFailureReleasesTheHostLockForAPeer() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("mongo-failure-system-root"));
+    Fixture fixture = fixture(true, new SharedFolderMaintenanceHostLock(systemRoot));
+    when(fixture.lease.acquire()).thenThrow(new IllegalStateException("database unavailable"));
+
+    assertFalse(fixture.service.maintain());
+
+    try (SharedFolderMaintenanceHostLock.Handle ignored =
+        new SharedFolderMaintenanceHostLock(systemRoot).tryAcquire().orElseThrow()) {
+      verifyNoInteractions(fixture.uploads, fixture.recycle, fixture.media);
+    }
+  }
+
+  @Test
+  void renewalFailureReleasesTheHostLockForAPeer() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("renewal-system-root"));
+    Fixture fixture = fixture(true, new SharedFolderMaintenanceHostLock(systemRoot));
+    when(fixture.lease.renew()).thenReturn(false);
+
+    assertFalse(fixture.service.maintain());
+
+    try (SharedFolderMaintenanceHostLock.Handle ignored =
+        new SharedFolderMaintenanceHostLock(systemRoot).tryAcquire().orElseThrow()) {
+      verify(fixture.uploads).expireAbandoned();
+    }
+  }
+
+  @Test
+  void thrownMaintenanceFaultReleasesTheHostLockForAPeer() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("exception-system-root"));
+    Fixture fixture = fixture(true, new SharedFolderMaintenanceHostLock(systemRoot));
+    when(fixture.uploads.expireAbandoned()).thenThrow(new AssertionError("fatal maintenance fault"));
+
+    assertThrows(AssertionError.class, fixture.service::maintain);
+
+    try (SharedFolderMaintenanceHostLock.Handle ignored =
+        new SharedFolderMaintenanceHostLock(systemRoot).tryAcquire().orElseThrow()) {
+      verify(fixture.lease).release();
+    }
   }
 
   @Test
@@ -165,6 +257,21 @@ class SharedFolderMaintenanceServiceTest {
   }
 
   private Fixture fixture(boolean enabled) {
+    SharedFolderMaintenanceHostLock hostLock = mock(SharedFolderMaintenanceHostLock.class);
+    SharedFolderMaintenanceHostLock.Handle hostHandle =
+        mock(SharedFolderMaintenanceHostLock.Handle.class);
+    when(hostLock.tryAcquire()).thenReturn(java.util.Optional.of(hostHandle));
+    return fixture(enabled, hostLock, hostHandle);
+  }
+
+  private Fixture fixture(boolean enabled, SharedFolderMaintenanceHostLock hostLock) {
+    return fixture(enabled, hostLock, null);
+  }
+
+  private Fixture fixture(
+      boolean enabled,
+      SharedFolderMaintenanceHostLock hostLock,
+      SharedFolderMaintenanceHostLock.Handle hostHandle) {
     SharedFolderProperties properties = mock(SharedFolderProperties.class);
     org.mockito.Mockito.when(properties.enabled()).thenReturn(enabled);
     SharedFolderUploadService uploads = mock(SharedFolderUploadService.class);
@@ -176,8 +283,9 @@ class SharedFolderMaintenanceServiceTest {
     when(lease.renew()).thenReturn(true);
     when(lease.release()).thenReturn(true);
     return new Fixture(
-        new SharedFolderMaintenanceService(properties, uploads, recycle, media, audit, lease),
-        uploads, recycle, media, audit, lease);
+        new SharedFolderMaintenanceService(
+            properties, uploads, recycle, media, audit, hostLock, lease),
+        uploads, recycle, media, audit, hostLock, hostHandle, lease);
   }
 
   private record Fixture(
@@ -186,6 +294,8 @@ class SharedFolderMaintenanceServiceTest {
       SharedFolderRecycleService recycle,
       MediaPlaybackService media,
       SharedFolderAuditRecorder audit,
+      SharedFolderMaintenanceHostLock hostLock,
+      SharedFolderMaintenanceHostLock.Handle hostHandle,
       SharedFolderMaintenanceLease lease) {}
 
   private static final class SharedLeaseStore implements SharedFolderMaintenanceLeaseStore {
@@ -215,6 +325,33 @@ class SharedFolderMaintenanceServiceTest {
       owner = null;
       expiresAt = Instant.EPOCH;
       return true;
+    }
+  }
+
+  private static final class MutableClock extends Clock {
+    private Instant now;
+
+    private MutableClock(Instant now) {
+      this.now = now;
+    }
+
+    private void advance(Duration duration) {
+      now = now.plus(duration);
+    }
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneOffset.UTC;
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+      return this;
+    }
+
+    @Override
+    public Instant instant() {
+      return now;
     }
   }
 }

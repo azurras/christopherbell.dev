@@ -5,6 +5,7 @@ import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.media.MediaPlaybackService;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadService;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +21,7 @@ public final class SharedFolderMaintenanceService {
   private final SharedFolderRecycleService recycle;
   private final MediaPlaybackService media;
   private final SharedFolderAuditRecorder audit;
+  private final SharedFolderMaintenanceHostLock hostLock;
   private final SharedFolderMaintenanceLease lease;
   private final AtomicBoolean running = new AtomicBoolean();
 
@@ -30,12 +32,14 @@ public final class SharedFolderMaintenanceService {
       SharedFolderRecycleService recycle,
       MediaPlaybackService media,
       SharedFolderAuditRecorder audit,
+      SharedFolderMaintenanceHostLock hostLock,
       SharedFolderMaintenanceLease lease) {
     this.properties = properties;
     this.uploads = uploads;
     this.recycle = recycle;
     this.media = media;
     this.audit = audit;
+    this.hostLock = hostLock;
     this.lease = lease;
   }
 
@@ -43,8 +47,16 @@ public final class SharedFolderMaintenanceService {
   @Scheduled(fixedDelayString = "${app.shared-folder.maintenance-delay:PT15M}")
   public boolean maintain() {
     if (!properties.enabled() || !running.compareAndSet(false, true)) return false;
+    Optional<SharedFolderMaintenanceHostLock.Handle> hostLockHandle = Optional.empty();
     boolean acquired = false;
     try {
+      try {
+        hostLockHandle = hostLock.tryAcquire();
+      } catch (RuntimeException failure) {
+        recordFailure("MAINTENANCE_HOST_LOCK_FAILED", failure);
+        return false;
+      }
+      if (hostLockHandle.isEmpty()) return false;
       try {
         acquired = lease.acquire();
       } catch (RuntimeException failure) {
@@ -62,6 +74,7 @@ public final class SharedFolderMaintenanceService {
       return true;
     } finally {
       if (acquired) releaseLease();
+      hostLockHandle.ifPresent(this::releaseHostLock);
       running.set(false);
     }
   }
@@ -94,6 +107,15 @@ public final class SharedFolderMaintenanceService {
         log.warn("Shared-folder maintenance lease release audit could not be recorded");
       }
       log.warn("Shared-folder maintenance lease release failed");
+    }
+  }
+
+  private void releaseHostLock(SharedFolderMaintenanceHostLock.Handle handle) {
+    try {
+      handle.close();
+    } catch (RuntimeException releaseFailure) {
+      recordFailure("MAINTENANCE_HOST_LOCK_RELEASE_FAILED", releaseFailure);
+      log.warn("Shared-folder maintenance host lock release failed");
     }
   }
 

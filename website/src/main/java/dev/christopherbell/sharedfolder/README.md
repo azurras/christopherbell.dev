@@ -44,8 +44,9 @@ Both configured roots must exist before the application starts. The system root 
 non-linked, non-reparse, non-mount directory on the same filesystem as the visible root; the
 application deliberately does not create that configured root. Deployment grants the website
 service identity access to the pre-created root. The application may create only its validated
-direct staging and quarantine children beneath it. Portable private create/open/delete operations
-capture canonical path, file identity, filesystem, mount, link, and reparse facts for every
+direct staging and quarantine children plus the fixed maintenance lock file beneath it.
+Portable private create/open/delete operations capture canonical path, file identity, filesystem,
+mount, link, and reparse facts for every
 ancestor and recheck them around the operation. Portable private-to-visible and visible-to-private
 moves are unavailable because a Java pathname move cannot bind the transitioned leaf to the
 earlier observation. An unavailable or changed private boundary fails with `503 Service
@@ -154,11 +155,15 @@ Unavailable` and never falls back to an unchecked production path.
   free-space reserve, reserves the full output cap for every active job, and independently checks
   the actual partial and completed file lengths against that cap.
 - Every 15 minutes, a non-overlapping coordinator runs bounded upload expiry, recycle retention,
-  READY-cache eviction, and worker reconciliation. A single fixed-key Mongo lease with a unique
-  process owner and bounded crash expiry prevents overlapping service instances; release is
-  owner-checked. Each failed step is safely logged and audited without preventing later steps or
-  later runs. Account mutation bursts are limited to 60 per minute with bounded identity state;
-  the existing media admission retains its global and per-account queued-job limits.
+  READY-cache eviction, and worker reconciliation. One fixed, non-expiring OS file lock beneath
+  the trusted system root is acquired without waiting before Mongo ownership and held across the
+  complete maintenance effect window. It is released last, is never deleted, and the OS releases
+  it if the process dies; this is the strict single-host authority even when a step stalls or the
+  JVM pauses. The fixed-key Mongo lease retains unique-owner, bounded-expiry, renewal, and
+  owner-checked-release metadata for ownership and auditing, but does not authorize overlap on the
+  host. Each failed step is safely logged and audited without preventing later steps or later runs.
+  Account mutation bursts are limited to 60 per minute with bounded identity state; the existing
+  media admission retains its global and per-account queued-job limits.
 
 ## Update This Doc
 
