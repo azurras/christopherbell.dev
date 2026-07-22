@@ -46,7 +46,7 @@ Describe 'native Windows deployment' {
                         '                               RESTART -- Delay = 30000 milliseconds.'
                     )
                 } else {
-                    @('FAILURE_ACTIONS              :')
+                    @()
                 }
                 return @(
                     '[SC] QueryServiceConfig2 SUCCESS',
@@ -188,7 +188,19 @@ Describe 'native Windows deployment' {
             } | Should -Throw '*Suspended recovery policy verification failed*'
         }
 
-        It 'rejects an empty failure-actions field followed by an unrecognized duplicate field' {
+        It 'rejects an empty failure-actions field for suspended recovery' {
+            $queryOutput = @(
+                New-RecoveryPolicyQueryOutput -Policy Suspended
+                '        FAILURE_ACTIONS              :'
+            ) -join [Environment]::NewLine
+
+            {
+                Assert-ProductionWebsiteRecoveryPolicy `
+                    -Policy Suspended -QueryOutput $queryOutput
+            } | Should -Throw '*Suspended recovery policy verification failed*'
+        }
+
+        It 'rejects an unrecognized failure-actions field for suspended recovery' {
             $queryOutput = @(
                 New-RecoveryPolicyQueryOutput -Policy Suspended
                 '        FAILURE_ACTIONS              : RESUME'
