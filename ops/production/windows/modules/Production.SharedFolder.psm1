@@ -320,6 +320,32 @@ function Install-SharedFolderWorkerService {
             & $Binary $Command | Out-Null
             $LASTEXITCODE
         },
+        [scriptblock]$StopServiceAction = {
+            param($Name)
+            $service = Get-Service $Name -ErrorAction SilentlyContinue
+            if (-not $service) { return }
+            if ($service.Status -ne [ServiceProcess.ServiceControllerStatus]::Stopped) {
+                Stop-Service $Name -Force -ErrorAction Stop
+                $service.WaitForStatus(
+                    [ServiceProcess.ServiceControllerStatus]::Stopped,
+                    [TimeSpan]::FromSeconds(30))
+                $service.Refresh()
+            }
+            if ($service.Status -ne [ServiceProcess.ServiceControllerStatus]::Stopped) {
+                throw "Service did not stop: $Name"
+            }
+        },
+        [scriptblock]$SetServiceIdentityAction = {
+            param($Name, $Identity)
+            Invoke-CheckedProcess -FilePath 'sc.exe' `
+                -ArgumentList @('config', $Name, 'obj=', $Identity) | Out-Null
+        },
+        [scriptblock]$GetServiceIdentityAction = {
+            param($Name)
+            $service = Get-CimInstance Win32_Service -Filter "Name='$Name'" -ErrorAction Stop
+            if (-not $service) { throw "Missing installed service: $Name" }
+            return [string]$service.StartName
+        },
         [scriptblock]$ProtectPathAction = { param($Path) Protect-ProductionPath -Path $Path },
         [scriptblock]$SetAclAction = { param($Path, $Acl) Set-Acl -LiteralPath $Path -AclObject $Acl }
     )
@@ -327,42 +353,65 @@ function Install-SharedFolderWorkerService {
     $serviceRoot = Join-Path $ProductionRoot 'service'
     $websiteBinary = Join-Path $serviceRoot 'ChristopherBellDev.exe'
     $workerBinary = Join-Path $serviceRoot 'ChristopherBellMediaWorker.exe'
-    if (-not (Test-Path -LiteralPath $websiteBinary -PathType Leaf)) {
-        throw 'The verified website WinSW binary must be installed before the media worker.'
-    }
-    if (-not (Test-Path -LiteralPath $workerBinary -PathType Leaf)) {
-        Copy-Item -LiteralPath $websiteBinary -Destination $workerBinary
-    } elseif ((Get-FileHash -LiteralPath $workerBinary -Algorithm SHA256).Hash -ne
-        (Get-FileHash -LiteralPath $websiteBinary -Algorithm SHA256).Hash) {
-        throw 'The media worker WinSW binary does not match the verified website WinSW binary.'
-    }
-    Copy-Item (Join-Path $PSScriptRoot '..\service\ChristopherBellMediaWorker.xml') $serviceRoot -Force
-    Copy-Item (Join-Path $PSScriptRoot '..\service\Start-SharedFolderMediaWorker.ps1') $serviceRoot -Force
-    Copy-Item (Join-Path $PSScriptRoot 'Production.SharedFolderWorker.psm1') $serviceRoot -Force
+    $serviceName = 'ChristopherBellMediaWorker'
+    $serviceExists = [bool](& $GetServiceAction $serviceName)
+    try {
+        if ($serviceExists) { & $StopServiceAction $serviceName }
 
-    foreach ($websiteControlFile in @(
-        'ChristopherBellDev.exe',
-        'ChristopherBellDev.xml',
-        'Start-ChristopherBellDev.ps1'
-    )) {
-        $path = Join-Path $serviceRoot $websiteControlFile
-        if (Test-Path -LiteralPath $path -PathType Leaf) { & $ProtectPathAction $path }
-    }
-    foreach ($workerFile in @(
-        'ChristopherBellMediaWorker.exe',
-        'ChristopherBellMediaWorker.xml',
-        'Start-SharedFolderMediaWorker.ps1',
-        'Production.SharedFolderWorker.psm1'
-    )) {
-        & $SetAclAction (Join-Path $serviceRoot $workerFile) (New-SharedFolderWorkerFileAcl)
-    }
+        if (-not (Test-Path -LiteralPath $websiteBinary -PathType Leaf)) {
+            throw 'The verified website WinSW binary must be installed before the media worker.'
+        }
+        if (-not (Test-Path -LiteralPath $workerBinary -PathType Leaf)) {
+            Copy-Item -LiteralPath $websiteBinary -Destination $workerBinary
+        } elseif ((Get-FileHash -LiteralPath $workerBinary -Algorithm SHA256).Hash -ne
+            (Get-FileHash -LiteralPath $websiteBinary -Algorithm SHA256).Hash) {
+            throw 'The media worker WinSW binary does not match the verified website WinSW binary.'
+        }
+        Copy-Item (Join-Path $PSScriptRoot '..\service\ChristopherBellMediaWorker.xml') $serviceRoot -Force
+        Copy-Item (Join-Path $PSScriptRoot '..\service\Start-SharedFolderMediaWorker.ps1') $serviceRoot -Force
+        Copy-Item (Join-Path $PSScriptRoot 'Production.SharedFolderWorker.psm1') $serviceRoot -Force
 
-    if (-not (& $GetServiceAction 'ChristopherBellMediaWorker')) {
-        $exitCode = & $InvokeWinSwAction $workerBinary 'install'
-        if ($exitCode -ne 0) { throw 'Media worker WinSW service installation failed.' }
-    } else {
-        $exitCode = & $InvokeWinSwAction $workerBinary 'refresh'
-        if ($exitCode -ne 0) { throw 'Media worker WinSW service refresh failed.' }
+        foreach ($websiteControlFile in @(
+            'ChristopherBellDev.exe',
+            'ChristopherBellDev.xml',
+            'Start-ChristopherBellDev.ps1'
+        )) {
+            $path = Join-Path $serviceRoot $websiteControlFile
+            if (Test-Path -LiteralPath $path -PathType Leaf) { & $ProtectPathAction $path }
+        }
+        foreach ($workerFile in @(
+            'ChristopherBellMediaWorker.exe',
+            'ChristopherBellMediaWorker.xml',
+            'Start-SharedFolderMediaWorker.ps1',
+            'Production.SharedFolderWorker.psm1'
+        )) {
+            & $SetAclAction (Join-Path $serviceRoot $workerFile) (New-SharedFolderWorkerFileAcl)
+        }
+
+        if (-not $serviceExists) {
+            $exitCode = & $InvokeWinSwAction $workerBinary 'install'
+            if ($exitCode -ne 0) { throw 'Media worker WinSW service installation failed.' }
+            & $StopServiceAction $serviceName
+        } else {
+            $exitCode = & $InvokeWinSwAction $workerBinary 'refresh'
+            if ($exitCode -ne 0) { throw 'Media worker WinSW service refresh failed.' }
+            & $StopServiceAction $serviceName
+        }
+        $expectedIdentity = 'NT AUTHORITY\LocalService'
+        & $SetServiceIdentityAction $serviceName $expectedIdentity
+        $actualIdentity = [string](& $GetServiceIdentityAction $serviceName)
+        if (-not [string]::Equals(
+            $actualIdentity, $expectedIdentity, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The media worker service must run as LocalService.'
+        }
+    } catch {
+        $setupFailure = $_
+        try {
+            & $StopServiceAction $serviceName
+        } catch {
+            throw "The media worker could not be left stopped after setup failed: $($setupFailure.Exception.Message)"
+        }
+        throw $setupFailure
     }
 }
 

@@ -954,20 +954,114 @@ Describe 'shared-folder runtime isolation' {
         'website xml' | Set-Content (Join-Path $service 'ChristopherBellDev.xml')
         'website script' | Set-Content (Join-Path $service 'Start-ChristopherBellDev.ps1')
         $commands = [Collections.Generic.List[string]]::new()
-        $state = @{ Existing = $false }
+        $identities = [Collections.Generic.List[string]]::new()
+        $events = [Collections.Generic.List[string]]::new()
+        $state = @{ Existing = $false; Status = 'Missing' }
         $getService = { param($name) if ($state.Existing) { [pscustomobject]@{Name=$name} } }
-        $invoke = { param($binary,$command) $commands.Add($command); 0 }
+        $invoke = {
+            param($binary,$command)
+            $commands.Add($command)
+            $events.Add($command)
+            if ($command -eq 'install') {
+                $state.Existing = $true
+                $state.Status = 'Stopped'
+            }
+            0
+        }
+        $stopService = {
+            param($name)
+            $events.Add('stop')
+            $state.Status = 'Stopped'
+        }
+        $setIdentity = {
+            param($name,$identity)
+            $events.Add('set-identity')
+            $identities.Add("$name=$identity")
+        }
+        $getIdentity = {
+            param($name)
+            $events.Add('get-identity')
+            'NT AUTHORITY\LocalService'
+        }
 
         Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
             -GetServiceAction $getService -InvokeWinSwAction $invoke `
+            -StopServiceAction $stopService `
+            -SetServiceIdentityAction $setIdentity -GetServiceIdentityAction $getIdentity `
             -ProtectPathAction { param($path) } -SetAclAction { param($path,$acl) }
         $state.Existing = $true
+        $state.Status = 'Running'
         Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
             -GetServiceAction $getService -InvokeWinSwAction $invoke `
+            -StopServiceAction $stopService `
+            -SetServiceIdentityAction $setIdentity -GetServiceIdentityAction $getIdentity `
             -ProtectPathAction { param($path) } -SetAclAction { param($path,$acl) }
 
         $commands | Should -Be @('install','refresh')
+        $identities | Should -Be @(
+            'ChristopherBellMediaWorker=NT AUTHORITY\LocalService',
+            'ChristopherBellMediaWorker=NT AUTHORITY\LocalService')
+        $events | Should -Be @(
+            'install','stop','set-identity','get-identity',
+            'stop','refresh','stop','set-identity','get-identity')
+        $state.Status | Should -Be 'Stopped'
         Test-Path (Join-Path $service 'ChristopherBellMediaWorker.exe') | Should -BeTrue
+    }
+
+    It 'fails closed when service control manager does not retain LocalService' {
+        $productionRoot = Join-Path $TestDrive 'wrong-worker-identity'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $state = @{ Status = 'Running'; StopCount = 0 }
+        $stopService = {
+            param($name)
+            $state.Status = 'Stopped'
+            $state.StopCount++
+        }
+
+        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -GetServiceAction { param($name) [pscustomobject]@{ Name = $name } } `
+            -InvokeWinSwAction { param($binary,$command) 0 } `
+            -StopServiceAction $stopService `
+            -SetServiceIdentityAction { param($name,$identity) } `
+            -GetServiceIdentityAction { param($name) 'LocalSystem' } `
+            -ProtectPathAction { param($path) } -SetAclAction { param($path,$acl) } } |
+            Should -Throw '*must run as LocalService*'
+        $state.StopCount | Should -BeGreaterOrEqual 1
+        $state.Status | Should -Be 'Stopped'
+    }
+
+    It 'stops an existing worker before file mutations and leaves it stopped when they fail' {
+        $productionRoot = Join-Path $TestDrive 'worker-file-failure'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        'website xml' | Set-Content (Join-Path $service 'ChristopherBellDev.xml')
+        $state = @{ Status = 'Running'; StopCount = 0 }
+        $events = [Collections.Generic.List[string]]::new()
+        $stopService = {
+            param($name)
+            $events.Add('stop')
+            $state.Status = 'Stopped'
+            $state.StopCount++
+        }
+        $protectPath = {
+            param($path)
+            $events.Add('protect')
+            $state.Status | Should -Be 'Stopped'
+            throw 'simulated file protection failure'
+        }
+
+        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -GetServiceAction { param($name) [pscustomobject]@{ Name = $name } } `
+            -StopServiceAction $stopService `
+            -ProtectPathAction $protectPath `
+            -SetAclAction { param($path,$acl) } } |
+            Should -Throw '*simulated file protection failure*'
+        $events[0..1] | Should -Be @('stop','protect')
+        $state.StopCount | Should -BeGreaterOrEqual 1
+        $state.Status | Should -Be 'Stopped'
     }
 
     It 'publishes immutable tool versions and leaves an active version untouched' {

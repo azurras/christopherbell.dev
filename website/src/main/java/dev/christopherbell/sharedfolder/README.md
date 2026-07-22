@@ -38,13 +38,18 @@ feature.
 
 `app.shared-folder` binds the roots, upload and cache limits, retention periods, and enablement
 flag. Local and test profiles use build-owned paths; production roots use environment-overridable
-`A:/Shared` and `A:/Shared-System` defaults.
+`A:/Shared` and `A:/Shared-System` defaults. Production remains disabled until the protected
+`app.env` sets `APP_SHARED_FOLDER_ENABLED=true`; the production parser and service wrapper accept
+only Boolean values for that optional switch.
 
 Both configured roots must exist before the application starts. The system root is an ordinary,
 non-linked, non-reparse, non-mount directory on the same filesystem as the visible root; the
 application deliberately does not create that configured root. Deployment grants the website
 service identity access to the pre-created root. The application may create only its validated
 direct staging and quarantine children plus the fixed maintenance lock file beneath it.
+The Windows installer explicitly configures the media worker as `NT AUTHORITY\LocalService`
+after WinSW install or refresh and fails closed unless Service Control Manager reports that exact
+identity.
 Portable private create/open/delete operations capture canonical path, file identity, filesystem,
 mount, link, and reparse facts for every
 ancestor and recheck them around the operation. Portable private-to-visible and visible-to-private
