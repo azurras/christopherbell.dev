@@ -40,10 +40,13 @@ winget install --id Cloudflare.cloudflared --exact --source winget --scope machi
 The installer downloads WinSW v2.12.0 x64 from the official GitHub release and
 requires SHA-256
 `05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA`.
-It also downloads the pinned FFmpeg 8.0.1 essentials archive over HTTPS and
-requires the SHA-256 recorded in
-`ops/production/windows/config/media-tools-manifest.json` before extracting
-`ffmpeg.exe` or `ffprobe.exe`.
+It also downloads the pinned FFmpeg `8.0.1-essentials` archive from the HTTPS
+URI in `ops/production/windows/config/media-tools-manifest.json` and requires
+SHA-256
+`E2AAEAA0FDBC397D4794828086424D4AAA2102CEF1FB6874F6FFD29C0B88B673`
+before extracting `ffmpeg.exe` or `ffprobe.exe`. The installer then records and
+revalidates the individual executable hashes in the protected active-tool
+manifest.
 
 ## ProgramData Layout and Security
 
@@ -141,7 +144,9 @@ Verify the entire contract with one command:
 
 It requires all three services to be Running and Automatic, confirms the
 automatic deployment task is enabled, exercises the native home/login smoke
-checks, and requires the public URL to return HTTP 200.
+checks, and requires the public URL to return HTTP 200. The current command's
+three-service assertion covers `MongoDB`, `ChristopherBellDev`, and
+`cloudflared`; inspect `ChristopherBellMediaWorker` separately as shown below.
 
 ## CPU Temperature Provider
 
@@ -261,6 +266,135 @@ immediately.
 Equivalent Makefile targets include `prod-status`, `prod-deploy`,
 `prod-backup`, and `prod-verify-startup`.
 
+## Shared-Folder Operations
+
+The website keeps its existing `ChristopherBellDev` service identity and
+security context. It owns shared-folder authorization, originals, uploads,
+recycle operations, audit records, and job admission. Only media inspection
+and transcoding cross into the separate `ChristopherBellMediaWorker` service,
+which runs as `NT AUTHORITY\LocalService`.
+
+Enable the feature through the protected
+`C:\ProgramData\christopherbell.dev\config\app.env`; do not put secrets in the
+checked-in examples or this runbook:
+
+```properties
+APP_SHARED_FOLDER_ENABLED=true
+APP_SHARED_FOLDER_ROOT=A:/Shared
+APP_SHARED_FOLDER_SYSTEM_ROOT=A:/Shared-System
+```
+
+The production defaults already select those roots. After changing the
+protected environment file, apply it with the existing production workflow:
+
+```powershell
+.\prod.cmd restart
+```
+
+`A:\Shared` contains user-visible originals. `A:\Shared-System` is private
+runtime state with these checked-in layouts:
+
+- `shared-folder-upload-staging` and `shared-folder-upload-quarantine`: owned
+  resumable-upload temporary state.
+- `shared-folder-recycle` and `shared-folder-recycle-replaced`: recoverable
+  deleted or replaced payloads.
+- `shared-folder-media-jobs`, `shared-folder-media-staging`,
+  `shared-folder-media-partial`, `shared-folder-media-status`, and
+  `shared-folder-media-cancel`: bounded worker handoff and in-progress state.
+- `shared-folder-media-cache`: completed derived playback media. Originals are
+  never replaced by cache entries.
+- `shared-folder-media-tools`: immutable pinned tool versions plus the active
+  hash manifest.
+- `shared-folder-media-logs` and `shared-folder-media-locks`: worker WinSW logs
+  and the single-worker lock.
+
+MongoDB holds `shared_folder_media_jobs`, recycle metadata, and the
+`shared_folder_audit` collection. Default retention is 30 days for recycle
+payloads and 180 days for audit records. Completed media cache is bounded to
+250 GB and is evicted least-recently-used while active readers remain leased.
+Every 15 minutes the website coordinates one host/Mongo lease before expiring
+abandoned uploads, purging expired recycle content, evicting cache, and
+reconciling worker results. Do not manually delete job, partial, recycle, or
+cache files while either service is running.
+
+Installation disables ACL inheritance on both roots. SYSTEM and
+Administrators retain full control. The unchanged website identity retains the
+access needed to manage visible and private state. LocalService receives only
+read/execute on `A:\Shared`, `A:\Shared-System`, and pinned tools, with Modify
+limited to the worker job, staging, partial, cache, status, cancellation, log,
+and lock directories. Re-run `prod.cmd install` to reconcile the checked-in
+directory, ACL, pinned-tool, and WinSW definitions; do not repair these ACLs by
+granting broad drive-level access.
+
+Inspect the sidecar without exposing command lines or job descriptors:
+
+```powershell
+Get-Service ChristopherBellMediaWorker |
+  Select-Object Name,Status,StartType
+Get-Content A:\Shared-System\shared-folder-media-logs\ChristopherBellMediaWorker.out.log -Tail 100
+Get-Content A:\Shared-System\shared-folder-media-logs\ChristopherBellMediaWorker.err.log -Tail 100
+```
+
+WinSW keeps 14 worker output/error files at 10 MiB each with size-only
+rotation. Alert when the worker is not Running/Automatic, the private volume
+approaches the configured 100 GB free-space reserve, or bounded logs/audit
+contain repeated `MAINTENANCE_*_FAILED`, `worker_failure`, `timed_out`,
+`output_limit`, `source_changed`, or `insufficient_space` outcomes. A stopped
+worker isolates transcoding failure: ordinary website traffic, authenticated
+listing/downloads, and browser-native previews remain owned by the website.
+
+`prod.cmd backup` covers MongoDB metadata, including shared-folder audit,
+recycle, and media-job documents; it does not copy `A:\Shared` or
+`A:\Shared-System`. Back up originals and recoverable recycle payloads with a
+separate ACL-preserving filesystem backup. Cache, staging, partial, status,
+cancellation, and logs are rebuildable operational state and should not be
+treated as the only copy of content. Quiesce shared-folder writes and the
+worker before taking a point-in-time filesystem copy that must correspond to a
+MongoDB backup.
+
+After shared-folder application or operations changes merge, use the normal
+update flow and refresh the worker process so it loads the installed module:
+
+```powershell
+git fetch origin main
+git switch main
+git pull --ff-only origin main
+.\prod.cmd install
+.\prod.cmd auto-install
+Restart-Service ChristopherBellMediaWorker
+.\prod.cmd deploy
+.\prod.cmd verify-startup
+Get-Service ChristopherBellMediaWorker |
+  Select-Object Name,Status,StartType
+```
+
+The Gradle entry point `gradlew.bat :website:sharedFolderVerification` runs the
+full Java and browser suites, PowerShell 7 worker coverage, PowerShell 7
+installer/operations coverage, and the same installer/operations compatibility
+fixtures under Windows PowerShell 5.1. Both shells require Pester 5; the Gradle
+task includes the redirected Documents `PowerShell\Modules` tree in the 5.1
+lookup before failing closed if Pester 5 is unavailable. The production
+installer itself still requires elevated PowerShell 7.
+
+For emergency isolation, preserve both roots and disable access before any
+rollback:
+
+```powershell
+# Set APP_SHARED_FOLDER_ENABLED=false in the protected app.env first.
+.\prod.cmd restart
+Stop-Service ChristopherBellMediaWorker
+.\prod.cmd rollback -WhatIf
+.\prod.cmd rollback
+.\prod.cmd verify-startup
+```
+
+Do not delete originals, recycle payloads, job metadata, or pinned tools during
+recovery. If the incident includes a worker service-definition change, use a
+clean, reviewed checkout of the prior known-good commit and run
+`prod.cmd install` from that checkout to restore its checked-in WinSW/script
+definitions; then start the worker, run `prod.cmd verify-startup`, inspect the
+worker explicitly, and re-enable shared routes only after both checks pass.
+
 ## Logs and Diagnostics
 
 Start with:
@@ -270,7 +404,7 @@ Start with:
 .\prod.cmd logs
 Get-WinEvent -LogName System -MaxEvents 200 |
   Where-Object ProviderName -eq 'Service Control Manager'
-Get-Service MongoDB,ChristopherBellDev,cloudflared |
+Get-Service MongoDB,ChristopherBellDev,ChristopherBellMediaWorker,cloudflared |
   Select-Object Name,Status,StartType
 ```
 
@@ -366,15 +500,17 @@ Restart-Computer
 After Windows starts, do not manually start production services. Verify:
 
 ```powershell
-Get-Service MongoDB,ChristopherBellDev,cloudflared |
+Get-Service MongoDB,ChristopherBellDev,ChristopherBellMediaWorker,cloudflared |
   Select-Object Name,Status,StartType
 .\prod.cmd verify-startup
 .\prod.cmd auto-status
 ```
 
-The public site must remain available before interactive login. All three
+The public site must remain available before interactive login. All four
 services must be Running and Automatic, and the auto-deploy state must record a
-recent check.
+recent check. `verify-startup` checks the website/MongoDB/cloudflared trio;
+retain the explicit worker service check until that command includes the
+sidecar.
 
 ## Failure Recovery
 
@@ -386,6 +522,10 @@ recent check.
   and logs, and restore only from a verified archive after explicit approval.
 - cloudflared failure: restart the native service, inspect Windows events, and
   validate the configured public route. Do not reinstall WSL tunnel packages.
+- Media-worker failure: stop `ChristopherBellMediaWorker`, leave originals and
+  recycle data in place, inspect bounded worker logs and free space, and keep
+  shared routes disabled if private-state integrity is uncertain. Website and
+  database recovery do not require deleting derived media state.
 - Startup-task failure: rerun `auto-install`, inspect Task Scheduler history and
   `auto-deploy.json`, then run `verify-startup`.
 
