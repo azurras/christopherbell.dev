@@ -34,6 +34,45 @@ Describe 'native Windows production operations' {
             { Invoke-ProductionRollback -WhatIf } | Should -Throw '*Both current and previous*'
         }
 
+        It 'uses the controlled stop for rollback and restoration' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot = 'C:\data'
+                    productionPort = 8080
+                }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { return 'C:\data\releases\current' }
+                return 'C:\data\releases\previous'
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Stop-Service { }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Set-AtomicJunction { }
+            Mock Start-Service { }
+            $script:rollbackVerification = 0
+            Mock Test-ProductionEndpoints {
+                if ($script:rollbackVerification++ -eq 0) {
+                    throw 'rollback verification failed'
+                }
+            }
+
+            {
+                Invoke-ProductionRollback
+            } | Should -Throw '*rollback verification failed*'
+
+            Should -Invoke Stop-ProductionWebsiteService -Times 2 -Exactly -ParameterFilter {
+                $ProductionPort -eq 8080
+            }
+            Should -Invoke Set-AtomicJunction -ParameterFilter {
+                $Target -eq 'C:\data\releases\current'
+            }
+            Should -Invoke Set-AtomicJunction -ParameterFilter {
+                $Target -eq 'C:\data\releases\previous'
+            }
+        }
+
         It 'reports cloudflared with native website and MongoDB services' {
             Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
             Mock Get-Service { [pscustomobject]@{ Status='Running'; StartType='Automatic' } }
