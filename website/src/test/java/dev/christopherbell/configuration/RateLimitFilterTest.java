@@ -144,6 +144,9 @@ public class RateLimitFilterTest {
     assertEquals(true, indexOf(rules, "shared-folder-uploads") < apiMutations);
     assertEquals(true, indexOf(rules, "shared-folder-mutations") < apiMutations);
     assertEquals(true, indexOf(rules, "shared-folder-transcode") < apiMutations);
+    var transcode = rules.stream().filter(rule -> "shared-folder-transcode".equals(rule.getName()))
+        .findFirst().orElseThrow();
+    assertEquals(List.of("/api/shared-folder/2026-07-17/media/**"), transcode.getPaths());
   }
 
   @Test

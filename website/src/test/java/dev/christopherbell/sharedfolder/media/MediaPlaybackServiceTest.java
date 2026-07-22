@@ -3,7 +3,9 @@ package dev.christopherbell.sharedfolder.media;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,10 +23,13 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.HttpStatus;
+import org.springframework.data.domain.SliceImpl;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -39,18 +44,20 @@ class MediaPlaybackServiceTest {
   private MediaStorage storage;
   private MediaPlaybackService media;
   private Account account;
+  private SharedFolderProperties folderProperties;
+  private SharedFolderMediaProperties mediaProperties;
 
   @BeforeEach
   void setUp() throws Exception {
     Path shared = Files.createDirectory(temp.resolve("shared"));
     Path system = Files.createDirectory(temp.resolve("system"));
-    SharedFolderProperties folderProperties = new SharedFolderProperties(
+    folderProperties = new SharedFolderProperties(
         shared, system, DataSize.ofGigabytes(10), DataSize.ofMegabytes(8),
         DataSize.ofBytes(100), DataSize.ofGigabytes(250), Duration.ofDays(30),
         Duration.ofDays(180), true);
-    SharedFolderMediaProperties mediaProperties = new SharedFolderMediaProperties(
+    mediaProperties = new SharedFolderMediaProperties(
         4, 2, Duration.ofMinutes(30), Duration.ofMillis(10), Duration.ofSeconds(1),
-        DataSize.ofBytes(4), DataSize.ofGigabytes(20));
+        DataSize.ofBytes(4), DataSize.ofBytes(100));
     access = mock(SharedFolderAccessService.class);
     jobs = mock(MediaJobRepository.class);
     audit = mock(SharedFolderAuditRecorder.class);
@@ -62,6 +69,9 @@ class MediaPlaybackServiceTest {
     when(access.requireRead()).thenReturn(account);
     when(jobs.countByStatusIn(any())).thenReturn(0L);
     when(jobs.countByOwnerIdAndStatusIn(any(), any())).thenReturn(0L);
+    when(jobs.findByStatusIn(any())).thenReturn(List.of());
+    when(jobs.findByStatusOrderByLastAccessedAtAscIdAsc(any(), any()))
+        .thenReturn(new SliceImpl<>(List.of()));
     when(jobs.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     media = new MediaPlaybackService(
         access, jobs, audit, sources, storage, folderProperties, mediaProperties,
@@ -69,15 +79,16 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
-  void compatibleMediaUsesOriginalAndUnknownContainerRequiresFallbackInspection() {
+  void directPlaybackIsOnlyABrowserProbeAndNeverClaimsCodecEvidence() {
     when(sources.resolve("audio/song.flac"))
         .thenReturn(source("audio/song.flac", 20, NOW.minusSeconds(1)));
     when(sources.resolve("video/source.mkv"))
         .thenReturn(source("video/source.mkv", 30, NOW.minusSeconds(2)));
 
-    assertThat(media.playback("audio/song.flac").mode()).isEqualTo(MediaPlaybackMode.DIRECT);
+    assertThat(media.playback("audio/song.flac").mode())
+        .isEqualTo(MediaPlaybackMode.DIRECT_PROBE);
     assertThat(media.playback("video/source.mkv").mode())
-        .isEqualTo(MediaPlaybackMode.FALLBACK_REQUIRED);
+        .isEqualTo(MediaPlaybackMode.DIRECT_PROBE);
     verify(access, org.mockito.Mockito.times(2)).requireRead();
   }
 
@@ -94,7 +105,7 @@ class MediaPlaybackServiceTest {
     assertThat(result.status()).isEqualTo(MediaJobStatus.QUEUED);
     assertThat(result.jobId()).isEqualTo("job-1");
     var captor = org.mockito.ArgumentCaptor.forClass(MediaJob.class);
-    verify(jobs).save(captor.capture());
+    verify(jobs, org.mockito.Mockito.times(2)).save(captor.capture());
     MediaJob saved = captor.getValue();
     assertThat(saved.getSourcePath()).isEqualTo("video/source.mkv");
     assertThat(saved.getProfile()).isEqualTo(MediaOutputProfile.VIDEO_MP4);
@@ -135,7 +146,105 @@ class MediaPlaybackServiceTest {
 
     assertThat(result.mode()).isEqualTo(MediaPlaybackMode.READY);
     assertThat(result.jobId()).isEqualTo("ready-1");
-    verify(jobs, org.mockito.Mockito.never()).save(any());
+    verify(jobs).save(ready);
+    assertThat(ready.getLastAccessedAt()).isEqualTo(NOW);
+  }
+
+  @Test
+  void completedCacheIsVisibleToAnotherAuthorizedReader() throws Exception {
+    MediaSourceSnapshot source = source("audio/source.wav", 30, NOW.minusSeconds(2));
+    String key = MediaCacheKeys.forSource(source, MediaOutputProfile.AUDIO_M4A, 1);
+    MediaJob ready = job("ready-1", key, MediaJobStatus.READY);
+    ready.setProfile(MediaOutputProfile.AUDIO_M4A);
+    storage.writeReadyForTest(ready, "ready-bytes".getBytes());
+    when(sources.resolve(source.relativePath())).thenReturn(source);
+    when(jobs.findById("ready-1")).thenReturn(Optional.of(ready));
+    when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(
+        key, MediaJobStatus.READY)).thenReturn(Optional.of(ready));
+
+    account.setId("account-2");
+
+    assertThat(media.job("ready-1").status()).isEqualTo(MediaJobStatus.READY);
+    assertThat(media.requestFallback(source.relativePath(), MediaOutputProfile.AUDIO_M4A).jobId())
+        .isEqualTo("ready-1");
+  }
+
+  @Test
+  void activeCacheWorkIsReusedOnlyByItsOwner() {
+    MediaSourceSnapshot source = source("video/source.mkv", 30, NOW.minusSeconds(2));
+    String key = MediaCacheKeys.forSource(source, MediaOutputProfile.VIDEO_MP4, 1);
+    MediaJob active = job("job-existing", key, MediaJobStatus.TRANSCODING);
+    when(sources.resolve(source.relativePath())).thenReturn(source);
+    when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(
+        key, MediaJobStatus.READY)).thenReturn(Optional.empty());
+    when(jobs.findFirstByCacheKeyAndStatusInOrderByCreatedAtAsc(
+        key, MediaJobStatus.active())).thenReturn(Optional.of(active));
+
+    assertThat(media.requestFallback(source.relativePath(), MediaOutputProfile.VIDEO_MP4).jobId())
+        .isEqualTo("job-existing");
+
+    account.setId("account-2");
+    assertStatus(HttpStatus.TOO_MANY_REQUESTS,
+        () -> media.requestFallback(source.relativePath(), MediaOutputProfile.VIDEO_MP4));
+  }
+
+  @Test
+  void admissionEvictsOldestReadyCacheToCoverAllActiveReservations() throws Exception {
+    MediaStorage boundedStorage = mock(MediaStorage.class);
+    MediaJob active = job("active", "c".repeat(64), MediaJobStatus.QUEUED);
+    active.setReservedBytes(100);
+    MediaJob oldest = job("oldest", "d".repeat(64), MediaJobStatus.READY);
+    MediaJob newest = job("newest", "e".repeat(64), MediaJobStatus.READY);
+    oldest.setLastAccessedAt(NOW.minusSeconds(20));
+    newest.setLastAccessedAt(NOW.minusSeconds(10));
+    AtomicBoolean oldestDeleted = new AtomicBoolean();
+    when(boundedStorage.readyLength(any(), anyLong())).thenAnswer(invocation -> {
+      MediaJob candidate = invocation.getArgument(0);
+      return oldestDeleted.get() && candidate == oldest ? -1L : 10L;
+    });
+    when(boundedStorage.usableSpace()).thenAnswer(
+        ignored -> oldestDeleted.get() ? 350L : 250L);
+    when(boundedStorage.deleteReady(oldest)).thenAnswer(ignored -> {
+      oldestDeleted.set(true);
+      return true;
+    });
+    when(jobs.findByStatusIn(MediaJobStatus.active())).thenReturn(List.of(active));
+    when(jobs.findByStatusOrderByLastAccessedAtAscIdAsc(any(), any()))
+        .thenReturn(new SliceImpl<>(List.of(oldest, newest)));
+    MediaSourceSnapshot source = source("video/new.mkv", 30, NOW.minusSeconds(2));
+    when(sources.resolve(source.relativePath())).thenReturn(source);
+    when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(any(), any()))
+        .thenReturn(Optional.empty());
+    MediaPlaybackService bounded = new MediaPlaybackService(
+        access, jobs, audit, sources, boundedStorage, folderProperties, mediaProperties,
+        Clock.fixed(NOW, ZoneOffset.UTC), () -> "job-new");
+
+    assertThat(bounded.requestFallback(source.relativePath(), MediaOutputProfile.VIDEO_MP4).jobId())
+        .isEqualTo("job-new");
+    verify(boundedStorage).deleteReady(oldest);
+    verify(boundedStorage, org.mockito.Mockito.never()).deleteReady(newest);
+  }
+
+  @Test
+  void onlyOneWorkerDescriptorIsPublishedUntilTheActiveJobFinishes() throws Exception {
+    AtomicInteger ids = new AtomicInteger();
+    MediaPlaybackService sequential = new MediaPlaybackService(
+        access, jobs, audit, sources, storage, folderProperties, mediaProperties,
+        Clock.fixed(NOW, ZoneOffset.UTC), () -> "job-" + ids.incrementAndGet());
+    MediaSourceSnapshot first = source("video/first.mkv", 30, NOW.minusSeconds(2));
+    MediaSourceSnapshot second = source("video/second.mkv", 40, NOW.minusSeconds(3));
+    when(sources.resolve(first.relativePath())).thenReturn(first);
+    when(sources.resolve(second.relativePath())).thenReturn(second);
+    when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(any(), any()))
+        .thenReturn(Optional.empty());
+    when(jobs.countByDescriptorPublishedTrueAndStatusIn(MediaJobStatus.active()))
+        .thenReturn(0L, 1L);
+
+    sequential.requestFallback(first.relativePath(), MediaOutputProfile.VIDEO_MP4);
+    sequential.requestFallback(second.relativePath(), MediaOutputProfile.VIDEO_MP4);
+
+    assertThat(storage.readDescriptor("job-1")).contains("\"jobId\":\"job-1\"");
+    assertThatThrownBy(() -> storage.readDescriptor("job-2")).isInstanceOf(java.io.IOException.class);
   }
 
   @Test
@@ -183,6 +292,7 @@ class MediaPlaybackServiceTest {
   @Test
   void workerStatusIsValidatedAndReflectedInOwnedPolling() throws Exception {
     MediaJob queued = job("job-1", "a".repeat(64), MediaJobStatus.QUEUED);
+    queued.setDescriptorPublished(true);
     when(jobs.findById("job-1")).thenReturn(Optional.of(queued));
     storage.writeStatusForTest(queued, MediaJobStatus.BUFFERING, 4, null);
 
@@ -190,7 +300,7 @@ class MediaPlaybackServiceTest {
 
     assertThat(response.status()).isEqualTo(MediaJobStatus.BUFFERING);
     assertThat(queued.getOutputBytes()).isEqualTo(4);
-    verify(jobs).save(queued);
+    verify(jobs, atLeastOnce()).save(queued);
   }
 
   @Test
@@ -209,6 +319,53 @@ class MediaPlaybackServiceTest {
         queued.getCacheKey(), MediaJobStatus.READY)).thenReturn(Optional.of(queued));
     assertThat(media.requestFallback(source.relativePath(), queued.getProfile()).mode())
         .isEqualTo(MediaPlaybackMode.READY);
+  }
+
+  @Test
+  void workerReadyClaimIsIgnoredWhenActualOutputExceedsTheLimit() throws Exception {
+    MediaJob queued = job("job-1", "f".repeat(64), MediaJobStatus.QUEUED);
+    queued.setDescriptorPublished(true);
+    when(jobs.findById("job-1")).thenReturn(Optional.of(queued));
+    storage.writeReadyForTest(queued, new byte[101]);
+    storage.writeStatusForTest(queued, MediaJobStatus.READY, 100, null);
+
+    assertThat(media.job("job-1").status()).isEqualTo(MediaJobStatus.QUEUED);
+  }
+
+  @Test
+  void readyTransitionPublishesTheNextQueuedWorkerDescriptor() throws Exception {
+    MediaJob first = job("job-1", "1".repeat(64), MediaJobStatus.BUFFERING);
+    first.setDescriptorPublished(true);
+    MediaJob second = job("job-2", "2".repeat(64), MediaJobStatus.QUEUED);
+    second.setSourcePath("video/second.mkv");
+    MediaSourceSnapshot secondSource = source(
+        second.getSourcePath(), second.getSourceSize(), second.getSourceModifiedAt());
+    second.setCacheKey(MediaCacheKeys.forSource(
+        secondSource, second.getProfile(), second.getProfileVersion()));
+    when(jobs.findById("job-1")).thenReturn(Optional.of(first));
+    when(jobs.findFirstByStatusAndDescriptorPublishedFalseOrderByCreatedAtAsc(
+        MediaJobStatus.QUEUED)).thenReturn(Optional.of(second));
+    when(sources.resolve(second.getSourcePath())).thenReturn(secondSource);
+    storage.writeReadyForTest(first, "ready".getBytes());
+    storage.writeStatusForTest(first, MediaJobStatus.READY, 5, null);
+
+    assertThat(media.job("job-1").status()).isEqualTo(MediaJobStatus.READY);
+    assertThat(storage.readDescriptor("job-2")).contains("\"jobId\":\"job-2\"");
+    assertThat(second.isDescriptorPublished()).isTrue();
+  }
+
+  @Test
+  void windowsCacheIdentityCollapsesPathCaseAliases() {
+    MediaSourceSnapshot upper = source("Folder/Track.MKV", 10, NOW.minusSeconds(5));
+    MediaSourceSnapshot lower = source("folder/track.mkv", 10, NOW.minusSeconds(5));
+
+    if (java.io.File.separatorChar == '\\') {
+      assertThat(MediaCacheKeys.forSource(upper, MediaOutputProfile.VIDEO_MP4, 1))
+          .isEqualTo(MediaCacheKeys.forSource(lower, MediaOutputProfile.VIDEO_MP4, 1));
+    } else {
+      assertThat(MediaCacheKeys.forSource(upper, MediaOutputProfile.VIDEO_MP4, 1))
+          .isNotEqualTo(MediaCacheKeys.forSource(lower, MediaOutputProfile.VIDEO_MP4, 1));
+    }
   }
 
   @Test

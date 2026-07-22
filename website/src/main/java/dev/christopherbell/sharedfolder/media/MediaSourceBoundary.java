@@ -54,5 +54,11 @@ public final class MediaSourceBoundary {
 
   /** Canonical worker input plus revision metadata; this object is never returned by an API. */
   public record MediaSourceSnapshot(
-      String relativePath, Path absolutePath, long size, Instant modifiedAt) {}
+      String relativePath, Path absolutePath, long size, Instant modifiedAt) {
+    /** Collapses Windows case aliases without merging distinct case-sensitive provider paths. */
+    public String cacheIdentity() {
+      return java.io.File.separatorChar == '\\'
+          ? relativePath.toLowerCase(java.util.Locale.ROOT) : relativePath;
+    }
+  }
 }

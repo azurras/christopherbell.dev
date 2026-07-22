@@ -194,9 +194,13 @@ public class PortableSharedFolderPrivateBoundary {
     try {
       parent = bridge.openRootForMutation(
           path.getParent(), WindowsSharedFolderNativeBridge.OBJ_DONT_REPARSE);
-      leaf = bridge.openRelativeForExclusiveMutation(parent, path.getFileName().toString(),
-          WindowsSharedFolderNativeBridge.OpenKind.FILE,
-          WindowsSharedFolderNativeBridge.OBJ_DONT_REPARSE);
+      leaf = access == FileAccess.READ
+          ? bridge.openRelative(parent, path.getFileName().toString(),
+              WindowsSharedFolderNativeBridge.OpenKind.FILE,
+              WindowsSharedFolderNativeBridge.OBJ_DONT_REPARSE)
+          : bridge.openRelativeForExclusiveMutation(parent, path.getFileName().toString(),
+              WindowsSharedFolderNativeBridge.OpenKind.FILE,
+              WindowsSharedFolderNativeBridge.OBJ_DONT_REPARSE);
       var metadata = bridge.metadata(leaf);
       String retainedIdentity = Long.toUnsignedString(metadata.identity().volumeSerial()) + ":"
           + Base64.getUrlEncoder().withoutPadding().encodeToString(metadata.identity().fileId());

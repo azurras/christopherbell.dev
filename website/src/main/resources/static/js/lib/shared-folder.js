@@ -305,3 +305,40 @@ export async function waitForPlayableMediaJob(initial, options) {
     job = await load(initial.jobId || initial.id, signal);
   }
 }
+
+/** Continue observing a progressive job so post-buffer failures and final readiness stay visible. */
+export async function waitForTerminalMediaJob(initial, options) {
+  const {
+    load, onStatus = () => {}, signal,
+    delays = Array.from({ length: 14_400 }, () => 500),
+  } = options;
+  let job = initial;
+  for (let poll = 0; ; poll += 1) {
+    signal?.throwIfAborted();
+    onStatus(job);
+    if (job?.status === 'READY') return job;
+    if (['FAILED', 'CANCELED', 'INSUFFICIENT_SPACE', 'TIMED_OUT'].includes(job?.status)) {
+      const error = new Error(mediaStatusMessage(job.status));
+      error.mediaStatus = job.status;
+      throw error;
+    }
+    if (poll >= delays.length) throw new Error('Media preparation is taking longer than expected.');
+    await mediaPollDelay(delays[poll], signal);
+    job = await load(initial.jobId || initial.id, signal);
+  }
+}
+
+function mediaPollDelay(delay, signal) {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Media playback disconnected.', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, Math.max(0, Number(delay) || 0));
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}

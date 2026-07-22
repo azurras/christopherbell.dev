@@ -1,56 +1,75 @@
 package dev.christopherbell.sharedfolder.media;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.christopherbell.configuration.SharedFolderProperties;
+import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.FileTime;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.util.unit.DataSize;
+import tools.jackson.databind.ObjectMapper;
 
 class MediaStorageTest {
   @TempDir Path temp;
+  private Path system;
   private MediaStorage storage;
 
   @BeforeEach
   void setUp() throws Exception {
     Path shared = Files.createDirectory(temp.resolve("shared"));
-    Path system = Files.createDirectory(temp.resolve("system"));
-    storage = new MediaStorage(new SharedFolderProperties(
-        shared, system, DataSize.ofGigabytes(1), DataSize.ofMegabytes(1),
-        DataSize.ofBytes(1), DataSize.ofBytes(10), Duration.ofDays(1),
-        Duration.ofDays(1), true));
-    storage.initialize();
+    system = Files.createDirectory(temp.resolve("system"));
+    storage = storage(shared, new PortableSharedFolderPrivateBoundary(system));
   }
 
   @Test
-  void cacheLimitEvictsLeastRecentlyUsedButProtectsActiveAndStreamedOutputs() throws Exception {
-    MediaJob oldest = job("old", "a".repeat(64));
-    MediaJob active = job("active", "b".repeat(64));
-    storage.writeReadyForTest(oldest, "12345678".getBytes());
-    storage.writeReadyForTest(active, "abcdefgh".getBytes());
-    Files.setLastModifiedTime(storage.readyPath(oldest),
-        FileTime.from(Instant.parse("2026-07-21T00:00:00Z")));
-    Files.setLastModifiedTime(storage.readyPath(active),
-        FileTime.from(Instant.parse("2026-07-21T01:00:00Z")));
+  void heldHandleCopyEnforcesActualOutputCapAndReleasesReaderLease() throws Exception {
+    MediaJob ready = job("ready", "a".repeat(64));
+    storage.writeReadyForTest(ready, "12345678".getBytes());
 
-    storage.evictToLimit(10, Set.of(active.getCacheKey()));
+    assertThat(storage.readyLength(ready, 7)).isEqualTo(-1);
+    assertThatThrownBy(() -> storage.copy(
+        ready, true, 0, 8, new ByteArrayOutputStream(), 7)).isInstanceOf(IOException.class);
+    assertThat(storage.isBeingRead(ready.getCacheKey())).isFalse();
 
-    assertThat(storage.readyExists(oldest)).isFalse();
-    assertThat(storage.readyExists(active)).isTrue();
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    assertThat(storage.copy(ready, true, 2, 4, output, 8)).isEqualTo(4);
+    assertThat(output.toString()).isEqualTo("3456");
+    assertThat(storage.isBeingRead(ready.getCacheKey())).isFalse();
+  }
 
-    var lease = storage.readyFile(active);
-    storage.evictToLimit(1, Set.of());
-    assertThat(storage.readyExists(active)).isTrue();
-    lease.close();
-    storage.evictToLimit(1, Set.of());
-    assertThat(storage.readyExists(active)).isFalse();
+  @Test
+  void leafSubstitutionBetweenValidationAndOpenFailsClosed() throws Exception {
+    Path shared = temp.resolve("shared");
+    Files.writeString(temp.resolve("outside.bin"), "outside-secret");
+    SubstitutingBoundary boundary = new SubstitutingBoundary(system, temp.resolve("outside.bin"));
+    MediaStorage guarded = storage(shared, boundary);
+    MediaJob ready = job("ready", "b".repeat(64));
+    guarded.writeReadyForTest(ready, "safe".getBytes());
+    boundary.arm();
+
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    assertThatThrownBy(() -> guarded.copy(ready, true, 0, 4, output, 100))
+        .isInstanceOf(IOException.class);
+    assertThat(output.toString()).isEqualTo("safe");
+    assertThat(output.toString()).doesNotContain("outside-secret");
+  }
+
+  private MediaStorage storage(Path shared, PortableSharedFolderPrivateBoundary boundary)
+      throws Exception {
+    SharedFolderProperties properties = new SharedFolderProperties(
+        shared, system, DataSize.ofGigabytes(1), DataSize.ofMegabytes(1),
+        DataSize.ofBytes(1), DataSize.ofBytes(10), Duration.ofDays(1),
+        Duration.ofDays(1), true);
+    MediaStorage result = new MediaStorage(system, true, new ObjectMapper(), boundary);
+    result.initialize();
+    return result;
   }
 
   private MediaJob job(String id, String cacheKey) {
@@ -59,5 +78,27 @@ class MediaStorageTest {
     job.setCacheKey(cacheKey);
     job.setProfile(MediaOutputProfile.VIDEO_MP4);
     return job;
+  }
+
+  private static final class SubstitutingBoundary extends PortableSharedFolderPrivateBoundary {
+    private final Path outside;
+    private boolean armed;
+
+    private SubstitutingBoundary(Path root, Path outside) {
+      super(root);
+      this.outside = outside;
+    }
+
+    void arm() { armed = true; }
+
+    @Override
+    protected void beforePrivateFileChannelOpen(Path path, FileAccess access) throws IOException {
+      if (!armed || access != FileAccess.READ || !path.getFileName().toString().endsWith(".mp4")) {
+        return;
+      }
+      armed = false;
+      Files.delete(path);
+      Files.createLink(path, outside);
+    }
   }
 }

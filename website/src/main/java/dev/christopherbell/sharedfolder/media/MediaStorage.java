@@ -1,30 +1,26 @@
 package dev.christopherbell.sharedfolder.media;
 
 import dev.christopherbell.configuration.SharedFolderProperties;
-import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
-import dev.christopherbell.sharedfolder.fs.UnsafeSharedPathException;
+import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary;
+import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary.FileAccess;
 import jakarta.annotation.PostConstruct;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.FilterInputStream;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
+import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.springframework.core.io.AbstractResource;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
-/** Fixed private media directories and atomic worker handoff files beneath the system root. */
+/** Fixed private media storage whose website operations retain a verified file handle. */
 @Component
 public class MediaStorage {
   static final String JOBS = "shared-folder-media-jobs";
@@ -32,11 +28,13 @@ public class MediaStorage {
   static final String READY = "shared-folder-media-cache";
   static final String STATUS = "shared-folder-media-status";
   static final String CANCEL = "shared-folder-media-cancel";
+  private static final int STATUS_LIMIT_BYTES = 16 * 1024;
   private static final String SAFE_KEY = "[a-f0-9]{64}|[A-Za-z0-9_-]{1,100}";
 
   private final Path systemRoot;
   private final boolean enabled;
   private final ObjectMapper mapper;
+  private final PortableSharedFolderPrivateBoundary boundary;
   private final Map<String, AtomicInteger> readers = new ConcurrentHashMap<>();
   private volatile Long usableSpaceForTest;
 
@@ -49,152 +47,168 @@ public class MediaStorage {
   }
 
   MediaStorage(Path systemRoot, boolean enabled, ObjectMapper mapper) {
+    this(systemRoot, enabled, mapper,
+        new PortableSharedFolderPrivateBoundary(
+            Objects.requireNonNull(systemRoot).toAbsolutePath().normalize()));
+  }
+
+  MediaStorage(
+      Path systemRoot,
+      boolean enabled,
+      ObjectMapper mapper,
+      PortableSharedFolderPrivateBoundary boundary) {
     this.systemRoot = Objects.requireNonNull(systemRoot).toAbsolutePath().normalize();
     this.enabled = enabled;
     this.mapper = Objects.requireNonNull(mapper);
+    this.boundary = Objects.requireNonNull(boundary);
   }
 
   @PostConstruct
   public void initialize() throws IOException {
     if (!enabled) return;
-    requireOrdinaryDirectory(systemRoot);
     for (String name : new String[] {JOBS, PARTIAL, READY, STATUS, CANCEL}) {
-      Path directory = systemRoot.resolve(name);
-      if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(directory);
-      requireOrdinaryDirectory(directory);
+      boundary.usableSpace(name);
     }
   }
 
   public long usableSpace() throws IOException {
     Long override = usableSpaceForTest;
-    return override == null ? Files.getFileStore(directory(READY)).getUsableSpace() : override;
+    return override == null ? boundary.usableSpace(READY) : override;
   }
 
+  /** Publishes complete descriptor bytes before a separate zero-byte ready marker becomes visible. */
   public void writeDescriptor(MediaWorkerJobDescriptor descriptor) throws IOException {
     requireKey(descriptor.jobId());
-    byte[] bytes = mapper.writeValueAsBytes(descriptor.asMap());
-    atomicWrite(directory(JOBS), descriptor.jobId() + ".json", bytes);
+    writeNew(JOBS, descriptor.jobId() + ".json", mapper.writeValueAsBytes(descriptor.asMap()));
+    writeNew(JOBS, descriptor.jobId() + ".ready", new byte[0]);
   }
 
   public String readDescriptor(String id) throws IOException {
     requireKey(id);
-    return Files.readString(leaf(JOBS, id + ".json"));
+    return new String(readBounded(JOBS, id + ".json", 64 * 1024), java.nio.charset.StandardCharsets.UTF_8);
   }
 
   public boolean readyExists(MediaJob job) {
+    return readyLength(job, Long.MAX_VALUE) >= 0;
+  }
+
+  public boolean readyMatches(MediaJob job, long expectedBytes, long maxOutputBytes) {
+    long actual = readyLength(job, maxOutputBytes);
+    return actual >= 0 && actual == expectedBytes;
+  }
+
+  public long readyLength(MediaJob job, long maxOutputBytes) {
     try {
-      Path path = readyPath(job);
-      return Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(path);
+      long size = boundary.metadata(READY, readyKey(job)).attributes().size();
+      return size <= maxOutputBytes ? size : -1;
     } catch (IOException exception) {
-      return false;
+      return -1;
     }
   }
 
-  public void touchReady(MediaJob job) {
+  public long partialLength(MediaJob job, long maxOutputBytes) throws IOException {
     try {
-      Path path = readyPath(job);
-      requireOrdinaryFile(path);
-      Files.setLastModifiedTime(path, java.nio.file.attribute.FileTime.from(java.time.Instant.now()));
-    } catch (IOException ignored) {
-      // A missing cache entry is handled by the normal ready-file check.
+      long size = boundary.metadata(PARTIAL, partialKey(job)).attributes().size();
+      if (size > maxOutputBytes) throw new IOException("Media output exceeded its limit");
+      return size;
+    } catch (NoSuchFileException exception) {
+      return 0;
     }
   }
 
-  public MediaStoredFile readyFile(MediaJob job) throws IOException {
-    Path path = readyPath(job);
-    requireOrdinaryFile(path);
-    String cacheKey = job.getCacheKey();
-    readers.computeIfAbsent(cacheKey, ignored -> new AtomicInteger()).incrementAndGet();
-    java.util.concurrent.atomic.AtomicBoolean released = new java.util.concurrent.atomic.AtomicBoolean();
-    Runnable release = () -> {
-      if (!released.compareAndSet(false, true)) return;
-      AtomicInteger count = readers.get(cacheKey);
-      if (count != null && count.decrementAndGet() <= 0) readers.remove(cacheKey, count);
-    };
-    return new MediaStoredFile(
-        new LeasedFileResource(path, release), Files.size(path), release);
+  /** Copies an exact held-handle region and protects ready output from concurrent eviction. */
+  public long copy(
+      MediaJob job, boolean ready, long position, long length, OutputStream output,
+      long maxOutputBytes) throws IOException {
+    if (position < 0 || length < 0) throw new IllegalArgumentException("Invalid media copy range");
+    String directory = ready ? READY : PARTIAL;
+    String key = ready ? readyKey(job) : partialKey(job);
+    if (ready) acquireReader(job.getCacheKey());
+    try {
+      return boundary.operateOnRegularFile(directory, key, FileAccess.READ, channel -> {
+        long size = channel.size();
+        if (size > maxOutputBytes || position > size) {
+          throw new IOException("Media output exceeded its limit");
+        }
+        long remaining = Math.min(length, size - position);
+        channel.position(position);
+        ByteBuffer buffer = ByteBuffer.allocate(64 * 1024);
+        long copied = 0;
+        while (copied < remaining) {
+          buffer.clear();
+          buffer.limit((int) Math.min(buffer.capacity(), remaining - copied));
+          int read = channel.read(buffer);
+          if (read <= 0) break;
+          output.write(buffer.array(), 0, read);
+          copied += read;
+        }
+        return copied;
+      });
+    } finally {
+      if (ready) releaseReader(job.getCacheKey());
+    }
+  }
+
+  public boolean deleteReady(MediaJob job) throws IOException {
+    if (readerCount(job.getCacheKey()) > 0) return false;
+    return boundary.deleteIfExists(READY, readyKey(job));
+  }
+
+  public boolean isBeingRead(String cacheKey) {
+    return readerCount(cacheKey) > 0;
   }
 
   public Path partialPath(MediaJob job) throws IOException {
-    requireKey(job.getId());
-    return leaf(PARTIAL, job.getId() + "." + job.getProfile().extension() + ".part");
+    return workerPath(PARTIAL, partialKey(job));
   }
 
   public Path readyPath(MediaJob job) throws IOException {
-    requireKey(job.getCacheKey());
-    return leaf(READY, job.getCacheKey() + "." + job.getProfile().extension());
+    return workerPath(READY, readyKey(job));
   }
 
   public Path statusPath(MediaJob job) throws IOException {
     requireKey(job.getId());
-    return leaf(STATUS, job.getId() + ".json");
+    return workerPath(STATUS, job.getId() + ".json");
   }
 
   public Path cancellationPath(MediaJob job) throws IOException {
     requireKey(job.getId());
-    return leaf(CANCEL, job.getId() + ".cancel");
+    return workerPath(CANCEL, job.getId() + ".cancel");
   }
 
-  /** Atomically publishes a fixed empty cancellation marker for the isolated worker. */
+  /** Idempotently publishes a fixed empty cancellation marker for the isolated worker. */
   public void requestCancellation(MediaJob job) throws IOException {
-    atomicWrite(directory(CANCEL), job.getId() + ".cancel", new byte[0]);
+    try {
+      writeNew(CANCEL, job.getId() + ".cancel", new byte[0]);
+    } catch (FileAlreadyExistsException ignored) {
+      // A prior cancellation request is already authoritative.
+    }
   }
 
   /** Reads one bounded worker-owned status document; malformed or mismatched files are ignored. */
-  public java.util.Optional<MediaWorkerStatus> readStatus(MediaJob job, long maxOutputBytes) {
+  public Optional<MediaWorkerStatus> readStatus(MediaJob job, long maxOutputBytes) {
     try {
-      Path path = statusPath(job);
-      if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path)
-          || Files.size(path) > 16 * 1024) return java.util.Optional.empty();
-      var root = mapper.readTree(Files.readString(path));
+      var root = mapper.readTree(new String(
+          readBounded(STATUS, job.getId() + ".json", STATUS_LIMIT_BYTES),
+          java.nio.charset.StandardCharsets.UTF_8));
       if (root.path("schemaVersion").asInt(-1) != 1
-          || !job.getId().equals(root.path("jobId").asText(""))) {
-        return java.util.Optional.empty();
-      }
+          || !job.getId().equals(root.path("jobId").asText(""))) return Optional.empty();
       MediaJobStatus status = MediaJobStatus.valueOf(root.path("status").asText(""));
       long outputBytes = root.path("outputBytes").asLong(-1);
-      if (outputBytes < 0 || outputBytes > maxOutputBytes) return java.util.Optional.empty();
+      if (outputBytes < 0 || outputBytes > maxOutputBytes) return Optional.empty();
       String category = root.path("failureCategory").isMissingNode()
           || root.path("failureCategory").isNull() ? null
           : root.path("failureCategory").asText();
-      if (category != null && !category.matches("[a-z_]{1,40}")) {
-        return java.util.Optional.empty();
-      }
-      return java.util.Optional.of(new MediaWorkerStatus(status, outputBytes, category));
+      if (category != null && !category.matches("[a-z_]{1,40}")) return Optional.empty();
+      return Optional.of(new MediaWorkerStatus(status, outputBytes, category));
     } catch (IOException | IllegalArgumentException exception) {
-      return java.util.Optional.empty();
-    }
-  }
-
-  /** LRU eviction that excludes active jobs and files with an open website streaming lease. */
-  public void evictToLimit(long limitBytes, Set<String> protectedCacheKeys) throws IOException {
-    if (limitBytes < 1) return;
-    Map<Path, BasicFileAttributes> files = new LinkedHashMap<>();
-    try (var stream = Files.list(directory(READY))) {
-      stream.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
-          .forEach(path -> {
-            try { files.put(path, Files.readAttributes(path, BasicFileAttributes.class)); }
-            catch (IOException ignored) { }
-          });
-    }
-    long total = files.values().stream().mapToLong(BasicFileAttributes::size).sum();
-    if (total <= limitBytes) return;
-    var oldest = files.entrySet().stream()
-        .sorted(Comparator.comparing(entry -> entry.getValue().lastAccessTime().toInstant()))
-        .toList();
-    for (var entry : oldest) {
-      if (total <= limitBytes) break;
-      String cacheKey = entry.getKey().getFileName().toString().split("\\.", 2)[0];
-      if (protectedCacheKeys.contains(cacheKey)
-          || readers.getOrDefault(cacheKey, new AtomicInteger()).get() > 0) continue;
-      long size = entry.getValue().size();
-      Files.deleteIfExists(entry.getKey());
-      total -= size;
+      return Optional.empty();
     }
   }
 
   void writeReadyForTest(MediaJob job, byte[] bytes) throws IOException {
-    atomicWrite(directory(READY), readyPath(job).getFileName().toString(), bytes);
+    job.setOutputBytes(bytes.length);
+    writeReplacingForTest(READY, readyKey(job), bytes);
   }
 
   void writeStatusForTest(
@@ -206,101 +220,76 @@ public class MediaStorage {
     values.put("status", status.name());
     values.put("outputBytes", outputBytes);
     values.put("failureCategory", failureCategory);
-    atomicWrite(directory(STATUS), job.getId() + ".json", mapper.writeValueAsBytes(values));
+    writeReplacingForTest(STATUS, job.getId() + ".json", mapper.writeValueAsBytes(values));
   }
 
   void setUsableSpaceForTest(long bytes) { usableSpaceForTest = bytes; }
 
-  private void atomicWrite(Path directory, String name, byte[] bytes) throws IOException {
-    Path target = safeLeaf(directory, name);
-    Path temporary = safeLeaf(directory, name + ".tmp");
-    Files.write(temporary, bytes);
-    try {
-      Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-    } finally {
-      Files.deleteIfExists(temporary);
-    }
+  private void writeNew(String directory, String key, byte[] bytes) throws IOException {
+    boundary.operateOnRegularFile(directory, key, FileAccess.CREATE_NEW, channel -> {
+      ByteBuffer buffer = ByteBuffer.wrap(bytes);
+      while (buffer.hasRemaining()) channel.write(buffer);
+      channel.force(true);
+      return null;
+    });
   }
 
-  private Path leaf(String directory, String name) throws IOException {
-    return safeLeaf(directory(directory), name);
+  private void writeReplacingForTest(String directory, String key, byte[] bytes) throws IOException {
+    boundary.deleteIfExists(directory, key);
+    writeNew(directory, key, bytes);
   }
 
-  private Path directory(String name) throws IOException {
-    Path path = systemRoot.resolve(name).normalize();
-    requireOrdinaryDirectory(path);
-    return path;
+  private byte[] readBounded(String directory, String key, int limit) throws IOException {
+    return boundary.operateOnRegularFile(directory, key, FileAccess.READ, channel -> {
+      if (channel.size() > limit) throw new IOException("Private media document is too large");
+      ByteArrayOutputStream output = new ByteArrayOutputStream((int) channel.size());
+      ByteBuffer buffer = ByteBuffer.allocate(4096);
+      while (channel.read(buffer) > 0) {
+        buffer.flip();
+        output.write(buffer.array(), 0, buffer.remaining());
+        buffer.clear();
+      }
+      return output.toByteArray();
+    });
   }
 
-  private Path safeLeaf(Path directory, String name) throws IOException {
-    if (name == null || name.isBlank() || name.contains("/") || name.contains("\\")) {
+  private Path workerPath(String directory, String key) throws IOException {
+    if (key == null || key.isBlank() || key.contains("/") || key.contains("\\")) {
       throw new IOException("Unsafe media storage name");
     }
-    Path leaf = directory.resolve(name).normalize();
-    if (!leaf.getParent().equals(directory)) throw new IOException("Media storage path escaped");
+    boundary.usableSpace(directory);
+    Path parent = systemRoot.resolve(directory).normalize();
+    Path leaf = parent.resolve(key).normalize();
+    if (!leaf.getParent().equals(parent)) throw new IOException("Media storage path escaped");
     return leaf;
+  }
+
+  private String readyKey(MediaJob job) throws IOException {
+    requireKey(job.getCacheKey());
+    return job.getCacheKey() + "." + job.getProfile().extension();
+  }
+
+  private String partialKey(MediaJob job) throws IOException {
+    requireKey(job.getId());
+    return job.getId() + "." + job.getProfile().extension() + ".part";
   }
 
   private void requireKey(String key) throws IOException {
     if (key == null || !key.matches(SAFE_KEY)) throw new IOException("Invalid media identifier");
   }
 
-  private void requireOrdinaryDirectory(Path path) throws IOException {
-    try {
-      SharedFolderPathResolver resolver = new SharedFolderPathResolver(systemRoot);
-      Path verified = path.equals(systemRoot)
-          ? systemRoot : resolver.existing(systemRoot.relativize(path).toString().replace('\\', '/'));
-      if (!resolver.readHandle(verified).attributes().isDirectory()) {
-        throw new IOException("Media storage directory is unavailable");
-      }
-    } catch (UnsafeSharedPathException exception) {
-      throw new IOException("Media storage directory is unavailable", exception);
-    }
+  private void acquireReader(String cacheKey) {
+    readers.computeIfAbsent(cacheKey, ignored -> new AtomicInteger()).incrementAndGet();
   }
 
-  private void requireOrdinaryFile(Path path) throws IOException {
-    try {
-      SharedFolderPathResolver resolver = new SharedFolderPathResolver(systemRoot);
-      Path verified = resolver.existing(systemRoot.relativize(path).toString().replace('\\', '/'));
-      if (!resolver.readHandle(verified).attributes().isRegularFile()) {
-        throw new IOException("Media output is unavailable");
-      }
-    } catch (UnsafeSharedPathException exception) {
-      throw new IOException("Media output is unavailable", exception);
-    }
+  private void releaseReader(String cacheKey) {
+    AtomicInteger count = readers.get(cacheKey);
+    if (count != null && count.decrementAndGet() <= 0) readers.remove(cacheKey, count);
   }
 
-  /** Open ready file plus an eviction lease that callers must close. */
-  public record MediaStoredFile(Resource resource, long length, Runnable release) {
-    public void close() { release.run(); }
-  }
-
-  private static final class LeasedFileResource extends AbstractResource {
-    private final Path path;
-    private final Runnable release;
-
-    private LeasedFileResource(Path path, Runnable release) {
-      this.path = path;
-      this.release = release;
-    }
-
-    @Override
-    public InputStream getInputStream() throws IOException {
-      try {
-        return new FilterInputStream(Files.newInputStream(path)) {
-          @Override public void close() throws IOException {
-            try { super.close(); } finally { release.run(); }
-          }
-        };
-      } catch (IOException failure) {
-        release.run();
-        throw failure;
-      }
-    }
-
-    @Override public long contentLength() throws IOException { return Files.size(path); }
-    @Override public String getFilename() { return path.getFileName().toString(); }
-    @Override public String getDescription() { return "shared-folder cached media resource"; }
+  private int readerCount(String cacheKey) {
+    AtomicInteger count = readers.get(cacheKey);
+    return count == null ? 0 : count.get();
   }
 
   /** Strict worker progress fields accepted by the website. */

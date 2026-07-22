@@ -52,7 +52,7 @@ class ProgressiveMediaControllerTest {
   @Test
   void ownedUserCanClassifyQueuePollAndCancelWithoutPathLeak() throws Exception {
     when(media.playback("video/source.mkv"))
-        .thenReturn(new MediaPlaybackDescriptor(MediaPlaybackMode.FALLBACK_REQUIRED, null, null, null));
+        .thenReturn(new MediaPlaybackDescriptor(MediaPlaybackMode.DIRECT_PROBE, null, null, null));
     when(media.requestFallback("video/source.mkv", MediaOutputProfile.VIDEO_MP4))
         .thenReturn(new MediaPlaybackDescriptor(
             MediaPlaybackMode.TRANSCODING, "job-1", MediaJobStatus.QUEUED,
@@ -66,7 +66,7 @@ class ProgressiveMediaControllerTest {
 
     mockMvc.perform(post(BASE + "/playback").with(basic()).contentType("application/json")
             .content("{\"path\":\"video/source.mkv\"}"))
-        .andExpect(status().isOk()).andExpect(jsonPath("$.mode").value("FALLBACK_REQUIRED"));
+        .andExpect(status().isOk()).andExpect(jsonPath("$.mode").value("DIRECT_PROBE"));
     mockMvc.perform(post(BASE + "/fallback").with(basic()).contentType("application/json")
             .content("{\"path\":\"video/source.mkv\",\"profile\":\"VIDEO_MP4\"}"))
         .andExpect(status().isAccepted()).andExpect(jsonPath("$.jobId").value("job-1"))
@@ -75,6 +75,29 @@ class ProgressiveMediaControllerTest {
         .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("BUFFERING"));
     mockMvc.perform(delete(BASE + "/jobs/job-1").with(basic()))
         .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELED"));
+  }
+
+  @Test
+  void terminalDerivativeStreamsReturnRetryableStatusInsteadOfEmptySuccess() throws Exception {
+    MediaJob failed = terminalJob(MediaJobStatus.FAILED);
+    MediaJob noSpace = terminalJob(MediaJobStatus.INSUFFICIENT_SPACE);
+    when(media.requireVisibleJob("failed")).thenReturn(failed);
+    when(media.requireVisibleJob("space")).thenReturn(noSpace);
+
+    mockMvc.perform(get(BASE + "/jobs/failed/stream").with(basic()))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
+    mockMvc.perform(get(BASE + "/jobs/space/stream").with(basic()))
+        .andExpect(status().isInsufficientStorage());
+  }
+
+  private MediaJob terminalJob(MediaJobStatus status) {
+    MediaJob job = new MediaJob();
+    job.setId(status.name().toLowerCase());
+    job.setSourcePath("video/source.mkv");
+    job.setProfile(MediaOutputProfile.VIDEO_MP4);
+    job.setStatus(status);
+    return job;
   }
 
   private org.springframework.test.web.servlet.request.RequestPostProcessor basic() {

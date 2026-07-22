@@ -7,12 +7,8 @@ public record MediaPlaybackDescriptor(
     MediaJobStatus status,
     MediaOutputProfile profile) {
 
-  static MediaPlaybackDescriptor direct() {
-    return new MediaPlaybackDescriptor(MediaPlaybackMode.DIRECT, null, null, null);
-  }
-
-  static MediaPlaybackDescriptor fallbackRequired() {
-    return new MediaPlaybackDescriptor(MediaPlaybackMode.FALLBACK_REQUIRED, null, null, null);
+  static MediaPlaybackDescriptor directProbe() {
+    return new MediaPlaybackDescriptor(MediaPlaybackMode.DIRECT_PROBE, null, null, null);
   }
 
   static MediaPlaybackDescriptor from(MediaJob job) {

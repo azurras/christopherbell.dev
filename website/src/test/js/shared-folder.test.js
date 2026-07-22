@@ -24,6 +24,7 @@ import {
   mediaOutputProfile,
   mediaStatusMessage,
   waitForPlayableMediaJob,
+  waitForTerminalMediaJob,
 } from '../../main/resources/static/js/lib/shared-folder.js';
 
 test('shared-folder API paths encode each decoded relative path once', () => {
@@ -80,6 +81,22 @@ test('media fallback polling stops on safe terminal state and disconnect', async
     load: async () => ({ id: 'job-1', status: 'BUFFERING' }), onStatus: () => {},
     signal: controller.signal, delays: [0],
   }), error => error.name === 'AbortError');
+});
+
+test('progressive media remains observed after buffering and exposes terminal failure', async () => {
+  const seen = [];
+  const states = ['TRANSCODING', 'FAILED'];
+  await assert.rejects(waitForTerminalMediaJob({ id: 'job-1', status: 'BUFFERING' }, {
+    load: async () => ({ id: 'job-1', status: states.shift() }),
+    onStatus: job => seen.push(job.status), delays: [0, 0],
+  }), error => error.mediaStatus === 'FAILED');
+  assert.deepEqual(seen, ['BUFFERING', 'TRANSCODING', 'FAILED']);
+
+  const ready = await waitForTerminalMediaJob({ id: 'job-2', status: 'BUFFERING' }, {
+    load: async () => ({ id: 'job-2', status: 'READY' }),
+    onStatus: () => {}, delays: [0],
+  });
+  assert.equal(ready.status, 'READY');
 });
 
 test('effective read access includes admins and stored write capability', () => {
@@ -418,5 +435,8 @@ test('shared-folder shell owns a responsive single-column mobile layout and down
   assert.match(page, /window\.confirm/);
   assert.match(page, /requestMediaFallback/);
   assert.match(page, /waitForPlayableMediaJob/);
+  assert.match(page, /waitForTerminalMediaJob/);
+  assert.match(page, /API\.sharedFolder\.media\.playback/);
+  assert.match(page, /shared-folder-media-retry/);
   assert.match(page, /API\.sharedFolder\.media\.stream/);
 });

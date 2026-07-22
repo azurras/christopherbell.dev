@@ -12,7 +12,7 @@ public final class MediaCacheKeys {
 
   public static String forSource(
       MediaSourceSnapshot source, MediaOutputProfile profile, int profileVersion) {
-    String material = source.relativePath() + "\n" + source.size() + "\n"
+    String material = source.cacheIdentity() + "\n" + source.size() + "\n"
         + source.modifiedAt() + "\n" + profile.name() + "\n" + profileVersion;
     try {
       return HexFormat.of().formatHex(

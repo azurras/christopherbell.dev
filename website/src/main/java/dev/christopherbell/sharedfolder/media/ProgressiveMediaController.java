@@ -6,7 +6,6 @@ import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.service.SharedFolderRangeNotSatisfiableException;
 import java.io.IOException;
 import java.util.List;
-import org.springframework.core.io.support.ResourceRegion;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -75,8 +74,8 @@ public class ProgressiveMediaController {
               "bytes " + selection.start() + "-" + (selection.start() + selection.length() - 1)
                   + "/" + selection.totalLength());
         }
-        return new ResponseEntity<>(
-            new ResourceRegion(selection.resource(), selection.start(), selection.length()), headers,
+        StreamingResponseBody body = output -> streamer.copyReady(selection, output);
+        return new ResponseEntity<>(body, headers,
             selection.partial() ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK);
       } catch (SharedFolderRangeNotSatisfiableException exception) {
         return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
@@ -84,6 +83,11 @@ public class ProgressiveMediaController {
             .header(HttpHeaders.ACCEPT_RANGES, "bytes")
             .header(HttpHeaders.CONTENT_RANGE, "bytes */" + exception.totalLength()).build();
       }
+    }
+    if (job.getStatus().terminal()) {
+      HttpStatus status = job.getStatus() == MediaJobStatus.INSUFFICIENT_SPACE
+          ? HttpStatus.INSUFFICIENT_STORAGE : HttpStatus.SERVICE_UNAVAILABLE;
+      return ResponseEntity.status(status).headers(mediaHeaders(job)).build();
     }
     StreamingResponseBody body = output -> streamer.copyGrowing(job, output);
     return new ResponseEntity<>(body, mediaHeaders(job), HttpStatus.OK);

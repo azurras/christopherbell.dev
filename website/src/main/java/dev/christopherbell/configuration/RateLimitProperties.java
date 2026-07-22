@@ -52,7 +52,7 @@ public class RateLimitProperties {
         30,
         Duration.ofMinutes(1),
         List.of("POST", "DELETE"),
-        List.of("/api/shared-folder" + APIVersion.V20260717 + "/transcode/**")));
+        List.of("/api/shared-folder" + APIVersion.V20260717 + "/media/**")));
     rules.add(new Rule(
         "api-mutations",
         300,

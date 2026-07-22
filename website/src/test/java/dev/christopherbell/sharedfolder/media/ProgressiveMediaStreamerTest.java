@@ -57,6 +57,7 @@ class ProgressiveMediaStreamerTest {
       if (checks.incrementAndGet() == 2) {
         Files.write(storage.partialPath(job), "ment".getBytes(),
             java.nio.file.StandardOpenOption.APPEND);
+        storage.writeReadyForTest(job, "fragment".getBytes());
         job.setStatus(MediaJobStatus.READY);
       }
       return Optional.of(job);
@@ -92,7 +93,6 @@ class ProgressiveMediaStreamerTest {
     assertThat(selection.length()).isEqualTo(4);
     assertThat(selection.totalLength()).isEqualTo(10);
     assertThat(selection.partial()).isTrue();
-    selection.close();
   }
 
   @Test

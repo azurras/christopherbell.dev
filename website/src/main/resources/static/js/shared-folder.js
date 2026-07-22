@@ -23,6 +23,7 @@ import {
   mediaOutputProfile,
   mediaStatusMessage,
   waitForPlayableMediaJob,
+  waitForTerminalMediaJob,
 } from './lib/shared-folder.js';
 import {
   clearSharedFolderStreamingAuth,
@@ -144,40 +145,53 @@ async function preview(entry) {
     : entry.previewKind === 'AUDIO' ? document.createElement('audio')
       : entry.previewKind === 'VIDEO' ? document.createElement('video')
         : document.createElement('iframe');
-  element.src = API.sharedFolder.preview(entry.path);
   element.title = `${entry.name} preview`;
   if (element instanceof HTMLMediaElement) element.controls = true;
   if (entry.previewKind === 'PDF') element.setAttribute('sandbox', '');
   if (['AUDIO', 'VIDEO'].includes(entry.previewKind)) {
     const controller = new AbortController();
     currentMediaPlayback = controller;
+    await fetchJson(API.sharedFolder.media.playback, {
+      method: 'POST', headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
+      body: JSON.stringify({ path: entry.path }), signal: controller.signal,
+    });
     element.addEventListener('error', () => {
       if (currentPreviewLostAccess || controller.signal.aborted) return;
-      void requestMediaFallback(entry, element, host, controller.signal).catch(error => {
-        if (error?.name === 'AbortError') return;
-        if (isSharedFolderAccessDenied(error)) {
-          handleSharedFolderAccessLoss(error.status);
-          return;
-        }
-        status(error?.message || 'The media could not be prepared.');
-        const retry = document.createElement('button');
-        retry.type = 'button';
-        retry.className = 'btn btn-sm btn-outline-light';
-        retry.textContent = 'Retry media';
-        retry.addEventListener('click', () => {
-          retry.remove();
-          void requestMediaFallback(entry, element, host, controller.signal)
-            .catch(retryError => status(retryError?.message || 'The media could not be prepared.'));
-        }, { once: true });
-        host.append(retry);
-      });
+      startMediaFallback(entry, element, host, controller.signal);
     }, { once: true });
+    element.src = API.sharedFolder.preview(entry.path);
   } else {
     element.addEventListener('error', () => {
       if (!currentPreviewLostAccess) status('The preview could not be loaded.');
     });
+    element.src = API.sharedFolder.preview(entry.path);
   }
   host.append(element);
+}
+
+function startMediaFallback(entry, element, host, signal) {
+  void requestMediaFallback(entry, element, host, signal).catch(error => {
+    if (error?.name === 'AbortError') return;
+    if (isSharedFolderAccessDenied(error)) {
+      handleSharedFolderAccessLoss(error.status);
+      return;
+    }
+    status(error?.message || 'The media could not be prepared.');
+    showMediaRetry(entry, element, host, signal);
+  });
+}
+
+function showMediaRetry(entry, element, host, signal) {
+  host.querySelector?.('.shared-folder-media-retry')?.remove();
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.className = 'btn btn-sm btn-outline-light shared-folder-media-retry';
+  retry.textContent = 'Retry media';
+  retry.addEventListener('click', () => {
+    retry.remove();
+    startMediaFallback(entry, element, host, signal);
+  }, { once: true });
+  host.append(retry);
 }
 
 async function requestMediaFallback(entry, element, host, signal) {
@@ -187,20 +201,24 @@ async function requestMediaFallback(entry, element, host, signal) {
     method: 'POST', headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
     body: JSON.stringify({ path: entry.path, profile: mediaOutputProfile(entry) }), signal,
   });
-  const playable = await waitForPlayableMediaJob(initial, {
-    signal,
-    load: (id, requestSignal) => fetchJson(API.sharedFolder.media.job(id), {
-      headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
-      signal: requestSignal,
-    }),
-    onStatus: job => status(mediaStatusMessage(job.status)),
+  const load = (id, requestSignal) => fetchJson(API.sharedFolder.media.job(id), {
+    headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
+    signal: requestSignal,
   });
+  const observe = { signal, load, onStatus: job => status(mediaStatusMessage(job.status)) };
+  const playable = await waitForPlayableMediaJob(initial, observe);
   signal?.throwIfAborted();
   if (!await prepareNativeStreaming()) return;
   element.src = API.sharedFolder.media.stream(playable.jobId || playable.id);
+  element.addEventListener('error', () => {
+    if (signal?.aborted || currentPreviewLostAccess) return;
+    status('The browser-compatible stream stopped. You can retry it.');
+    showMediaRetry(entry, element, host, signal);
+  }, { once: true });
   element.load?.();
   status(mediaStatusMessage(playable.status));
   host.scrollIntoView?.({ block: 'nearest' });
+  if (playable.status !== 'READY') await waitForTerminalMediaJob(playable, observe);
 }
 
 async function mutationRequest(url, method, body) {

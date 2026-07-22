@@ -1,26 +1,18 @@
 package dev.christopherbell.sharedfolder.media;
 
 import dev.christopherbell.configuration.SharedFolderMediaProperties;
-import dev.christopherbell.sharedfolder.media.MediaStorage.MediaStoredFile;
 import dev.christopherbell.sharedfolder.service.SharedFolderRangeNotSatisfiableException;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpRange;
 import org.springframework.stereotype.Component;
 
-/** Sequentially streams a growing derivative with bounded polling and no whole-file buffering. */
+/** Sequentially streams held-handle media regions with bounded growing-file polling. */
 @Component
 public final class ProgressiveMediaStreamer {
-  private static final int COPY_BUFFER_BYTES = 64 * 1024;
   private final MediaStorage storage;
   private final MediaJobRepository jobs;
   private final SharedFolderMediaProperties properties;
@@ -50,34 +42,27 @@ public final class ProgressiveMediaStreamer {
     long position = 0;
     boolean started = false;
     long idleSince = System.nanoTime();
-    ByteBuffer buffer = ByteBuffer.allocate(COPY_BUFFER_BYTES);
+    long maximum = properties.maxOutput().toBytes();
     while (!Thread.currentThread().isInterrupted()) {
       MediaJob current = jobs.findById(original.getId()).orElse(original);
       if (media != null) current = media.refreshWorkerState(current);
       MediaJob observed = current;
-      MediaJobStatus effectiveStatus = storage
-          .readStatus(observed, properties.maxOutput().toBytes())
-          .map(MediaStorage.MediaWorkerStatus::status)
-          .filter(status -> status != MediaJobStatus.READY || storage.readyExists(observed))
+      var workerStatus = storage.readStatus(observed, maximum);
+      MediaJobStatus effectiveStatus = workerStatus.map(MediaStorage.MediaWorkerStatus::status)
+          .filter(status -> status != MediaJobStatus.READY
+              || storage.readyMatches(observed, workerStatus.get().outputBytes(), maximum))
           .orElse(observed.getStatus());
-      Path path = outputPath(observed, effectiveStatus);
-      long size = ordinarySize(path);
+      boolean ready = effectiveStatus == MediaJobStatus.READY;
+      long size = ready ? storage.readyLength(observed, maximum)
+          : storage.partialLength(observed, maximum);
+      if (size < 0) throw new IOException("Media output is unavailable");
       if (!started && size >= properties.initialBuffer().toBytes()) started = true;
       if (!started && effectiveStatus.terminal()) started = size > 0;
       if (started && size > position) {
-        try (FileChannel channel = FileChannel.open(path, StandardOpenOption.READ)) {
-          channel.position(position);
-          while (position < size) {
-            buffer.clear();
-            buffer.limit((int) Math.min(buffer.capacity(), size - position));
-            int read = channel.read(buffer);
-            if (read <= 0) break;
-            output.write(buffer.array(), 0, read);
-            position += read;
-          }
-        }
+        long copied = storage.copy(observed, ready, position, size - position, output, maximum);
+        position += copied;
         output.flush();
-        idleSince = System.nanoTime();
+        if (copied > 0) idleSince = System.nanoTime();
       }
       if (effectiveStatus.terminal() && position >= size) return;
       if (Duration.ofNanos(System.nanoTime() - idleSince)
@@ -87,34 +72,27 @@ public final class ProgressiveMediaStreamer {
   }
 
   public ReadySelection openReady(MediaJob job, String rangeHeader) throws IOException {
-    MediaStoredFile stored = storage.readyFile(job);
-    long total = stored.length();
-    if (rangeHeader == null) return new ReadySelection(stored, 0, total, total, false);
+    long total = storage.readyLength(job, properties.maxOutput().toBytes());
+    if (total < 0) throw new IOException("Media output is unavailable");
+    if (rangeHeader == null) return new ReadySelection(job, 0, total, total, false);
     try {
       List<HttpRange> ranges = HttpRange.parseRanges(rangeHeader);
-      if (ranges.size() != 1 || total == 0) throw invalidRange(total, stored);
+      if (ranges.size() != 1 || total == 0) throw invalidRange(total);
       long start = ranges.getFirst().getRangeStart(total);
       long end = ranges.getFirst().getRangeEnd(total);
-      if (start < 0 || end < start || end >= total) throw invalidRange(total, stored);
-      return new ReadySelection(stored, start, end - start + 1, total, true);
+      if (start < 0 || end < start || end >= total) throw invalidRange(total);
+      return new ReadySelection(job, start, end - start + 1, total, true);
     } catch (IllegalArgumentException exception) {
-      throw invalidRange(total, stored);
+      throw invalidRange(total);
     }
   }
 
-  private Path outputPath(MediaJob job, MediaJobStatus effectiveStatus) throws IOException {
-    if (effectiveStatus == MediaJobStatus.READY && storage.readyExists(job)) {
-      return storage.readyPath(job);
-    }
-    return storage.partialPath(job);
-  }
-
-  private long ordinarySize(Path path) throws IOException {
-    if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return 0;
-    if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path)) {
-      throw new IOException("Media output is unavailable");
-    }
-    return Files.size(path);
+  public void copyReady(ReadySelection selection, OutputStream output) throws IOException {
+    long copied = storage.copy(
+        selection.job(), true, selection.start(), selection.length(), output,
+        properties.maxOutput().toBytes());
+    if (copied != selection.length()) throw new IOException("Media output changed during streaming");
+    output.flush();
   }
 
   private void sleep(Duration duration) throws IOException {
@@ -126,16 +104,11 @@ public final class ProgressiveMediaStreamer {
     }
   }
 
-  private SharedFolderRangeNotSatisfiableException invalidRange(
-      long total, MediaStoredFile stored) {
-    stored.close();
+  private SharedFolderRangeNotSatisfiableException invalidRange(long total) {
     return new SharedFolderRangeNotSatisfiableException(total);
   }
 
-  /** Ready disk region and its eviction lease. */
+  /** Completed held-handle range selection. */
   public record ReadySelection(
-      MediaStoredFile stored, long start, long length, long totalLength, boolean partial) {
-    public org.springframework.core.io.Resource resource() { return stored.resource(); }
-    public void close() { stored.close(); }
-  }
+      MediaJob job, long start, long length, long totalLength, boolean partial) {}
 }
