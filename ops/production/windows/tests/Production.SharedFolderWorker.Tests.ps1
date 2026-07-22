@@ -946,35 +946,49 @@ Describe 'shared-folder runtime isolation' {
         { Assert-PinnedMediaToolSet -ToolRoot $toolRoot } | Should -Throw '*hash verification*'
     }
 
-    It 'installs and refreshes the worker service idempotently through controlled service effects' {
+    It 'installs and reinstalls the worker through supported WinSW 2 commands' {
         $productionRoot = Join-Path $TestDrive 'service-runtime'
-        $service = Join-Path $productionRoot 'service'
-        New-Item -ItemType Directory -Path $service -Force | Out-Null
-        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
-        'website xml' | Set-Content (Join-Path $service 'ChristopherBellDev.xml')
-        'website script' | Set-Content (Join-Path $service 'Start-ChristopherBellDev.ps1')
+        $serviceRoot = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $serviceRoot -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $serviceRoot 'ChristopherBellDev.exe')
+        'website xml' | Set-Content (Join-Path $serviceRoot 'ChristopherBellDev.xml')
+        'website script' | Set-Content (Join-Path $serviceRoot 'Start-ChristopherBellDev.ps1')
         $commands = [Collections.Generic.List[string]]::new()
-        $identities = [Collections.Generic.List[string]]::new()
+        $waits = [Collections.Generic.List[string]]::new()
         $events = [Collections.Generic.List[string]]::new()
+        $identities = [Collections.Generic.List[string]]::new()
         $state = @{ Existing = $false; Status = 'Missing' }
-        $getService = { param($name) if ($state.Existing) { [pscustomobject]@{Name=$name} } }
+        $getService = {
+            param($name)
+            if ($state.Existing) { [pscustomobject]@{ Name = $name } }
+        }
         $invoke = {
-            param($binary,$command)
+            param($binary, $command)
             $commands.Add($command)
             $events.Add($command)
             if ($command -eq 'install') {
                 $state.Existing = $true
                 $state.Status = 'Stopped'
+            } elseif ($command -eq 'uninstall') {
+                $state.Existing = $false
+                $state.Status = 'Missing'
             }
             0
+        }
+        $wait = {
+            param($name, $shouldExist, $timeoutSeconds)
+            $label = if ($shouldExist) { 'wait-present' } else { 'wait-absent' }
+            $events.Add($label)
+            $waits.Add("${name}=${shouldExist}:$timeoutSeconds")
+            $state.Existing | Should -Be $shouldExist
         }
         $stopService = {
             param($name)
             $events.Add('stop')
-            $state.Status = 'Stopped'
+            if ($state.Existing) { $state.Status = 'Stopped' }
         }
         $setIdentity = {
-            param($name,$identity)
+            param($name, $identity)
             $events.Add('set-identity')
             $identities.Add("$name=$identity")
         }
@@ -984,28 +998,437 @@ Describe 'shared-folder runtime isolation' {
             'NT AUTHORITY\LocalService'
         }
 
-        Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
-            -GetServiceAction $getService -InvokeWinSwAction $invoke `
-            -StopServiceAction $stopService `
-            -SetServiceIdentityAction $setIdentity -GetServiceIdentityAction $getIdentity `
-            -ProtectPathAction { param($path) } -SetAclAction { param($path,$acl) }
-        $state.Existing = $true
+        $arguments = @{
+            ProductionRoot = $productionRoot
+            GetServiceAction = $getService
+            InvokeWinSwAction = $invoke
+            WaitForServicePresenceAction = $wait
+            StopServiceAction = $stopService
+            SetServiceIdentityAction = $setIdentity
+            GetServiceIdentityAction = $getIdentity
+            ProtectPathAction = { param($path) }
+            SetAclAction = { param($path, $acl) }
+        }
+        Install-SharedFolderWorkerService @arguments
         $state.Status = 'Running'
-        Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
-            -GetServiceAction $getService -InvokeWinSwAction $invoke `
-            -StopServiceAction $stopService `
-            -SetServiceIdentityAction $setIdentity -GetServiceIdentityAction $getIdentity `
-            -ProtectPathAction { param($path) } -SetAclAction { param($path,$acl) }
+        Install-SharedFolderWorkerService @arguments
 
-        $commands | Should -Be @('install','refresh')
+        $commands | Should -Be @('install','uninstall','install')
+        $waits | Should -Be @(
+            'ChristopherBellMediaWorker=True:30',
+            'ChristopherBellMediaWorker=False:30',
+            'ChristopherBellMediaWorker=True:30')
+        $events | Should -Be @(
+            'install','wait-present','stop','set-identity','get-identity',
+            'stop','uninstall','wait-absent','install','wait-present','stop',
+            'set-identity','get-identity')
         $identities | Should -Be @(
             'ChristopherBellMediaWorker=NT AUTHORITY\LocalService',
             'ChristopherBellMediaWorker=NT AUTHORITY\LocalService')
-        $events | Should -Be @(
-            'install','stop','set-identity','get-identity',
-            'stop','refresh','stop','set-identity','get-identity')
+        $state.Existing | Should -BeTrue
         $state.Status | Should -Be 'Stopped'
-        Test-Path (Join-Path $service 'ChristopherBellMediaWorker.exe') | Should -BeTrue
+    }
+
+    It 'fails before effects when the initial service query fails' {
+        $productionRoot = Join-Path $TestDrive 'worker-initial-query-failure'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $effects = [Collections.Generic.List[string]]::new()
+        Mock Get-Service -ModuleName Production.SharedFolder {
+            throw 'simulated initial service query failure'
+        }
+
+        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -InvokeWinSwAction { param($binary, $command) $effects.Add($command); 0 } `
+            -WaitForServicePresenceAction { param($name, $shouldExist, $timeoutSeconds) $effects.Add('wait') } `
+            -StopServiceAction { param($name) $effects.Add('stop') } `
+            -SetServiceIdentityAction { param($name, $identity) $effects.Add('set-identity') } `
+            -GetServiceIdentityAction { param($name) $effects.Add('get-identity'); 'NT AUTHORITY\LocalService' } `
+            -ProtectPathAction { param($path) $effects.Add('protect') } `
+            -SetAclAction { param($path, $acl) $effects.Add('set-acl') } } |
+            Should -Throw '*simulated initial service query failure*'
+
+        $effects.Count | Should -Be 0
+        Should -Invoke Get-Service -ModuleName Production.SharedFolder -Times 1 -Exactly `
+            -ParameterFilter { $ErrorAction -eq 'Stop' }
+    }
+
+    It 'does not reinstall when the absence wait service query fails' {
+        $productionRoot = Join-Path $TestDrive 'worker-absence-query-failure'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $queryState = @{ Count = 0 }
+        $commands = [Collections.Generic.List[string]]::new()
+        $identityEffects = [Collections.Generic.List[string]]::new()
+        $getService = {
+            param($name)
+            $queryState.Count++
+            if ($queryState.Count -eq 1) { return [pscustomobject]@{ Name = $name } }
+            throw 'simulated absence wait service query failure'
+        }
+
+        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -ServiceWaitTimeoutSeconds 1 -GetServiceAction $getService `
+            -InvokeWinSwAction { param($binary, $command) $commands.Add($command); 0 } `
+            -StopServiceAction { param($name) } `
+            -SetServiceIdentityAction { param($name, $identity) $identityEffects.Add('set') } `
+            -GetServiceIdentityAction { param($name) $identityEffects.Add('get'); 'NT AUTHORITY\LocalService' } `
+            -ProtectPathAction { param($path) } -SetAclAction { param($path, $acl) } } |
+            Should -Throw '*simulated absence wait service query failure*'
+
+        $queryState.Count | Should -Be 2
+        $commands | Should -Be @('uninstall')
+        $identityEffects.Count | Should -Be 0
+    }
+
+    It 'does not configure identity when the presence wait service query fails' {
+        $productionRoot = Join-Path $TestDrive 'worker-presence-query-failure'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $queryState = @{ Count = 0 }
+        $commands = [Collections.Generic.List[string]]::new()
+        $identityEffects = [Collections.Generic.List[string]]::new()
+        $getService = {
+            param($name)
+            $queryState.Count++
+            if ($queryState.Count -eq 1) { return $null }
+            throw 'simulated presence wait service query failure'
+        }
+
+        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -ServiceWaitTimeoutSeconds 1 -GetServiceAction $getService `
+            -InvokeWinSwAction { param($binary, $command) $commands.Add($command); 0 } `
+            -StopServiceAction { param($name) } `
+            -SetServiceIdentityAction { param($name, $identity) $identityEffects.Add('set') } `
+            -GetServiceIdentityAction { param($name) $identityEffects.Add('get'); 'NT AUTHORITY\LocalService' } `
+            -ProtectPathAction { param($path) } -SetAclAction { param($path, $acl) } } |
+            Should -Throw '*simulated presence wait service query failure*'
+
+        $queryState.Count | Should -Be 2
+        $commands | Should -Be @('install')
+        $identityEffects.Count | Should -Be 0
+    }
+
+    It 'fails before file effects when the initial stop service query fails' {
+        $productionRoot = Join-Path $TestDrive 'worker-initial-stop-query-failure'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $queryState = @{ Count = 0 }
+        $effects = [Collections.Generic.List[string]]::new()
+        $getService = {
+            param($name)
+            $queryState.Count++
+            if ($queryState.Count -eq 1) {
+                return [pscustomobject]@{ Name = $name; Status = 'Running' }
+            }
+            if ($queryState.Count -eq 2) {
+                throw 'simulated initial stop service query failure'
+            }
+            return $null
+        }
+
+        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -GetServiceAction $getService `
+            -InvokeWinSwAction { param($binary, $command) $effects.Add($command); 0 } `
+            -WaitForServicePresenceAction { param($name, $shouldExist, $timeoutSeconds) $effects.Add('wait') } `
+            -SetServiceIdentityAction { param($name, $identity) $effects.Add('set-identity') } `
+            -GetServiceIdentityAction { param($name) $effects.Add('get-identity'); 'NT AUTHORITY\LocalService' } `
+            -ProtectPathAction { param($path) $effects.Add('protect') } `
+            -SetAclAction { param($path, $acl) $effects.Add('set-acl') } } |
+            Should -Throw '*simulated initial stop service query failure*'
+
+        $queryState.Count | Should -Be 3
+        $effects.Count | Should -Be 0
+    }
+
+    It 'preserves post-install and cleanup stop service query failures in order' {
+        $productionRoot = Join-Path $TestDrive 'worker-post-install-stop-query-failure'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $queryState = @{ Count = 0 }
+        $commands = [Collections.Generic.List[string]]::new()
+        $identityEffects = [Collections.Generic.List[string]]::new()
+        $getService = {
+            param($name)
+            $queryState.Count++
+            if ($queryState.Count -eq 1) { return $null }
+            if ($queryState.Count -eq 2) {
+                throw 'simulated post-install stop service query failure'
+            }
+            throw 'simulated cleanup stop service query failure'
+        }
+        $caught = $null
+
+        try {
+            Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+                -GetServiceAction $getService `
+                -InvokeWinSwAction { param($binary, $command) $commands.Add($command); 0 } `
+                -WaitForServicePresenceAction { param($name, $shouldExist, $timeoutSeconds) } `
+                -SetServiceIdentityAction { param($name, $identity) $identityEffects.Add('set') } `
+                -GetServiceIdentityAction { param($name) $identityEffects.Add('get'); 'NT AUTHORITY\LocalService' } `
+                -ProtectPathAction { param($path) } -SetAclAction { param($path, $acl) }
+        } catch {
+            $caught = $_.Exception
+        }
+
+        $queryState.Count | Should -Be 3
+        $commands | Should -Be @('install')
+        $identityEffects.Count | Should -Be 0
+        $caught | Should -BeOfType [System.AggregateException]
+        $caught.InnerExceptions.Count | Should -Be 2
+        $caught.InnerExceptions[0].Message |
+            Should -Be 'simulated post-install stop service query failure'
+        $caught.InnerExceptions[1].Message |
+            Should -Be 'simulated cleanup stop service query failure'
+    }
+
+    It 'keeps an existing registration when worker file preparation fails' {
+        $productionRoot = Join-Path $TestDrive 'worker-file-failure'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        'website xml' | Set-Content (Join-Path $service 'ChristopherBellDev.xml')
+        $state = @{ Existing = $true; Status = 'Running' }
+        $commands = [Collections.Generic.List[string]]::new()
+        $events = [Collections.Generic.List[string]]::new()
+        $stopService = {
+            param($name)
+            $events.Add('stop')
+            $state.Status = 'Stopped'
+        }
+        $protectPath = {
+            param($path)
+            $events.Add('protect')
+            $state.Existing | Should -BeTrue
+            $state.Status | Should -Be 'Stopped'
+            throw 'simulated file protection failure'
+        }
+
+        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -GetServiceAction { param($name) [pscustomobject]@{ Name = $name } } `
+            -InvokeWinSwAction { param($binary, $command) $commands.Add($command); 0 } `
+            -WaitForServicePresenceAction { param($name, $shouldExist, $timeoutSeconds) throw 'unexpected wait' } `
+            -StopServiceAction $stopService `
+            -SetServiceIdentityAction { param($name, $identity) throw 'unexpected identity change' } `
+            -GetServiceIdentityAction { param($name) throw 'unexpected identity read' } `
+            -ProtectPathAction $protectPath `
+            -SetAclAction { param($path,$acl) } } |
+            Should -Throw '*simulated file protection failure*'
+        $events | Should -Be @('stop','protect','stop')
+        $commands.Count | Should -Be 0
+        $state.Existing | Should -BeTrue
+        $state.Status | Should -Be 'Stopped'
+    }
+
+    It 'does not install when WinSW uninstall fails' {
+        $productionRoot = Join-Path $TestDrive 'worker-uninstall-failure'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $state = @{ Existing = $true; Status = 'Running' }
+        $commands = [Collections.Generic.List[string]]::new()
+        $events = [Collections.Generic.List[string]]::new()
+
+        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -GetServiceAction { param($name) [pscustomobject]@{ Name = $name } } `
+            -InvokeWinSwAction {
+                param($binary, $command)
+                $commands.Add($command)
+                $events.Add($command)
+                1
+            } `
+            -WaitForServicePresenceAction { param($name, $shouldExist, $timeoutSeconds) throw 'unexpected wait' } `
+            -StopServiceAction {
+                param($name)
+                $events.Add('stop')
+                $state.Status = 'Stopped'
+            } `
+            -SetServiceIdentityAction { param($name, $identity) throw 'unexpected identity change' } `
+            -GetServiceIdentityAction { param($name) throw 'unexpected identity read' } `
+            -ProtectPathAction { param($path) } -SetAclAction { param($path, $acl) } } |
+            Should -Throw '*WinSW service uninstallation failed*'
+
+        $commands | Should -Be @('uninstall')
+        $events | Should -Be @('stop','uninstall','stop')
+        $state.Existing | Should -BeTrue
+        $state.Status | Should -Be 'Stopped'
+    }
+
+    It 'does not install when service disappearance times out' {
+        $productionRoot = Join-Path $TestDrive 'worker-disappearance-timeout'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $state = @{ Existing = $true; Status = 'Running' }
+        $commands = [Collections.Generic.List[string]]::new()
+        $events = [Collections.Generic.List[string]]::new()
+
+        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -GetServiceAction { param($name) [pscustomobject]@{ Name = $name } } `
+            -InvokeWinSwAction {
+                param($binary, $command)
+                $commands.Add($command)
+                $events.Add($command)
+                if ($command -eq 'uninstall') {
+                    $state.Existing = $false
+                    $state.Status = 'Missing'
+                }
+                0
+            } `
+            -WaitForServicePresenceAction {
+                param($name, $shouldExist, $timeoutSeconds)
+                $events.Add('wait-absent')
+                throw 'simulated disappearance timeout'
+            } `
+            -StopServiceAction { param($name) $events.Add('stop') } `
+            -SetServiceIdentityAction { param($name, $identity) throw 'unexpected identity change' } `
+            -GetServiceIdentityAction { param($name) throw 'unexpected identity read' } `
+            -ProtectPathAction { param($path) } -SetAclAction { param($path, $acl) } } |
+            Should -Throw '*simulated disappearance timeout*'
+
+        $commands | Should -Be @('uninstall')
+        $events | Should -Be @('stop','uninstall','wait-absent','stop')
+        $state.Existing | Should -BeFalse
+        $state.Status | Should -Be 'Missing'
+    }
+
+    It 'fails when WinSW install fails' {
+        $productionRoot = Join-Path $TestDrive 'worker-install-failure'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $state = @{ Existing = $false; Status = 'Missing' }
+        $commands = [Collections.Generic.List[string]]::new()
+        $events = [Collections.Generic.List[string]]::new()
+
+        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -GetServiceAction { param($name) $null } `
+            -InvokeWinSwAction {
+                param($binary, $command)
+                $commands.Add($command)
+                $events.Add($command)
+                1
+            } `
+            -WaitForServicePresenceAction { param($name, $shouldExist, $timeoutSeconds) throw 'unexpected wait' } `
+            -StopServiceAction { param($name) $events.Add('stop') } `
+            -SetServiceIdentityAction { param($name, $identity) throw 'unexpected identity change' } `
+            -GetServiceIdentityAction { param($name) throw 'unexpected identity read' } `
+            -ProtectPathAction { param($path) } -SetAclAction { param($path, $acl) } } |
+            Should -Throw '*WinSW service installation failed*'
+
+        $commands | Should -Be @('install')
+        $events | Should -Be @('install','stop')
+        $state.Existing | Should -BeFalse
+        $state.Status | Should -Be 'Missing'
+    }
+
+    It 'fails when service presence times out' {
+        $productionRoot = Join-Path $TestDrive 'worker-presence-timeout'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $state = @{ Existing = $false; Status = 'Missing' }
+        $commands = [Collections.Generic.List[string]]::new()
+        $events = [Collections.Generic.List[string]]::new()
+
+        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -GetServiceAction { param($name) $null } `
+            -InvokeWinSwAction {
+                param($binary, $command)
+                $commands.Add($command)
+                $events.Add($command)
+                $state.Existing = $true
+                $state.Status = 'Running'
+                0
+            } `
+            -WaitForServicePresenceAction {
+                param($name, $shouldExist, $timeoutSeconds)
+                $events.Add('wait-present')
+                throw 'simulated presence timeout'
+            } `
+            -StopServiceAction {
+                param($name)
+                $events.Add('stop')
+                $state.Status = 'Stopped'
+            } `
+            -SetServiceIdentityAction { param($name, $identity) throw 'unexpected identity change' } `
+            -GetServiceIdentityAction { param($name) throw 'unexpected identity read' } `
+            -ProtectPathAction { param($path) } -SetAclAction { param($path, $acl) } } |
+            Should -Throw '*simulated presence timeout*'
+
+        $commands | Should -Be @('install')
+        $events | Should -Be @('install','wait-present','stop')
+        $state.Existing | Should -BeTrue
+        $state.Status | Should -Be 'Stopped'
+    }
+
+    It 'forwards the configured bounded timeout to every wait' {
+        $productionRoot = Join-Path $TestDrive 'worker-custom-timeout'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $state = @{ Existing = $true; Status = 'Running' }
+        $waits = [Collections.Generic.List[string]]::new()
+        $commands = [Collections.Generic.List[string]]::new()
+
+        Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -ServiceWaitTimeoutSeconds 17 `
+            -GetServiceAction { param($name) [pscustomobject]@{ Name = $name } } `
+            -InvokeWinSwAction {
+                param($binary, $command)
+                $commands.Add($command)
+                $state.Existing = $command -eq 'install'
+                $state.Status = if ($state.Existing) { 'Running' } else { 'Missing' }
+                0
+            } `
+            -WaitForServicePresenceAction {
+                param($name, $shouldExist, $timeoutSeconds)
+                $waits.Add("${shouldExist}:$timeoutSeconds")
+                $state.Existing | Should -Be $shouldExist
+            } `
+            -StopServiceAction { param($name) if ($state.Existing) { $state.Status = 'Stopped' } } `
+            -SetServiceIdentityAction { param($name, $identity) } `
+            -GetServiceIdentityAction { param($name) 'NT AUTHORITY\LocalService' } `
+            -ProtectPathAction { param($path) } -SetAclAction { param($path, $acl) }
+
+        $commands | Should -Be @('uninstall','install')
+        $waits | Should -Be @('False:17','True:17')
+        $state.Existing | Should -BeTrue
+        $state.Status | Should -Be 'Stopped'
+    }
+
+    It 'preserves setup and cleanup failures in causal order' {
+        $productionRoot = Join-Path $TestDrive 'worker-aggregate-failure'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        $events = [Collections.Generic.List[string]]::new()
+        $caught = $null
+
+        try {
+            Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+                -GetServiceAction { param($name) $null } `
+                -InvokeWinSwAction { param($binary, $command) $events.Add($command); 1 } `
+                -WaitForServicePresenceAction { param($name, $shouldExist, $timeoutSeconds) throw 'unexpected wait' } `
+                -StopServiceAction { param($name) $events.Add('stop'); throw 'simulated cleanup failure' } `
+                -SetServiceIdentityAction { param($name, $identity) throw 'unexpected identity change' } `
+                -GetServiceIdentityAction { param($name) throw 'unexpected identity read' } `
+                -ProtectPathAction { param($path) } -SetAclAction { param($path, $acl) }
+            throw 'expected worker setup to fail'
+        } catch {
+            $caught = $_.Exception
+        }
+
+        $events | Should -Be @('install','stop')
+        $caught | Should -BeOfType [System.AggregateException]
+        $caught.InnerExceptions.Count | Should -Be 2
+        $caught.InnerExceptions[0].Message | Should -Be 'Media worker WinSW service installation failed.'
+        $caught.InnerExceptions[1].Message | Should -Be 'simulated cleanup failure'
     }
 
     It 'fails closed when service control manager does not retain LocalService' {
@@ -1013,54 +1436,40 @@ Describe 'shared-folder runtime isolation' {
         $service = Join-Path $productionRoot 'service'
         New-Item -ItemType Directory -Path $service -Force | Out-Null
         'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
-        $state = @{ Status = 'Running'; StopCount = 0 }
-        $stopService = {
-            param($name)
-            $state.Status = 'Stopped'
-            $state.StopCount++
-        }
-
-        { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
-            -GetServiceAction { param($name) [pscustomobject]@{ Name = $name } } `
-            -InvokeWinSwAction { param($binary,$command) 0 } `
-            -StopServiceAction $stopService `
-            -SetServiceIdentityAction { param($name,$identity) } `
-            -GetServiceIdentityAction { param($name) 'LocalSystem' } `
-            -ProtectPathAction { param($path) } -SetAclAction { param($path,$acl) } } |
-            Should -Throw '*must run as LocalService*'
-        $state.StopCount | Should -BeGreaterOrEqual 1
-        $state.Status | Should -Be 'Stopped'
-    }
-
-    It 'stops an existing worker before file mutations and leaves it stopped when they fail' {
-        $productionRoot = Join-Path $TestDrive 'worker-file-failure'
-        $service = Join-Path $productionRoot 'service'
-        New-Item -ItemType Directory -Path $service -Force | Out-Null
-        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
-        'website xml' | Set-Content (Join-Path $service 'ChristopherBellDev.xml')
-        $state = @{ Status = 'Running'; StopCount = 0 }
+        $state = @{ Existing = $true; Status = 'Running' }
+        $commands = [Collections.Generic.List[string]]::new()
         $events = [Collections.Generic.List[string]]::new()
-        $stopService = {
-            param($name)
-            $events.Add('stop')
-            $state.Status = 'Stopped'
-            $state.StopCount++
-        }
-        $protectPath = {
-            param($path)
-            $events.Add('protect')
-            $state.Status | Should -Be 'Stopped'
-            throw 'simulated file protection failure'
-        }
 
         { Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
             -GetServiceAction { param($name) [pscustomobject]@{ Name = $name } } `
-            -StopServiceAction $stopService `
-            -ProtectPathAction $protectPath `
-            -SetAclAction { param($path,$acl) } } |
-            Should -Throw '*simulated file protection failure*'
-        $events[0..1] | Should -Be @('stop','protect')
-        $state.StopCount | Should -BeGreaterOrEqual 1
+            -InvokeWinSwAction {
+                param($binary, $command)
+                $commands.Add($command)
+                $events.Add($command)
+                $state.Existing = $command -eq 'install'
+                $state.Status = if ($state.Existing) { 'Running' } else { 'Missing' }
+                0
+            } `
+            -WaitForServicePresenceAction {
+                param($name, $shouldExist, $timeoutSeconds)
+                $events.Add($(if ($shouldExist) { 'wait-present' } else { 'wait-absent' }))
+                $state.Existing | Should -Be $shouldExist
+            } `
+            -StopServiceAction {
+                param($name)
+                $events.Add('stop')
+                if ($state.Existing) { $state.Status = 'Stopped' }
+            } `
+            -SetServiceIdentityAction { param($name, $identity) $events.Add('set-identity') } `
+            -GetServiceIdentityAction { param($name) $events.Add('get-identity'); 'LocalSystem' } `
+            -ProtectPathAction { param($path) } -SetAclAction { param($path, $acl) } } |
+            Should -Throw '*must run as LocalService*'
+
+        $commands | Should -Be @('uninstall','install')
+        $events | Should -Be @(
+            'stop','uninstall','wait-absent','install','wait-present','stop',
+            'set-identity','get-identity','stop')
+        $state.Existing | Should -BeTrue
         $state.Status | Should -Be 'Stopped'
     }
 

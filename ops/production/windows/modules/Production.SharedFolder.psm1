@@ -313,16 +313,36 @@ function Install-SharedFolderWorkerService {
         [Parameter(Mandatory)][string]$ProductionRoot,
         [scriptblock]$GetServiceAction = {
             param($Name)
-            Get-Service $Name -ErrorAction SilentlyContinue
+            try {
+                Get-Service -Name $Name -ErrorAction Stop
+            } catch {
+                $missingServiceErrorId =
+                    'NoServiceFoundForGivenName,Microsoft.PowerShell.Commands.GetServiceCommand'
+                if ($_.FullyQualifiedErrorId -eq $missingServiceErrorId) { return $null }
+                throw
+            }
         },
         [scriptblock]$InvokeWinSwAction = {
             param($Binary, $Command)
             & $Binary $Command | Out-Null
             $LASTEXITCODE
         },
+        [ValidateRange(1, 300)][int]$ServiceWaitTimeoutSeconds = 30,
+        [scriptblock]$WaitForServicePresenceAction = {
+            param($Name, $ShouldExist, $TimeoutSeconds, $QueryServiceAction)
+            $timer = [Diagnostics.Stopwatch]::StartNew()
+            do {
+                $service = & $QueryServiceAction $Name
+                if ([bool]$service -eq [bool]$ShouldExist) { return $service }
+                Start-Sleep -Milliseconds 250
+            } while ($timer.Elapsed -lt [TimeSpan]::FromSeconds($TimeoutSeconds))
+
+            $expected = if ($ShouldExist) { 'appear' } else { 'disappear' }
+            throw "Service did not $expected within $TimeoutSeconds seconds: $Name"
+        },
         [scriptblock]$StopServiceAction = {
-            param($Name)
-            $service = Get-Service $Name -ErrorAction SilentlyContinue
+            param($Name, $QueryServiceAction)
+            $service = & $QueryServiceAction $Name
             if (-not $service) { return }
             if ($service.Status -ne [ServiceProcess.ServiceControllerStatus]::Stopped) {
                 Stop-Service $Name -Force -ErrorAction Stop
@@ -356,7 +376,7 @@ function Install-SharedFolderWorkerService {
     $serviceName = 'ChristopherBellMediaWorker'
     $serviceExists = [bool](& $GetServiceAction $serviceName)
     try {
-        if ($serviceExists) { & $StopServiceAction $serviceName }
+        if ($serviceExists) { & $StopServiceAction $serviceName $GetServiceAction }
 
         if (-not (Test-Path -LiteralPath $websiteBinary -PathType Leaf)) {
             throw 'The verified website WinSW binary must be installed before the media worker.'
@@ -388,15 +408,22 @@ function Install-SharedFolderWorkerService {
             & $SetAclAction (Join-Path $serviceRoot $workerFile) (New-SharedFolderWorkerFileAcl)
         }
 
-        if (-not $serviceExists) {
-            $exitCode = & $InvokeWinSwAction $workerBinary 'install'
-            if ($exitCode -ne 0) { throw 'Media worker WinSW service installation failed.' }
-            & $StopServiceAction $serviceName
-        } else {
-            $exitCode = & $InvokeWinSwAction $workerBinary 'refresh'
-            if ($exitCode -ne 0) { throw 'Media worker WinSW service refresh failed.' }
-            & $StopServiceAction $serviceName
+        if ($serviceExists) {
+            $exitCode = & $InvokeWinSwAction $workerBinary 'uninstall'
+            if ($exitCode -ne 0) {
+                throw 'Media worker WinSW service uninstallation failed.'
+            }
+            & $WaitForServicePresenceAction `
+                $serviceName $false $ServiceWaitTimeoutSeconds $GetServiceAction | Out-Null
         }
+
+        $exitCode = & $InvokeWinSwAction $workerBinary 'install'
+        if ($exitCode -ne 0) {
+            throw 'Media worker WinSW service installation failed.'
+        }
+        & $WaitForServicePresenceAction `
+            $serviceName $true $ServiceWaitTimeoutSeconds $GetServiceAction | Out-Null
+        & $StopServiceAction $serviceName $GetServiceAction
         $expectedIdentity = 'NT AUTHORITY\LocalService'
         & $SetServiceIdentityAction $serviceName $expectedIdentity
         $actualIdentity = [string](& $GetServiceIdentityAction $serviceName)
@@ -407,9 +434,11 @@ function Install-SharedFolderWorkerService {
     } catch {
         $setupFailure = $_
         try {
-            & $StopServiceAction $serviceName
+            & $StopServiceAction $serviceName $GetServiceAction
         } catch {
-            throw "The media worker could not be left stopped after setup failed: $($setupFailure.Exception.Message)"
+            $failures = [System.Exception[]]@($setupFailure.Exception, $_.Exception)
+            throw [System.AggregateException]::new(
+                'Media worker setup and stopped-state cleanup both failed.', $failures)
         }
         throw $setupFailure
     }
