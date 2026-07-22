@@ -38,9 +38,14 @@ Task 10: in progress (operational-test commits dc9965e4..287a28c9; alternate-por
 acceptance passed 41/41 against isolated roots, database, and port 8090; final runtime review
 approved 0 Critical, 0 Important, 0 Minor after the bounded-range remediation; fresh aggregate
 gate passed 1,053 Java tests with 0 failures/errors and 3 expected platform skips, 165 JavaScript
-tests, worker Pester 56/56, and operations Pester 28/28 under both PowerShell hosts; post-review
-Java/JavaScript gate also passed; final diff check clean; installed-worker acceptance,
-PR/CI/merge, production rollout, and Builder closeout remain)
+tests, worker Pester 56/56, and operations Pester 28/28 under both PowerShell hosts; PR #1219
+passed CI and CodeQL and merged as 6ad5a0a; the first guarded production install rejected the
+new feature flag before switching releases and was rolled back with the live website healthy,
+feature disabled, worker service absent, and both data roots preserved; the production-fix branch
+now accepts only a Boolean optional flag, defaults the process flag to false, and stops the worker
+before every service/file mutation and on failure; focused production Pester passes 87/87 and a
+fresh aggregate gate passes; final production-fix review, PR/CI/merge, installed-worker acceptance,
+production rollout, and Builder closeout remain)
 
 Minor findings for final review:
 - Task 1: add an HTTP-level regression for `{read:false,write:true}` returning 400; service coverage already enforces it.

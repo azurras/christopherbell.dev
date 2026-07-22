@@ -216,7 +216,9 @@ function Read-ProductionEnvironment {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing environment file: $Path" }
-    $allowed = @('APP_JWT_SECRET','RESEND_API_KEY','APP_MAIL_FROM','SPRING_MONGODB_URI')
+    $required = @('APP_JWT_SECRET','RESEND_API_KEY','APP_MAIL_FROM','SPRING_MONGODB_URI')
+    $optional = @('APP_SHARED_FOLDER_ENABLED')
+    $allowed = @($required) + @($optional)
     $values = @{}
     foreach ($line in Get-Content -LiteralPath $Path) {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith('#')) { continue }
@@ -224,10 +226,15 @@ function Read-ProductionEnvironment {
         if ($allowed -notcontains $Matches[1]) { throw "Unsupported app.env key: $($Matches[1])" }
         $values[$Matches[1]] = $Matches[2]
     }
-    foreach ($required in $allowed) {
-        if (-not $values.ContainsKey($required) -or [string]::IsNullOrWhiteSpace($values[$required])) {
-            throw "Missing app.env value: $required"
+    foreach ($requiredKey in $required) {
+        if (-not $values.ContainsKey($requiredKey) -or
+            [string]::IsNullOrWhiteSpace($values[$requiredKey])) {
+            throw "Missing app.env value: $requiredKey"
         }
+    }
+    if ($values.ContainsKey('APP_SHARED_FOLDER_ENABLED') -and
+        $values.APP_SHARED_FOLDER_ENABLED -notin @('true','false')) {
+        throw 'APP_SHARED_FOLDER_ENABLED must be a Boolean.'
     }
     if ($values.APP_JWT_SECRET -match '^replace-with-' -or $values.APP_JWT_SECRET.Length -lt 32) {
         throw 'APP_JWT_SECRET must be a non-placeholder value of at least 32 characters.'

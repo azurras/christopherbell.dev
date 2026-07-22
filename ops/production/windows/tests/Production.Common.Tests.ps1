@@ -78,8 +78,20 @@ Describe 'production common operations' {
     It 'parses only allowlisted environment keys' {
         $path = Join-Path $TestDrive 'app.env'
         @('APP_JWT_SECRET=abcdefghijklmnopqrstuvwxyz123456','RESEND_API_KEY=re_test',
-          'APP_MAIL_FROM=noreply@example.com','SPRING_MONGODB_URI=mongodb://127.0.0.1:27017') | Set-Content $path
-        (Read-ProductionEnvironment $path).APP_MAIL_FROM | Should -Be 'noreply@example.com'
+          'APP_MAIL_FROM=noreply@example.com','SPRING_MONGODB_URI=mongodb://127.0.0.1:27017',
+          'APP_SHARED_FOLDER_ENABLED=true') | Set-Content $path
+        $environment = Read-ProductionEnvironment $path
+        $environment.APP_MAIL_FROM | Should -Be 'noreply@example.com'
+        $environment.APP_SHARED_FOLDER_ENABLED | Should -Be 'true'
+    }
+
+    It 'rejects a non-Boolean shared-folder switch' {
+        $path = Join-Path $TestDrive 'app.env'
+        @('APP_JWT_SECRET=abcdefghijklmnopqrstuvwxyz123456','RESEND_API_KEY=re_test',
+          'APP_MAIL_FROM=noreply@example.com','SPRING_MONGODB_URI=mongodb://127.0.0.1:27017',
+          'APP_SHARED_FOLDER_ENABLED=yes') | Set-Content $path
+
+        { Read-ProductionEnvironment $path } | Should -Throw '*APP_SHARED_FOLDER_ENABLED*Boolean*'
     }
 
     It 'rejects unsupported environment keys' {
