@@ -103,3 +103,69 @@ Complete Windows GREEN command:
 
 - Three real ACL/service-token integration tests were skipped because this PowerShell session is not elevated. The deterministic ACL/service effect tests and LocalService XML assertions passed, but effective-token verification still requires an elevated deployment-phase run.
 - The assignment prohibits installing services/tools or mutating production, so live WinSW refresh, real FFmpeg/FFprobe execution, and progressive browser playback remain deployment-phase checks.
+
+## Second Fix Wave: Complete Job Boundary and Real Process Evidence
+
+### Status
+
+Both remaining Important findings are resolved in local commit `04d2dcd3` (`Bound media worker staging lifecycle`). The change remains local and has not been pushed. No production service, media tool, ACL, shared-folder root, or port was changed.
+
+### Findings Resolved
+
+- The worker now rejects transcode sources above the fixed 10 GiB shared-folder limit and safely rejects source-size/capacity values outside signed 64-bit arithmetic. Because staging and output are contractually beneath the same non-reparse private system root, one explicit invariant owns their capacity domain. Admission requires source staging bytes plus maximum output bytes plus the fixed 100 GiB reserve before copying begins.
+- Retained source bytes are copied in fixed 64 KiB chunks. Deadline, cancellation, declared source size, and same-store remaining capacity are checked before and after every chunk, including the final chunk. Every failed copy removes its partial staged file, and the retained staged handle's final path, byte count, volume, and file identity are revalidated before probe, transcode, and publication.
+- Cancellation and deadline are checked immediately before `Process.Start`, as well as before probe/transcode actions and after process completion. Existing in-loop cancellation/deadline checks still kill the complete owned process tree.
+- Controlled PowerShell child processes now exercise the real probe/transcode process runner. A post-start cancellation marker kills a live parent/child process tree and leaves no staged, partial, or ready bytes. The success process uses bounded filesystem events to prove ready output is absent while the child remains active, emits oversized stdout/stderr through the bounded drain, exits, and only then permits READY publication.
+
+### TDD Evidence
+
+Initial second-wave focused RED command:
+
+`Invoke-Pester .\ops\production\windows\tests\Production.SharedFolderWorker.Tests.ps1 -Output Normal`
+
+- Result: 46 passed, 9 failed, 0 skipped.
+- Expected failures covered the 10 GiB source ceiling, pre-start cancellation/deadline rejection, source-plus-output-plus-reserve capacity, overflow-safe aggregation, the single-private-store invariant, and chunked staging cancellation/deadline/free-space cleanup.
+- Both real controlled-process tests passed at this baseline and were recorded as characterization evidence rather than manufactured failures.
+
+Follow-up RED:
+
+- Result: 55 passed, 1 failed, 0 skipped.
+- The remaining failure proved a one-chunk copy did not recheck free-space reserve after its final write.
+
+Focused GREEN command:
+
+`Invoke-Pester .\ops\production\windows\tests\Production.SharedFolderWorker.Tests.ps1 -Output Normal`
+
+- Result: 56 passed, 0 failed, 0 skipped.
+
+Reviewer-covering GREEN command:
+
+`Invoke-Pester .\ops\production\windows\tests\Production.SharedFolderWorker.Tests.ps1,.\ops\production\windows\tests\Production.Install.Tests.ps1,.\ops\production\windows\tests\Production.Command.Tests.ps1,.\ops\production\windows\tests\Production.Security.Integration.Tests.ps1 -Output Normal`
+
+- Result: 78 passed, 0 failed, 3 skipped.
+- The three skips are the existing Windows elevation-gated ACL/service-token integration cases.
+
+Complete Windows GREEN command:
+
+`Invoke-Pester .\ops\production\windows\tests -Output Normal`
+
+- Result: 143 passed, 0 failed, 3 skipped.
+- PowerShell parser validation passed for all 20 Windows `.ps1` and `.psm1` files.
+- XML parsing passed for 2 files; JSON parsing passed for 2 files.
+- `git diff --check` passed.
+
+### Files Changed
+
+- `ops/production/windows/modules/Production.SharedFolderWorker.psm1`
+- `ops/production/windows/tests/Production.SharedFolderWorker.Tests.ps1`
+- `.superpowers/sdd/task-7-report.md`
+
+### Commits
+
+- `04d2dcd3` - complete storage/deadline/cancellation boundary and real controlled-process evidence.
+- The report-only commit follows this section and contains no production code.
+
+### Remaining Concerns
+
+- Three real ACL/service-token integration tests remain skipped because this PowerShell session is not elevated.
+- The assignment prohibits production mutation, so live WinSW service execution, real pinned FFmpeg/FFprobe transcoding, and progressive browser playback remain deployment-phase checks. The new child-process tests use controlled PowerShell executables to exercise the real process runner deterministically.
