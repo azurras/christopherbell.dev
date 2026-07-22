@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.AbstractResource;
 import org.springframework.stereotype.Component;
 
@@ -41,6 +42,7 @@ public final class WindowsSharedFolderReadBoundary {
   private volatile NativeHandle rootHandle;
 
   /** Creates the production singleton. Native initialization is delayed until Spring starts it. */
+  @Autowired
   public WindowsSharedFolderReadBoundary(SharedFolderProperties properties) {
     this(properties.root(), new JnaWindowsSharedFolderNativeBridge(),
         properties.enabled() && isWindows());

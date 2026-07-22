@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.concurrent.locks.ReentrantLock;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -46,6 +47,7 @@ public final class WindowsSharedFolderMutationBoundary {
   private volatile NativeHandle recycleRootHandle;
   private volatile NativeHandle recycleReplacedRootHandle;
 
+  @Autowired
   public WindowsSharedFolderMutationBoundary(SharedFolderProperties properties) {
     this(properties.root(), properties.systemRoot(), new JnaWindowsSharedFolderNativeBridge(),
         properties.enabled() && isWindows(), false);
