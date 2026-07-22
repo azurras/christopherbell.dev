@@ -8,6 +8,116 @@ $isElevatedWindows = $IsWindows -and $principal.IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 
 BeforeAll {
+if (-not ('ChristopherBell.Dev.Acceptance.NativePath' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+namespace ChristopherBell.Dev.Acceptance
+{
+    public sealed class NativePathIdentity
+    {
+        public string NativeFinalPath { get; set; }
+        public uint VolumeSerialNumber { get; set; }
+        public ulong FileIndex { get; set; }
+    }
+
+    public static class NativePath
+    {
+        private const uint FileReadAttributes = 0x80;
+        private const uint FileShareAll = 0x7;
+        private const uint OpenExisting = 3;
+        private const uint BackupSemantics = 0x02000000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ByHandleFileInformation
+        {
+            public uint FileAttributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+            public uint VolumeSerialNumber;
+            public uint FileSizeHigh;
+            public uint FileSizeLow;
+            public uint NumberOfLinks;
+            public uint FileIndexHigh;
+            public uint FileIndexLow;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFileW(
+            string path,
+            uint access,
+            uint share,
+            IntPtr securityAttributes,
+            uint creationDisposition,
+            uint flags,
+            IntPtr template);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFinalPathNameByHandleW(
+            SafeFileHandle handle,
+            StringBuilder path,
+            uint pathLength,
+            uint flags);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandle(
+            SafeFileHandle handle,
+            out ByHandleFileInformation information);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool CreateDirectoryW(string path, IntPtr securityAttributes);
+
+        public static NativePathIdentity GetIdentity(string path, bool directory)
+        {
+            uint flags = directory ? BackupSemantics : 0;
+            using (SafeFileHandle handle = CreateFileW(
+                path, FileReadAttributes, FileShareAll, IntPtr.Zero, OpenExisting, flags, IntPtr.Zero))
+            {
+                if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+                var finalPath = new StringBuilder(32768);
+                uint length = GetFinalPathNameByHandleW(
+                    handle, finalPath, (uint)finalPath.Capacity, 0);
+                if (length == 0 || length >= finalPath.Capacity)
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                ByHandleFileInformation information;
+                if (!GetFileInformationByHandle(handle, out information))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                return new NativePathIdentity
+                {
+                    NativeFinalPath = NormalizeFinalPath(finalPath.ToString()),
+                    VolumeSerialNumber = information.VolumeSerialNumber,
+                    FileIndex = ((ulong)information.FileIndexHigh << 32) | information.FileIndexLow
+                };
+            }
+        }
+
+        public static void CreateDirectoryNew(string path)
+        {
+            if (!CreateDirectoryW(path, IntPtr.Zero))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        private static string NormalizeFinalPath(string path)
+        {
+            string normalized = path;
+            if (normalized.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+                normalized = @"\\" + normalized.Substring(8);
+            else if (normalized.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase))
+                normalized = normalized.Substring(4);
+            return Path.GetFullPath(normalized).TrimEnd(
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+    }
+}
+'@
+}
+
 function Test-InstalledWorkerAcceptanceRequested {
     [CmdletBinding()]
     param(
@@ -100,6 +210,138 @@ function Test-StrictlyBelowPath {
         [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Get-NativePathIdentity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$Directory
+    )
+
+    return [ChristopherBell.Dev.Acceptance.NativePath]::GetIdentity($Path, $Directory.IsPresent)
+}
+
+function Test-NativePathIdentityEqual {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Expected,
+        [Parameter(Mandatory)]$Actual
+    )
+
+    return [string]::Equals(
+        [string]$Expected.NativeFinalPath,
+        [string]$Actual.NativeFinalPath,
+        [StringComparison]::OrdinalIgnoreCase) -and
+        [string]$Expected.VolumeSerialNumber -ceq [string]$Actual.VolumeSerialNumber -and
+        [string]$Expected.FileIndex -ceq [string]$Actual.FileIndex
+}
+
+function Assert-NativePathIdentity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Expected,
+        [Parameter(Mandatory)][scriptblock]$GetPathIdentityAction,
+        [Parameter(Mandatory)][bool]$Directory
+    )
+
+    $actual = & $GetPathIdentityAction $Expected.NativeFinalPath $Directory
+    if (-not (Test-NativePathIdentityEqual -Expected $Expected -Actual $actual)) {
+        throw 'A native path identity changed.'
+    }
+    return $actual
+}
+
+function Assert-FixedProbeExecutable {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [hashtable]$Actions = @{}
+    )
+
+    $fixedPath = 'C:\Program Files\PowerShell\7\pwsh.exe'
+    if (-not [string]::Equals($Path, $fixedPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The probe executable is not the fixed PowerShell installation.'
+    }
+    $getItem = if ($Actions.GetItem) { $Actions.GetItem } else {
+        { param($Candidate) Get-Item -LiteralPath $Candidate -Force -ErrorAction Stop }
+    }
+    $getIdentity = if ($Actions.GetPathIdentity) { $Actions.GetPathIdentity } else {
+        { param($Candidate,$Directory) Get-NativePathIdentity -Path $Candidate }
+    }
+    $getSignature = if ($Actions.GetSignature) { $Actions.GetSignature } else {
+        { param($Candidate) Get-AuthenticodeSignature -LiteralPath $Candidate -ErrorAction Stop }
+    }
+    $getVersion = if ($Actions.GetVersion) { $Actions.GetVersion } else {
+        { param($Candidate) (Get-Item -LiteralPath $Candidate -Force -ErrorAction Stop).VersionInfo }
+    }
+
+    $environment = @{ FixedProbeExecutable = $Path }
+    $canonical = Resolve-InstalledWorkerAcceptancePath -Environment $environment `
+        -Name FixedProbeExecutable -Directory $false -GetItemAction $getItem
+    $identity = & $getIdentity $canonical $false
+    if (-not [string]::Equals($identity.NativeFinalPath, $fixedPath,
+        [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The probe executable native path does not match the fixed installation.'
+    }
+    $signature = & $getSignature $canonical
+    $version = & $getVersion $canonical
+    if ([string]$signature.Status -ne 'Valid' -or
+        $null -eq $signature.SignerCertificate -or
+        [string]$signature.SignerCertificate.Subject -notmatch
+            '(^|, )O=Microsoft Corporation(,|$)' -or
+        [string]$version.CompanyName -ne 'Microsoft Corporation' -or
+        [string]$version.ProductName -ne 'PowerShell') {
+        throw 'The fixed probe executable provenance is invalid.'
+    }
+    return [pscustomobject]@{
+        Path = $canonical
+        Identity = $identity
+    }
+}
+
+function Read-PinnedWinSwSha256 {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [scriptblock]$ReadTextAction = {
+            param($Candidate)
+            Get-Content -LiteralPath $Candidate -Raw -ErrorAction Stop
+        }
+    )
+
+    [string]$text = & $ReadTextAction $Path
+    $matches = [regex]::Matches(
+        $text,
+        "(?m)^\`$script:WinSwSha256 = '([0-9A-F]{64})'\r?$")
+    if ($matches.Count -ne 1) {
+        throw 'Production.Install.psm1 must contain one authoritative WinSW digest.'
+    }
+    return $matches[0].Groups[1].Value
+}
+
+function Assert-InstalledWinSwDigest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$WorkerPath,
+        [Parameter(Mandatory)][string]$InstallModulePath,
+        [scriptblock]$GetHashAction = {
+            param($Path)
+            Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop
+        },
+        [scriptblock]$ReadTextAction = {
+            param($Path)
+            Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+        }
+    )
+
+    $pinnedDigest = Read-PinnedWinSwSha256 -Path $InstallModulePath `
+        -ReadTextAction $ReadTextAction
+    $installedDigest = (& $GetHashAction $WorkerPath).Hash
+    if ([string]$installedDigest -cne $pinnedDigest) {
+        throw 'The installed worker executable does not match the authoritative WinSW digest.'
+    }
+    return $pinnedDigest
+}
+
 function Get-InstalledWorkerAcceptanceInputs {
     [CmdletBinding()]
     param(
@@ -107,6 +349,10 @@ function Get-InstalledWorkerAcceptanceInputs {
         [scriptblock]$GetItemAction = {
             param($Path)
             Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        },
+        [scriptblock]$GetPathIdentityAction = {
+            param($Path,$Directory)
+            Get-NativePathIdentity -Path $Path -Directory:$Directory
         }
     )
 
@@ -147,12 +393,45 @@ function Get-InstalledWorkerAcceptanceInputs {
         throw 'The media fixture must not be empty.'
     }
 
+    $visibleRootIdentity = & $GetPathIdentityAction $visibleRoot $true
+    $mediaFixtureIdentity = & $GetPathIdentityAction $mediaFixture $false
+    $privateRootIdentity = & $GetPathIdentityAction $privateRoot $true
+    $privateProbeDirectoryIdentity = & $GetPathIdentityAction $privateProbeDirectory $true
+    $protectedConfigIdentity = & $GetPathIdentityAction $protectedConfig $false
+    if (-not (Test-StrictlyBelowPath -Path $mediaFixtureIdentity.NativeFinalPath `
+        -Root $visibleRootIdentity.NativeFinalPath) -or
+        -not (Test-StrictlyBelowPath -Path $privateProbeDirectoryIdentity.NativeFinalPath `
+            -Root $privateRootIdentity.NativeFinalPath)) {
+        throw 'Native final-path containment is invalid.'
+    }
+    if ((Test-StrictlyBelowPath -Path $visibleRootIdentity.NativeFinalPath `
+            -Root $privateRootIdentity.NativeFinalPath) -or
+        (Test-StrictlyBelowPath -Path $privateRootIdentity.NativeFinalPath `
+            -Root $visibleRootIdentity.NativeFinalPath) -or
+        [string]::Equals($visibleRootIdentity.NativeFinalPath,
+            $privateRootIdentity.NativeFinalPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Native shared-root containment is invalid.'
+    }
+    foreach ($rootIdentity in @($visibleRootIdentity, $privateRootIdentity)) {
+        if ((Test-StrictlyBelowPath -Path $protectedConfigIdentity.NativeFinalPath `
+                -Root $rootIdentity.NativeFinalPath) -or
+            [string]::Equals($protectedConfigIdentity.NativeFinalPath,
+                $rootIdentity.NativeFinalPath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Native protected-config containment is invalid.'
+        }
+    }
+
     return [pscustomobject]@{
         VisibleRoot = $visibleRoot
         MediaFixture = $mediaFixture
         PrivateRoot = $privateRoot
         PrivateProbeDirectory = $privateProbeDirectory
         ProtectedConfig = $protectedConfig
+        VisibleRootIdentity = $visibleRootIdentity
+        MediaFixtureIdentity = $mediaFixtureIdentity
+        PrivateRootIdentity = $privateRootIdentity
+        PrivateProbeDirectoryIdentity = $privateProbeDirectoryIdentity
+        ProtectedConfigIdentity = $protectedConfigIdentity
     }
 }
 
@@ -183,18 +462,68 @@ function New-InstalledWorkerProbeScript {
     param(
         [Parameter(Mandatory)]$Inputs,
         [Parameter(Mandatory)][string]$ResultRoot,
-        [Parameter(Mandatory)][string]$ProbeFile
+        [Parameter(Mandatory)]$ResultRootIdentity,
+        [Parameter(Mandatory)][string]$ProbeFile,
+        [Parameter(Mandatory)]$ProbeExecutableIdentity
     )
 
+    function ConvertTo-ProbeIdentityRecord {
+        param([Parameter(Mandatory)]$Identity)
+        return [ordered]@{
+            NativeFinalPath = [string]$Identity.NativeFinalPath
+            VolumeSerialNumber = [string]$Identity.VolumeSerialNumber
+            FileIndex = [string]$Identity.FileIndex
+        }
+    }
+
+    $probeInput = [ordered]@{
+        schemaVersion = 1
+        visibleRoot = ConvertTo-ProbeIdentityRecord $Inputs.VisibleRootIdentity
+        mediaFixture = ConvertTo-ProbeIdentityRecord $Inputs.MediaFixtureIdentity
+        privateRoot = ConvertTo-ProbeIdentityRecord $Inputs.PrivateRootIdentity
+        privateProbeDirectory = ConvertTo-ProbeIdentityRecord `
+            $Inputs.PrivateProbeDirectoryIdentity
+        protectedConfig = ConvertTo-ProbeIdentityRecord $Inputs.ProtectedConfigIdentity
+        resultRoot = ConvertTo-ProbeIdentityRecord $ResultRootIdentity
+        probeExecutable = ConvertTo-ProbeIdentityRecord $ProbeExecutableIdentity
+        probePath = $ProbeFile
+    }
+    $probeInputJson = $probeInput | ConvertTo-Json -Compress -Depth 4
+    if ([Text.Encoding]::UTF8.GetByteCount($probeInputJson) -gt 4096) {
+        throw 'The encoded probe input is too large.'
+    }
+    $encodedProbeInput = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes($probeInputJson))
     $template = @'
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @"
 using System;
+using System.ComponentModel;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
 public static class AcceptanceNative {
     [StructLayout(LayoutKind.Sequential)] public struct LUID { public uint LowPart; public int HighPart; }
     [StructLayout(LayoutKind.Sequential)] public struct LUID_AND_ATTRIBUTES { public LUID Luid; public uint Attributes; }
     [StructLayout(LayoutKind.Sequential)] public struct PRIVILEGE_SET { public uint PrivilegeCount; public uint Control; public LUID_AND_ATTRIBUTES Privilege; }
+    [StructLayout(LayoutKind.Sequential)] private struct FILE_INFO {
+        public uint Attributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME AccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME WriteTime;
+        public uint VolumeSerialNumber;
+        public uint SizeHigh;
+        public uint SizeLow;
+        public uint LinkCount;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+    public sealed class PATH_IDENTITY {
+        public string NativeFinalPath { get; set; }
+        public uint VolumeSerialNumber { get; set; }
+        public ulong FileIndex { get; set; }
+    }
     [DllImport("advapi32.dll", SetLastError=true)] public static extern IntPtr OpenSCManager(string machine, string database, uint access);
     [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern IntPtr OpenServiceW(IntPtr manager, string name, uint access);
     [DllImport("advapi32.dll")] public static extern bool CloseServiceHandle(IntPtr handle);
@@ -203,14 +532,65 @@ public static class AcceptanceNative {
     [DllImport("advapi32.dll", SetLastError=true)] public static extern bool PrivilegeCheck(IntPtr token, ref PRIVILEGE_SET required, out bool result);
     [DllImport("kernel32.dll")] public static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder path, uint length, uint flags);
+    [DllImport("kernel32.dll", SetLastError=true)] private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FILE_INFO information);
+    public static PATH_IDENTITY GetPathIdentity(string path, bool directory) {
+        using (SafeFileHandle handle = CreateFileW(path, 0x80, 7, IntPtr.Zero, 3, directory ? 0x02000000u : 0u, IntPtr.Zero)) {
+            if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            var finalPath = new StringBuilder(32768);
+            uint length = GetFinalPathNameByHandleW(handle, finalPath, (uint)finalPath.Capacity, 0);
+            if (length == 0 || length >= finalPath.Capacity) throw new Win32Exception(Marshal.GetLastWin32Error());
+            FILE_INFO information;
+            if (!GetFileInformationByHandle(handle, out information)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            string normalized = finalPath.ToString();
+            if (normalized.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) normalized = @"\\" + normalized.Substring(8);
+            else if (normalized.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase)) normalized = normalized.Substring(4);
+            return new PATH_IDENTITY {
+                NativeFinalPath = Path.GetFullPath(normalized).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                VolumeSerialNumber = information.VolumeSerialNumber,
+                FileIndex = ((ulong)information.FileIndexHigh << 32) | information.FileIndexLow
+            };
+        }
+    }
 }
 "@
-$fixture = __FIXTURE__
-$config = __CONFIG__
-$probe = __PROBE__
-$resultRoot = __RESULT_ROOT__
-$resultPath = [IO.Path]::Combine($resultRoot, 'result.json')
-$temporaryResult = [IO.Path]::Combine($resultRoot, 'result.tmp')
+$inputJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__PROBE_INPUT__'))
+$input = $inputJson | ConvertFrom-Json -ErrorAction Stop
+$expectedInputFields = @('mediaFixture','privateProbeDirectory','privateRoot','probeExecutable',
+    'probePath','protectedConfig','resultRoot','schemaVersion','visibleRoot')
+if ([string]::Join('|', @($input.PSObject.Properties.Name | Sort-Object)) -ne
+    [string]::Join('|', $expectedInputFields) -or $input.schemaVersion -ne 1) {
+    throw 'Invalid probe input schema.'
+}
+$expectedIdentityFields = @('FileIndex','NativeFinalPath','VolumeSerialNumber')
+foreach ($identityField in @(
+    'visibleRoot','mediaFixture','privateRoot','privateProbeDirectory',
+    'protectedConfig','resultRoot','probeExecutable')) {
+    $identity = $input.$identityField
+    if ([string]::Join('|', @($identity.PSObject.Properties.Name | Sort-Object)) -ne
+            [string]::Join('|', $expectedIdentityFields) -or
+        $identity.NativeFinalPath -isnot [string] -or
+        [string]::IsNullOrWhiteSpace($identity.NativeFinalPath) -or
+        [string]$identity.VolumeSerialNumber -notmatch '^\d+$' -or
+        [string]$identity.FileIndex -notmatch '^\d+$') {
+        throw 'Invalid probe identity schema.'
+    }
+}
+if ($input.probePath -isnot [string] -or
+    [string]::IsNullOrWhiteSpace($input.probePath) -or $input.probePath.Length -gt 32767) {
+    throw 'Invalid probe path schema.'
+}
+function Assert-ExpectedIdentity {
+    param($Expected,[bool]$Directory)
+    $actual = [AcceptanceNative]::GetPathIdentity($Expected.NativeFinalPath, $Directory)
+    if (-not [string]::Equals($actual.NativeFinalPath, $Expected.NativeFinalPath,
+            [StringComparison]::OrdinalIgnoreCase) -or
+        [string]$actual.VolumeSerialNumber -cne [string]$Expected.VolumeSerialNumber -or
+        [string]$actual.FileIndex -cne [string]$Expected.FileIndex) {
+        throw 'Native identity changed.'
+    }
+}
 $result = [ordered]@{
     schemaVersion = 1
     identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -224,16 +604,34 @@ $result = [ordered]@{
     errorCode = 'NONE'
 }
 try {
-    [IO.Directory]::CreateDirectory($resultRoot) | Out-Null
-    $stream = [IO.File]::Open($fixture, 'Open', 'Read', 'Read')
+    Assert-ExpectedIdentity $input.probeExecutable $false
+    Assert-ExpectedIdentity $input.visibleRoot $true
+    Assert-ExpectedIdentity $input.mediaFixture $false
+    $stream = [IO.File]::Open($input.mediaFixture.NativeFinalPath, 'Open', 'Read', 'Read')
     try { $result.fixtureReadable = $stream.ReadByte() -ge 0 } finally { $stream.Dispose() }
-    [IO.File]::WriteAllBytes($probe, [byte[]](37))
-    $result.privateCreate = [IO.File]::Exists($probe)
-    $result.privateRead = ([IO.File]::ReadAllBytes($probe).Length -eq 1)
-    [IO.File]::Delete($probe)
-    $result.privateDelete = -not [IO.File]::Exists($probe)
+    Assert-ExpectedIdentity $input.privateRoot $true
+    Assert-ExpectedIdentity $input.privateProbeDirectory $true
+    if (-not [string]::Equals([IO.Path]::GetDirectoryName($input.probePath),
+        $input.privateProbeDirectory.NativeFinalPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Invalid private probe path.'
+    }
+    $probeStream = [IO.FileStream]::new(
+        $input.probePath,
+        [IO.FileMode]::CreateNew,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None,
+        4096,
+        [IO.FileOptions]::DeleteOnClose)
     try {
-        $protected = [IO.File]::Open($config, 'Open', 'Read', 'ReadWrite')
+        $result.privateCreate = [IO.File]::Exists($input.probePath)
+        $probeStream.WriteByte(37)
+        $probeStream.Position = 0
+        $result.privateRead = $probeStream.ReadByte() -eq 37
+    } finally { $probeStream.Dispose() }
+    $result.privateDelete = -not [IO.File]::Exists($input.probePath)
+    Assert-ExpectedIdentity $input.protectedConfig $false
+    try {
+        $protected = [IO.File]::Open($input.protectedConfig.NativeFinalPath, 'Open', 'Read', 'ReadWrite')
         $protected.Dispose()
     } catch [UnauthorizedAccessException] {
         $result.configReadDenied = $true
@@ -273,21 +671,18 @@ try {
 } catch {
     $result.errorCode = 'PROBE_FAILURE'
 } finally {
-    if ([IO.File]::Exists($probe)) { [IO.File]::Delete($probe) }
-    if ([IO.Directory]::Exists($resultRoot)) {
-        $json = $result | ConvertTo-Json -Compress
-        if ([Text.Encoding]::UTF8.GetByteCount($json) -le 2048) {
-            [IO.File]::WriteAllText($temporaryResult, $json, [Text.UTF8Encoding]::new($false))
-            [IO.File]::Move($temporaryResult, $resultPath, $true)
-        }
+    Assert-ExpectedIdentity $input.resultRoot $true
+    $json = $result | ConvertTo-Json -Compress
+    $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+    if ($bytes.Length -le 2048) {
+        $resultPath = [IO.Path]::Combine($input.resultRoot.NativeFinalPath, 'result.json')
+        $resultStream = [IO.FileStream]::new(
+            $resultPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { $resultStream.Write($bytes, 0, $bytes.Length) } finally { $resultStream.Dispose() }
     }
 }
 '@
-    return $template.Replace('__FIXTURE__',
-        (ConvertTo-SingleQuotedPowerShellLiteral $Inputs.MediaFixture)).Replace('__CONFIG__',
-        (ConvertTo-SingleQuotedPowerShellLiteral $Inputs.ProtectedConfig)).Replace('__PROBE__',
-        (ConvertTo-SingleQuotedPowerShellLiteral $ProbeFile)).Replace('__RESULT_ROOT__',
-        (ConvertTo-SingleQuotedPowerShellLiteral $ResultRoot))
+    return $template.Replace('__PROBE_INPUT__', $encodedProbeInput)
 }
 
 function Read-InstalledWorkerProbeResult {
@@ -359,6 +754,9 @@ function Assert-InstalledWorkerInstallation {
         (Get-FileHash $installed.WebsiteExe -Algorithm SHA256).Hash) {
         throw 'The installed worker executable hash is unverified.'
     }
+    Assert-InstalledWinSwDigest -WorkerPath $installed.WorkerExe `
+        -InstallModulePath (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') |
+        Out-Null
     foreach ($copy in @(
         @($installed.Xml, (Join-Path $PSScriptRoot '..\service\ChristopherBellMediaWorker.xml')),
         @($installed.Script, (Join-Path $PSScriptRoot '..\service\Start-SharedFolderMediaWorker.ps1')),
@@ -370,7 +768,9 @@ function Assert-InstalledWorkerInstallation {
         }
     }
     [xml]$configuration = Get-Content -LiteralPath $installed.Xml -Raw
-    $expectedPwsh = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    $probeExecutable = Assert-FixedProbeExecutable `
+        -Path 'C:\Program Files\PowerShell\7\pwsh.exe'
+    $expectedPwsh = $probeExecutable.Path
     $expandedExecutable = [Environment]::ExpandEnvironmentVariables(
         [string]$configuration.service.executable)
     if ([string]$configuration.service.serviceaccount.username -ne
@@ -409,6 +809,12 @@ function Assert-InstalledWorkerInstallation {
             [StringComparison]::OrdinalIgnoreCase)
     })
     if ($workerProcess.Count -ne 1) { throw 'The worker process tree is unexpected.' }
+    $workerProcessIdentity = Get-NativePathIdentity `
+        -Path $workerProcess[0].ExecutablePath
+    if (-not (Test-NativePathIdentityEqual -Expected $probeExecutable.Identity `
+        -Actual $workerProcessIdentity)) {
+        throw 'The running worker child executable identity is unexpected.'
+    }
     $priority = (Get-Process -Id $workerProcess[0].ProcessId -ErrorAction Stop).PriorityClass
     if ($priority -ne [Diagnostics.ProcessPriorityClass]::BelowNormal) {
         throw 'The worker process priority is unexpected.'
@@ -421,82 +827,509 @@ function Assert-InstalledWorkerInstallation {
         Service = $Service
         Installed = $installed
         WorkerProcessId = $workerProcess[0].ProcessId
+        ProbeExecutable = $probeExecutable
         Tools = $tools
+    }
+}
+
+function Assert-RegisteredProbeTaskContract {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Task,
+        [Parameter(Mandatory)]$Specification
+    )
+
+    $actions = @($Task.Actions)
+    if ($actions.Count -ne 1 -or
+        -not [string]::Equals($actions[0].Execute, $Specification.Execute,
+            [StringComparison]::OrdinalIgnoreCase) -or
+        $actions[0].Arguments -cne $Specification.Arguments -or
+        [string]$Task.Principal.UserId -cne 'NT AUTHORITY\LOCAL SERVICE' -or
+        [string]$Task.Principal.LogonType -cne 'ServiceAccount' -or
+        [string]$Task.Principal.RunLevel -cne 'Limited' -or
+        -not [bool]$Task.Settings.Hidden -or
+        [string]$Task.Settings.ExecutionTimeLimit -cne 'PT1M') {
+        throw 'The registered acceptance task contract is invalid.'
+    }
+}
+
+function Invoke-BoundedScheduledTaskCleanup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('Stop','Unregister')][string]$Operation,
+        [Parameter(Mandatory)][string]$Name,
+        [hashtable]$Actions = @{}
+    )
+
+    $startJob = if ($Actions.StartJob) { $Actions.StartJob } else {
+        {
+            param($RequestedOperation,$TaskName)
+            if ($RequestedOperation -eq 'Stop') {
+                Stop-ScheduledTask -TaskName $TaskName -AsJob -ErrorAction Stop
+            } else {
+                Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false `
+                    -AsJob -ErrorAction Stop
+            }
+        }
+    }
+    $waitJob = if ($Actions.WaitJob) { $Actions.WaitJob } else {
+        { param($Job,$TimeoutSeconds) Wait-Job -Job $Job -Timeout $TimeoutSeconds }
+    }
+    $receiveJob = if ($Actions.ReceiveJob) { $Actions.ReceiveJob } else {
+        { param($Job) Receive-Job -Job $Job -ErrorAction Stop | Out-Null }
+    }
+    $stopJob = if ($Actions.StopJob) { $Actions.StopJob } else {
+        { param($Job) Stop-Job -Job $Job -ErrorAction Stop }
+    }
+    $removeJob = if ($Actions.RemoveJob) { $Actions.RemoveJob } else {
+        { param($Job) Remove-Job -Job $Job -Force -ErrorAction Stop }
+    }
+
+    $job = $null
+    $failed = $false
+    try {
+        $job = & $startJob $Operation $Name
+        if ($null -eq $job) { throw 'Missing cleanup job.' }
+        $completed = & $waitJob $job 10
+        if ($null -eq $completed) {
+            & $stopJob $job
+            throw 'Cleanup job timed out.'
+        }
+        & $receiveJob $job
+    } catch {
+        $failed = $true
+    } finally {
+        if ($job) {
+            try { & $removeJob $job } catch { $failed = $true }
+        }
+    }
+    if ($failed) { throw 'The bounded cleanup action failed.' }
+}
+
+function New-InstalledWorkerProbeDependencies {
+    [CmdletBinding()]
+    param()
+
+    return @{
+        NewNonce = { [guid]::NewGuid().ToString('N') }
+        ResultRootParent = [Environment]::GetFolderPath(
+            [Environment+SpecialFolder]::CommonApplicationData)
+        ValidateResultRootParent = {
+            param($Path)
+            $environment = @{ ProgramData = $Path }
+            $canonical = Resolve-InstalledWorkerAcceptancePath -Environment $environment `
+                -Name ProgramData -Directory $true -GetItemAction {
+                    param($Candidate)
+                    Get-Item -LiteralPath $Candidate -Force -ErrorAction Stop
+                }
+            Get-NativePathIdentity -Path $canonical -Directory
+        }
+        ValidateProbeExecutable = {
+            Assert-FixedProbeExecutable -Path 'C:\Program Files\PowerShell\7\pwsh.exe'
+        }
+        CreateResultDirectory = {
+            param($Path)
+            [ChristopherBell.Dev.Acceptance.NativePath]::CreateDirectoryNew($Path)
+            try {
+                Get-NativePathIdentity -Path $Path -Directory
+            } catch {
+                try { [IO.Directory]::Delete($Path, $false) } catch {
+                    throw 'Installed-worker acceptance cleanup failed.'
+                }
+                throw
+            }
+        }
+        RegisterTask = {
+            param($Specification)
+            $action = New-ScheduledTaskAction -Execute $Specification.Execute `
+                -Argument $Specification.Arguments
+            $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\LOCAL SERVICE' `
+                -LogonType ServiceAccount -RunLevel Limited
+            $settings = New-ScheduledTaskSettingsSet -Hidden `
+                -ExecutionTimeLimit ([TimeSpan]::FromMinutes(1)) `
+                -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+            $task = New-ScheduledTask -Action $action -Principal $principal -Settings $settings
+            Register-ScheduledTask -TaskName $Specification.Name -InputObject $task `
+                -ErrorAction Stop | Out-Null
+        }
+        GetTask = {
+            param($Name)
+            $matches = @(Get-ScheduledTask -ErrorAction Stop | Where-Object TaskName -CEQ $Name)
+            if ($matches.Count -gt 1) { throw 'The acceptance task lookup is ambiguous.' }
+            if ($matches.Count -eq 1) { return $matches[0] }
+            return $null
+        }
+        StartTask = { param($Name) Start-ScheduledTask -TaskName $Name -ErrorAction Stop }
+        StopTask = {
+            param($Name)
+            Invoke-BoundedScheduledTaskCleanup -Operation Stop -Name $Name
+        }
+        UnregisterTask = {
+            param($Name)
+            Invoke-BoundedScheduledTaskCleanup -Operation Unregister -Name $Name
+        }
+        GetPathIdentity = {
+            param($Path,$Directory)
+            Get-NativePathIdentity -Path $Path -Directory:$Directory
+        }
+        ResultExists = {
+            param($Path)
+            Test-Path -LiteralPath $Path -PathType Leaf -ErrorAction Stop
+        }
+        ResultDirectoryExists = {
+            param($Path)
+            Test-Path -LiteralPath $Path -PathType Container -ErrorAction Stop
+        }
+        RemoveResultDirectory = {
+            param($Path)
+            $children = @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)
+            if (@($children | Where-Object Name -CNE 'result.json').Count -gt 0 -or
+                @($children | Where-Object Name -CEQ 'result.json').Count -gt 1) {
+                throw 'The owned acceptance result directory contains unexpected entries.'
+            }
+            $resultPath = Join-Path $Path 'result.json'
+            if ([IO.File]::Exists($resultPath)) { [IO.File]::Delete($resultPath) }
+            [IO.Directory]::Delete($Path, $false)
+        }
+        ProbeExists = {
+            param($Path)
+            Test-Path -LiteralPath $Path -PathType Leaf -ErrorAction Stop
+        }
+        UtcNow = { [DateTime]::UtcNow }
+        Wait = { param($Duration) Start-Sleep -Milliseconds $Duration.TotalMilliseconds }
+        ReadResult = { param($Path) Read-InstalledWorkerProbeResult -Path $Path }
     }
 }
 
 function Invoke-InstalledWorkerLocalServiceProbe {
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Inputs)
+    param(
+        [Parameter(Mandatory)]$Inputs,
+        [hashtable]$Dependencies
+    )
 
-    $nonce = [guid]::NewGuid().ToString('N')
-    $taskName = "ChristopherBellMediaWorkerAcceptance-$nonce"
-    $programData = [IO.Path]::GetFullPath(
-        [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData))
-    $programDataEnvironment = @{ ProgramData = $programData }
-    $programData = Resolve-InstalledWorkerAcceptancePath `
-        -Environment $programDataEnvironment -Name ProgramData -Directory $true `
-        -GetItemAction {
-            param($Path)
-            Get-Item -LiteralPath $Path -Force -ErrorAction Stop
-        }
-    $resultRoot = Join-Path $programData "ChristopherBellWorkerAcceptance-$nonce"
-    if (-not (Test-StrictlyBelowPath -Path $resultRoot -Root $programData)) {
-        throw 'The unique acceptance result path is invalid.'
+    if ($null -eq $Dependencies) { $Dependencies = New-InstalledWorkerProbeDependencies }
+    $requiredDependencies = @(
+        'NewNonce','ResultRootParent','ValidateResultRootParent','ValidateProbeExecutable',
+        'CreateResultDirectory',
+        'RegisterTask','GetTask','StartTask','StopTask','UnregisterTask','GetPathIdentity',
+        'ResultExists','ResultDirectoryExists','RemoveResultDirectory','ProbeExists','UtcNow',
+        'Wait','ReadResult')
+    $missingDependencies = @($requiredDependencies | Where-Object {
+        -not $Dependencies.ContainsKey($_) -or $null -eq $Dependencies[$_]
+    })
+    $extraDependencies = @($Dependencies.Keys | Where-Object { $_ -notin $requiredDependencies })
+    if ($missingDependencies.Count -gt 0 -or $extraDependencies.Count -gt 0) {
+        throw 'The installed-worker probe dependency contract is invalid.'
     }
+
+    $nonce = [string](& $Dependencies.NewNonce)
+    if ($nonce -notmatch '^[0-9a-f]{32}$') {
+        throw 'The installed-worker probe nonce is invalid.'
+    }
+    $taskName = "ChristopherBellMediaWorkerAcceptance-$nonce"
+    $resultRootParentIdentity = & $Dependencies.ValidateResultRootParent `
+        ([string]$Dependencies.ResultRootParent)
+    $resultRootParent = [string]$resultRootParentIdentity.NativeFinalPath
+    $resultRoot = Join-Path $resultRootParent "ChristopherBellWorkerAcceptance-$nonce"
     $resultPath = Join-Path $resultRoot 'result.json'
-    $probeFile = Join-Path $Inputs.PrivateProbeDirectory "acceptance-$nonce.bin"
-    $registered = $false
+    $probeFile = Join-Path $Inputs.PrivateProbeDirectoryIdentity.NativeFinalPath `
+        "acceptance-$nonce.bin"
+    $resultRootIdentity = $null
+    $taskNameReserved = $false
+    $primaryFailure = $null
+    $probeResult = $null
+    $cleanupFailed = $false
+
     try {
-        if ((Test-Path -LiteralPath $resultRoot) -or (Test-Path -LiteralPath $probeFile)) {
+        $probeExecutable = & $Dependencies.ValidateProbeExecutable
+        if (& $Dependencies.GetTask $taskName) {
+            throw 'A unique acceptance task already exists.'
+        }
+        $taskNameReserved = $true
+        if ((& $Dependencies.ResultDirectoryExists $resultRoot) -or
+            (& $Dependencies.ProbeExists $probeFile)) {
             throw 'A unique acceptance resource already exists.'
         }
-        $script = New-InstalledWorkerProbeScript -Inputs $Inputs `
-            -ResultRoot $resultRoot -ProbeFile $probeFile
-        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
-        $pwsh = (Get-Command pwsh.exe -ErrorAction Stop).Source
-        $arguments = "-NoLogo -NoProfile -NonInteractive -EncodedCommand $encoded"
-        $action = New-ScheduledTaskAction -Execute $pwsh -Argument $arguments
-        $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\LOCAL SERVICE' `
-            -LogonType ServiceAccount -RunLevel Limited
-        $settings = New-ScheduledTaskSettingsSet -Hidden `
-            -ExecutionTimeLimit ([TimeSpan]::FromMinutes(1)) `
-            -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-        $task = New-ScheduledTask -Action $action -Principal $principal -Settings $settings
-        Register-ScheduledTask -TaskName $taskName -InputObject $task -ErrorAction Stop |
-            Out-Null
-        $registered = $true
-        $registeredTask = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-        if ($registeredTask.Actions.Count -ne 1 -or
-            -not [string]::Equals($registeredTask.Actions[0].Execute, $pwsh,
-                [StringComparison]::OrdinalIgnoreCase) -or
-            $registeredTask.Actions[0].Arguments -ne $arguments -or
-            $registeredTask.Principal.UserId -ne 'NT AUTHORITY\LOCAL SERVICE' -or
-            -not $registeredTask.Settings.Hidden -or
-            $registeredTask.Settings.ExecutionTimeLimit -ne 'PT1M') {
-            throw 'The registered acceptance task action is unexpected.'
+        $resultRootIdentity = & $Dependencies.CreateResultDirectory $resultRoot
+        if (-not [string]::Equals($resultRootIdentity.NativeFinalPath, $resultRoot,
+            [StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-StrictlyBelowPath -Path $resultRootIdentity.NativeFinalPath `
+                -Root $resultRootParentIdentity.NativeFinalPath)) {
+            throw 'The created acceptance result identity is invalid.'
         }
-        Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
-        $deadline = [DateTime]::UtcNow.AddSeconds(45)
-        while (-not (Test-Path -LiteralPath $resultPath -PathType Leaf) -and
-            [DateTime]::UtcNow -lt $deadline) {
-            Start-Sleep -Milliseconds 250
+        $probeScript = New-InstalledWorkerProbeScript -Inputs $Inputs `
+            -ResultRoot $resultRoot -ResultRootIdentity $resultRootIdentity `
+            -ProbeFile $probeFile -ProbeExecutableIdentity $probeExecutable.Identity
+        $encodedScript = [Convert]::ToBase64String(
+            [Text.Encoding]::Unicode.GetBytes($probeScript))
+        $arguments = "-NoLogo -NoProfile -NonInteractive -EncodedCommand $encodedScript"
+        $specification = [pscustomobject]@{
+            Name = $taskName
+            Execute = $probeExecutable.Path
+            Arguments = $arguments
         }
-        if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
-            throw 'The bounded LocalService probe did not produce a result.'
+        & $Dependencies.RegisterTask $specification
+        $registeredTask = & $Dependencies.GetTask $taskName
+        if ($null -eq $registeredTask) {
+            throw 'The registered acceptance task is unavailable.'
         }
-        return Read-InstalledWorkerProbeResult -Path $resultPath
-    } finally {
-        if ($registered) {
-            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-            if ($task -and $task.State -eq 'Running') {
-                Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        Assert-RegisteredProbeTaskContract -Task $registeredTask `
+            -Specification $specification
+        & $Dependencies.StartTask $taskName
+
+        $deadline = (& $Dependencies.UtcNow).AddSeconds(45)
+        while (-not (& $Dependencies.ResultExists $resultPath)) {
+            if ((& $Dependencies.UtcNow) -ge $deadline) {
+                throw 'The bounded LocalService probe did not produce a result.'
             }
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false `
-                -ErrorAction SilentlyContinue
+            & $Dependencies.Wait ([TimeSpan]::FromMilliseconds(250))
         }
-        Remove-Item -LiteralPath $probeFile -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $resultRoot -Recurse -Force -ErrorAction SilentlyContinue
+        $probeResult = & $Dependencies.ReadResult $resultPath
+    } catch {
+        $primaryFailure = $_
+    } finally {
+        if ($taskNameReserved) {
+            $cleanupTask = $null
+            try { $cleanupTask = & $Dependencies.GetTask $taskName }
+            catch { $cleanupFailed = $true }
+            if ($cleanupTask) {
+                if ([string]$cleanupTask.State -ceq 'Running') {
+                    try { & $Dependencies.StopTask $taskName }
+                    catch { $cleanupFailed = $true }
+                }
+                try { & $Dependencies.UnregisterTask $taskName }
+                catch { $cleanupFailed = $true }
+            }
+            try {
+                if (& $Dependencies.GetTask $taskName) { $cleanupFailed = $true }
+            } catch { $cleanupFailed = $true }
+        }
+        if ($null -ne $resultRootIdentity) {
+            $resultDirectoryPresent = $false
+            try {
+                $resultDirectoryPresent = & $Dependencies.ResultDirectoryExists $resultRoot
+            } catch { $cleanupFailed = $true }
+            if ($resultDirectoryPresent) {
+                $identityMatches = $false
+                try {
+                    $cleanupIdentity = & $Dependencies.GetPathIdentity $resultRoot $true
+                    $identityMatches = Test-NativePathIdentityEqual `
+                        -Expected $resultRootIdentity -Actual $cleanupIdentity
+                    if (-not $identityMatches) { $cleanupFailed = $true }
+                } catch { $cleanupFailed = $true }
+                if ($identityMatches) {
+                    try { & $Dependencies.RemoveResultDirectory $resultRoot }
+                    catch { $cleanupFailed = $true }
+                }
+            }
+            try {
+                if (& $Dependencies.ResultDirectoryExists $resultRoot) {
+                    $cleanupFailed = $true
+                }
+            } catch { $cleanupFailed = $true }
+        }
+        try {
+            if (& $Dependencies.ProbeExists $probeFile) { $cleanupFailed = $true }
+        } catch { $cleanupFailed = $true }
+
+        if ($cleanupFailed) {
+            $inner = if ($primaryFailure) { $primaryFailure.Exception } else { $null }
+            throw [InvalidOperationException]::new(
+                'Installed-worker acceptance cleanup failed.', $inner)
+        }
+    }
+    if ($primaryFailure) { throw $primaryFailure }
+    return $probeResult
+}
+
+function New-TestInstalledWorkerProbeScenario {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ResultRootParent,
+        [ValidateSet('Success','Executable','Collision','Registration','Start','Timeout','Result')]
+        [string]$FailurePhase = 'Success',
+        [ValidateSet('None','Unregister','RemoveResult','ProbeLeak')]
+        [string]$CleanupFailure = 'None',
+        [switch]$IdentityMismatch,
+        [switch]$TaskContractMismatch,
+        [ValidateSet('None','Execute','Arguments','UserId','LogonType','RunLevel','Hidden','Limit')]
+        [string]$TaskContractField = 'None',
+        [switch]$PreexistingResult
+    )
+
+    $events = [Collections.Generic.List[string]]::new()
+    $state = @{
+        TaskPresent = $false
+        Task = $null
+        Specification = $null
+        ResultDirectoryPresent = $PreexistingResult.IsPresent
+        ResultReady = $false
+        Now = [DateTime]::new(2026, 7, 22, 0, 0, 0, [DateTimeKind]::Utc)
+    }
+    $resultIdentity = [pscustomobject]@{
+        NativeFinalPath = Join-Path $ResultRootParent `
+            'ChristopherBellWorkerAcceptance-11111111111111111111111111111111'
+        VolumeSerialNumber = 7
+        FileIndex = 8
+    }
+    $probeExecutable = [pscustomobject]@{
+        Path = 'C:\Program Files\PowerShell\7\pwsh.exe'
+        Identity = [pscustomobject]@{
+            NativeFinalPath = 'C:\Program Files\PowerShell\7\pwsh.exe'
+            VolumeSerialNumber = 7
+            FileIndex = 9
+        }
+    }
+    $validResult = [pscustomobject]@{
+        schemaVersion = 1
+        identity = 'NT AUTHORITY\LOCAL SERVICE'
+        fixtureReadable = $true
+        privateCreate = $true
+        privateRead = $true
+        privateDelete = $true
+        configReadDenied = $true
+        websiteServiceControlDenied = $true
+        shutdownPrivilegeEnabled = $false
+        errorCode = 'NONE'
+    }
+    $dependencies = @{
+        NewNonce = { '11111111111111111111111111111111' }
+        ResultRootParent = $ResultRootParent
+        ValidateResultRootParent = {
+            param($Path)
+            $events.Add('validate-result-parent')
+            [pscustomobject]@{
+                NativeFinalPath = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+                VolumeSerialNumber = 7
+                FileIndex = 6
+            }
+        }.GetNewClosure()
+        ValidateProbeExecutable = {
+            $events.Add('validate-executable')
+            if ($FailurePhase -eq 'Executable') { throw 'executable failed' }
+            return $probeExecutable
+        }.GetNewClosure()
+        CreateResultDirectory = {
+            param($Path)
+            $events.Add('create-result')
+            if ($FailurePhase -eq 'Collision') { throw 'atomic collision' }
+            $state.ResultDirectoryPresent = $true
+            return $resultIdentity
+        }.GetNewClosure()
+        RegisterTask = {
+            param($Specification)
+            $events.Add('register')
+            $state.Specification = $Specification
+            $execute = if ($TaskContractMismatch -or $TaskContractField -eq 'Execute') {
+                'C:\wrong.exe'
+            } else { $Specification.Execute }
+            $state.Task = [pscustomobject]@{
+                Actions = @([pscustomobject]@{
+                    Execute = $execute
+                    Arguments = if ($TaskContractField -eq 'Arguments') {
+                        'wrong'
+                    } else { $Specification.Arguments }
+                })
+                Principal = [pscustomobject]@{
+                    UserId = if ($TaskContractField -eq 'UserId') { 'SYSTEM' } else {
+                        'NT AUTHORITY\LOCAL SERVICE'
+                    }
+                    LogonType = if ($TaskContractField -eq 'LogonType') {
+                        'Password'
+                    } else { 'ServiceAccount' }
+                    RunLevel = if ($TaskContractField -eq 'RunLevel') {
+                        'Highest'
+                    } else { 'Limited' }
+                }
+                Settings = [pscustomobject]@{
+                    Hidden = $TaskContractField -ne 'Hidden'
+                    ExecutionTimeLimit = if ($TaskContractField -eq 'Limit') {
+                        'PT5M'
+                    } else { 'PT1M' }
+                }
+                State = 'Ready'
+            }
+            $state.TaskPresent = $true
+            if ($FailurePhase -eq 'Registration') { throw 'registration failed' }
+        }.GetNewClosure()
+        GetTask = {
+            param($Name)
+            $events.Add('get-task')
+            if ($state.TaskPresent) { return $state.Task }
+            return $null
+        }.GetNewClosure()
+        StartTask = {
+            param($Name)
+            $events.Add('start')
+            if ($FailurePhase -eq 'Start') { throw 'start failed' }
+            $state.Task.State = 'Running'
+            if ($FailurePhase -in @('Success','Result')) {
+                $state.ResultReady = $true
+                $state.Task.State = 'Ready'
+            }
+        }.GetNewClosure()
+        StopTask = {
+            param($Name)
+            $events.Add('stop')
+            $state.Task.State = 'Ready'
+        }.GetNewClosure()
+        UnregisterTask = {
+            param($Name)
+            $events.Add('unregister')
+            if ($CleanupFailure -eq 'Unregister') { throw 'unregister failed' }
+            $state.TaskPresent = $false
+        }.GetNewClosure()
+        GetPathIdentity = {
+            param($Path,$Directory)
+            $events.Add('get-result-identity')
+            if ($IdentityMismatch) {
+                return [pscustomobject]@{
+                    NativeFinalPath = $Path
+                    VolumeSerialNumber = 7
+                    FileIndex = 999
+                }
+            }
+            return $resultIdentity
+        }.GetNewClosure()
+        ResultExists = {
+            param($Path)
+            $events.Add('result-exists')
+            return $state.ResultReady
+        }.GetNewClosure()
+        ResultDirectoryExists = {
+            param($Path)
+            $events.Add('result-directory-exists')
+            return $state.ResultDirectoryPresent
+        }.GetNewClosure()
+        RemoveResultDirectory = {
+            param($Path)
+            $events.Add('remove-result')
+            if ($CleanupFailure -eq 'RemoveResult') { throw 'remove failed' }
+            $state.ResultDirectoryPresent = $false
+        }.GetNewClosure()
+        ProbeExists = {
+            param($Path)
+            $events.Add('probe-exists')
+            return $CleanupFailure -eq 'ProbeLeak'
+        }.GetNewClosure()
+        UtcNow = { return $state.Now }.GetNewClosure()
+        Wait = {
+            param($Duration)
+            $events.Add('wait')
+            $state.Now = $state.Now.AddSeconds(46)
+        }.GetNewClosure()
+        ReadResult = {
+            param($Path)
+            $events.Add('read-result')
+            if ($FailurePhase -eq 'Result') { throw 'result failed' }
+            return $validResult
+        }.GetNewClosure()
+    }
+    return [pscustomobject]@{
+        Dependencies = $dependencies
+        Events = $events
+        State = $state
     }
 }
 }
@@ -598,9 +1431,12 @@ Describe 'installed-worker acceptance guard and probe safety' {
     It 'builds a parseable probe that inspects handles and token state without prohibited actions' {
         $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
         $resultRoot = Join-Path $TestDrive 'result'
+        New-Item -ItemType Directory -Path $resultRoot | Out-Null
+        $resultRootIdentity = Get-NativePathIdentity -Path $resultRoot -Directory
         $probeFile = Join-Path $probeDirectory 'probe.bin'
         $probeScript = New-InstalledWorkerProbeScript -Inputs $inputs `
-            -ResultRoot $resultRoot -ProbeFile $probeFile
+            -ResultRoot $resultRoot -ResultRootIdentity $resultRootIdentity `
+            -ProbeFile $probeFile -ProbeExecutableIdentity $resultRootIdentity
         $tokens = $null
         $parseErrors = $null
         $ast = [Management.Automation.Language.Parser]::ParseInput(
@@ -642,6 +1478,358 @@ Describe 'installed-worker acceptance guard and probe safety' {
 
         [IO.File]::WriteAllText($resultPath, 'x' * 4097)
         { Read-InstalledWorkerProbeResult -Path $resultPath } | Should -Throw '*large*'
+    }
+
+    It 'accepts only the fixed native Microsoft PowerShell executable provenance' {
+        $fixedPath = 'C:\Program Files\PowerShell\7\pwsh.exe'
+        $fixedIdentity = [pscustomobject]@{
+            NativeFinalPath = $fixedPath
+            VolumeSerialNumber = 17
+            FileIndex = 41
+        }
+        $actions = @{
+            GetItem = { param($Path) [pscustomobject]@{
+                FullName = $Path
+                PSIsContainer = $false
+                Attributes = [IO.FileAttributes]::Normal
+            } }
+            GetPathIdentity = { param($Path,$Directory) $fixedIdentity }
+            GetSignature = { param($Path) [pscustomobject]@{
+                Status = 'Valid'
+                SignerCertificate = [pscustomobject]@{
+                    Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, C=US'
+                }
+            } }
+            GetVersion = { param($Path) [pscustomobject]@{
+                CompanyName = 'Microsoft Corporation'
+                ProductName = 'PowerShell'
+            } }
+        }
+
+        $validated = Assert-FixedProbeExecutable -Path $fixedPath -Actions $actions
+        $validated.Path | Should -Be $fixedPath
+        $validated.Identity.FileIndex | Should -Be 41
+
+        { Assert-FixedProbeExecutable -Path 'A:\tools\pwsh.exe' -Actions $actions } |
+            Should -Throw '*fixed*'
+        $actions.GetSignature = { [pscustomobject]@{ Status = 'HashMismatch' } }
+        { Assert-FixedProbeExecutable -Path $fixedPath -Actions $actions } |
+            Should -Throw '*provenance*'
+        $actions.GetSignature = { [pscustomobject]@{
+            Status = 'Valid'
+            SignerCertificate = [pscustomobject]@{ Subject = 'CN=Other Publisher' }
+        } }
+        { Assert-FixedProbeExecutable -Path $fixedPath -Actions $actions } |
+            Should -Throw '*provenance*'
+        $actions.GetSignature = { [pscustomobject]@{
+            Status = 'Valid'
+            SignerCertificate = [pscustomobject]@{
+                Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation, C=US'
+            }
+        } }
+        $actions.GetPathIdentity = { [pscustomobject]@{
+            NativeFinalPath = 'C:\redirected\pwsh.exe'
+            VolumeSerialNumber = 17
+            FileIndex = 41
+        } }
+        { Assert-FixedProbeExecutable -Path $fixedPath -Actions $actions } |
+            Should -Throw '*native path*'
+    }
+
+    It 'rejects native final-path containment aliases and identity drift' {
+        $identityAction = {
+            param($Path,$Directory)
+            $fullPath = [IO.Path]::GetFullPath($Path)
+            if ([string]::Equals($fullPath, [IO.Path]::GetFullPath($mediaFixture),
+                [StringComparison]::OrdinalIgnoreCase)) {
+                return [pscustomobject]@{
+                    NativeFinalPath = 'C:\escaped\fixture.bin'
+                    VolumeSerialNumber = 1
+                    FileIndex = 2
+                }
+            }
+            return [pscustomobject]@{
+                NativeFinalPath = $fullPath
+                VolumeSerialNumber = 1
+                FileIndex = [Math]::Abs($fullPath.GetHashCode())
+            }
+        }.GetNewClosure()
+
+        { Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment `
+            -GetPathIdentityAction $identityAction } | Should -Throw '*native*containment*'
+
+        $expected = [pscustomobject]@{
+            NativeFinalPath = $mediaFixture
+            VolumeSerialNumber = 9
+            FileIndex = 10
+        }
+        $changed = [pscustomobject]@{
+            NativeFinalPath = $mediaFixture
+            VolumeSerialNumber = 9
+            FileIndex = 11
+        }
+        Test-NativePathIdentityEqual -Expected $expected -Actual $expected | Should -BeTrue
+        Test-NativePathIdentityEqual -Expected $expected -Actual $changed | Should -BeFalse
+    }
+
+    It 'embeds effect-time native identities and atomic no-overwrite file modes in the probe' {
+        $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
+        $resultRoot = Join-Path $TestDrive 'owned-result'
+        New-Item -ItemType Directory -Path $resultRoot | Out-Null
+        $resultIdentity = Get-NativePathIdentity -Path $resultRoot -Directory
+        $probeFile = Join-Path $probeDirectory 'probe.bin'
+        $probeScript = New-InstalledWorkerProbeScript -Inputs $inputs `
+            -ResultRoot $resultRoot -ResultRootIdentity $resultIdentity `
+            -ProbeFile $probeFile -ProbeExecutableIdentity $resultIdentity
+
+        $probeScript | Should -Match 'NativeFinalPath'
+        $encodedInput = [regex]::Match(
+            $probeScript,
+            "FromBase64String\('(?<value>[A-Za-z0-9+/=]+)'\)").Groups['value'].Value
+        $decodedInput = [Text.Encoding]::UTF8.GetString(
+            [Convert]::FromBase64String($encodedInput)) | ConvertFrom-Json
+        @($decodedInput.PSObject.Properties.Name | Sort-Object) | Should -Be @(
+            'mediaFixture','privateProbeDirectory','privateRoot','probeExecutable',
+            'probePath','protectedConfig','resultRoot','schemaVersion','visibleRoot')
+        foreach ($identityField in @(
+            'visibleRoot','mediaFixture','privateRoot','privateProbeDirectory',
+            'protectedConfig','resultRoot','probeExecutable')) {
+            @($decodedInput.$identityField.PSObject.Properties.Name | Sort-Object) |
+                Should -Be @('FileIndex','NativeFinalPath','VolumeSerialNumber')
+        }
+        [string]$decodedInput.mediaFixture.FileIndex |
+            Should -Be ([string]$inputs.MediaFixtureIdentity.FileIndex)
+        $probeScript | Should -Match 'expectedIdentityFields'
+        $probeScript | Should -Match 'FileMode]::CreateNew'
+        $probeScript | Should -Match 'FileOptions]::DeleteOnClose'
+        $probeScript | Should -Match 'result\.json'
+        @([regex]::Matches($probeScript, 'FileMode]::CreateNew')).Count | Should -Be 2
+    }
+
+    It 'reads one authoritative anchored WinSW digest and rejects ambiguous pins' {
+        $expected = '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA'
+        Read-PinnedWinSwSha256 -Path 'ignored' -ReadTextAction {
+            param($Path)
+            "`$script:WinSwSha256 = '$expected'`r`n"
+        } | Should -Be $expected
+
+        { Read-PinnedWinSwSha256 -Path 'ignored' -ReadTextAction {
+            "`$script:WinSwSha256 = '$expected'`n`$script:WinSwSha256 = '$expected'`n"
+        } } | Should -Throw '*authoritative*'
+    }
+
+    It 'compares the installed worker binary directly with the authoritative WinSW digest' {
+        $expected = '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA'
+        Assert-InstalledWinSwDigest -WorkerPath 'worker.exe' -InstallModulePath 'install.psm1' `
+            -GetHashAction { param($Path) [pscustomobject]@{ Hash = $expected } } `
+            -ReadTextAction { "`$script:WinSwSha256 = '$expected'`n" } |
+            Should -Be $expected
+
+        { Assert-InstalledWinSwDigest -WorkerPath 'worker.exe' `
+            -InstallModulePath 'install.psm1' `
+            -GetHashAction { [pscustomobject]@{ Hash = '0' * 64 } } `
+            -ReadTextAction { "`$script:WinSwSha256 = '$expected'`n" } } |
+            Should -Throw '*authoritative WinSW digest*'
+    }
+
+    It 'refuses task contract drift before starting the injected non-live task' {
+        $events = [Collections.Generic.List[string]]::new()
+        $taskState = @{ Present = $false; ResultPresent = $false }
+        $dependencies = @{
+            NewNonce = { '11111111111111111111111111111111' }
+            ResultRootParent = $TestDrive
+            ValidateResultRootParent = { param($Path) [pscustomobject]@{
+                NativeFinalPath = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+                VolumeSerialNumber = 1
+                FileIndex = 4
+            } }
+            ValidateProbeExecutable = { [pscustomobject]@{
+                Path = 'C:\Program Files\PowerShell\7\pwsh.exe'
+                Identity = [pscustomobject]@{
+                    NativeFinalPath = 'C:\Program Files\PowerShell\7\pwsh.exe'
+                    VolumeSerialNumber = 1
+                    FileIndex = 2
+                }
+            } }
+            CreateResultDirectory = { param($Path) $events.Add('create-result');
+                $taskState.ResultPresent = $true
+                [pscustomobject]@{ NativeFinalPath=$Path;VolumeSerialNumber=1;FileIndex=3 } }
+            RegisterTask = { param($Spec) $events.Add('register'); $taskState.Present = $true }
+            GetTask = { param($Name) $events.Add('get-task'); if ($taskState.Present) {
+                [pscustomobject]@{
+                    Actions = @([pscustomobject]@{ Execute='C:\wrong.exe';Arguments='wrong' })
+                    Principal = [pscustomobject]@{
+                        UserId='NT AUTHORITY\LOCAL SERVICE';LogonType='ServiceAccount';RunLevel='Limited'
+                    }
+                    Settings = [pscustomobject]@{ Hidden=$true;ExecutionTimeLimit='PT1M' }
+                    State = 'Ready'
+                }
+            } }
+            StartTask = { $events.Add('start') }
+            StopTask = { $events.Add('stop') }
+            UnregisterTask = { $events.Add('unregister'); $taskState.Present = $false }
+            GetPathIdentity = { param($Path,$Directory)
+                [pscustomobject]@{ NativeFinalPath=$Path;VolumeSerialNumber=1;FileIndex=3 } }
+            ResultExists = { $false }
+            ResultDirectoryExists = { $taskState.ResultPresent }
+            RemoveResultDirectory = { $events.Add('remove-result');$taskState.ResultPresent=$false }
+            ProbeExists = { $false }
+            UtcNow = { [DateTime]::UtcNow }
+            Wait = { }
+            ReadResult = { throw 'must not read' }
+        }
+        $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
+
+        { Invoke-InstalledWorkerLocalServiceProbe -Inputs $inputs `
+            -Dependencies $dependencies } | Should -Throw '*task contract*'
+        $events | Should -Not -Contain 'start'
+        $events | Should -Contain 'unregister'
+        $events | Should -Contain 'remove-result'
+        $taskState.Present | Should -BeFalse
+    }
+
+    It 're-reads every task principal setting and action field before start' {
+        $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
+        foreach ($field in @(
+            'Execute','Arguments','UserId','LogonType','RunLevel','Hidden','Limit')) {
+            $scenario = New-TestInstalledWorkerProbeScenario -ResultRootParent $TestDrive `
+                -TaskContractField $field
+
+            { Invoke-InstalledWorkerLocalServiceProbe -Inputs $inputs `
+                -Dependencies $scenario.Dependencies } | Should -Throw '*task contract*'
+            $scenario.Events | Should -Not -Contain 'start'
+            $scenario.State.TaskPresent | Should -BeFalse
+            $scenario.State.ResultDirectoryPresent | Should -BeFalse
+        }
+    }
+
+    It 'executes and cleans the exact injected task contract without live effects or sleeps' {
+        $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
+        $scenario = New-TestInstalledWorkerProbeScenario -ResultRootParent $TestDrive
+
+        $result = Invoke-InstalledWorkerLocalServiceProbe -Inputs $inputs `
+            -Dependencies $scenario.Dependencies
+
+        $result.errorCode | Should -Be 'NONE'
+        $scenario.State.Specification.Execute |
+            Should -Be 'C:\Program Files\PowerShell\7\pwsh.exe'
+        $scenario.State.Specification.Arguments |
+            Should -Match '^-NoLogo -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$'
+        $scenario.Events | Should -Contain 'start'
+        $scenario.Events | Should -Contain 'unregister'
+        $scenario.Events | Should -Contain 'remove-result'
+        $scenario.Events | Should -Not -Contain 'wait'
+        @($scenario.Events | Where-Object { $_ -eq 'get-task' }).Count | Should -BeGreaterOrEqual 4
+        @($scenario.Events | Where-Object { $_ -eq 'result-directory-exists' }).Count |
+            Should -BeGreaterOrEqual 3
+        $scenario.State.TaskPresent | Should -BeFalse
+        $scenario.State.ResultDirectoryPresent | Should -BeFalse
+    }
+
+    It 'cleans deterministically after registration start result and timeout failures' {
+        $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
+        $expectations = [ordered]@{
+            Registration = 'registration failed'
+            Start = 'start failed'
+            Result = 'result failed'
+            Timeout = 'did not produce a result'
+        }
+        foreach ($phase in $expectations.Keys) {
+            $scenario = New-TestInstalledWorkerProbeScenario `
+                -ResultRootParent $TestDrive -FailurePhase $phase
+
+            { Invoke-InstalledWorkerLocalServiceProbe -Inputs $inputs `
+                -Dependencies $scenario.Dependencies } |
+                Should -Throw "*$($expectations[$phase])*"
+            $scenario.Events | Should -Contain 'unregister'
+            $scenario.Events | Should -Contain 'remove-result'
+            $scenario.State.TaskPresent | Should -BeFalse
+            $scenario.State.ResultDirectoryPresent | Should -BeFalse
+        }
+    }
+
+    It 'preserves the primary failure behind one fixed cleanup failure' {
+        $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
+        $scenario = New-TestInstalledWorkerProbeScenario -ResultRootParent $TestDrive `
+            -FailurePhase Result -CleanupFailure Unregister
+        $caught = $null
+
+        try {
+            Invoke-InstalledWorkerLocalServiceProbe -Inputs $inputs `
+                -Dependencies $scenario.Dependencies | Out-Null
+        } catch { $caught = $_ }
+
+        $caught.Exception.Message | Should -Be 'Installed-worker acceptance cleanup failed.'
+        $caught.Exception.InnerException.Message | Should -Be 'result failed'
+        $scenario.Events | Should -Contain 'remove-result'
+        @($scenario.Events | Where-Object { $_ -eq 'get-task' }).Count |
+            Should -BeGreaterOrEqual 4
+    }
+
+    It 'surfaces result-removal and leaked-probe cleanup postcondition failures' {
+        $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
+        foreach ($cleanupFailure in @('RemoveResult','ProbeLeak')) {
+            $scenario = New-TestInstalledWorkerProbeScenario -ResultRootParent $TestDrive `
+                -CleanupFailure $cleanupFailure
+
+            { Invoke-InstalledWorkerLocalServiceProbe -Inputs $inputs `
+                -Dependencies $scenario.Dependencies } | Should -Throw '*cleanup failed*'
+            $scenario.State.TaskPresent | Should -BeFalse
+            if ($cleanupFailure -eq 'RemoveResult') {
+                @($scenario.Events | Where-Object { $_ -eq 'result-directory-exists' }).Count |
+                    Should -BeGreaterOrEqual 3
+            }
+        }
+    }
+
+    It 'bounds scheduled-task stop and unregister cleanup jobs' {
+        $events = [Collections.Generic.List[string]]::new()
+        $actions = @{
+            StartJob = { param($Operation,$Name) $events.Add("start-$Operation");
+                [pscustomobject]@{ Id = 1 } }
+            WaitJob = { param($Job,$TimeoutSeconds) $events.Add("wait-$TimeoutSeconds"); $null }
+            ReceiveJob = { $events.Add('receive') }
+            StopJob = { $events.Add('stop-job') }
+            RemoveJob = { $events.Add('remove-job') }
+        }
+
+        { Invoke-BoundedScheduledTaskCleanup -Operation Stop -Name 'exact-task' `
+            -Actions $actions } | Should -Throw '*bounded cleanup action failed*'
+        $events | Should -Contain 'start-Stop'
+        $events | Should -Contain 'wait-10'
+        $events | Should -Contain 'stop-job'
+        $events | Should -Contain 'remove-job'
+        $events | Should -Not -Contain 'receive'
+    }
+
+    It 'refuses atomic collisions without deleting resources it did not create' {
+        $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
+        $createCollision = New-TestInstalledWorkerProbeScenario `
+            -ResultRootParent $TestDrive -FailurePhase Collision
+        { Invoke-InstalledWorkerLocalServiceProbe -Inputs $inputs `
+            -Dependencies $createCollision.Dependencies } | Should -Throw '*atomic collision*'
+        $createCollision.Events | Should -Not -Contain 'register'
+        $createCollision.Events | Should -Not -Contain 'remove-result'
+
+        $preexisting = New-TestInstalledWorkerProbeScenario `
+            -ResultRootParent $TestDrive -PreexistingResult
+        { Invoke-InstalledWorkerLocalServiceProbe -Inputs $inputs `
+            -Dependencies $preexisting.Dependencies } | Should -Throw '*already exists*'
+        $preexisting.Events | Should -Not -Contain 'create-result'
+        $preexisting.Events | Should -Not -Contain 'remove-result'
+        $preexisting.State.ResultDirectoryPresent | Should -BeTrue
+    }
+
+    It 'fails cleanup closed rather than deleting an identity-mismatched result directory' {
+        $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
+        $scenario = New-TestInstalledWorkerProbeScenario -ResultRootParent $TestDrive `
+            -FailurePhase Start -IdentityMismatch
+
+        { Invoke-InstalledWorkerLocalServiceProbe -Inputs $inputs `
+            -Dependencies $scenario.Dependencies } | Should -Throw '*cleanup failed*'
+        $scenario.Events | Should -Not -Contain 'remove-result'
+        $scenario.State.ResultDirectoryPresent | Should -BeTrue
+        $scenario.State.TaskPresent | Should -BeFalse
     }
 }
 
