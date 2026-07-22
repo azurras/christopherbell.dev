@@ -27,8 +27,13 @@ Task 8: complete (commits d503f66c..c1f728e4; final task review approved 0 Criti
 0 Important, 0 Minor; fresh full Windows gate passed 947 Java tests with 0 failures/errors
 and 3 expected environment-gated skips plus 165 JavaScript tests with 0 failures; final diff
 check clean; strict maintenance authority verified for the current single-Windows-host deployment;
-reviewed branch checkpoint ready to push)
-Task 9: pending
+reviewed branch checkpoint pushed)
+Task 9: complete (commits 2a3ff56c..d8bf2fc3; final task review approved 0 Critical,
+0 Important, 0 Minor; fresh isolated `clean test :website:sharedFolderVerification` gate passed
+19/19 actions, 1,049 Java tests with 0 failures/errors and 3 expected platform skips, 165
+JavaScript tests, worker Pester 56/56, and operations Pester 28/28 under both PowerShell 7
+and Windows PowerShell 5.1 using exact Pester 5.9.0; final diff check clean; reviewed branch
+checkpoint ready to push)
 Task 10: pending
 
 Minor findings for final review:
