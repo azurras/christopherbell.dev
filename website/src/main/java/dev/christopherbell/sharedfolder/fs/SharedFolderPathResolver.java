@@ -315,7 +315,7 @@ public final class SharedFolderPathResolver {
       Object attributes = fileSystem.dosAttributesNoFollow(path);
       return attributes instanceof Number number
           && (number.intValue() & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
-    } catch (UnsupportedOperationException exception) {
+    } catch (UnsupportedOperationException | IllegalArgumentException exception) {
       return false;
     }
   }

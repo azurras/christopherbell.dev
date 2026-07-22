@@ -579,7 +579,7 @@ public class PortableSharedFolderPrivateBoundary {
     try {
       Object value = Files.getAttribute(path, "dos:attributes", LinkOption.NOFOLLOW_LINKS);
       return value instanceof Number number && (number.intValue() & 0x0400) != 0;
-    } catch (UnsupportedOperationException exception) {
+    } catch (UnsupportedOperationException | IllegalArgumentException exception) {
       return false;
     }
   }

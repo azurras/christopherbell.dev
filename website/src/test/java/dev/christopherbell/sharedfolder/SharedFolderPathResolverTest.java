@@ -41,6 +41,14 @@ class SharedFolderPathResolverTest {
     assertThat(resolver.existing("")).isEqualTo(root);
   }
 
+  @Test
+  void acceptsAnOrdinaryRootWhenTheProviderDoesNotRecognizeDosAttributes() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("shared"));
+    var resolver = new SharedFolderPathResolver(root, new UnrecognizedDosViewBoundary());
+
+    assertThat(resolver.existing("")).isEqualTo(root);
+  }
+
   @ParameterizedTest(name = "rejects unsafe Windows path: {0}")
   @MethodSource("unsafePaths")
   void rejectsUnsafeWindowsPathForms(String path) throws Exception {
@@ -361,6 +369,13 @@ class SharedFolderPathResolverTest {
         return super.realPathNoFollow(path);
       }
       return super.realPath(path).resolveSibling("aliased-ancestor").resolve(root.getFileName());
+    }
+  }
+
+  private static final class UnrecognizedDosViewBoundary extends DelegatingBoundary {
+    @Override
+    public Object dosAttributesNoFollow(Path path) {
+      throw new IllegalArgumentException("View 'dos' not available");
     }
   }
 

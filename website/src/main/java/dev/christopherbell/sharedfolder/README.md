@@ -20,8 +20,9 @@ feature.
   staging only. On macOS, the portable boundary rejects filesystem roots directly and detects
   nested mounts through the parent/child file-store comparison. Operating-system aliases above
   the configured root are allowed after canonical capture; the configured root and every
-  descendant must still be ordinary, non-linked entries. Deployable visible writes fail with
-  `503` without a retained mutation capability.
+  descendant must still be ordinary, non-linked entries. Providers without a DOS attribute view
+  treat that view as unavailable; Windows providers still enforce the native reparse-point bit.
+  Deployable visible writes fail with `503` without a retained mutation capability.
 - `security` reloads the authenticated account from MongoDB for every decision. A persisted
   active approved account needs a shared-folder capability; ADMIN has read and write implicitly,
   and write implies read. JWTs intentionally carry no shared-folder capability.
