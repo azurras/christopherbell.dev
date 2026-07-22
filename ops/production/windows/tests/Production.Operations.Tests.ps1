@@ -49,7 +49,11 @@ Describe 'native Windows production operations' {
             Mock Assert-ReleasePath { $Path }
             Mock Stop-Service { }
             Mock Stop-ProductionWebsiteService { }
-            Mock Set-AtomicJunction { }
+            $junctionWrites = [System.Collections.Generic.List[string]]::new()
+            Mock Set-AtomicJunction {
+                param($Config, $Path, $Target)
+                [void]$junctionWrites.Add("$Path=>$Target")
+            }
             Mock Start-Service { }
             $script:rollbackVerification = 0
             Mock Test-ProductionEndpoints {
@@ -65,12 +69,49 @@ Describe 'native Windows production operations' {
             Should -Invoke Stop-ProductionWebsiteService -Times 2 -Exactly -ParameterFilter {
                 $ProductionPort -eq 8080
             }
-            Should -Invoke Set-AtomicJunction -ParameterFilter {
-                $Target -eq 'C:\data\releases\current'
+            ($junctionWrites -join '|') | Should -Be (
+                'C:\data\current=>C:\data\releases\previous|' +
+                'C:\data\previous=>C:\data\releases\current|' +
+                'C:\data\current=>C:\data\releases\current|' +
+                'C:\data\previous=>C:\data\releases\previous')
+        }
+
+        It 'preserves rollback and restoration failures together' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot = 'C:\data'
+                    productionPort = 8080
+                }
             }
-            Should -Invoke Set-AtomicJunction -ParameterFilter {
-                $Target -eq 'C:\data\releases\previous'
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { return 'C:\data\releases\current' }
+                return 'C:\data\releases\previous'
             }
+            Mock Assert-ReleasePath { $Path }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Set-AtomicJunction { }
+            Mock Start-Service { }
+            $script:rollbackVerification = 0
+            Mock Test-ProductionEndpoints {
+                if ($script:rollbackVerification++ -eq 0) {
+                    throw 'rollback verification failed'
+                }
+                throw 'release restoration failed'
+            }
+
+            $failure = $null
+            try {
+                Invoke-ProductionRollback
+            } catch {
+                $failure = $_.Exception
+            }
+
+            $failure.GetType().FullName | Should -Be 'System.AggregateException'
+            $failure.Message | Should -Match '^Production rollback and release restoration both failed\.'
+            @($failure.InnerExceptions).Count | Should -Be 2
+            $failure.InnerExceptions[0].Message | Should -Be 'rollback verification failed'
+            $failure.InnerExceptions[1].Message | Should -Be 'release restoration failed'
         }
 
         It 'reports cloudflared with native website and MongoDB services' {
