@@ -21,27 +21,63 @@ function Invoke-ProductionRollback {
     $config = Read-ProductionConfig
     $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
     try {
-        $current = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
-        $previous = Get-JunctionTarget (Join-Path $config.programDataRoot 'previous')
-        if (-not $current -or -not $previous) { throw 'Both current and previous releases are required.' }
+        $currentPath = Join-Path $config.programDataRoot 'current'
+        $previousPath = Join-Path $config.programDataRoot 'previous'
+        $current = Get-JunctionTarget $currentPath
+        $previous = Get-JunctionTarget $previousPath
+        if (-not $current -or -not $previous) {
+            throw 'Both current and previous releases are required.'
+        }
         Assert-ReleasePath $config $current | Out-Null
         Assert-ReleasePath $config $previous | Out-Null
-        if ($WhatIf) { Write-Output "Would roll back from $current to $previous"; return }
-        Stop-Service ChristopherBellDev
-        Set-AtomicJunction $config (Join-Path $config.programDataRoot 'current') $previous
-        Set-AtomicJunction $config (Join-Path $config.programDataRoot 'previous') $current
+        if ($WhatIf) {
+            Write-Output "Would roll back from $current to $previous"
+            return
+        }
+
+        Stop-ProductionWebsiteService -ProductionPort $config.productionPort
         try {
+            Set-AtomicJunction $config $currentPath $previous
+            Set-AtomicJunction $config $previousPath $current
             Start-Service ChristopherBellDev
             Test-ProductionEndpoints $config $config.productionPort
         } catch {
-            Stop-Service ChristopherBellDev -ErrorAction SilentlyContinue
-            Set-AtomicJunction $config (Join-Path $config.programDataRoot 'current') $current
-            Set-AtomicJunction $config (Join-Path $config.programDataRoot 'previous') $previous
-            Start-Service ChristopherBellDev
-            Test-ProductionEndpoints $config $config.productionPort
-            throw
+            $rollbackFailure = $_.Exception
+            try {
+                Stop-ProductionWebsiteService -ProductionPort $config.productionPort
+                $junctionRestoreFailures = [System.Collections.Generic.List[System.Exception]]::new()
+                try {
+                    Set-AtomicJunction $config $currentPath $current
+                } catch {
+                    [void]$junctionRestoreFailures.Add($_.Exception)
+                }
+                try {
+                    Set-AtomicJunction $config $previousPath $previous
+                } catch {
+                    [void]$junctionRestoreFailures.Add($_.Exception)
+                }
+                if ($junctionRestoreFailures.Count -eq 1) {
+                    throw [System.InvalidOperationException]::new(
+                        'Failed to restore original release junctions.',
+                        $junctionRestoreFailures[0])
+                }
+                if ($junctionRestoreFailures.Count -gt 1) {
+                    throw [System.AggregateException]::new(
+                        'Failed to restore original release junctions.',
+                        [System.Exception[]]$junctionRestoreFailures.ToArray())
+                }
+                Start-Service ChristopherBellDev
+                Test-ProductionEndpoints $config $config.productionPort
+            } catch {
+                throw [System.AggregateException]::new(
+                    'Production rollback and release restoration both failed.',
+                    [System.Exception[]]@($rollbackFailure, $_.Exception))
+            }
+            throw $rollbackFailure
         }
-    } finally { $lock.Dispose() }
+    } finally {
+        $lock.Dispose()
+    }
 }
 
 function Get-NativeMongoDumpArguments {
