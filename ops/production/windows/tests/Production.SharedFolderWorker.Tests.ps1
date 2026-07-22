@@ -58,6 +58,51 @@ BeforeAll {
             Paths = $directories
         }
     }
+
+    function New-TestMediaToolSet {
+        param([Parameter(Mandatory)][string]$Root)
+        New-Item -ItemType Directory -Path $Root -Force | Out-Null
+        $ffmpeg = Join-Path $Root 'ffmpeg.exe'
+        $ffprobe = Join-Path $Root 'ffprobe.exe'
+        'test-ffmpeg' | Set-Content -LiteralPath $ffmpeg
+        'test-ffprobe' | Set-Content -LiteralPath $ffprobe
+        [pscustomobject]@{
+            Ffmpeg = $ffmpeg
+            Ffprobe = $ffprobe
+            FfmpegSha256 = (Get-FileHash -LiteralPath $ffmpeg -Algorithm SHA256).Hash
+            FfprobeSha256 = (Get-FileHash -LiteralPath $ffprobe -Algorithm SHA256).Hash
+        }
+    }
+
+    function New-TestMediaArchive {
+        param(
+            [Parameter(Mandatory)][string]$Path,
+            [Parameter(Mandatory)][string]$Label
+        )
+        Add-Type -AssemblyName System.IO.Compression
+        $archive = [IO.Compression.ZipFile]::Open($Path, [IO.Compression.ZipArchiveMode]::Create)
+        try {
+            foreach ($name in 'ffmpeg.exe','ffprobe.exe') {
+                $entry = $archive.CreateEntry("package/bin/$name")
+                $writer = [IO.StreamWriter]::new($entry.Open())
+                try { $writer.Write("$Label-$name") } finally { $writer.Dispose() }
+            }
+        } finally { $archive.Dispose() }
+    }
+
+    function New-TestMediaManifest {
+        param(
+            [Parameter(Mandatory)][string]$Path,
+            [Parameter(Mandatory)][string]$ArchivePath,
+            [Parameter(Mandatory)][string]$Version
+        )
+        [ordered]@{
+            schemaVersion = 1
+            packageVersion = $Version
+            uri = 'https://example.invalid/media-tools.zip'
+            sha256 = (Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash
+        } | ConvertTo-Json | Set-Content -LiteralPath $Path
+    }
 }
 
 Describe 'shared-folder media worker service definition' {
@@ -121,6 +166,44 @@ Describe 'shared-folder media job boundary validation' {
 
         { Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot } |
             Should -Throw '*deadline*'
+    }
+
+    It 'rejects a deadline beyond the fixed two-hour worker horizon' {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        $fixture.Job.deadline = [DateTime]::UtcNow.AddHours(3).ToString('o')
+        $fixture.Job | ConvertTo-Json | Set-Content $fixture.JobPath
+
+        { Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot } |
+            Should -Throw '*two-hour*'
+    }
+
+    It 'rejects an output ceiling above the Task 6 fifty-gigabyte contract' {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        $fixture.Job.maxOutputBytes = 53687091201
+        $fixture.Job | ConvertTo-Json | Set-Content $fixture.JobPath
+
+        { Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot } |
+            Should -Throw '*maxOutputBytes*'
+    }
+
+    It 'rejects an initial buffer above the Task 6 two-megabyte contract' {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        $fixture.Job.maxOutputBytes = 4194304
+        $fixture.Job.initialBufferBytes = 2097153
+        $fixture.Job | ConvertTo-Json | Set-Content $fixture.JobPath
+
+        { Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot } |
+            Should -Throw '*initialBufferBytes*'
+    }
+
+    It 'rejects an initial buffer larger than the requested output ceiling' {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        $fixture.Job.maxOutputBytes = 1024
+        $fixture.Job.initialBufferBytes = 2048
+        $fixture.Job | ConvertTo-Json | Set-Content $fixture.JobPath
+
+        { Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot } |
+            Should -Throw '*must not exceed*'
     }
 
     It 'rejects traversal outside the visible root' {
@@ -205,6 +288,8 @@ Describe 'fixed media tool arguments' {
         ($arguments -join ' ') | Should -Match 'libx264'
         ($arguments -join ' ') | Should -Match 'aac'
         ($arguments -join ' ') | Should -Match 'frag_keyframe\+empty_moov\+default_base_moof'
+        $arguments | Should -Contain '-fs'
+        $arguments[([array]::IndexOf($arguments, '-fs') + 1)] | Should -Be ([string]$job.maxOutputBytes)
         $arguments[-1] | Should -Be $job.partialOutputPath
         $arguments | Should -Not -Contain '-f concat -i attacker.txt'
     }
@@ -280,6 +365,135 @@ Describe 'fixed media tool arguments' {
     }
 }
 
+Describe 'retained source and private publication ownership' {
+    It 'stages bytes from the retained source handle and prevents source substitution' -Skip:(-not $IsWindows) {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        New-Item -ItemType Directory -Path (Join-Path $fixture.SystemRoot 'shared-folder-media-staging') -Force |
+            Out-Null
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        $owned = Open-ValidatedMediaSource -Job $job
+        try {
+            { Move-Item -LiteralPath $job.sourcePath -Destination "$($job.sourcePath).old" -ErrorAction Stop } |
+                Should -Throw
+            $staged = Copy-ValidatedMediaSourceToStage -Job $job -OwnedSource $owned
+            try {
+                [IO.File]::ReadAllBytes($staged.Path) | Should -Be ([byte[]](1..32))
+            } finally { $staged.Dispose() }
+        } finally { $owned.Dispose() }
+    }
+
+    It 'holds private output ancestors against coordinated substitution' -Skip:(-not $IsWindows) {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        New-Item -ItemType Directory -Path (Join-Path $fixture.SystemRoot 'shared-folder-media-staging') -Force |
+            Out-Null
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        $lease = Enter-MediaPrivateRootLease -Job $job
+        try {
+            { Move-Item -LiteralPath $fixture.Paths.PartialRoot `
+                -Destination "$($fixture.Paths.PartialRoot)-swapped" -ErrorAction Stop } | Should -Throw
+        } finally { $lease.Dispose() }
+    }
+
+    It 'rejects a reparse output ancestor at the last publication boundary' -Skip:(-not $IsWindows) {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        [IO.File]::WriteAllBytes($job.partialOutputPath, [byte[]](1..16))
+        $outside = Join-Path $TestDrive 'outside-ready'
+        New-Item -ItemType Directory -Path $outside | Out-Null
+        Move-Item -LiteralPath $fixture.Paths.CacheRoot -Destination "$($fixture.Paths.CacheRoot)-original"
+        New-Item -ItemType Junction -Path $fixture.Paths.CacheRoot -Target $outside | Out-Null
+
+        { Complete-MediaJobAtomically -Job $job } | Should -Throw '*reparse*'
+        Test-Path -LiteralPath (Join-Path $outside ([IO.Path]::GetFileName($job.readyOutputPath))) |
+            Should -BeFalse
+    }
+}
+
+Describe 'media job effect boundaries' {
+    It 'requires the fixed free-space reserve in addition to the output ceiling' {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+
+        { Assert-MediaOutputCapacity -Job $job `
+            -AvailableFreeSpaceBytes (100GB + $job.maxOutputBytes - 1) } |
+            Should -Throw '*reserve*'
+    }
+
+    It 'revalidates exact tool hashes immediately before the probe launch boundary' {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        New-Item -ItemType Directory -Path $fixture.Paths.StagingRoot -Force | Out-Null
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        $tools = New-TestMediaToolSet -Root (Join-Path $TestDrive 'changed-launch-tools')
+        'changed' | Set-Content -LiteralPath $tools.Ffprobe
+        $called = @{ Probe = $false }
+
+        { Invoke-ValidatedMediaJob -Job $job -ToolSet $tools `
+            -GetAvailableFreeSpace { param($path) 200GB } `
+            -ProbeAction { param($context) $called.Probe = $true } `
+            -TranscodeAction { param($context) } } |
+            Should -Throw '*hash verification*'
+        $called.Probe | Should -BeFalse
+    }
+
+    It 'cleans staged and partial files after cancellation at the transcode boundary' {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        New-Item -ItemType Directory -Path (Join-Path $fixture.SystemRoot 'shared-folder-media-staging') -Force |
+            Out-Null
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        $tools = New-TestMediaToolSet -Root (Join-Path $TestDrive 'cancel-tools')
+        $probe = { param($context) [pscustomobject]@{ StandardOutput='{}'; OutputTruncated=$false } }
+        $transcode = {
+            param($context)
+            [IO.File]::WriteAllBytes($context.Job.partialOutputPath, [byte[]](1..16))
+            throw [OperationCanceledException]::new('coordinated cancellation')
+        }
+
+        { Invoke-ValidatedMediaJob -Job $job -ToolSet $tools `
+            -GetAvailableFreeSpace { param($path) 200GB } `
+            -ProbeAction $probe -TranscodeAction $transcode } |
+            Should -Throw '*cancellation*'
+        Test-Path -LiteralPath $job.partialOutputPath | Should -BeFalse
+        @(Get-ChildItem -LiteralPath (Join-Path $fixture.SystemRoot 'shared-folder-media-staging') -File).Count |
+            Should -Be 0
+    }
+
+    It 'fails closed and cleans up when a transcode rapidly overshoots the output ceiling' {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        New-Item -ItemType Directory -Path (Join-Path $fixture.SystemRoot 'shared-folder-media-staging') -Force |
+            Out-Null
+        $fixture.Job.maxOutputBytes = 8
+        $fixture.Job.initialBufferBytes = 4
+        $fixture.Job | ConvertTo-Json | Set-Content $fixture.JobPath
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        $tools = New-TestMediaToolSet -Root (Join-Path $TestDrive 'overshoot-tools')
+        $probe = { param($context) [pscustomobject]@{ StandardOutput='{}'; OutputTruncated=$false } }
+        $transcode = {
+            param($context)
+            [IO.File]::WriteAllBytes($context.Job.partialOutputPath, [byte[]](1..9))
+            & $context.PollAction
+        }
+
+        { Invoke-ValidatedMediaJob -Job $job -ToolSet $tools `
+            -GetAvailableFreeSpace { param($path) 200GB } `
+            -ProbeAction $probe -TranscodeAction $transcode } |
+            Should -Throw '*maxOutputBytes*'
+        Test-Path -LiteralPath $job.readyOutputPath | Should -BeFalse
+        Test-Path -LiteralPath $job.partialOutputPath | Should -BeFalse
+    }
+
+    It 'publishes completed output and READY status through the real filesystem boundary' {
+        $fixture = New-TestMediaJobFixture -Root $TestDrive
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        [IO.File]::WriteAllBytes($job.partialOutputPath, [byte[]](1..16))
+
+        Complete-MediaJobAtomically -Job $job
+
+        Test-Path -LiteralPath $job.partialOutputPath | Should -BeFalse
+        [IO.File]::ReadAllBytes($job.readyOutputPath) | Should -Be ([byte[]](1..16))
+        (Get-Content $job.statusPath -Raw | ConvertFrom-Json).status | Should -Be 'READY'
+    }
+}
+
 Describe 'shared-folder runtime isolation' {
     It 'uses the exact default visible and private roots' {
         $paths = Get-SharedFolderRuntimePaths
@@ -338,6 +552,39 @@ Describe 'shared-folder runtime isolation' {
         }
     }
 
+    It 'applies the expected ACL objects through one effect seam' {
+        $sharedRoot = Join-Path $TestDrive 'acl-shared'
+        $systemRoot = Join-Path $TestDrive 'acl-system'
+        $paths = New-SharedFolderRuntimeDirectories -SharedRoot $sharedRoot -SystemRoot $systemRoot
+        $requests = [Collections.Generic.List[object]]::new()
+
+        Set-SharedFolderRuntimeAcls -SharedRoot $sharedRoot -SystemRoot $systemRoot `
+            -SetAclAction { param($path,$acl) $requests.Add([pscustomobject]@{Path=$path;Acl=$acl}) }
+
+        $requests.Path | Should -Contain $paths.SharedRoot
+        $requests.Path | Should -Contain $paths.StagingRoot
+        $requests.Path | Should -Contain $paths.ToolRoot
+        ($requests | Where-Object Path -eq $paths.SharedRoot).Acl.AreAccessRulesProtected |
+            Should -BeTrue
+    }
+
+    It 'rejects archive traversal before extracting any outside entry' {
+        Add-Type -AssemblyName System.IO.Compression
+        $archivePath = Join-Path $TestDrive 'traversal.zip'
+        $destination = Join-Path $TestDrive 'expanded'
+        $outside = Join-Path $TestDrive 'escaped.txt'
+        $archive = [IO.Compression.ZipFile]::Open($archivePath, [IO.Compression.ZipArchiveMode]::Create)
+        try {
+            $entry = $archive.CreateEntry('../escaped.txt')
+            $writer = [IO.StreamWriter]::new($entry.Open())
+            try { $writer.Write('outside') } finally { $writer.Dispose() }
+        } finally { $archive.Dispose() }
+
+        { Expand-ValidatedMediaArchive -ArchivePath $archivePath -Destination $destination } |
+            Should -Throw '*unsafe path*'
+        Test-Path -LiteralPath $outside | Should -BeFalse
+    }
+
     It 'reads the exact pinned HTTPS media tool manifest' {
         $manifestPath = Join-Path $PSScriptRoot '..\config\media-tools-manifest.json'
 
@@ -351,42 +598,117 @@ Describe 'shared-folder runtime isolation' {
 
     It 'reuses an already verified media tool installation without downloading' {
         $toolRoot = Join-Path $TestDrive 'media-tools'
-        New-Item -ItemType Directory -Path $toolRoot | Out-Null
-        'fake' | Set-Content (Join-Path $toolRoot 'ffmpeg.exe')
-        'fake' | Set-Content (Join-Path $toolRoot 'ffprobe.exe')
-        $manifestPath = Join-Path $PSScriptRoot '..\config\media-tools-manifest.json'
-        $manifest = Read-PinnedMediaToolManifest -Path $manifestPath
-        [ordered]@{
-            schemaVersion = 1
-            packageVersion = $manifest.packageVersion
-            packageSha256 = $manifest.sha256
-            ffmpegSha256 = (Get-FileHash (Join-Path $toolRoot 'ffmpeg.exe') -Algorithm SHA256).Hash
-            ffprobeSha256 = (Get-FileHash (Join-Path $toolRoot 'ffprobe.exe') -Algorithm SHA256).Hash
-        } | ConvertTo-Json | Set-Content (Join-Path $toolRoot 'installed-media-tools.json')
-        Mock Invoke-WebRequest { throw 'Media tools should not be downloaded again.' }
+        $archive = Join-Path $TestDrive 'reused-tools.zip'
+        $manifestPath = Join-Path $TestDrive 'reused-tools.json'
+        New-TestMediaArchive -Path $archive -Label reused
+        New-TestMediaManifest -Path $manifestPath -ArchivePath $archive -Version reused
+        $first = Install-PinnedMediaTools -ManifestPath $manifestPath -ToolRoot $toolRoot `
+            -DownloadAction { param($uri,$destination) Copy-Item $archive $destination }
 
-        $installed = Install-PinnedMediaTools -ManifestPath $manifestPath -ToolRoot $toolRoot
+        $installed = Install-PinnedMediaTools -ManifestPath $manifestPath -ToolRoot $toolRoot `
+            -DownloadAction { param($uri,$destination) throw 'Media tools should not be downloaded again.' }
 
-        $installed.Ffmpeg | Should -Be (Join-Path $toolRoot 'ffmpeg.exe')
-        Should -Invoke Invoke-WebRequest -Times 0
+        $installed.Ffmpeg | Should -Be $first.Ffmpeg
+        $installed.Ffmpeg | Should -Match '[\\/]versions[\\/]'
     }
 
     It 'rejects a media tool changed after pinned installation' {
         $toolRoot = Join-Path $TestDrive 'pinned-media-tools'
-        New-Item -ItemType Directory -Path $toolRoot | Out-Null
-        'ffmpeg' | Set-Content (Join-Path $toolRoot 'ffmpeg.exe')
-        'ffprobe' | Set-Content (Join-Path $toolRoot 'ffprobe.exe')
-        [ordered]@{
-            schemaVersion = 1
-            packageVersion = 'test'
-            packageSha256 = 'a' * 64
-            ffmpegSha256 = (Get-FileHash (Join-Path $toolRoot 'ffmpeg.exe') -Algorithm SHA256).Hash
-            ffprobeSha256 = (Get-FileHash (Join-Path $toolRoot 'ffprobe.exe') -Algorithm SHA256).Hash
-        } | ConvertTo-Json | Set-Content (Join-Path $toolRoot 'installed-media-tools.json')
-
+        $archive = Join-Path $TestDrive 'pinned-tools.zip'
+        $manifestPath = Join-Path $TestDrive 'pinned-tools.json'
+        New-TestMediaArchive -Path $archive -Label pinned
+        New-TestMediaManifest -Path $manifestPath -ArchivePath $archive -Version pinned
+        $active = Install-PinnedMediaTools -ManifestPath $manifestPath -ToolRoot $toolRoot `
+            -DownloadAction { param($uri,$destination) Copy-Item $archive $destination }
         Assert-PinnedMediaToolSet -ToolRoot $toolRoot | Should -Not -BeNullOrEmpty
-        'changed' | Set-Content (Join-Path $toolRoot 'ffmpeg.exe')
+        'changed' | Set-Content $active.Ffmpeg
 
         { Assert-PinnedMediaToolSet -ToolRoot $toolRoot } | Should -Throw '*hash verification*'
+    }
+
+    It 'installs and refreshes the worker service idempotently through controlled service effects' {
+        $productionRoot = Join-Path $TestDrive 'service-runtime'
+        $service = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $service -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $service 'ChristopherBellDev.exe')
+        'website xml' | Set-Content (Join-Path $service 'ChristopherBellDev.xml')
+        'website script' | Set-Content (Join-Path $service 'Start-ChristopherBellDev.ps1')
+        $commands = [Collections.Generic.List[string]]::new()
+        $state = @{ Existing = $false }
+        $getService = { param($name) if ($state.Existing) { [pscustomobject]@{Name=$name} } }
+        $invoke = { param($binary,$command) $commands.Add($command); 0 }
+
+        Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -GetServiceAction $getService -InvokeWinSwAction $invoke `
+            -ProtectPathAction { param($path) } -SetAclAction { param($path,$acl) }
+        $state.Existing = $true
+        Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -GetServiceAction $getService -InvokeWinSwAction $invoke `
+            -ProtectPathAction { param($path) } -SetAclAction { param($path,$acl) }
+
+        $commands | Should -Be @('install','refresh')
+        Test-Path (Join-Path $service 'ChristopherBellMediaWorker.exe') | Should -BeTrue
+    }
+
+    It 'publishes immutable tool versions and leaves an active version untouched' {
+        $toolRoot = Join-Path $TestDrive 'versioned-tools'
+        $archive1 = Join-Path $TestDrive 'tools-v1.zip'
+        $archive2 = Join-Path $TestDrive 'tools-v2.zip'
+        $manifest1 = Join-Path $TestDrive 'tools-v1.json'
+        $manifest2 = Join-Path $TestDrive 'tools-v2.json'
+        New-TestMediaArchive -Path $archive1 -Label v1
+        New-TestMediaArchive -Path $archive2 -Label v2
+        New-TestMediaManifest -Path $manifest1 -ArchivePath $archive1 -Version v1
+        New-TestMediaManifest -Path $manifest2 -ArchivePath $archive2 -Version v2
+
+        $active = Install-PinnedMediaTools -ManifestPath $manifest1 -ToolRoot $toolRoot `
+            -DownloadAction { param($uri,$destination) Copy-Item $archive1 $destination }
+        $activeBytes = Get-Content -LiteralPath $active.Ffmpeg -Raw
+        Install-PinnedMediaTools -ManifestPath $manifest2 -ToolRoot $toolRoot `
+            -DownloadAction { param($uri,$destination) Copy-Item $archive2 $destination } | Out-Null
+        $current = Assert-PinnedMediaToolSet -ToolRoot $toolRoot
+
+        $current.Ffmpeg | Should -Not -Be $active.Ffmpeg
+        Get-Content -LiteralPath $active.Ffmpeg -Raw | Should -Be $activeBytes
+        Test-Path -LiteralPath $active.Ffmpeg | Should -BeTrue
+    }
+
+    It 'preserves the active tool version when a refresh is interrupted' {
+        $toolRoot = Join-Path $TestDrive 'interrupted-tools'
+        $archive = Join-Path $TestDrive 'tools-stable.zip'
+        $manifest = Join-Path $TestDrive 'tools-stable.json'
+        New-TestMediaArchive -Path $archive -Label stable
+        New-TestMediaManifest -Path $manifest -ArchivePath $archive -Version stable
+        $active = Install-PinnedMediaTools -ManifestPath $manifest -ToolRoot $toolRoot `
+            -DownloadAction { param($uri,$destination) Copy-Item $archive $destination }
+        $brokenManifest = Join-Path $TestDrive 'tools-broken.json'
+        $broken = Get-Content $manifest -Raw | ConvertFrom-Json
+        $broken.packageVersion = 'broken'
+        $broken.sha256 = 'B' * 64
+        $broken | ConvertTo-Json | Set-Content $brokenManifest
+
+        { Install-PinnedMediaTools -ManifestPath $brokenManifest -ToolRoot $toolRoot `
+            -DownloadAction { param($uri,$destination) throw 'interrupted download' } } |
+            Should -Throw '*interrupted download*'
+        (Assert-PinnedMediaToolSet -ToolRoot $toolRoot).Ffmpeg | Should -Be $active.Ffmpeg
+        @(Get-ChildItem -LiteralPath $toolRoot -Filter '.install-*' -Force).Count | Should -Be 0
+    }
+
+    It 'recovers from a corrupt active marker by publishing a complete new version' {
+        $toolRoot = Join-Path $TestDrive 'corrupt-active-tools'
+        $archive = Join-Path $TestDrive 'tools-corrupt-recovery.zip'
+        $manifest = Join-Path $TestDrive 'tools-corrupt-recovery.json'
+        New-TestMediaArchive -Path $archive -Label recovered
+        New-TestMediaManifest -Path $manifest -ArchivePath $archive -Version recovered
+        $old = Install-PinnedMediaTools -ManifestPath $manifest -ToolRoot $toolRoot `
+            -DownloadAction { param($uri,$destination) Copy-Item $archive $destination }
+        '{broken' | Set-Content -LiteralPath (Join-Path $toolRoot 'active-media-tools.json')
+
+        $current = Install-PinnedMediaTools -ManifestPath $manifest -ToolRoot $toolRoot `
+            -DownloadAction { param($uri,$destination) Copy-Item $archive $destination }
+
+        $current.Ffmpeg | Should -Not -Be $old.Ffmpeg
+        Test-Path -LiteralPath $old.Ffmpeg | Should -BeTrue
+        (Assert-PinnedMediaToolSet -ToolRoot $toolRoot).Ffmpeg | Should -Be $current.Ffmpeg
     }
 }

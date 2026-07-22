@@ -28,6 +28,10 @@ $script:StatusValues = @(
     'INSUFFICIENT_SPACE',
     'TIMED_OUT'
 )
+$script:MaximumJobDuration = [TimeSpan]::FromHours(2)
+$script:MaximumOutputBytes = 50GB
+$script:MaximumInitialBufferBytes = 2MB
+$script:MinimumFreeSpaceReserveBytes = 100GB
 
 if (-not ('ChristopherBell.Dev.Production.BoundedTextReader' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -72,6 +76,88 @@ namespace ChristopherBell.Dev.Production
                 if (count > remaining) truncated = true;
             }
             return new BoundedTextResult(text.ToString(), truncated);
+        }
+    }
+}
+'@
+}
+
+if (-not ('ChristopherBell.Dev.Production.NativeFileHandle' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+namespace ChristopherBell.Dev.Production
+{
+    public sealed class NativeFileIdentity
+    {
+        public uint VolumeSerialNumber { get; set; }
+        public ulong FileIndex { get; set; }
+        public long FileSize { get; set; }
+        public DateTime LastWriteTimeUtc { get; set; }
+    }
+
+    public static class NativeFileHandle
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ByHandleFileInformation
+        {
+            public uint FileAttributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+            public uint VolumeSerialNumber;
+            public uint FileSizeHigh;
+            public uint FileSizeLow;
+            public uint NumberOfLinks;
+            public uint FileIndexHigh;
+            public uint FileIndexLow;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandle(
+            SafeFileHandle handle,
+            out ByHandleFileInformation information);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFinalPathNameByHandle(
+            SafeFileHandle handle,
+            StringBuilder path,
+            uint pathLength,
+            uint flags);
+
+        public static NativeFileIdentity GetIdentity(SafeFileHandle handle)
+        {
+            ByHandleFileInformation information;
+            if (!GetFileInformationByHandle(handle, out information))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            long writeTime = ((long)(uint)information.LastWriteTime.dwHighDateTime << 32) |
+                (uint)information.LastWriteTime.dwLowDateTime;
+            return new NativeFileIdentity
+            {
+                VolumeSerialNumber = information.VolumeSerialNumber,
+                FileIndex = ((ulong)information.FileIndexHigh << 32) | information.FileIndexLow,
+                FileSize = ((long)information.FileSizeHigh << 32) | information.FileSizeLow,
+                LastWriteTimeUtc = DateTime.FromFileTimeUtc(writeTime)
+            };
+        }
+
+        public static string GetFinalPath(SafeFileHandle handle)
+        {
+            var path = new StringBuilder(32768);
+            uint length = GetFinalPathNameByHandle(handle, path, (uint)path.Capacity, 0);
+            if (length == 0 || length >= path.Capacity)
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            string value = path.ToString();
+            if (value.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+                return @"\\" + value.Substring(8);
+            if (value.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase))
+                return value.Substring(4);
+            return value;
         }
     }
 }
@@ -267,8 +353,17 @@ function Read-ValidatedMediaJob {
 
     $deadline = ConvertTo-StrictUtcTimestamp -Value $job.deadline -FieldName deadline
     if ($deadline -le $NowUtc.ToUniversalTime()) { throw 'Job deadline has expired.' }
+    if ($deadline -gt $NowUtc.ToUniversalTime().Add($script:MaximumJobDuration)) {
+        throw 'Job deadline exceeds the fixed two-hour worker horizon.'
+    }
     $maxOutputBytes = Assert-PositiveInteger -Value $job.maxOutputBytes -FieldName maxOutputBytes
     $initialBufferBytes = Assert-PositiveInteger -Value $job.initialBufferBytes -FieldName initialBufferBytes
+    if ($maxOutputBytes -gt $script:MaximumOutputBytes) {
+        throw 'maxOutputBytes exceeds the fixed worker limit.'
+    }
+    if ($initialBufferBytes -gt $script:MaximumInitialBufferBytes) {
+        throw 'initialBufferBytes exceeds the fixed worker limit.'
+    }
     if ($initialBufferBytes -gt $maxOutputBytes) {
         throw 'initialBufferBytes must not exceed maxOutputBytes.'
     }
@@ -306,6 +401,156 @@ function Read-ValidatedMediaJob {
         deadline = $deadline
         maxOutputBytes = $maxOutputBytes
         initialBufferBytes = $initialBufferBytes
+        sharedRoot = $canonicalSharedRoot
+        systemRoot = $canonicalSystemRoot
+        stagingRoot = Join-Path $canonicalSystemRoot 'shared-folder-media-staging'
+    }
+}
+
+function Open-ValidatedMediaSource {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Job)
+
+    $stream = [IO.FileStream]::new(
+        [string]$Job.sourcePath,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read,
+        65536,
+        [IO.FileOptions]::SequentialScan)
+    try {
+        $finalPath = if ($IsWindows) {
+            [ChristopherBell.Dev.Production.NativeFileHandle]::GetFinalPath($stream.SafeFileHandle)
+        } else {
+            $stream.Name
+        }
+        $canonicalFinalPath = Get-CanonicalPath -Path $finalPath
+        if (-not [string]::Equals(
+            $canonicalFinalPath,
+            (Get-CanonicalPath -Path $Job.sourcePath),
+            [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Opened source final location does not match sourcePath.'
+        }
+        if (-not (Test-PathBelowRoot -Path $canonicalFinalPath -Root $Job.sharedRoot)) {
+            throw 'Opened source is outside the configured shared root.'
+        }
+        $identity = if ($IsWindows) {
+            [ChristopherBell.Dev.Production.NativeFileHandle]::GetIdentity($stream.SafeFileHandle)
+        } else {
+            [pscustomobject]@{
+                FileSize = $stream.Length
+                LastWriteTimeUtc = (Get-Item -LiteralPath $stream.Name).LastWriteTimeUtc
+            }
+        }
+        if ([long]$identity.FileSize -ne [long]$Job.sourceSize -or
+            $identity.LastWriteTimeUtc.Ticks -ne $Job.sourceModifiedAt.UtcDateTime.Ticks) {
+            throw 'Opened source identity does not match the queued source metadata.'
+        }
+        $owned = [pscustomobject]@{
+            Path = $canonicalFinalPath
+            Stream = $stream
+            Identity = $identity
+        }
+        $owned | Add-Member -MemberType ScriptMethod -Name Dispose -Value { $this.Stream.Dispose() }
+        return $owned
+    } catch {
+        $stream.Dispose()
+        throw
+    }
+}
+
+function Copy-ValidatedMediaSourceToStage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Job,
+        [Parameter(Mandatory)]$OwnedSource
+    )
+
+    Assert-PathHasNoReparseComponent -Path $Job.stagingRoot -Root $Job.systemRoot
+    $stagedPath = Join-Path $Job.stagingRoot "$($Job.jobId).source"
+    Assert-PathHasNoReparseComponent -Path $stagedPath -Root $Job.systemRoot
+    $output = [IO.FileStream]::new(
+        $stagedPath,
+        [IO.FileMode]::CreateNew,
+        [IO.FileAccess]::Write,
+        [IO.FileShare]::Read)
+    try {
+        $OwnedSource.Stream.Position = 0
+        $OwnedSource.Stream.CopyTo($output)
+        $output.Flush($true)
+    } finally {
+        $output.Dispose()
+    }
+    [IO.File]::SetLastWriteTimeUtc($stagedPath, $Job.sourceModifiedAt.UtcDateTime)
+    $stream = [IO.FileStream]::new(
+        $stagedPath,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read,
+        65536,
+        [IO.FileOptions]::SequentialScan)
+    $staged = [pscustomobject]@{ Path = $stagedPath; Stream = $stream }
+    $staged | Add-Member -MemberType ScriptMethod -Name Dispose -Value { $this.Stream.Dispose() }
+    return $staged
+}
+
+function Assert-MediaJobPrivatePaths {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Job)
+
+    foreach ($path in @(
+        $Job.stagingRoot,
+        (Split-Path -Parent $Job.partialOutputPath),
+        (Split-Path -Parent $Job.readyOutputPath),
+        (Split-Path -Parent $Job.statusPath),
+        (Split-Path -Parent $Job.cancellationPath),
+        $Job.partialOutputPath,
+        $Job.readyOutputPath,
+        $Job.statusPath,
+        $Job.cancellationPath
+    )) {
+        Assert-PathHasNoReparseComponent -Path $path -Root $Job.systemRoot
+    }
+}
+
+function Enter-MediaPrivateRootLease {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Job)
+
+    Assert-MediaJobPrivatePaths -Job $Job
+    $streams = [Collections.Generic.List[IO.FileStream]]::new()
+    $leasePaths = [Collections.Generic.List[string]]::new()
+    try {
+        foreach ($directory in @(
+            $Job.stagingRoot,
+            (Split-Path -Parent $Job.partialOutputPath),
+            (Split-Path -Parent $Job.readyOutputPath),
+            (Split-Path -Parent $Job.statusPath),
+            (Split-Path -Parent $Job.cancellationPath)
+        ) | Select-Object -Unique) {
+            $leasePath = Join-Path $directory ".lease-$($Job.jobId)"
+            $stream = [IO.FileStream]::new(
+                $leasePath,
+                [IO.FileMode]::OpenOrCreate,
+                [IO.FileAccess]::ReadWrite,
+                [IO.FileShare]::ReadWrite)
+            $streams.Add($stream)
+            $leasePaths.Add($leasePath)
+        }
+        $lease = [pscustomobject]@{ Streams = $streams; Paths = $leasePaths }
+        $lease | Add-Member -MemberType ScriptMethod -Name Dispose -Value {
+            foreach ($stream in $this.Streams) { $stream.Dispose() }
+            foreach ($path in $this.Paths) {
+                Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            }
+        }
+        return $lease
+    } catch {
+        foreach ($stream in $streams) { $stream.Dispose() }
+        foreach ($leasePath in $leasePaths) {
+            Remove-Item -LiteralPath $leasePath -Force -ErrorAction SilentlyContinue
+        }
+        throw
     }
 }
 
@@ -350,6 +595,7 @@ function New-FixedFfmpegArguments {
             '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
             '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+            '-fs', [string]$Job.maxOutputBytes,
             '-f', 'mp4',
             [string]$Job.partialOutputPath
         )
@@ -360,6 +606,7 @@ function New-FixedFfmpegArguments {
             '-vn',
             '-c:a', 'aac',
             '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+            '-fs', [string]$Job.maxOutputBytes,
             '-f', 'mp4',
             [string]$Job.partialOutputPath
         )
@@ -384,9 +631,7 @@ function Assert-PinnedMediaToolSet {
     param([Parameter(Mandatory)][string]$ToolRoot)
 
     $canonicalRoot = Get-CanonicalPath -Path $ToolRoot
-    Assert-PathHasNoReparseComponent -Path (Join-Path $canonicalRoot 'ffmpeg.exe') -Root $canonicalRoot
-    Assert-PathHasNoReparseComponent -Path (Join-Path $canonicalRoot 'ffprobe.exe') -Root $canonicalRoot
-    $markerPath = Join-Path $canonicalRoot 'installed-media-tools.json'
+    $markerPath = Join-Path $canonicalRoot 'active-media-tools.json'
     Assert-PathHasNoReparseComponent -Path $markerPath -Root $canonicalRoot
     $markerFile = Get-Item -LiteralPath $markerPath -Force -ErrorAction Stop
     if ($markerFile.Length -gt 16384) { throw 'Installed media tool manifest is too large.' }
@@ -402,7 +647,8 @@ function Assert-PinnedMediaToolSet {
         'ffprobeSha256',
         'packageSha256',
         'packageVersion',
-        'schemaVersion'
+        'schemaVersion',
+        'versionDirectory'
     ) | Sort-Object)
     if (($actual -join "`n") -cne ($expected -join "`n") -or [int]$marker.schemaVersion -ne 1) {
         throw 'Installed media tool manifest fields are invalid.'
@@ -412,13 +658,53 @@ function Assert-PinnedMediaToolSet {
             throw 'Installed media tool manifest hashes are invalid.'
         }
     }
-    $ffmpeg = Join-Path $canonicalRoot 'ffmpeg.exe'
-    $ffprobe = Join-Path $canonicalRoot 'ffprobe.exe'
+    if ($marker.packageVersion -isnot [string] -or
+        $marker.packageVersion -notmatch '^[A-Za-z0-9._-]{1,40}$' -or
+        $marker.versionDirectory -isnot [string] -or
+        $marker.versionDirectory -notmatch '^[A-Za-z0-9._-]{1,120}$') {
+        throw 'Installed media tool manifest version values are invalid.'
+    }
+    $versionRoot = Join-Path (Join-Path $canonicalRoot 'versions') ([string]$marker.versionDirectory)
+    Assert-PathHasNoReparseComponent -Path $versionRoot -Root $canonicalRoot
+    $ffmpeg = @(Get-ChildItem -LiteralPath $versionRoot -Filter ffmpeg.exe -File -Recurse)
+    $ffprobe = @(Get-ChildItem -LiteralPath $versionRoot -Filter ffprobe.exe -File -Recurse)
+    if ($ffmpeg.Count -ne 1 -or $ffprobe.Count -ne 1) {
+        throw 'Installed media tool version layout is invalid.'
+    }
+    $ffmpeg = $ffmpeg[0].FullName
+    $ffprobe = $ffprobe[0].FullName
+    Assert-PathHasNoReparseComponent -Path $ffmpeg -Root $canonicalRoot
+    Assert-PathHasNoReparseComponent -Path $ffprobe -Root $canonicalRoot
     if ((Get-FileHash -LiteralPath $ffmpeg -Algorithm SHA256).Hash -ne $marker.ffmpegSha256 -or
         (Get-FileHash -LiteralPath $ffprobe -Algorithm SHA256).Hash -ne $marker.ffprobeSha256) {
         throw 'Installed media tool executable hash verification failed.'
     }
-    return [pscustomobject]@{ Ffmpeg = $ffmpeg; Ffprobe = $ffprobe }
+    return [pscustomobject]@{
+        Ffmpeg = $ffmpeg
+        Ffprobe = $ffprobe
+        FfmpegSha256 = ([string]$marker.ffmpegSha256).ToUpperInvariant()
+        FfprobeSha256 = ([string]$marker.ffprobeSha256).ToUpperInvariant()
+        PackageSha256 = ([string]$marker.packageSha256).ToUpperInvariant()
+        PackageVersion = [string]$marker.packageVersion
+        VersionDirectory = [string]$marker.versionDirectory
+    }
+}
+
+function Assert-MediaToolSetUnchanged {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$ToolSet)
+
+    foreach ($name in 'Ffmpeg','Ffprobe','FfmpegSha256','FfprobeSha256') {
+        if (-not $ToolSet.PSObject.Properties[$name]) {
+            throw "Pinned media tool set is missing $name."
+        }
+    }
+    if ((Get-FileHash -LiteralPath $ToolSet.Ffmpeg -Algorithm SHA256).Hash -cne
+        ([string]$ToolSet.FfmpegSha256).ToUpperInvariant() -or
+        (Get-FileHash -LiteralPath $ToolSet.Ffprobe -Algorithm SHA256).Hash -cne
+        ([string]$ToolSet.FfprobeSha256).ToUpperInvariant()) {
+        throw 'Installed media tool executable hash verification failed immediately before launch.'
+    }
 }
 
 function Invoke-PinnedMediaTool {
@@ -518,6 +804,7 @@ function Write-MediaJobStatusAtomic {
     if ($FailureCategory -and $FailureCategory -notmatch '^[a-z_]{1,40}$') {
         throw 'failureCategory is invalid.'
     }
+    Assert-MediaJobPrivatePaths -Job $Job
     $payload = [ordered]@{
         schemaVersion = 1
         jobId = [string]$Job.jobId
@@ -541,55 +828,122 @@ function Complete-MediaJobAtomically {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Job)
 
+    Assert-MediaJobPrivatePaths -Job $Job
     Assert-MediaJobSourceUnchanged -Job $Job
     $partial = Get-Item -LiteralPath $Job.partialOutputPath -Force -ErrorAction Stop
     if ($partial.PSIsContainer -or $partial.Length -le 0) { throw 'Media output is empty.' }
     if ($partial.Length -gt [long]$Job.maxOutputBytes) { throw 'Media output exceeds maxOutputBytes.' }
+    Assert-MediaJobPrivatePaths -Job $Job
     [IO.File]::Move([string]$Job.partialOutputPath, [string]$Job.readyOutputPath, $true)
     Write-MediaJobStatusAtomic -Job $Job -Status READY -OutputBytes $partial.Length
+}
+
+function Assert-MediaOutputCapacity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Job,
+        [Parameter(Mandatory)][long]$AvailableFreeSpaceBytes
+    )
+
+    if ($AvailableFreeSpaceBytes -lt $script:MinimumFreeSpaceReserveBytes -or
+        ($AvailableFreeSpaceBytes - $script:MinimumFreeSpaceReserveBytes) -lt
+            [long]$Job.maxOutputBytes) {
+        throw 'Insufficient space for maxOutputBytes plus the fixed free-space reserve.'
+    }
 }
 
 function Invoke-ValidatedMediaJob {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Job,
-        [Parameter(Mandatory)][string]$FfprobeExecutable,
-        [Parameter(Mandatory)][string]$FfmpegExecutable
+        [Parameter(Mandatory)]$ToolSet,
+        [scriptblock]$GetAvailableFreeSpace = {
+            param($Path)
+            ([IO.DriveInfo]::new([IO.Path]::GetPathRoot($Path))).AvailableFreeSpace
+        },
+        [scriptblock]$ProbeAction = {
+            param($Context)
+            Invoke-PinnedMediaTool -Executable $Context.ToolSet.Ffprobe `
+                -ArgumentList $Context.ToolArgList -Deadline $Context.Job.deadline `
+                -CancellationPath $Context.Job.cancellationPath
+        },
+        [scriptblock]$TranscodeAction = {
+            param($Context)
+            Invoke-PinnedMediaTool -Executable $Context.ToolSet.Ffmpeg `
+                -ArgumentList $Context.ToolArgList -Deadline $Context.Job.deadline `
+                -CancellationPath $Context.Job.cancellationPath -OnPoll $Context.PollAction
+        }
     )
 
-    $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot([string]$Job.partialOutputPath))
-    if ($drive.AvailableFreeSpace -lt [long]$Job.maxOutputBytes) {
-        throw 'Insufficient space for maxOutputBytes.'
-    }
-    Write-MediaJobStatusAtomic -Job $Job -Status INSPECTING
-    $probe = Invoke-PinnedMediaTool -Executable $FfprobeExecutable `
-        -ArgumentList (New-FixedFfprobeArguments -Job $Job) `
-        -Deadline $Job.deadline -CancellationPath $Job.cancellationPath
-    if ($probe.OutputTruncated -or [Text.Encoding]::UTF8.GetByteCount($probe.StandardOutput) -gt 65536) {
-        throw 'ffprobe JSON exceeded its bounded output limit.'
-    }
-    try { $probeJson = $probe.StandardOutput | ConvertFrom-Json -ErrorAction Stop }
-    catch { throw 'ffprobe did not produce valid bounded JSON.' }
-    if ($null -eq $probeJson -or $probeJson -is [array]) {
-        throw 'ffprobe did not produce a JSON object.'
-    }
+    $available = & $GetAvailableFreeSpace ([string]$Job.partialOutputPath)
+    Assert-MediaOutputCapacity -Job $Job -AvailableFreeSpaceBytes ([long]$available)
+    $lease = Enter-MediaPrivateRootLease -Job $Job
+    $ownedSource = $null
+    $stagedSource = $null
+    $completed = $false
+    try {
+        $ownedSource = Open-ValidatedMediaSource -Job $Job
+        $staleStage = Join-Path $Job.stagingRoot "$($Job.jobId).source"
+        Remove-Item -LiteralPath $staleStage -Force -ErrorAction SilentlyContinue
+        $stagedSource = Copy-ValidatedMediaSourceToStage -Job $Job -OwnedSource $ownedSource
+        $executionJob = $Job.PSObject.Copy()
+        $executionJob.sourcePath = $stagedSource.Path
 
-    Write-MediaJobStatusAtomic -Job $Job -Status TRANSCODING
-    $progress = @{ BufferingPublished = $false }
-    $poll = {
-        if (Test-Path -LiteralPath $Job.partialOutputPath -PathType Leaf) {
-            $bytes = (Get-Item -LiteralPath $Job.partialOutputPath -Force).Length
-            if ($bytes -gt [long]$Job.maxOutputBytes) { throw 'Media output exceeds maxOutputBytes.' }
-            if (-not $progress.BufferingPublished -and $bytes -ge [long]$Job.initialBufferBytes) {
-                Write-MediaJobStatusAtomic -Job $Job -Status BUFFERING -OutputBytes $bytes
-                $progress.BufferingPublished = $true
+        Write-MediaJobStatusAtomic -Job $executionJob -Status INSPECTING
+        Assert-MediaToolSetUnchanged -ToolSet $ToolSet
+        $probeContext = [pscustomobject]@{
+            Job = $executionJob
+            ToolSet = $ToolSet
+            ToolArgList = New-FixedFfprobeArguments -Job $executionJob
+        }
+        $probe = & $ProbeAction $probeContext
+        if ($probe.OutputTruncated -or
+            [Text.Encoding]::UTF8.GetByteCount([string]$probe.StandardOutput) -gt 65536) {
+            throw 'ffprobe JSON exceeded its bounded output limit.'
+        }
+        try { $probeJson = $probe.StandardOutput | ConvertFrom-Json -ErrorAction Stop }
+        catch { throw 'ffprobe did not produce valid bounded JSON.' }
+        if ($null -eq $probeJson -or $probeJson -is [array]) {
+            throw 'ffprobe did not produce a JSON object.'
+        }
+
+        Write-MediaJobStatusAtomic -Job $executionJob -Status TRANSCODING
+        $progress = @{ BufferingPublished = $false }
+        $poll = {
+            Assert-MediaJobPrivatePaths -Job $executionJob
+            if (Test-Path -LiteralPath $executionJob.partialOutputPath -PathType Leaf) {
+                $bytes = (Get-Item -LiteralPath $executionJob.partialOutputPath -Force).Length
+                if ($bytes -gt [long]$executionJob.maxOutputBytes) {
+                    throw 'Media output exceeds maxOutputBytes.'
+                }
+                if (-not $progress.BufferingPublished -and
+                    $bytes -ge [long]$executionJob.initialBufferBytes) {
+                    Write-MediaJobStatusAtomic -Job $executionJob -Status BUFFERING -OutputBytes $bytes
+                    $progress.BufferingPublished = $true
+                }
             }
         }
+        Assert-MediaToolSetUnchanged -ToolSet $ToolSet
+        $transcodeContext = [pscustomobject]@{
+            Job = $executionJob
+            ToolSet = $ToolSet
+            ToolArgList = New-FixedFfmpegArguments -Job $executionJob
+            PollAction = $poll
+        }
+        & $TranscodeAction $transcodeContext | Out-Null
+        & $poll
+        Complete-MediaJobAtomically -Job $executionJob
+        $completed = $true
+    } finally {
+        if ($stagedSource) { $stagedSource.Dispose() }
+        if ($ownedSource) { $ownedSource.Dispose() }
+        if (-not $completed) {
+            Remove-Item -LiteralPath $Job.partialOutputPath -Force -ErrorAction SilentlyContinue
+        }
+        Remove-Item -LiteralPath (Join-Path $Job.stagingRoot "$($Job.jobId).source") `
+            -Force -ErrorAction SilentlyContinue
+        $lease.Dispose()
     }
-    Invoke-PinnedMediaTool -Executable $FfmpegExecutable `
-        -ArgumentList (New-FixedFfmpegArguments -Job $Job) `
-        -Deadline $Job.deadline -CancellationPath $Job.cancellationPath -OnPoll $poll | Out-Null
-    Complete-MediaJobAtomically -Job $Job
 }
 
-Export-ModuleMember -Function Get-CanonicalPath,Test-PathBelowRoot,Assert-PathHasNoReparseComponent,Read-ValidatedMediaJob,Assert-MediaJobSourceUnchanged,New-FixedFfprobeArguments,New-FixedFfmpegArguments,Enter-SharedFolderWorkerLock,Assert-PinnedMediaToolSet,Invoke-PinnedMediaTool,Write-MediaJobStatusAtomic,Complete-MediaJobAtomically,Invoke-ValidatedMediaJob
+Export-ModuleMember -Function Get-CanonicalPath,Test-PathBelowRoot,Assert-PathHasNoReparseComponent,Read-ValidatedMediaJob,Open-ValidatedMediaSource,Copy-ValidatedMediaSourceToStage,Assert-MediaJobPrivatePaths,Enter-MediaPrivateRootLease,Assert-MediaJobSourceUnchanged,New-FixedFfprobeArguments,New-FixedFfmpegArguments,Enter-SharedFolderWorkerLock,Assert-PinnedMediaToolSet,Assert-MediaToolSetUnchanged,Invoke-PinnedMediaTool,Write-MediaJobStatusAtomic,Complete-MediaJobAtomically,Assert-MediaOutputCapacity,Invoke-ValidatedMediaJob

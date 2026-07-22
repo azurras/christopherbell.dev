@@ -1,4 +1,5 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.SharedFolder.psm1') -Force
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]$identity
@@ -6,6 +7,27 @@ $isElevatedWindows = $IsWindows -and $principal.IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 
 Describe 'protected production NTFS integration' -Tag 'WindowsAclIntegration' -Skip:(-not $isElevatedWindows) {
+    It 'applies effective LocalService read-only and private-write ACL boundaries to temporary roots' {
+        $sharedRoot = Join-Path $TestDrive 'effective-shared'
+        $systemRoot = Join-Path $TestDrive 'effective-system'
+        $paths = New-SharedFolderRuntimeDirectories -SharedRoot $sharedRoot -SystemRoot $systemRoot
+
+        Set-SharedFolderRuntimeAcls -SharedRoot $sharedRoot -SystemRoot $systemRoot
+
+        $sharedRules = @(Get-Acl $paths.SharedRoot |
+            ForEach-Object { $_.GetAccessRules($true,$false,[Security.Principal.SecurityIdentifier]) })
+        $privateRules = @(Get-Acl $paths.StagingRoot |
+            ForEach-Object { $_.GetAccessRules($true,$false,[Security.Principal.SecurityIdentifier]) })
+        $sharedWorker = $sharedRules | Where-Object IdentityReference -eq 'S-1-5-19'
+        $privateWorker = $privateRules | Where-Object IdentityReference -eq 'S-1-5-19'
+        ($sharedWorker.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify) |
+            Should -Not -Be ([Security.AccessControl.FileSystemRights]::Modify)
+        ($privateWorker.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify) |
+            Should -Be ([Security.AccessControl.FileSystemRights]::Modify)
+        [xml]$service = Get-Content (Join-Path $PSScriptRoot '..\service\ChristopherBellMediaWorker.xml') -Raw
+        [string]$service.service.serviceaccount.username | Should -Be 'NT AUTHORITY\LocalService'
+    }
+
     It 'removes low-privilege writes throughout a real tree and rejects nested junctions' {
         $root = Join-Path $TestDrive 'protected-root'
         $nested = Join-Path $root 'tools\modules'

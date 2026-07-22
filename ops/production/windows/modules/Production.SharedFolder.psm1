@@ -18,6 +18,7 @@ function Get-SharedFolderRuntimePaths {
         SharedRoot = $canonicalSharedRoot
         SystemRoot = $canonicalSystemRoot
         JobRoot = Join-Path $canonicalSystemRoot 'shared-folder-media-jobs'
+        StagingRoot = Join-Path $canonicalSystemRoot 'shared-folder-media-staging'
         PartialRoot = Join-Path $canonicalSystemRoot 'shared-folder-media-partial'
         CacheRoot = Join-Path $canonicalSystemRoot 'shared-folder-media-cache'
         StatusRoot = Join-Path $canonicalSystemRoot 'shared-folder-media-status'
@@ -118,14 +119,16 @@ function Set-SharedFolderRuntimeAcls {
     [CmdletBinding()]
     param(
         [string]$SharedRoot = 'A:\Shared',
-        [string]$SystemRoot = 'A:\Shared-System'
+        [string]$SystemRoot = 'A:\Shared-System',
+        [scriptblock]$SetAclAction = { param($Path, $Acl) Set-Acl -LiteralPath $Path -AclObject $Acl }
     )
 
     $paths = Get-SharedFolderRuntimePaths -SharedRoot $SharedRoot -SystemRoot $SystemRoot
-    Set-Acl -LiteralPath $paths.SharedRoot -AclObject (New-SharedFolderAcl -WorkerAccess ReadAndExecute)
-    Set-Acl -LiteralPath $paths.SystemRoot -AclObject (New-SharedFolderAcl -WorkerAccess ReadAndExecute)
+    & $SetAclAction $paths.SharedRoot (New-SharedFolderAcl -WorkerAccess ReadAndExecute)
+    & $SetAclAction $paths.SystemRoot (New-SharedFolderAcl -WorkerAccess ReadAndExecute)
     foreach ($path in @(
         $paths.JobRoot,
+        $paths.StagingRoot,
         $paths.PartialRoot,
         $paths.CacheRoot,
         $paths.StatusRoot,
@@ -133,9 +136,9 @@ function Set-SharedFolderRuntimeAcls {
         $paths.LogRoot,
         $paths.LockRoot
     )) {
-        Set-Acl -LiteralPath $path -AclObject (New-SharedFolderAcl -WorkerAccess Modify)
+        & $SetAclAction $path (New-SharedFolderAcl -WorkerAccess Modify)
     }
-    Set-Acl -LiteralPath $paths.ToolRoot -AclObject (New-SharedFolderAcl -WorkerAccess ReadAndExecute)
+    & $SetAclAction $paths.ToolRoot (New-SharedFolderAcl -WorkerAccess ReadAndExecute)
 }
 
 function Read-PinnedMediaToolManifest {
@@ -201,42 +204,61 @@ function Install-PinnedMediaTools {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ManifestPath,
-        [Parameter(Mandatory)][string]$ToolRoot
+        [Parameter(Mandatory)][string]$ToolRoot,
+        [scriptblock]$DownloadAction = {
+            param($Uri, $Destination)
+            Invoke-WebRequest -Uri $Uri -OutFile $Destination
+        }
     )
 
     $manifest = Read-PinnedMediaToolManifest -Path $ManifestPath
-    $ffmpegTarget = Join-Path $ToolRoot 'ffmpeg.exe'
-    $ffprobeTarget = Join-Path $ToolRoot 'ffprobe.exe'
-    $installedManifest = Join-Path $ToolRoot 'installed-media-tools.json'
-    if ((Test-Path -LiteralPath $ffmpegTarget -PathType Leaf) -and
-        (Test-Path -LiteralPath $ffprobeTarget -PathType Leaf) -and
-        (Test-Path -LiteralPath $installedManifest -PathType Leaf)) {
+    New-Item -ItemType Directory -Path $ToolRoot -Force | Out-Null
+    $activeMarker = Join-Path $ToolRoot 'active-media-tools.json'
+    if (Test-Path -LiteralPath $activeMarker -PathType Leaf) {
         try {
-            $installed = Get-Content -LiteralPath $installedManifest -Raw | ConvertFrom-Json -ErrorAction Stop
-            $installedFields = @($installed.PSObject.Properties.Name | Sort-Object)
-            $expectedFields = @(@(
+            $active = Get-Content -LiteralPath $activeMarker -Raw -Encoding utf8 |
+                ConvertFrom-Json -DateKind String -ErrorAction Stop
+            $activeFields = @($active.PSObject.Properties.Name | Sort-Object)
+            $expectedActiveFields = @(@(
                 'ffmpegSha256',
                 'ffprobeSha256',
                 'packageSha256',
                 'packageVersion',
-                'schemaVersion'
+                'schemaVersion',
+                'versionDirectory'
             ) | Sort-Object)
-            if (($installedFields -join "`n") -ceq ($expectedFields -join "`n") -and
-                [int]$installed.schemaVersion -eq 1 -and
-                [string]$installed.packageSha256 -eq $manifest.sha256 -and
-                [string]$installed.ffmpegSha256 -eq (Get-FileHash -LiteralPath $ffmpegTarget -Algorithm SHA256).Hash -and
-                [string]$installed.ffprobeSha256 -eq (Get-FileHash -LiteralPath $ffprobeTarget -Algorithm SHA256).Hash) {
-                return [pscustomobject]@{ Ffmpeg = $ffmpegTarget; Ffprobe = $ffprobeTarget }
+            if (($activeFields -join "`n") -ceq ($expectedActiveFields -join "`n") -and
+                [string]$active.packageSha256 -ceq $manifest.sha256 -and
+                [int]$active.schemaVersion -eq 1 -and
+                [string]$active.versionDirectory -match '^[A-Za-z0-9._-]{1,120}$' -and
+                [string]$active.ffmpegSha256 -match '^[A-Fa-f0-9]{64}$' -and
+                [string]$active.ffprobeSha256 -match '^[A-Fa-f0-9]{64}$') {
+                $activeVersion = Join-Path (Join-Path $ToolRoot 'versions') $active.versionDirectory
+                $activeFfmpeg = @(Get-ChildItem -LiteralPath $activeVersion -Filter ffmpeg.exe -File -Recurse)
+                $activeFfprobe = @(Get-ChildItem -LiteralPath $activeVersion -Filter ffprobe.exe -File -Recurse)
+                if ($activeFfmpeg.Count -eq 1 -and $activeFfprobe.Count -eq 1 -and
+                    (Get-FileHash -LiteralPath $activeFfmpeg[0].FullName -Algorithm SHA256).Hash -ceq
+                        ([string]$active.ffmpegSha256).ToUpperInvariant() -and
+                    (Get-FileHash -LiteralPath $activeFfprobe[0].FullName -Algorithm SHA256).Hash -ceq
+                        ([string]$active.ffprobeSha256).ToUpperInvariant()) {
+                    return [pscustomobject]@{
+                        Ffmpeg = $activeFfmpeg[0].FullName
+                        Ffprobe = $activeFfprobe[0].FullName
+                        FfmpegSha256 = ([string]$active.ffmpegSha256).ToUpperInvariant()
+                        FfprobeSha256 = ([string]$active.ffprobeSha256).ToUpperInvariant()
+                    }
+                }
             }
         } catch { }
     }
 
-    New-Item -ItemType Directory -Path $ToolRoot -Force | Out-Null
-    $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("cb-media-tools-" + [Guid]::NewGuid().ToString('N'))
+    $versionsRoot = Join-Path $ToolRoot 'versions'
+    New-Item -ItemType Directory -Path $versionsRoot -Force | Out-Null
+    $temporaryRoot = Join-Path $ToolRoot ('.install-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
     try {
         $archivePath = Join-Path $temporaryRoot 'media-tools.zip'
-        Invoke-WebRequest -Uri $manifest.uri -OutFile $archivePath
+        & $DownloadAction $manifest.uri $archivePath
         if ((Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash -ne $manifest.sha256) {
             throw 'Pinned media tool package SHA-256 verification failed.'
         }
@@ -247,26 +269,60 @@ function Install-PinnedMediaTools {
         if ($ffmpeg.Count -ne 1 -or $ffprobe.Count -ne 1) {
             throw 'Pinned media tool package has an unexpected layout.'
         }
-        Copy-Item -LiteralPath $ffmpeg[0].FullName -Destination $ffmpegTarget -Force
-        Copy-Item -LiteralPath $ffprobe[0].FullName -Destination $ffprobeTarget -Force
-        [ordered]@{
+
+        $versionName = '{0}-{1}-{2}' -f $manifest.packageVersion,
+            $manifest.sha256.Substring(0, 12), [Guid]::NewGuid().ToString('N')
+        $publishedVersion = Join-Path $versionsRoot $versionName
+        [IO.Directory]::Move($expanded, $publishedVersion)
+        $ffmpegTarget = Join-Path $publishedVersion ([IO.Path]::GetRelativePath($expanded, $ffmpeg[0].FullName))
+        $ffprobeTarget = Join-Path $publishedVersion ([IO.Path]::GetRelativePath($expanded, $ffprobe[0].FullName))
+        $active = [ordered]@{
             schemaVersion = 1
             packageVersion = $manifest.packageVersion
             packageSha256 = $manifest.sha256
+            versionDirectory = $versionName
             ffmpegSha256 = (Get-FileHash -LiteralPath $ffmpegTarget -Algorithm SHA256).Hash
             ffprobeSha256 = (Get-FileHash -LiteralPath $ffprobeTarget -Algorithm SHA256).Hash
-        } | ConvertTo-Json | Set-Content -LiteralPath $installedManifest -Encoding utf8
+        }
+        $temporaryMarker = "$activeMarker.$([Guid]::NewGuid().ToString('N')).tmp"
+        try {
+            [IO.File]::WriteAllText(
+                $temporaryMarker,
+                ($active | ConvertTo-Json -Compress),
+                [Text.UTF8Encoding]::new($false))
+            [IO.File]::Move($temporaryMarker, $activeMarker, $true)
+        } finally {
+            Remove-Item -LiteralPath $temporaryMarker -Force -ErrorAction SilentlyContinue
+        }
     } finally {
         if (Test-Path -LiteralPath $temporaryRoot) {
             Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
-    return [pscustomobject]@{ Ffmpeg = $ffmpegTarget; Ffprobe = $ffprobeTarget }
+    return [pscustomobject]@{
+        Ffmpeg = $ffmpegTarget
+        Ffprobe = $ffprobeTarget
+        FfmpegSha256 = $active.ffmpegSha256
+        FfprobeSha256 = $active.ffprobeSha256
+    }
 }
 
 function Install-SharedFolderWorkerService {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$ProductionRoot)
+    param(
+        [Parameter(Mandatory)][string]$ProductionRoot,
+        [scriptblock]$GetServiceAction = {
+            param($Name)
+            Get-Service $Name -ErrorAction SilentlyContinue
+        },
+        [scriptblock]$InvokeWinSwAction = {
+            param($Binary, $Command)
+            & $Binary $Command | Out-Null
+            $LASTEXITCODE
+        },
+        [scriptblock]$ProtectPathAction = { param($Path) Protect-ProductionPath -Path $Path },
+        [scriptblock]$SetAclAction = { param($Path, $Acl) Set-Acl -LiteralPath $Path -AclObject $Acl }
+    )
 
     $serviceRoot = Join-Path $ProductionRoot 'service'
     $websiteBinary = Join-Path $serviceRoot 'ChristopherBellDev.exe'
@@ -290,7 +346,7 @@ function Install-SharedFolderWorkerService {
         'Start-ChristopherBellDev.ps1'
     )) {
         $path = Join-Path $serviceRoot $websiteControlFile
-        if (Test-Path -LiteralPath $path -PathType Leaf) { Protect-ProductionPath -Path $path }
+        if (Test-Path -LiteralPath $path -PathType Leaf) { & $ProtectPathAction $path }
     }
     foreach ($workerFile in @(
         'ChristopherBellMediaWorker.exe',
@@ -298,16 +354,15 @@ function Install-SharedFolderWorkerService {
         'Start-SharedFolderMediaWorker.ps1',
         'Production.SharedFolderWorker.psm1'
     )) {
-        Set-Acl -LiteralPath (Join-Path $serviceRoot $workerFile) `
-            -AclObject (New-SharedFolderWorkerFileAcl)
+        & $SetAclAction (Join-Path $serviceRoot $workerFile) (New-SharedFolderWorkerFileAcl)
     }
 
-    if (-not (Get-Service ChristopherBellMediaWorker -ErrorAction SilentlyContinue)) {
-        & $workerBinary install | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Media worker WinSW service installation failed.' }
+    if (-not (& $GetServiceAction 'ChristopherBellMediaWorker')) {
+        $exitCode = & $InvokeWinSwAction $workerBinary 'install'
+        if ($exitCode -ne 0) { throw 'Media worker WinSW service installation failed.' }
     } else {
-        & $workerBinary refresh | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Media worker WinSW service refresh failed.' }
+        $exitCode = & $InvokeWinSwAction $workerBinary 'refresh'
+        if ($exitCode -ne 0) { throw 'Media worker WinSW service refresh failed.' }
     }
 }
 

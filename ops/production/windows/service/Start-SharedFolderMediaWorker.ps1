@@ -46,8 +46,7 @@ try {
                 if (Test-Path -LiteralPath $job.cancellationPath -PathType Leaf) {
                     Write-MediaJobStatusAtomic -Job $job -Status CANCELED -FailureCategory canceled
                 } else {
-                    Invoke-ValidatedMediaJob -Job $job `
-                        -FfprobeExecutable $tools.Ffprobe -FfmpegExecutable $tools.Ffmpeg
+                    Invoke-ValidatedMediaJob -Job $job -ToolSet $tools
                 }
             } catch [OperationCanceledException] {
                 if ($job) {
