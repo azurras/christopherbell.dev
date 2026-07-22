@@ -160,12 +160,18 @@ public class RateLimitFilterTest {
     assertEquals(List.of("POST", "PUT", "PATCH", "DELETE"), mutation.getMethods());
     assertEquals(List.of(
         "/api/shared-folder/2026-07-17/mutations/**",
-        "/api/shared-folder/2026-07-17/recycle/**"), mutation.getPaths());
+        "/api/shared-folder/2026-07-17/recycle/**",
+        "/api/shared-folder/2026-07-17/folders",
+        "/api/shared-folder/2026-07-17/entries",
+        "/api/shared-folder/2026-07-17/entries/**",
+        "/api/shared-folder/2026-07-17/admin/recycle/**"), mutation.getPaths());
     var transcode = rules.stream().filter(rule -> "shared-transcode".equals(rule.getName()))
         .findFirst().orElseThrow();
     assertEquals(10, transcode.getCapacity());
     assertEquals(List.of("POST"), transcode.getMethods());
-    assertEquals(List.of("/api/shared-folder/2026-07-17/media/jobs"), transcode.getPaths());
+    assertEquals(List.of(
+        "/api/shared-folder/2026-07-17/media/jobs",
+        "/api/shared-folder/2026-07-17/media/fallback"), transcode.getPaths());
   }
 
   @Test
@@ -197,11 +203,11 @@ public class RateLimitFilterTest {
     RateLimitFilter filter = new RateLimitFilter(supplier, new ClientIpResolver(clientIp));
     FilterChain chain = mock(FilterChain.class);
 
-    var first = request("POST", "/api/test");
+    var first = request("POST", "/api/shared-folder/2026-07-17/media/fallback");
     first.setRemoteAddr("10.0.0.10");
     first.addHeader("X-Forwarded-For", "203.0.113.10");
     filter.doFilter(first, new MockHttpServletResponse(), chain);
-    var second = request("POST", "/api/test");
+    var second = request("POST", "/api/shared-folder/2026-07-17/media/fallback");
     second.setRemoteAddr("10.0.0.10");
     second.addHeader("X-Forwarded-For", "203.0.113.11");
     var response = new MockHttpServletResponse();
@@ -239,6 +245,43 @@ public class RateLimitFilterTest {
         .doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
   }
 
+  @Test
+  void everyDeployedSharedFolderMutationRouteUsesItsDedicatedFirstMatchRule() throws Exception {
+    assertUsesDedicatedBucket("POST", "/api/shared-folder/2026-07-17/folders",
+        "shared-mutation");
+    assertUsesDedicatedBucket("PATCH", "/api/shared-folder/2026-07-17/entries/rename",
+        "shared-mutation");
+    assertUsesDedicatedBucket("POST", "/api/shared-folder/2026-07-17/entries/move",
+        "shared-mutation");
+    assertUsesDedicatedBucket("DELETE", "/api/shared-folder/2026-07-17/entries",
+        "shared-mutation");
+    assertUsesDedicatedBucket(
+        "POST", "/api/shared-folder/2026-07-17/admin/recycle/item/restore",
+        "shared-mutation");
+    assertUsesDedicatedBucket(
+        "DELETE", "/api/shared-folder/2026-07-17/admin/recycle/item",
+        "shared-mutation");
+    assertUsesDedicatedBucket("POST", "/api/shared-folder/2026-07-17/media/fallback",
+        "shared-transcode");
+  }
+
+  @Test
+  void deployedUploadMethodsUseTheUploadRuleAndReadMethodsRemainExcluded() throws Exception {
+    assertUsesDedicatedBucket("POST", "/api/shared-folder/2026-07-17/uploads",
+        "shared-upload");
+    assertUsesDedicatedBucket(
+        "PUT", "/api/shared-folder/2026-07-17/uploads/item/chunks/0", "shared-upload");
+    assertUsesDedicatedBucket(
+        "POST", "/api/shared-folder/2026-07-17/uploads/item/complete", "shared-upload");
+
+    assertReadDoesNotUseDedicatedBucket(
+        "GET", "/api/shared-folder/2026-07-17/uploads/item", "shared-upload");
+    assertReadDoesNotUseDedicatedBucket(
+        "HEAD", "/api/shared-folder/2026-07-17/content", "shared-mutation");
+    assertReadDoesNotUseDedicatedBucket(
+        "GET", "/api/shared-folder/2026-07-17/media/jobs/item/stream", "shared-transcode");
+  }
+
   private int indexOf(List<RateLimitProperties.Rule> rules, String name) {
     for (int index = 0; index < rules.size(); index++) {
       if (name.equals(rules.get(index).getName())) {
@@ -255,6 +298,47 @@ public class RateLimitFilterTest {
       List<String> paths
   ) {
     return new RateLimitProperties.Rule(name, capacity, Duration.ofMinutes(1), methods, paths);
+  }
+
+  private void assertUsesDedicatedBucket(String method, String path, String ruleName)
+      throws Exception {
+    RateLimitProperties properties = new RateLimitProperties();
+    properties.getRules().forEach(rule -> {
+      if (ruleName.equals(rule.getName())) rule.setCapacity(1);
+    });
+    RateLimitFilter filter = new RateLimitFilter(
+        new ClientIpResolver(new ClientIpProperties()), properties);
+    FilterChain chain = mock(FilterChain.class);
+
+    filter.doFilter(request(method, path), new MockHttpServletResponse(), chain);
+    MockHttpServletResponse denied = new MockHttpServletResponse();
+    filter.doFilter(request(method, path), denied, chain);
+
+    assertEquals(429, denied.getStatus());
+    assertEquals("application/json", denied.getContentType());
+    assertEquals(
+        "{\"code\":\"RATE_LIMITED\",\"message\":\"Too many requests. Try again later.\"}",
+        denied.getContentAsString());
+    verify(chain).doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
+  }
+
+  private void assertReadDoesNotUseDedicatedBucket(String method, String path, String ruleName)
+      throws Exception {
+    RateLimitProperties properties = new RateLimitProperties();
+    properties.getRules().forEach(rule -> {
+      if (ruleName.equals(rule.getName())) rule.setCapacity(1);
+    });
+    RateLimitFilter filter = new RateLimitFilter(
+        new ClientIpResolver(new ClientIpProperties()), properties);
+    FilterChain chain = mock(FilterChain.class);
+
+    filter.doFilter(request(method, path), new MockHttpServletResponse(), chain);
+    MockHttpServletResponse second = new MockHttpServletResponse();
+    filter.doFilter(request(method, path), second, chain);
+
+    assertEquals(200, second.getStatus());
+    verify(chain, times(2))
+        .doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
   }
 
   private MockHttpServletRequest request(String method, String path) {

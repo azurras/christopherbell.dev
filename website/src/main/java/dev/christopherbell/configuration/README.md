@@ -21,7 +21,9 @@ Owns application-wide Spring and web infrastructure.
   tune per-endpoint capacity and window settings. Shared-folder upload, mutation, and transcode
   rules are first-match groups at 240, 60, and 10 requests per minute respectively; GET, HEAD,
   range, and progressive media reads do not consume those mutation buckets. Rejections use a
-  stable JSON `429` body, and client bucket state is least-recently-used bounded.
+  stable JSON `429` body, and client bucket state is least-recently-used bounded. The mutation
+  rule covers deployed `/folders`, `/entries`, and `/admin/recycle/**` writes plus planned aliases;
+  transcode admission covers deployed `/media/fallback` plus the planned `/media/jobs` alias.
 - `ClientIpResolver` resolves effective client IPs from `X-Forwarded-For` only
   when the immediate remote address is listed in `client-ip.trusted-proxies`.
 - MongoDB auditing configuration under `mongo`.

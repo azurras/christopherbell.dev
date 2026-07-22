@@ -46,13 +46,19 @@ public class RateLimitProperties {
         List.of("POST", "PUT", "PATCH", "DELETE"),
         List.of(
             "/api/shared-folder" + APIVersion.V20260717 + "/mutations/**",
-            "/api/shared-folder" + APIVersion.V20260717 + "/recycle/**")));
+            "/api/shared-folder" + APIVersion.V20260717 + "/recycle/**",
+            "/api/shared-folder" + APIVersion.V20260717 + "/folders",
+            "/api/shared-folder" + APIVersion.V20260717 + "/entries",
+            "/api/shared-folder" + APIVersion.V20260717 + "/entries/**",
+            "/api/shared-folder" + APIVersion.V20260717 + "/admin/recycle/**")));
     rules.add(new Rule(
         "shared-transcode",
         10,
         Duration.ofMinutes(1),
         List.of("POST"),
-        List.of("/api/shared-folder" + APIVersion.V20260717 + "/media/jobs")));
+        List.of(
+            "/api/shared-folder" + APIVersion.V20260717 + "/media/jobs",
+            "/api/shared-folder" + APIVersion.V20260717 + "/media/fallback")));
     rules.add(new Rule(
         "api-mutations",
         300,

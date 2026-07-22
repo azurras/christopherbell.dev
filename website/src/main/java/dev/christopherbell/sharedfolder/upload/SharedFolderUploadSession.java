@@ -19,8 +19,8 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @CompoundIndexes({
     @CompoundIndex(name = "upload_owner_state", def = "{'ownerId': 1, 'state': 1}"),
     @CompoundIndex(
-        name = "upload_expiry_state_id",
-        def = "{'expiresAt': 1, 'state': 1, '_id': 1}")
+        name = "upload_maintenance_due",
+        def = "{'state': 1, 'maintenanceRetryAt': 1, 'expiresAt': 1, '_id': 1}")
 })
 public class SharedFolderUploadSession {
   @Id private String id;
@@ -49,6 +49,8 @@ public class SharedFolderUploadSession {
   private String finalizationLeaseToken;
   private Instant finalizationLeaseExpiresAt;
   @Indexed private Instant expiresAt;
+  private Instant maintenanceRetryAt;
+  private int maintenanceAttempts;
   private SharedFolderUploadState state;
   private Instant createdAt;
   private Instant updatedAt;
