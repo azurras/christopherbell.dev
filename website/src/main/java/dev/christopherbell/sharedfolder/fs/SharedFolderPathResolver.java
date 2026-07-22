@@ -287,10 +287,6 @@ public final class SharedFolderPathResolver {
       throw unsafe("Shared-folder paths cannot contain filesystem mount points");
     }
     Path canonicalPath = fileSystem.realPath(path);
-    Path nonFollowingPath = fileSystem.realPathNoFollow(path);
-    if (!canonicalPath.equals(nonFollowingPath)) {
-      throw unsafe("Shared-folder paths must retain canonical identity without following links");
-    }
     return new ExistingIdentity(canonicalPath, attributes.fileKey(), attributes);
   }
 

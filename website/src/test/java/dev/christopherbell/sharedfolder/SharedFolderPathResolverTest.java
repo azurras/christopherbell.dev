@@ -33,6 +33,14 @@ class SharedFolderPathResolverTest {
     assertThat(resolver.existing("music/live")).isEqualTo(root.resolve("music/live"));
   }
 
+  @Test
+  void acceptsAnOrdinaryRootReachedThroughAnAliasedAncestor() throws Exception {
+    Path root = Files.createDirectory(temp.resolve("shared"));
+    var resolver = new SharedFolderPathResolver(root, new AncestorAliasBoundary(root));
+
+    assertThat(resolver.existing("")).isEqualTo(root);
+  }
+
   @ParameterizedTest(name = "rejects unsafe Windows path: {0}")
   @MethodSource("unsafePaths")
   void rejectsUnsafeWindowsPathForms(String path) throws Exception {
@@ -337,6 +345,22 @@ class SharedFolderPathResolverTest {
     @Override
     public boolean isMountPoint(Path path) throws IOException {
       return mountPoint.equals(path.toAbsolutePath().normalize()) || super.isMountPoint(path);
+    }
+  }
+
+  private static final class AncestorAliasBoundary extends DelegatingBoundary {
+    private final Path root;
+
+    private AncestorAliasBoundary(Path root) {
+      this.root = root.toAbsolutePath().normalize();
+    }
+
+    @Override
+    public Path realPathNoFollow(Path path) throws IOException {
+      if (!root.equals(path.toAbsolutePath().normalize())) {
+        return super.realPathNoFollow(path);
+      }
+      return super.realPath(path).resolveSibling("aliased-ancestor").resolve(root.getFileName());
     }
   }
 

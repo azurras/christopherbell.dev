@@ -99,7 +99,11 @@ public class NioSharedFolderFileSystemBoundary implements SharedFolderFileSystem
   }
 
   private static SharedFolderMountMetadata defaultMountMetadata() {
-    String operatingSystem = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+    return mountMetadataForOperatingSystem(System.getProperty("os.name", ""));
+  }
+
+  static SharedFolderMountMetadata mountMetadataForOperatingSystem(String operatingSystemName) {
+    String operatingSystem = operatingSystemName.toLowerCase(Locale.ROOT);
     if (operatingSystem.contains("linux")) {
       return new LinuxSharedFolderMountMetadata();
     }

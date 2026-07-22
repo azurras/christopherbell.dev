@@ -21,7 +21,6 @@ class NioSharedFolderFileSystemBoundaryTest {
 
     assertThat(boundary.absoluteNormalized(root.resolve(".").resolve("music").resolve("..")))
         .isEqualTo(root.toAbsolutePath().normalize());
-    assertThat(boundary.realPath(root)).isEqualTo(boundary.realPathNoFollow(root));
     assertThat(boundary.realPath(child)).startsWith(boundary.realPath(root));
     assertThat(boundary.sameFileStore(root, child)).isTrue();
     assertThat(boundary.isMountPoint(child)).isFalse();
@@ -43,17 +42,8 @@ class NioSharedFolderFileSystemBoundaryTest {
   }
 
   private static NioSharedFolderFileSystemBoundary macOsBoundary() {
-    String originalOperatingSystem = System.getProperty("os.name");
-    try {
-      System.setProperty("os.name", "Mac OS X");
-      return new NioSharedFolderFileSystemBoundary();
-    } finally {
-      if (originalOperatingSystem == null) {
-        System.clearProperty("os.name");
-      } else {
-        System.setProperty("os.name", originalOperatingSystem);
-      }
-    }
+    return new NioSharedFolderFileSystemBoundary(
+        NioSharedFolderFileSystemBoundary.mountMetadataForOperatingSystem("Mac OS X"));
   }
 
   @Test
