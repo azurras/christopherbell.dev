@@ -68,6 +68,15 @@ Describe 'native Windows service installer' {
         $startup | Should -Match '--enable-native-access=ALL-UNNAMED'
         $startup | Should -Not -Match "SetEnvironmentVariable\('COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED',\s*'true'"
     }
+
+    It 'preserves website service setup while delegating the shared-folder runtime install' {
+        $module = Get-Content (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Raw
+
+        $module | Should -Match 'function Install-WebsiteService'
+        $module | Should -Match 'Set-Service MongoDB -StartupType Automatic'
+        $module | Should -Match 'sc\.exe config ChristopherBellDev start= auto depend= MongoDB'
+        $module | Should -Match 'Install-SharedFolderRuntime -ProductionRoot \$root -Configuration \$config'
+    }
 }
 
 Describe 'native cloudflared service installer' {

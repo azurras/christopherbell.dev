@@ -40,6 +40,10 @@ winget install --id Cloudflare.cloudflared --exact --source winget --scope machi
 The installer downloads WinSW v2.12.0 x64 from the official GitHub release and
 requires SHA-256
 `05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA`.
+It also downloads the pinned FFmpeg 8.0.1 essentials archive over HTTPS and
+requires the SHA-256 recorded in
+`ops/production/windows/config/media-tools-manifest.json` before extracting
+`ffmpeg.exe` or `ffprobe.exe`.
 
 ## ProgramData Layout and Security
 
@@ -56,6 +60,22 @@ Runtime state lives under `C:\ProgramData\christopherbell.dev`:
 
 Backups use `backupRoot` from `deploy.json`; the checked-in example points to
 `A:\Projects\christopherbell.dev-backups`.
+
+Shared-folder originals and media-worker state are deliberately outside
+ProgramData:
+
+- `A:\Shared`: files exposed by the application. The website service retains
+  full control; the `LocalService` media worker has read/execute access only.
+- `A:\Shared-System`: private job, partial-output, cache, status, cancellation,
+  log, lock, and pinned-tool directories. The worker can modify only its job
+  processing directories and can only read the pinned-tool directory.
+
+Both roots disable inherited ACLs. SYSTEM and Administrators retain full
+control. The `ChristopherBellMediaWorker` WinSW service runs as
+`NT AUTHORITY\LocalService` at below-normal priority, and its fixed profiles
+produce fragmented H.264/AAC MP4 or AAC M4A output. Job JSON, source paths,
+source metadata, deadlines, output paths, and tool hashes are revalidated by
+the worker before media processes run.
 
 Never commit or paste `app.env` or a tunnel token. Restrict any temporary token
 file to the current administrator, use it only for first installation, and
@@ -107,6 +127,8 @@ Installation configures:
 - `MongoDB`: Automatic startup and restart-on-failure recovery.
 - `ChristopherBellDev`: Automatic startup, dependency on MongoDB, and
   restart-on-failure recovery.
+- `ChristopherBellMediaWorker`: delayed Automatic startup as LocalService,
+  below-normal priority, bounded rolling logs, and restart-on-failure recovery.
 - `cloudflared`: Automatic startup and restart-on-failure recovery.
 - `ChristopherBellAutoDeploy`: SYSTEM principal, highest privileges, AtStartup
   trigger, and bounded restart policy.
