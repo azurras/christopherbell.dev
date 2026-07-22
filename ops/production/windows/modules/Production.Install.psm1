@@ -141,22 +141,18 @@ function Install-WinSwBinary {
     return $binary
 }
 
-function Install-ProductionRuntime {
+function Install-WebsiteService {
     [CmdletBinding()]
-    param([switch]$WhatIf, [string]$CloudflareTokenPath)
-    Assert-Administrator
-    $root = 'C:\ProgramData\christopherbell.dev'
-    if ($WhatIf) { Write-Output "Would create $root, preserve configuration, verify WinSW, install ChristopherBellDev, and validate cloudflared."; return }
-    New-ProductionDirectories $root
-    Install-ConfigurationExamples $root
-    $config = Read-ProductionConfig (Join-Path $root 'config\deploy.json')
-    Read-ProductionEnvironment (Join-Path $root 'config\app.env') | Out-Null
-    Protect-ProductionSecrets $root
-    Install-CloudflaredService -Executable $config.cloudflaredExe -TokenPath $CloudflareTokenPath
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)]$Configuration
+    )
+
+    $null = $Configuration
     Set-Service MongoDB -StartupType Automatic
     & sc.exe failure MongoDB reset= 3600 actions= restart/10000/restart/30000 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure MongoDB service recovery.' }
-    $service = Join-Path $root 'service'
+    $service = Join-Path $Root 'service'
     $binary = Install-WinSwBinary -ServiceRoot $service
     Copy-Item (Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml') $service -Force
     Copy-Item (Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1') $service -Force
@@ -168,6 +164,25 @@ function Install-ProductionRuntime {
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure the website service.' }
     & sc.exe failure ChristopherBellDev reset= 3600 actions= restart/10000/restart/30000 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure website service recovery.' }
+}
+
+function Install-ProductionRuntime {
+    [CmdletBinding()]
+    param([switch]$WhatIf, [string]$CloudflareTokenPath)
+    Assert-Administrator
+    $root = 'C:\ProgramData\christopherbell.dev'
+    if ($WhatIf) {
+        Write-Output "Would install the website runtime and restricted shared media worker under $root."
+        return
+    }
+    New-ProductionDirectories $root
+    Install-ConfigurationExamples $root
+    $config = Read-ProductionConfig (Join-Path $root 'config\deploy.json')
+    Read-ProductionEnvironment (Join-Path $root 'config\app.env') | Out-Null
+    Protect-ProductionSecrets $root
+    Install-CloudflaredService -Executable $config.cloudflaredExe -TokenPath $CloudflareTokenPath
+    Install-WebsiteService -Root $root -Configuration $config
+    Install-SharedFolderRuntime -ProductionRoot $root -Configuration $config
 }
 
 function Uninstall-ProductionRuntime {
@@ -183,4 +198,4 @@ function Uninstall-ProductionRuntime {
     }
 }
 
-Export-ModuleMember -Function Assert-Administrator,New-ProductionDirectories,Install-ConfigurationExamples,Protect-ProductionSecrets,Assert-CloudflaredExecutable,Get-ServiceExecutablePath,Assert-CloudflaredServiceBinding,Install-CloudflaredService,Install-WinSwBinary,Install-ProductionRuntime,Uninstall-ProductionRuntime
+Export-ModuleMember -Function Assert-Administrator,New-ProductionDirectories,Install-ConfigurationExamples,Protect-ProductionSecrets,Assert-CloudflaredExecutable,Get-ServiceExecutablePath,Assert-CloudflaredServiceBinding,Install-CloudflaredService,Install-WinSwBinary,Install-WebsiteService,Install-ProductionRuntime,Uninstall-ProductionRuntime

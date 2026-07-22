@@ -33,7 +33,7 @@ Describe 'native Windows production command surface' {
     It 'keeps every command handler exported after loading all modules' {
         $moduleRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\modules')).Path
         Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
-        foreach ($module in 'Production.Deploy','Production.Install','Production.Operations','Production.AutoDeploy','Production.Sensors') {
+        foreach ($module in 'Production.Deploy','Production.SharedFolder','Production.Install','Production.Operations','Production.AutoDeploy','Production.Sensors') {
             Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
         }
 
@@ -43,6 +43,14 @@ Describe 'native Windows production command surface' {
         foreach ($command in 'Install-PawnIoProvider','Get-ProductionSensorStatus','Set-ProductionSensorState') {
             Get-Command $command -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
+    }
+
+    It 'loads the shared-folder module before the installer' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $script = Get-Content (Join-Path $root 'ops\production\windows\prod.ps1') -Raw
+
+        $script.IndexOf("'Production.SharedFolder'") | Should -BeGreaterThan -1
+        $script.IndexOf("'Production.SharedFolder'") | Should -BeLessThan $script.IndexOf("'Production.Install'")
     }
 
     It 'does not expose the retired WSL migration command' {

@@ -14,7 +14,7 @@ import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService.Share
 import dev.christopherbell.sharedfolder.service.SharedFolderBrowserService;
 import dev.christopherbell.sharedfolder.service.SharedFolderRangeNotSatisfiableException;
 import java.util.List;
-import org.springframework.core.io.support.ResourceRegion;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -71,7 +71,7 @@ public class SharedFolderReadController {
    * a second time.
    */
   @GetMapping("/content")
-  public ResponseEntity<ResourceRegion> content(
+  public ResponseEntity<Resource> content(
       @RequestParam String path,
       @RequestHeader HttpHeaders headers) {
     try {
@@ -80,8 +80,6 @@ public class SharedFolderReadController {
       String range = ranges == null || ranges.isEmpty() ? null : String.join(",", ranges);
       SharedFolderDownload download = downloads.open(path, range);
       audit.recordLogicalAccess("DOWNLOAD_STARTED", path, download.totalLength());
-      ResourceRegion body = new ResourceRegion(
-          download.resource(), download.start(), download.length());
       HttpHeaders responseHeaders = new HttpHeaders();
       responseHeaders.set(HttpHeaders.ACCEPT_RANGES, "bytes");
       responseHeaders.set("X-Content-Type-Options", "nosniff");
@@ -90,11 +88,11 @@ public class SharedFolderReadController {
       responseHeaders.set(HttpHeaders.CONTENT_DISPOSITION, download.disposition());
       responseHeaders.setContentLength(download.length());
       if (download.partial()) {
+        long end = download.start() + download.length() - 1;
         responseHeaders.set(HttpHeaders.CONTENT_RANGE,
-            "bytes " + download.start() + "-" + (download.start() + download.length() - 1)
-                + "/" + download.totalLength());
+            "bytes " + download.start() + "-" + end + "/" + download.totalLength());
       }
-      return new ResponseEntity<>(body, responseHeaders,
+      return new ResponseEntity<>(download.resource(), responseHeaders,
           download.partial() ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK);
     } catch (SharedFolderRangeNotSatisfiableException exception) {
       return rangeNotSatisfiable(exception.totalLength());
@@ -128,7 +126,7 @@ public class SharedFolderReadController {
     }
   }
 
-  private ResponseEntity<ResourceRegion> rangeNotSatisfiable(long totalLength) {
+  private ResponseEntity<Resource> rangeNotSatisfiable(long totalLength) {
     return ResponseEntity.status(HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
         .header(HttpHeaders.CONTENT_RANGE, "bytes */" + totalLength)
         .header(HttpHeaders.ACCEPT_RANGES, "bytes")

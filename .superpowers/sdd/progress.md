@@ -1,8 +1,8 @@
 # Shared Folder Portal SDD Progress
 
 Plan: `C:\Users\Christopher\Developer\builder\docs\implementation-plans\2026-07-17-christopherbell-dev-shared-folder-portal.md`
-Branch base: `9108f9cb936aa80eb10f235210c6b101e16496c4`
-Branch: `codex/shared-folder-portal`
+Branch base: `d45ff0ec63e774ac301299477dc02da44546632b`
+Branch: `codex/shared-folder-worker`
 Baseline: `gradlew.bat test :website:jsTest --console=plain` succeeded; browser tests 120 passed, 0 failed.
 
 Workflow checkpoint: each numbered task is complete only after RED/GREEN implementation,
@@ -17,13 +17,30 @@ Task 4: complete (commits 8602985..8d1d3da; eighth whole-change review approved 
 Task 5: complete (commits 09d2f408..54b1bae2; twelfth whole-change review approved
 0C/0I/0M; forced native/junction-enabled full gate passed 957 Java tests and 161 JS tests;
 reviewed branch checkpoint pushed)
-Task 6: complete (commits 32958f7b..63849159; final whole-change review approved
-0 blockers/0 warnings; forced native/junction-enabled full gate passed 998 Java tests and 165 JS
-tests with zero failures, errors, or skips; reviewed branch checkpoint ready to push)
-Task 7: pending
-Task 8: pending
-Task 9: pending
-Task 10: pending
+Task 6: complete (merged by PR #1218 as `d45ff0ec63e774ac301299477dc02da44546632b`;
+final whole-change review approved 0 blockers/0 warnings; cross-platform CI and CodeQL passed)
+Task 7: complete (commits d45ff0ec..405c8f83; final task review approved 0 Critical,
+0 Important, 0 Minor; fresh full Windows gate passed 143 Pester tests with 0 failures and
+3 elevation-gated skips; 20 PowerShell, 2 XML, and 2 JSON files parsed; reviewed branch
+checkpoint pushed)
+Task 8: complete (commits d503f66c..c1f728e4; final task review approved 0 Critical,
+0 Important, 0 Minor; fresh full Windows gate passed 947 Java tests with 0 failures/errors
+and 3 expected environment-gated skips plus 165 JavaScript tests with 0 failures; final diff
+check clean; strict maintenance authority verified for the current single-Windows-host deployment;
+reviewed branch checkpoint pushed)
+Task 9: complete (commits 2a3ff56c..d8bf2fc3; final task review approved 0 Critical,
+0 Important, 0 Minor; fresh isolated `clean test :website:sharedFolderVerification` gate passed
+19/19 actions, 1,049 Java tests with 0 failures/errors and 3 expected platform skips, 165
+JavaScript tests, worker Pester 56/56, and operations Pester 28/28 under both PowerShell 7
+and Windows PowerShell 5.1 using exact Pester 5.9.0; final diff check clean; reviewed branch
+checkpoint pushed)
+Task 10: in progress (operational-test commits dc9965e4..287a28c9; alternate-port runtime
+acceptance passed 41/41 against isolated roots, database, and port 8090; final runtime review
+approved 0 Critical, 0 Important, 0 Minor after the bounded-range remediation; fresh aggregate
+gate passed 1,053 Java tests with 0 failures/errors and 3 expected platform skips, 165 JavaScript
+tests, worker Pester 56/56, and operations Pester 28/28 under both PowerShell hosts; post-review
+Java/JavaScript gate also passed; final diff check clean; installed-worker acceptance,
+PR/CI/merge, production rollout, and Builder closeout remain)
 
 Minor findings for final review:
 - Task 1: add an HTTP-level regression for `{read:false,write:true}` returning 400; service coverage already enforces it.

@@ -1,0 +1,21 @@
+<service>
+  <id>ChristopherBellMediaWorker</id>
+  <name>Christopher Bell Media Worker</name>
+  <description>Restricted shared-folder media inspection and transcoding worker</description>
+  <executable>%ProgramFiles%\PowerShell\7\pwsh.exe</executable>
+  <arguments>-NoLogo -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "%BASE%\Start-SharedFolderMediaWorker.ps1"</arguments>
+  <serviceaccount>
+    <username>NT AUTHORITY\LocalService</username>
+  </serviceaccount>
+  <priority>belownormal</priority>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <logpath>A:\Shared-System\shared-folder-media-logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>14</keepFiles>
+  </log>
+</service>

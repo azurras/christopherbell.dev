@@ -3,6 +3,7 @@ package dev.christopherbell.sharedfolder.upload;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.configuration.filter.RequestPayloadTooLargeException;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary;
 import dev.christopherbell.sharedfolder.fs.PortableSharedFolderPrivateBoundary.BoundaryUnavailableException;
@@ -26,18 +27,24 @@ import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Streams bounded, owned upload chunks to private disk staging and atomically finalizes them. */
 @Service
+@Slf4j
 public class SharedFolderUploadService {
   private static final String STAGING_DIRECTORY = "shared-folder-upload-staging";
   private static final String QUARANTINE_DIRECTORY = "shared-folder-upload-quarantine";
@@ -46,6 +53,11 @@ public class SharedFolderUploadService {
   private static final Duration FINALIZATION_LEASE_TTL = Duration.ofMinutes(2);
   private static final int COPY_BUFFER_SIZE = 16 * 1024;
   private static final long LEASE_RENEWAL_BYTES = 1024L * 1024L;
+  private static final int EXPIRY_BATCH_LIMIT = 100;
+  private static final int MAX_ACTIVE_UPLOADS_PER_ACCOUNT = 4;
+  private static final int MAX_MAINTENANCE_ATTEMPTS = 8;
+  private static final Duration MAINTENANCE_RETRY_BASE = Duration.ofMinutes(15);
+  private static final Duration MAINTENANCE_RETRY_MAX = Duration.ofHours(24);
 
   private final SharedFolderAccessService access;
   private final SharedFolderUploadSessionRepository sessions;
@@ -53,26 +65,43 @@ public class SharedFolderUploadService {
   private final WindowsSharedFolderMutationBoundary nativeBoundary;
   private final PortableSharedFolderPrivateBoundary privateBoundary;
   private final String serviceInstanceId = UUID.randomUUID().toString();
+  private final Object admissionLock = new Object();
+  private final SharedFolderAuditRecorder audit;
+  private final Clock clock;
 
   /** Creates the upload coordinator. */
   public SharedFolderUploadService(
       SharedFolderAccessService access,
       SharedFolderUploadSessionRepository sessions,
       SharedFolderProperties properties) {
-    this(access, sessions, properties, WindowsSharedFolderMutationBoundary.inactive());
+    this(access, sessions, properties, WindowsSharedFolderMutationBoundary.inactive(),
+        null, Clock.systemUTC());
   }
 
   /** Creates the production upload service and preserves native held-root fail-closed semantics. */
-  @Autowired
   public SharedFolderUploadService(
       SharedFolderAccessService access,
       SharedFolderUploadSessionRepository sessions,
       SharedFolderProperties properties,
       WindowsSharedFolderMutationBoundary nativeBoundary) {
+    this(access, sessions, properties, nativeBoundary, null, Clock.systemUTC());
+  }
+
+  /** Creates the production upload service with durable maintenance failure reporting. */
+  @Autowired
+  public SharedFolderUploadService(
+      SharedFolderAccessService access,
+      SharedFolderUploadSessionRepository sessions,
+      SharedFolderProperties properties,
+      WindowsSharedFolderMutationBoundary nativeBoundary,
+      SharedFolderAuditRecorder audit,
+      Clock clock) {
     this.access = access;
     this.sessions = sessions;
     this.properties = properties;
     this.nativeBoundary = nativeBoundary;
+    this.audit = audit;
+    this.clock = clock;
     this.privateBoundary = nativeBoundary.testOnlyPortableMode()
         ? PortableSharedFolderPrivateBoundary.testOnlyWithPathMoves(properties.systemRoot())
         : new PortableSharedFolderPrivateBoundary(properties.systemRoot());
@@ -88,9 +117,17 @@ public class SharedFolderUploadService {
     if (request.expectedBytes() > properties.maxUpload().toBytes()) {
       throw tooLarge();
     }
-    if (nativeBoundary.nativeMode()) {
-      return createNative(request, account);
+    synchronized (admissionLock) {
+      requireUploadCapacity(account);
+      if (nativeBoundary.nativeMode()) {
+        return createNative(request, account);
+      }
+      return createPortable(request, account);
     }
+  }
+
+  private SharedFolderUploadStatus createPortable(
+      SharedFolderUploadCreateRequest request, Account account) {
     try {
       SharedFolderPathResolver resolver = portableResolver();
       Path requestedTarget = resolver.newChild(request.parentPath(), request.name());
@@ -129,6 +166,96 @@ public class SharedFolderUploadService {
       throw notFound();
     } catch (IOException | SecurityException exception) {
       throw conflict();
+    }
+  }
+
+  /** Expires a bounded batch of inactive staging sessions and deletes only private payloads. */
+  public int expireAbandoned() {
+    if (!properties.enabled()) return 0;
+    Instant now = clock.instant();
+    var batch = sessions.findDueForMaintenance(now, PageRequest.of(
+        0, EXPIRY_BATCH_LIMIT, Sort.by(
+            "maintenanceRetryAt", "expiresAt", "id")));
+    int expired = 0;
+    boolean deferralPersistenceFailed = false;
+    for (SharedFolderUploadSession candidate : batch.getContent()) {
+      SharedFolderUploadSession current = null;
+      try {
+        if (candidate.getState() == SharedFolderUploadState.ACTIVE
+            && sessions.expireActive(candidate.getId(), now, now) != 1) {
+          continue;
+        }
+        current = sessions.findById(candidate.getId()).orElse(null);
+        if (current == null || current.getState() != SharedFolderUploadState.EXPIRED) continue;
+        deleteExpiredPrivatePayloads(current);
+        sessions.deleteById(current.getId());
+        expired++;
+      } catch (RuntimeException | IOException failure) {
+        recordMaintenanceFailure(candidate, failure);
+        SharedFolderUploadSession deferred = current != null ? current : candidate;
+        try {
+          if (deferred.getState() != SharedFolderUploadState.EXPIRED) throw unavailable();
+          deferExpiredMaintenance(deferred, now);
+        } catch (RuntimeException persistenceFailure) {
+          deferralPersistenceFailed = true;
+        }
+        log.warn("Shared-folder abandoned upload cleanup deferred");
+      }
+    }
+    if (deferralPersistenceFailed) throw unavailable();
+    return expired;
+  }
+
+  private void deferExpiredMaintenance(SharedFolderUploadSession session, Instant now) {
+    int expectedAttempts = Math.max(0, session.getMaintenanceAttempts());
+    int newAttempts = Math.min(MAX_MAINTENANCE_ATTEMPTS, expectedAttempts + 1);
+    int exponent = Math.max(0, newAttempts - 1);
+    Duration delay = MAINTENANCE_RETRY_BASE.multipliedBy(1L << exponent);
+    if (delay.compareTo(MAINTENANCE_RETRY_MAX) > 0) delay = MAINTENANCE_RETRY_MAX;
+    Instant retryAt = now.plus(delay);
+    if (sessions.deferExpiredMaintenance(
+        session.getId(), expectedAttempts, retryAt, newAttempts, now) != 1) {
+      throw unavailable();
+    }
+  }
+
+  private void recordMaintenanceFailure(
+      SharedFolderUploadSession session, Exception failure) {
+    if (audit == null) return;
+    try {
+      RuntimeException safeFailure = failure instanceof RuntimeException runtime
+          ? runtime : unavailable();
+      audit.recordSystemFailure(
+          "UPLOAD_EXPIRY_FAILED", "upload-staging", session.getExpectedBytes(), safeFailure);
+    } catch (RuntimeException auditFailure) {
+      log.warn("Shared-folder abandoned upload failure audit could not be recorded");
+    }
+  }
+
+  private void requireUploadCapacity(Account account) {
+    String ownerId = requiredAccountId(account);
+    long active = sessions.countByOwnerIdAndStateIn(ownerId, List.of(
+        SharedFolderUploadState.ACTIVE,
+        SharedFolderUploadState.APPENDING,
+        SharedFolderUploadState.FINALIZING,
+        SharedFolderUploadState.CANCEL_PENDING));
+    if (active >= MAX_ACTIVE_UPLOADS_PER_ACCOUNT) {
+      throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+          "Too many active uploads. Try again later.");
+    }
+  }
+
+  private void deleteExpiredPrivatePayloads(SharedFolderUploadSession session) throws IOException {
+    if (nativeBoundary.nativeMode()) {
+      nativeBoundary.deleteStagingIfExists(session.getStagingKey());
+      if (session.getAppendChunkKey() != null) {
+        nativeBoundary.deleteStagingIfExists(session.getAppendChunkKey());
+      }
+      return;
+    }
+    deleteStagingKeyIfExists(session.getStagingKey());
+    if (session.getAppendChunkKey() != null) {
+      deleteStagingKeyIfExists(session.getAppendChunkKey());
     }
   }
 
@@ -615,6 +742,7 @@ public class SharedFolderUploadService {
     if (renewed != 1L) {
       throw new AppendLeaseLostException();
     }
+    advanceVersionAfterLeaseRenewal(session);
     session.setAppendLeaseExpiresAt(expiresAt);
     session.setUpdatedAt(now);
   }
@@ -1135,8 +1263,18 @@ public class SharedFolderUploadService {
     if (renewed != 1L) {
       throw new FinalizationLeaseLostException();
     }
+    advanceVersionAfterLeaseRenewal(session);
     session.setFinalizationLeaseExpiresAt(expiresAt);
     session.setUpdatedAt(now);
+  }
+
+  /** Keeps the in-memory aggregate aligned with the repository's atomic version increment. */
+  private void advanceVersionAfterLeaseRenewal(SharedFolderUploadSession session) {
+    Long version = session.getVersion();
+    if (version == null) {
+      throw new IllegalStateException("Persisted upload session has no optimistic-lock version");
+    }
+    session.setVersion(Math.incrementExact(version));
   }
 
   /** Test seam for deterministic short finalization leases. */

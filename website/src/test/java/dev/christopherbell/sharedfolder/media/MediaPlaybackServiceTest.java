@@ -99,6 +99,48 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
+  void maintenanceEvictsOnlyTheLeastRecentlyUsedReadyCacheAboveTheLimit() throws Exception {
+    MediaJob old = job("old", "a".repeat(64), MediaJobStatus.READY);
+    old.setLastAccessedAt(NOW.minusSeconds(20));
+    MediaJob recent = job("recent", "b".repeat(64), MediaJobStatus.READY);
+    recent.setLastAccessedAt(NOW.minusSeconds(10));
+    storage.writeReadyForTest(old, new byte[4]);
+    storage.writeReadyForTest(recent, new byte[4]);
+    Path original = Files.writeString(folderProperties.root().resolve("original.mkv"), "keep");
+    when(jobs.findByStatusOrderByLastAccessedAtAscIdAsc(
+        org.mockito.ArgumentMatchers.eq(MediaJobStatus.READY), any()))
+        .thenReturn(new SliceImpl<>(List.of(old, recent)));
+    media = mediaWithCacheLimit(DataSize.ofBytes(5));
+
+    media.evictReadyCache();
+
+    assertThat(storage.readyLength(old, Long.MAX_VALUE)).isEmpty();
+    assertThat(storage.readyLength(recent, Long.MAX_VALUE)).hasValue(4);
+    assertThat(original).exists();
+  }
+
+  @Test
+  void maintenancePreservesActiveCacheKeysAndReaderLeases() throws Exception {
+    MediaJob protectedReady = job("protected-ready", "c".repeat(64), MediaJobStatus.READY);
+    MediaJob disposable = job("disposable", "d".repeat(64), MediaJobStatus.READY);
+    MediaJob active = job("active", protectedReady.getCacheKey(), MediaJobStatus.TRANSCODING);
+    storage.writeReadyForTest(protectedReady, new byte[4]);
+    storage.writeReadyForTest(disposable, new byte[4]);
+    when(jobs.findByStatusIn(MediaJobStatus.active())).thenReturn(List.of(active));
+    when(jobs.findByStatusOrderByLastAccessedAtAscIdAsc(
+        org.mockito.ArgumentMatchers.eq(MediaJobStatus.READY), any()))
+        .thenReturn(new SliceImpl<>(List.of(protectedReady, disposable)));
+    media = mediaWithCacheLimit(DataSize.ofBytes(5));
+
+    try (var lease = storage.acquireReadyLease(protectedReady)) {
+      media.evictReadyCache();
+    }
+
+    assertThat(storage.readyLength(protectedReady, Long.MAX_VALUE)).hasValue(4);
+    assertThat(storage.readyLength(disposable, Long.MAX_VALUE)).isEmpty();
+  }
+
+  @Test
   void fallbackCreatesOpaqueFixedProfileDescriptorWithoutArguments() throws Exception {
     MediaSourceSnapshot source = source("video/source.mkv", 30, NOW.minusSeconds(2));
     when(sources.resolve(source.relativePath())).thenReturn(source);
@@ -649,6 +691,16 @@ class MediaPlaybackServiceTest {
 
   private MediaSourceSnapshot source(String relative, long size, Instant modifiedAt) {
     return new MediaSourceSnapshot(relative, temp.resolve("shared").resolve(relative), size, modifiedAt);
+  }
+
+  private MediaPlaybackService mediaWithCacheLimit(DataSize cacheLimit) {
+    SharedFolderProperties bounded = new SharedFolderProperties(
+        folderProperties.root(), folderProperties.systemRoot(), folderProperties.maxUpload(),
+        folderProperties.uploadChunk(), folderProperties.minimumFreeSpace(), cacheLimit,
+        folderProperties.recycleRetention(), folderProperties.auditRetention(), true);
+    return new MediaPlaybackService(
+        access, jobs, audit, sources, storage, bounded, mediaProperties,
+        Clock.fixed(NOW, ZoneOffset.UTC), () -> "unused");
   }
 
   private MediaJob job(String id, String cacheKey, MediaJobStatus status) {

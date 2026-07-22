@@ -285,6 +285,18 @@ public class MediaPlaybackService {
     }
   }
 
+  /** Evicts only unleased READY derivatives until cache and reserve bounds are satisfied. */
+  public void evictReadyCache() {
+    synchronized (admissionLock) {
+      evictCache(activeReservations(), 0, Set.of());
+    }
+  }
+
+  /** Reconciles the published worker descriptor without waiting for worker progress. */
+  public void reconcileWorkerStatuses() {
+    promoteQueuedJob();
+  }
+
   private void publishNextIfIdleLocked() {
     if (publishedActiveJob().isPresent()) return;
     while (true) {
@@ -449,7 +461,8 @@ public class MediaPlaybackService {
       boolean more;
       do {
         var slice = jobs.findByStatusOrderByLastAccessedAtAscIdAsc(
-            MediaJobStatus.READY, PageRequest.of(page++, CACHE_PAGE_SIZE));
+            MediaJobStatus.READY, PageRequest.of(page, CACHE_PAGE_SIZE));
+        boolean deleted = false;
         for (MediaJob candidate : slice.getContent()) {
           var length = storage.readyLength(candidate, Long.MAX_VALUE);
           if (length.isEmpty() || protectedKeys.contains(candidate.getCacheKey())
@@ -458,9 +471,11 @@ public class MediaPlaybackService {
               && storage.usableSpace() >= requiredFree) return;
           if (storage.deleteReady(candidate)) {
             total = Math.max(0, total - length.getAsLong());
+            deleted = true;
           }
         }
         more = slice.hasNext();
+        if (!deleted) page++;
       } while (more);
     } catch (ArithmeticException failure) {
       throw insufficientStorage(failure);

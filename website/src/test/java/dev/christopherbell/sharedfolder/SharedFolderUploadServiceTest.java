@@ -12,6 +12,7 @@ import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.configuration.filter.RequestSizeLimitFilter;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.fs.WindowsSharedFolderMutationBoundary;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadService;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadSession;
@@ -27,9 +28,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Map;
+import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.CountDownLatch;
@@ -40,11 +46,214 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.springframework.util.unit.DataSize;
+import org.springframework.data.domain.SliceImpl;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.http.HttpStatus;
 
 class SharedFolderUploadServiceTest {
   @TempDir Path temp;
+
+  @Test
+  void abandonedUploadRetryStateIsDurableAndQueriedOnlyWhenDue()
+      throws ReflectiveOperationException {
+    SharedFolderUploadSession session = activeSession("retry", "account-1", "staging-key");
+    Instant retryAt = Instant.parse("2026-07-22T12:15:00Z");
+    session.setMaintenanceAttempts(3);
+    session.setMaintenanceRetryAt(retryAt);
+    SharedFolderUploadSessionRepository repository = mock(
+        SharedFolderUploadSessionRepository.class);
+
+    repository.findDueForMaintenance(
+        retryAt.minusSeconds(1), org.springframework.data.domain.PageRequest.of(0, 100));
+
+    assertThat(session.getMaintenanceAttempts()).isEqualTo(3);
+    assertThat(session.getMaintenanceRetryAt()).isEqualTo(retryAt);
+    verify(repository).findDueForMaintenance(
+        retryAt.minusSeconds(1), org.springframework.data.domain.PageRequest.of(0, 100));
+    var deferralQuery = SharedFolderUploadSessionRepository.class.getMethod(
+        "deferExpiredMaintenance", String.class, int.class, Instant.class,
+        int.class, Instant.class).getAnnotation(
+            org.springframework.data.mongodb.repository.Query.class);
+    assertThat(deferralQuery.value()).contains("$exists");
+  }
+
+  @Test
+  void failedFirstCleanupDoesNotStarveLaterWorkAcrossServiceRestarts() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("maintenance-restart"));
+    SharedFolderProperties properties = properties(root);
+    Instant start = Instant.parse("2026-07-22T12:00:00Z");
+    MutableClock clock = new MutableClock(start);
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadSession first = expiredMaintenanceSession(
+        "first", "..", 0, start);
+    String laterKey = UUID.randomUUID().toString();
+    SharedFolderUploadSession later = expiredMaintenanceSession(
+        "later", laterKey, 0, start);
+    stored.put(first.getId(), first);
+    stored.put(later.getId(), later);
+    Files.createDirectories(properties.systemRoot().resolve("shared-folder-upload-staging"));
+    Files.writeString(properties.systemRoot().resolve("shared-folder-upload-staging")
+        .resolve(laterKey), "discard");
+    SharedFolderUploadSessionRepository repository = maintenanceRepository(stored);
+    SharedFolderAuditRecorder audit = mock(SharedFolderAuditRecorder.class);
+
+    SharedFolderUploadService initial = maintenanceService(
+        repository, properties, audit, clock);
+    assertThat(initial.expireAbandoned()).isEqualTo(1);
+
+    assertThat(stored).containsOnlyKeys("first");
+    assertThat(stored.get("first").getMaintenanceAttempts()).isEqualTo(1);
+    assertThat(stored.get("first").getMaintenanceRetryAt())
+        .isEqualTo(start.plus(Duration.ofMinutes(15)));
+    verify(audit).recordSystemFailure(
+        org.mockito.ArgumentMatchers.eq("UPLOAD_EXPIRY_FAILED"),
+        org.mockito.ArgumentMatchers.eq("upload-staging"),
+        org.mockito.ArgumentMatchers.anyLong(), any());
+
+    SharedFolderUploadService beforeDue = maintenanceService(
+        repository, properties, audit, clock);
+    assertThat(beforeDue.expireAbandoned()).isZero();
+    assertThat(stored.get("first").getMaintenanceAttempts()).isEqualTo(1);
+
+    clock.advance(Duration.ofMinutes(15));
+    SharedFolderUploadService afterRestart = maintenanceService(
+        repository, properties, audit, clock);
+    assertThat(afterRestart.expireAbandoned()).isZero();
+    assertThat(stored.get("first").getMaintenanceAttempts()).isEqualTo(2);
+    assertThat(stored.get("first").getMaintenanceRetryAt())
+        .isEqualTo(clock.instant().plus(Duration.ofMinutes(30)));
+  }
+
+  @Test
+  void cleanupRetryAttemptsAndBackoffRemainCapped() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("maintenance-cap"));
+    SharedFolderProperties properties = properties(root);
+    Files.createDirectories(properties.systemRoot().resolve("shared-folder-upload-staging"));
+    Instant now = Instant.parse("2026-07-22T12:00:00Z");
+    MutableClock clock = new MutableClock(now);
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadSession capped = expiredMaintenanceSession(
+        "capped", "..", 8, now);
+    stored.put(capped.getId(), capped);
+
+    SharedFolderUploadService service = maintenanceService(
+        maintenanceRepository(stored), properties, mock(SharedFolderAuditRecorder.class), clock);
+    assertThat(service.expireAbandoned()).isZero();
+
+    assertThat(stored.get("capped").getMaintenanceAttempts()).isEqualTo(8);
+    assertThat(stored.get("capped").getMaintenanceRetryAt())
+        .isEqualTo(now.plus(Duration.ofHours(24)));
+  }
+
+  @Test
+  void alreadyMissingStagingIsIdempotentAndClearsTheExpiredRecord() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("maintenance-missing"));
+    SharedFolderProperties properties = properties(root);
+    Files.createDirectories(properties.systemRoot().resolve("shared-folder-upload-staging"));
+    Instant now = Instant.parse("2026-07-22T12:00:00Z");
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadSession missing = expiredMaintenanceSession(
+        "missing", UUID.randomUUID().toString(), 0, now);
+    stored.put(missing.getId(), missing);
+
+    SharedFolderUploadService service = maintenanceService(
+        maintenanceRepository(stored), properties, mock(SharedFolderAuditRecorder.class),
+        Clock.fixed(now, ZoneOffset.UTC));
+
+    assertThat(service.expireAbandoned()).isEqualTo(1);
+    assertThat(stored).isEmpty();
+  }
+
+  @Test
+  void deferralPersistenceFailureIsVisibleAfterLaterDueWorkCompletes() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("maintenance-deferral-failure"));
+    SharedFolderProperties properties = properties(root);
+    Files.createDirectories(properties.systemRoot().resolve("shared-folder-upload-staging"));
+    Instant now = Instant.parse("2026-07-22T12:00:00Z");
+    SharedFolderUploadSession failing = expiredMaintenanceSession("failing", "..", 0, now);
+    SharedFolderUploadSession later = expiredMaintenanceSession(
+        "later", UUID.randomUUID().toString(), 0, now);
+    SharedFolderUploadSessionRepository repository = mock(
+        SharedFolderUploadSessionRepository.class);
+    when(repository.findDueForMaintenance(any(), any()))
+        .thenReturn(new SliceImpl<>(List.of(failing, later)));
+    when(repository.findById("failing")).thenReturn(java.util.Optional.of(failing));
+    when(repository.findById("later")).thenReturn(java.util.Optional.of(later));
+    when(repository.deferExpiredMaintenance(any(), org.mockito.ArgumentMatchers.anyInt(), any(),
+        org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(0L);
+    SharedFolderUploadService service = maintenanceService(
+        repository, properties, mock(SharedFolderAuditRecorder.class),
+        Clock.fixed(now, ZoneOffset.UTC));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(service::expireAbandoned)
+        .isInstanceOfSatisfying(
+            org.springframework.web.server.ResponseStatusException.class,
+            failure -> assertThat(failure.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+
+    verify(repository).deleteById("later");
+  }
+
+  @Test
+  void uploadAdmissionAndExpiryQueriesHaveDeterministicMongoIndexes() {
+    CompoundIndexes indexes = SharedFolderUploadSession.class.getAnnotation(CompoundIndexes.class);
+
+    assertThat(indexes).isNotNull();
+    assertThat(java.util.Arrays.stream(indexes.value()).map(index -> index.def()))
+        .contains("{'ownerId': 1, 'state': 1}",
+            "{'state': 1, 'maintenanceRetryAt': 1, 'expiresAt': 1, '_id': 1}");
+  }
+
+  @Test
+  void rejectsAnAccountWithFourActiveUploads() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("upload-account-capacity"));
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    SharedFolderUploadSessionRepository repository = mock(
+        SharedFolderUploadSessionRepository.class);
+    when(repository.countByOwnerIdAndStateIn(
+        org.mockito.ArgumentMatchers.eq("account-1"), any())).thenReturn(4L);
+    SharedFolderUploadService uploads = new SharedFolderUploadService(
+        access, repository, properties(root));
+
+    assertStatus(429, () -> uploads.create(new SharedFolderUploadCreateRequest(
+        "", "blocked.bin", 1, null, null)));
+  }
+
+  @Test
+  void abandonedUploadExpiryDeletesOnlyThePrivateStagingPayload() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("abandoned-expiry"));
+    Path original = Files.writeString(root.resolve("original.bin"), "keep");
+    SharedFolderProperties properties = properties(root);
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    SharedFolderUploadSessionRepository repository = mock(
+        SharedFolderUploadSessionRepository.class);
+    SharedFolderUploadService uploads = new SharedFolderUploadService(
+        access, repository, properties);
+    String stagingKey = UUID.randomUUID().toString();
+    SharedFolderUploadSession session = activeSession("expired", "account-1", stagingKey);
+    session.setExpiresAt(Instant.EPOCH);
+    Path staging = Files.createDirectories(
+        properties.systemRoot().resolve("shared-folder-upload-staging")).resolve(stagingKey);
+    Files.writeString(staging, "discard");
+    when(repository.findDueForMaintenance(any(), any()))
+        .thenReturn(new SliceImpl<>(List.of(session)));
+    when(repository.expireActive(org.mockito.ArgumentMatchers.eq("expired"), any(), any()))
+        .thenAnswer(invocation -> {
+          session.setState(SharedFolderUploadState.EXPIRED);
+          return 1L;
+        });
+    when(repository.findById("expired")).thenReturn(java.util.Optional.of(session));
+
+    assertThat(uploads.expireAbandoned()).isEqualTo(1);
+
+    assertThat(staging).doesNotExist();
+    assertThat(original).exists();
+    verify(repository).deleteById("expired");
+  }
 
   @Test
   void portableCompletionFailsClosedAndPreservesPrivateStaging() throws Exception {
@@ -474,7 +683,9 @@ class SharedFolderUploadServiceTest {
       if (candidate.getNextOffset() > 0 && failProgressSave.compareAndSet(true, false)) {
         throw new org.springframework.dao.OptimisticLockingFailureException("simulated concurrent save");
       }
+      SharedFolderUploadSession existing = stored.get(candidate.getId());
       SharedFolderUploadSession saved = copy(candidate);
+      saved.setVersion(existing == null ? 0L : existing.getVersion() + 1L);
       stored.put(saved.getId(), saved);
       return copy(saved);
     });
@@ -512,7 +723,9 @@ class SharedFolderUploadServiceTest {
           && failCompletedSave.compareAndSet(true, false)) {
         throw new org.springframework.dao.OptimisticLockingFailureException("simulated final save");
       }
+      SharedFolderUploadSession existing = stored.get(candidate.getId());
       SharedFolderUploadSession saved = copy(candidate);
+      saved.setVersion(existing == null ? 0L : existing.getVersion() + 1L);
       stored.put(saved.getId(), saved);
       return copy(saved);
     });
@@ -1804,6 +2017,73 @@ class SharedFolderUploadServiceTest {
     return repository;
   }
 
+  private SharedFolderUploadService maintenanceService(
+      SharedFolderUploadSessionRepository repository,
+      SharedFolderProperties properties,
+      SharedFolderAuditRecorder audit,
+      Clock clock) {
+    return new SharedFolderUploadService(
+        mock(SharedFolderAccessService.class), repository, properties,
+        WindowsSharedFolderMutationBoundary.inactive(), audit, clock);
+  }
+
+  private SharedFolderUploadSessionRepository maintenanceRepository(
+      Map<String, SharedFolderUploadSession> sessions) {
+    SharedFolderUploadSessionRepository repository = mock(
+        SharedFolderUploadSessionRepository.class);
+    when(repository.findDueForMaintenance(any(), any())).thenAnswer(invocation -> {
+      Instant dueAt = invocation.getArgument(0);
+      List<SharedFolderUploadSession> due = sessions.values().stream()
+          .filter(session ->
+              (session.getState() == SharedFolderUploadState.ACTIVE
+                  && session.getExpiresAt() != null && !session.getExpiresAt().isAfter(dueAt))
+              || (session.getState() == SharedFolderUploadState.EXPIRED
+                  && (session.getMaintenanceRetryAt() == null
+                      || !session.getMaintenanceRetryAt().isAfter(dueAt))))
+          .sorted(java.util.Comparator
+              .comparing((SharedFolderUploadSession session) ->
+                  session.getMaintenanceRetryAt() == null
+                      ? Instant.EPOCH : session.getMaintenanceRetryAt())
+              .thenComparing(session -> session.getExpiresAt() == null
+                  ? Instant.EPOCH : session.getExpiresAt())
+              .thenComparing(SharedFolderUploadSession::getId))
+          .limit(100)
+          .toList();
+      return new SliceImpl<>(due);
+    });
+    when(repository.findById(any(String.class))).thenAnswer(invocation ->
+        java.util.Optional.ofNullable(sessions.get(invocation.getArgument(0))));
+    when(repository.expireActive(any(), any(), any())).thenAnswer(invocation -> {
+      SharedFolderUploadSession session = sessions.get(invocation.getArgument(0));
+      Instant dueAt = invocation.getArgument(1);
+      Instant updatedAt = invocation.getArgument(2);
+      if (session == null || session.getState() != SharedFolderUploadState.ACTIVE
+          || session.getExpiresAt() == null || session.getExpiresAt().isAfter(dueAt)) return 0L;
+      session.setState(SharedFolderUploadState.EXPIRED);
+      session.setMaintenanceRetryAt(updatedAt);
+      session.setMaintenanceAttempts(0);
+      session.setUpdatedAt(updatedAt);
+      return 1L;
+    });
+    when(repository.deferExpiredMaintenance(
+        any(), org.mockito.ArgumentMatchers.anyInt(), any(),
+        org.mockito.ArgumentMatchers.anyInt(), any())).thenAnswer(invocation -> {
+      SharedFolderUploadSession session = sessions.get(invocation.getArgument(0));
+      int expectedAttempts = invocation.getArgument(1);
+      if (session == null || session.getState() != SharedFolderUploadState.EXPIRED
+          || session.getMaintenanceAttempts() != expectedAttempts) return 0L;
+      session.setMaintenanceRetryAt(invocation.getArgument(2));
+      session.setMaintenanceAttempts(invocation.getArgument(3));
+      session.setUpdatedAt(invocation.getArgument(4));
+      return 1L;
+    });
+    org.mockito.Mockito.doAnswer(invocation -> {
+      sessions.remove(invocation.getArgument(0));
+      return null;
+    }).when(repository).deleteById(any());
+    return repository;
+  }
+
   private void stubFinalizationRenewal(
       SharedFolderUploadSessionRepository repository,
       Map<String, SharedFolderUploadSession> sessions) {
@@ -1838,6 +2118,7 @@ class SharedFolderUploadServiceTest {
         }
         current.setAppendLeaseExpiresAt(invocation.getArgument(3));
         current.setUpdatedAt(invocation.getArgument(4));
+        current.setVersion(current.getVersion() == null ? 0L : current.getVersion() + 1L);
         return 1L;
       }
     }).when(repository).renewAppendLease(
@@ -1854,6 +2135,7 @@ class SharedFolderUploadServiceTest {
         }
         current.setFinalizationLeaseExpiresAt(invocation.getArgument(3));
         current.setUpdatedAt(invocation.getArgument(4));
+        current.setVersion(current.getVersion() == null ? 0L : current.getVersion() + 1L);
         return 1L;
       }
     }).when(repository).renewFinalizationLease(any(), any(), any(), any(), any());
@@ -1897,6 +2179,16 @@ class SharedFolderUploadServiceTest {
     return session;
   }
 
+  private SharedFolderUploadSession expiredMaintenanceSession(
+      String id, String stagingKey, int attempts, Instant retryAt) {
+    SharedFolderUploadSession session = activeSession(id, "account-1", stagingKey);
+    session.setState(SharedFolderUploadState.EXPIRED);
+    session.setExpiresAt(Instant.EPOCH);
+    session.setMaintenanceAttempts(attempts);
+    session.setMaintenanceRetryAt(retryAt);
+    return session;
+  }
+
   private SharedFolderProperties properties(Path root) throws Exception {
     return properties(root, DataSize.ofMegabytes(8), DataSize.ofBytes(1));
   }
@@ -1935,6 +2227,8 @@ class SharedFolderUploadServiceTest {
     copy.setAppendDigest(source.getAppendDigest());
     copy.setAppendChunkKey(source.getAppendChunkKey());
     copy.setExpiresAt(source.getExpiresAt());
+    copy.setMaintenanceRetryAt(source.getMaintenanceRetryAt());
+    copy.setMaintenanceAttempts(source.getMaintenanceAttempts());
     copy.setState(source.getState());
     copy.setCreatedAt(source.getCreatedAt());
     copy.setUpdatedAt(source.getUpdatedAt());
@@ -1973,5 +2267,32 @@ class SharedFolderUploadServiceTest {
         .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
         .satisfies(exception -> assertThat(((org.springframework.web.server.ResponseStatusException) exception)
             .getStatusCode().value()).isEqualTo(expected));
+  }
+
+  private static final class MutableClock extends Clock {
+    private Instant now;
+
+    private MutableClock(Instant now) {
+      this.now = now;
+    }
+
+    private void advance(Duration duration) {
+      now = now.plus(duration);
+    }
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneOffset.UTC;
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+      return this;
+    }
+
+    @Override
+    public Instant instant() {
+      return now;
+    }
   }
 }

@@ -44,8 +44,9 @@ Both configured roots must exist before the application starts. The system root 
 non-linked, non-reparse, non-mount directory on the same filesystem as the visible root; the
 application deliberately does not create that configured root. Deployment grants the website
 service identity access to the pre-created root. The application may create only its validated
-direct staging and quarantine children beneath it. Portable private create/open/delete operations
-capture canonical path, file identity, filesystem, mount, link, and reparse facts for every
+direct staging and quarantine children plus the fixed maintenance lock file beneath it.
+Portable private create/open/delete operations capture canonical path, file identity, filesystem,
+mount, link, and reparse facts for every
 ancestor and recheck them around the operation. Portable private-to-visible and visible-to-private
 moves are unavailable because a Java pathname move cannot bind the transitioned leaf to the
 earlier observation. An unavailable or changed private boundary fails with `503 Service
@@ -61,7 +62,7 @@ Unavailable` and never falls back to an unchecked production path.
   `Cache-Control: private, no-store` before security or controller handling, so successful reads,
   range/HEAD responses, and protected errors cannot be retained by browser or intermediary caches.
 - `GET /entries` returns only decoded relative paths and ordinary-entry metadata. `GET /content`
-  uses a revalidating disk-backed resource plus `ResourceRegion` for disk streaming and supports
+  uses a revalidating disk-backed resource plus a bounded range resource for streaming and supports
   exactly one HTTP byte range, including correct `206`, `416`, `Content-Range`, `Accept-Ranges`,
   and `HEAD` semantics. It never calls `readAllBytes` or exposes an absolute local path.
 - `GET /preview` returns bounded UTF-8 text as JSON for text files; allowlisted raster image,
@@ -111,6 +112,11 @@ Unavailable` and never falls back to an unchecked production path.
   durable `FINALIZING` and `CANCEL_PENDING` phases so a database save failure after the physical
   operation can be reconciled from stable file identity instead of duplicating or losing work.
   Terminal sessions report `COMPLETED`, `CANCELLED`, or `EXPIRED` and cannot accept more chunks.
+- A fresh account may have at most four active upload sessions. A bounded maintenance pass
+  atomically expires abandoned `ACTIVE` sessions before deleting their capability-verified
+  private staging; append and finalization lease states are never maintenance deletion targets.
+  Failed cleanup is audited with a fixed safe resource and durably deferred using capped
+  exponential backoff, so page-zero failures cannot starve later due work after restart.
 
 ## Media Playback and Worker Handoff
 
@@ -148,6 +154,16 @@ Unavailable` and never falls back to an unchecked production path.
   or currently streamed outputs from eviction. Media conversion preserves the default 100 GB
   free-space reserve, reserves the full output cap for every active job, and independently checks
   the actual partial and completed file lengths against that cap.
+- Every 15 minutes, a non-overlapping coordinator runs bounded upload expiry, recycle retention,
+  READY-cache eviction, and worker reconciliation. One fixed, non-expiring OS file lock beneath
+  the trusted system root is acquired without waiting before Mongo ownership and held across the
+  complete maintenance effect window. It is released last, is never deleted, and the OS releases
+  it if the process dies; this is the strict single-host authority even when a step stalls or the
+  JVM pauses. The fixed-key Mongo lease retains unique-owner, bounded-expiry, renewal, and
+  owner-checked-release metadata for ownership and auditing, but does not authorize overlap on the
+  host. Each failed step is safely logged and audited without preventing later steps or later runs.
+  Account mutation bursts are limited to 60 per minute with bounded identity state; the existing
+  media admission retains its global and per-account queued-job limits.
 
 ## Update This Doc
 
