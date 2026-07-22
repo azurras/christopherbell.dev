@@ -36,17 +36,36 @@ function Invoke-ProductionRollback {
         }
 
         Stop-ProductionWebsiteService -ProductionPort $config.productionPort
-        Set-AtomicJunction $config $currentPath $previous
-        Set-AtomicJunction $config $previousPath $current
         try {
+            Set-AtomicJunction $config $currentPath $previous
+            Set-AtomicJunction $config $previousPath $current
             Start-Service ChristopherBellDev
             Test-ProductionEndpoints $config $config.productionPort
         } catch {
             $rollbackFailure = $_.Exception
             try {
                 Stop-ProductionWebsiteService -ProductionPort $config.productionPort
-                Set-AtomicJunction $config $currentPath $current
-                Set-AtomicJunction $config $previousPath $previous
+                $junctionRestoreFailures = [System.Collections.Generic.List[System.Exception]]::new()
+                try {
+                    Set-AtomicJunction $config $currentPath $current
+                } catch {
+                    [void]$junctionRestoreFailures.Add($_.Exception)
+                }
+                try {
+                    Set-AtomicJunction $config $previousPath $previous
+                } catch {
+                    [void]$junctionRestoreFailures.Add($_.Exception)
+                }
+                if ($junctionRestoreFailures.Count -eq 1) {
+                    throw [System.InvalidOperationException]::new(
+                        'Failed to restore original release junctions.',
+                        $junctionRestoreFailures[0])
+                }
+                if ($junctionRestoreFailures.Count -gt 1) {
+                    throw [System.AggregateException]::new(
+                        'Failed to restore original release junctions.',
+                        [System.Exception[]]$junctionRestoreFailures.ToArray())
+                }
                 Start-Service ChristopherBellDev
                 Test-ProductionEndpoints $config $config.productionPort
             } catch {

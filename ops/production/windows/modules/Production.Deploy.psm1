@@ -95,12 +95,130 @@ function Test-CandidateRelease {
     }
 }
 
+function Invoke-BoundedCheckedProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [ValidateRange(1,60000)]
+        [int]$TimeoutMilliseconds = 5000
+    )
+
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $FilePath
+    $start.WorkingDirectory = (Get-Location).Path
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in $ArgumentList) {
+        [void]$start.ArgumentList.Add($argument)
+    }
+
+    $process = $null
+    try {
+        $process = [Diagnostics.Process]::Start($start)
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+            $timeoutFailure = [System.TimeoutException]::new(
+                "$([IO.Path]::GetFileName($FilePath)) did not exit within $TimeoutMilliseconds milliseconds.")
+            try {
+                $process.Kill($true)
+            } catch {
+                throw [System.AggregateException]::new(
+                    'A checked process timed out and could not be terminated.',
+                    [System.Exception[]]@($timeoutFailure, $_.Exception))
+            }
+            [void]$process.WaitForExit(1000)
+            throw $timeoutFailure
+        }
+
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        [void]$stderrTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            throw "$([IO.Path]::GetFileName($FilePath)) exited with code $($process.ExitCode)."
+        }
+        return $stdout
+    } finally {
+        if ($null -ne $process) { $process.Dispose() }
+    }
+}
+
+function Assert-ProductionWebsiteRecoveryPolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Suspended','Normal')]
+        [string]$Policy,
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$QueryOutput
+    )
+
+    $resetMatch = [regex]::Match(
+        $QueryOutput,
+        '(?im)^\s*RESET_PERIOD\s*\(in seconds\)\s*:\s*(?<Seconds>\d+)\s*$')
+    $resetPeriodSeconds = if ($resetMatch.Success) {
+        [int]$resetMatch.Groups['Seconds'].Value
+    } else {
+        $null
+    }
+    $actionMatches = [regex]::Matches(
+        $QueryOutput,
+        '(?im)^\s*(?:FAILURE_ACTIONS\s*:\s*)?(?<Action>RESTART|REBOOT|RUN COMMAND)\s*--\s*Delay\s*=\s*(?<Delay>\d+)\s*milliseconds\.\s*$')
+    $actualActions = @(
+        $actionMatches | ForEach-Object {
+            "$($_.Groups['Action'].Value):$($_.Groups['Delay'].Value)"
+        }
+    )
+    $delayLineCount = [regex]::Matches(
+        $QueryOutput,
+        '(?im)--\s*Delay\s*=').Count
+    $hasEmptyActions = [regex]::IsMatch(
+        $QueryOutput,
+        '(?im)^\s*FAILURE_ACTIONS\s*:\s*$')
+
+    $matchesExpectedPolicy = if ($Policy -eq 'Suspended') {
+        $resetPeriodSeconds -eq 3600 -and
+            $hasEmptyActions -and
+            $delayLineCount -eq 0 -and
+            $actualActions.Count -eq 0
+    } else {
+        $resetPeriodSeconds -eq 3600 -and
+            $delayLineCount -eq 2 -and
+            $actualActions.Count -eq 2 -and
+            $actualActions[0] -eq 'RESTART:10000' -and
+            $actualActions[1] -eq 'RESTART:30000'
+    }
+    if (-not $matchesExpectedPolicy) {
+        $actualReset = if ($null -eq $resetPeriodSeconds) {
+            'unavailable'
+        } else {
+            [string]$resetPeriodSeconds
+        }
+        $actualActionSummary = if ($actualActions.Count -eq 0) {
+            'none'
+        } else {
+            $actualActions -join ', '
+        }
+        $expectedActions = if ($Policy -eq 'Suspended') {
+            'none'
+        } else {
+            'RESTART:10000, RESTART:30000'
+        }
+        throw [System.InvalidOperationException]::new(
+            "$Policy recovery policy verification failed. Expected reset period 3600 seconds and actions $expectedActions; received reset period $actualReset and actions $actualActionSummary.")
+    }
+}
+
 function Set-ProductionWebsiteRecoveryPolicy {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
         [ValidateSet('Suspended','Normal')]
-        [string]$Policy
+        [string]$Policy,
+        [ValidateRange(1,60000)]
+        [int]$RecoveryCommandTimeoutMilliseconds = 5000
     )
 
     $actions = if ($Policy -eq 'Normal') {
@@ -110,19 +228,32 @@ function Set-ProductionWebsiteRecoveryPolicy {
     }
     $phase = if ($Policy -eq 'Normal') { 'restore' } else { 'suspend' }
     try {
-        Invoke-CheckedProcess -FilePath 'sc.exe' -ArgumentList @(
+        Invoke-BoundedCheckedProcess -FilePath 'sc.exe' -ArgumentList @(
             'failure',
             'ChristopherBellDev',
             'reset=',
             '3600',
             'actions=',
             $actions
-        ) | Out-Null
+        ) -TimeoutMilliseconds $RecoveryCommandTimeoutMilliseconds | Out-Null
     } catch {
         throw [System.InvalidOperationException]::new(
-            "Failed to $phase website service recovery.",
+            "Failed to $phase website service recovery during mutation: $($_.Exception.Message)",
             $_.Exception)
     }
+
+    $verificationPhase = if ($Policy -eq 'Normal') { 'restored' } else { 'suspended' }
+    try {
+        $queryOutput = Invoke-BoundedCheckedProcess `
+            -FilePath 'sc.exe' `
+            -ArgumentList @('qfailure','ChristopherBellDev') `
+            -TimeoutMilliseconds $RecoveryCommandTimeoutMilliseconds
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            "Failed to verify $verificationPhase website service recovery: $($_.Exception.Message)",
+            $_.Exception)
+    }
+    Assert-ProductionWebsiteRecoveryPolicy -Policy $Policy -QueryOutput $queryOutput
 }
 
 function Assert-ProductionWebsiteStopped {
@@ -182,40 +313,57 @@ function Stop-ProductionWebsiteService {
         [ValidateRange(1,300)]
         [int]$ServiceTimeoutSeconds = 30,
         [ValidateRange(1,60000)]
-        [int]$PortTimeoutMilliseconds = 10000
+        [int]$PortTimeoutMilliseconds = 10000,
+        [ValidateRange(1,60000)]
+        [int]$RecoveryCommandTimeoutMilliseconds = 5000
     )
 
-    Set-ProductionWebsiteRecoveryPolicy -Policy Suspended
     $operationFailure = $null
     $restoreFailure = $null
+    $suspensionAttempted = $false
     try {
-        $stopFailure = $null
+        $suspensionAttempted = $true
         try {
-            Stop-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+            Set-ProductionWebsiteRecoveryPolicy `
+                -Policy Suspended `
+                -RecoveryCommandTimeoutMilliseconds $RecoveryCommandTimeoutMilliseconds
         } catch {
-            $stopFailure = $_.Exception
+            $operationFailure = $_.Exception
         }
 
-        try {
-            Assert-ProductionWebsiteStopped `
-                -ProductionPort $ProductionPort `
-                -ServiceTimeoutSeconds $ServiceTimeoutSeconds `
-                -PortTimeoutMilliseconds $PortTimeoutMilliseconds
-        } catch {
-            $stateFailure = $_.Exception
-            $operationFailure = if ($stopFailure) {
-                [System.AggregateException]::new(
-                    'Website service stop request and postcondition verification failed.',
-                    [System.Exception[]]@($stopFailure, $stateFailure))
-            } else {
-                $stateFailure
+        if ($null -eq $operationFailure) {
+            $stopFailure = $null
+            try {
+                Stop-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+            } catch {
+                $stopFailure = $_.Exception
+            }
+
+            try {
+                Assert-ProductionWebsiteStopped `
+                    -ProductionPort $ProductionPort `
+                    -ServiceTimeoutSeconds $ServiceTimeoutSeconds `
+                    -PortTimeoutMilliseconds $PortTimeoutMilliseconds
+            } catch {
+                $stateFailure = $_.Exception
+                $operationFailure = if ($stopFailure) {
+                    [System.AggregateException]::new(
+                        'Website service stop request and postcondition verification failed.',
+                        [System.Exception[]]@($stopFailure, $stateFailure))
+                } else {
+                    $stateFailure
+                }
             }
         }
     } finally {
-        try {
-            Set-ProductionWebsiteRecoveryPolicy -Policy Normal
-        } catch {
-            $restoreFailure = $_.Exception
+        if ($suspensionAttempted) {
+            try {
+                Set-ProductionWebsiteRecoveryPolicy `
+                    -Policy Normal `
+                    -RecoveryCommandTimeoutMilliseconds $RecoveryCommandTimeoutMilliseconds
+            } catch {
+                $restoreFailure = $_.Exception
+            }
         }
     }
 
@@ -225,9 +373,7 @@ function Stop-ProductionWebsiteService {
                 'Website service stop and recovery restoration both failed.',
                 [System.Exception[]]@($operationFailure, $restoreFailure))
         }
-        throw [System.InvalidOperationException]::new(
-            'Failed to restore website service recovery after the planned stop.',
-            $restoreFailure)
+        throw $restoreFailure
     }
     if ($operationFailure) { throw $operationFailure }
 }

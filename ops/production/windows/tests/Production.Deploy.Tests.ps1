@@ -25,10 +25,129 @@ Describe 'native Windows deployment' {
                 $service | Add-Member -MemberType ScriptMethod -Name Refresh -Value { }
                 return $service
             }
+
+            function New-RecoveryPolicyQueryOutput {
+                param(
+                    [ValidateSet('Suspended','Normal')]
+                    [string]$Policy,
+                    [int]$ResetPeriodSeconds = 3600
+                )
+
+                $failureActions = if ($Policy -eq 'Normal') {
+                    @(
+                        'FAILURE_ACTIONS              : RESTART -- Delay = 10000 milliseconds.',
+                        '                               RESTART -- Delay = 30000 milliseconds.'
+                    )
+                } else {
+                    @('FAILURE_ACTIONS              :')
+                }
+                return @(
+                    '[SC] QueryServiceConfig2 SUCCESS',
+                    '',
+                    'SERVICE_NAME: ChristopherBellDev',
+                    "        RESET_PERIOD (in seconds)    : $ResetPeriodSeconds",
+                    '        REBOOT_MESSAGE               :',
+                    '        COMMAND_LINE                 :'
+                ) + $failureActions -join [Environment]::NewLine
+            }
+
+            function Invoke-RecoveryCommandDouble {
+                param($FilePath, $ArgumentList, $TimeoutMilliseconds)
+                $null = $FilePath
+                $null = $TimeoutMilliseconds
+                $command = [string]$ArgumentList[0]
+                if ($command -eq 'failure') {
+                    $policy = if ([string]::IsNullOrEmpty([string]$ArgumentList[-1])) {
+                        'Suspended'
+                    } else {
+                        'Normal'
+                    }
+                    [void]$script:recoveryCommands.Add("failure:$($ArgumentList[-1])")
+                    $mode = if ($policy -eq 'Suspended') {
+                        $script:suspendedRecoveryMode
+                    } else {
+                        $script:normalRecoveryMode
+                    }
+                    if ($mode -eq 'MutationFailure') {
+                        throw "simulated $($policy.ToLowerInvariant()) mutation failure"
+                    }
+                    if ($mode -eq 'MutationTimeout') {
+                        throw [System.TimeoutException]::new(
+                            "simulated $($policy.ToLowerInvariant()) mutation timeout")
+                    }
+                    $script:configuredRecoveryPolicy = $policy
+                    return ''
+                }
+                if ($command -eq 'qfailure') {
+                    [void]$script:recoveryCommands.Add('qfailure')
+                    $mode = if ($script:configuredRecoveryPolicy -eq 'Suspended') {
+                        $script:suspendedRecoveryMode
+                    } else {
+                        $script:normalRecoveryMode
+                    }
+                    if ($mode -eq 'QueryFailure') {
+                        throw "simulated $($script:configuredRecoveryPolicy.ToLowerInvariant()) query failure"
+                    }
+                    if ($mode -eq 'QueryTimeout') {
+                        throw [System.TimeoutException]::new(
+                            "simulated $($script:configuredRecoveryPolicy.ToLowerInvariant()) query timeout")
+                    }
+                    if ($mode -eq 'Mismatch') {
+                        $oppositePolicy = if ($script:configuredRecoveryPolicy -eq 'Normal') {
+                            'Suspended'
+                        } else {
+                            'Normal'
+                        }
+                        return New-RecoveryPolicyQueryOutput -Policy $oppositePolicy
+                    }
+                    if ($mode -eq 'ResetMismatch') {
+                        return New-RecoveryPolicyQueryOutput `
+                            -Policy $script:configuredRecoveryPolicy `
+                            -ResetPeriodSeconds 42
+                    }
+                    return New-RecoveryPolicyQueryOutput -Policy $script:configuredRecoveryPolicy
+                }
+                throw "Unexpected recovery command: $command"
+            }
         }
 
+        It 'bounds checked processes that do not exit' {
+            $slowPowerShell = Join-Path $PSHOME 'pwsh.exe'
+            $watch = [Diagnostics.Stopwatch]::StartNew()
+
+            {
+                Invoke-BoundedCheckedProcess `
+                    -FilePath $slowPowerShell `
+                    -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 10') `
+                    -TimeoutMilliseconds 100
+            } | Should -Throw '*did not exit within 100 milliseconds*'
+
+            $watch.Elapsed | Should -BeLessThan ([timespan]::FromSeconds(5))
+        }
+
+        Context 'controlled website service stop' {
+            BeforeEach {
+                $script:configuredRecoveryPolicy = 'Normal'
+                $script:suspendedRecoveryMode = $null
+                $script:normalRecoveryMode = $null
+                $script:recoveryCommands = [System.Collections.Generic.List[string]]::new()
+                Mock Invoke-BoundedCheckedProcess {
+                    param($FilePath, $ArgumentList, $TimeoutMilliseconds)
+                    Invoke-RecoveryCommandDouble @PSBoundParameters
+                }
+                Mock Invoke-CheckedProcess {
+                    param($FilePath, $ArgumentList)
+                    Invoke-RecoveryCommandDouble @PSBoundParameters
+                }
+                Mock Stop-Service { throw 'unexpected real stop seam reached' }
+                Mock Get-Service { throw 'unexpected real service query seam reached' }
+                Mock Get-NetTCPConnection { throw 'unexpected real TCP query seam reached' }
+                Mock Start-Service { throw 'unexpected real start seam reached' }
+                Mock Set-AtomicJunction { throw 'unexpected real junction seam reached' }
+                Mock Test-ProductionEndpoints { throw 'unexpected real endpoint seam reached' }
+            }
+
         It 'accepts the WinSW stop exception only after stopped service and closed port postconditions pass' {
-            Mock Invoke-CheckedProcess { '' }
             Mock Stop-Service { throw 'simulated WinSW invalid handle failure' }
             Mock Get-Service { New-ServiceStateStub }
             Mock Get-NetTCPConnection { }
@@ -37,31 +156,52 @@ Describe 'native Windows deployment' {
                 Stop-ProductionWebsiteService -ProductionPort 8080 -PortTimeoutMilliseconds 1
             } | Should -Not -Throw
 
-            Should -Invoke Invoke-CheckedProcess -Times 1 -Exactly -ParameterFilter {
-                $FilePath -eq 'sc.exe' -and $ArgumentList[-1] -eq ''
+            ($script:recoveryCommands -join '|') | Should -Be (
+                'failure:|qfailure|failure:restart/10000/restart/30000|qfailure')
+            Should -Invoke Invoke-BoundedCheckedProcess -Times 4 -Exactly -ParameterFilter {
+                $FilePath -eq 'sc.exe' -and $TimeoutMilliseconds -eq 5000
             }
-            Should -Invoke Invoke-CheckedProcess -Times 1 -Exactly -ParameterFilter {
-                $FilePath -eq 'sc.exe' -and
-                $ArgumentList[-1] -eq 'restart/10000/restart/30000'
+            Should -Invoke Invoke-BoundedCheckedProcess -Times 1 -Exactly -ParameterFilter {
+                $ArgumentList[0] -eq 'failure' -and
+                $ArgumentList[1] -eq 'ChristopherBellDev' -and
+                $ArgumentList[2] -eq 'reset=' -and
+                $ArgumentList[3] -eq '3600' -and
+                $ArgumentList[4] -eq 'actions=' -and
+                [string]::IsNullOrEmpty([string]$ArgumentList[5])
+            }
+            Should -Invoke Invoke-BoundedCheckedProcess -Times 1 -Exactly -ParameterFilter {
+                $ArgumentList[0] -eq 'failure' -and
+                $ArgumentList[1] -eq 'ChristopherBellDev' -and
+                $ArgumentList[2] -eq 'reset=' -and
+                $ArgumentList[3] -eq '3600' -and
+                $ArgumentList[4] -eq 'actions=' -and
+                $ArgumentList[5] -eq 'restart/10000/restart/30000'
+            }
+            Should -Invoke Invoke-BoundedCheckedProcess -Times 2 -Exactly -ParameterFilter {
+                $ArgumentList.Count -eq 2 -and
+                $ArgumentList[0] -eq 'qfailure' -and
+                $ArgumentList[1] -eq 'ChristopherBellDev'
             }
         }
 
-        It 'fails closed when the website service does not reach Stopped' {
-            Mock Invoke-CheckedProcess { '' }
+        It 'preserves stop request and failed postcondition causes in order' {
             Mock Stop-Service { throw 'simulated WinSW invalid handle failure' }
             Mock Get-Service { New-ServiceStateStub -Status Running -WaitFails }
 
-            {
+            $failure = try {
                 Stop-ProductionWebsiteService -ProductionPort 8080 -ServiceTimeoutSeconds 1
-            } | Should -Throw '*did not reach Stopped*'
-
-            Should -Invoke Invoke-CheckedProcess -Times 1 -Exactly -ParameterFilter {
-                $ArgumentList[-1] -eq 'restart/10000/restart/30000'
+                $null
+            } catch {
+                $_.Exception
             }
+
+            $failure.GetType().FullName | Should -Be 'System.AggregateException'
+            @($failure.InnerExceptions).Count | Should -Be 2
+            $failure.InnerExceptions[0].Message | Should -Be 'simulated WinSW invalid handle failure'
+            $failure.InnerExceptions[1].Message | Should -Match '^ChristopherBellDev did not reach Stopped'
         }
 
         It 'fails closed when the production port remains open' {
-            Mock Invoke-CheckedProcess { '' }
             Mock Stop-Service { }
             Mock Get-Service { New-ServiceStateStub }
             Mock Get-NetTCPConnection {
@@ -75,7 +215,6 @@ Describe 'native Windows deployment' {
         }
 
         It 'fails closed when the production port cannot be inspected' {
-            Mock Invoke-CheckedProcess { '' }
             Mock Stop-Service { }
             Mock Get-Service { New-ServiceStateStub }
             Mock Get-NetTCPConnection { throw 'simulated TCP inspection failure' }
@@ -85,33 +224,182 @@ Describe 'native Windows deployment' {
             } | Should -Throw '*inspect production port 8080*'
         }
 
-        It 'does not request a stop when recovery suspension fails' {
-            Mock Invoke-CheckedProcess {
-                if ($ArgumentList[-1] -eq '') { throw 'simulated recovery suspension failure' }
-            }
+        It 'restores normal policy and avoids stop when suspension mutation fails' {
+            $script:suspendedRecoveryMode = 'MutationFailure'
             Mock Stop-Service { }
 
             {
                 Stop-ProductionWebsiteService -ProductionPort 8080
-            } | Should -Throw '*suspend website service recovery*'
+            } | Should -Throw '*suspend website service recovery*mutation*'
+
+            Should -Invoke Stop-Service -Times 0
+            ($script:recoveryCommands -join '|') | Should -Be (
+                'failure:|failure:restart/10000/restart/30000|qfailure')
+        }
+
+        It 'restores normal policy and avoids stop when suspension mutation times out' {
+            $script:suspendedRecoveryMode = 'MutationTimeout'
+            Mock Stop-Service { }
+
+            {
+                Stop-ProductionWebsiteService -ProductionPort 8080
+            } | Should -Throw '*suspend website service recovery*timeout*'
+
+            Should -Invoke Stop-Service -Times 0
+            ($script:recoveryCommands -join '|') | Should -Be (
+                'failure:|failure:restart/10000/restart/30000|qfailure')
+        }
+
+        It 'restores normal policy and avoids stop when suspension query fails' {
+            $script:suspendedRecoveryMode = 'QueryFailure'
+            Mock Stop-Service { }
+
+            {
+                Stop-ProductionWebsiteService -ProductionPort 8080
+            } | Should -Throw '*verify suspended website service recovery*'
+
+            Should -Invoke Stop-Service -Times 0
+            ($script:recoveryCommands -join '|') | Should -Be (
+                'failure:|qfailure|failure:restart/10000/restart/30000|qfailure')
+        }
+
+        It 'restores normal policy and avoids stop when suspension query times out' {
+            $script:suspendedRecoveryMode = 'QueryTimeout'
+            Mock Stop-Service { }
+
+            {
+                Stop-ProductionWebsiteService -ProductionPort 8080
+            } | Should -Throw '*verify suspended website service recovery*timeout*'
+
+            Should -Invoke Stop-Service -Times 0
+            ($script:recoveryCommands -join '|') | Should -Be (
+                'failure:|qfailure|failure:restart/10000/restart/30000|qfailure')
+        }
+
+        It 'restores normal policy and avoids stop when suspended policy verification mismatches' {
+            $script:suspendedRecoveryMode = 'Mismatch'
+            Mock Stop-Service { }
+
+            {
+                Stop-ProductionWebsiteService -ProductionPort 8080
+            } | Should -Throw '*Suspended recovery policy verification failed*'
 
             Should -Invoke Stop-Service -Times 0
         }
 
-        It 'blocks restart when recovery restoration fails' {
-            Mock Invoke-CheckedProcess {
-                if ($ArgumentList[-1] -eq 'restart/10000/restart/30000') {
-                    throw 'simulated recovery restoration failure'
-                }
-                return ''
+        It 'preserves suspension and restoration failures in order' {
+            $script:suspendedRecoveryMode = 'MutationFailure'
+            $script:normalRecoveryMode = 'MutationFailure'
+            Mock Stop-Service { }
+
+            $failure = try {
+                Stop-ProductionWebsiteService -ProductionPort 8080
+                $null
+            } catch {
+                $_.Exception
             }
+
+            $failure.GetType().FullName | Should -Be 'System.AggregateException'
+            @($failure.InnerExceptions).Count | Should -Be 2
+            $failure.InnerExceptions[0].Message | Should -Match '^Failed to suspend website service recovery during mutation'
+            $failure.InnerExceptions[1].Message | Should -Match '^Failed to restore website service recovery during mutation'
+            Should -Invoke Stop-Service -Times 0
+        }
+
+        It 'preserves postcondition and restoration failures in order' {
+            $script:normalRecoveryMode = 'MutationFailure'
+            Mock Stop-Service { }
+            Mock Get-Service { New-ServiceStateStub -Status Running -WaitFails }
+
+            $failure = try {
+                Stop-ProductionWebsiteService -ProductionPort 8080 -ServiceTimeoutSeconds 1
+                $null
+            } catch {
+                $_.Exception
+            }
+
+            $failure.GetType().FullName | Should -Be 'System.AggregateException'
+            @($failure.InnerExceptions).Count | Should -Be 2
+            $failure.InnerExceptions[0].Message | Should -Match '^ChristopherBellDev did not reach Stopped'
+            $failure.InnerExceptions[1].Message | Should -Match '^Failed to restore website service recovery during mutation'
+        }
+
+        It 'fails closed when restored policy query times out' {
+            $script:normalRecoveryMode = 'QueryTimeout'
             Mock Stop-Service { }
             Mock Get-Service { New-ServiceStateStub }
             Mock Get-NetTCPConnection { }
 
             {
                 Stop-ProductionWebsiteService -ProductionPort 8080
-            } | Should -Throw '*restore website service recovery*'
+            } | Should -Throw '*verify restored website service recovery*timeout*'
+        }
+
+        It 'fails closed when restored policy query fails' {
+            $script:normalRecoveryMode = 'QueryFailure'
+            Mock Stop-Service { }
+            Mock Get-Service { New-ServiceStateStub }
+            Mock Get-NetTCPConnection { }
+
+            {
+                Stop-ProductionWebsiteService -ProductionPort 8080
+            } | Should -Throw '*verify restored website service recovery*query failure*'
+        }
+
+        It 'fails closed when restored policy mutation times out' {
+            $script:normalRecoveryMode = 'MutationTimeout'
+            Mock Stop-Service { }
+            Mock Get-Service { New-ServiceStateStub }
+            Mock Get-NetTCPConnection { }
+
+            {
+                Stop-ProductionWebsiteService -ProductionPort 8080
+            } | Should -Throw '*restore website service recovery*mutation*timeout*'
+        }
+
+        It 'fails closed when restored policy verification mismatches' {
+            $script:normalRecoveryMode = 'Mismatch'
+            Mock Stop-Service { }
+            Mock Get-Service { New-ServiceStateStub }
+            Mock Get-NetTCPConnection { }
+
+            {
+                Stop-ProductionWebsiteService -ProductionPort 8080
+            } | Should -Throw '*Normal recovery policy verification failed*'
+        }
+
+        It 'fails closed when restored policy reset period mismatches' {
+            $script:normalRecoveryMode = 'ResetMismatch'
+            Mock Stop-Service { }
+            Mock Get-Service { New-ServiceStateStub }
+            Mock Get-NetTCPConnection { }
+
+            {
+                Stop-ProductionWebsiteService -ProductionPort 8080
+            } | Should -Throw '*Normal recovery policy verification failed*reset period 3600*'
+        }
+
+        It 'blocks junction changes and restart when normal recovery verification fails' {
+            $script:normalRecoveryMode = 'Mismatch'
+            Mock Assert-ReleasePath { $Path }
+            Mock Get-JunctionTarget { 'C:\data\releases\old' }
+            Mock Stop-Service { }
+            Mock Get-Service { New-ServiceStateStub }
+            Mock Get-NetTCPConnection { }
+            Mock Set-AtomicJunction { }
+            Mock Start-Service { }
+            $config = [pscustomobject]@{
+                programDataRoot = 'C:\data'
+                productionPort = 8080
+            }
+
+            {
+                Switch-ProductionRelease $config 'C:\data\releases\new'
+            } | Should -Throw '*Normal recovery policy verification failed*'
+
+            Should -Invoke Set-AtomicJunction -Times 0
+            Should -Invoke Start-Service -Times 0
+        }
         }
 
         It 'resolves fetched remote main instead of the checked out branch' {
@@ -166,9 +454,18 @@ Describe 'native Windows deployment' {
                 productionPort = 8080
             }
 
-            {
+            $failure = try {
                 Switch-ProductionRelease $config 'C:\data\releases\new'
-            } | Should -Throw '*deployment and automatic rollback both failed*'
+                $null
+            } catch {
+                $_.Exception
+            }
+
+            $failure.GetType().FullName | Should -Be 'System.AggregateException'
+            $failure.Message | Should -Match '^Production deployment and automatic rollback both failed\.'
+            @($failure.InnerExceptions).Count | Should -Be 2
+            $failure.InnerExceptions[0].Message | Should -Be 'deployment verification failed'
+            $failure.InnerExceptions[1].Message | Should -Be 'rollback stop failed'
         }
 
         It 'overrides the candidate database for migration validation' {
