@@ -30,9 +30,16 @@ Describe 'native Windows deployment' {
                 param(
                     [ValidateSet('Suspended','Normal')]
                     [string]$Policy,
-                    [int]$ResetPeriodSeconds = 3600
+                    [Nullable[int]]$ResetPeriodSeconds
                 )
 
+                $effectiveResetPeriodSeconds = if ($null -ne $ResetPeriodSeconds) {
+                    [int]$ResetPeriodSeconds
+                } elseif ($Policy -eq 'Suspended') {
+                    0
+                } else {
+                    3600
+                }
                 $failureActions = if ($Policy -eq 'Normal') {
                     @(
                         'FAILURE_ACTIONS              : RESTART -- Delay = 10000 milliseconds.',
@@ -45,7 +52,7 @@ Describe 'native Windows deployment' {
                     '[SC] QueryServiceConfig2 SUCCESS',
                     '',
                     'SERVICE_NAME: ChristopherBellDev',
-                    "        RESET_PERIOD (in seconds)    : $ResetPeriodSeconds",
+                    "        RESET_PERIOD (in seconds)    : $effectiveResetPeriodSeconds",
                     '        REBOOT_MESSAGE               :',
                     '        COMMAND_LINE                 :'
                 ) + $failureActions -join [Environment]::NewLine
@@ -76,6 +83,7 @@ Describe 'native Windows deployment' {
                             "simulated $($policy.ToLowerInvariant()) mutation timeout")
                     }
                     $script:configuredRecoveryPolicy = $policy
+                    $script:configuredRecoveryResetPeriodSeconds = [int]$ArgumentList[3]
                     return ''
                 }
                 if ($command -eq 'qfailure') {
@@ -105,10 +113,91 @@ Describe 'native Windows deployment' {
                             -Policy $script:configuredRecoveryPolicy `
                             -ResetPeriodSeconds 42
                     }
-                    return New-RecoveryPolicyQueryOutput -Policy $script:configuredRecoveryPolicy
+                    if ($mode -eq 'DuplicateReset') {
+                        return @(
+                            New-RecoveryPolicyQueryOutput `
+                                -Policy $script:configuredRecoveryPolicy `
+                                -ResetPeriodSeconds $script:configuredRecoveryResetPeriodSeconds
+                            '        RESET_PERIOD (in seconds)    : 42'
+                        ) -join [Environment]::NewLine
+                    }
+                    if ($mode -eq 'DuplicateFailureActions') {
+                        return @(
+                            New-RecoveryPolicyQueryOutput `
+                                -Policy $script:configuredRecoveryPolicy `
+                                -ResetPeriodSeconds $script:configuredRecoveryResetPeriodSeconds
+                            '        FAILURE_ACTIONS              : RESUME'
+                        ) -join [Environment]::NewLine
+                    }
+                    return New-RecoveryPolicyQueryOutput `
+                        -Policy $script:configuredRecoveryPolicy `
+                        -ResetPeriodSeconds $script:configuredRecoveryResetPeriodSeconds
                 }
                 throw "Unexpected recovery command: $command"
             }
+        }
+
+        It 'accepts the Windows-normalized suspended policy with reset period zero' {
+            $queryOutput = New-RecoveryPolicyQueryOutput `
+                -Policy Suspended -ResetPeriodSeconds 0
+
+            {
+                Assert-ProductionWebsiteRecoveryPolicy `
+                    -Policy Suspended -QueryOutput $queryOutput
+            } | Should -Not -Throw
+        }
+
+        It 'rejects a nonzero reset period for suspended recovery' {
+            $queryOutput = New-RecoveryPolicyQueryOutput `
+                -Policy Suspended -ResetPeriodSeconds 42
+
+            {
+                Assert-ProductionWebsiteRecoveryPolicy `
+                    -Policy Suspended -QueryOutput $queryOutput
+            } | Should -Throw '*Expected reset period 0*received reset period 42*'
+        }
+
+        It 'rejects reset period zero for normal recovery' {
+            $queryOutput = New-RecoveryPolicyQueryOutput `
+                -Policy Normal -ResetPeriodSeconds 0
+
+            {
+                Assert-ProductionWebsiteRecoveryPolicy `
+                    -Policy Normal -QueryOutput $queryOutput
+            } | Should -Throw '*Expected reset period 3600*received reset period 0*'
+        }
+
+        It 'accepts one labeled normal restart followed by one unlabeled restart' {
+            $queryOutput = New-RecoveryPolicyQueryOutput -Policy Normal
+
+            {
+                Assert-ProductionWebsiteRecoveryPolicy `
+                    -Policy Normal -QueryOutput $queryOutput
+            } | Should -Not -Throw
+        }
+
+        It 'rejects contradictory duplicate reset-period fields' {
+            $queryOutput = @(
+                New-RecoveryPolicyQueryOutput -Policy Suspended
+                '        RESET_PERIOD (in seconds)    : 42'
+            ) -join [Environment]::NewLine
+
+            {
+                Assert-ProductionWebsiteRecoveryPolicy `
+                    -Policy Suspended -QueryOutput $queryOutput
+            } | Should -Throw '*Suspended recovery policy verification failed*'
+        }
+
+        It 'rejects an empty failure-actions field followed by an unrecognized duplicate field' {
+            $queryOutput = @(
+                New-RecoveryPolicyQueryOutput -Policy Suspended
+                '        FAILURE_ACTIONS              : RESUME'
+            ) -join [Environment]::NewLine
+
+            {
+                Assert-ProductionWebsiteRecoveryPolicy `
+                    -Policy Suspended -QueryOutput $queryOutput
+            } | Should -Throw '*Suspended recovery policy verification failed*'
         }
 
         It 'bounds checked processes that do not exit' {
@@ -128,6 +217,7 @@ Describe 'native Windows deployment' {
         Context 'controlled website service stop' {
             BeforeEach {
                 $script:configuredRecoveryPolicy = 'Normal'
+                $script:configuredRecoveryResetPeriodSeconds = 3600
                 $script:suspendedRecoveryMode = $null
                 $script:normalRecoveryMode = $null
                 $script:recoveryCommands = [System.Collections.Generic.List[string]]::new()
@@ -165,7 +255,7 @@ Describe 'native Windows deployment' {
                 $ArgumentList[0] -eq 'failure' -and
                 $ArgumentList[1] -eq 'ChristopherBellDev' -and
                 $ArgumentList[2] -eq 'reset=' -and
-                $ArgumentList[3] -eq '3600' -and
+                $ArgumentList[3] -eq '0' -and
                 $ArgumentList[4] -eq 'actions=' -and
                 [string]::IsNullOrEmpty([string]$ArgumentList[5])
             }
@@ -285,6 +375,32 @@ Describe 'native Windows deployment' {
             } | Should -Throw '*Suspended recovery policy verification failed*'
 
             Should -Invoke Stop-Service -Times 0
+        }
+
+        It 'restores normal policy and avoids stop for contradictory duplicate reset-period fields' {
+            $script:suspendedRecoveryMode = 'DuplicateReset'
+            Mock Stop-Service { }
+
+            {
+                Stop-ProductionWebsiteService -ProductionPort 8080
+            } | Should -Throw '*Suspended recovery policy verification failed*'
+
+            Should -Invoke Stop-Service -Times 0
+            ($script:recoveryCommands -join '|') | Should -Be (
+                'failure:|qfailure|failure:restart/10000/restart/30000|qfailure')
+        }
+
+        It 'restores normal policy and avoids stop for duplicate failure-actions fields' {
+            $script:suspendedRecoveryMode = 'DuplicateFailureActions'
+            Mock Stop-Service { }
+
+            {
+                Stop-ProductionWebsiteService -ProductionPort 8080
+            } | Should -Throw '*Suspended recovery policy verification failed*'
+
+            Should -Invoke Stop-Service -Times 0
+            ($script:recoveryCommands -join '|') | Should -Be (
+                'failure:|qfailure|failure:restart/10000/restart/30000|qfailure')
         }
 
         It 'preserves suspension and restoration failures in order' {
