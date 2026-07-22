@@ -126,8 +126,10 @@ Unavailable` and never falls back to an unchecked production path.
   size. Spring fully writes and flushes `{jobId}.json` before publishing `{jobId}.ready`; the
   worker watches the marker and then reads the matching descriptor. Worker status JSON is
   size-bounded and accepted only for the matching opaque job with a known state, bounded output
-  count, and safe failure category. Spring publishes only one job descriptor at a time; the worker
-  adds its own cross-process lock in the worker task.
+  count, and safe failure category. Spring serializes admission, cancellation, reconciliation, and
+  descriptor publication under one bounded scheduler lock. It publishes only one active descriptor,
+  recovers an interrupted publication idempotently, and advances unattended terminal jobs; the
+  worker adds its own cross-process lock in the worker task.
 - `GET /media/jobs/{id}/stream` rechecks read access, restricts active work to its owner, and lets
   any current reader use a completed shared cache. A growing output streams sequentially after the
   configured initial buffer with bounded polling, then follows the worker's atomic ready-cache

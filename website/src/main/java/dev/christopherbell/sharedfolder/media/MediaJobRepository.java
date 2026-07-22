@@ -27,7 +27,8 @@ public interface MediaJobRepository extends MongoRepository<MediaJob, String> {
   Optional<MediaJob> findFirstByStatusAndDescriptorPublishedFalseOrderByCreatedAtAsc(
       MediaJobStatus status);
 
-  long countByDescriptorPublishedTrueAndStatusIn(Collection<MediaJobStatus> statuses);
+  Optional<MediaJob> findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(
+      Collection<MediaJobStatus> statuses);
 
   Slice<MediaJob> findByStatusOrderByLastAccessedAtAscIdAsc(
       MediaJobStatus status, Pageable pageable);

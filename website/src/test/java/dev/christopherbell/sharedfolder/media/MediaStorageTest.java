@@ -33,7 +33,8 @@ class MediaStorageTest {
     MediaJob ready = job("ready", "a".repeat(64));
     storage.writeReadyForTest(ready, "12345678".getBytes());
 
-    assertThat(storage.readyLength(ready, 7)).isEqualTo(-1);
+    assertThatThrownBy(() -> storage.readyLength(ready, 7)).isInstanceOf(IOException.class);
+    assertThat(storage.readyLength(job("missing", "c".repeat(64)), 7)).isEmpty();
     assertThatThrownBy(() -> storage.copy(
         ready, true, 0, 8, new ByteArrayOutputStream(), 7)).isInstanceOf(IOException.class);
     assertThat(storage.isBeingRead(ready.getCacheKey())).isFalse();

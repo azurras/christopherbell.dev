@@ -24,12 +24,13 @@ class ProgressiveMediaStreamerTest {
   private MediaJobRepository jobs;
   private ProgressiveMediaStreamer streamer;
   private MediaJob job;
+  private SharedFolderProperties folders;
 
   @BeforeEach
   void setUp() throws Exception {
     Path shared = Files.createDirectory(temp.resolve("shared"));
     Path system = Files.createDirectory(temp.resolve("system"));
-    SharedFolderProperties folders = new SharedFolderProperties(
+    folders = new SharedFolderProperties(
         shared, system, DataSize.ofGigabytes(10), DataSize.ofMegabytes(8),
         DataSize.ofBytes(10), DataSize.ofGigabytes(1), Duration.ofDays(1),
         Duration.ofDays(1), true);
@@ -93,6 +94,9 @@ class ProgressiveMediaStreamerTest {
     assertThat(selection.length()).isEqualTo(4);
     assertThat(selection.totalLength()).isEqualTo(10);
     assertThat(selection.partial()).isTrue();
+    assertThat(storage.deleteReady(job)).isFalse();
+    selection.close();
+    assertThat(storage.deleteReady(job)).isTrue();
   }
 
   @Test
@@ -103,6 +107,39 @@ class ProgressiveMediaStreamerTest {
     ByteArrayOutputStream output = new ByteArrayOutputStream();
 
     streamer.copyGrowing(job, output);
+
+    assertThat(output.toString()).isEqualTo("fragment");
+  }
+
+  @Test
+  void progressiveCopyRetriesReadyOutputWhenPartialMovesDuringOpen() throws Exception {
+    MediaStorage racingStorage = new MediaStorage(folders) {
+      private boolean published;
+
+      @Override
+      public long copy(
+          MediaJob current, boolean ready, long position, long length,
+          java.io.OutputStream output, long maximum) throws java.io.IOException {
+        if (!ready && !published) {
+          published = true;
+          writeReadyForTest(current, "fragment".getBytes());
+          writeStatusForTest(current, MediaJobStatus.READY, 8, null);
+          Files.deleteIfExists(partialPath(current));
+          throw new java.nio.file.NoSuchFileException(partialPath(current).toString());
+        }
+        return super.copy(current, ready, position, length, output, maximum);
+      }
+    };
+    racingStorage.initialize();
+    Files.write(racingStorage.partialPath(job), "frag".getBytes());
+    when(jobs.findById("job-1")).thenReturn(Optional.of(job));
+    ProgressiveMediaStreamer racing = new ProgressiveMediaStreamer(racingStorage, jobs,
+        new SharedFolderMediaProperties(
+            4, 2, Duration.ofMinutes(1), Duration.ofMillis(10), Duration.ofSeconds(1),
+            DataSize.ofBytes(4), DataSize.ofMegabytes(10)));
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+    racing.copyGrowing(job, output);
 
     assertThat(output.toString()).isEqualTo("fragment");
   }

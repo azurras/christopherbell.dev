@@ -74,7 +74,11 @@ public class ProgressiveMediaController {
               "bytes " + selection.start() + "-" + (selection.start() + selection.length() - 1)
                   + "/" + selection.totalLength());
         }
-        StreamingResponseBody body = output -> streamer.copyReady(selection, output);
+        StreamingResponseBody body = output -> {
+          try (selection) {
+            streamer.copyReady(selection, output);
+          }
+        };
         return new ResponseEntity<>(body, headers,
             selection.partial() ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK);
       } catch (SharedFolderRangeNotSatisfiableException exception) {

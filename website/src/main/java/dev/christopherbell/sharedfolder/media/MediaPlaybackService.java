@@ -142,7 +142,7 @@ public class MediaPlaybackService {
           throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
               "This media is already being prepared. Try again shortly.");
         }
-        publishIfIdle(job, source);
+        publishIfIdleLocked(job, source);
         audit.recordFor(account, "MEDIA_QUEUED", path, source.size(), "accepted", null);
         return MediaPlaybackDescriptor.from(job);
       }
@@ -159,26 +159,28 @@ public class MediaPlaybackService {
 
   public MediaPlaybackDescriptor cancel(String id) {
     Account account = access.requireRead();
-    MediaJob job = owned(id, account.getId());
-    if (!job.getStatus().terminal()) {
-      try {
-        storage.requestCancellation(job);
-      } catch (IOException failure) {
-        throw unavailable();
+    synchronized (admissionLock) {
+      MediaJob job = owned(id, account.getId());
+      if (!job.getStatus().terminal()) {
+        try {
+          storage.requestCancellation(job);
+        } catch (IOException failure) {
+          throw unavailable();
+        }
+        if (jobs.cancelActive(id, account.getId(), clock.instant()) != 1) {
+          job = owned(id, account.getId());
+        } else {
+          job.setStatus(MediaJobStatus.CANCELED);
+          job.setActiveCacheKey(null);
+          job.setDescriptorPublished(false);
+          job.setUpdatedAt(clock.instant());
+          audit.recordFor(account, "MEDIA_CANCELED", job.getSourcePath(), job.getOutputBytes(),
+              "accepted", null);
+          publishNextIfIdleLocked();
+        }
       }
-      if (jobs.cancelActive(id, account.getId(), clock.instant()) != 1) {
-        job = owned(id, account.getId());
-      } else {
-        job.setStatus(MediaJobStatus.CANCELED);
-        job.setActiveCacheKey(null);
-        job.setDescriptorPublished(false);
-        job.setUpdatedAt(clock.instant());
-        audit.recordFor(account, "MEDIA_CANCELED", job.getSourcePath(), job.getOutputBytes(),
-            "accepted", null);
-        publishNextIfIdle();
-      }
+      return MediaPlaybackDescriptor.from(job);
     }
-    return MediaPlaybackDescriptor.from(job);
   }
 
   public MediaJob requireVisibleJob(String id) {
@@ -187,27 +189,32 @@ public class MediaPlaybackService {
   }
 
   /** Reconciles one already-authorized job from a strict status document and actual output size. */
-  synchronized MediaJob refreshWorkerState(MediaJob job) {
+  MediaJob refreshWorkerState(MediaJob job) {
+    synchronized (admissionLock) {
+      return refreshWorkerStateLocked(job);
+    }
+  }
+
+  private MediaJob refreshWorkerStateLocked(MediaJob job) {
     Instant now = clock.instant();
-    if (job.getStatus() == MediaJobStatus.READY
-        && !storage.readyMatches(job, job.getOutputBytes(), properties.maxOutput().toBytes())) {
+    if (job.getStatus() == MediaJobStatus.READY) {
+      requireCurrentReadySource(job);
       return job;
     }
     if (!job.getStatus().terminal() && !job.getDeadline().isAfter(now)) {
       terminal(job, MediaJobStatus.TIMED_OUT, "timeout", now);
       audit.recordSystem("MEDIA_TIMED_OUT", job.getSourcePath(), job.getOutputBytes(),
           "rejected", "timeout");
-      publishNextIfIdle();
+      publishNextIfIdleLocked();
       return job;
     }
-    var status = storage.readStatus(job, properties.maxOutput().toBytes());
+    var status = readWorkerStatus(job);
     if (status.isEmpty() || status.get().status() == job.getStatus()
         || !validTransition(job.getStatus(), status.get().status())
         || (MediaJobStatus.processing().contains(status.get().status())
             && !job.isDescriptorPublished())
         || status.get().status() == MediaJobStatus.READY
-            && !storage.readyMatches(
-                job, status.get().outputBytes(), properties.maxOutput().toBytes())) {
+            && !readyMatchesOrRejectOversized(job, status.get().outputBytes())) {
       return job;
     }
     job.setStatus(status.get().status());
@@ -238,7 +245,7 @@ public class MediaPlaybackService {
       if (job.getStatus() == MediaJobStatus.READY) {
         evictCache(activeReservations(), 0, Set.of(job.getCacheKey()));
       }
-      publishNextIfIdle();
+      publishNextIfIdleLocked();
     }
     return job;
   }
@@ -247,40 +254,57 @@ public class MediaPlaybackService {
   @Scheduled(fixedDelayString = "${app.shared-folder.media.admission-poll:PT5S}")
   public void promoteQueuedJob() {
     synchronized (admissionLock) {
-      publishNextIfIdle();
+      MediaJob published = publishedActiveJob().orElse(null);
+      if (published == null) {
+        publishNextIfIdleLocked();
+        return;
+      }
+      MediaJob refreshed = refreshWorkerStateLocked(published);
+      if (refreshed.getStatus().terminal()) return;
+      try {
+        MediaSourceSnapshot source = requireCurrentSourceRevision(refreshed);
+        storage.writeDescriptor(descriptor(refreshed, source));
+      } catch (ResponseStatusException failure) {
+        if (failure.getStatusCode() != HttpStatus.NOT_FOUND) throw failure;
+        rejectChangedSource(refreshed);
+        publishNextIfIdleLocked();
+      } catch (IOException failure) {
+        terminal(refreshed, MediaJobStatus.FAILED, "storage_unavailable", clock.instant());
+        audit.recordSystemFailure("MEDIA_PUBLISH_FAILED", refreshed.getSourcePath(), null,
+            unavailable(failure));
+        publishNextIfIdleLocked();
+      }
     }
   }
 
-  private void publishNextIfIdle() {
-    if (jobs.countByDescriptorPublishedTrueAndStatusIn(MediaJobStatus.active()) > 0) return;
+  private void publishNextIfIdleLocked() {
+    if (publishedActiveJob().isPresent()) return;
     while (true) {
       MediaJob next = jobs.findFirstByStatusAndDescriptorPublishedFalseOrderByCreatedAtAsc(
           MediaJobStatus.QUEUED).orElse(null);
       if (next == null) return;
       try {
-        MediaSourceSnapshot source = sources.resolve(next.getSourcePath());
-        String currentKey = MediaCacheKeys.forSource(source, next.getProfile(), next.getProfileVersion());
-        if (!currentKey.equals(next.getCacheKey())) {
-          terminal(next, MediaJobStatus.FAILED, "source_changed", clock.instant());
-          continue;
-        }
+        MediaSourceSnapshot source = requireCurrentSourceRevision(next);
         publish(next, source);
         return;
-      } catch (IOException | RuntimeException failure) {
+      } catch (ResponseStatusException failure) {
+        if (failure.getStatusCode() != HttpStatus.NOT_FOUND) throw failure;
+        rejectChangedSource(next);
+      } catch (IOException failure) {
         terminal(next, MediaJobStatus.FAILED, "storage_unavailable", clock.instant());
         audit.recordSystemFailure("MEDIA_PUBLISH_FAILED", next.getSourcePath(), null,
-            failure instanceof RuntimeException runtime ? runtime : unavailable());
+            unavailable(failure));
       }
     }
   }
 
-  private void publishIfIdle(MediaJob job, MediaSourceSnapshot source) {
-    if (jobs.countByDescriptorPublishedTrueAndStatusIn(MediaJobStatus.active()) == 0) {
+  private void publishIfIdleLocked(MediaJob job, MediaSourceSnapshot source) {
+    if (publishedActiveJob().isEmpty()) {
       try {
         publish(job, source);
       } catch (IOException failure) {
         terminal(job, MediaJobStatus.FAILED, "storage_unavailable", clock.instant());
-        throw unavailable();
+        throw unavailable(failure);
       }
     }
   }
@@ -292,11 +316,61 @@ public class MediaPlaybackService {
     storage.writeDescriptor(descriptor(job, source));
   }
 
+  private java.util.Optional<MediaJob> publishedActiveJob() {
+    return jobs.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(
+        MediaJobStatus.active());
+  }
+
+  private MediaSourceSnapshot requireCurrentSourceRevision(MediaJob job) {
+    MediaSourceSnapshot source = sources.resolve(job.getSourcePath());
+    String currentKey = MediaCacheKeys.forSource(
+        source, job.getProfile(), job.getProfileVersion());
+    if (!currentKey.equals(job.getCacheKey())) throw notFound();
+    return source;
+  }
+
+  private void requireCurrentReadySource(MediaJob job) {
+    requireCurrentSourceRevision(job);
+    if (!readyMatchesOrRejectOversized(job, job.getOutputBytes())
+        && job.getStatus() != MediaJobStatus.FAILED) {
+      throw unavailable();
+    }
+  }
+
   private MediaJob readyCache(String cacheKey) {
-    return jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(cacheKey, MediaJobStatus.READY)
-        .filter(job -> storage.readyMatches(
-            job, job.getOutputBytes(), properties.maxOutput().toBytes()))
-        .orElse(null);
+    MediaJob ready = jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(
+        cacheKey, MediaJobStatus.READY).orElse(null);
+    return ready != null
+        && readyMatchesOrRejectOversized(ready, ready.getOutputBytes()) ? ready : null;
+  }
+
+  private java.util.Optional<MediaStorage.MediaWorkerStatus> readWorkerStatus(MediaJob job) {
+    try {
+      return storage.readStatus(job, properties.maxOutput().toBytes());
+    } catch (IOException failure) {
+      throw unavailable(failure);
+    }
+  }
+
+  private boolean readyMatchesOrRejectOversized(MediaJob job, long expectedBytes) {
+    try {
+      return storage.readyMatches(job, expectedBytes, properties.maxOutput().toBytes());
+    } catch (MediaStorage.MediaOutputLimitException failure) {
+      boolean wasActive = MediaJobStatus.active().contains(job.getStatus());
+      terminal(job, MediaJobStatus.FAILED, "output_limit", clock.instant());
+      audit.recordSystem("MEDIA_FAILED", job.getSourcePath(), job.getOutputBytes(),
+          "rejected", "output_limit");
+      if (wasActive) publishNextIfIdleLocked();
+      return false;
+    } catch (IOException failure) {
+      throw unavailable(failure);
+    }
+  }
+
+  private void rejectChangedSource(MediaJob job) {
+    terminal(job, MediaJobStatus.FAILED, "source_changed", clock.instant());
+    audit.recordSystem("MEDIA_FAILED", job.getSourcePath(), job.getOutputBytes(),
+        "rejected", "source_changed");
   }
 
   private void requireCapacity(String ownerId) {
@@ -350,12 +424,14 @@ public class MediaPlaybackService {
         var slice = jobs.findByStatusOrderByLastAccessedAtAscIdAsc(
             MediaJobStatus.READY, PageRequest.of(page++, CACHE_PAGE_SIZE));
         for (MediaJob candidate : slice.getContent()) {
-          long length = storage.readyLength(candidate, Long.MAX_VALUE);
-          if (length < 0 || protectedKeys.contains(candidate.getCacheKey())
+          var length = storage.readyLength(candidate, Long.MAX_VALUE);
+          if (length.isEmpty() || protectedKeys.contains(candidate.getCacheKey())
               || storage.isBeingRead(candidate.getCacheKey())) continue;
           if (total <= folderProperties.transcodeCacheLimit().toBytes()
               && storage.usableSpace() >= requiredFree) return;
-          if (storage.deleteReady(candidate)) total = Math.max(0, total - length);
+          if (storage.deleteReady(candidate)) {
+            total = Math.max(0, total - length.getAsLong());
+          }
         }
         more = slice.hasNext();
       } while (more);
@@ -372,8 +448,10 @@ public class MediaPlaybackService {
       var slice = jobs.findByStatusOrderByLastAccessedAtAscIdAsc(
           MediaJobStatus.READY, PageRequest.of(page++, CACHE_PAGE_SIZE));
       for (MediaJob ready : slice.getContent()) {
-        long length = storage.readyLength(ready, Long.MAX_VALUE);
-        if (length > 0) total = Math.addExact(total, length);
+        var length = storage.readyLength(ready, Long.MAX_VALUE);
+        if (length.isPresent() && length.getAsLong() > 0) {
+          total = Math.addExact(total, length.getAsLong());
+        }
       }
       more = slice.hasNext();
     } while (more);
@@ -432,8 +510,12 @@ public class MediaPlaybackService {
   }
 
   private ResponseStatusException unavailable() {
+    return unavailable(null);
+  }
+
+  private ResponseStatusException unavailable(Throwable cause) {
     return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-        "Media conversion is temporarily unavailable");
+        "Media conversion is temporarily unavailable", cause);
   }
 
   private ResponseStatusException insufficientStorage() {

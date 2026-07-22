@@ -15,9 +15,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 /** Fixed private media storage whose website operations retain a verified file handle. */
@@ -36,6 +39,7 @@ public class MediaStorage {
   private final ObjectMapper mapper;
   private final PortableSharedFolderPrivateBoundary boundary;
   private final Map<String, AtomicInteger> readers = new ConcurrentHashMap<>();
+  private final Object readyLeaseLock = new Object();
   private volatile Long usableSpaceForTest;
 
   public MediaStorage(SharedFolderProperties properties) {
@@ -79,8 +83,20 @@ public class MediaStorage {
   /** Publishes complete descriptor bytes before a separate zero-byte ready marker becomes visible. */
   public void writeDescriptor(MediaWorkerJobDescriptor descriptor) throws IOException {
     requireKey(descriptor.jobId());
-    writeNew(JOBS, descriptor.jobId() + ".json", mapper.writeValueAsBytes(descriptor.asMap()));
-    writeNew(JOBS, descriptor.jobId() + ".ready", new byte[0]);
+    byte[] expected = mapper.writeValueAsBytes(descriptor.asMap());
+    try {
+      writeNew(JOBS, descriptor.jobId() + ".json", expected);
+    } catch (FileAlreadyExistsException existing) {
+      byte[] actual = readBounded(JOBS, descriptor.jobId() + ".json", 64 * 1024);
+      if (!mapper.readTree(actual).equals(mapper.valueToTree(descriptor.asMap()))) {
+        throw new IOException("Published media descriptor does not match its durable job");
+      }
+    }
+    try {
+      writeNew(JOBS, descriptor.jobId() + ".ready", new byte[0]);
+    } catch (FileAlreadyExistsException ignored) {
+      // The matching durable descriptor was already published before an interrupted save/restart.
+    }
   }
 
   public String readDescriptor(String id) throws IOException {
@@ -88,21 +104,20 @@ public class MediaStorage {
     return new String(readBounded(JOBS, id + ".json", 64 * 1024), java.nio.charset.StandardCharsets.UTF_8);
   }
 
-  public boolean readyExists(MediaJob job) {
-    return readyLength(job, Long.MAX_VALUE) >= 0;
+  public boolean readyMatches(MediaJob job, long expectedBytes, long maxOutputBytes)
+      throws IOException {
+    OptionalLong actual = readyLength(job, maxOutputBytes);
+    return actual.isPresent() && actual.getAsLong() == expectedBytes;
   }
 
-  public boolean readyMatches(MediaJob job, long expectedBytes, long maxOutputBytes) {
-    long actual = readyLength(job, maxOutputBytes);
-    return actual >= 0 && actual == expectedBytes;
-  }
-
-  public long readyLength(MediaJob job, long maxOutputBytes) {
+  /** Returns empty only when the completed output is absent; all other failures remain visible. */
+  public OptionalLong readyLength(MediaJob job, long maxOutputBytes) throws IOException {
     try {
       long size = boundary.metadata(READY, readyKey(job)).attributes().size();
-      return size <= maxOutputBytes ? size : -1;
-    } catch (IOException exception) {
-      return -1;
+      if (size > maxOutputBytes) throw new MediaOutputLimitException();
+      return OptionalLong.of(size);
+    } catch (NoSuchFileException exception) {
+      return OptionalLong.empty();
     }
   }
 
@@ -123,8 +138,7 @@ public class MediaStorage {
     if (position < 0 || length < 0) throw new IllegalArgumentException("Invalid media copy range");
     String directory = ready ? READY : PARTIAL;
     String key = ready ? readyKey(job) : partialKey(job);
-    if (ready) acquireReader(job.getCacheKey());
-    try {
+    try (ReadyLease ignored = ready ? acquireReadyLease(job) : null) {
       return boundary.operateOnRegularFile(directory, key, FileAccess.READ, channel -> {
         long size = channel.size();
         if (size > maxOutputBytes || position > size) {
@@ -144,18 +158,29 @@ public class MediaStorage {
         }
         return copied;
       });
-    } finally {
-      if (ready) releaseReader(job.getCacheKey());
     }
   }
 
   public boolean deleteReady(MediaJob job) throws IOException {
-    if (readerCount(job.getCacheKey()) > 0) return false;
-    return boundary.deleteIfExists(READY, readyKey(job));
+    synchronized (readyLeaseLock) {
+      if (readerCount(job.getCacheKey()) > 0) return false;
+      return boundary.deleteIfExists(READY, readyKey(job));
+    }
   }
 
   public boolean isBeingRead(String cacheKey) {
-    return readerCount(cacheKey) > 0;
+    synchronized (readyLeaseLock) {
+      return readerCount(cacheKey) > 0;
+    }
+  }
+
+  /** Prevents cache eviction from range selection until its asynchronous response body completes. */
+  public ReadyLease acquireReadyLease(MediaJob job) throws IOException {
+    requireKey(job.getCacheKey());
+    synchronized (readyLeaseLock) {
+      readers.computeIfAbsent(job.getCacheKey(), ignored -> new AtomicInteger()).incrementAndGet();
+      return new ReadyLease(this, job.getCacheKey());
+    }
   }
 
   public Path partialPath(MediaJob job) throws IOException {
@@ -186,11 +211,17 @@ public class MediaStorage {
   }
 
   /** Reads one bounded worker-owned status document; malformed or mismatched files are ignored. */
-  public Optional<MediaWorkerStatus> readStatus(MediaJob job, long maxOutputBytes) {
+  public Optional<MediaWorkerStatus> readStatus(MediaJob job, long maxOutputBytes)
+      throws IOException {
+    byte[] bytes;
     try {
-      var root = mapper.readTree(new String(
-          readBounded(STATUS, job.getId() + ".json", STATUS_LIMIT_BYTES),
-          java.nio.charset.StandardCharsets.UTF_8));
+      bytes = readBounded(STATUS, job.getId() + ".json", STATUS_LIMIT_BYTES);
+    } catch (NoSuchFileException exception) {
+      return Optional.empty();
+    }
+    try {
+      var root = mapper.readTree(
+          new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
       if (root.path("schemaVersion").asInt(-1) != 1
           || !job.getId().equals(root.path("jobId").asText(""))) return Optional.empty();
       MediaJobStatus status = MediaJobStatus.valueOf(root.path("status").asText(""));
@@ -201,7 +232,7 @@ public class MediaStorage {
           : root.path("failureCategory").asText();
       if (category != null && !category.matches("[a-z_]{1,40}")) return Optional.empty();
       return Optional.of(new MediaWorkerStatus(status, outputBytes, category));
-    } catch (IOException | IllegalArgumentException exception) {
+    } catch (JacksonException | IllegalArgumentException exception) {
       return Optional.empty();
     }
   }
@@ -278,13 +309,11 @@ public class MediaStorage {
     if (key == null || !key.matches(SAFE_KEY)) throw new IOException("Invalid media identifier");
   }
 
-  private void acquireReader(String cacheKey) {
-    readers.computeIfAbsent(cacheKey, ignored -> new AtomicInteger()).incrementAndGet();
-  }
-
   private void releaseReader(String cacheKey) {
-    AtomicInteger count = readers.get(cacheKey);
-    if (count != null && count.decrementAndGet() <= 0) readers.remove(cacheKey, count);
+    synchronized (readyLeaseLock) {
+      AtomicInteger count = readers.get(cacheKey);
+      if (count != null && count.decrementAndGet() <= 0) readers.remove(cacheKey, count);
+    }
   }
 
   private int readerCount(String cacheKey) {
@@ -295,4 +324,28 @@ public class MediaStorage {
   /** Strict worker progress fields accepted by the website. */
   public record MediaWorkerStatus(
       MediaJobStatus status, long outputBytes, String failureCategory) {}
+
+  /** Idempotent lease protecting one cache key from eviction. */
+  public static final class ReadyLease implements AutoCloseable {
+    private final MediaStorage storage;
+    private final String cacheKey;
+    private final AtomicBoolean closed = new AtomicBoolean();
+
+    private ReadyLease(MediaStorage storage, String cacheKey) {
+      this.storage = storage;
+      this.cacheKey = cacheKey;
+    }
+
+    @Override
+    public void close() {
+      if (closed.compareAndSet(false, true)) storage.releaseReader(cacheKey);
+    }
+  }
+
+  /** Worker output exceeded the fixed descriptor limit and must become a terminal job failure. */
+  public static final class MediaOutputLimitException extends IOException {
+    private MediaOutputLimitException() {
+      super("Media output exceeded its limit");
+    }
+  }
 }

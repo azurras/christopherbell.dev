@@ -54,6 +54,18 @@ class PortableSharedFolderPrivateBoundaryTest {
   }
 
   @Test
+  void missingReadLeafReturnsAControlledCheckedFailure() throws Exception {
+    Path systemRoot = Files.createDirectory(temp.resolve("missing-leaf-system"));
+    PortableSharedFolderPrivateBoundary boundary =
+        new PortableSharedFolderPrivateBoundary(systemRoot);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> boundary.operateOnRegularFile(
+        "shared-folder-media-status", "not-created.json",
+        PortableSharedFolderPrivateBoundary.FileAccess.READ, channel -> null))
+        .isInstanceOf(java.nio.file.NoSuchFileException.class);
+  }
+
+  @Test
   void rejectsSymlinkPrivateLeavesBeforeChannelOperations() throws Exception {
     Path systemRoot = Files.createDirectory(temp.resolve("linked-system"));
     PortableSharedFolderPrivateBoundary boundary =

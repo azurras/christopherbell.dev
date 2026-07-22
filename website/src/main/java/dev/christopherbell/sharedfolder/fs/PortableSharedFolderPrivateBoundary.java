@@ -133,6 +133,9 @@ public class PortableSharedFolderPrivateBoundary {
     } catch (NoSuchFileException exception) {
       expected = null;
     }
+    if (expected == null && (access == FileAccess.READ || access == FileAccess.WRITE)) {
+      throw new NoSuchFileException(path.toString());
+    }
     if (access == FileAccess.CREATE_NEW) {
       if (expected != null) throw new FileAlreadyExistsException(path.toString());
       Files.createFile(path);

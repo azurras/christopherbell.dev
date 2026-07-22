@@ -23,6 +23,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
@@ -137,6 +138,10 @@ class MediaPlaybackServiceTest {
     when(sources.resolve(source.relativePath())).thenReturn(source);
     String key = MediaCacheKeys.forSource(source, MediaOutputProfile.AUDIO_M4A, 1);
     MediaJob ready = job("ready-1", key, MediaJobStatus.READY);
+    ready.setSourcePath(source.relativePath());
+    ready.setSourceSize(source.size());
+    ready.setSourceModifiedAt(source.modifiedAt());
+    ready.setProfile(MediaOutputProfile.AUDIO_M4A);
     storage.writeReadyForTest(ready, "ready-bytes".getBytes());
     when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(
         key, MediaJobStatus.READY)).thenReturn(Optional.of(ready));
@@ -155,6 +160,9 @@ class MediaPlaybackServiceTest {
     MediaSourceSnapshot source = source("audio/source.wav", 30, NOW.minusSeconds(2));
     String key = MediaCacheKeys.forSource(source, MediaOutputProfile.AUDIO_M4A, 1);
     MediaJob ready = job("ready-1", key, MediaJobStatus.READY);
+    ready.setSourcePath(source.relativePath());
+    ready.setSourceSize(source.size());
+    ready.setSourceModifiedAt(source.modifiedAt());
     ready.setProfile(MediaOutputProfile.AUDIO_M4A);
     storage.writeReadyForTest(ready, "ready-bytes".getBytes());
     when(sources.resolve(source.relativePath())).thenReturn(source);
@@ -200,7 +208,8 @@ class MediaPlaybackServiceTest {
     AtomicBoolean oldestDeleted = new AtomicBoolean();
     when(boundedStorage.readyLength(any(), anyLong())).thenAnswer(invocation -> {
       MediaJob candidate = invocation.getArgument(0);
-      return oldestDeleted.get() && candidate == oldest ? -1L : 10L;
+      return oldestDeleted.get() && candidate == oldest
+          ? OptionalLong.empty() : OptionalLong.of(10);
     });
     when(boundedStorage.usableSpace()).thenAnswer(
         ignored -> oldestDeleted.get() ? 350L : 250L);
@@ -237,10 +246,11 @@ class MediaPlaybackServiceTest {
     when(sources.resolve(second.relativePath())).thenReturn(second);
     when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(any(), any()))
         .thenReturn(Optional.empty());
-    when(jobs.countByDescriptorPublishedTrueAndStatusIn(MediaJobStatus.active()))
-        .thenReturn(0L, 1L);
-
     sequential.requestFallback(first.relativePath(), MediaOutputProfile.VIDEO_MP4);
+    MediaJob published = job("job-1", "published", MediaJobStatus.QUEUED);
+    published.setDescriptorPublished(true);
+    when(jobs.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(
+        MediaJobStatus.active())).thenReturn(Optional.of(published));
     sequential.requestFallback(second.relativePath(), MediaOutputProfile.VIDEO_MP4);
 
     assertThat(storage.readDescriptor("job-1")).contains("\"jobId\":\"job-1\"");
@@ -329,7 +339,8 @@ class MediaPlaybackServiceTest {
     storage.writeReadyForTest(queued, new byte[101]);
     storage.writeStatusForTest(queued, MediaJobStatus.READY, 100, null);
 
-    assertThat(media.job("job-1").status()).isEqualTo(MediaJobStatus.QUEUED);
+    assertThat(media.job("job-1").status()).isEqualTo(MediaJobStatus.FAILED);
+    assertThat(queued.getFailureCategory()).isEqualTo("output_limit");
   }
 
   @Test
@@ -355,6 +366,49 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
+  void schedulerReconcilesAnUnattendedPublishedJobAndAdvancesTheQueue() throws Exception {
+    MediaJob first = job("job-1", "3".repeat(64), MediaJobStatus.BUFFERING);
+    first.setDescriptorPublished(true);
+    MediaJob second = job("job-2", "4".repeat(64), MediaJobStatus.QUEUED);
+    second.setSourcePath("video/second.mkv");
+    MediaSourceSnapshot secondSource = source(
+        second.getSourcePath(), second.getSourceSize(), second.getSourceModifiedAt());
+    second.setCacheKey(MediaCacheKeys.forSource(
+        secondSource, second.getProfile(), second.getProfileVersion()));
+    when(jobs.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(
+        MediaJobStatus.active())).thenAnswer(ignored ->
+            first.isDescriptorPublished() && !first.getStatus().terminal()
+                ? Optional.of(first) : Optional.empty());
+    when(jobs.findFirstByStatusAndDescriptorPublishedFalseOrderByCreatedAtAsc(
+        MediaJobStatus.QUEUED)).thenReturn(Optional.of(second));
+    when(sources.resolve(second.getSourcePath())).thenReturn(secondSource);
+    storage.writeReadyForTest(first, "ready".getBytes());
+    storage.writeStatusForTest(first, MediaJobStatus.READY, 5, null);
+
+    media.promoteQueuedJob();
+
+    assertThat(first.getStatus()).isEqualTo(MediaJobStatus.READY);
+    assertThat(storage.readDescriptor("job-2")).contains("\"jobId\":\"job-2\"");
+  }
+
+  @Test
+  void schedulerRepublishesACrashInterruptedDescriptor() throws Exception {
+    MediaJob published = job("job-1", "5".repeat(64), MediaJobStatus.QUEUED);
+    published.setDescriptorPublished(true);
+    MediaSourceSnapshot source = source(
+        published.getSourcePath(), published.getSourceSize(), published.getSourceModifiedAt());
+    published.setCacheKey(MediaCacheKeys.forSource(
+        source, published.getProfile(), published.getProfileVersion()));
+    when(jobs.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(
+        MediaJobStatus.active())).thenReturn(Optional.of(published));
+    when(sources.resolve(published.getSourcePath())).thenReturn(source);
+
+    media.promoteQueuedJob();
+
+    assertThat(storage.readDescriptor("job-1")).contains("\"jobId\":\"job-1\"");
+  }
+
+  @Test
   void windowsCacheIdentityCollapsesPathCaseAliases() {
     MediaSourceSnapshot upper = source("Folder/Track.MKV", 10, NOW.minusSeconds(5));
     MediaSourceSnapshot lower = source("folder/track.mkv", 10, NOW.minusSeconds(5));
@@ -369,10 +423,26 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
-  void oneBadRequestIsAuditedWithoutCorruptingAnotherReadyJob() {
+  void readyJobUrlIsInvalidatedWhenTheSourceRevisionChanges() {
+    MediaSourceSnapshot original = source("video/source.mkv", 30, NOW.minusSeconds(2));
+    MediaJob ready = job("ready-1", MediaCacheKeys.forSource(
+        original, MediaOutputProfile.VIDEO_MP4, 1), MediaJobStatus.READY);
+    when(jobs.findById("ready-1")).thenReturn(Optional.of(ready));
+    when(sources.resolve(ready.getSourcePath())).thenReturn(source(
+        ready.getSourcePath(), ready.getSourceSize() + 1, ready.getSourceModifiedAt()));
+
+    assertStatus(HttpStatus.NOT_FOUND, () -> media.job("ready-1"));
+  }
+
+  @Test
+  void oneBadRequestIsAuditedWithoutCorruptingAnotherReadyJob() throws Exception {
     when(sources.resolve("bad.mkv"))
         .thenThrow(new ResponseStatusException(HttpStatus.NOT_FOUND, "missing"));
-    MediaJob ready = job("ready-1", "cache-1", MediaJobStatus.READY);
+    MediaSourceSnapshot source = source("video/source.mkv", 30, NOW.minusSeconds(2));
+    MediaJob ready = job("ready-1", MediaCacheKeys.forSource(
+        source, MediaOutputProfile.VIDEO_MP4, 1), MediaJobStatus.READY);
+    storage.writeReadyForTest(ready, "ready".getBytes());
+    when(sources.resolve(ready.getSourcePath())).thenReturn(source);
     when(jobs.findById("ready-1")).thenReturn(Optional.of(ready));
 
     assertStatus(HttpStatus.NOT_FOUND,
