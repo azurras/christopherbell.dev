@@ -56,21 +56,32 @@ public class PortableSharedFolderPrivateBoundary {
   private PortableSharedFolderPrivateBoundary(
       Path configuredRoot, SharedFolderFileSystemBoundary fileSystem, boolean testOnlyPathMoves) {
     if (configuredRoot == null) throw new IllegalArgumentException("system root is required");
-    this.configuredRoot = configuredRoot.toAbsolutePath().normalize();
     this.fileSystem = java.util.Objects.requireNonNull(fileSystem);
     this.testOnlyPathMoves = testOnlyPathMoves;
+    Path absoluteRoot = configuredRoot.toAbsolutePath().normalize();
+    Path canonicalRoot = absoluteRoot;
     List<Identity> captured = List.of();
     IOException failure = null;
     try {
-      captured = captureChain(this.configuredRoot);
+      BasicFileAttributes configuredAttributes = Files.readAttributes(
+          absoluteRoot, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+      if (!configuredAttributes.isDirectory() || configuredAttributes.isSymbolicLink()
+          || configuredAttributes.isOther() || isWindowsReparsePoint(absoluteRoot)) {
+        throw new IOException("pre-created private shared-folder system root is not a directory");
+      }
+      Object configuredIdentity = stableIdentity(absoluteRoot, configuredAttributes);
+      canonicalRoot = absoluteRoot.toRealPath();
+      captured = captureChain(canonicalRoot);
       Identity root = captured.get(captured.size() - 1);
-      if (!root.attributes().isDirectory() || root.mountPoint()) {
+      if (!root.attributes().isDirectory() || root.mountPoint()
+          || !configuredIdentity.equals(root.fileKey())) {
         throw new IOException("pre-created private shared-folder system root is not a directory");
       }
     } catch (IOException | SecurityException exception) {
       failure = exception instanceof IOException io ? io
           : new IOException("private shared-folder root cannot be inspected", exception);
     }
+    this.configuredRoot = canonicalRoot;
     this.configuredChain = captured;
     this.initializationFailure = failure;
   }

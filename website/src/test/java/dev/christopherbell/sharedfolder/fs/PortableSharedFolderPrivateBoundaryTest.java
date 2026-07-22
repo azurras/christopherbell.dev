@@ -37,6 +37,31 @@ class PortableSharedFolderPrivateBoundaryTest {
   }
 
   @Test
+  void acceptsAnOrdinarySystemRootReachedThroughAnAliasedAncestor() throws Exception {
+    Path actualParent = Files.createDirectory(temp.resolve("actual-parent"));
+    Path actualRoot = Files.createDirectory(actualParent.resolve("system"));
+    Path alias = temp.resolve("parent-alias");
+    assumeDirectoryAliasCreated(alias, actualParent);
+
+    try {
+      PortableSharedFolderPrivateBoundary boundary =
+          new PortableSharedFolderPrivateBoundary(alias.resolve("system"));
+      Path otherParent = Files.createDirectory(temp.resolve("other-parent"));
+      Path otherRoot = Files.createDirectory(otherParent.resolve("system"));
+      Files.delete(alias);
+      assumeDirectoryAliasCreated(alias, otherParent);
+
+      Path staging = boundary.directory("shared-folder-upload-staging");
+
+      assertThat(staging.getParent()).isEqualTo(actualRoot.toRealPath());
+      assertThat(otherRoot.resolve("shared-folder-upload-staging")).doesNotExist();
+      boundary.verify();
+    } finally {
+      Files.deleteIfExists(alias);
+    }
+  }
+
+  @Test
   void wrapsPrivateLeafOperationsWithIdentityChecks() throws Exception {
     Path systemRoot = Files.createDirectory(temp.resolve("system"));
     PortableSharedFolderPrivateBoundary boundary =
@@ -516,5 +541,25 @@ class PortableSharedFolderPrivateBoundaryTest {
 
       assertThat(invoked).isFalse();
     }
+  }
+
+  private static void assumeDirectoryAliasCreated(Path alias, Path target) throws Exception {
+    try {
+      Files.createSymbolicLink(alias, target);
+      return;
+    } catch (UnsupportedOperationException | java.nio.file.FileSystemException exception) {
+      // Windows directory junctions do not require symbolic-link privileges.
+    }
+    if (!System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT)
+        .contains("windows")) {
+      org.junit.jupiter.api.Assumptions.abort("directory aliases are unavailable");
+    }
+    Process process = new ProcessBuilder(
+        "cmd", "/c", "mklink", "/J", alias.toString(), target.toString())
+        .redirectErrorStream(true)
+        .start();
+    String output = new String(process.getInputStream().readAllBytes());
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        process.waitFor() == 0, "junction capability unavailable: " + output);
   }
 }
