@@ -487,6 +487,44 @@ class SharedFolderRecycleServiceTest {
   }
 
   @Test
+  void failedScheduledPartialPurgePreservesPurgingStateForRestartRecovery() throws Exception {
+    byte[] fileId = new byte[16];
+    fileId[0] = 8;
+    NativeFileIdentity identity = new NativeFileIdentity(11, fileId);
+    String encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(fileId);
+    String stable = "11:" + encoded + ":true:false";
+    NativeFileMetadata original = new NativeFileMetadata(identity, true, false, 2, NOW);
+    NativeFileMetadata partial = new NativeFileMetadata(
+        identity, true, false, 1, NOW.plusSeconds(1));
+    SharedFolderRecycleItem recycled = new SharedFolderRecycleItem(
+        "native-scheduled-purge", "expired-folder", "writer-1",
+        NOW.minus(Duration.ofDays(31)), NOW.minusSeconds(1),
+        "cccccccc-cccc-cccc-cccc-cccccccccccc", 2, true,
+        stable + ":2:" + NOW, SharedFolderRecycleState.RECYCLED, null, null, stable);
+    WindowsSharedFolderMutationBoundary boundary = mock(WindowsSharedFolderMutationBoundary.class);
+    when(boundary.nativeMode()).thenReturn(true);
+    when(boundary.recycleMetadata(recycled.payloadKey())).thenReturn(original, partial);
+    org.mockito.Mockito.doThrow(new NativeBoundaryException("partial", 5)).doNothing()
+        .when(boundary).deleteRecycleTree(
+            org.mockito.ArgumentMatchers.eq(recycled.payloadKey()), any());
+    NativeFixture fixture = nativeFixture(boundary, recycled);
+
+    assertThat(fixture.recycle.cleanupExpired()).isZero();
+    assertThat(fixture.records.get(recycled.id()).state())
+        .isEqualTo(SharedFolderRecycleState.PURGING);
+    assertThat(fixture.records.get(recycled.id()).retryAfter())
+        .isEqualTo(NOW.plus(Duration.ofDays(1)));
+
+    SharedFolderRecycleService restarted = new SharedFolderRecycleService(
+        fixture.access, fixture.properties, fixture.boundary, fixture.repository,
+        Clock.fixed(NOW.plus(Duration.ofDays(1)), ZoneOffset.UTC), fixture.audit);
+    assertThat(restarted.reconcilePending()).isEqualTo(1);
+    assertThat(fixture.records).doesNotContainKey(recycled.id());
+    verify(boundary, org.mockito.Mockito.times(2))
+        .deleteRecycleTree(org.mockito.ArgumentMatchers.eq(recycled.payloadKey()), any());
+  }
+
+  @Test
   void nativeReconciliationAlsoDefersUnprovenMissingPrivateArtifacts() throws Exception {
     byte[] expectedId = new byte[16];
     expectedId[0] = 3;
@@ -597,9 +635,28 @@ class SharedFolderRecycleServiceTest {
     var records = new LinkedHashMap<String, SharedFolderRecycleItem>();
     for (SharedFolderRecycleItem item : items) records.put(item.id(), item);
     SharedFolderRecycleRepository repository = mock(SharedFolderRecycleRepository.class);
+    when(repository.findById(any())).thenAnswer(invocation ->
+        Optional.ofNullable(records.get(invocation.<String>getArgument(0))));
     when(repository.findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(
         any(), any(), any()))
-        .thenAnswer(invocation -> List.copyOf(records.values()));
+        .thenAnswer(invocation -> {
+          @SuppressWarnings("unchecked")
+          List<SharedFolderRecycleState> states = invocation.getArgument(0);
+          Instant due = invocation.getArgument(1);
+          return records.values().stream().filter(item -> states.contains(item.state()))
+              .filter(item -> !item.retryAfter().isAfter(due)).toList();
+        });
+    when(repository
+        .findByStateAndExpiresAtBeforeAndRetryAfterLessThanEqualOrderByExpiresAtAscIdAsc(
+            org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(), any(), any()))
+        .thenAnswer(invocation -> {
+          Instant cutoff = invocation.getArgument(1);
+          Instant due = invocation.getArgument(2);
+          return records.values().stream()
+              .filter(item -> item.state() == SharedFolderRecycleState.RECYCLED)
+              .filter(item -> item.expiresAt().isBefore(cutoff))
+              .filter(item -> !item.retryAfter().isAfter(due)).toList();
+        });
     when(repository.save(any())).thenAnswer(invocation -> {
       SharedFolderRecycleItem item = invocation.getArgument(0);
       records.put(item.id(), item);
@@ -611,7 +668,8 @@ class SharedFolderRecycleServiceTest {
     }).when(repository).deleteById(any());
     SharedFolderRecycleService recycle = new SharedFolderRecycleService(
         access, properties, boundary, repository, Clock.fixed(NOW, ZoneOffset.UTC), audit);
-    return new NativeFixture(records, recycle);
+    return new NativeFixture(
+        properties, boundary, access, repository, audit, records, recycle);
   }
 
   private Account account(String id, Role role) {
@@ -640,6 +698,11 @@ class SharedFolderRecycleServiceTest {
       SharedFolderAuditRecorder audit) {}
 
   private record NativeFixture(
+      SharedFolderProperties properties,
+      WindowsSharedFolderMutationBoundary boundary,
+      SharedFolderAccessService access,
+      SharedFolderRecycleRepository repository,
+      SharedFolderAuditRecorder audit,
       LinkedHashMap<String, SharedFolderRecycleItem> records,
       SharedFolderRecycleService recycle) {}
 }

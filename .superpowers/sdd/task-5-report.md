@@ -273,3 +273,23 @@ The forced Windows native/junction-enabled full gate re-executed every task and 
 tests and 161 JavaScript tests with zero failures, errors, or skips (`BUILD SUCCESSFUL` in 1m 19s).
 No worktree-local Gradle directory exists and production port 8080 remained untouched. Task 5
 remains a review candidate until the complete remediated range receives independent approval.
+
+## Tenth Independent Review and Remediation
+
+The tenth fresh whole-change review of `09d2f408..f477c55d` rejected Task 5 with zero Critical,
+one Important, and zero Minor findings. No rejected candidate was pushed. The finding exposed a
+stale-object write during scheduled partial-purge failure:
+
+- Maintenance deferral now reloads the current durable record by ID before setting `retryAfter`.
+  If purge already persisted `PURGING` and native recursive deletion then partially fails, the
+  deferral update preserves `PURGING` instead of overwriting it with the caller's earlier
+  `RECYCLED` snapshot.
+- A native regression starts an expired `RECYCLED` directory, persists `PURGING`, throws after a
+  simulated partial tree deletion, and verifies the deferred record remains `PURGING`. It then
+  constructs a new service at the retry deadline and proves stable-identity recovery completes the
+  remaining deletion and removes the durable record.
+
+The forced Windows native/junction-enabled full gate re-executed every task and passed all 957 Java
+tests and 161 JavaScript tests with zero failures, errors, or skips (`BUILD SUCCESSFUL` in 1m 17s).
+No worktree-local Gradle directory exists and production port 8080 remained untouched. Task 5
+remains a review candidate until the complete remediated range receives independent approval.

@@ -297,7 +297,8 @@ public class SharedFolderRecycleService {
 
   private void deferMaintenance(SharedFolderRecycleItem item) {
     try {
-      repository.save(item.withRetryAfter(clock.instant().plus(MAINTENANCE_RETRY_DELAY)));
+      SharedFolderRecycleItem current = repository.findById(item.id()).orElse(item);
+      repository.save(current.withRetryAfter(clock.instant().plus(MAINTENANCE_RETRY_DELAY)));
     } catch (RuntimeException persistenceFailure) {
       log.warn("Shared-folder maintenance retry could not be deferred for item {}", item.id());
     }
