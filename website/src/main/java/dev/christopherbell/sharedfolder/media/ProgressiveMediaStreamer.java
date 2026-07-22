@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpRange;
 import org.springframework.stereotype.Component;
 
@@ -23,12 +24,26 @@ public final class ProgressiveMediaStreamer {
   private final MediaStorage storage;
   private final MediaJobRepository jobs;
   private final SharedFolderMediaProperties properties;
+  private final MediaPlaybackService media;
 
+  @Autowired
   public ProgressiveMediaStreamer(
+      MediaStorage storage,
+      MediaJobRepository jobs,
+      SharedFolderMediaProperties properties,
+      MediaPlaybackService media) {
+    this.storage = storage;
+    this.jobs = jobs;
+    this.properties = properties;
+    this.media = media;
+  }
+
+  ProgressiveMediaStreamer(
       MediaStorage storage, MediaJobRepository jobs, SharedFolderMediaProperties properties) {
     this.storage = storage;
     this.jobs = jobs;
     this.properties = properties;
+    this.media = null;
   }
 
   public void copyGrowing(MediaJob original, OutputStream output) throws IOException {
@@ -38,12 +53,14 @@ public final class ProgressiveMediaStreamer {
     ByteBuffer buffer = ByteBuffer.allocate(COPY_BUFFER_BYTES);
     while (!Thread.currentThread().isInterrupted()) {
       MediaJob current = jobs.findById(original.getId()).orElse(original);
+      if (media != null) current = media.refreshWorkerState(current);
+      MediaJob observed = current;
       MediaJobStatus effectiveStatus = storage
-          .readStatus(current, properties.maxOutput().toBytes())
+          .readStatus(observed, properties.maxOutput().toBytes())
           .map(MediaStorage.MediaWorkerStatus::status)
-          .filter(status -> status != MediaJobStatus.READY || storage.readyExists(current))
-          .orElse(current.getStatus());
-      Path path = outputPath(current, effectiveStatus);
+          .filter(status -> status != MediaJobStatus.READY || storage.readyExists(observed))
+          .orElse(observed.getStatus());
+      Path path = outputPath(observed, effectiveStatus);
       long size = ordinarySize(path);
       if (!started && size >= properties.initialBuffer().toBytes()) started = true;
       if (!started && effectiveStatus.terminal()) started = size > 0;

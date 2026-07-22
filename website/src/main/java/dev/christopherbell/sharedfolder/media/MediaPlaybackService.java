@@ -138,7 +138,7 @@ public class MediaPlaybackService {
   /** Returns a job only to its owner after refreshing read access. */
   public MediaPlaybackDescriptor job(String id) {
     Account account = access.requireRead();
-    MediaJob job = refresh(owned(id, account.getId()));
+    MediaJob job = refreshWorkerState(owned(id, account.getId()));
     return MediaPlaybackDescriptor.from(job);
   }
 
@@ -167,10 +167,11 @@ public class MediaPlaybackService {
   /** Internal stream lookup that still performs fresh access and owner checks. */
   public MediaJob requireVisibleJob(String id) {
     Account account = access.requireRead();
-    return refresh(owned(id, account.getId()));
+    return refreshWorkerState(owned(id, account.getId()));
   }
 
-  private synchronized MediaJob refresh(MediaJob job) {
+  /** Reconciles one already-authorized job from the strict worker status file. */
+  synchronized MediaJob refreshWorkerState(MediaJob job) {
     Instant now = clock.instant();
     if (!job.getStatus().terminal() && !job.getDeadline().isAfter(now)) {
       job.setStatus(MediaJobStatus.TIMED_OUT);

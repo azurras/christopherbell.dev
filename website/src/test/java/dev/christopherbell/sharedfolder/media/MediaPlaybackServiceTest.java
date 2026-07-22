@@ -194,6 +194,24 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
+  void workerReadyPublishBecomesReusableCacheState() throws Exception {
+    MediaSourceSnapshot source = source("video/source.mkv", 30, NOW.minusSeconds(2));
+    String cacheKey = MediaCacheKeys.forSource(source, MediaOutputProfile.VIDEO_MP4, 1);
+    MediaJob queued = job("job-1", cacheKey, MediaJobStatus.QUEUED);
+    when(jobs.findById("job-1")).thenReturn(Optional.of(queued));
+    storage.writeReadyForTest(queued, "ready".getBytes());
+    storage.writeStatusForTest(queued, MediaJobStatus.READY, 5, null);
+
+    assertThat(media.job("job-1").status()).isEqualTo(MediaJobStatus.READY);
+
+    when(sources.resolve(source.relativePath())).thenReturn(source);
+    when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(
+        queued.getCacheKey(), MediaJobStatus.READY)).thenReturn(Optional.of(queued));
+    assertThat(media.requestFallback(source.relativePath(), queued.getProfile()).mode())
+        .isEqualTo(MediaPlaybackMode.READY);
+  }
+
+  @Test
   void oneBadRequestIsAuditedWithoutCorruptingAnotherReadyJob() {
     when(sources.resolve("bad.mkv"))
         .thenThrow(new ResponseStatusException(HttpStatus.NOT_FOUND, "missing"));
