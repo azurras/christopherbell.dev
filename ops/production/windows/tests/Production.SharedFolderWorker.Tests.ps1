@@ -18,6 +18,7 @@ BeforeAll {
         $directories.SharedRoot,
         $directories.SystemRoot,
         $directories.JobRoot,
+        $directories.StagingRoot,
         $directories.PartialRoot,
         $directories.CacheRoot,
         $directories.StatusRoot,
@@ -72,6 +73,39 @@ BeforeAll {
             FfmpegSha256 = (Get-FileHash -LiteralPath $ffmpeg -Algorithm SHA256).Hash
             FfprobeSha256 = (Get-FileHash -LiteralPath $ffprobe -Algorithm SHA256).Hash
         }
+    }
+
+    function Get-TestPowerShellMediaToolSet {
+        $executable = (Get-Command pwsh.exe).Source
+        $hash = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
+        [pscustomobject]@{
+            Ffmpeg = $executable
+            Ffprobe = $executable
+            FfmpegSha256 = $hash
+            FfprobeSha256 = $hash
+        }
+    }
+
+    function ConvertTo-TestEncodedCommand {
+        param([Parameter(Mandatory)][string]$Script)
+        [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Script))
+    }
+
+    function Set-TestMediaSourceBytes {
+        param(
+            [Parameter(Mandatory)]$Fixture,
+            [Parameter(Mandatory)][int]$Length
+        )
+        $bytes = [byte[]]::new($Length)
+        for ($index = 0; $index -lt $bytes.Length; $index++) {
+            $bytes[$index] = $index % 251
+        }
+        [IO.File]::WriteAllBytes($Fixture.Job.sourcePath, $bytes)
+        $source = Get-Item -LiteralPath $Fixture.Job.sourcePath
+        $Fixture.Job.sourceSize = [long]$source.Length
+        $Fixture.Job.sourceModifiedAt = $source.LastWriteTimeUtc.ToString('o')
+        $Fixture.Job | ConvertTo-Json -Depth 4 |
+            Set-Content -LiteralPath $Fixture.JobPath -Encoding utf8
     }
 
     function New-TestMediaArchive {
@@ -184,6 +218,20 @@ Describe 'shared-folder media job boundary validation' {
 
         { Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot } |
             Should -Throw '*maxOutputBytes*'
+    }
+
+    It 'rejects a source above the fixed ten-gigabyte transcode ceiling' {
+        { Assert-MediaSourceSizeAllowed -SourceSizeBytes (10GB + 1) } |
+            Should -Throw '*ten-gigabyte*'
+    }
+
+    It 'rejects a sourceSize outside signed 64-bit arithmetic without overflowing' {
+        $fixture = New-TestMediaJobFixture -Root (Join-Path $TestDrive 'source-overflow')
+        $fixture.Job.sourceSize = [decimal]::Parse('9223372036854775808')
+        $fixture.Job | ConvertTo-Json | Set-Content $fixture.JobPath
+
+        { Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot } |
+            Should -Throw 'sourceSize must be an integer.'
     }
 
     It 'rejects an initial buffer above the Task 6 two-megabyte contract' {
@@ -347,6 +395,37 @@ Describe 'fixed media tool arguments' {
             Should -Throw '*deadline*'
     }
 
+    It 'does not start a child when cancellation already exists' {
+        $marker = Join-Path $TestDrive 'pre-canceled-child-started.txt'
+        $cancellation = Join-Path $TestDrive 'pre-canceled.cancel'
+        Set-Content -LiteralPath $cancellation -Value canceled
+        $encoded = ConvertTo-TestEncodedCommand -Script @"
+[IO.File]::WriteAllText('$($marker.Replace("'", "''"))', 'started')
+[Threading.Thread]::Sleep(30000)
+"@
+
+        { Invoke-PinnedMediaTool -Executable (Get-Command pwsh.exe).Source `
+            -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$encoded) `
+            -Deadline ([DateTimeOffset]::UtcNow.AddMinutes(1)) `
+            -CancellationPath $cancellation } |
+            Should -Throw '*canceled*'
+        Test-Path -LiteralPath $marker | Should -BeFalse
+    }
+
+    It 'does not start a child when the deadline is already expired' {
+        $marker = Join-Path $TestDrive 'expired-child-started.txt'
+        $encoded = ConvertTo-TestEncodedCommand -Script @"
+[IO.File]::WriteAllText('$($marker.Replace("'", "''"))', 'started')
+[Threading.Thread]::Sleep(30000)
+"@
+
+        { Invoke-PinnedMediaTool -Executable (Get-Command pwsh.exe).Source `
+            -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$encoded) `
+            -Deadline ([DateTimeOffset]::UtcNow.AddMilliseconds(-1)) } |
+            Should -Throw '*deadline*'
+        Test-Path -LiteralPath $marker | Should -BeFalse
+    }
+
     It 'publishes the exact bounded status schema with atomic replacement' {
         $fixture = New-TestMediaJobFixture -Root $TestDrive
         $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
@@ -378,6 +457,11 @@ Describe 'retained source and private publication ownership' {
             $staged = Copy-ValidatedMediaSourceToStage -Job $job -OwnedSource $owned
             try {
                 [IO.File]::ReadAllBytes($staged.Path) | Should -Be ([byte[]](1..32))
+                { Assert-StagedMediaSourceUnchanged -Job $job -StagedSource $staged } |
+                    Should -Not -Throw
+                $job.sourceSize++
+                { Assert-StagedMediaSourceUnchanged -Job $job -StagedSource $staged } |
+                    Should -Throw '*identity*'
             } finally { $staged.Dispose() }
         } finally { $owned.Dispose() }
     }
@@ -415,8 +499,83 @@ Describe 'media job effect boundaries' {
         $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
 
         { Assert-MediaOutputCapacity -Job $job `
-            -AvailableFreeSpaceBytes (100GB + $job.maxOutputBytes - 1) } |
+            -AvailableFreeSpaceBytes (100GB + $job.sourceSize + $job.maxOutputBytes - 1) } |
             Should -Throw '*reserve*'
+    }
+
+    It 'rejects aggregate capacity arithmetic that would overflow' {
+        { Get-RequiredMediaCapacityBytes -SourceSizeBytes ([long]::MaxValue) `
+            -MaxOutputBytes 1 } | Should -Throw '*overflow*'
+    }
+
+    It 'represents staging and output as one private-store capacity domain' {
+        $fixture = New-TestMediaJobFixture -Root (Join-Path $TestDrive 'same-store')
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+
+        Assert-MediaJobUsesSinglePrivateStore -Job $job | Should -Be $job.systemRoot
+    }
+
+    It 'cancels a bounded staged copy between chunks and removes partial staged bytes' {
+        $fixture = New-TestMediaJobFixture -Root (Join-Path $TestDrive 'stage-cancel')
+        Set-TestMediaSourceBytes -Fixture $fixture -Length 196608
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        $owned = Open-ValidatedMediaSource -Job $job
+        $state = @{ Checks = 0 }
+        $clock = {
+            $state.Checks++
+            if ($state.Checks -eq 3) {
+                [IO.File]::WriteAllText($job.cancellationPath, 'cancel')
+            }
+            [DateTimeOffset]::UtcNow
+        }.GetNewClosure()
+        try {
+            { Copy-ValidatedMediaSourceToStage -Job $job -OwnedSource $owned `
+                -GetNowUtc $clock -GetAvailableFreeSpace { param($path) 200GB } } |
+                Should -Throw '*canceled*'
+        } finally { $owned.Dispose() }
+
+        Test-Path -LiteralPath (Join-Path $job.stagingRoot "$($job.jobId).source") |
+            Should -BeFalse
+    }
+
+    It 'times out a bounded staged copy between chunks and removes partial staged bytes' {
+        $fixture = New-TestMediaJobFixture -Root (Join-Path $TestDrive 'stage-timeout')
+        Set-TestMediaSourceBytes -Fixture $fixture -Length 196608
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        $owned = Open-ValidatedMediaSource -Job $job
+        $state = @{ Checks = 0 }
+        $clock = {
+            $state.Checks++
+            if ($state.Checks -lt 3) { [DateTimeOffset]::UtcNow } else { $job.deadline.AddTicks(1) }
+        }.GetNewClosure()
+        try {
+            { Copy-ValidatedMediaSourceToStage -Job $job -OwnedSource $owned `
+                -GetNowUtc $clock -GetAvailableFreeSpace { param($path) 200GB } } |
+                Should -Throw '*deadline*'
+        } finally { $owned.Dispose() }
+
+        Test-Path -LiteralPath (Join-Path $job.stagingRoot "$($job.jobId).source") |
+            Should -BeFalse
+    }
+
+    It 'fails a staged copy when the remaining same-store reserve is consumed' {
+        $fixture = New-TestMediaJobFixture -Root (Join-Path $TestDrive 'stage-space')
+        Set-TestMediaSourceBytes -Fixture $fixture -Length 65536
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        $owned = Open-ValidatedMediaSource -Job $job
+        $state = @{ Queries = 0 }
+        $space = {
+            param($path)
+            $state.Queries++
+            if ($state.Queries -eq 1) { 200GB } else { 100GB + $job.maxOutputBytes - 1 }
+        }.GetNewClosure()
+        try {
+            { Copy-ValidatedMediaSourceToStage -Job $job -OwnedSource $owned `
+                -GetAvailableFreeSpace $space } | Should -Throw '*reserve*'
+        } finally { $owned.Dispose() }
+
+        Test-Path -LiteralPath (Join-Path $job.stagingRoot "$($job.jobId).source") |
+            Should -BeFalse
     }
 
     It 'revalidates exact tool hashes immediately before the probe launch boundary' {
@@ -491,6 +650,167 @@ Describe 'media job effect boundaries' {
         Test-Path -LiteralPath $job.partialOutputPath | Should -BeFalse
         [IO.File]::ReadAllBytes($job.readyOutputPath) | Should -Be ([byte[]](1..16))
         (Get-Content $job.statusPath -Raw | ConvertFrom-Json).status | Should -Be 'READY'
+    }
+}
+
+Describe 'real controlled media child-process pipeline' -Skip:(-not $IsWindows) {
+    It 'kills a real transcode process tree after post-start cancellation and cleans private bytes' {
+        $fixture = New-TestMediaJobFixture -Root (Join-Path $TestDrive 'real-cancel')
+        Set-TestMediaSourceBytes -Fixture $fixture -Length 131072
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        $tools = Get-TestPowerShellMediaToolSet
+        $started = Join-Path $TestDrive 'real-cancel-transcode-started.txt'
+        $childPidPath = Join-Path $TestDrive 'real-cancel-child.pid'
+        $release = Join-Path $TestDrive 'real-cancel-release.txt'
+        $pwsh = (Get-Command pwsh.exe).Source
+        $childCommand = ConvertTo-TestEncodedCommand -Script @"
+`$watcher = [IO.FileSystemWatcher]::new('$($TestDrive.Replace("'", "''"))', '$([IO.Path]::GetFileName($release))')
+`$watcher.EnableRaisingEvents = `$true
+try {
+    if (-not (Test-Path -LiteralPath '$($release.Replace("'", "''"))')) {
+        `$change = `$watcher.WaitForChanged([IO.WatcherChangeTypes]::Created, 30000)
+        if (`$change.TimedOut) { exit 4 }
+    }
+} finally { `$watcher.Dispose() }
+"@
+        $transcodeCommand = ConvertTo-TestEncodedCommand -Script @"
+`$child = Start-Process -FilePath '$($pwsh.Replace("'", "''"))' -WindowStyle Hidden -PassThru -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand','$childCommand')
+[IO.File]::WriteAllText('$($childPidPath.Replace("'", "''"))', [string]`$child.Id)
+[IO.File]::WriteAllBytes('$($job.partialOutputPath.Replace("'", "''"))', [byte[]](1..32))
+[IO.File]::WriteAllText('$($started.Replace("'", "''"))', 'started')
+[IO.File]::WriteAllText('$($job.cancellationPath.Replace("'", "''"))', 'cancel')
+`$watcher = [IO.FileSystemWatcher]::new('$($TestDrive.Replace("'", "''"))', '$([IO.Path]::GetFileName($release))')
+`$watcher.EnableRaisingEvents = `$true
+try {
+    if (-not (Test-Path -LiteralPath '$($release.Replace("'", "''"))')) {
+        `$change = `$watcher.WaitForChanged([IO.WatcherChangeTypes]::Created, 30000)
+        if (`$change.TimedOut) { exit 5 }
+    }
+} finally { `$watcher.Dispose() }
+"@
+        $probeCommand = ConvertTo-TestEncodedCommand -Script "[Console]::Out.Write('{}')"
+        $probe = {
+            param($context)
+            Invoke-PinnedMediaTool -Executable $context.ToolSet.Ffprobe `
+                -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$probeCommand) `
+                -Deadline $context.Job.deadline -CancellationPath $context.Job.cancellationPath
+        }.GetNewClosure()
+        $transcode = {
+            param($context)
+            Invoke-PinnedMediaTool -Executable $context.ToolSet.Ffmpeg `
+                -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$transcodeCommand) `
+                -Deadline $context.Job.deadline -CancellationPath $context.Job.cancellationPath `
+                -OnPoll $context.PollAction
+        }.GetNewClosure()
+
+        { Invoke-ValidatedMediaJob -Job $job -ToolSet $tools `
+            -GetAvailableFreeSpace { param($path) 200GB } `
+            -ProbeAction $probe -TranscodeAction $transcode } |
+            Should -Throw '*canceled*'
+
+        Test-Path -LiteralPath $started | Should -BeTrue
+        Test-Path -LiteralPath $job.partialOutputPath | Should -BeFalse
+        Test-Path -LiteralPath $job.readyOutputPath | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $job.stagingRoot "$($job.jobId).source") |
+            Should -BeFalse
+        (Get-Content -LiteralPath $job.statusPath -Raw | ConvertFrom-Json).status |
+            Should -Not -Be 'READY'
+        $childProcessId = [int](Get-Content -LiteralPath $childPidPath -Raw)
+        try {
+            $child = [Diagnostics.Process]::GetProcessById($childProcessId)
+            $child.WaitForExit(5000) | Should -BeTrue
+            $child.HasExited | Should -BeTrue
+        } catch [ArgumentException] {
+            $true | Should -BeTrue
+        }
+    }
+
+    It 'publishes only after a real bounded-output transcode process exits' {
+        $fixture = New-TestMediaJobFixture -Root (Join-Path $TestDrive 'real-success')
+        Set-TestMediaSourceBytes -Fixture $fixture -Length 131072
+        $job = Read-ValidatedMediaJob $fixture.JobPath $fixture.SharedRoot $fixture.SystemRoot
+        $tools = Get-TestPowerShellMediaToolSet
+        $started = Join-Path $TestDrive 'real-success-transcode-started.txt'
+        $release = Join-Path $TestDrive 'real-success-release.txt'
+        $observation = Join-Path $TestDrive 'real-success-ready-observation.txt'
+        $exitMarker = Join-Path $TestDrive 'real-success-exited.txt'
+        $boundedResult = Join-Path $TestDrive 'real-success-bounded.json'
+        $coordinatorCommand = ConvertTo-TestEncodedCommand -Script @"
+`$watcher = [IO.FileSystemWatcher]::new('$($TestDrive.Replace("'", "''"))', '$([IO.Path]::GetFileName($started))')
+`$watcher.EnableRaisingEvents = `$true
+try {
+    if (-not (Test-Path -LiteralPath '$($started.Replace("'", "''"))')) {
+        `$change = `$watcher.WaitForChanged([IO.WatcherChangeTypes]::Created, 15000)
+        if (`$change.TimedOut) { exit 6 }
+    }
+    `$state = if (Test-Path -LiteralPath '$($job.readyOutputPath.Replace("'", "''"))') { 'present' } else { 'absent' }
+    [IO.File]::WriteAllText('$($observation.Replace("'", "''"))', `$state)
+    [IO.File]::WriteAllText('$($release.Replace("'", "''"))', 'release')
+} finally { `$watcher.Dispose() }
+"@
+        $transcodeCommand = ConvertTo-TestEncodedCommand -Script @"
+[IO.File]::WriteAllBytes('$($job.partialOutputPath.Replace("'", "''"))', [byte[]](1..64))
+[IO.File]::WriteAllText('$($started.Replace("'", "''"))', 'started')
+`$watcher = [IO.FileSystemWatcher]::new('$($TestDrive.Replace("'", "''"))', '$([IO.Path]::GetFileName($release))')
+`$watcher.EnableRaisingEvents = `$true
+try {
+    if (-not (Test-Path -LiteralPath '$($release.Replace("'", "''"))')) {
+        `$change = `$watcher.WaitForChanged([IO.WatcherChangeTypes]::Created, 15000)
+        if (`$change.TimedOut) { exit 7 }
+    }
+} finally { `$watcher.Dispose() }
+[Console]::Out.Write('x' * 200000)
+[Console]::Error.Write('y' * 200000)
+[IO.File]::WriteAllText('$($exitMarker.Replace("'", "''"))', 'exited')
+"@
+        $probeCommand = ConvertTo-TestEncodedCommand -Script "[Console]::Out.Write('{}')"
+        $probe = {
+            param($context)
+            Invoke-PinnedMediaTool -Executable $context.ToolSet.Ffprobe `
+                -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$probeCommand) `
+                -Deadline $context.Job.deadline -CancellationPath $context.Job.cancellationPath
+        }.GetNewClosure()
+        $transcode = {
+            param($context)
+            $coordinator = Start-Process -FilePath $context.ToolSet.Ffmpeg -WindowStyle Hidden -PassThru `
+                -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$coordinatorCommand)
+            try {
+                $result = Invoke-PinnedMediaTool -Executable $context.ToolSet.Ffmpeg `
+                    -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$transcodeCommand) `
+                    -Deadline $context.Job.deadline -CancellationPath $context.Job.cancellationPath `
+                    -OnPoll $context.PollAction
+                [ordered]@{
+                    outputLength = $result.StandardOutput.Length
+                    errorLength = $result.StandardError.Length
+                    outputTruncated = $result.OutputTruncated
+                    errorTruncated = $result.ErrorTruncated
+                } | ConvertTo-Json | Set-Content -LiteralPath $boundedResult
+            } finally {
+                if (-not $coordinator.WaitForExit(5000)) {
+                    $coordinator.Kill($true)
+                    throw 'Success coordinator did not exit within its bounded wait.'
+                }
+                if ($coordinator.ExitCode -ne 0) {
+                    throw "Success coordinator exited with code $($coordinator.ExitCode)."
+                }
+                $coordinator.Dispose()
+            }
+        }.GetNewClosure()
+
+        Invoke-ValidatedMediaJob -Job $job -ToolSet $tools `
+            -GetAvailableFreeSpace { param($path) 200GB } `
+            -ProbeAction $probe -TranscodeAction $transcode
+
+        Get-Content -LiteralPath $observation -Raw | Should -Be 'absent'
+        Test-Path -LiteralPath $exitMarker | Should -BeTrue
+        Test-Path -LiteralPath $job.readyOutputPath | Should -BeTrue
+        (Get-Content -LiteralPath $job.statusPath -Raw | ConvertFrom-Json).status |
+            Should -Be 'READY'
+        $bounded = Get-Content -LiteralPath $boundedResult -Raw | ConvertFrom-Json
+        $bounded.outputLength | Should -Be 65536
+        $bounded.errorLength | Should -Be 65536
+        $bounded.outputTruncated | Should -BeTrue
+        $bounded.errorTruncated | Should -BeTrue
     }
 }
 

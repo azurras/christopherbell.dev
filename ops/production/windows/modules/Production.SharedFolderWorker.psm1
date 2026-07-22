@@ -29,9 +29,11 @@ $script:StatusValues = @(
     'TIMED_OUT'
 )
 $script:MaximumJobDuration = [TimeSpan]::FromHours(2)
+$script:MaximumSourceBytes = 10GB
 $script:MaximumOutputBytes = 50GB
 $script:MaximumInitialBufferBytes = 2MB
 $script:MinimumFreeSpaceReserveBytes = 100GB
+$script:StagingCopyBufferBytes = 64KB
 
 if (-not ('ChristopherBell.Dev.Production.BoundedTextReader' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -283,6 +285,15 @@ function Assert-PositiveInteger {
     return $number
 }
 
+function Assert-MediaSourceSizeAllowed {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][long]$SourceSizeBytes)
+
+    if ($SourceSizeBytes -lt 0 -or $SourceSizeBytes -gt $script:MaximumSourceBytes) {
+        throw 'sourceSize exceeds the fixed ten-gigabyte transcode ceiling.'
+    }
+}
+
 function Read-ValidatedMediaJob {
     [CmdletBinding()]
     param(
@@ -345,6 +356,7 @@ function Read-ValidatedMediaJob {
     }
 
     $sourceSize = Assert-PositiveInteger -Value $job.sourceSize -FieldName sourceSize -AllowZero
+    Assert-MediaSourceSizeAllowed -SourceSizeBytes $sourceSize
     if ([long]$source.Length -ne $sourceSize) { throw 'Source size changed after the job was queued.' }
     $sourceModifiedAt = ConvertTo-StrictUtcTimestamp -Value $job.sourceModifiedAt -FieldName sourceModifiedAt
     if ($source.LastWriteTimeUtc.Ticks -ne $sourceModifiedAt.UtcDateTime.Ticks) {
@@ -459,39 +471,201 @@ function Open-ValidatedMediaSource {
     }
 }
 
+function Assert-MediaJobMayContinue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Job,
+        [DateTimeOffset]$NowUtc = [DateTimeOffset]::UtcNow
+    )
+
+    if (Test-Path -LiteralPath $Job.cancellationPath -PathType Leaf) {
+        throw [OperationCanceledException]::new('Media job was canceled.')
+    }
+    if ($NowUtc.ToUniversalTime() -ge $Job.deadline) {
+        throw [TimeoutException]::new('Media job exceeded its deadline.')
+    }
+}
+
+function Assert-MediaJobUsesSinglePrivateStore {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Job)
+
+    $systemRoot = Get-CanonicalPath -Path $Job.systemRoot
+    $expectedStagingRoot = Get-CanonicalPath -Path (
+        Join-Path $systemRoot 'shared-folder-media-staging')
+    if (-not [string]::Equals(
+        (Get-CanonicalPath -Path $Job.stagingRoot),
+        $expectedStagingRoot,
+        [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Media staging and output paths must use the configured private store.'
+    }
+    foreach ($path in @(
+        $Job.stagingRoot,
+        $Job.partialOutputPath,
+        $Job.readyOutputPath
+    )) {
+        if (-not (Test-PathBelowRoot -Path $path -Root $systemRoot)) {
+            throw 'Media staging and output paths must use one private store.'
+        }
+        if (-not [string]::Equals(
+            [IO.Path]::GetPathRoot((Get-CanonicalPath -Path $path)),
+            [IO.Path]::GetPathRoot($systemRoot),
+            [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Media staging and output paths must use one private store.'
+        }
+    }
+    return $systemRoot
+}
+
 function Copy-ValidatedMediaSourceToStage {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Job,
-        [Parameter(Mandatory)]$OwnedSource
+        [Parameter(Mandatory)]$OwnedSource,
+        [scriptblock]$GetNowUtc = { [DateTimeOffset]::UtcNow },
+        [scriptblock]$GetAvailableFreeSpace = {
+            param($Path)
+            ([IO.DriveInfo]::new([IO.Path]::GetPathRoot($Path))).AvailableFreeSpace
+        }
     )
 
+    Assert-MediaSourceSizeAllowed -SourceSizeBytes ([long]$Job.sourceSize)
+    $privateStoreRoot = Assert-MediaJobUsesSinglePrivateStore -Job $Job
     Assert-PathHasNoReparseComponent -Path $Job.stagingRoot -Root $Job.systemRoot
     $stagedPath = Join-Path $Job.stagingRoot "$($Job.jobId).source"
     Assert-PathHasNoReparseComponent -Path $stagedPath -Root $Job.systemRoot
-    $output = [IO.FileStream]::new(
-        $stagedPath,
-        [IO.FileMode]::CreateNew,
-        [IO.FileAccess]::Write,
-        [IO.FileShare]::Read)
+    $output = $null
+    $copiedBytes = 0L
     try {
+        Assert-MediaJobMayContinue -Job $Job -NowUtc (& $GetNowUtc)
+        $output = [IO.FileStream]::new(
+            $stagedPath,
+            [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write,
+            [IO.FileShare]::None)
         $OwnedSource.Stream.Position = 0
-        $OwnedSource.Stream.CopyTo($output)
+        $buffer = [byte[]]::new($script:StagingCopyBufferBytes)
+        while ($copiedBytes -lt [long]$Job.sourceSize) {
+            Assert-MediaJobMayContinue -Job $Job -NowUtc (& $GetNowUtc)
+            $remainingBytes = [long]$Job.sourceSize - $copiedBytes
+            $availableBytes = [long](& $GetAvailableFreeSpace $privateStoreRoot)
+            Assert-MediaRemainingCapacity -RemainingSourceBytes $remainingBytes `
+                -MaxOutputBytes ([long]$Job.maxOutputBytes) `
+                -AvailableFreeSpaceBytes $availableBytes
+            $requestedBytes = [int][Math]::Min([long]$buffer.Length, $remainingBytes)
+            $readBytes = $OwnedSource.Stream.Read($buffer, 0, $requestedBytes)
+            if ($readBytes -le 0) {
+                throw 'Retained source ended before the declared sourceSize.'
+            }
+            $output.Write($buffer, 0, $readBytes)
+            $copiedBytes += $readBytes
+            if ($copiedBytes -gt [long]$Job.sourceSize) {
+                throw 'Staged source exceeds the declared sourceSize.'
+            }
+            $remainingBytes = [long]$Job.sourceSize - $copiedBytes
+            $availableBytes = [long](& $GetAvailableFreeSpace $privateStoreRoot)
+            Assert-MediaRemainingCapacity -RemainingSourceBytes $remainingBytes `
+                -MaxOutputBytes ([long]$Job.maxOutputBytes) `
+                -AvailableFreeSpaceBytes $availableBytes
+            Assert-MediaJobMayContinue -Job $Job -NowUtc (& $GetNowUtc)
+        }
+        if ($OwnedSource.Stream.ReadByte() -ne -1) {
+            throw 'Retained source exceeds the declared sourceSize.'
+        }
         $output.Flush($true)
-    } finally {
         $output.Dispose()
+        $output = $null
+        if ((Get-Item -LiteralPath $stagedPath -Force).Length -ne [long]$Job.sourceSize) {
+            throw 'Staged source byte count does not match sourceSize.'
+        }
+        [IO.File]::SetLastWriteTimeUtc($stagedPath, $Job.sourceModifiedAt.UtcDateTime)
+        $stream = [IO.FileStream]::new(
+            $stagedPath,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::Read,
+            [IO.FileShare]::Read,
+            65536,
+            [IO.FileOptions]::SequentialScan)
+        try {
+            $finalPath = if ($IsWindows) {
+                [ChristopherBell.Dev.Production.NativeFileHandle]::GetFinalPath($stream.SafeFileHandle)
+            } else {
+                $stream.Name
+            }
+            if (-not [string]::Equals(
+                (Get-CanonicalPath -Path $finalPath),
+                (Get-CanonicalPath -Path $stagedPath),
+                [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Staged source final location changed before tool use.'
+            }
+            $identity = if ($IsWindows) {
+                [ChristopherBell.Dev.Production.NativeFileHandle]::GetIdentity($stream.SafeFileHandle)
+            } else {
+                [pscustomobject]@{
+                    FileSize = $stream.Length
+                    LastWriteTimeUtc = (Get-Item -LiteralPath $stream.Name).LastWriteTimeUtc
+                }
+            }
+            if ([long]$identity.FileSize -ne [long]$Job.sourceSize) {
+                throw 'Staged source identity does not match sourceSize.'
+            }
+            $staged = [pscustomobject]@{
+                Path = $stagedPath
+                Stream = $stream
+                Identity = $identity
+            }
+            $staged | Add-Member -MemberType ScriptMethod -Name Dispose -Value {
+                $this.Stream.Dispose()
+            }
+            return $staged
+        } catch {
+            $stream.Dispose()
+            throw
+        }
+    } catch {
+        if ($output) { $output.Dispose() }
+        Remove-Item -LiteralPath $stagedPath -Force -ErrorAction SilentlyContinue
+        throw
     }
-    [IO.File]::SetLastWriteTimeUtc($stagedPath, $Job.sourceModifiedAt.UtcDateTime)
-    $stream = [IO.FileStream]::new(
-        $stagedPath,
-        [IO.FileMode]::Open,
-        [IO.FileAccess]::Read,
-        [IO.FileShare]::Read,
-        65536,
-        [IO.FileOptions]::SequentialScan)
-    $staged = [pscustomobject]@{ Path = $stagedPath; Stream = $stream }
-    $staged | Add-Member -MemberType ScriptMethod -Name Dispose -Value { $this.Stream.Dispose() }
-    return $staged
+}
+
+function Assert-StagedMediaSourceUnchanged {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Job,
+        [Parameter(Mandatory)]$StagedSource
+    )
+
+    $finalPath = if ($IsWindows) {
+        [ChristopherBell.Dev.Production.NativeFileHandle]::GetFinalPath(
+            $StagedSource.Stream.SafeFileHandle)
+    } else {
+        $StagedSource.Stream.Name
+    }
+    if (-not [string]::Equals(
+        (Get-CanonicalPath -Path $finalPath),
+        (Get-CanonicalPath -Path $StagedSource.Path),
+        [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Staged source final location changed before tool use.'
+    }
+    $identity = if ($IsWindows) {
+        [ChristopherBell.Dev.Production.NativeFileHandle]::GetIdentity(
+            $StagedSource.Stream.SafeFileHandle)
+    } else {
+        [pscustomobject]@{
+            FileSize = $StagedSource.Stream.Length
+            LastWriteTimeUtc = (Get-Item -LiteralPath $StagedSource.Path).LastWriteTimeUtc
+        }
+    }
+    if ([long]$identity.FileSize -ne [long]$Job.sourceSize -or
+        [long]$identity.FileSize -ne [long]$StagedSource.Identity.FileSize) {
+        throw 'Staged source identity changed before tool use.'
+    }
+    if ($IsWindows -and
+        ($identity.VolumeSerialNumber -ne $StagedSource.Identity.VolumeSerialNumber -or
+        $identity.FileIndex -ne $StagedSource.Identity.FileIndex)) {
+        throw 'Staged source identity changed before tool use.'
+    }
 }
 
 function Assert-MediaJobPrivatePaths {
@@ -740,6 +914,12 @@ function Invoke-PinnedMediaTool {
     $stdoutTask = $null
     $stderrTask = $null
     try {
+        if ($CancellationPath -and (Test-Path -LiteralPath $CancellationPath -PathType Leaf)) {
+            throw [OperationCanceledException]::new('Media job was canceled.')
+        }
+        if ([DateTimeOffset]::UtcNow -ge $Deadline) {
+            throw [TimeoutException]::new('Media job exceeded its deadline.')
+        }
         if (-not $process.Start()) { throw 'Media tool process did not start.' }
         $started = $true
         $stdoutTask = [ChristopherBell.Dev.Production.BoundedTextReader]::ReadAsync(
@@ -845,10 +1025,46 @@ function Assert-MediaOutputCapacity {
         [Parameter(Mandatory)][long]$AvailableFreeSpaceBytes
     )
 
-    if ($AvailableFreeSpaceBytes -lt $script:MinimumFreeSpaceReserveBytes -or
-        ($AvailableFreeSpaceBytes - $script:MinimumFreeSpaceReserveBytes) -lt
-            [long]$Job.maxOutputBytes) {
-        throw 'Insufficient space for maxOutputBytes plus the fixed free-space reserve.'
+    $requiredBytes = Get-RequiredMediaCapacityBytes `
+        -SourceSizeBytes ([long]$Job.sourceSize) `
+        -MaxOutputBytes ([long]$Job.maxOutputBytes)
+    if ($AvailableFreeSpaceBytes -lt $requiredBytes) {
+        throw 'Insufficient space for source staging, maxOutputBytes, and the fixed free-space reserve.'
+    }
+}
+
+function Get-RequiredMediaCapacityBytes {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][long]$SourceSizeBytes,
+        [Parameter(Mandatory)][long]$MaxOutputBytes
+    )
+
+    if ($SourceSizeBytes -lt 0 -or $MaxOutputBytes -lt 0) {
+        throw 'Media capacity components must not be negative.'
+    }
+    if ($SourceSizeBytes -gt [long]::MaxValue - $MaxOutputBytes) {
+        throw 'Media capacity calculation would overflow.'
+    }
+    $workBytes = $SourceSizeBytes + $MaxOutputBytes
+    if ($workBytes -gt [long]::MaxValue - $script:MinimumFreeSpaceReserveBytes) {
+        throw 'Media capacity calculation would overflow.'
+    }
+    return $workBytes + $script:MinimumFreeSpaceReserveBytes
+}
+
+function Assert-MediaRemainingCapacity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][long]$RemainingSourceBytes,
+        [Parameter(Mandatory)][long]$MaxOutputBytes,
+        [Parameter(Mandatory)][long]$AvailableFreeSpaceBytes
+    )
+
+    $requiredBytes = Get-RequiredMediaCapacityBytes `
+        -SourceSizeBytes $RemainingSourceBytes -MaxOutputBytes $MaxOutputBytes
+    if ($AvailableFreeSpaceBytes -lt $requiredBytes) {
+        throw 'Insufficient space for remaining source staging, output, and the fixed free-space reserve.'
     }
 }
 
@@ -875,7 +1091,9 @@ function Invoke-ValidatedMediaJob {
         }
     )
 
-    $available = & $GetAvailableFreeSpace ([string]$Job.partialOutputPath)
+    Assert-MediaJobMayContinue -Job $Job
+    $privateStoreRoot = Assert-MediaJobUsesSinglePrivateStore -Job $Job
+    $available = & $GetAvailableFreeSpace $privateStoreRoot
     Assert-MediaOutputCapacity -Job $Job -AvailableFreeSpaceBytes ([long]$available)
     $lease = Enter-MediaPrivateRootLease -Job $Job
     $ownedSource = $null
@@ -885,10 +1103,13 @@ function Invoke-ValidatedMediaJob {
         $ownedSource = Open-ValidatedMediaSource -Job $Job
         $staleStage = Join-Path $Job.stagingRoot "$($Job.jobId).source"
         Remove-Item -LiteralPath $staleStage -Force -ErrorAction SilentlyContinue
-        $stagedSource = Copy-ValidatedMediaSourceToStage -Job $Job -OwnedSource $ownedSource
+        $stagedSource = Copy-ValidatedMediaSourceToStage -Job $Job -OwnedSource $ownedSource `
+            -GetAvailableFreeSpace $GetAvailableFreeSpace
         $executionJob = $Job.PSObject.Copy()
         $executionJob.sourcePath = $stagedSource.Path
 
+        Assert-MediaJobMayContinue -Job $executionJob
+        Assert-StagedMediaSourceUnchanged -Job $executionJob -StagedSource $stagedSource
         Write-MediaJobStatusAtomic -Job $executionJob -Status INSPECTING
         Assert-MediaToolSetUnchanged -ToolSet $ToolSet
         $probeContext = [pscustomobject]@{
@@ -896,6 +1117,7 @@ function Invoke-ValidatedMediaJob {
             ToolSet = $ToolSet
             ToolArgList = New-FixedFfprobeArguments -Job $executionJob
         }
+        Assert-MediaJobMayContinue -Job $executionJob
         $probe = & $ProbeAction $probeContext
         if ($probe.OutputTruncated -or
             [Text.Encoding]::UTF8.GetByteCount([string]$probe.StandardOutput) -gt 65536) {
@@ -924,6 +1146,8 @@ function Invoke-ValidatedMediaJob {
             }
         }
         Assert-MediaToolSetUnchanged -ToolSet $ToolSet
+        Assert-MediaJobMayContinue -Job $executionJob
+        Assert-StagedMediaSourceUnchanged -Job $executionJob -StagedSource $stagedSource
         $transcodeContext = [pscustomobject]@{
             Job = $executionJob
             ToolSet = $ToolSet
@@ -932,6 +1156,8 @@ function Invoke-ValidatedMediaJob {
         }
         & $TranscodeAction $transcodeContext | Out-Null
         & $poll
+        Assert-MediaJobMayContinue -Job $executionJob
+        Assert-StagedMediaSourceUnchanged -Job $executionJob -StagedSource $stagedSource
         Complete-MediaJobAtomically -Job $executionJob
         $completed = $true
     } finally {
@@ -946,4 +1172,4 @@ function Invoke-ValidatedMediaJob {
     }
 }
 
-Export-ModuleMember -Function Get-CanonicalPath,Test-PathBelowRoot,Assert-PathHasNoReparseComponent,Read-ValidatedMediaJob,Open-ValidatedMediaSource,Copy-ValidatedMediaSourceToStage,Assert-MediaJobPrivatePaths,Enter-MediaPrivateRootLease,Assert-MediaJobSourceUnchanged,New-FixedFfprobeArguments,New-FixedFfmpegArguments,Enter-SharedFolderWorkerLock,Assert-PinnedMediaToolSet,Assert-MediaToolSetUnchanged,Invoke-PinnedMediaTool,Write-MediaJobStatusAtomic,Complete-MediaJobAtomically,Assert-MediaOutputCapacity,Invoke-ValidatedMediaJob
+Export-ModuleMember -Function Get-CanonicalPath,Test-PathBelowRoot,Assert-PathHasNoReparseComponent,Assert-MediaSourceSizeAllowed,Read-ValidatedMediaJob,Open-ValidatedMediaSource,Assert-MediaJobMayContinue,Assert-MediaJobUsesSinglePrivateStore,Copy-ValidatedMediaSourceToStage,Assert-StagedMediaSourceUnchanged,Assert-MediaJobPrivatePaths,Enter-MediaPrivateRootLease,Assert-MediaJobSourceUnchanged,New-FixedFfprobeArguments,New-FixedFfmpegArguments,Enter-SharedFolderWorkerLock,Assert-PinnedMediaToolSet,Assert-MediaToolSetUnchanged,Invoke-PinnedMediaTool,Write-MediaJobStatusAtomic,Complete-MediaJobAtomically,Get-RequiredMediaCapacityBytes,Assert-MediaRemainingCapacity,Assert-MediaOutputCapacity,Invoke-ValidatedMediaJob
