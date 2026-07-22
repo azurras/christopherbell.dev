@@ -149,6 +149,11 @@ public final class SharedFolderAuditRecorder {
     recordRejected(action, resource, failureCategory(failure));
   }
 
+  /** Records a failed operation through the globally bounded rejection ingress path. */
+  public void recordFailureOnce(String action, String resource, RuntimeException failure) {
+    recordRejectedOnce(action, safeRejectedResource(resource), failureCategory(failure));
+  }
+
   /** Reports whether this request already emitted the same action/outcome audit fact. */
   public boolean currentRequestAlreadyRecorded(String action, String outcome) {
     HttpServletRequest request = currentRequest();

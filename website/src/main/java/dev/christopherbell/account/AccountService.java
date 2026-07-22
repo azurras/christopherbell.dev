@@ -403,7 +403,7 @@ public class AccountService {
           "PERMISSION_CHANGE", auditResource, null, "rejected", "not_found");
       throw failure;
     } catch (RuntimeException failure) {
-      sharedFolderAudit.recordFailure("PERMISSION_CHANGE", auditResource, failure);
+      sharedFolderAudit.recordFailureOnce("PERMISSION_CHANGE", auditResource, failure);
       throw failure;
     }
   }

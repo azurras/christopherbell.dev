@@ -11,12 +11,14 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface SharedFolderRecycleRepository
     extends MongoRepository<SharedFolderRecycleItem, String> {
-  Slice<SharedFolderRecycleItem> findByStateOrderByDeletedAtDesc(
+  Slice<SharedFolderRecycleItem> findByStateOrderByDeletedAtDescIdDesc(
       SharedFolderRecycleState state, Pageable page);
 
-  List<SharedFolderRecycleItem> findByStateAndExpiresAtBeforeOrderByExpiresAtAscIdAsc(
-      SharedFolderRecycleState state, Instant cutoff, Pageable page);
+  List<SharedFolderRecycleItem>
+      findByStateAndExpiresAtBeforeAndRetryAfterLessThanEqualOrderByExpiresAtAscIdAsc(
+          SharedFolderRecycleState state, Instant cutoff, Instant retryDue, Pageable page);
 
-  List<SharedFolderRecycleItem> findByStateInOrderByDeletedAtAscIdAsc(
-      List<SharedFolderRecycleState> states, Pageable page);
+  List<SharedFolderRecycleItem>
+      findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(
+          List<SharedFolderRecycleState> states, Instant retryDue, Pageable page);
 }

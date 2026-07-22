@@ -793,7 +793,7 @@ public class AccountServiceTest {
         () -> accountService.updateSharedFolderPermissions(
             "account-permissions", new SharedFolderPermissionUpdate(true, false)));
 
-    verify(sharedFolderAudit).recordFailure(
+    verify(sharedFolderAudit).recordFailureOnce(
         eq("PERMISSION_CHANGE"), eq("account-permissions"), any(
             org.springframework.security.access.AccessDeniedException.class));
     verifyNoMoreInteractions(accountRepository);
@@ -817,7 +817,7 @@ public class AccountServiceTest {
     assertThrows(org.springframework.dao.DataAccessResourceFailureException.class,
         () -> accountService.updateSharedFolderPermissions(
             account.getId(), new SharedFolderPermissionUpdate(true, false)));
-    verify(sharedFolderAudit).recordFailure(
+    verify(sharedFolderAudit).recordFailureOnce(
         "PERMISSION_CHANGE", account.getId(), persistenceFailure);
   }
 

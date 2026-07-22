@@ -22,6 +22,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -46,6 +47,7 @@ public class SharedFolderRecycleService {
   private static final int MAX_ADMIN_LIST_PAGE = 10_000;
   private static final int CLEANUP_BATCH_LIMIT = 100;
   private static final int RECOVERY_BATCH_LIMIT = 100;
+  private static final Duration MAINTENANCE_RETRY_DELAY = Duration.ofDays(1);
 
   private final SharedFolderAccessService access;
   private final SharedFolderProperties properties;
@@ -54,8 +56,6 @@ public class SharedFolderRecycleService {
   private final Clock clock;
   private final PortableSharedFolderPrivateBoundary privateBoundary;
   private final SharedFolderAuditRecorder audit;
-  private int cleanupPage;
-  private int recoveryPage;
 
   public SharedFolderRecycleService(
       SharedFolderAccessService access,
@@ -148,7 +148,7 @@ public class SharedFolderRecycleService {
     access.requireAdmin();
     requireEnabled();
     if (page < 0 || page > MAX_ADMIN_LIST_PAGE) throw badRequest();
-    var result = repository.findByStateOrderByDeletedAtDesc(
+    var result = repository.findByStateOrderByDeletedAtDescIdDesc(
         SharedFolderRecycleState.RECYCLED, PageRequest.of(page, ADMIN_LIST_LIMIT));
     return new SharedFolderRecyclePage(
         result.getContent(), page, page < MAX_ADMIN_LIST_PAGE && result.hasNext());
@@ -246,11 +246,11 @@ public class SharedFolderRecycleService {
     if (!properties.enabled()) return 0;
     reconcilePending();
     int purged = 0;
-    List<SharedFolderRecycleItem> batch =
-        repository.findByStateAndExpiresAtBeforeOrderByExpiresAtAscIdAsc(
-            SharedFolderRecycleState.RECYCLED, clock.instant(),
-            PageRequest.of(cleanupPage, CLEANUP_BATCH_LIMIT));
-    cleanupPage = nextMaintenancePage(cleanupPage, batch.size(), CLEANUP_BATCH_LIMIT);
+    Instant now = clock.instant();
+    List<SharedFolderRecycleItem> batch = repository
+        .findByStateAndExpiresAtBeforeAndRetryAfterLessThanEqualOrderByExpiresAtAscIdAsc(
+            SharedFolderRecycleState.RECYCLED, now, now,
+            PageRequest.of(0, CLEANUP_BATCH_LIMIT));
     for (SharedFolderRecycleItem item : batch) {
       try {
         purgeInternal(item);
@@ -258,6 +258,7 @@ public class SharedFolderRecycleService {
             "RETENTION_PURGE", item.originalPath(), item.size(), "accepted", null);
         purged++;
       } catch (RuntimeException failure) {
+        deferMaintenance(item);
         if (audit != null) audit.recordSystemFailure(
             "RETENTION_PURGE", item.originalPath(), item.size(), failure);
         log.warn("Shared-folder retention purge deferred for item {}", item.id());
@@ -271,15 +272,21 @@ public class SharedFolderRecycleService {
   public synchronized int reconcilePending() {
     if (!properties.enabled()) return 0;
     int reconciled = 0;
-    List<SharedFolderRecycleItem> batch = repository.findByStateInOrderByDeletedAtAscIdAsc(List.of(
-        SharedFolderRecycleState.PREPARING,
-        SharedFolderRecycleState.RESTORING,
-        SharedFolderRecycleState.PURGING), PageRequest.of(recoveryPage, RECOVERY_BATCH_LIMIT));
-    recoveryPage = nextMaintenancePage(recoveryPage, batch.size(), RECOVERY_BATCH_LIMIT);
+    Instant now = clock.instant();
+    List<SharedFolderRecycleItem> batch = repository
+        .findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(List.of(
+            SharedFolderRecycleState.PREPARING,
+            SharedFolderRecycleState.RESTORING,
+            SharedFolderRecycleState.PURGING), now, PageRequest.of(0, RECOVERY_BATCH_LIMIT));
     for (SharedFolderRecycleItem item : batch) {
       try {
-        if (reconcileItem(item)) reconciled++;
+        if (reconcileItem(item)) {
+          reconciled++;
+        } else {
+          deferMaintenance(item);
+        }
       } catch (RuntimeException failure) {
+        deferMaintenance(item);
         if (audit != null) audit.recordSystemFailure(
             recoveryAction(item), item.originalPath(), item.size(), failure);
         log.warn("Shared-folder recycle reconciliation deferred for item {}", item.id());
@@ -288,8 +295,12 @@ public class SharedFolderRecycleService {
     return reconciled;
   }
 
-  private int nextMaintenancePage(int current, int batchSize, int limit) {
-    return batchSize < limit || current == Integer.MAX_VALUE ? 0 : current + 1;
+  private void deferMaintenance(SharedFolderRecycleItem item) {
+    try {
+      repository.save(item.withRetryAfter(clock.instant().plus(MAINTENANCE_RETRY_DELAY)));
+    } catch (RuntimeException persistenceFailure) {
+      log.warn("Shared-folder maintenance retry could not be deferred for item {}", item.id());
+    }
   }
 
   private SharedFolderRecycleItem recycleNative(

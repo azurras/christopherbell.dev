@@ -248,3 +248,28 @@ Java tests and 161 JavaScript tests with zero failures, errors, or skips (`BUILD
 1m 25s). No worktree-local Gradle directory exists and production port 8080 remained untouched.
 Task 5 remains a review candidate until the complete remediated range receives independent
 approval.
+
+## Ninth Independent Review and Remediation
+
+The ninth fresh whole-change review of `09d2f408..239bbdab` rejected Task 5 with zero Critical,
+two Important, and one Minor finding. No rejected candidate was pushed. The remediation replaces
+the remaining transient progress and direct audit paths:
+
+- Runtime failures from the freshly authorized shared-folder permission service now call
+  `recordFailureOnce`, which derives the same closed safe category while entering the globally
+  capped rejection window. A demoted, suspended, or otherwise stale former administrator cannot
+  bypass the outer filter cap by causing the service to mark the request first.
+- Transient in-memory maintenance page cursors were removed. Every recycle record now persists a
+  `retryAfter` timestamp; a failed retention purge, failed recovery, or ambiguous recovery is
+  deferred for one day. Both scheduled queries select only due records from page zero, so the
+  first failed batch becomes ineligible and later records progress even after a process restart.
+  The regression constructs a second service instance over the same persisted repository and
+  proves it reaches the later cleanup and recovery batches.
+- Recycle administration now orders by `deletedAt` and ID, and the cleanup/recovery queries retain
+  expiry/deletion plus ID tie-breakers. Compound indexes include `_id` for deterministic paging and
+  a persisted retry field for due-work filtering.
+
+The forced Windows native/junction-enabled full gate re-executed every task and passed all 956 Java
+tests and 161 JavaScript tests with zero failures, errors, or skips (`BUILD SUCCESSFUL` in 1m 19s).
+No worktree-local Gradle directory exists and production port 8080 remained untouched. Task 5
+remains a review candidate until the complete remediated range receives independent approval.

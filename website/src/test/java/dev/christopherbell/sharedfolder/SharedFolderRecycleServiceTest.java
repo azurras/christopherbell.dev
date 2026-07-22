@@ -51,21 +51,24 @@ class SharedFolderRecycleServiceTest {
     fixture.recycle.listPage(2);
     fixture.recycle.cleanupExpired();
 
-    verify(fixture.repository).findByStateOrderByDeletedAtDesc(
+    verify(fixture.repository).findByStateOrderByDeletedAtDescIdDesc(
         org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED),
         org.mockito.ArgumentMatchers.argThat((Pageable page) ->
             page.getPageSize() == 200 && page.getPageNumber() == 2));
-    verify(fixture.repository).findByStateAndExpiresAtBeforeOrderByExpiresAtAscIdAsc(
-        org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(),
+    verify(fixture.repository)
+        .findByStateAndExpiresAtBeforeAndRetryAfterLessThanEqualOrderByExpiresAtAscIdAsc(
+        org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(), any(),
         org.mockito.ArgumentMatchers.argThat((Pageable page) -> page.getPageSize() == 100));
-    verify(fixture.repository).findByStateInOrderByDeletedAtAscIdAsc(
-        any(), org.mockito.ArgumentMatchers.argThat((Pageable page) -> page.getPageSize() == 100));
+    verify(fixture.repository)
+        .findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(
+        any(), any(), org.mockito.ArgumentMatchers.argThat(
+            (Pageable page) -> page.getPageSize() == 100));
     assertStatus(400, () -> fixture.recycle.listPage(-1));
     assertStatus(400, () -> fixture.recycle.listPage(10_001));
   }
 
   @Test
-  void failedRetentionAndRecoveryBatchesAdvanceToTheNextStablePage() throws Exception {
+  void failedRetentionAndRecoveryBatchesPersistDeferralAcrossServiceRestart() throws Exception {
     Fixture fixture = fixture();
     SharedFolderRecycleItem blocked = new SharedFolderRecycleItem(
         "blocked-id", "missing.txt", "writer-1", NOW.minus(Duration.ofDays(31)),
@@ -73,36 +76,48 @@ class SharedFolderRecycleServiceTest {
         SharedFolderRecycleState.RECYCLED);
     List<SharedFolderRecycleItem> fullCleanupBatch =
         java.util.Collections.nCopies(100, blocked);
-    when(fixture.repository.findByStateAndExpiresAtBeforeOrderByExpiresAtAscIdAsc(
-        org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(), any()))
-        .thenReturn(fullCleanupBatch);
+    SharedFolderRecycleItem later = new SharedFolderRecycleItem(
+        "later-id", "later.txt", "writer-1", NOW.minus(Duration.ofDays(30)),
+        NOW.minusSeconds(1), "later-payload", 1, false, "fingerprint",
+        SharedFolderRecycleState.RECYCLED);
+    org.mockito.Mockito.doReturn(fullCleanupBatch).doReturn(List.of(later))
+        .when(fixture.repository)
+        .findByStateAndExpiresAtBeforeAndRetryAfterLessThanEqualOrderByExpiresAtAscIdAsc(
+            org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(), any(), any());
 
     fixture.recycle.cleanupExpired();
-    fixture.recycle.cleanupExpired();
+    SharedFolderRecycleService restarted = new SharedFolderRecycleService(
+        fixture.access, fixture.properties, fixture.boundary, fixture.repository,
+        Clock.fixed(NOW, ZoneOffset.UTC), fixture.audit);
+    restarted.cleanupExpired();
 
-    ArgumentCaptor<Pageable> cleanupPages = ArgumentCaptor.forClass(Pageable.class);
+    assertThat(fixture.records.get(blocked.id()).retryAfter())
+        .isEqualTo(NOW.plus(Duration.ofDays(1)));
+    ArgumentCaptor<Instant> cleanupDue = ArgumentCaptor.forClass(Instant.class);
     verify(fixture.repository, org.mockito.Mockito.times(2))
-        .findByStateAndExpiresAtBeforeOrderByExpiresAtAscIdAsc(
+        .findByStateAndExpiresAtBeforeAndRetryAfterLessThanEqualOrderByExpiresAtAscIdAsc(
             org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(),
-            cleanupPages.capture());
-    assertThat(cleanupPages.getAllValues()).extracting(Pageable::getPageNumber)
-        .containsExactly(0, 1);
+            cleanupDue.capture(), org.mockito.ArgumentMatchers.argThat(
+                (Pageable page) -> page.getPageNumber() == 0));
+    assertThat(cleanupDue.getAllValues()).containsOnly(NOW);
 
     SharedFolderRecycleItem ambiguous = new SharedFolderRecycleItem(
         "ambiguous-id", "../unsafe.txt", "writer-1", NOW,
         NOW.plus(Duration.ofDays(30)), "missing-payload", 1, false, "fingerprint",
         SharedFolderRecycleState.PREPARING);
-    when(fixture.repository.findByStateInOrderByDeletedAtAscIdAsc(any(), any()))
-        .thenReturn(java.util.Collections.nCopies(100, ambiguous));
+    SharedFolderRecycleItem laterAmbiguous = new SharedFolderRecycleItem(
+        "later-ambiguous-id", "../later-unsafe.txt", "writer-1", NOW.plusSeconds(1),
+        NOW.plus(Duration.ofDays(30)), "missing-payload", 1, false, "fingerprint",
+        SharedFolderRecycleState.PREPARING);
+    org.mockito.Mockito.doReturn(java.util.Collections.nCopies(100, ambiguous))
+        .doReturn(List.of(laterAmbiguous)).when(fixture.repository)
+        .findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(any(), any(), any());
 
     fixture.recycle.reconcilePending();
-    fixture.recycle.reconcilePending();
+    restarted.reconcilePending();
 
-    ArgumentCaptor<Pageable> recoveryPages = ArgumentCaptor.forClass(Pageable.class);
-    verify(fixture.repository, org.mockito.Mockito.times(4))
-        .findByStateInOrderByDeletedAtAscIdAsc(any(), recoveryPages.capture());
-    assertThat(recoveryPages.getAllValues()).extracting(Pageable::getPageNumber)
-        .containsExactly(0, 0, 0, 1);
+    assertThat(fixture.records.get(ambiguous.id()).retryAfter())
+        .isEqualTo(NOW.plus(Duration.ofDays(1)));
   }
 
   @Test
@@ -531,7 +546,7 @@ class SharedFolderRecycleServiceTest {
     });
     when(repository.findById(any())).thenAnswer(invocation ->
         Optional.ofNullable(records.get(invocation.<String>getArgument(0))));
-    when(repository.findByStateOrderByDeletedAtDesc(
+    when(repository.findByStateOrderByDeletedAtDescIdDesc(
         org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any()))
         .thenAnswer(invocation -> {
           Pageable page = invocation.getArgument(1);
@@ -539,16 +554,21 @@ class SharedFolderRecycleServiceTest {
               .filter(item -> item.state() == SharedFolderRecycleState.RECYCLED).toList(),
               page, false);
         });
-    when(repository.findByStateAndExpiresAtBeforeOrderByExpiresAtAscIdAsc(
-        org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(), any()))
+    when(repository
+        .findByStateAndExpiresAtBeforeAndRetryAfterLessThanEqualOrderByExpiresAtAscIdAsc(
+            org.mockito.ArgumentMatchers.eq(SharedFolderRecycleState.RECYCLED), any(), any(), any()))
         .thenAnswer(invocation -> records.values().stream()
             .filter(item -> item.state() == SharedFolderRecycleState.RECYCLED)
             .filter(item -> item.expiresAt().isBefore(invocation.getArgument(1)))
+            .filter(item -> !item.retryAfter().isAfter(invocation.getArgument(2)))
             .toList());
-    when(repository.findByStateInOrderByDeletedAtAscIdAsc(any(), any())).thenAnswer(invocation -> {
+    when(repository.findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(
+        any(), any(), any())).thenAnswer(invocation -> {
       @SuppressWarnings("unchecked")
       List<SharedFolderRecycleState> states = invocation.getArgument(0);
-      return records.values().stream().filter(item -> states.contains(item.state())).toList();
+      Instant due = invocation.getArgument(1);
+      return records.values().stream().filter(item -> states.contains(item.state()))
+          .filter(item -> !item.retryAfter().isAfter(due)).toList();
     });
     org.mockito.Mockito.doAnswer(invocation -> {
       records.remove(invocation.<String>getArgument(0));
@@ -559,7 +579,8 @@ class SharedFolderRecycleServiceTest {
     var recycle = new SharedFolderRecycleService(
         access, properties, boundary, repository,
         Clock.fixed(NOW, ZoneOffset.UTC), audit);
-    return new Fixture(root, system, access, records, repository, mutations, recycle, audit);
+    return new Fixture(root, system, properties, boundary, access, records, repository, mutations,
+        recycle, audit);
   }
 
   private NativeFixture nativeFixture(
@@ -576,8 +597,14 @@ class SharedFolderRecycleServiceTest {
     var records = new LinkedHashMap<String, SharedFolderRecycleItem>();
     for (SharedFolderRecycleItem item : items) records.put(item.id(), item);
     SharedFolderRecycleRepository repository = mock(SharedFolderRecycleRepository.class);
-    when(repository.findByStateInOrderByDeletedAtAscIdAsc(any(), any()))
+    when(repository.findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(
+        any(), any(), any()))
         .thenAnswer(invocation -> List.copyOf(records.values()));
+    when(repository.save(any())).thenAnswer(invocation -> {
+      SharedFolderRecycleItem item = invocation.getArgument(0);
+      records.put(item.id(), item);
+      return item;
+    });
     org.mockito.Mockito.doAnswer(invocation -> {
       records.remove(invocation.<String>getArgument(0));
       return null;
@@ -603,6 +630,8 @@ class SharedFolderRecycleServiceTest {
   private record Fixture(
       Path root,
       Path system,
+      SharedFolderProperties properties,
+      WindowsSharedFolderMutationBoundary boundary,
       SharedFolderAccessService access,
       LinkedHashMap<String, SharedFolderRecycleItem> records,
       SharedFolderRecycleRepository repository,
