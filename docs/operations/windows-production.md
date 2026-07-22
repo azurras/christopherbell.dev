@@ -33,7 +33,7 @@ SHA differs from the active release.
 winget install --id Cloudflare.cloudflared --exact --source winget --scope machine --accept-package-agreements --accept-source-agreements
 ```
 
-- Pester 5.x for operations tests.
+- Pester 5.9.0 for operations tests in both PowerShell 7 and Windows PowerShell 5.1.
 - A real production account email for the mutation-free login smoke check.
 - A rotated Cloudflare tunnel token for a fresh connector installation.
 
@@ -114,6 +114,15 @@ $tokenPath = 'C:\Secure\cloudflared-token.txt'
 .\prod.cmd install -CloudflareTokenPath $tokenPath
 Remove-Item -LiteralPath $tokenPath -Force
 .\prod.cmd auto-install
+Start-Service -Name ChristopherBellMediaWorker -ErrorAction Stop
+$workerService = Get-Service -Name ChristopherBellMediaWorker -ErrorAction Stop
+$workerConfig = Get-CimInstance Win32_Service `
+  -Filter "Name='ChristopherBellMediaWorker'" -ErrorAction Stop
+if ($workerService.Status -ne 'Running' -or
+    $workerService.StartType -ne 'Automatic' -or
+    $workerConfig.StartName -ne 'NT AUTHORITY\LocalService') {
+  throw 'Media worker startup contract failed.'
+}
 .\prod.cmd deploy
 .\prod.cmd verify-startup
 ```
@@ -136,17 +145,20 @@ Installation configures:
 - `ChristopherBellAutoDeploy`: SYSTEM principal, highest privileges, AtStartup
   trigger, and bounded restart policy.
 
-Verify the entire contract with one command:
+Verify the existing website, database, tunnel, deployment-task, and smoke-test
+contract with:
 
 ```powershell
 .\prod.cmd verify-startup
 ```
 
-It requires all three services to be Running and Automatic, confirms the
-automatic deployment task is enabled, exercises the native home/login smoke
-checks, and requires the public URL to return HTTP 200. The current command's
-three-service assertion covers `MongoDB`, `ChristopherBellDev`, and
-`cloudflared`; inspect `ChristopherBellMediaWorker` separately as shown below.
+It requires all three existing services to be Running and Automatic, confirms
+the automatic deployment task is enabled, exercises the native home/login
+smoke checks, and requires the public URL to return HTTP 200. The current
+command's three-service assertion covers `MongoDB`, `ChristopherBellDev`, and
+`cloudflared`. It does not verify `ChristopherBellMediaWorker`; the explicit
+Running, Automatic, and LocalService check in fresh setup and feature
+activation is a separate required part of the startup contract.
 
 ## CPU Temperature Provider
 
@@ -289,6 +301,15 @@ protected environment file, apply it with the existing production workflow:
 
 ```powershell
 .\prod.cmd restart
+Start-Service -Name ChristopherBellMediaWorker -ErrorAction Stop
+$workerService = Get-Service -Name ChristopherBellMediaWorker -ErrorAction Stop
+$workerConfig = Get-CimInstance Win32_Service `
+  -Filter "Name='ChristopherBellMediaWorker'" -ErrorAction Stop
+if ($workerService.Status -ne 'Running' -or
+    $workerService.StartType -ne 'Automatic' -or
+    $workerConfig.StartName -ne 'NT AUTHORITY\LocalService') {
+  throw 'Media worker startup contract failed.'
+}
 ```
 
 `A:\Shared` contains user-visible originals. `A:\Shared-System` is private
@@ -361,20 +382,27 @@ git switch main
 git pull --ff-only origin main
 .\prod.cmd install
 .\prod.cmd auto-install
-Restart-Service ChristopherBellMediaWorker
+Restart-Service ChristopherBellMediaWorker -ErrorAction Stop
 .\prod.cmd deploy
 .\prod.cmd verify-startup
-Get-Service ChristopherBellMediaWorker |
-  Select-Object Name,Status,StartType
+$workerService = Get-Service -Name ChristopherBellMediaWorker -ErrorAction Stop
+$workerConfig = Get-CimInstance Win32_Service `
+  -Filter "Name='ChristopherBellMediaWorker'" -ErrorAction Stop
+if ($workerService.Status -ne 'Running' -or
+    $workerService.StartType -ne 'Automatic' -or
+    $workerConfig.StartName -ne 'NT AUTHORITY\LocalService') {
+  throw 'Media worker startup contract failed.'
+}
 ```
 
 The Gradle entry point `gradlew.bat :website:sharedFolderVerification` runs the
 full Java and browser suites, PowerShell 7 worker coverage, PowerShell 7
 installer/operations coverage, and the same installer/operations compatibility
-fixtures under Windows PowerShell 5.1. Both shells require Pester 5; the Gradle
-task includes the redirected Documents `PowerShell\Modules` tree in the 5.1
-lookup before failing closed if Pester 5 is unavailable. The production
-installer itself still requires elevated PowerShell 7.
+fixtures under Windows PowerShell 5.1. Both shells require exactly Pester
+5.9.0; the Gradle task includes the redirected Documents `PowerShell\Modules`
+tree in the 5.1 lookup before failing closed if Pester 5.9.0 is unavailable or
+a different module version loads. The production installer itself still
+requires elevated PowerShell 7.
 
 For emergency isolation, preserve both roots and disable access before any
 rollback:
@@ -394,6 +422,22 @@ clean, reviewed checkout of the prior known-good commit and run
 `prod.cmd install` from that checkout to restore its checked-in WinSW/script
 definitions; then start the worker, run `prod.cmd verify-startup`, inspect the
 worker explicitly, and re-enable shared routes only after both checks pass.
+
+From that prior known-good checkout, perform the worker recovery check with:
+
+```powershell
+.\prod.cmd install
+Start-Service -Name ChristopherBellMediaWorker -ErrorAction Stop
+$workerService = Get-Service -Name ChristopherBellMediaWorker -ErrorAction Stop
+$workerConfig = Get-CimInstance Win32_Service `
+  -Filter "Name='ChristopherBellMediaWorker'" -ErrorAction Stop
+if ($workerService.Status -ne 'Running' -or
+    $workerService.StartType -ne 'Automatic' -or
+    $workerConfig.StartName -ne 'NT AUTHORITY\LocalService') {
+  throw 'Media worker startup contract failed.'
+}
+.\prod.cmd verify-startup
+```
 
 ## Logs and Diagnostics
 
@@ -539,7 +583,16 @@ git switch main
 git pull --ff-only origin main
 .\prod.cmd install
 .\prod.cmd auto-install
+Restart-Service ChristopherBellMediaWorker -ErrorAction Stop
 .\prod.cmd verify-startup
+$workerService = Get-Service -Name ChristopherBellMediaWorker -ErrorAction Stop
+$workerConfig = Get-CimInstance Win32_Service `
+  -Filter "Name='ChristopherBellMediaWorker'" -ErrorAction Stop
+if ($workerService.Status -ne 'Running' -or
+    $workerService.StartType -ne 'Automatic' -or
+    $workerConfig.StartName -ne 'NT AUTHORITY\LocalService') {
+  throw 'Media worker startup contract failed.'
+}
 ```
 
 Existing secrets are preserved. New non-secret deploy defaults are merged only

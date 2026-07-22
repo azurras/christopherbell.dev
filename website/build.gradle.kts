@@ -167,6 +167,7 @@ val sharedFolderPesterInputs = rootProject.files(
     "ops/production/windows/modules",
     "ops/production/windows/service",
     "ops/production/windows/config")
+val requiredPesterVersion = "5.9.0"
 val pesterReportDirectory = layout.buildDirectory.dir("test-results/shared-folder-pester")
 val pwshExecutable = providers.environmentVariable("PWSH_EXE")
     .orElse("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
@@ -207,7 +208,14 @@ val sharedFolderWorkerPester = tasks.register<Exec>("sharedFolderWorkerPester") 
         val command = """
             ${'$'}ErrorActionPreference = 'Stop'
             if (${'$'}PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required.' }
-            Import-Module Pester -MinimumVersion 5.0.0 -ErrorAction Stop
+            try {
+                Import-Module Pester -RequiredVersion $requiredPesterVersion -ErrorAction Stop
+            } catch {
+                throw 'Required Pester $requiredPesterVersion module is unavailable.'
+            }
+            if ((Get-Module Pester).Version -ne [version]'$requiredPesterVersion') {
+                throw 'Required Pester $requiredPesterVersion module failed to load.'
+            }
             ${'$'}configuration = New-PesterConfiguration
             ${'$'}configuration.Run.Path = @(${pesterPaths(sharedFolderWorkerPesterFiles)})
             ${'$'}configuration.Run.Exit = ${'$'}true
@@ -237,7 +245,14 @@ val sharedFolderOperationsPwshPester = tasks.register<Exec>("sharedFolderOperati
         val command = """
             ${'$'}ErrorActionPreference = 'Stop'
             if (${'$'}PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required.' }
-            Import-Module Pester -MinimumVersion 5.0.0 -ErrorAction Stop
+            try {
+                Import-Module Pester -RequiredVersion $requiredPesterVersion -ErrorAction Stop
+            } catch {
+                throw 'Required Pester $requiredPesterVersion module is unavailable.'
+            }
+            if ((Get-Module Pester).Version -ne [version]'$requiredPesterVersion') {
+                throw 'Required Pester $requiredPesterVersion module failed to load.'
+            }
             ${'$'}configuration = New-PesterConfiguration
             ${'$'}configuration.Run.Path = @(${pesterPaths(sharedFolderOperationsPesterFiles)})
             ${'$'}configuration.Run.Exit = ${'$'}true
@@ -282,7 +297,14 @@ val sharedFolderOperationsWindowsPowerShellPester =
                     ${'$'}windowsUserModules,
                     ${'$'}programModules,
                     ${'$'}builtInModules) -join ';'
-                Import-Module Pester -MinimumVersion 5.0.0 -ErrorAction Stop
+                try {
+                    Import-Module Pester -RequiredVersion $requiredPesterVersion -ErrorAction Stop
+                } catch {
+                    throw 'Required Pester $requiredPesterVersion module is unavailable.'
+                }
+                if ((Get-Module Pester).Version -ne [version]'$requiredPesterVersion') {
+                    throw 'Required Pester $requiredPesterVersion module failed to load.'
+                }
                 ${'$'}configuration = New-PesterConfiguration
                 ${'$'}configuration.Run.Path = @(${pesterPaths(sharedFolderOperationsPesterFiles)})
                 ${'$'}configuration.Run.Exit = ${'$'}true
