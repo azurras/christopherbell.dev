@@ -14,6 +14,8 @@ using System;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
@@ -26,12 +28,37 @@ namespace ChristopherBell.Dev.Acceptance
         public ulong FileIndex { get; set; }
     }
 
+    public sealed class NativeAccessRule
+    {
+        public string Sid { get; set; }
+        public int AccessMask { get; set; }
+        public int AceFlags { get; set; }
+        public string AceType { get; set; }
+    }
+
+    public sealed class NativePathSecurity
+    {
+        public string OwnerSid { get; set; }
+        public bool DaclProtected { get; set; }
+        public NativeAccessRule[] AccessRules { get; set; }
+    }
+
     public static class NativePath
     {
         private const uint FileReadAttributes = 0x80;
         private const uint FileShareAll = 0x7;
         private const uint OpenExisting = 3;
         private const uint BackupSemantics = 0x02000000;
+        private const string ResultDirectorySddl =
+            "O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1301BF;;;LS)";
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SecurityAttributes
+        {
+            public int Length;
+            public IntPtr SecurityDescriptor;
+            public int InheritHandle;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         private struct ByHandleFileInformation
@@ -97,10 +124,80 @@ namespace ChristopherBell.Dev.Acceptance
             }
         }
 
-        public static void CreateDirectoryNew(string path)
+        public static NativePathSecurity GetSecurity(string path, bool directory)
         {
-            if (!CreateDirectoryW(path, IntPtr.Zero))
-                throw new Win32Exception(Marshal.GetLastWin32Error());
+            FileSystemSecurity security = directory
+                ? (FileSystemSecurity)FileSystemAclExtensions.GetAccessControl(
+                    new DirectoryInfo(path), AccessControlSections.Owner | AccessControlSections.Access)
+                : (FileSystemSecurity)FileSystemAclExtensions.GetAccessControl(
+                    new FileInfo(path), AccessControlSections.Owner | AccessControlSections.Access);
+            var rules = security.GetAccessRules(
+                true, true, typeof(SecurityIdentifier));
+            var nativeRules = new NativeAccessRule[rules.Count];
+            for (int index = 0; index < rules.Count; index++)
+            {
+                var rule = (FileSystemAccessRule)rules[index];
+                int flags = 0;
+                if ((rule.InheritanceFlags & InheritanceFlags.ObjectInherit) != 0) flags |= 1;
+                if ((rule.InheritanceFlags & InheritanceFlags.ContainerInherit) != 0) flags |= 2;
+                if ((rule.PropagationFlags & PropagationFlags.NoPropagateInherit) != 0) flags |= 4;
+                if ((rule.PropagationFlags & PropagationFlags.InheritOnly) != 0) flags |= 8;
+                if (rule.IsInherited) flags |= 16;
+                nativeRules[index] = new NativeAccessRule
+                {
+                    Sid = rule.IdentityReference.Value,
+                    AccessMask = (int)rule.FileSystemRights,
+                    AceFlags = flags,
+                    AceType = rule.AccessControlType == AccessControlType.Allow
+                        ? "AccessAllowed" : "AccessDenied"
+                };
+            }
+            return new NativePathSecurity
+            {
+                OwnerSid = security.GetOwner(typeof(SecurityIdentifier)).Value,
+                DaclProtected = security.AreAccessRulesProtected,
+                AccessRules = nativeRules
+            };
+        }
+
+        public static void CreateResultDirectoryNew(string path)
+        {
+            CreateResultDirectoryNew(path, null);
+        }
+
+        public static void CreateResultDirectoryNew(
+            string path,
+            Func<string, IntPtr, byte[], bool> createDirectory)
+        {
+            var descriptor = new RawSecurityDescriptor(ResultDirectorySddl);
+            var descriptorBytes = new byte[descriptor.BinaryLength];
+            descriptor.GetBinaryForm(descriptorBytes, 0);
+            IntPtr descriptorPointer = IntPtr.Zero;
+            IntPtr attributesPointer = IntPtr.Zero;
+            try
+            {
+                descriptorPointer = Marshal.AllocHGlobal(descriptorBytes.Length);
+                Marshal.Copy(descriptorBytes, 0, descriptorPointer, descriptorBytes.Length);
+                var attributes = new SecurityAttributes
+                {
+                    Length = Marshal.SizeOf<SecurityAttributes>(),
+                    SecurityDescriptor = descriptorPointer,
+                    InheritHandle = 0
+                };
+                attributesPointer = Marshal.AllocHGlobal(attributes.Length);
+                Marshal.StructureToPtr(attributes, attributesPointer, false);
+                bool created = createDirectory == null
+                    ? CreateDirectoryW(path, attributesPointer)
+                    : createDirectory(path, attributesPointer, (byte[])descriptorBytes.Clone());
+                if (!created) throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            finally
+            {
+                if (attributesPointer != IntPtr.Zero)
+                    Marshal.FreeHGlobal(attributesPointer);
+                if (descriptorPointer != IntPtr.Zero)
+                    Marshal.FreeHGlobal(descriptorPointer);
+            }
         }
 
         private static string NormalizeFinalPath(string path)
@@ -218,6 +315,134 @@ function Get-NativePathIdentity {
     )
 
     return [ChristopherBell.Dev.Acceptance.NativePath]::GetIdentity($Path, $Directory.IsPresent)
+}
+
+function Get-NativePathSecurity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$Directory
+    )
+
+    return [ChristopherBell.Dev.Acceptance.NativePath]::GetSecurity(
+        $Path, $Directory.IsPresent)
+}
+
+function Assert-InstalledWorkerResultSecurity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Security,
+        [Parameter(Mandatory)][ValidateSet('Directory','File')][string]$Kind
+    )
+
+    $isDirectory = $Kind -eq 'Directory'
+    $expectedOwner = if ($isDirectory) { 'S-1-5-32-544' } else { 'S-1-5-19' }
+    $expectedProtected = $isDirectory
+    $expectedFlags = if ($isDirectory) { 3 } else { 16 }
+    $expectedMasks = @{
+        'S-1-5-18' = 0x001F01FF
+        'S-1-5-32-544' = 0x001F01FF
+        'S-1-5-19' = 0x001301BF
+    }
+    $rules = @($Security.AccessRules)
+    $valid = $null -ne $Security -and
+        [string]$Security.OwnerSid -ceq $expectedOwner -and
+        [bool]$Security.DaclProtected -eq $expectedProtected -and
+        $rules.Count -eq $expectedMasks.Count
+    if ($valid) {
+        foreach ($sid in $expectedMasks.Keys) {
+            $matches = @($rules | Where-Object { [string]$_.Sid -ceq $sid })
+            if ($matches.Count -ne 1 -or
+                [string]$matches[0].AceType -cne 'AccessAllowed' -or
+                [int]$matches[0].AceFlags -ne $expectedFlags -or
+                [int]$matches[0].AccessMask -ne [int]$expectedMasks[$sid]) {
+                $valid = $false
+                break
+            }
+        }
+    }
+    if (-not $valid) {
+        $label = if ($isDirectory) { 'result directory' } else { 'result file' }
+        throw "The installed-worker $label security is invalid."
+    }
+}
+
+function Assert-InstalledWorkerResultDirectorySecurity {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Security)
+
+    Assert-InstalledWorkerResultSecurity -Security $Security -Kind Directory
+}
+
+function Assert-InstalledWorkerResultFileSecurity {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Security)
+
+    Assert-InstalledWorkerResultSecurity -Security $Security -Kind File
+}
+
+function Assert-InstalledWorkerResultDirectoryState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]$ExpectedIdentity,
+        [scriptblock]$GetPathIdentityAction = {
+            param($Candidate,$Directory)
+            Get-NativePathIdentity -Path $Candidate -Directory:$Directory
+        },
+        [scriptblock]$GetPathSecurityAction = {
+            param($Candidate,$Directory)
+            Get-NativePathSecurity -Path $Candidate -Directory:$Directory
+        }
+    )
+
+    try {
+        $actualIdentity = & $GetPathIdentityAction $Path $true
+        $security = & $GetPathSecurityAction $Path $true
+    } catch {
+        throw 'The installed-worker result directory state is invalid.'
+    }
+    if (-not (Test-NativePathIdentityEqual -Expected $ExpectedIdentity `
+        -Actual $actualIdentity)) {
+        throw 'The installed-worker result directory state is invalid.'
+    }
+    Assert-InstalledWorkerResultDirectorySecurity -Security $security
+}
+
+function Assert-InstalledWorkerResultFileState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]$ResultRootIdentity,
+        [scriptblock]$GetItemAction = {
+            param($Candidate)
+            Get-Item -LiteralPath $Candidate -Force -ErrorAction Stop
+        },
+        [scriptblock]$GetPathIdentityAction = {
+            param($Candidate,$Directory)
+            Get-NativePathIdentity -Path $Candidate -Directory:$Directory
+        },
+        [scriptblock]$GetPathSecurityAction = {
+            param($Candidate,$Directory)
+            Get-NativePathSecurity -Path $Candidate -Directory:$Directory
+        }
+    )
+
+    try {
+        $item = & $GetItemAction $Path
+        $identity = & $GetPathIdentityAction $Path $false
+        $security = & $GetPathSecurityAction $Path $false
+    } catch {
+        throw 'The installed-worker result file state is invalid.'
+    }
+    if ($null -eq $item -or [bool]$item.PSIsContainer -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        -not (Test-StrictlyBelowPath -Path $identity.NativeFinalPath `
+            -Root $ResultRootIdentity.NativeFinalPath) -or
+        [string][IO.Path]::GetFileName($identity.NativeFinalPath) -cne 'result.json') {
+        throw 'The installed-worker result file state is invalid.'
+    }
+    Assert-InstalledWorkerResultFileSecurity -Security $security
 }
 
 function Test-NativePathIdentityEqual {
@@ -929,7 +1154,7 @@ function New-InstalledWorkerProbeDependencies {
         }
         CreateResultDirectory = {
             param($Path)
-            [ChristopherBell.Dev.Acceptance.NativePath]::CreateDirectoryNew($Path)
+            [ChristopherBell.Dev.Acceptance.NativePath]::CreateResultDirectoryNew($Path)
             try {
                 Get-NativePathIdentity -Path $Path -Directory
             } catch {
@@ -938,6 +1163,16 @@ function New-InstalledWorkerProbeDependencies {
                 }
                 throw
             }
+        }
+        ValidateResultDirectory = {
+            param($Path,$ExpectedIdentity)
+            Assert-InstalledWorkerResultDirectoryState -Path $Path `
+                -ExpectedIdentity $ExpectedIdentity
+        }
+        ValidateResultFile = {
+            param($Path,$ResultRootIdentity)
+            Assert-InstalledWorkerResultFileState -Path $Path `
+                -ResultRootIdentity $ResultRootIdentity
         }
         RegisterTask = {
             param($Specification)
@@ -1011,7 +1246,7 @@ function Invoke-InstalledWorkerLocalServiceProbe {
     if ($null -eq $Dependencies) { $Dependencies = New-InstalledWorkerProbeDependencies }
     $requiredDependencies = @(
         'NewNonce','ResultRootParent','ValidateResultRootParent','ValidateProbeExecutable',
-        'CreateResultDirectory',
+        'CreateResultDirectory','ValidateResultDirectory','ValidateResultFile',
         'RegisterTask','GetTask','StartTask','StopTask','UnregisterTask','GetPathIdentity',
         'ResultExists','ResultDirectoryExists','RemoveResultDirectory','ProbeExists','UtcNow',
         'Wait','ReadResult')
@@ -1058,6 +1293,7 @@ function Invoke-InstalledWorkerLocalServiceProbe {
                 -Root $resultRootParentIdentity.NativeFinalPath)) {
             throw 'The created acceptance result identity is invalid.'
         }
+        & $Dependencies.ValidateResultDirectory $resultRoot $resultRootIdentity
         $probeScript = New-InstalledWorkerProbeScript -Inputs $Inputs `
             -ResultRoot $resultRoot -ResultRootIdentity $resultRootIdentity `
             -ProbeFile $probeFile -ProbeExecutableIdentity $probeExecutable.Identity
@@ -1085,6 +1321,8 @@ function Invoke-InstalledWorkerLocalServiceProbe {
             }
             & $Dependencies.Wait ([TimeSpan]::FromMilliseconds(250))
         }
+        & $Dependencies.ValidateResultDirectory $resultRoot $resultRootIdentity
+        & $Dependencies.ValidateResultFile $resultPath $resultRootIdentity
         $probeResult = & $Dependencies.ReadResult $resultPath
     } catch {
         $primaryFailure = $_
@@ -1217,6 +1455,14 @@ function New-TestInstalledWorkerProbeScenario {
             $state.ResultDirectoryPresent = $true
             return $resultIdentity
         }.GetNewClosure()
+        ValidateResultDirectory = {
+            param($Path,$ExpectedIdentity)
+            $events.Add('validate-result-directory')
+        }.GetNewClosure()
+        ValidateResultFile = {
+            param($Path,$ExpectedRootIdentity)
+            $events.Add('validate-result-file')
+        }.GetNewClosure()
         RegisterTask = {
             param($Specification)
             $events.Add('register')
@@ -1330,6 +1576,25 @@ function New-TestInstalledWorkerProbeScenario {
         Dependencies = $dependencies
         Events = $events
         State = $state
+    }
+}
+
+function New-TestResultSecuritySnapshot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('Directory','File')][string]$Kind
+    )
+
+    $inherited = $Kind -eq 'File'
+    $flags = if ($inherited) { 16 } else { 3 }
+    return [pscustomobject]@{
+        OwnerSid = if ($Kind -eq 'File') { 'S-1-5-19' } else { 'S-1-5-32-544' }
+        DaclProtected = -not $inherited
+        AccessRules = @(
+            [pscustomobject]@{ Sid='S-1-5-18';AccessMask=0x001F01FF;AceFlags=$flags;AceType='AccessAllowed' }
+            [pscustomobject]@{ Sid='S-1-5-32-544';AccessMask=0x001F01FF;AceFlags=$flags;AceType='AccessAllowed' }
+            [pscustomobject]@{ Sid='S-1-5-19';AccessMask=0x001301BF;AceFlags=$flags;AceType='AccessAllowed' }
+        )
     }
 }
 }
@@ -1654,6 +1919,10 @@ Describe 'installed-worker acceptance guard and probe safety' {
             CreateResultDirectory = { param($Path) $events.Add('create-result');
                 $taskState.ResultPresent = $true
                 [pscustomobject]@{ NativeFinalPath=$Path;VolumeSerialNumber=1;FileIndex=3 } }
+            ValidateResultDirectory = { param($Path,$Identity)
+                $events.Add('validate-result-directory') }
+            ValidateResultFile = { param($Path,$Identity)
+                $events.Add('validate-result-file') }
             RegisterTask = { param($Spec) $events.Add('register'); $taskState.Present = $true }
             GetTask = { param($Name) $events.Add('get-task'); if ($taskState.Present) {
                 [pscustomobject]@{
@@ -1830,6 +2099,185 @@ Describe 'installed-worker acceptance guard and probe safety' {
         $scenario.Events | Should -Not -Contain 'remove-result'
         $scenario.State.ResultDirectoryPresent | Should -BeTrue
         $scenario.State.TaskPresent | Should -BeFalse
+    }
+
+    It 'builds the protected result directory descriptor inside the atomic native create call' {
+        $captured = @{}
+        $nativeCreate = [Func[string,IntPtr,byte[],bool]]{
+            param($Path,$SecurityAttributes,$SecurityDescriptor)
+            $captured.Path = $Path
+            $captured.AttributesLength = [Runtime.InteropServices.Marshal]::ReadInt32(
+                $SecurityAttributes, 0)
+            $descriptorOffset = if ([IntPtr]::Size -eq 8) { 8 } else { 4 }
+            $inheritOffset = $descriptorOffset + [IntPtr]::Size
+            $captured.DescriptorPointer = [Runtime.InteropServices.Marshal]::ReadIntPtr(
+                $SecurityAttributes, $descriptorOffset)
+            $captured.InheritHandle = [Runtime.InteropServices.Marshal]::ReadInt32(
+                $SecurityAttributes, $inheritOffset)
+            $captured.Descriptor = [Security.AccessControl.RawSecurityDescriptor]::new(
+                $SecurityDescriptor, 0)
+            return $true
+        }
+
+        [ChristopherBell.Dev.Acceptance.NativePath]::CreateResultDirectoryNew(
+            'C:\ProgramData\ChristopherBellWorkerAcceptance-test', $nativeCreate)
+
+        $captured.Path | Should -Be 'C:\ProgramData\ChristopherBellWorkerAcceptance-test'
+        $captured.AttributesLength | Should -BeGreaterThan 0
+        $captured.DescriptorPointer | Should -Not -Be ([IntPtr]::Zero)
+        $captured.InheritHandle | Should -Be 0
+        $captured.Descriptor.Owner.Value | Should -Be 'S-1-5-32-544'
+        ($captured.Descriptor.ControlFlags -band
+            [Security.AccessControl.ControlFlags]::SelfRelative) |
+            Should -Not -Be 0
+        ($captured.Descriptor.ControlFlags -band
+            [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected) |
+            Should -Not -Be 0
+        @($captured.Descriptor.DiscretionaryAcl).Count | Should -Be 3
+        @($captured.Descriptor.DiscretionaryAcl | ForEach-Object {
+            $_.SecurityIdentifier.Value
+        }) | Should -Be @('S-1-5-18','S-1-5-32-544','S-1-5-19')
+        @($captured.Descriptor.DiscretionaryAcl | ForEach-Object AccessMask) |
+            Should -Be @(0x001F01FF,0x001F01FF,0x001301BF)
+    }
+
+    It 'accepts only the exact protected result directory owner and DACL' {
+        Assert-InstalledWorkerResultDirectorySecurity `
+            -Security (New-TestResultSecuritySnapshot -Kind Directory)
+
+        foreach ($mutation in @('Owner','Protection','Users','Everyone','Inherited','Rights')) {
+            $security = New-TestResultSecuritySnapshot -Kind Directory
+            switch ($mutation) {
+                Owner { $security.OwnerSid = 'S-1-5-18' }
+                Protection { $security.DaclProtected = $false }
+                Users { $security.AccessRules += [pscustomobject]@{
+                    Sid='S-1-5-32-545';AccessMask=0x001301BF;AceFlags=3;AceType='AccessAllowed' } }
+                Everyone { $security.AccessRules += [pscustomobject]@{
+                    Sid='S-1-1-0';AccessMask=0x001301BF;AceFlags=3;AceType='AccessAllowed' } }
+                Inherited { $security.AccessRules[0].AceFlags = 19 }
+                Rights { $security.AccessRules[2].AccessMask = 0x001F01FF }
+            }
+            { Assert-InstalledWorkerResultDirectorySecurity -Security $security } |
+                Should -Throw '*result directory security*'
+        }
+    }
+
+    It 'accepts only a LocalService-owned result file with the exact inherited DACL' {
+        Assert-InstalledWorkerResultFileSecurity `
+            -Security (New-TestResultSecuritySnapshot -Kind File)
+
+        foreach ($mutation in @('Owner','Dacl','Users','Everyone','Inheritance','Rights')) {
+            $security = New-TestResultSecuritySnapshot -Kind File
+            switch ($mutation) {
+                Owner { $security.OwnerSid = 'S-1-5-18' }
+                Dacl { $security.DaclProtected = $true }
+                Users { $security.AccessRules += [pscustomobject]@{
+                    Sid='S-1-5-32-545';AccessMask=0x001301BF;AceFlags=16;AceType='AccessAllowed' } }
+                Everyone { $security.AccessRules += [pscustomobject]@{
+                    Sid='S-1-1-0';AccessMask=0x001301BF;AceFlags=16;AceType='AccessAllowed' } }
+                Inheritance { $security.AccessRules[0].AceFlags = 0 }
+                Rights { $security.AccessRules[2].AccessMask = 0x001F01FF }
+            }
+            { Assert-InstalledWorkerResultFileSecurity -Security $security } |
+                Should -Throw '*result file security*'
+        }
+    }
+
+    It 'refuses a Users-writable schema-valid result before reading it as success' {
+        $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
+        $scenario = New-TestInstalledWorkerProbeScenario -ResultRootParent $TestDrive
+        $scenario.Dependencies.ValidateResultDirectory = { param($Path,$Identity) }
+        $forgedSecurity = New-TestResultSecuritySnapshot -Kind File
+        $forgedSecurity.OwnerSid = 'S-1-5-32-545'
+        $forgedSecurity.AccessRules += [pscustomobject]@{
+            Sid='S-1-5-32-545';AccessMask=0x001301BF;AceFlags=16;AceType='AccessAllowed'
+        }
+        $validateResultFileState = ${function:Assert-InstalledWorkerResultFileState}
+        $scenario.Dependencies.ValidateResultFile = {
+            param($Path,$ResultRootIdentity)
+            $scenario.Events.Add('validate-result-file')
+            & $validateResultFileState -Path $Path `
+                -ResultRootIdentity $ResultRootIdentity `
+                -GetItemAction { [pscustomobject]@{
+                    PSIsContainer = $false
+                    Attributes = [IO.FileAttributes]::Normal
+                } } `
+                -GetPathIdentityAction { param($Candidate,$Directory)
+                    [pscustomobject]@{
+                        NativeFinalPath = $Candidate
+                        VolumeSerialNumber = 7
+                        FileIndex = 10
+                    } } `
+                -GetPathSecurityAction { return $forgedSecurity }
+        }.GetNewClosure()
+
+        { Invoke-InstalledWorkerLocalServiceProbe -Inputs $inputs `
+            -Dependencies $scenario.Dependencies } |
+            Should -Throw '*result file security*'
+        $scenario.Events | Should -Contain 'validate-result-file'
+        $scenario.Events | Should -Not -Contain 'read-result'
+        $scenario.State.TaskPresent | Should -BeFalse
+        $scenario.State.ResultDirectoryPresent | Should -BeFalse
+    }
+
+    It 'accepts only a non-reparse native-contained LocalService result child' {
+        $root = [pscustomobject]@{
+            NativeFinalPath = 'C:\ProgramData\ChristopherBellWorkerAcceptance-test'
+            VolumeSerialNumber = 1
+            FileIndex = 2
+        }
+        $path = Join-Path $root.NativeFinalPath 'result.json'
+        $itemAction = { [pscustomobject]@{
+            PSIsContainer = $false
+            Attributes = [IO.FileAttributes]::Normal
+        } }
+        $identityAction = { param($Candidate,$Directory) [pscustomobject]@{
+            NativeFinalPath = $Candidate
+            VolumeSerialNumber = 1
+            FileIndex = 3
+        } }
+        $securityAction = { New-TestResultSecuritySnapshot -Kind File }
+
+        Assert-InstalledWorkerResultFileState -Path $path -ResultRootIdentity $root `
+            -GetItemAction $itemAction -GetPathIdentityAction $identityAction `
+            -GetPathSecurityAction $securityAction
+
+        { Assert-InstalledWorkerResultFileState -Path $path -ResultRootIdentity $root `
+            -GetItemAction { [pscustomobject]@{
+                PSIsContainer = $false
+                Attributes = [IO.FileAttributes]::ReparsePoint
+            } } -GetPathIdentityAction $identityAction `
+            -GetPathSecurityAction $securityAction } | Should -Throw '*result file state*'
+        { Assert-InstalledWorkerResultFileState -Path $path -ResultRootIdentity $root `
+            -GetItemAction $itemAction -GetPathIdentityAction {
+                [pscustomobject]@{
+                    NativeFinalPath = 'C:\escaped\result.json'
+                    VolumeSerialNumber = 1
+                    FileIndex = 3
+                }
+            } -GetPathSecurityAction $securityAction } | Should -Throw '*result file state*'
+    }
+
+    It 'revalidates result-directory identity and DACL before accepting a result' {
+        $inputs = Get-InstalledWorkerAcceptanceInputs -Environment $acceptanceEnvironment
+        $scenario = New-TestInstalledWorkerProbeScenario -ResultRootParent $TestDrive
+        $validationState = @{ Count = 0 }
+        $scenario.Dependencies.ValidateResultDirectory = {
+            param($Path,$Identity)
+            $validationState.Count++
+            $scenario.Events.Add("validate-result-directory-$($validationState.Count)")
+            if ($validationState.Count -eq 2) {
+                throw 'The installed-worker result directory security is invalid.'
+            }
+        }.GetNewClosure()
+
+        { Invoke-InstalledWorkerLocalServiceProbe -Inputs $inputs `
+            -Dependencies $scenario.Dependencies } |
+            Should -Throw '*result directory security*'
+        $scenario.Events | Should -Contain 'validate-result-directory-1'
+        $scenario.Events | Should -Contain 'validate-result-directory-2'
+        $scenario.Events | Should -Not -Contain 'validate-result-file'
+        $scenario.Events | Should -Not -Contain 'read-result'
     }
 }
 
