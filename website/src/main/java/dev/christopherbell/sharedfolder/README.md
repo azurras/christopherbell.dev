@@ -111,6 +111,9 @@ Unavailable` and never falls back to an unchecked production path.
   durable `FINALIZING` and `CANCEL_PENDING` phases so a database save failure after the physical
   operation can be reconciled from stable file identity instead of duplicating or losing work.
   Terminal sessions report `COMPLETED`, `CANCELLED`, or `EXPIRED` and cannot accept more chunks.
+- A fresh account may have at most four active upload sessions. A bounded maintenance pass
+  atomically expires abandoned `ACTIVE` sessions before deleting their capability-verified
+  private staging; append and finalization lease states are never maintenance deletion targets.
 
 ## Media Playback and Worker Handoff
 
@@ -148,6 +151,11 @@ Unavailable` and never falls back to an unchecked production path.
   or currently streamed outputs from eviction. Media conversion preserves the default 100 GB
   free-space reserve, reserves the full output cap for every active job, and independently checks
   the actual partial and completed file lengths against that cap.
+- Every 15 minutes, a single-host non-overlapping coordinator runs bounded upload expiry, recycle
+  retention, READY-cache eviction, and worker reconciliation. Each failed step is safely logged
+  and audited without preventing later steps or later runs. Account mutation bursts are limited
+  to 60 per minute with bounded identity state; the existing media admission retains its global
+  and per-account queued-job limits.
 
 ## Update This Doc
 

@@ -12,10 +12,11 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -30,11 +31,22 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Order(1)
 public class RateLimitFilter extends OncePerRequestFilter {
 
+  private static final int MAX_BUCKETS = 10_000;
+  private static final int MAX_CLIENT_KEY_LENGTH = 64;
+  private static final String RATE_LIMIT_BODY =
+      "{\"code\":\"RATE_LIMITED\",\"message\":\"Too many requests. Try again later.\"}";
+
   private final Supplier<Bucket> bucketSupplier;
   private final ClientIpResolver clientIpResolver;
   private final RateLimitProperties properties;
   private final AntPathMatcher pathMatcher = new AntPathMatcher();
-  private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
+  private final Map<String, Bucket> buckets = Collections.synchronizedMap(
+      new LinkedHashMap<>(128, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Bucket> eldest) {
+          return size() > MAX_BUCKETS;
+        }
+      });
 
   /**
    * Creates a filter with default limit of 10000 requests per minute.
@@ -103,6 +115,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
       filterChain.doFilter(request, response);
     } else {
       response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+      response.setContentType("application/json");
+      response.getWriter().write(RATE_LIMIT_BODY);
     }
   }
 
@@ -144,7 +158,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
   }
 
   private String bucketKey(RateLimitProperties.Rule rule, String ip) {
-    return rule.getName().toLowerCase(Locale.ROOT) + ":" + ip;
+    String safeIp = ip == null || ip.isBlank() || ip.length() > MAX_CLIENT_KEY_LENGTH
+        ? "unknown" : ip;
+    return rule.getName().toLowerCase(Locale.ROOT) + ":" + safeIp;
   }
 
   private Bucket newBucket(RateLimitProperties.Rule rule) {

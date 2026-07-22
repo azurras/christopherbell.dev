@@ -1,5 +1,9 @@
 package dev.christopherbell.sharedfolder.upload;
 
+import java.time.Instant;
+import java.util.Collection;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.data.mongodb.repository.Query;
 import org.springframework.data.mongodb.repository.Update;
@@ -7,6 +11,17 @@ import org.springframework.data.mongodb.repository.Update;
 /** Repository for owned resumable-upload metadata; payload bytes remain on private disk staging. */
 public interface SharedFolderUploadSessionRepository
     extends MongoRepository<SharedFolderUploadSession, String> {
+
+  long countByOwnerIdAndStateIn(
+      String ownerId, Collection<SharedFolderUploadState> states);
+
+  Slice<SharedFolderUploadSession> findByExpiresAtLessThanEqualAndStateInOrderByExpiresAtAscIdAsc(
+      Instant expiresAt, Collection<SharedFolderUploadState> states, Pageable pageable);
+
+  /** Atomically closes only an untouched ACTIVE session whose deadline has elapsed. */
+  @Query("{ '_id': ?0, 'state': 'ACTIVE', 'expiresAt': { '$lte': ?1 } }")
+  @Update("{ '$set': { 'state': 'EXPIRED', 'updatedAt': ?2 }, '$inc': { 'version': 1 } }")
+  long expireActive(String id, Instant expiresAtOrBefore, Instant updatedAt);
 
   /** Extends only the exact FINALIZING writer and phase without advancing document version. */
   @Query("{ '_id': ?0, 'state': 'FINALIZING', 'finalizationLeaseToken': ?1, 'finalizationState': ?2 }")

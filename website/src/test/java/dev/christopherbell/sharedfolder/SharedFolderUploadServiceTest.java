@@ -30,6 +30,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
+import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.CountDownLatch;
@@ -40,11 +42,73 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.springframework.util.unit.DataSize;
+import org.springframework.data.domain.SliceImpl;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class SharedFolderUploadServiceTest {
   @TempDir Path temp;
+
+  @Test
+  void uploadAdmissionAndExpiryQueriesHaveDeterministicMongoIndexes() {
+    CompoundIndexes indexes = SharedFolderUploadSession.class.getAnnotation(CompoundIndexes.class);
+
+    assertThat(indexes).isNotNull();
+    assertThat(java.util.Arrays.stream(indexes.value()).map(index -> index.def()))
+        .contains("{'ownerId': 1, 'state': 1}",
+            "{'expiresAt': 1, 'state': 1, '_id': 1}");
+  }
+
+  @Test
+  void rejectsAnAccountWithFourActiveUploads() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("upload-account-capacity"));
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    SharedFolderUploadSessionRepository repository = mock(
+        SharedFolderUploadSessionRepository.class);
+    when(repository.countByOwnerIdAndStateIn(
+        org.mockito.ArgumentMatchers.eq("account-1"), any())).thenReturn(4L);
+    SharedFolderUploadService uploads = new SharedFolderUploadService(
+        access, repository, properties(root));
+
+    assertStatus(429, () -> uploads.create(new SharedFolderUploadCreateRequest(
+        "", "blocked.bin", 1, null, null)));
+  }
+
+  @Test
+  void abandonedUploadExpiryDeletesOnlyThePrivateStagingPayload() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("abandoned-expiry"));
+    Path original = Files.writeString(root.resolve("original.bin"), "keep");
+    SharedFolderProperties properties = properties(root);
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    SharedFolderUploadSessionRepository repository = mock(
+        SharedFolderUploadSessionRepository.class);
+    SharedFolderUploadService uploads = new SharedFolderUploadService(
+        access, repository, properties);
+    String stagingKey = UUID.randomUUID().toString();
+    SharedFolderUploadSession session = activeSession("expired", "account-1", stagingKey);
+    session.setExpiresAt(Instant.EPOCH);
+    Path staging = Files.createDirectories(
+        properties.systemRoot().resolve("shared-folder-upload-staging")).resolve(stagingKey);
+    Files.writeString(staging, "discard");
+    when(repository.findByExpiresAtLessThanEqualAndStateInOrderByExpiresAtAscIdAsc(
+        any(), any(), any())).thenReturn(new SliceImpl<>(List.of(session)));
+    when(repository.expireActive(org.mockito.ArgumentMatchers.eq("expired"), any(), any()))
+        .thenAnswer(invocation -> {
+          session.setState(SharedFolderUploadState.EXPIRED);
+          return 1L;
+        });
+    when(repository.findById("expired")).thenReturn(java.util.Optional.of(session));
+
+    assertThat(uploads.expireAbandoned()).isEqualTo(1);
+
+    assertThat(staging).doesNotExist();
+    assertThat(original).exists();
+    verify(repository).deleteById("expired");
+  }
 
   @Test
   void portableCompletionFailsClosedAndPreservesPrivateStaging() throws Exception {

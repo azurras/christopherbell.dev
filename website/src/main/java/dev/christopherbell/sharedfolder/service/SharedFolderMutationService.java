@@ -46,13 +46,14 @@ public class SharedFolderMutationService {
   private final SharedFolderProperties properties;
   private final WindowsSharedFolderMutationBoundary nativeBoundary;
   private final SharedFolderMutationRecoveryRepository recoveries;
+  private final SharedFolderAccountMutationLimiter mutationLimiter;
   private final PortableSharedFolderPrivateBoundary privateBoundary;
   private final String serviceInstanceId = UUID.randomUUID().toString();
 
   /** Creates the portable mutation service used by non-Windows test and local providers. */
   public SharedFolderMutationService(
       SharedFolderAccessService access, SharedFolderProperties properties) {
-    this(access, properties, WindowsSharedFolderMutationBoundary.inactive(), null);
+    this(access, properties, WindowsSharedFolderMutationBoundary.inactive(), null, null);
   }
 
   /** Creates the production service; Windows held-root mode must never fall back to NIO writes. */
@@ -60,20 +61,31 @@ public class SharedFolderMutationService {
       SharedFolderAccessService access,
       SharedFolderProperties properties,
       WindowsSharedFolderMutationBoundary nativeBoundary) {
-    this(access, properties, nativeBoundary, null);
+    this(access, properties, nativeBoundary, null, null);
   }
 
   /** Creates the production service with a durable conditional-replacement recovery journal. */
-  @Autowired
   public SharedFolderMutationService(
       SharedFolderAccessService access,
       SharedFolderProperties properties,
       WindowsSharedFolderMutationBoundary nativeBoundary,
       SharedFolderMutationRecoveryRepository recoveries) {
+    this(access, properties, nativeBoundary, recoveries, null);
+  }
+
+  /** Creates the production service with durable recovery and account mutation admission. */
+  @Autowired
+  public SharedFolderMutationService(
+      SharedFolderAccessService access,
+      SharedFolderProperties properties,
+      WindowsSharedFolderMutationBoundary nativeBoundary,
+      SharedFolderMutationRecoveryRepository recoveries,
+      SharedFolderAccountMutationLimiter mutationLimiter) {
     this.access = access;
     this.properties = properties;
     this.nativeBoundary = nativeBoundary;
     this.recoveries = recoveries;
+    this.mutationLimiter = mutationLimiter;
     this.privateBoundary = nativeBoundary.testOnlyPortableMode()
         ? PortableSharedFolderPrivateBoundary.testOnlyWithPathMoves(properties.systemRoot())
         : new PortableSharedFolderPrivateBoundary(properties.systemRoot());
@@ -82,6 +94,7 @@ public class SharedFolderMutationService {
   /** Creates one new directory under a decoded, existing relative parent path. */
   public SharedDirectoryEntry createFolder(SharedFolderCreateFolderRequest request) {
     Account account = access.requireWrite();
+    requireMutationCapacity(account);
     validateCreateFolder(request);
     if (!properties.enabled()) {
       throw unavailable();
@@ -145,6 +158,7 @@ public class SharedFolderMutationService {
   /** Renames one observed item without implicitly replacing an existing target. */
   public SharedDirectoryEntry rename(SharedFolderRenameRequest request) {
     Account account = access.requireWrite();
+    requireMutationCapacity(account);
     validateRename(request);
     if (!properties.enabled()) {
       throw unavailable();
@@ -203,6 +217,7 @@ public class SharedFolderMutationService {
   /** Moves one observed item and permits replacement only with an explicit target observation. */
   public SharedDirectoryEntry move(SharedFolderMoveRequest request) {
     Account account = access.requireWrite();
+    requireMutationCapacity(account);
     validateMove(request);
     if (!properties.enabled()) {
       throw unavailable();
@@ -316,6 +331,7 @@ public class SharedFolderMutationService {
   /** Physically deletes an observed item until the later recycle layer replaces this seam. */
   public void delete(SharedFolderDeleteRequest request) {
     Account account = access.requireWrite();
+    requireMutationCapacity(account);
     validateDelete(request);
     if (!properties.enabled()) {
       throw unavailable();
@@ -1079,6 +1095,10 @@ public class SharedFolderMutationService {
     if (!nativeBoundary.nativeMode() && !nativeBoundary.testOnlyPortableMode()) {
       throw unavailable();
     }
+  }
+
+  private void requireMutationCapacity(Account account) {
+    if (mutationLimiter != null) mutationLimiter.requireMutation(account);
   }
 
   private void requirePortableBoundary() {

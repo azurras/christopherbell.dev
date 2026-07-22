@@ -14,6 +14,7 @@ import dev.christopherbell.sharedfolder.model.SharedFolderDeleteRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import dev.christopherbell.sharedfolder.service.SharedFolderObservedItemTokens;
+import dev.christopherbell.sharedfolder.service.SharedFolderAccountMutationLimiter;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
@@ -31,7 +32,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
@@ -56,6 +56,7 @@ public class SharedFolderRecycleService {
   private final Clock clock;
   private final PortableSharedFolderPrivateBoundary privateBoundary;
   private final SharedFolderAuditRecorder audit;
+  private final SharedFolderAccountMutationLimiter mutationLimiter;
 
   public SharedFolderRecycleService(
       SharedFolderAccessService access,
@@ -63,7 +64,17 @@ public class SharedFolderRecycleService {
       WindowsSharedFolderMutationBoundary nativeBoundary,
       SharedFolderRecycleRepository repository,
       Clock clock) {
-    this(access, properties, nativeBoundary, repository, clock, null);
+    this(access, properties, nativeBoundary, repository, clock, null, null);
+  }
+
+  public SharedFolderRecycleService(
+      SharedFolderAccessService access,
+      SharedFolderProperties properties,
+      WindowsSharedFolderMutationBoundary nativeBoundary,
+      SharedFolderRecycleRepository repository,
+      Clock clock,
+      SharedFolderAuditRecorder audit) {
+    this(access, properties, nativeBoundary, repository, clock, audit, null);
   }
 
   @Autowired
@@ -73,13 +84,15 @@ public class SharedFolderRecycleService {
       WindowsSharedFolderMutationBoundary nativeBoundary,
       SharedFolderRecycleRepository repository,
       Clock clock,
-      SharedFolderAuditRecorder audit) {
+      SharedFolderAuditRecorder audit,
+      SharedFolderAccountMutationLimiter mutationLimiter) {
     this.access = access;
     this.properties = properties;
     this.nativeBoundary = nativeBoundary;
     this.repository = repository;
     this.clock = clock;
     this.audit = audit;
+    this.mutationLimiter = mutationLimiter;
     this.privateBoundary = nativeBoundary.testOnlyPortableMode()
         ? PortableSharedFolderPrivateBoundary.testOnlyWithPathMoves(properties.systemRoot())
         : new PortableSharedFolderPrivateBoundary(properties.systemRoot());
@@ -88,6 +101,7 @@ public class SharedFolderRecycleService {
   /** Replaces physical delete with a durable private move of the exact observed item. */
   public synchronized SharedFolderRecycleItem recycle(SharedFolderDeleteRequest request) {
     Account account = access.requireWrite();
+    requireMutationCapacity(account);
     requireEnabled();
     if (request == null || request.path() == null || request.observedToken() == null) {
       throw badRequest();
@@ -157,6 +171,7 @@ public class SharedFolderRecycleService {
   /** Restores to the original path, replacing only when the administrator explicitly requested it. */
   public synchronized SharedDirectoryEntry restore(String id, boolean replace) {
     Account admin = access.requireAdmin();
+    requireMutationCapacity(admin);
     requireEnabled();
     SharedFolderRecycleItem item = current(id);
     if (!item.expiresAt().isAfter(clock.instant())) {
@@ -231,6 +246,7 @@ public class SharedFolderRecycleService {
   /** Permanently purges one retained payload after exact typed administrator confirmation. */
   public synchronized void purge(String id, String confirmation) {
     Account admin = access.requireAdmin();
+    requireMutationCapacity(admin);
     String safeId = requiredId(id);
     if (!("PURGE " + safeId).equals(confirmation == null ? "" : confirmation)) {
       throw badRequest();
@@ -241,7 +257,6 @@ public class SharedFolderRecycleService {
   }
 
   /** Purges only recycle entries whose configured retention deadline has elapsed. */
-  @Scheduled(fixedDelayString = "${app.shared-folder.recycle-cleanup-delay:PT1H}")
   public synchronized int cleanupExpired() {
     if (!properties.enabled()) return 0;
     reconcilePending();
@@ -709,6 +724,10 @@ public class SharedFolderRecycleService {
 
   private void requireEnabled() {
     if (!properties.enabled()) throw unavailable();
+  }
+
+  private void requireMutationCapacity(Account account) {
+    if (mutationLimiter != null) mutationLimiter.requireMutation(account);
   }
 
   private void recordFor(Account account, String action, String path, long size) {

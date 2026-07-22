@@ -1,6 +1,7 @@
 package dev.christopherbell.configuration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -43,6 +44,10 @@ public class RateLimitFilterTest {
     MockHttpServletResponse response2 = new MockHttpServletResponse();
     filter.doFilter(request, response2, chain);
     assertEquals(429, response2.getStatus());
+    assertEquals("application/json", response2.getContentType());
+    assertEquals(
+        "{\"code\":\"RATE_LIMITED\",\"message\":\"Too many requests. Try again later.\"}",
+        response2.getContentAsString());
   }
 
   @Test
@@ -141,12 +146,26 @@ public class RateLimitFilterTest {
     var rules = new RateLimitProperties().getRules();
     int apiMutations = indexOf(rules, "api-mutations");
 
-    assertEquals(true, indexOf(rules, "shared-folder-uploads") < apiMutations);
-    assertEquals(true, indexOf(rules, "shared-folder-mutations") < apiMutations);
-    assertEquals(true, indexOf(rules, "shared-folder-transcode") < apiMutations);
-    var transcode = rules.stream().filter(rule -> "shared-folder-transcode".equals(rule.getName()))
+    assertTrue(indexOf(rules, "shared-upload") < apiMutations);
+    assertTrue(indexOf(rules, "shared-mutation") < apiMutations);
+    assertTrue(indexOf(rules, "shared-transcode") < apiMutations);
+    var upload = rules.stream().filter(rule -> "shared-upload".equals(rule.getName()))
         .findFirst().orElseThrow();
-    assertEquals(List.of("/api/shared-folder/2026-07-17/media/**"), transcode.getPaths());
+    assertEquals(240, upload.getCapacity());
+    assertEquals(List.of("POST", "PUT", "PATCH"), upload.getMethods());
+    assertEquals(List.of("/api/shared-folder/2026-07-17/uploads/**"), upload.getPaths());
+    var mutation = rules.stream().filter(rule -> "shared-mutation".equals(rule.getName()))
+        .findFirst().orElseThrow();
+    assertEquals(60, mutation.getCapacity());
+    assertEquals(List.of("POST", "PUT", "PATCH", "DELETE"), mutation.getMethods());
+    assertEquals(List.of(
+        "/api/shared-folder/2026-07-17/mutations/**",
+        "/api/shared-folder/2026-07-17/recycle/**"), mutation.getPaths());
+    var transcode = rules.stream().filter(rule -> "shared-transcode".equals(rule.getName()))
+        .findFirst().orElseThrow();
+    assertEquals(10, transcode.getCapacity());
+    assertEquals(List.of("POST"), transcode.getMethods());
+    assertEquals(List.of("/api/shared-folder/2026-07-17/media/jobs"), transcode.getPaths());
   }
 
   @Test
@@ -156,7 +175,7 @@ public class RateLimitFilterTest {
         new ClientIpResolver(new ClientIpProperties()), new RateLimitProperties());
     FilterChain chain = mock(FilterChain.class);
     MockHttpServletResponse response = null;
-    for (int count = 0; count < 121; count++) {
+    for (int count = 0; count < 241; count++) {
       response = new MockHttpServletResponse();
       filter.doFilter(request(
           "PUT", "/api/shared-folder/2026-07-17/uploads/session/chunks/0"), response, chain);
@@ -166,6 +185,58 @@ public class RateLimitFilterTest {
 
     assertEquals(429, response.getStatus());
     assertEquals(200, genericResponse.getStatus());
+  }
+
+  @Test
+  void trustedProxyClientsReceiveIndependentBuckets() throws Exception {
+    var clientIp = new ClientIpProperties();
+    clientIp.setTrustedProxies(List.of("10.0.0.10"));
+    Supplier<Bucket> supplier = () -> Bucket4j.builder()
+        .addLimit(Bandwidth.simple(1, Duration.ofMinutes(1)))
+        .build();
+    RateLimitFilter filter = new RateLimitFilter(supplier, new ClientIpResolver(clientIp));
+    FilterChain chain = mock(FilterChain.class);
+
+    var first = request("POST", "/api/test");
+    first.setRemoteAddr("10.0.0.10");
+    first.addHeader("X-Forwarded-For", "203.0.113.10");
+    filter.doFilter(first, new MockHttpServletResponse(), chain);
+    var second = request("POST", "/api/test");
+    second.setRemoteAddr("10.0.0.10");
+    second.addHeader("X-Forwarded-For", "203.0.113.11");
+    var response = new MockHttpServletResponse();
+    filter.doFilter(second, response, chain);
+
+    assertEquals(200, response.getStatus());
+    verify(chain, times(2))
+        .doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
+  }
+
+  @Test
+  void progressiveAndRangeReadsDoNotConsumeTheTranscodeMutationBucket() throws Exception {
+    var properties = new RateLimitProperties();
+    properties.setRules(List.of(
+        rule("shared-transcode", 1, List.of("POST"),
+            List.of("/api/shared-folder/2026-07-17/media/jobs")),
+        rule("default", 10, List.of(), List.of("/**"))));
+    RateLimitFilter filter = new RateLimitFilter(
+        new ClientIpResolver(new ClientIpProperties()), properties);
+    FilterChain chain = mock(FilterChain.class);
+
+    filter.doFilter(request("POST", "/api/shared-folder/2026-07-17/media/jobs"),
+        new MockHttpServletResponse(), chain);
+    var range = request("GET", "/api/shared-folder/2026-07-17/media/jobs/job/stream");
+    range.addHeader("Range", "bytes=0-1023");
+    filter.doFilter(range, new MockHttpServletResponse(), chain);
+    filter.doFilter(request("GET", "/api/shared-folder/2026-07-17/media/jobs/job/stream"),
+        new MockHttpServletResponse(), chain);
+    var deniedMutation = new MockHttpServletResponse();
+    filter.doFilter(request("POST", "/api/shared-folder/2026-07-17/media/jobs"),
+        deniedMutation, chain);
+
+    assertEquals(429, deniedMutation.getStatus());
+    verify(chain, times(3))
+        .doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
   }
 
   private int indexOf(List<RateLimitProperties.Rule> rules, String name) {

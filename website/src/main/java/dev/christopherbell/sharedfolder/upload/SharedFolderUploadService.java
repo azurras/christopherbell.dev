@@ -29,8 +29,11 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +41,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 /** Streams bounded, owned upload chunks to private disk staging and atomically finalizes them. */
 @Service
+@Slf4j
 public class SharedFolderUploadService {
   private static final String STAGING_DIRECTORY = "shared-folder-upload-staging";
   private static final String QUARANTINE_DIRECTORY = "shared-folder-upload-quarantine";
@@ -46,6 +50,8 @@ public class SharedFolderUploadService {
   private static final Duration FINALIZATION_LEASE_TTL = Duration.ofMinutes(2);
   private static final int COPY_BUFFER_SIZE = 16 * 1024;
   private static final long LEASE_RENEWAL_BYTES = 1024L * 1024L;
+  private static final int EXPIRY_BATCH_LIMIT = 100;
+  private static final int MAX_ACTIVE_UPLOADS_PER_ACCOUNT = 4;
 
   private final SharedFolderAccessService access;
   private final SharedFolderUploadSessionRepository sessions;
@@ -53,6 +59,7 @@ public class SharedFolderUploadService {
   private final WindowsSharedFolderMutationBoundary nativeBoundary;
   private final PortableSharedFolderPrivateBoundary privateBoundary;
   private final String serviceInstanceId = UUID.randomUUID().toString();
+  private final Object admissionLock = new Object();
 
   /** Creates the upload coordinator. */
   public SharedFolderUploadService(
@@ -88,9 +95,17 @@ public class SharedFolderUploadService {
     if (request.expectedBytes() > properties.maxUpload().toBytes()) {
       throw tooLarge();
     }
-    if (nativeBoundary.nativeMode()) {
-      return createNative(request, account);
+    synchronized (admissionLock) {
+      requireUploadCapacity(account);
+      if (nativeBoundary.nativeMode()) {
+        return createNative(request, account);
+      }
+      return createPortable(request, account);
     }
+  }
+
+  private SharedFolderUploadStatus createPortable(
+      SharedFolderUploadCreateRequest request, Account account) {
     try {
       SharedFolderPathResolver resolver = portableResolver();
       Path requestedTarget = resolver.newChild(request.parentPath(), request.name());
@@ -129,6 +144,59 @@ public class SharedFolderUploadService {
       throw notFound();
     } catch (IOException | SecurityException exception) {
       throw conflict();
+    }
+  }
+
+  /** Expires a bounded batch of inactive staging sessions and deletes only private payloads. */
+  public int expireAbandoned() {
+    if (!properties.enabled()) return 0;
+    Instant now = Instant.now();
+    var batch = sessions.findByExpiresAtLessThanEqualAndStateInOrderByExpiresAtAscIdAsc(
+        now, List.of(SharedFolderUploadState.ACTIVE, SharedFolderUploadState.EXPIRED),
+        PageRequest.of(0, EXPIRY_BATCH_LIMIT));
+    int expired = 0;
+    for (SharedFolderUploadSession candidate : batch.getContent()) {
+      try {
+        if (candidate.getState() == SharedFolderUploadState.ACTIVE
+            && sessions.expireActive(candidate.getId(), now, now) != 1) {
+          continue;
+        }
+        SharedFolderUploadSession current = sessions.findById(candidate.getId()).orElse(null);
+        if (current == null || current.getState() != SharedFolderUploadState.EXPIRED) continue;
+        deleteExpiredPrivatePayloads(current);
+        sessions.deleteById(current.getId());
+        expired++;
+      } catch (RuntimeException | IOException failure) {
+        log.warn("Shared-folder abandoned upload cleanup deferred");
+      }
+    }
+    return expired;
+  }
+
+  private void requireUploadCapacity(Account account) {
+    String ownerId = requiredAccountId(account);
+    long active = sessions.countByOwnerIdAndStateIn(ownerId, List.of(
+        SharedFolderUploadState.ACTIVE,
+        SharedFolderUploadState.APPENDING,
+        SharedFolderUploadState.FINALIZING,
+        SharedFolderUploadState.CANCEL_PENDING));
+    if (active >= MAX_ACTIVE_UPLOADS_PER_ACCOUNT) {
+      throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+          "Too many active uploads. Try again later.");
+    }
+  }
+
+  private void deleteExpiredPrivatePayloads(SharedFolderUploadSession session) throws IOException {
+    if (nativeBoundary.nativeMode()) {
+      nativeBoundary.deleteStagingIfExists(session.getStagingKey());
+      if (session.getAppendChunkKey() != null) {
+        nativeBoundary.deleteStagingIfExists(session.getAppendChunkKey());
+      }
+      return;
+    }
+    deleteStagingKeyIfExists(session.getStagingKey());
+    if (session.getAppendChunkKey() != null) {
+      deleteStagingKeyIfExists(session.getAppendChunkKey());
     }
   }
 
