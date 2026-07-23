@@ -1074,12 +1074,22 @@ function Assert-RegisteredProbeTaskContract {
         [Parameter(Mandatory)]$Specification
     )
 
+    $principalSid = $null
+    try {
+        $principalAccount = [Security.Principal.NTAccount]::new(
+            [string]$Task.Principal.UserId)
+        $principalSid = [string]$principalAccount.Translate(
+            [Security.Principal.SecurityIdentifier]).Value
+    } catch {
+        $principalSid = $null
+    }
+
     $actions = @($Task.Actions)
     if ($actions.Count -ne 1 -or
         -not [string]::Equals($actions[0].Execute, $Specification.Execute,
             [StringComparison]::OrdinalIgnoreCase) -or
         $actions[0].Arguments -cne $Specification.Arguments -or
-        [string]$Task.Principal.UserId -cne 'NT AUTHORITY\LOCAL SERVICE' -or
+        $principalSid -cne 'S-1-5-19' -or
         [string]$Task.Principal.LogonType -cne 'ServiceAccount' -or
         [string]$Task.Principal.RunLevel -cne 'Limited' -or
         -not [bool]$Task.Settings.Hidden -or
@@ -1772,6 +1782,31 @@ Describe 'installed-worker acceptance guard and probe safety' {
         {
             Assert-FixedProbeExecutable -Path 'C:\Program Files\PowerShell\7\pwsh.exe'
         } | Should -Not -Throw
+    }
+
+    It 'accepts the Windows-normalized LocalService task principal by SID' -Skip:(-not $IsWindows) {
+        $specification = [pscustomobject]@{
+            Execute = 'C:\Program Files\PowerShell\7\pwsh.exe'
+            Arguments = '-NoLogo -NoProfile -NonInteractive'
+        }
+        $task = [pscustomobject]@{
+            Actions = @([pscustomobject]@{
+                Execute = $specification.Execute
+                Arguments = $specification.Arguments
+            })
+            Principal = [pscustomobject]@{
+                UserId = 'LOCAL SERVICE'
+                LogonType = 'ServiceAccount'
+                RunLevel = 'Limited'
+            }
+            Settings = [pscustomobject]@{
+                Hidden = $true
+                ExecutionTimeLimit = 'PT1M'
+            }
+        }
+
+        { Assert-RegisteredProbeTaskContract -Task $task -Specification $specification } |
+            Should -Not -Throw
     }
 
     It 'accepts only the fixed native Microsoft PowerShell executable provenance' {
