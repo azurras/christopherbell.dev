@@ -30,6 +30,15 @@ test('native shared-folder authorization preserves Range and never puts a bearer
   assert.equal(new URL(authorized.url).searchParams.has('access_token'), false);
 });
 
+test('native no-cors media requests become same-origin before authorization is attached', () => {
+  const original = new Request(sharedContent, { mode: 'no-cors' });
+  const authorized = attachSharedFolderAuthorization(original, 'jwt-value', origin);
+
+  assert.equal(original.mode, 'no-cors');
+  assert.equal(authorized.mode, 'same-origin');
+  assert.equal(authorized.headers.get('Authorization'), 'Bearer jwt-value');
+});
+
 test('worker delegates no-store forwarding and 401 token eviction to its runtime', () => {
   const worker = fs.readFileSync('website/src/main/resources/static/shared-folder-auth-sw.js', 'utf8');
   const runtime = fs.readFileSync(
