@@ -946,6 +946,64 @@ Describe 'shared-folder runtime isolation' {
         { Assert-PinnedMediaToolSet -ToolRoot $toolRoot } | Should -Throw '*hash verification*'
     }
 
+    It 'grants LocalService non-inheriting service-directory traversal before WinSW install' {
+        $productionRoot = Join-Path $TestDrive 'worker-service-traversal'
+        $serviceRoot = Join-Path $productionRoot 'service'
+        New-Item -ItemType Directory -Path $serviceRoot -Force | Out-Null
+        'winsw' | Set-Content (Join-Path $serviceRoot 'ChristopherBellDev.exe')
+        'website xml' | Set-Content (Join-Path $serviceRoot 'ChristopherBellDev.xml')
+        'website script' | Set-Content (Join-Path $serviceRoot 'Start-ChristopherBellDev.ps1')
+        $requests = [Collections.Generic.List[object]]::new()
+        $events = [Collections.Generic.List[string]]::new()
+        $state = @{ Existing = $false }
+
+        Install-SharedFolderWorkerService -ProductionRoot $productionRoot `
+            -GetServiceAction {
+                param($name)
+                if ($state.Existing) {
+                    [pscustomobject]@{ Name = $name; Status = 'Stopped' }
+                }
+            } `
+            -InvokeWinSwAction {
+                param($binary, $command)
+                $events.Add($command)
+                if ($command -eq 'install') { $state.Existing = $true }
+                0
+            } `
+            -WaitForServicePresenceAction {
+                param($name, $shouldExist, $timeoutSeconds)
+                $state.Existing | Should -Be $shouldExist
+            } `
+            -StopServiceAction { param($name) } `
+            -SetServiceIdentityAction { param($name, $identity) } `
+            -GetServiceIdentityAction { param($name) 'NT AUTHORITY\LocalService' } `
+            -ProtectPathAction { param($path) } `
+            -SetAclAction {
+                param($path, $acl)
+                $requests.Add([pscustomobject]@{ Path = $path; Acl = $acl })
+                $events.Add("acl:$([IO.Path]::GetFileName($path))")
+            }
+
+        $serviceRootRequests = @($requests | Where-Object Path -eq $serviceRoot)
+        $serviceRootRequests.Count | Should -Be 1
+        $acl = $serviceRootRequests[0].Acl
+        $acl.AreAccessRulesProtected | Should -BeTrue
+        $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value |
+            Should -Be 'S-1-5-32-544'
+        $rules = @($acl.GetAccessRules(
+            $true, $false, [Security.Principal.SecurityIdentifier]))
+        $worker = $rules | Where-Object IdentityReference -eq 'S-1-5-19'
+        ($worker.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadAndExecute) |
+            Should -Be ([Security.AccessControl.FileSystemRights]::ReadAndExecute)
+        ($worker.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify) |
+            Should -Not -Be ([Security.AccessControl.FileSystemRights]::Modify)
+        $worker.InheritanceFlags |
+            Should -Be ([Security.AccessControl.InheritanceFlags]::None)
+        $worker.PropagationFlags |
+            Should -Be ([Security.AccessControl.PropagationFlags]::None)
+        $events.IndexOf('acl:service') | Should -BeLessThan ($events.IndexOf('install'))
+    }
+
     It 'installs and reinstalls the worker through supported WinSW 2 commands' {
         $productionRoot = Join-Path $TestDrive 'service-runtime'
         $serviceRoot = Join-Path $productionRoot 'service'
