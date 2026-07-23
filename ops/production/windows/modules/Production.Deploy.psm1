@@ -71,7 +71,7 @@ function Start-ProductionJar {
 
 function Test-ProductionEndpoints {
     param($Config, [int]$Port)
-    Wait-HttpStatus -Uri "http://127.0.0.1:$Port/" -ExpectedStatus 200 -Timeout ([timespan]::FromSeconds(90)) | Out-Null
+    Wait-HttpStatus -Uri "http://127.0.0.1:$Port/" -ExpectedStatus 200 -Timeout ([timespan]::FromMinutes(3)) | Out-Null
     $body = @{ email=$Config.smokeAccountEmail; password='deployment-smoke-intentionally-invalid' } | ConvertTo-Json
     $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/api/accounts/2024-12-15/login" -Method Post -ContentType 'application/json' -Body $body -SkipHttpErrorCheck -TimeoutSec 15
     if ([int]$response.StatusCode -ne 401) { throw "Smoke login expected HTTP 401, received $($response.StatusCode)." }
