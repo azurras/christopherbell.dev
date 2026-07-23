@@ -53,6 +53,28 @@ test('lost worker token is rehydrated from the initiating controlled client befo
   assert.equal(requests[0].options.cache, 'no-store');
 });
 
+test('an authenticated shared-folder API fetch keeps its bearer token across page navigation', async () => {
+  const requests = [];
+  const response = await respondToSharedFolderFetch({
+    request: new Request(apiUrl, {
+      headers: { Authorization: 'Bearer back-office-jwt' },
+    }),
+    clientId: 'back-office-client',
+    clientTokens: new Map(),
+    clients: {
+      get: async () => assert.fail('an explicit bearer token must not require client recovery'),
+    },
+    origin,
+    fetchFn: async request => {
+      requests.push(request);
+      return new Response('admin data', { status: 200 });
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(requests[0].headers.get('Authorization'), 'Bearer back-office-jwt');
+});
+
 test('a token-recovery timeout returns a controlled denial instead of falling through unauthenticated', async () => {
   const tokens = new Map();
   const messages = [];
