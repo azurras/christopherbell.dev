@@ -10,6 +10,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSScriptRoot 'Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot 'Production.SharedFolderWorker.psm1') -Force
 
 try {
