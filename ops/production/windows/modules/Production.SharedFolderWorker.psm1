@@ -899,14 +899,13 @@ function Invoke-PinnedMediaTool {
         throw 'MaxLogCharacters is outside the allowed range.'
     }
 
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $Executable
-    $start.WorkingDirectory = Split-Path -Parent $Executable
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    foreach ($argument in $ArgumentList) { [void]$start.ArgumentList.Add($argument) }
+    $start = New-ProductionProcessStartInfo `
+        -FilePath $Executable `
+        -ArgumentList $ArgumentList `
+        -WorkingDirectory (Split-Path -Parent $Executable) `
+        -CreateNoWindow `
+        -RedirectStandardOutput `
+        -RedirectStandardError
 
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start

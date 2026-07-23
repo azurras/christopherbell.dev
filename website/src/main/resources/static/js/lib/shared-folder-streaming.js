@@ -15,7 +15,7 @@ export function attachSharedFolderAuthorization(request, token, origin) {
   if (!isSharedFolderApiRequest(request, origin)) return request;
   const headers = new Headers(request.headers);
   headers.set('Authorization', `Bearer ${token}`);
-  return new Request(request, { headers });
+  return new Request(request, { headers, mode: 'same-origin' });
 }
 
 /** Map native streaming denial responses to UI behavior. */

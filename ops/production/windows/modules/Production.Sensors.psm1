@@ -239,13 +239,7 @@ function Get-ProductionCpuTemperature {
     if (-not (Test-Path -LiteralPath $powerShell -PathType Leaf)) {
         throw 'Windows PowerShell 5.1 is required for the CPU temperature probe.'
     }
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $powerShell
-    $start.WorkingDirectory = $directory
-    $start.UseShellExecute = $false
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    foreach ($argument in @(
+    $arguments = @(
         '-NoLogo',
         '-NoProfile',
         '-NonInteractive',
@@ -255,9 +249,13 @@ function Get-ProductionCpuTemperature {
         $scriptPath,
         '-LibreHardwareMonitorPath',
         $libraryPath
-    )) {
-        [void]$start.ArgumentList.Add($argument)
-    }
+    )
+    $start = New-ProductionProcessStartInfo `
+        -FilePath $powerShell `
+        -ArgumentList $arguments `
+        -WorkingDirectory $directory `
+        -RedirectStandardOutput `
+        -RedirectStandardError
     $process = [Diagnostics.Process]::Start($start)
     try {
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()

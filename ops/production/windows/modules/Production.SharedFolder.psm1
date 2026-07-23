@@ -217,19 +217,99 @@ function Expand-ValidatedMediaArchive {
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    $destinationItem = Get-Item -LiteralPath $Destination -Force -ErrorAction Stop
+    if ($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Pinned media tool archive destination must not be a reparse point.'
+    }
     $destinationRoot = [IO.Path]::GetFullPath($Destination).TrimEnd('\') + '\'
     $archive = [IO.Compression.ZipFile]::OpenRead($ArchivePath)
     try {
+        $validatedEntries = [Collections.Generic.List[object]]::new()
+        $targetPaths = [Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::OrdinalIgnoreCase)
         foreach ($entry in $archive.Entries) {
+            if ([string]::IsNullOrWhiteSpace([string]$entry.FullName)) {
+                throw 'Pinned media tool archive contains an empty path.'
+            }
             $target = [IO.Path]::GetFullPath((Join-Path $Destination $entry.FullName))
             if (-not $target.StartsWith($destinationRoot, [StringComparison]::OrdinalIgnoreCase)) {
                 throw 'Pinned media tool archive contains an unsafe path.'
             }
+            if (-not $targetPaths.Add($target)) {
+                throw 'Pinned media tool archive contains a duplicate path.'
+            }
+            if (Test-Path -LiteralPath $target) {
+                throw 'Pinned media tool archive target already exists.'
+            }
+            $validatedEntries.Add([pscustomobject]@{
+                Entry = $entry
+                Target = $target
+                IsDirectory = [string]::IsNullOrEmpty([string]$entry.Name)
+            })
+        }
+
+        foreach ($validated in $validatedEntries) {
+            if ($validated.IsDirectory) {
+                New-Item -ItemType Directory -Path $validated.Target -Force | Out-Null
+                continue
+            }
+            New-Item -ItemType Directory `
+                -Path (Split-Path -Parent $validated.Target) `
+                -Force | Out-Null
+            $source = $validated.Entry.Open()
+            try {
+                $targetStream = [IO.FileStream]::new(
+                    $validated.Target,
+                    [IO.FileMode]::CreateNew,
+                    [IO.FileAccess]::Write,
+                    [IO.FileShare]::None)
+                try { $source.CopyTo($targetStream) } finally { $targetStream.Dispose() }
+            } finally { $source.Dispose() }
         }
     } finally {
         $archive.Dispose()
     }
-    [IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $Destination, $true)
+}
+
+function Get-RelativeMediaToolPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $canonicalRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $canonicalPath = [IO.Path]::GetFullPath($Path)
+    if (-not $canonicalPath.StartsWith(
+        $canonicalRoot,
+        [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Pinned media tool path is outside its expanded package root.'
+    }
+    return $canonicalPath.Substring($canonicalRoot.Length)
+}
+
+function Move-MediaToolMarker {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination
+    )
+
+    if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
+        try {
+            [IO.File]::Move($Source, $Destination)
+            return
+        } catch [IO.IOException] {
+            if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) { throw }
+        }
+    }
+
+    $backup = "$Destination.$([Guid]::NewGuid().ToString('N')).bak"
+    try {
+        [IO.File]::Replace($Source, $Destination, $backup)
+    } finally {
+        [IO.File]::Delete($backup)
+    }
 }
 
 function Install-PinnedMediaTools {
@@ -249,7 +329,7 @@ function Install-PinnedMediaTools {
     if (Test-Path -LiteralPath $activeMarker -PathType Leaf) {
         try {
             $active = Get-Content -LiteralPath $activeMarker -Raw -Encoding utf8 |
-                ConvertFrom-Json -DateKind String -ErrorAction Stop
+                ConvertFrom-Json -ErrorAction Stop
             $activeFields = @($active.PSObject.Properties.Name | Sort-Object)
             $expectedActiveFields = @(@(
                 'ffmpegSha256',
@@ -306,8 +386,10 @@ function Install-PinnedMediaTools {
             $manifest.sha256.Substring(0, 12), [Guid]::NewGuid().ToString('N')
         $publishedVersion = Join-Path $versionsRoot $versionName
         [IO.Directory]::Move($expanded, $publishedVersion)
-        $ffmpegTarget = Join-Path $publishedVersion ([IO.Path]::GetRelativePath($expanded, $ffmpeg[0].FullName))
-        $ffprobeTarget = Join-Path $publishedVersion ([IO.Path]::GetRelativePath($expanded, $ffprobe[0].FullName))
+        $ffmpegTarget = Join-Path $publishedVersion (
+            Get-RelativeMediaToolPath -Root $expanded -Path $ffmpeg[0].FullName)
+        $ffprobeTarget = Join-Path $publishedVersion (
+            Get-RelativeMediaToolPath -Root $expanded -Path $ffprobe[0].FullName)
         $active = [ordered]@{
             schemaVersion = 1
             packageVersion = $manifest.packageVersion
@@ -322,7 +404,7 @@ function Install-PinnedMediaTools {
                 $temporaryMarker,
                 ($active | ConvertTo-Json -Compress),
                 [Text.UTF8Encoding]::new($false))
-            [IO.File]::Move($temporaryMarker, $activeMarker, $true)
+            Move-MediaToolMarker -Source $temporaryMarker -Destination $activeMarker
         } finally {
             Remove-Item -LiteralPath $temporaryMarker -Force -ErrorAction SilentlyContinue
         }

@@ -212,6 +212,22 @@ Describe 'native Windows deployment' {
             } | Should -Throw '*Suspended recovery policy verification failed*'
         }
 
+        It 'allows three minutes for a production cold start' {
+            Mock Wait-HttpStatus { 200 }
+            Mock Invoke-ProductionWebRequest {
+                [pscustomobject]@{ StatusCode = 401; Content = '{"code":"UNAUTHORIZED"}' }
+            }
+            $configuration = [pscustomobject]@{ smokeAccountEmail = 'admin@example.com' }
+
+            Test-ProductionEndpoints -Config $configuration -Port 8080
+
+            Should -Invoke Wait-HttpStatus -Times 1 -Exactly -ParameterFilter {
+                $Uri -eq 'http://127.0.0.1:8080/' -and
+                $ExpectedStatus -eq 200 -and
+                $Timeout.TotalSeconds -eq 180
+            }
+        }
+
         It 'bounds checked processes that do not exit' {
             $slowPowerShell = Join-Path $PSHOME 'pwsh.exe'
             $watch = [Diagnostics.Stopwatch]::StartNew()

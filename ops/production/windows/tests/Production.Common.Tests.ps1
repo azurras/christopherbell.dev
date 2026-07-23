@@ -114,6 +114,70 @@ Describe 'production common operations' {
         catch { $_.Exception.Message | Should -Not -Match 'sensitive-child-output' }
     }
 
+    It 'runs checked processes from Windows PowerShell 5.1 with arguments and environment' {
+        $target = Join-Path $TestDrive 'legacy-process-target.ps1'
+        @'
+param([Parameter(Mandatory)][string]$Value)
+[Console]::Write("$Value|$env:PROBE_VALUE")
+'@ | Set-Content -LiteralPath $target
+        $probe = Join-Path $TestDrive 'legacy-process-probe.ps1'
+        @'
+param(
+    [Parameter(Mandatory)][string]$ModulePath,
+    [Parameter(Mandatory)][string]$TargetPath
+)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$output = Invoke-CheckedProcess `
+    -FilePath 'powershell.exe' `
+    -ArgumentList @('-NoProfile','-File',$TargetPath,'-Value','argument with spaces "and quotes"\tail') `
+    -Environment @{ PROBE_VALUE = 'legacy value' }
+if ($output -ne 'argument with spaces "and quotes"\tail|legacy value') {
+    throw "Unexpected child output: $output"
+}
+'@ | Set-Content -LiteralPath $probe
+
+        $modulePath = (Resolve-Path (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1')).Path
+        & powershell.exe -NoProfile -File $probe -ModulePath $modulePath -TargetPath $target
+
+        $LASTEXITCODE | Should -Be 0
+    }
+
+    It 'normalizes an HTTP error response without PowerShell 7-only switches' {
+        Mock Invoke-WebRequest -ModuleName Production.Common {
+            $exception = [Exception]::new('simulated HTTP 401')
+            $exception | Add-Member -MemberType NoteProperty -Name Response -Value (
+                [pscustomobject]@{ StatusCode = 401; Content = '{"code":"UNAUTHORIZED"}' })
+            throw $exception
+        }
+
+        $response = Invoke-ProductionWebRequest `
+            -Uri 'http://127.0.0.1/login' `
+            -Method Post `
+            -ContentType 'application/json' `
+            -Body '{}'
+
+        $response.StatusCode | Should -Be 401
+        $response.Content | Should -Be '{"code":"UNAUTHORIZED"}'
+        Should -Invoke Invoke-WebRequest -ModuleName Production.Common -Times 1 -Exactly `
+            -ParameterFilter { $UseBasicParsing -and -not $PSBoundParameters.ContainsKey('SkipHttpErrorCheck') }
+    }
+
+    It 'does not attach an empty request body to a health-check GET' {
+        Mock Invoke-WebRequest -ModuleName Production.Common {
+            [pscustomobject]@{ StatusCode = 200; Content = 'ok' }
+        }
+
+        $response = Invoke-ProductionWebRequest -Uri 'http://127.0.0.1/'
+
+        $response.StatusCode | Should -Be 200
+        Should -Invoke Invoke-WebRequest -ModuleName Production.Common -Times 1 -Exactly `
+            -ParameterFilter {
+                $Method -eq 'Get' -and
+                -not $PSBoundParameters.ContainsKey('Body')
+            }
+    }
+
     It 'scopes Git repository trust to each production command' {
         $arguments = Get-TrustedGitArguments -RepositoryPath 'A:\Projects\christopherbell.dev' -ArgumentList @('status','--short')
         $arguments | Should -Be @('-c','safe.directory=A:/Projects/christopherbell.dev','-C','A:\Projects\christopherbell.dev','status','--short')

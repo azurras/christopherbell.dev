@@ -53,27 +53,32 @@ function Start-ProductionJar {
     if (-not (Test-Path -LiteralPath $jar -PathType Leaf)) { throw "Missing release JAR: $jar" }
     $environment = Read-ProductionEnvironment (Join-Path $Config.programDataRoot 'config\app.env')
     foreach ($entry in $AdditionalEnvironment.GetEnumerator()) { $environment[$entry.Key] = [string]$entry.Value }
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $Config.javaExe
-    $start.WorkingDirectory = $release
-    $start.UseShellExecute = $false
-    foreach ($argument in @(
+    $arguments = @(
         '-Xrs',
         '--enable-native-access=ALL-UNNAMED',
         '-jar',
         $jar,
         "--spring.profiles.active=$Profiles",
         "--server.port=$Port"
-    )) { [void]$start.ArgumentList.Add($argument) }
-    foreach ($entry in $environment.GetEnumerator()) { $start.Environment[$entry.Key] = [string]$entry.Value }
+    )
+    $start = New-ProductionProcessStartInfo `
+        -FilePath $Config.javaExe `
+        -ArgumentList $arguments `
+        -WorkingDirectory $release `
+        -Environment $environment
     return [Diagnostics.Process]::Start($start)
 }
 
 function Test-ProductionEndpoints {
     param($Config, [int]$Port)
-    Wait-HttpStatus -Uri "http://127.0.0.1:$Port/" -ExpectedStatus 200 -Timeout ([timespan]::FromSeconds(90)) | Out-Null
+    Wait-HttpStatus -Uri "http://127.0.0.1:$Port/" -ExpectedStatus 200 -Timeout ([timespan]::FromMinutes(3)) | Out-Null
     $body = @{ email=$Config.smokeAccountEmail; password='deployment-smoke-intentionally-invalid' } | ConvertTo-Json
-    $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/api/accounts/2024-12-15/login" -Method Post -ContentType 'application/json' -Body $body -SkipHttpErrorCheck -TimeoutSec 15
+    $response = Invoke-ProductionWebRequest `
+        -Uri "http://127.0.0.1:$Port/api/accounts/2024-12-15/login" `
+        -Method Post `
+        -ContentType 'application/json' `
+        -Body $body `
+        -TimeoutSec 15
     if ([int]$response.StatusCode -ne 401) { throw "Smoke login expected HTTP 401, received $($response.StatusCode)." }
     if ([string]$response.Content -match 'RESOURCE_NOT_FOUND') { throw 'Smoke account was not found in the configured production database.' }
 }
@@ -104,15 +109,11 @@ function Invoke-BoundedCheckedProcess {
         [int]$TimeoutMilliseconds = 5000
     )
 
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $FilePath
-    $start.WorkingDirectory = (Get-Location).Path
-    $start.UseShellExecute = $false
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    foreach ($argument in $ArgumentList) {
-        [void]$start.ArgumentList.Add($argument)
-    }
+    $start = New-ProductionProcessStartInfo `
+        -FilePath $FilePath `
+        -ArgumentList $ArgumentList `
+        -RedirectStandardOutput `
+        -RedirectStandardError
 
     $process = $null
     try {

@@ -44,10 +44,16 @@ function Install-ConfigurationExamples {
 }
 
 function Protect-ProductionSecrets {
-    param([string]$Root)
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [scriptblock]$ProtectTreeAction = { param($Path) Protect-ProductionTree -Path $Path },
+        [scriptblock]$AssertTreeAction = { param($Path) Assert-ProtectedProductionTree -Path $Path }
+    )
+
     $config = Join-Path $Root 'config'
-    & icacls.exe $config '/inheritance:r' '/grant:r' 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Failed to protect production configuration ACLs.' }
+    & $ProtectTreeAction $config
+    & $AssertTreeAction $config
 }
 
 function Assert-CloudflaredExecutable {

@@ -770,6 +770,18 @@ public static class AcceptanceNative {
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder path, uint length, uint flags);
     [DllImport("kernel32.dll", SetLastError=true)] private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FILE_INFO information);
+    public static int ProbeServiceStopAccess(string serviceName) {
+        IntPtr manager = OpenSCManager(null, null, 1);
+        if (manager == IntPtr.Zero) return Marshal.GetLastWin32Error();
+        try {
+            IntPtr service = OpenServiceW(manager, serviceName, 32);
+            if (service == IntPtr.Zero) return Marshal.GetLastWin32Error();
+            CloseServiceHandle(service);
+            return 0;
+        } finally {
+            CloseServiceHandle(manager);
+        }
+    }
     public static PATH_IDENTITY GetPathIdentity(string path, bool directory) {
         using (SafeFileHandle handle = CreateFileW(path, 0x80, 7, IntPtr.Zero, 3, directory ? 0x02000000u : 0u, IntPtr.Zero)) {
             if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -864,23 +876,23 @@ try {
         $result.privateRead = $probeStream.ReadByte() -eq 37
     } finally { $probeStream.Dispose() }
     $result.privateDelete = -not [IO.File]::Exists($input.probePath)
-    Assert-ExpectedIdentity $input.protectedConfig $false
     try {
+        Assert-ExpectedIdentity $input.protectedConfig $false
         $protected = [IO.File]::Open($input.protectedConfig.NativeFinalPath, 'Open', 'Read', 'ReadWrite')
         $protected.Dispose()
     } catch [UnauthorizedAccessException] {
         $result.configReadDenied = $true
+    } catch [System.ComponentModel.Win32Exception] {
+        if ($_.Exception.NativeErrorCode -ne 5) { throw }
+        $result.configReadDenied = $true
     }
-    $manager = [AcceptanceNative]::OpenSCManager($null, $null, 1)
-    if ($manager -eq [IntPtr]::Zero) { $result.errorCode = 'SERVICE_MANAGER_QUERY_FAILED' }
-    else {
-        try {
-            $website = [AcceptanceNative]::OpenServiceW($manager, 'ChristopherBellDev', 32)
-            if ($website -eq [IntPtr]::Zero) {
-                $result.websiteServiceControlDenied = [Runtime.InteropServices.Marshal]::GetLastWin32Error() -eq 5
-                if (-not $result.websiteServiceControlDenied) { $result.errorCode = 'SERVICE_HANDLE_CHECK_FAILED' }
-            } else { [AcceptanceNative]::CloseServiceHandle($website) | Out-Null }
-        } finally { [AcceptanceNative]::CloseServiceHandle($manager) | Out-Null }
+    $serviceAccessError = [AcceptanceNative]::ProbeServiceStopAccess('ChristopherBellDev')
+    if ($serviceAccessError -eq 5) {
+        $result.websiteServiceControlDenied = $true
+    } elseif ($serviceAccessError -eq 0) {
+        $result.errorCode = 'SERVICE_HANDLE_CHECK_FAILED'
+    } else {
+        $result.errorCode = 'SERVICE_MANAGER_QUERY_FAILED'
     }
     $token = [IntPtr]::Zero
     if (-not [AcceptanceNative]::OpenProcessToken([AcceptanceNative]::GetCurrentProcess(), 8, [ref]$token)) {
@@ -918,6 +930,55 @@ try {
 }
 '@
     return $template.Replace('__PROBE_INPUT__', $encodedProbeInput)
+}
+
+function New-InstalledWorkerProbeArguments {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ProbeScript,
+        [ValidateRange(1, 32767)][int]$MaximumLength = 30000
+    )
+
+    $probeBytes = [Text.UTF8Encoding]::new($false, $true).GetBytes($ProbeScript)
+    $compressedStream = [IO.MemoryStream]::new()
+    try {
+        $compressor = [IO.Compression.GZipStream]::new(
+            $compressedStream,
+            [IO.Compression.CompressionMode]::Compress,
+            $true)
+        try {
+            $compressor.Write($probeBytes, 0, $probeBytes.Length)
+        } finally {
+            $compressor.Dispose()
+        }
+        $compressedBytes = $compressedStream.ToArray()
+    } finally {
+        $compressedStream.Dispose()
+    }
+
+    $payload = [Convert]::ToBase64String($compressedBytes)
+    $bootstrapTemplate = @'
+$ErrorActionPreference = 'Stop'
+$compressedBytes = [Convert]::FromBase64String('__COMPRESSED_PROBE__')
+$compressedStream = [IO.MemoryStream]::new($compressedBytes)
+$decompressor = [IO.Compression.GZipStream]::new($compressedStream, [IO.Compression.CompressionMode]::Decompress)
+$reader = [IO.StreamReader]::new($decompressor, [Text.UTF8Encoding]::new($false, $true))
+try {
+    & ([ScriptBlock]::Create($reader.ReadToEnd()))
+} finally {
+    $reader.Dispose()
+    $decompressor.Dispose()
+    $compressedStream.Dispose()
+}
+'@
+    $bootstrap = $bootstrapTemplate.Replace('__COMPRESSED_PROBE__', $payload)
+    $encodedBootstrap = [Convert]::ToBase64String(
+        [Text.Encoding]::Unicode.GetBytes($bootstrap))
+    $arguments = "-NoLogo -NoProfile -NonInteractive -EncodedCommand $encodedBootstrap"
+    if ($arguments.Length -gt $MaximumLength) {
+        throw "The compressed installed-worker probe command is too large: $($arguments.Length) characters."
+    }
+    return $arguments
 }
 
 function Read-InstalledWorkerProbeResult {
@@ -1226,6 +1287,11 @@ function New-InstalledWorkerProbeDependencies {
             if ($matches.Count -eq 1) { return $matches[0] }
             return $null
         }
+        GetTaskInfo = {
+            param($Name)
+            $information = Get-ScheduledTaskInfo -TaskName $Name -ErrorAction Stop
+            [pscustomobject]@{ LastTaskResult = [int64]$information.LastTaskResult }
+        }
         StartTask = { param($Name) Start-ScheduledTask -TaskName $Name -ErrorAction Stop }
         StopTask = {
             param($Name)
@@ -1279,7 +1345,7 @@ function Invoke-InstalledWorkerLocalServiceProbe {
     $requiredDependencies = @(
         'NewNonce','ResultRootParent','ValidateResultRootParent','ValidateProbeExecutable',
         'CreateResultDirectory','ValidateResultDirectory','ValidateResultFile',
-        'RegisterTask','GetTask','StartTask','StopTask','UnregisterTask','GetPathIdentity',
+        'RegisterTask','GetTask','GetTaskInfo','StartTask','StopTask','UnregisterTask','GetPathIdentity',
         'ResultExists','ResultDirectoryExists','RemoveResultDirectory','ProbeExists','UtcNow',
         'Wait','ReadResult')
     $missingDependencies = @($requiredDependencies | Where-Object {
@@ -1329,9 +1395,7 @@ function Invoke-InstalledWorkerLocalServiceProbe {
         $probeScript = New-InstalledWorkerProbeScript -Inputs $Inputs `
             -ResultRoot $resultRoot -ResultRootIdentity $resultRootIdentity `
             -ProbeFile $probeFile -ProbeExecutableIdentity $probeExecutable.Identity
-        $encodedScript = [Convert]::ToBase64String(
-            [Text.Encoding]::Unicode.GetBytes($probeScript))
-        $arguments = "-NoLogo -NoProfile -NonInteractive -EncodedCommand $encodedScript"
+        $arguments = New-InstalledWorkerProbeArguments -ProbeScript $probeScript
         $specification = [pscustomobject]@{
             Name = $taskName
             Execute = $probeExecutable.Path
@@ -1349,7 +1413,17 @@ function Invoke-InstalledWorkerLocalServiceProbe {
         $deadline = (& $Dependencies.UtcNow).AddSeconds(45)
         while (-not (& $Dependencies.ResultExists $resultPath)) {
             if ((& $Dependencies.UtcNow) -ge $deadline) {
-                throw 'The bounded LocalService probe did not produce a result.'
+                $taskResult = 'unavailable'
+                try {
+                    $taskInformation = & $Dependencies.GetTaskInfo $taskName
+                    if ($taskInformation -and
+                        $taskInformation.PSObject.Properties['LastTaskResult']) {
+                        $unsignedResult = [int64]$taskInformation.LastTaskResult -band 0xFFFFFFFFL
+                        $taskResult = '{0} (0x{1})' -f $unsignedResult,
+                            $unsignedResult.ToString('X8')
+                    }
+                } catch { }
+                throw "The bounded LocalService probe did not produce a result. LastTaskResult=$taskResult."
             }
             & $Dependencies.Wait ([TimeSpan]::FromMilliseconds(250))
         }
@@ -1536,6 +1610,11 @@ function New-TestInstalledWorkerProbeScenario {
             $events.Add('get-task')
             if ($state.TaskPresent) { return $state.Task }
             return $null
+        }.GetNewClosure()
+        GetTaskInfo = {
+            param($Name)
+            $events.Add('get-task-info')
+            [pscustomobject]@{ LastTaskResult = 2147942402 }
         }.GetNewClosure()
         StartTask = {
             param($Name)
@@ -1742,6 +1821,7 @@ Describe 'installed-worker acceptance guard and probe safety' {
         $parseErrors.Count | Should -Be 0
         $ast | Should -Not -BeNullOrEmpty
         $probeScript | Should -Match 'OpenServiceW'
+        $probeScript | Should -Match 'ProbeServiceStopAccess'
         $probeScript | Should -Match 'PrivilegeCheck'
         foreach ($forbidden in @(
             'ControlService', 'Stop-Service', 'Restart-Service', 'shutdown.exe',
@@ -1932,7 +2012,29 @@ Describe 'installed-worker acceptance guard and probe safety' {
         $probeScript | Should -Match 'FileMode]::CreateNew'
         $probeScript | Should -Match 'FileOptions]::DeleteOnClose'
         $probeScript | Should -Match 'result\.json'
+        $probeScript | Should -Match 'catch \[System\.ComponentModel\.Win32Exception\]'
+        $probeScript | Should -Match 'NativeErrorCode -ne 5'
         @([regex]::Matches($probeScript, 'FileMode]::CreateNew')).Count | Should -Be 2
+
+        $arguments = New-InstalledWorkerProbeArguments -ProbeScript $probeScript
+        $directArguments = '-NoLogo -NoProfile -NonInteractive -EncodedCommand ' +
+            [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probeScript))
+        $arguments.Length | Should -BeLessOrEqual 30000
+        $arguments.Length | Should -BeLessThan $directArguments.Length
+        $arguments | Should -Match `
+            '^-NoLogo -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$'
+    }
+
+    It 'round trips a compressed in-memory probe command' {
+        $arguments = New-InstalledWorkerProbeArguments `
+            -ProbeScript "'compressed-probe-round-trip'"
+        $encodedBootstrap = ($arguments -split ' ')[-1]
+        $bootstrap = [Text.Encoding]::Unicode.GetString(
+            [Convert]::FromBase64String($encodedBootstrap))
+
+        $output = & ([ScriptBlock]::Create($bootstrap))
+
+        $output | Should -BeExactly 'compressed-probe-round-trip'
     }
 
     It 'reads one authoritative anchored WinSW digest and rejects ambiguous pins' {
@@ -1998,6 +2100,7 @@ Describe 'installed-worker acceptance guard and probe safety' {
                     State = 'Ready'
                 }
             } }
+            GetTaskInfo = { [pscustomobject]@{ LastTaskResult = 0 } }
             StartTask = { $events.Add('start') }
             StopTask = { $events.Add('stop') }
             UnregisterTask = { $events.Add('unregister'); $taskState.Present = $false }
@@ -2065,7 +2168,7 @@ Describe 'installed-worker acceptance guard and probe safety' {
             Registration = 'registration failed'
             Start = 'start failed'
             Result = 'result failed'
-            Timeout = 'did not produce a result'
+            Timeout = 'did not produce a result*LastTaskResult=2147942402 (0x80070002)'
         }
         foreach ($phase in $expectations.Keys) {
             $scenario = New-TestInstalledWorkerProbeScenario `
@@ -2365,7 +2468,8 @@ Describe 'installed worker LocalService security acceptance' `
         $result.privateRead | Should -BeTrue
         $result.privateDelete | Should -BeTrue
         $result.configReadDenied | Should -BeTrue
-        $result.websiteServiceControlDenied | Should -BeTrue
+        $result.websiteServiceControlDenied | Should -BeTrue `
+            -Because "the probe reported errorCode '$($result.errorCode)'"
         $result.shutdownPrivilegeEnabled | Should -BeFalse
         $result.errorCode | Should -Be 'NONE'
     }

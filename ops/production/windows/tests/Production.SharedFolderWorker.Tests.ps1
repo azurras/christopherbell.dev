@@ -365,13 +365,14 @@ Describe 'fixed media tool arguments' {
         $arguments[-1] | Should -Be $job.sourcePath
     }
 
-    It 'launches only through ArgumentList, bounds redirected logs, and kills a process tree' {
+    It 'launches through centralized argument escaping, bounds logs, and kills a process tree' {
         $module = Get-Content (Join-Path $moduleRoot 'Production.SharedFolderWorker.psm1') -Raw
 
-        $module | Should -Match '\.ArgumentList\.Add\(\$argument\)'
+        $module | Should -Match 'New-ProductionProcessStartInfo'
+        $module | Should -Match '-ArgumentList \$ArgumentList'
         $module | Should -Match 'BoundedTextReader'
         $module | Should -Match '\.Kill\(\$true\)'
-        $module | Should -Not -Match 'Arguments\s*='
+        $module | Should -Not -Match 'ProcessStartInfo]::new'
     }
 
     It 'captures child output through the bounded process runner' {
@@ -736,29 +737,23 @@ try {
         $exitMarker = Join-Path $TestDrive 'real-success-exited.txt'
         $boundedResult = Join-Path $TestDrive 'real-success-bounded.json'
         $coordinatorCommand = ConvertTo-TestEncodedCommand -Script @"
-`$watcher = [IO.FileSystemWatcher]::new('$($TestDrive.Replace("'", "''"))', '$([IO.Path]::GetFileName($started))')
-`$watcher.EnableRaisingEvents = `$true
-try {
-    if (-not (Test-Path -LiteralPath '$($started.Replace("'", "''"))')) {
-        `$change = `$watcher.WaitForChanged([IO.WatcherChangeTypes]::Created, 15000)
-        if (`$change.TimedOut) { exit 6 }
-    }
-    `$state = if (Test-Path -LiteralPath '$($job.readyOutputPath.Replace("'", "''"))') { 'present' } else { 'absent' }
-    [IO.File]::WriteAllText('$($observation.Replace("'", "''"))', `$state)
-    [IO.File]::WriteAllText('$($release.Replace("'", "''"))', 'release')
-} finally { `$watcher.Dispose() }
+`$deadline = [DateTime]::UtcNow.AddSeconds(15)
+while (-not (Test-Path -LiteralPath '$($started.Replace("'", "''"))')) {
+    if ([DateTime]::UtcNow -ge `$deadline) { exit 6 }
+    Start-Sleep -Milliseconds 25
+}
+`$state = if (Test-Path -LiteralPath '$($job.readyOutputPath.Replace("'", "''"))') { 'present' } else { 'absent' }
+[IO.File]::WriteAllText('$($observation.Replace("'", "''"))', `$state)
+[IO.File]::WriteAllText('$($release.Replace("'", "''"))', 'release')
 "@
         $transcodeCommand = ConvertTo-TestEncodedCommand -Script @"
 [IO.File]::WriteAllBytes('$($job.partialOutputPath.Replace("'", "''"))', [byte[]](1..64))
 [IO.File]::WriteAllText('$($started.Replace("'", "''"))', 'started')
-`$watcher = [IO.FileSystemWatcher]::new('$($TestDrive.Replace("'", "''"))', '$([IO.Path]::GetFileName($release))')
-`$watcher.EnableRaisingEvents = `$true
-try {
-    if (-not (Test-Path -LiteralPath '$($release.Replace("'", "''"))')) {
-        `$change = `$watcher.WaitForChanged([IO.WatcherChangeTypes]::Created, 15000)
-        if (`$change.TimedOut) { exit 7 }
-    }
-} finally { `$watcher.Dispose() }
+`$deadline = [DateTime]::UtcNow.AddSeconds(15)
+while (-not (Test-Path -LiteralPath '$($release.Replace("'", "''"))')) {
+    if ([DateTime]::UtcNow -ge `$deadline) { exit 7 }
+    Start-Sleep -Milliseconds 25
+}
 [Console]::Out.Write('x' * 200000)
 [Console]::Error.Write('y' * 200000)
 [IO.File]::WriteAllText('$($exitMarker.Replace("'", "''"))', 'exited')
@@ -903,6 +898,146 @@ Describe 'shared-folder runtime isolation' {
         { Expand-ValidatedMediaArchive -ArchivePath $archivePath -Destination $destination } |
             Should -Throw '*unsafe path*'
         Test-Path -LiteralPath $outside | Should -BeFalse
+    }
+
+    It 'extracts nested media tools under Windows PowerShell 5.1' {
+        $archivePath = Join-Path $TestDrive 'legacy-media-tools.zip'
+        $destination = Join-Path $TestDrive 'legacy-expanded'
+        $probe = Join-Path $TestDrive 'legacy-archive-probe.ps1'
+        New-TestMediaArchive -Path $archivePath -Label legacy
+        @'
+param(
+    [Parameter(Mandatory)][string]$ModulePath,
+    [Parameter(Mandatory)][string]$ArchivePath,
+    [Parameter(Mandatory)][string]$Destination
+)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+Expand-ValidatedMediaArchive -ArchivePath $ArchivePath -Destination $Destination
+'@ | Set-Content -LiteralPath $probe
+        $modulePath = (Resolve-Path (
+            Join-Path $moduleRoot 'Production.SharedFolder.psm1')).Path
+
+        & powershell.exe -NoProfile -File $probe `
+            -ModulePath $modulePath `
+            -ArchivePath $archivePath `
+            -Destination $destination
+
+        $LASTEXITCODE | Should -Be 0
+        Join-Path $destination 'package\bin\ffmpeg.exe' |
+            Should -Exist
+        Join-Path $destination 'package\bin\ffprobe.exe' |
+            Should -Exist
+    }
+
+    It 'installs and reuses pinned media tools under Windows PowerShell 5.1' {
+        $archivePath = Join-Path $TestDrive 'legacy-pinned-tools.zip'
+        $manifestPath = Join-Path $TestDrive 'legacy-pinned-tools.json'
+        $replacementArchivePath = Join-Path $TestDrive 'legacy-replacement-tools.zip'
+        $replacementManifestPath = Join-Path $TestDrive 'legacy-replacement-tools.json'
+        $toolRoot = Join-Path $TestDrive 'legacy-pinned-root'
+        $probe = Join-Path $TestDrive 'legacy-pinned-probe.ps1'
+        New-TestMediaArchive -Path $archivePath -Label legacy-pinned
+        New-TestMediaManifest `
+            -Path $manifestPath `
+            -ArchivePath $archivePath `
+            -Version legacy-pinned
+        New-TestMediaArchive -Path $replacementArchivePath -Label legacy-replacement
+        New-TestMediaManifest `
+            -Path $replacementManifestPath `
+            -ArchivePath $replacementArchivePath `
+            -Version legacy-replacement
+        @'
+param(
+    [Parameter(Mandatory)][string]$ModulePath,
+    [Parameter(Mandatory)][string]$ArchivePath,
+    [Parameter(Mandatory)][string]$ManifestPath,
+    [Parameter(Mandatory)][string]$ReplacementArchivePath,
+    [Parameter(Mandatory)][string]$ReplacementManifestPath,
+    [Parameter(Mandatory)][string]$ToolRoot
+)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$first = Install-PinnedMediaTools `
+    -ManifestPath $ManifestPath `
+    -ToolRoot $ToolRoot `
+    -DownloadAction { param($uri,$destination) Copy-Item $ArchivePath $destination }
+$replacement = Install-PinnedMediaTools `
+    -ManifestPath $ReplacementManifestPath `
+    -ToolRoot $ToolRoot `
+    -DownloadAction {
+        param($uri,$destination)
+        Copy-Item $ReplacementArchivePath $destination
+    }
+$reused = Install-PinnedMediaTools `
+    -ManifestPath $ReplacementManifestPath `
+    -ToolRoot $ToolRoot `
+    -DownloadAction { throw 'Pinned media tools were downloaded instead of reused.' }
+if ($first.Ffmpeg -eq $replacement.Ffmpeg -or $first.Ffprobe -eq $replacement.Ffprobe) {
+    throw 'Replacement media tools reused the former version directory.'
+}
+if ($replacement.Ffmpeg -ne $reused.Ffmpeg -or
+    $replacement.Ffprobe -ne $reused.Ffprobe) {
+    throw 'Pinned media tool reuse returned different executables.'
+}
+'@ | Set-Content -LiteralPath $probe
+        $modulePath = (Resolve-Path (
+            Join-Path $moduleRoot 'Production.SharedFolder.psm1')).Path
+
+        & powershell.exe -NoProfile -File $probe `
+            -ModulePath $modulePath `
+            -ArchivePath $archivePath `
+            -ManifestPath $manifestPath `
+            -ReplacementArchivePath $replacementArchivePath `
+            -ReplacementManifestPath $replacementManifestPath `
+            -ToolRoot $toolRoot
+
+        $LASTEXITCODE | Should -Be 0
+    }
+
+    It 'rejects duplicate canonical archive paths before extracting files' {
+        Add-Type -AssemblyName System.IO.Compression
+        $archivePath = Join-Path $TestDrive 'duplicate-paths.zip'
+        $destination = Join-Path $TestDrive 'duplicate-expanded'
+        $archive = [IO.Compression.ZipFile]::Open(
+            $archivePath,
+            [IO.Compression.ZipArchiveMode]::Create)
+        try {
+            foreach ($entryName in @(
+                'package/bin/ffmpeg.exe',
+                'PACKAGE/BIN/FFMPEG.EXE')) {
+                $entry = $archive.CreateEntry($entryName)
+                $writer = [IO.StreamWriter]::new($entry.Open())
+                try { $writer.Write($entryName) } finally { $writer.Dispose() }
+            }
+        } finally { $archive.Dispose() }
+
+        { Expand-ValidatedMediaArchive `
+                -ArchivePath $archivePath `
+                -Destination $destination } |
+            Should -Throw '*duplicate path*'
+        Test-Path -LiteralPath (
+            Join-Path $destination 'package\bin\ffmpeg.exe') |
+            Should -BeFalse
+    }
+
+    It 'rejects a reparse-point archive destination before extracting files' {
+        $archivePath = Join-Path $TestDrive 'reparse-destination.zip'
+        $actualDestination = Join-Path $TestDrive 'actual-expanded'
+        $linkedDestination = Join-Path $TestDrive 'linked-expanded'
+        New-TestMediaArchive -Path $archivePath -Label reparse
+        New-Item -ItemType Directory -Path $actualDestination | Out-Null
+        New-Item -ItemType Junction `
+            -Path $linkedDestination `
+            -Target $actualDestination | Out-Null
+
+        { Expand-ValidatedMediaArchive `
+                -ArchivePath $archivePath `
+                -Destination $linkedDestination } |
+            Should -Throw '*reparse point*'
+        Test-Path -LiteralPath (
+            Join-Path $actualDestination 'package\bin\ffmpeg.exe') |
+            Should -BeFalse
     }
 
     It 'reads the exact pinned HTTPS media tool manifest' {
