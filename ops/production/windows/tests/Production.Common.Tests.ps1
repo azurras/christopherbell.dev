@@ -114,6 +114,35 @@ Describe 'production common operations' {
         catch { $_.Exception.Message | Should -Not -Match 'sensitive-child-output' }
     }
 
+    It 'runs checked processes from Windows PowerShell 5.1 with arguments and environment' {
+        $target = Join-Path $TestDrive 'legacy-process-target.ps1'
+        @'
+param([Parameter(Mandatory)][string]$Value)
+[Console]::Write("$Value|$env:PROBE_VALUE")
+'@ | Set-Content -LiteralPath $target
+        $probe = Join-Path $TestDrive 'legacy-process-probe.ps1'
+        @'
+param(
+    [Parameter(Mandatory)][string]$ModulePath,
+    [Parameter(Mandatory)][string]$TargetPath
+)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$output = Invoke-CheckedProcess `
+    -FilePath 'powershell.exe' `
+    -ArgumentList @('-NoProfile','-File',$TargetPath,'-Value','argument with spaces "and quotes"\tail') `
+    -Environment @{ PROBE_VALUE = 'legacy value' }
+if ($output -ne 'argument with spaces "and quotes"\tail|legacy value') {
+    throw "Unexpected child output: $output"
+}
+'@ | Set-Content -LiteralPath $probe
+
+        $modulePath = (Resolve-Path (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1')).Path
+        & powershell.exe -NoProfile -File $probe -ModulePath $modulePath -TargetPath $target
+
+        $LASTEXITCODE | Should -Be 0
+    }
+
     It 'scopes Git repository trust to each production command' {
         $arguments = Get-TrustedGitArguments -RepositoryPath 'A:\Projects\christopherbell.dev' -ArgumentList @('status','--short')
         $arguments | Should -Be @('-c','safe.directory=A:/Projects/christopherbell.dev','-C','A:\Projects\christopherbell.dev','status','--short')

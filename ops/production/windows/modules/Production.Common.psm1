@@ -40,6 +40,40 @@ function Read-ProductionConfig {
     return $config
 }
 
+function ConvertTo-NativeProcessArgument {
+    [CmdletBinding()]
+    param([AllowEmptyString()][Parameter(Mandatory)][string]$Argument)
+
+    if ($Argument.Length -eq 0) { return '""' }
+    if ($Argument -notmatch '[\s"]') { return $Argument }
+
+    $escaped = [Text.StringBuilder]::new()
+    [void]$escaped.Append('"')
+    $backslashCount = 0
+    foreach ($character in $Argument.ToCharArray()) {
+        if ($character -eq [char]'\') {
+            $backslashCount++
+            continue
+        }
+        if ($character -eq [char]'"') {
+            [void]$escaped.Append([char]'\', (2 * $backslashCount) + 1)
+            [void]$escaped.Append('"')
+            $backslashCount = 0
+            continue
+        }
+        if ($backslashCount -gt 0) {
+            [void]$escaped.Append([char]'\', $backslashCount)
+            $backslashCount = 0
+        }
+        [void]$escaped.Append($character)
+    }
+    if ($backslashCount -gt 0) {
+        [void]$escaped.Append([char]'\', 2 * $backslashCount)
+    }
+    [void]$escaped.Append('"')
+    return $escaped.ToString()
+}
+
 function Invoke-CheckedProcess {
     [CmdletBinding()]
     param(
@@ -54,8 +88,11 @@ function Invoke-CheckedProcess {
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    foreach ($argument in $ArgumentList) { [void]$start.ArgumentList.Add($argument) }
-    foreach ($entry in $Environment.GetEnumerator()) { $start.Environment[$entry.Key] = [string]$entry.Value }
+    $escapedArguments = @($ArgumentList | ForEach-Object { ConvertTo-NativeProcessArgument -Argument $_ })
+    $start.Arguments = [string]::Join(' ', $escapedArguments)
+    foreach ($entry in $Environment.GetEnumerator()) {
+        $start.EnvironmentVariables[$entry.Key] = [string]$entry.Value
+    }
     $process = [Diagnostics.Process]::Start($start)
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
