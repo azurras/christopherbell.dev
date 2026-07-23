@@ -745,7 +745,6 @@ function New-FixedFfprobeArguments {
     param([Parameter(Mandatory)]$Job)
 
     return @(
-        '-nostdin',
         '-v', 'error',
         '-show_streams',
         '-show_format',

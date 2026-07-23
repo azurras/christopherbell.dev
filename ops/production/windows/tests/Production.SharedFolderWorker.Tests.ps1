@@ -362,6 +362,7 @@ Describe 'fixed media tool arguments' {
         $arguments | Should -Contain 'json'
         $arguments | Should -Contain '-show_streams'
         $arguments | Should -Contain '-show_format'
+        $arguments | Should -Not -Contain '-nostdin'
         $arguments[-1] | Should -Be $job.sourcePath
     }
 
