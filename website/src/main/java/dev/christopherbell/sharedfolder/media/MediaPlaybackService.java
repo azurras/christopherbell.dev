@@ -9,6 +9,7 @@ import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -119,7 +120,7 @@ public class MediaPlaybackService {
         long reservation = properties.maxOutput().toBytes();
         evictCache(reservedBeforeAdmission, reservation, Set.of());
         requireDiskReserve(reservedBeforeAdmission, reservation);
-        Instant now = clock.instant();
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MILLIS);
         MediaJob job = new MediaJob();
         job.setId(ids.get());
         job.setOwnerId(account.getId());

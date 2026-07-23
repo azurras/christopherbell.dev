@@ -167,6 +167,24 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
+  void fallbackUsesMongoStableDeadlinePrecision() {
+    Instant preciseNow = Instant.parse("2026-07-21T12:00:00.123456789Z");
+    MediaSourceSnapshot source = source("audio/source.m4a", 30, preciseNow.minusSeconds(2));
+    when(sources.resolve(source.relativePath())).thenReturn(source);
+    when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(any(), any()))
+        .thenReturn(Optional.empty());
+    media = new MediaPlaybackService(
+        access, jobs, audit, sources, storage, folderProperties, mediaProperties,
+        Clock.fixed(preciseNow, ZoneOffset.UTC), () -> "job-precise");
+
+    media.requestFallback(source.relativePath(), MediaOutputProfile.AUDIO_M4A);
+
+    var captor = org.mockito.ArgumentCaptor.forClass(MediaJob.class);
+    verify(jobs, org.mockito.Mockito.times(2)).save(captor.capture());
+    assertThat(captor.getValue().getDeadline().getNano() % 1_000_000).isZero();
+  }
+
+  @Test
   void cacheKeyChangesWithSourceMetadataAndProfileVersion() {
     MediaSourceSnapshot first = source("video/a.mkv", 10, NOW.minusSeconds(5));
     MediaSourceSnapshot changedSize = source("video/a.mkv", 11, NOW.minusSeconds(5));
