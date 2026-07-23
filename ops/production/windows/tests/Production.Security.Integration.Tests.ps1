@@ -870,7 +870,7 @@ try {
         $protected.Dispose()
     } catch [UnauthorizedAccessException] {
         $result.configReadDenied = $true
-    } catch [ComponentModel.Win32Exception] {
+    } catch [System.ComponentModel.Win32Exception] {
         if ($_.Exception.NativeErrorCode -ne 5) { throw }
         $result.configReadDenied = $true
     }
@@ -1935,7 +1935,7 @@ Describe 'installed-worker acceptance guard and probe safety' {
         $probeScript | Should -Match 'FileMode]::CreateNew'
         $probeScript | Should -Match 'FileOptions]::DeleteOnClose'
         $probeScript | Should -Match 'result\.json'
-        $probeScript | Should -Match 'catch \[ComponentModel\.Win32Exception\]'
+        $probeScript | Should -Match 'catch \[System\.ComponentModel\.Win32Exception\]'
         $probeScript | Should -Match 'NativeErrorCode -ne 5'
         @([regex]::Matches($probeScript, 'FileMode]::CreateNew')).Count | Should -Be 2
     }
