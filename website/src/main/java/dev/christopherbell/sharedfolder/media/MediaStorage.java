@@ -97,7 +97,7 @@ public class MediaStorage {
             "Published media descriptor exceeds its protocol limit", oversized);
       }
       try {
-        if (!mapper.readTree(actual).equals(mapper.valueToTree(descriptor.asMap()))) {
+        if (!mapper.readTree(actual).equals(mapper.readTree(expected))) {
           throw new MediaDescriptorProtocolException(
               "Published media descriptor does not match its durable job");
         }

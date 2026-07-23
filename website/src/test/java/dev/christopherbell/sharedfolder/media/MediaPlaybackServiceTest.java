@@ -185,6 +185,28 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
+  void schedulerAcceptsItsOwnUnchangedDescriptor() {
+    MediaSourceSnapshot source = source("audio/source.m4a", 30, NOW.minusSeconds(2));
+    AtomicReference<MediaJob> published = new AtomicReference<>();
+    when(sources.resolve(source.relativePath())).thenReturn(source);
+    when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(any(), any()))
+        .thenReturn(Optional.empty());
+    when(jobs.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(
+        MediaJobStatus.active())).thenAnswer(ignored -> Optional.ofNullable(published.get()));
+    when(jobs.save(any())).thenAnswer(invocation -> {
+      MediaJob saved = invocation.getArgument(0);
+      if (saved.isDescriptorPublished()) published.set(saved);
+      return saved;
+    });
+
+    media.requestFallback(source.relativePath(), MediaOutputProfile.AUDIO_M4A);
+    media.promoteQueuedJob();
+
+    assertThat(published.get().getStatus()).isEqualTo(MediaJobStatus.QUEUED);
+    assertThat(published.get().getFailureCategory()).isNull();
+  }
+
+  @Test
   void cacheKeyChangesWithSourceMetadataAndProfileVersion() {
     MediaSourceSnapshot first = source("video/a.mkv", 10, NOW.minusSeconds(5));
     MediaSourceSnapshot changedSize = source("video/a.mkv", 11, NOW.minusSeconds(5));
