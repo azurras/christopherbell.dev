@@ -368,7 +368,9 @@ Describe 'fixed media tool arguments' {
 
     It 'launches through centralized argument escaping, bounds logs, and kills a process tree' {
         $module = Get-Content (Join-Path $moduleRoot 'Production.SharedFolderWorker.psm1') -Raw
+        $launcher = Get-Content (Join-Path $serviceRoot 'Start-SharedFolderMediaWorker.ps1') -Raw
 
+        $launcher | Should -Match "Import-Module.*Production\.Common\.psm1.*-Global"
         $module | Should -Match 'New-ProductionProcessStartInfo'
         $module | Should -Match '-ArgumentList \$ArgumentList'
         $module | Should -Match 'BoundedTextReader'
@@ -1120,6 +1122,7 @@ if ($replacement.Ffmpeg -ne $reused.Ffmpeg -or
                 $events.Add("acl:$([IO.Path]::GetFileName($path))")
             }
 
+        Join-Path $serviceRoot 'Production.Common.psm1' | Should -Exist
         $serviceRootRequests = @($requests | Where-Object Path -eq $serviceRoot)
         $serviceRootRequests.Count | Should -Be 1
         $acl = $serviceRootRequests[0].Acl

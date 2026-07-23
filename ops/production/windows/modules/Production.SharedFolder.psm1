@@ -504,6 +504,7 @@ function Install-SharedFolderWorkerService {
         }
         Copy-Item (Join-Path $PSScriptRoot '..\service\ChristopherBellMediaWorker.xml') $serviceRoot -Force
         Copy-Item (Join-Path $PSScriptRoot '..\service\Start-SharedFolderMediaWorker.ps1') $serviceRoot -Force
+        Copy-Item (Join-Path $PSScriptRoot 'Production.Common.psm1') $serviceRoot -Force
         Copy-Item (Join-Path $PSScriptRoot 'Production.SharedFolderWorker.psm1') $serviceRoot -Force
 
         foreach ($websiteControlFile in @(
@@ -518,6 +519,7 @@ function Install-SharedFolderWorkerService {
             'ChristopherBellMediaWorker.exe',
             'ChristopherBellMediaWorker.xml',
             'Start-SharedFolderMediaWorker.ps1',
+            'Production.Common.psm1',
             'Production.SharedFolderWorker.psm1'
         )) {
             & $SetAclAction (Join-Path $serviceRoot $workerFile) (New-SharedFolderWorkerFileAcl)
