@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   attachSharedFolderAuthorization,
+  installSharedFolderAuthRecovery,
   isSharedFolderApiRequest,
   sharedFolderDownloadRequestUrl,
   prepareSharedFolderStreamingAuth,
@@ -77,6 +78,31 @@ test('download and binary-preview denial states are actionable without a rejecte
     message: 'Shared-folder access was denied. Your access may have been revoked.',
     redirectToLogin: false,
   });
+});
+
+test('global auth recovery answers an existing worker after navigation to Back Office', () => {
+  let onMessage;
+  const replies = [];
+  const controller = { scriptURL: `${origin}/shared-folder-auth-sw.js` };
+  const serviceWorker = {
+    controller,
+    addEventListener(type, listener) {
+      assert.equal(type, 'message');
+      onMessage = listener;
+    },
+  };
+
+  installSharedFolderAuthRecovery(() => 'current-jwt', serviceWorker);
+  onMessage({
+    data: { type: 'shared-folder-auth-request-token' },
+    source: controller,
+    ports: [{ postMessage: reply => replies.push(reply) }],
+  });
+
+  assert.deepEqual(replies, [{
+    type: 'shared-folder-auth-recovery',
+    token: 'current-jwt',
+  }]);
 });
 
 test('shared-folder page starts native anchor and media requests without Blob buffering', () => {

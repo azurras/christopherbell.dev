@@ -11,7 +11,13 @@ import './components/footer.js';
 import './components/blog.js';
 import './components/gallery.js';
 import pubsub from './components/pubsub.js';
-import { clearSharedFolderStreamingAuth } from './lib/shared-folder-streaming.js';
+import {
+    clearSharedFolderStreamingAuth,
+    installSharedFolderAuthRecovery,
+} from './lib/shared-folder-streaming.js';
+import { getAuthToken } from './lib/util.js';
+
+installSharedFolderAuthRecovery(getAuthToken);
 
 /** Wire core layout and global auth behavior once DOM is ready. */
 document.addEventListener('DOMContentLoaded', () => {
