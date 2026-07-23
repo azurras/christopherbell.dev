@@ -875,8 +875,14 @@ try {
         $result.configReadDenied = $true
     }
     $manager = [AcceptanceNative]::OpenSCManager($null, $null, 1)
-    if ($manager -eq [IntPtr]::Zero) { $result.errorCode = 'SERVICE_MANAGER_QUERY_FAILED' }
-    else {
+    if ($manager -eq [IntPtr]::Zero) {
+        $managerError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        if ($managerError -eq 5) {
+            $result.websiteServiceControlDenied = $true
+        } else {
+            $result.errorCode = 'SERVICE_MANAGER_QUERY_FAILED'
+        }
+    } else {
         try {
             $website = [AcceptanceNative]::OpenServiceW($manager, 'ChristopherBellDev', 32)
             if ($website -eq [IntPtr]::Zero) {
