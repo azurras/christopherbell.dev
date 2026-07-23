@@ -930,6 +930,71 @@ Expand-ValidatedMediaArchive -ArchivePath $ArchivePath -Destination $Destination
             Should -Exist
     }
 
+    It 'installs and reuses pinned media tools under Windows PowerShell 5.1' {
+        $archivePath = Join-Path $TestDrive 'legacy-pinned-tools.zip'
+        $manifestPath = Join-Path $TestDrive 'legacy-pinned-tools.json'
+        $replacementArchivePath = Join-Path $TestDrive 'legacy-replacement-tools.zip'
+        $replacementManifestPath = Join-Path $TestDrive 'legacy-replacement-tools.json'
+        $toolRoot = Join-Path $TestDrive 'legacy-pinned-root'
+        $probe = Join-Path $TestDrive 'legacy-pinned-probe.ps1'
+        New-TestMediaArchive -Path $archivePath -Label legacy-pinned
+        New-TestMediaManifest `
+            -Path $manifestPath `
+            -ArchivePath $archivePath `
+            -Version legacy-pinned
+        New-TestMediaArchive -Path $replacementArchivePath -Label legacy-replacement
+        New-TestMediaManifest `
+            -Path $replacementManifestPath `
+            -ArchivePath $replacementArchivePath `
+            -Version legacy-replacement
+        @'
+param(
+    [Parameter(Mandatory)][string]$ModulePath,
+    [Parameter(Mandatory)][string]$ArchivePath,
+    [Parameter(Mandatory)][string]$ManifestPath,
+    [Parameter(Mandatory)][string]$ReplacementArchivePath,
+    [Parameter(Mandatory)][string]$ReplacementManifestPath,
+    [Parameter(Mandatory)][string]$ToolRoot
+)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+$first = Install-PinnedMediaTools `
+    -ManifestPath $ManifestPath `
+    -ToolRoot $ToolRoot `
+    -DownloadAction { param($uri,$destination) Copy-Item $ArchivePath $destination }
+$replacement = Install-PinnedMediaTools `
+    -ManifestPath $ReplacementManifestPath `
+    -ToolRoot $ToolRoot `
+    -DownloadAction {
+        param($uri,$destination)
+        Copy-Item $ReplacementArchivePath $destination
+    }
+$reused = Install-PinnedMediaTools `
+    -ManifestPath $ReplacementManifestPath `
+    -ToolRoot $ToolRoot `
+    -DownloadAction { throw 'Pinned media tools were downloaded instead of reused.' }
+if ($first.Ffmpeg -eq $replacement.Ffmpeg -or $first.Ffprobe -eq $replacement.Ffprobe) {
+    throw 'Replacement media tools reused the former version directory.'
+}
+if ($replacement.Ffmpeg -ne $reused.Ffmpeg -or
+    $replacement.Ffprobe -ne $reused.Ffprobe) {
+    throw 'Pinned media tool reuse returned different executables.'
+}
+'@ | Set-Content -LiteralPath $probe
+        $modulePath = (Resolve-Path (
+            Join-Path $moduleRoot 'Production.SharedFolder.psm1')).Path
+
+        & powershell.exe -NoProfile -File $probe `
+            -ModulePath $modulePath `
+            -ArchivePath $archivePath `
+            -ManifestPath $manifestPath `
+            -ReplacementArchivePath $replacementArchivePath `
+            -ReplacementManifestPath $replacementManifestPath `
+            -ToolRoot $toolRoot
+
+        $LASTEXITCODE | Should -Be 0
+    }
+
     It 'rejects duplicate canonical archive paths before extracting files' {
         Add-Type -AssemblyName System.IO.Compression
         $archivePath = Join-Path $TestDrive 'duplicate-paths.zip'

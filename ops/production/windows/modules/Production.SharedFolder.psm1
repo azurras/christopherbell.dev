@@ -271,6 +271,47 @@ function Expand-ValidatedMediaArchive {
     }
 }
 
+function Get-RelativeMediaToolPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $canonicalRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $canonicalPath = [IO.Path]::GetFullPath($Path)
+    if (-not $canonicalPath.StartsWith(
+        $canonicalRoot,
+        [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Pinned media tool path is outside its expanded package root.'
+    }
+    return $canonicalPath.Substring($canonicalRoot.Length)
+}
+
+function Move-MediaToolMarker {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination
+    )
+
+    if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
+        try {
+            [IO.File]::Move($Source, $Destination)
+            return
+        } catch [IO.IOException] {
+            if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) { throw }
+        }
+    }
+
+    $backup = "$Destination.$([Guid]::NewGuid().ToString('N')).bak"
+    try {
+        [IO.File]::Replace($Source, $Destination, $backup)
+    } finally {
+        [IO.File]::Delete($backup)
+    }
+}
+
 function Install-PinnedMediaTools {
     [CmdletBinding()]
     param(
@@ -288,7 +329,7 @@ function Install-PinnedMediaTools {
     if (Test-Path -LiteralPath $activeMarker -PathType Leaf) {
         try {
             $active = Get-Content -LiteralPath $activeMarker -Raw -Encoding utf8 |
-                ConvertFrom-Json -DateKind String -ErrorAction Stop
+                ConvertFrom-Json -ErrorAction Stop
             $activeFields = @($active.PSObject.Properties.Name | Sort-Object)
             $expectedActiveFields = @(@(
                 'ffmpegSha256',
@@ -345,8 +386,10 @@ function Install-PinnedMediaTools {
             $manifest.sha256.Substring(0, 12), [Guid]::NewGuid().ToString('N')
         $publishedVersion = Join-Path $versionsRoot $versionName
         [IO.Directory]::Move($expanded, $publishedVersion)
-        $ffmpegTarget = Join-Path $publishedVersion ([IO.Path]::GetRelativePath($expanded, $ffmpeg[0].FullName))
-        $ffprobeTarget = Join-Path $publishedVersion ([IO.Path]::GetRelativePath($expanded, $ffprobe[0].FullName))
+        $ffmpegTarget = Join-Path $publishedVersion (
+            Get-RelativeMediaToolPath -Root $expanded -Path $ffmpeg[0].FullName)
+        $ffprobeTarget = Join-Path $publishedVersion (
+            Get-RelativeMediaToolPath -Root $expanded -Path $ffprobe[0].FullName)
         $active = [ordered]@{
             schemaVersion = 1
             packageVersion = $manifest.packageVersion
@@ -361,7 +404,7 @@ function Install-PinnedMediaTools {
                 $temporaryMarker,
                 ($active | ConvertTo-Json -Compress),
                 [Text.UTF8Encoding]::new($false))
-            [IO.File]::Move($temporaryMarker, $activeMarker, $true)
+            Move-MediaToolMarker -Source $temporaryMarker -Destination $activeMarker
         } finally {
             Remove-Item -LiteralPath $temporaryMarker -Force -ErrorAction SilentlyContinue
         }
