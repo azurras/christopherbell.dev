@@ -1,7 +1,11 @@
 import { isSharedFolderApiRequest } from './js/lib/shared-folder-streaming.js';
-import { respondToSharedFolderFetch } from './js/lib/shared-folder-worker-runtime.js';
+import {
+  respondToSharedFolderFetch,
+  stageSharedFolderDownloadAuthorization,
+} from './js/lib/shared-folder-worker-runtime.js';
 
 const clientTokens = new Map();
+const downloadTokens = new Map();
 
 self.addEventListener('install', event => {
   event.waitUntil(self.skipWaiting());
@@ -18,6 +22,18 @@ self.addEventListener('message', event => {
     clientTokens.delete(clientId);
     return;
   }
+  if (event.data?.type === 'shared-folder-download-token') {
+    const accepted = stageSharedFolderDownloadAuthorization({
+      requestUrl: event.data.requestUrl,
+      token: event.data.token,
+      downloadTokens,
+      origin: self.location.origin,
+    });
+    event.ports[0]?.postMessage({
+      type: accepted ? 'shared-folder-download-ready' : 'shared-folder-download-rejected',
+    });
+    return;
+  }
   if (event.data?.type !== 'shared-folder-auth-token' || typeof event.data.token !== 'string'
       || !event.data.token) {
     return;
@@ -32,6 +48,7 @@ self.addEventListener('fetch', event => {
     request: event.request,
     clientId: event.clientId,
     clientTokens,
+    downloadTokens,
     clients: self.clients,
     origin: self.location.origin,
   }));

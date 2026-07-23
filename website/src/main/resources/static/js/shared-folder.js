@@ -27,7 +27,9 @@ import {
 } from './lib/shared-folder.js';
 import {
   clearSharedFolderStreamingAuth,
+  prepareSharedFolderDownloadAuth,
   prepareSharedFolderStreamingAuth,
+  sharedFolderDownloadRequestUrl,
   sharedFolderStreamingDenial,
 } from './lib/shared-folder-streaming.js';
 
@@ -87,9 +89,24 @@ async function prepareNativeStreaming() {
 
 async function download(entry) {
   status(`Preparing ${entry.name}`);
-  if (!await prepareNativeStreaming()) return;
+  const token = getAuthToken();
+  if (!token) {
+    status('Authentication is required for shared-folder downloads.');
+    return;
+  }
+  const requestUrl = sharedFolderDownloadRequestUrl(
+    API.sharedFolder.content(entry.path),
+    crypto.randomUUID(),
+    window.location.origin,
+  );
+  try {
+    await prepareSharedFolderDownloadAuth(token, requestUrl);
+  } catch (error) {
+    status(error?.message || 'Secure shared-folder download is unavailable.');
+    return;
+  }
   const link = document.createElement('a');
-  link.href = API.sharedFolder.content(entry.path);
+  link.href = requestUrl;
   link.download = entry.name;
   document.body.append(link);
   link.click();

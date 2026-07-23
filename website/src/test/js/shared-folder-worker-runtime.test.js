@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 
-import { respondToSharedFolderFetch } from '../../main/resources/static/js/lib/shared-folder-worker-runtime.js';
+import {
+  respondToSharedFolderFetch,
+  stageSharedFolderDownloadAuthorization,
+} from '../../main/resources/static/js/lib/shared-folder-worker-runtime.js';
 
 const origin = 'https://example.test';
 const apiUrl = `${origin}/api/shared-folder/2026-07-17/content?path=music%2Ftrack.flac`;
@@ -95,6 +98,38 @@ test('a client lookup failure returns a controlled denial instead of rejecting t
 
   assert.equal(response.status, 401);
   assert.equal(response.headers.get('Cache-Control'), 'private, no-store');
+});
+
+test('one exact download without a client id consumes one bounded in-memory authorization', async () => {
+  const downloadUrl = `${apiUrl}&downloadId=11111111-1111-4111-8111-111111111111`;
+  const downloads = new Map();
+  const requests = [];
+  assert.equal(stageSharedFolderDownloadAuthorization({
+    requestUrl: downloadUrl,
+    token: 'download-jwt',
+    downloadTokens: downloads,
+    origin,
+    nowMs: 1000,
+  }), true);
+
+  const response = await respondToSharedFolderFetch({
+    request: new Request(downloadUrl),
+    clientId: '',
+    clientTokens: new Map(),
+    downloadTokens: downloads,
+    clients: { get: async () => null },
+    origin,
+    nowFn: () => 1001,
+    fetchFn: async request => {
+      requests.push(request);
+      return new Response('download', { status: 200 });
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(requests[0].headers.get('Authorization'), 'Bearer download-jwt');
+  assert.equal(requests[0].url, downloadUrl);
+  assert.equal(downloads.size, 0);
 });
 
 test('worker recovery keeps tokens out of URLs and persistent browser storage', () => {

@@ -1,5 +1,6 @@
 export const SHARED_FOLDER_API_PREFIX = '/api/shared-folder/2026-07-17/';
 export const SHARED_FOLDER_AUTH_WORKER_PATH = '/shared-folder-auth-sw.js';
+const DOWNLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Return whether a request is same-origin and precisely inside the shared-folder API surface. */
 export function isSharedFolderApiRequest(requestOrUrl, origin) {
@@ -16,6 +17,17 @@ export function attachSharedFolderAuthorization(request, token, origin) {
   const headers = new Headers(request.headers);
   headers.set('Authorization', `Bearer ${token}`);
   return new Request(request, { headers, mode: 'same-origin' });
+}
+
+/** Add a non-secret one-time correlation id to one exact same-origin download URL. */
+export function sharedFolderDownloadRequestUrl(contentUrl, downloadId, origin) {
+  const url = new URL(contentUrl, origin);
+  if (url.origin !== origin || url.pathname !== `${SHARED_FOLDER_API_PREFIX}content`
+      || !DOWNLOAD_ID.test(downloadId)) {
+    throw new Error('The shared-folder download request is invalid.');
+  }
+  url.searchParams.set('downloadId', downloadId);
+  return url.href;
 }
 
 /** Map native streaming denial responses to UI behavior. */
@@ -45,6 +57,13 @@ export async function prepareSharedFolderStreamingAuth(token) {
   await navigator.serviceWorker.ready;
   const controller = await waitForExpectedController();
   await setWorkerToken(controller, token);
+  return controller;
+}
+
+/** Stage one exact download in worker memory for requests that have no browser client id. */
+export async function prepareSharedFolderDownloadAuth(token, requestUrl) {
+  const controller = await prepareSharedFolderStreamingAuth(token);
+  await setWorkerDownloadAuthorization(controller, token, requestUrl);
 }
 
 /** Remove this browser client’s transient streaming token after logout. */
@@ -93,5 +112,26 @@ function setWorkerToken(controller, token) {
       }
     };
     controller.postMessage({ type: 'shared-folder-auth-token', token }, [channel.port2]);
+  });
+}
+
+function setWorkerDownloadAuthorization(controller, token, requestUrl) {
+  return new Promise((resolve, reject) => {
+    const channel = new MessageChannel();
+    const timeout = window.setTimeout(() => reject(
+      new Error('Secure shared-folder download authorization timed out.')), 5000);
+    channel.port1.onmessage = event => {
+      window.clearTimeout(timeout);
+      if (event.data?.type === 'shared-folder-download-ready') {
+        resolve();
+      } else {
+        reject(new Error('Secure shared-folder download authorization was rejected.'));
+      }
+    };
+    controller.postMessage({
+      type: 'shared-folder-download-token',
+      token,
+      requestUrl,
+    }, [channel.port2]);
   });
 }

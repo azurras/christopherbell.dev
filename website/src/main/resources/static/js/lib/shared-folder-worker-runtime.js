@@ -1,6 +1,12 @@
-import { attachSharedFolderAuthorization } from './shared-folder-streaming.js';
+import {
+  SHARED_FOLDER_API_PREFIX,
+  attachSharedFolderAuthorization,
+} from './shared-folder-streaming.js';
 
 const TOKEN_RECOVERY_TIMEOUT_MS = 5000;
+const DOWNLOAD_AUTHORIZATION_TTL_MS = 10000;
+const MAX_PENDING_DOWNLOADS = 64;
+const DOWNLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * Authorize one exact shared-folder request in the worker. A worker restart loses the
@@ -11,6 +17,7 @@ export async function respondToSharedFolderFetch({
   request,
   clientId,
   clientTokens,
+  downloadTokens = new Map(),
   clients,
   origin,
   fetchFn = fetch,
@@ -18,8 +25,14 @@ export async function respondToSharedFolderFetch({
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   timeoutMs = TOKEN_RECOVERY_TIMEOUT_MS,
+  nowFn = Date.now,
 }) {
-  let token = clientTokens.get(clientId);
+  let token = consumeSharedFolderDownloadAuthorization(
+    request.url,
+    downloadTokens,
+    nowFn(),
+  );
+  if (!token) token = clientTokens.get(clientId);
   if (!token) {
     token = await recoverClientToken({
       clientId,
@@ -49,6 +62,44 @@ export async function respondToSharedFolderFetch({
     await notifySharedFolderDenial(clients, clientId, response.status);
   }
   return response;
+}
+
+/** Stage one exact short-lived download token without persisting it or putting it in the URL. */
+export function stageSharedFolderDownloadAuthorization({
+  requestUrl,
+  token,
+  downloadTokens,
+  origin,
+  nowMs = Date.now(),
+}) {
+  const normalizedToken = typeof token === 'string' ? token.trim() : '';
+  let url;
+  try {
+    url = new URL(requestUrl, origin);
+  } catch (_) {
+    return false;
+  }
+  if (!normalizedToken || url.origin !== origin
+      || url.pathname !== `${SHARED_FOLDER_API_PREFIX}content`
+      || !DOWNLOAD_ID.test(url.searchParams.get('downloadId') || '')) {
+    return false;
+  }
+  for (const [key, authorization] of downloadTokens) {
+    if (authorization.expiresAt <= nowMs) downloadTokens.delete(key);
+  }
+  if (downloadTokens.size >= MAX_PENDING_DOWNLOADS) return false;
+  downloadTokens.set(url.href, {
+    token: normalizedToken,
+    expiresAt: nowMs + DOWNLOAD_AUTHORIZATION_TTL_MS,
+  });
+  return true;
+}
+
+function consumeSharedFolderDownloadAuthorization(requestUrl, downloadTokens, nowMs) {
+  const authorization = downloadTokens.get(requestUrl);
+  if (!authorization) return '';
+  downloadTokens.delete(requestUrl);
+  return authorization.expiresAt > nowMs ? authorization.token : '';
 }
 
 async function recoverClientToken({
