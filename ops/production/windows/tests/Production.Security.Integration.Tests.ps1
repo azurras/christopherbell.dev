@@ -923,6 +923,55 @@ try {
     return $template.Replace('__PROBE_INPUT__', $encodedProbeInput)
 }
 
+function New-InstalledWorkerProbeArguments {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ProbeScript,
+        [ValidateRange(1, 32767)][int]$MaximumLength = 30000
+    )
+
+    $probeBytes = [Text.UTF8Encoding]::new($false, $true).GetBytes($ProbeScript)
+    $compressedStream = [IO.MemoryStream]::new()
+    try {
+        $compressor = [IO.Compression.GZipStream]::new(
+            $compressedStream,
+            [IO.Compression.CompressionMode]::Compress,
+            $true)
+        try {
+            $compressor.Write($probeBytes, 0, $probeBytes.Length)
+        } finally {
+            $compressor.Dispose()
+        }
+        $compressedBytes = $compressedStream.ToArray()
+    } finally {
+        $compressedStream.Dispose()
+    }
+
+    $payload = [Convert]::ToBase64String($compressedBytes)
+    $bootstrapTemplate = @'
+$ErrorActionPreference = 'Stop'
+$compressedBytes = [Convert]::FromBase64String('__COMPRESSED_PROBE__')
+$compressedStream = [IO.MemoryStream]::new($compressedBytes)
+$decompressor = [IO.Compression.GZipStream]::new($compressedStream, [IO.Compression.CompressionMode]::Decompress)
+$reader = [IO.StreamReader]::new($decompressor, [Text.UTF8Encoding]::new($false, $true))
+try {
+    & ([ScriptBlock]::Create($reader.ReadToEnd()))
+} finally {
+    $reader.Dispose()
+    $decompressor.Dispose()
+    $compressedStream.Dispose()
+}
+'@
+    $bootstrap = $bootstrapTemplate.Replace('__COMPRESSED_PROBE__', $payload)
+    $encodedBootstrap = [Convert]::ToBase64String(
+        [Text.Encoding]::Unicode.GetBytes($bootstrap))
+    $arguments = "-NoLogo -NoProfile -NonInteractive -EncodedCommand $encodedBootstrap"
+    if ($arguments.Length -gt $MaximumLength) {
+        throw "The compressed installed-worker probe command is too large: $($arguments.Length) characters."
+    }
+    return $arguments
+}
+
 function Read-InstalledWorkerProbeResult {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
@@ -1337,9 +1386,7 @@ function Invoke-InstalledWorkerLocalServiceProbe {
         $probeScript = New-InstalledWorkerProbeScript -Inputs $Inputs `
             -ResultRoot $resultRoot -ResultRootIdentity $resultRootIdentity `
             -ProbeFile $probeFile -ProbeExecutableIdentity $probeExecutable.Identity
-        $encodedScript = [Convert]::ToBase64String(
-            [Text.Encoding]::Unicode.GetBytes($probeScript))
-        $arguments = "-NoLogo -NoProfile -NonInteractive -EncodedCommand $encodedScript"
+        $arguments = New-InstalledWorkerProbeArguments -ProbeScript $probeScript
         $specification = [pscustomobject]@{
             Name = $taskName
             Execute = $probeExecutable.Path
@@ -1958,6 +2005,26 @@ Describe 'installed-worker acceptance guard and probe safety' {
         $probeScript | Should -Match 'catch \[System\.ComponentModel\.Win32Exception\]'
         $probeScript | Should -Match 'NativeErrorCode -ne 5'
         @([regex]::Matches($probeScript, 'FileMode]::CreateNew')).Count | Should -Be 2
+
+        $arguments = New-InstalledWorkerProbeArguments -ProbeScript $probeScript
+        $directArguments = '-NoLogo -NoProfile -NonInteractive -EncodedCommand ' +
+            [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probeScript))
+        $arguments.Length | Should -BeLessOrEqual 30000
+        $arguments.Length | Should -BeLessThan $directArguments.Length
+        $arguments | Should -Match `
+            '^-NoLogo -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$'
+    }
+
+    It 'round trips a compressed in-memory probe command' {
+        $arguments = New-InstalledWorkerProbeArguments `
+            -ProbeScript "'compressed-probe-round-trip'"
+        $encodedBootstrap = ($arguments -split ' ')[-1]
+        $bootstrap = [Text.Encoding]::Unicode.GetString(
+            [Convert]::FromBase64String($encodedBootstrap))
+
+        $output = & ([ScriptBlock]::Create($bootstrap))
+
+        $output | Should -BeExactly 'compressed-probe-round-trip'
     }
 
     It 'reads one authoritative anchored WinSW digest and rejects ambiguous pins' {
