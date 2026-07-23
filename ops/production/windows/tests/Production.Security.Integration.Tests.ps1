@@ -864,11 +864,14 @@ try {
         $result.privateRead = $probeStream.ReadByte() -eq 37
     } finally { $probeStream.Dispose() }
     $result.privateDelete = -not [IO.File]::Exists($input.probePath)
-    Assert-ExpectedIdentity $input.protectedConfig $false
     try {
+        Assert-ExpectedIdentity $input.protectedConfig $false
         $protected = [IO.File]::Open($input.protectedConfig.NativeFinalPath, 'Open', 'Read', 'ReadWrite')
         $protected.Dispose()
     } catch [UnauthorizedAccessException] {
+        $result.configReadDenied = $true
+    } catch [ComponentModel.Win32Exception] {
+        if ($_.Exception.NativeErrorCode -ne 5) { throw }
         $result.configReadDenied = $true
     }
     $manager = [AcceptanceNative]::OpenSCManager($null, $null, 1)
@@ -1932,6 +1935,8 @@ Describe 'installed-worker acceptance guard and probe safety' {
         $probeScript | Should -Match 'FileMode]::CreateNew'
         $probeScript | Should -Match 'FileOptions]::DeleteOnClose'
         $probeScript | Should -Match 'result\.json'
+        $probeScript | Should -Match 'catch \[ComponentModel\.Win32Exception\]'
+        $probeScript | Should -Match 'NativeErrorCode -ne 5'
         @([regex]::Matches($probeScript, 'FileMode]::CreateNew')).Count | Should -Be 2
     }
 
