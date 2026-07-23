@@ -486,16 +486,26 @@ function Assert-FixedProbeExecutable {
     if (-not [string]::Equals($Path, $fixedPath, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'The probe executable is not the fixed PowerShell installation.'
     }
-    $getItem = if ($Actions.GetItem) { $Actions.GetItem } else {
+    $getItem = if ($Actions.ContainsKey('GetItem') -and $null -ne $Actions['GetItem']) {
+        $Actions['GetItem']
+    } else {
         { param($Candidate) Get-Item -LiteralPath $Candidate -Force -ErrorAction Stop }
     }
-    $getIdentity = if ($Actions.GetPathIdentity) { $Actions.GetPathIdentity } else {
+    $getIdentity = if ($Actions.ContainsKey('GetPathIdentity') -and
+        $null -ne $Actions['GetPathIdentity']) {
+        $Actions['GetPathIdentity']
+    } else {
         { param($Candidate,$Directory) Get-NativePathIdentity -Path $Candidate }
     }
-    $getSignature = if ($Actions.GetSignature) { $Actions.GetSignature } else {
+    $getSignature = if ($Actions.ContainsKey('GetSignature') -and
+        $null -ne $Actions['GetSignature']) {
+        $Actions['GetSignature']
+    } else {
         { param($Candidate) Get-AuthenticodeSignature -LiteralPath $Candidate -ErrorAction Stop }
     }
-    $getVersion = if ($Actions.GetVersion) { $Actions.GetVersion } else {
+    $getVersion = if ($Actions.ContainsKey('GetVersion') -and $null -ne $Actions['GetVersion']) {
+        $Actions['GetVersion']
+    } else {
         { param($Candidate) (Get-Item -LiteralPath $Candidate -Force -ErrorAction Stop).VersionInfo }
     }
 
@@ -1086,7 +1096,9 @@ function Invoke-BoundedScheduledTaskCleanup {
         [hashtable]$Actions = @{}
     )
 
-    $startJob = if ($Actions.StartJob) { $Actions.StartJob } else {
+    $startJob = if ($Actions.ContainsKey('StartJob') -and $null -ne $Actions['StartJob']) {
+        $Actions['StartJob']
+    } else {
         {
             param($RequestedOperation,$TaskName)
             if ($RequestedOperation -eq 'Stop') {
@@ -1097,16 +1109,26 @@ function Invoke-BoundedScheduledTaskCleanup {
             }
         }
     }
-    $waitJob = if ($Actions.WaitJob) { $Actions.WaitJob } else {
+    $waitJob = if ($Actions.ContainsKey('WaitJob') -and $null -ne $Actions['WaitJob']) {
+        $Actions['WaitJob']
+    } else {
         { param($Job,$TimeoutSeconds) Wait-Job -Job $Job -Timeout $TimeoutSeconds }
     }
-    $receiveJob = if ($Actions.ReceiveJob) { $Actions.ReceiveJob } else {
+    $receiveJob = if ($Actions.ContainsKey('ReceiveJob') -and
+        $null -ne $Actions['ReceiveJob']) {
+        $Actions['ReceiveJob']
+    } else {
         { param($Job) Receive-Job -Job $Job -ErrorAction Stop | Out-Null }
     }
-    $stopJob = if ($Actions.StopJob) { $Actions.StopJob } else {
+    $stopJob = if ($Actions.ContainsKey('StopJob') -and $null -ne $Actions['StopJob']) {
+        $Actions['StopJob']
+    } else {
         { param($Job) Stop-Job -Job $Job -ErrorAction Stop }
     }
-    $removeJob = if ($Actions.RemoveJob) { $Actions.RemoveJob } else {
+    $removeJob = if ($Actions.ContainsKey('RemoveJob') -and
+        $null -ne $Actions['RemoveJob']) {
+        $Actions['RemoveJob']
+    } else {
         { param($Job) Remove-Job -Job $Job -Force -ErrorAction Stop }
     }
 
@@ -1743,6 +1765,13 @@ Describe 'installed-worker acceptance guard and probe safety' {
 
         [IO.File]::WriteAllText($resultPath, 'x' * 4097)
         { Read-InstalledWorkerProbeResult -Path $resultPath } | Should -Throw '*large*'
+    }
+
+    It 'uses production defaults when fixed-probe action overrides are omitted' -Skip:(-not $IsWindows) {
+        Set-StrictMode -Version Latest
+        {
+            Assert-FixedProbeExecutable -Path 'C:\Program Files\PowerShell\7\pwsh.exe'
+        } | Should -Not -Throw
     }
 
     It 'accepts only the fixed native Microsoft PowerShell executable provenance' {
