@@ -983,12 +983,17 @@ function Write-MediaJobStatusAtomic {
         throw 'failureCategory is invalid.'
     }
     Assert-MediaJobPrivatePaths -Job $Job
+    $normalizedFailureCategory = if ([string]::IsNullOrEmpty($FailureCategory)) {
+        $null
+    } else {
+        $FailureCategory
+    }
     $payload = [ordered]@{
         schemaVersion = 1
         jobId = [string]$Job.jobId
         status = $Status
         outputBytes = $OutputBytes
-        failureCategory = $FailureCategory
+        failureCategory = $normalizedFailureCategory
     }
     $temporary = "$($Job.statusPath).$([Guid]::NewGuid().ToString('N')).tmp"
     $json = $payload | ConvertTo-Json -Compress
