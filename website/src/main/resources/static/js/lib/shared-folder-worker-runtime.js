@@ -32,6 +32,7 @@ export async function respondToSharedFolderFetch({
     downloadTokens,
     nowFn(),
   );
+  if (!token) token = requestBearerToken(request);
   if (!token) token = clientTokens.get(clientId);
   if (!token) {
     token = await recoverClientToken({
@@ -62,6 +63,12 @@ export async function respondToSharedFolderFetch({
     await notifySharedFolderDenial(clients, clientId, response.status);
   }
   return response;
+}
+
+function requestBearerToken(request) {
+  const authorization = request.headers.get('Authorization') || '';
+  if (!authorization.startsWith('Bearer ')) return '';
+  return authorization.substring('Bearer '.length).trim();
 }
 
 /** Stage one exact short-lived download token without persisting it or putting it in the URL. */
