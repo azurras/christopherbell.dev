@@ -2458,7 +2458,8 @@ Describe 'installed worker LocalService security acceptance' `
         $result.privateRead | Should -BeTrue
         $result.privateDelete | Should -BeTrue
         $result.configReadDenied | Should -BeTrue
-        $result.websiteServiceControlDenied | Should -BeTrue
+        $result.websiteServiceControlDenied | Should -BeTrue `
+            -Because "the probe reported errorCode '$($result.errorCode)'"
         $result.shutdownPrivilegeEnabled | Should -BeFalse
         $result.errorCode | Should -Be 'NONE'
     }
