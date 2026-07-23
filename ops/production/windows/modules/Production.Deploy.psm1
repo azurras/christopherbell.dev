@@ -170,12 +170,7 @@ function Assert-ProductionWebsiteRecoveryPolicy {
     $failureActionFieldMatches = [regex]::Matches(
         $QueryOutput,
         '(?im)^[ \t]*FAILURE_ACTIONS[ \t]*:[ \t]*(?<Value>[^\r\n]*)\r?$')
-    $hasSingleFailureActionField = $failureActionFieldMatches.Count -eq 1
-    $failureActionFieldValue = if ($hasSingleFailureActionField) {
-        $failureActionFieldMatches[0].Groups['Value'].Value.Trim()
-    } else {
-        $null
-    }
+    $failureActionFieldCount = $failureActionFieldMatches.Count
     $actionMatches = [regex]::Matches(
         $QueryOutput,
         '(?im)^[ \t]*(?:(?<Label>FAILURE_ACTIONS)[ \t]*:[ \t]*)?(?<Action>RESTART|REBOOT|RUN COMMAND)[ \t]*--[ \t]*Delay[ \t]*=[ \t]*(?<Delay>\d+)[ \t]*milliseconds\.[ \t]*\r?$')
@@ -191,14 +186,13 @@ function Assert-ProductionWebsiteRecoveryPolicy {
     $expectedResetPeriodSeconds = if ($Policy -eq 'Suspended') { 0 } else { 3600 }
     $matchesExpectedPolicy = if ($Policy -eq 'Suspended') {
         $hasSingleResetField -and
-            $hasSingleFailureActionField -and
-            [string]::IsNullOrEmpty($failureActionFieldValue) -and
+            $failureActionFieldCount -eq 0 -and
             $resetPeriodSeconds -eq $expectedResetPeriodSeconds -and
             $delayLineCount -eq 0 -and
             $actualActions.Count -eq 0
     } else {
         $hasSingleResetField -and
-            $hasSingleFailureActionField -and
+            $failureActionFieldCount -eq 1 -and
             $resetPeriodSeconds -eq $expectedResetPeriodSeconds -and
             $delayLineCount -eq 2 -and
             $actualActions.Count -eq 2 -and
