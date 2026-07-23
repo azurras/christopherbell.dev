@@ -365,13 +365,14 @@ Describe 'fixed media tool arguments' {
         $arguments[-1] | Should -Be $job.sourcePath
     }
 
-    It 'launches only through ArgumentList, bounds redirected logs, and kills a process tree' {
+    It 'launches through centralized argument escaping, bounds logs, and kills a process tree' {
         $module = Get-Content (Join-Path $moduleRoot 'Production.SharedFolderWorker.psm1') -Raw
 
-        $module | Should -Match '\.ArgumentList\.Add\(\$argument\)'
+        $module | Should -Match 'New-ProductionProcessStartInfo'
+        $module | Should -Match '-ArgumentList \$ArgumentList'
         $module | Should -Match 'BoundedTextReader'
         $module | Should -Match '\.Kill\(\$true\)'
-        $module | Should -Not -Match 'Arguments\s*='
+        $module | Should -Not -Match 'ProcessStartInfo]::new'
     }
 
     It 'captures child output through the bounded process runner' {

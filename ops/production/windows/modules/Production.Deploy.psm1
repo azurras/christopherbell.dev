@@ -53,19 +53,19 @@ function Start-ProductionJar {
     if (-not (Test-Path -LiteralPath $jar -PathType Leaf)) { throw "Missing release JAR: $jar" }
     $environment = Read-ProductionEnvironment (Join-Path $Config.programDataRoot 'config\app.env')
     foreach ($entry in $AdditionalEnvironment.GetEnumerator()) { $environment[$entry.Key] = [string]$entry.Value }
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $Config.javaExe
-    $start.WorkingDirectory = $release
-    $start.UseShellExecute = $false
-    foreach ($argument in @(
+    $arguments = @(
         '-Xrs',
         '--enable-native-access=ALL-UNNAMED',
         '-jar',
         $jar,
         "--spring.profiles.active=$Profiles",
         "--server.port=$Port"
-    )) { [void]$start.ArgumentList.Add($argument) }
-    foreach ($entry in $environment.GetEnumerator()) { $start.Environment[$entry.Key] = [string]$entry.Value }
+    )
+    $start = New-ProductionProcessStartInfo `
+        -FilePath $Config.javaExe `
+        -ArgumentList $arguments `
+        -WorkingDirectory $release `
+        -Environment $environment
     return [Diagnostics.Process]::Start($start)
 }
 
@@ -104,15 +104,11 @@ function Invoke-BoundedCheckedProcess {
         [int]$TimeoutMilliseconds = 5000
     )
 
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $FilePath
-    $start.WorkingDirectory = (Get-Location).Path
-    $start.UseShellExecute = $false
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    foreach ($argument in $ArgumentList) {
-        [void]$start.ArgumentList.Add($argument)
-    }
+    $start = New-ProductionProcessStartInfo `
+        -FilePath $FilePath `
+        -ArgumentList $ArgumentList `
+        -RedirectStandardOutput `
+        -RedirectStandardError
 
     $process = $null
     try {

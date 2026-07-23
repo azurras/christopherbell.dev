@@ -74,6 +74,35 @@ function ConvertTo-NativeProcessArgument {
     return $escaped.ToString()
 }
 
+function New-ProductionProcessStartInfo {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [string]$WorkingDirectory = (Get-Location).Path,
+        [hashtable]$Environment = @{},
+        [switch]$RedirectStandardOutput,
+        [switch]$RedirectStandardError,
+        [switch]$CreateNoWindow
+    )
+
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $FilePath
+    $start.WorkingDirectory = $WorkingDirectory
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $RedirectStandardOutput
+    $start.RedirectStandardError = $RedirectStandardError
+    $start.CreateNoWindow = $CreateNoWindow
+    $escapedArguments = @(
+        $ArgumentList | ForEach-Object { ConvertTo-NativeProcessArgument -Argument $_ }
+    )
+    $start.Arguments = [string]::Join(' ', $escapedArguments)
+    foreach ($entry in $Environment.GetEnumerator()) {
+        $start.EnvironmentVariables[$entry.Key] = [string]$entry.Value
+    }
+    return $start
+}
+
 function Invoke-CheckedProcess {
     [CmdletBinding()]
     param(
@@ -82,17 +111,13 @@ function Invoke-CheckedProcess {
         [string]$WorkingDirectory = (Get-Location).Path,
         [hashtable]$Environment = @{}
     )
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $FilePath
-    $start.WorkingDirectory = $WorkingDirectory
-    $start.UseShellExecute = $false
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    $escapedArguments = @($ArgumentList | ForEach-Object { ConvertTo-NativeProcessArgument -Argument $_ })
-    $start.Arguments = [string]::Join(' ', $escapedArguments)
-    foreach ($entry in $Environment.GetEnumerator()) {
-        $start.EnvironmentVariables[$entry.Key] = [string]$entry.Value
-    }
+    $start = New-ProductionProcessStartInfo `
+        -FilePath $FilePath `
+        -ArgumentList $ArgumentList `
+        -WorkingDirectory $WorkingDirectory `
+        -Environment $Environment `
+        -RedirectStandardOutput `
+        -RedirectStandardError
     $process = [Diagnostics.Process]::Start($start)
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
@@ -336,4 +361,4 @@ Commands: install, deploy, status, logs, restart, releases, rollback, backup,
 '@ | Write-Output
 }
 
-Export-ModuleMember -Function Read-ProductionConfig,Invoke-CheckedProcess,Enter-DeploymentLock,New-ProtectedProductionAcl,Assert-ProductionPathNotReparse,Assert-ProductionTreeNotReparse,Assert-ProtectedProductionPath,Protect-ProductionPath,Protect-ProductionTree,Assert-ProtectedProductionTree,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Get-TrustedGitArguments,Show-ProductionHelp
+Export-ModuleMember -Function Read-ProductionConfig,New-ProductionProcessStartInfo,Invoke-CheckedProcess,Enter-DeploymentLock,New-ProtectedProductionAcl,Assert-ProductionPathNotReparse,Assert-ProductionTreeNotReparse,Assert-ProtectedProductionPath,Protect-ProductionPath,Protect-ProductionTree,Assert-ProtectedProductionTree,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Get-TrustedGitArguments,Show-ProductionHelp
