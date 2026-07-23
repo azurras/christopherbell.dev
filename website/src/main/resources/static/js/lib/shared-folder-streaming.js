@@ -74,6 +74,23 @@ export function clearSharedFolderStreamingAuth() {
   }
 }
 
+/** Let every signed-in page rehydrate the active worker after a page navigation. */
+export function installSharedFolderAuthRecovery(
+  getToken,
+  serviceWorker = typeof navigator === 'undefined' ? null : navigator.serviceWorker,
+) {
+  if (typeof getToken !== 'function' || !serviceWorker?.addEventListener) return;
+  serviceWorker.addEventListener('message', event => {
+    if (event.data?.type !== 'shared-folder-auth-request-token') return;
+    const controller = serviceWorker.controller;
+    if (event.source !== controller || !event.ports?.[0]) return;
+    event.ports[0].postMessage({
+      type: 'shared-folder-auth-recovery',
+      token: getToken() || null,
+    });
+  });
+}
+
 function isExpectedWorker(worker) {
   return !!worker
     && new URL(worker.scriptURL).pathname === SHARED_FOLDER_AUTH_WORKER_PATH;
