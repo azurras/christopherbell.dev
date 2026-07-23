@@ -115,6 +115,38 @@ function New-SharedFolderWorkerFileAcl {
     return $acl
 }
 
+function New-SharedFolderWorkerServiceDirectoryAcl {
+    [CmdletBinding()]
+    param()
+
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new($script:AdministratorsSid)
+    $system = [Security.Principal.SecurityIdentifier]::new($script:SystemSid)
+    $worker = [Security.Principal.SecurityIdentifier]::new($script:LocalServiceSid)
+    $acl.SetOwner($administrators)
+    $inheritance = [Security.AccessControl.InheritanceFlags]::None
+    $propagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    foreach ($identity in @($system, $administrators)) {
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+            $identity,
+            [Security.AccessControl.FileSystemRights]::FullControl,
+            $inheritance,
+            $propagation,
+            $allow)
+        [void]$acl.AddAccessRule($rule)
+    }
+    $workerRule = [Security.AccessControl.FileSystemAccessRule]::new(
+        $worker,
+        [Security.AccessControl.FileSystemRights]::ReadAndExecute,
+        $inheritance,
+        $propagation,
+        $allow)
+    [void]$acl.AddAccessRule($workerRule)
+    return $acl
+}
+
 function Set-SharedFolderRuntimeAcls {
     [CmdletBinding()]
     param(
@@ -377,6 +409,7 @@ function Install-SharedFolderWorkerService {
     $serviceExists = [bool](& $GetServiceAction $serviceName)
     try {
         if ($serviceExists) { & $StopServiceAction $serviceName $GetServiceAction }
+        & $SetAclAction $serviceRoot (New-SharedFolderWorkerServiceDirectoryAcl)
 
         if (-not (Test-Path -LiteralPath $websiteBinary -PathType Leaf)) {
             throw 'The verified website WinSW binary must be installed before the media worker.'
@@ -460,4 +493,4 @@ function Install-SharedFolderRuntime {
     Install-SharedFolderWorkerService -ProductionRoot $ProductionRoot
 }
 
-Export-ModuleMember -Function Get-SharedFolderRuntimePaths,New-SharedFolderRuntimeDirectories,New-SharedFolderAcl,New-SharedFolderWorkerFileAcl,Set-SharedFolderRuntimeAcls,Read-PinnedMediaToolManifest,Expand-ValidatedMediaArchive,Install-PinnedMediaTools,Install-SharedFolderWorkerService,Install-SharedFolderRuntime
+Export-ModuleMember -Function Get-SharedFolderRuntimePaths,New-SharedFolderRuntimeDirectories,New-SharedFolderAcl,New-SharedFolderWorkerFileAcl,New-SharedFolderWorkerServiceDirectoryAcl,Set-SharedFolderRuntimeAcls,Read-PinnedMediaToolManifest,Expand-ValidatedMediaArchive,Install-PinnedMediaTools,Install-SharedFolderWorkerService,Install-SharedFolderRuntime
