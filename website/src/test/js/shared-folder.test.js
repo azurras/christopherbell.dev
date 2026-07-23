@@ -7,8 +7,12 @@ import {
   accountHasSharedFolderRead,
   accountHasSharedFolderWrite,
   breadcrumbItems,
+  formatSharedFolderModifiedAt,
+  formatSharedFolderSize,
   internalSharedFolderUrl,
   isSharedFolderAccessDenied,
+  sharedFolderEntryKind,
+  sortSharedFolderEntries,
   renderPreviewText,
   shouldActivateEntry,
   uploadProgressPercent,
@@ -412,9 +416,43 @@ test('permission denial distinguishes 401 and 403 from other failures', () => {
   assert.equal(isSharedFolderAccessDenied({ status: 500 }), false);
 });
 
-test('shared-folder shell owns a responsive single-column mobile layout and download controls', () => {
+test('file-browser presentation exposes familiar types, sizes, and folder-first ordering', () => {
+  assert.equal(sharedFolderEntryKind({ type: 'DIRECTORY' }), 'folder');
+  assert.equal(sharedFolderEntryKind({ type: 'FILE', previewKind: 'AUDIO' }), 'audio');
+  assert.equal(sharedFolderEntryKind({ type: 'FILE', previewKind: 'VIDEO' }), 'video');
+  assert.equal(sharedFolderEntryKind({ type: 'FILE', previewKind: 'IMAGE' }), 'image');
+  assert.equal(sharedFolderEntryKind({ type: 'FILE', previewKind: 'PDF' }), 'pdf');
+  assert.equal(sharedFolderEntryKind({ type: 'FILE', previewKind: 'TEXT' }), 'text');
+  assert.equal(sharedFolderEntryKind({ type: 'FILE', previewKind: 'NONE' }), 'file');
+  assert.equal(formatSharedFolderSize(0), '0 B');
+  assert.equal(formatSharedFolderSize(1_536), '1.5 KB');
+  assert.equal(formatSharedFolderSize(26_188_800), '25 MB');
+  assert.equal(formatSharedFolderModifiedAt('not-a-date'), '—');
+  assert.equal(formatSharedFolderModifiedAt('2026-07-16T21:48:23Z', 'en-US', 'UTC'),
+    'Jul 16, 2026, 9:48 PM');
+  assert.deepEqual(sortSharedFolderEntries([
+    { name: 'zeta.mp3', type: 'FILE' },
+    { name: 'Archive', type: 'DIRECTORY' },
+    { name: 'alpha.jpg', type: 'FILE' },
+  ]).map(entry => entry.name), ['Archive', 'alpha.jpg', 'zeta.mp3']);
+});
+
+test('shared-folder shell presents an explorer layout with compact actions and responsive preview', () => {
   const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
   const page = fs.readFileSync('website/src/main/resources/static/js/shared-folder.js', 'utf8');
+  const template = fs.readFileSync('website/src/main/resources/templates/shared-folder.html', 'utf8');
+  assert.match(template, /shared-folder-list-header/);
+  assert.match(template, /Name[\s\S]*Size[\s\S]*Modified/);
+  assert.match(template, /Select a file to preview it/);
+  assert.match(css, /\.shared-folder-browser-shell/);
+  assert.match(css, /\.shared-folder-entry-icon/);
+  assert.match(css, /\.shared-folder-entry-menu/);
+  assert.match(page, /formatSharedFolderSize/);
+  assert.match(page, /sharedFolderEntryKind/);
+  assert.match(page, /sortSharedFolderEntries/);
+  assert.match(page, /aria-expanded/);
+  assert.doesNotMatch(page, /setAttribute\('role', 'cell'\)/);
+  assert.doesNotMatch(template, /id="shared-list"[^>]*role="table"/);
   assert.match(css, /@media[^{}]*\(max-width:\s*767px\)[\s\S]*\.shared-folder-layout[\s\S]*grid-template-columns:\s*1fr/);
   assert.match(page, /download/);
   assert.match(page, /loginRedirectUrl/);

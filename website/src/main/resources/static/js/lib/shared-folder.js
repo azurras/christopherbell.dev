@@ -235,6 +235,57 @@ export function internalSharedFolderUrl(path = '') {
   return `/shared?${params}`;
 }
 
+/** Return the closed visual category used by the file-browser row and preview. */
+export function sharedFolderEntryKind(entry) {
+  if (entry?.type === 'DIRECTORY') return 'folder';
+  return ({
+    AUDIO: 'audio',
+    VIDEO: 'video',
+    IMAGE: 'image',
+    PDF: 'pdf',
+    TEXT: 'text',
+  })[String(entry?.previewKind || '').toUpperCase()] || 'file';
+}
+
+/** Format a non-negative byte count without hiding the original order of magnitude. */
+export function formatSharedFolderSize(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return '—';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let amount = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; amount >= 1024 && index < units.length; index += 1) {
+    amount /= 1024;
+    unit = units[index];
+  }
+  const precision = amount < 10 ? 1 : 0;
+  return `${amount.toFixed(precision).replace(/\.0$/, '')} ${unit}`;
+}
+
+/** Format an API timestamp for a file row, or an em dash when the boundary value is invalid. */
+export function formatSharedFolderModifiedAt(value, locale, timeZone) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '—';
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    ...(timeZone ? { timeZone } : {}),
+  }).format(date);
+}
+
+/** Return a new conventional explorer ordering: folders first, then case-insensitive names. */
+export function sortSharedFolderEntries(entries) {
+  return [...(Array.isArray(entries) ? entries : [])].sort((left, right) => {
+    const leftDirectory = left?.type === 'DIRECTORY';
+    const rightDirectory = right?.type === 'DIRECTORY';
+    if (leftDirectory !== rightDirectory) return leftDirectory ? -1 : 1;
+    return String(left?.name || '').localeCompare(String(right?.name || ''), undefined, {
+      sensitivity: 'base',
+    });
+  });
+}
+
 /** Render untrusted preview text without interpreting markup. */
 export function renderPreviewText(target, text) {
   target.textContent = String(text ?? '');

@@ -11,10 +11,13 @@ import {
   accountHasSharedFolderRead,
   accountHasSharedFolderWrite,
   breadcrumbItems,
+  formatSharedFolderModifiedAt,
+  formatSharedFolderSize,
   internalSharedFolderUrl,
   isSharedFolderAccessDenied,
   moveMutationPayload,
   renderPreviewText,
+  sharedFolderEntryKind,
   uploadProgressPercent,
   uploadIsTerminal,
   createUploadOperationGate,
@@ -22,6 +25,7 @@ import {
   cancelUploadWorkflow,
   mediaOutputProfile,
   mediaStatusMessage,
+  sortSharedFolderEntries,
   waitForPlayableMediaJob,
   waitForTerminalMediaJob,
 } from './lib/shared-folder.js';
@@ -127,8 +131,17 @@ async function preview(entry) {
   clear(host);
   host.hidden = false;
   const heading = document.createElement('h2');
+  heading.className = 'shared-folder-preview-title';
   heading.textContent = entry.name;
   host.append(heading);
+  const metadata = document.createElement('p');
+  metadata.className = 'shared-folder-preview-metadata';
+  metadata.textContent = [
+    sharedFolderEntryKind(entry).toUpperCase(),
+    formatSharedFolderSize(entry.size),
+    formatSharedFolderModifiedAt(entry.modifiedAt),
+  ].join(' · ');
+  host.append(metadata);
 
   if (entry.previewKind === 'TEXT') {
     let response;
@@ -261,19 +274,26 @@ function mutationFailure(error) {
 function renderToolbar(path, canWrite = false) {
   const host = document.getElementById('shared-toolbar');
   clear(host);
-  const copy = document.createElement('button');
-  copy.type = 'button';
-  copy.className = 'btn btn-sm btn-outline-light';
-  copy.textContent = 'Copy folder link';
-  copy.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(new URL(internalSharedFolderUrl(path), window.location.origin).href);
-    status('Internal link copied');
-  });
-  host.append(copy);
   if (canWrite) {
+    const upload = document.createElement('button');
+    upload.type = 'button';
+    upload.className = 'btn btn-sm btn-warning';
+    upload.textContent = 'Upload';
+    upload.dataset.sharedUploadToggle = '';
+    upload.setAttribute('aria-controls', 'shared-upload-panel');
+    upload.setAttribute('aria-expanded', 'false');
+    upload.addEventListener('click', () => {
+      const panel = document.getElementById('shared-upload-panel');
+      if (!panel) return;
+      panel.hidden = !panel.hidden;
+      upload.setAttribute('aria-expanded', String(!panel.hidden));
+      if (!panel.hidden) document.getElementById('shared-upload-file')?.focus();
+    });
+    host.append(upload);
+
     const create = document.createElement('button');
     create.type = 'button';
-    create.className = 'btn btn-sm btn-warning';
+    create.className = 'btn btn-sm btn-outline-light';
     create.textContent = 'New folder';
     create.addEventListener('click', () => {
       const name = window.prompt('New folder name');
@@ -284,6 +304,15 @@ function renderToolbar(path, canWrite = false) {
     });
     host.append(create);
   }
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'btn btn-sm btn-outline-light';
+  copy.textContent = 'Copy link';
+  copy.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(new URL(internalSharedFolderUrl(path), window.location.origin).href);
+    status('Internal link copied');
+  });
+  host.append(copy);
 }
 
 function storedUpload() {
@@ -390,12 +419,14 @@ async function configureUploadPanel(path, account) {
   if (typeof document === 'undefined') return;
   const panel = document.getElementById('shared-upload-panel');
   if (!panel || !accountHasSharedFolderWrite(account)) return;
-  panel.hidden = false;
+  const resume = storedUpload();
+  panel.hidden = !resume;
+  document.querySelector('[data-shared-upload-toggle]')
+    ?.setAttribute('aria-expanded', String(!panel.hidden));
   const form = document.getElementById('shared-upload-form');
   const fileInput = document.getElementById('shared-upload-file');
   const cancel = document.getElementById('shared-upload-cancel');
   const pause = document.getElementById('shared-upload-pause');
-  const resume = storedUpload();
   if (resume) {
     try {
       const upload = await fetchJson(API.sharedFolder.uploadStatus(resume.id), {
@@ -478,41 +509,100 @@ function renderEntries(response, canWrite = false) {
   const host = document.getElementById('shared-list');
   clear(host);
   if (!response.entries?.length) {
-    host.textContent = 'This folder is empty.';
+    const empty = document.createElement('p');
+    empty.className = 'shared-folder-list-empty';
+    empty.textContent = 'This folder is empty.';
+    host.append(empty);
     return;
   }
-  response.entries.forEach(entry => {
+  sortSharedFolderEntries(response.entries).forEach(entry => {
+    const kind = sharedFolderEntryKind(entry);
     const row = document.createElement('div');
     row.className = 'shared-folder-entry';
+    row.dataset.kind = kind;
+
     const open = document.createElement('button');
     open.type = 'button';
-    open.className = 'btn btn-link text-start flex-grow-1';
-    open.textContent = `${entry.type === 'DIRECTORY' ? 'Folder' : 'File'}: ${entry.name}`;
+    open.className = 'shared-folder-entry-name';
+    const icon = document.createElement('span');
+    icon.className = 'shared-folder-entry-icon';
+    icon.dataset.kind = kind;
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = ({
+      folder: '▰', audio: '♫', video: '▶', image: '▧', pdf: 'PDF', text: 'TXT', file: '◇',
+    })[kind];
+    const identity = document.createElement('span');
+    identity.className = 'shared-folder-entry-identity';
+    const name = document.createElement('span');
+    name.className = 'shared-folder-entry-label';
+    name.textContent = entry.name;
+    const type = document.createElement('span');
+    type.className = 'shared-folder-entry-type';
+    type.textContent = kind === 'folder' ? 'Folder' : kind;
+    identity.append(name, type);
+    open.append(icon, identity);
     open.addEventListener('click', () => {
       if (entry.type === 'DIRECTORY') {
         navigate(entry.path);
       } else {
+        host.querySelector('.shared-folder-entry.is-selected')?.classList.remove('is-selected');
+        row.classList.add('is-selected');
         void preview(entry).catch(error => status(error?.message || 'The preview could not be loaded.'));
       }
     });
-    row.append(open);
+
+    const size = document.createElement('span');
+    size.className = 'shared-folder-entry-size';
+    size.textContent = entry.type === 'DIRECTORY' ? '—' : formatSharedFolderSize(entry.size);
+    const modified = document.createElement('span');
+    modified.className = 'shared-folder-entry-modified';
+    modified.textContent = formatSharedFolderModifiedAt(entry.modifiedAt);
+
+    const actions = document.createElement('div');
+    actions.className = 'shared-folder-entry-actions';
+    if (entry.type === 'FILE') {
+      const save = document.createElement('button');
+      save.type = 'button';
+      save.className = 'shared-folder-entry-download';
+      save.textContent = 'Download';
+      save.setAttribute('aria-label', `Download ${entry.name}`);
+      save.addEventListener('click', () => {
+        void download(entry).catch(error =>
+          status(error?.message || 'The download could not be started.'));
+      });
+      actions.append(save);
+    }
+
+    const menu = document.createElement('details');
+    menu.className = 'shared-folder-entry-menu';
+    const summary = document.createElement('summary');
+    summary.textContent = '•••';
+    summary.setAttribute('aria-label', `More actions for ${entry.name}`);
+    const menuItems = document.createElement('div');
+    menuItems.className = 'shared-folder-entry-menu-items';
+    const menuButton = (label, action, danger = false) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = danger ? 'is-danger' : '';
+      button.textContent = label;
+      button.addEventListener('click', action);
+      menuItems.append(button);
+    };
+    menuButton('Copy link', () => {
+      menu.open = false;
+      void copyLink(entry).catch(error => status(error?.message || 'The link could not be copied.'));
+    });
     if (canWrite) {
-      const rename = document.createElement('button');
-      rename.type = 'button';
-      rename.className = 'btn btn-sm btn-outline-light';
-      rename.textContent = 'Rename';
-      rename.addEventListener('click', () => {
+      menuButton('Rename', () => {
+        menu.open = false;
         const name = window.prompt('New name', entry.name);
         if (!name?.trim() || name.trim() === entry.name) return;
         void mutationRequest(API.sharedFolder.rename, 'PATCH', {
           path: entry.path, name: name.trim(), observedToken: entry.observedToken,
         }).then(() => window.location.reload()).catch(mutationFailure);
       });
-      const move = document.createElement('button');
-      move.type = 'button';
-      move.className = 'btn btn-sm btn-outline-light';
-      move.textContent = 'Move';
-      move.addEventListener('click', () => {
+      menuButton('Move', () => {
+        menu.open = false;
         const destinationPath = window.prompt('Destination folder path', response.path || '');
         if (destinationPath === null) return;
         const name = window.prompt('Destination name', entry.name);
@@ -537,33 +627,18 @@ function renderEntries(response, canWrite = false) {
             }
           });
       });
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'btn btn-sm btn-outline-danger';
-      remove.textContent = 'Delete';
-      remove.addEventListener('click', () => {
+      menuButton('Delete', () => {
+        menu.open = false;
         if (!window.confirm(`Delete ${entry.name}? This cannot be undone yet.`)) return;
         void mutationRequest(API.sharedFolder.delete, 'DELETE', {
           path: entry.path, observedToken: entry.observedToken,
         }).then(() => window.location.reload()).catch(mutationFailure);
-      });
-      row.append(rename, move, remove);
+      }, true);
     }
-    if (entry.type === 'FILE') {
-      const copy = document.createElement('button');
-      copy.type = 'button';
-      copy.className = 'btn btn-sm btn-outline-light';
-      copy.textContent = 'Copy link';
-      copy.addEventListener('click', () => copyLink(entry));
-      const save = document.createElement('button');
-      save.type = 'button';
-      save.className = 'btn btn-sm btn-warning';
-      save.textContent = 'Download';
-      save.addEventListener('click', () => {
-        void download(entry).catch(error => status(error?.message || 'The download could not be started.'));
-      });
-      row.append(copy, save);
-    }
+    menu.append(summary, menuItems);
+    actions.append(menu);
+
+    row.append(open, size, modified, actions);
     host.append(row);
   });
 }
