@@ -443,7 +443,7 @@ Describe 'fixed media tool arguments' {
         $status.jobId | Should -Be $job.jobId
         $status.status | Should -Be 'BUFFERING'
         $status.outputBytes | Should -Be 123
-        $status.failureCategory | Should -BeNullOrEmpty
+        ($null -eq $status.failureCategory) | Should -BeTrue
         @(Get-ChildItem -LiteralPath $fixture.Paths.StatusRoot -Filter '*.tmp').Count | Should -Be 0
     }
 }
