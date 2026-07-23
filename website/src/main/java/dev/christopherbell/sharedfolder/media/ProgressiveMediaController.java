@@ -58,7 +58,7 @@ public class ProgressiveMediaController {
   }
 
   @GetMapping("/jobs/{id}/stream")
-  public ResponseEntity<?> stream(
+  public ResponseEntity<StreamingResponseBody> stream(
       @PathVariable String id, @RequestHeader HttpHeaders requestHeaders) throws IOException {
     MediaJob job = media.requireVisibleJob(id);
     audit.recordLogicalAccess("MEDIA_STREAM_STARTED", job.getSourcePath(), job.getOutputBytes());

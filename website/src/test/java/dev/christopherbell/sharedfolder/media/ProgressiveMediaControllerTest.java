@@ -1,12 +1,16 @@
 package dev.christopherbell.sharedfolder.media;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
@@ -27,6 +31,7 @@ import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 @WebMvcTest(ProgressiveMediaController.class)
 @Import({ControllerExceptionHandler.class, SharedFolderNoStoreFilter.class,
@@ -89,6 +94,30 @@ class ProgressiveMediaControllerTest {
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
     mockMvc.perform(get(BASE + "/jobs/space/stream").with(basic()))
         .andExpect(status().isInsufficientStorage());
+  }
+
+  @Test
+  void readyDerivativeUsesTheStreamingResponseHandler() throws Exception {
+    MediaJob ready = terminalJob(MediaJobStatus.READY);
+    ready.setId("ready");
+    ready.setProfile(MediaOutputProfile.AUDIO_M4A);
+    var selection = org.mockito.Mockito.mock(ProgressiveMediaStreamer.ReadySelection.class);
+    when(media.requireVisibleJob("ready")).thenReturn(ready);
+    when(streamer.openReady(ready, null)).thenReturn(selection);
+    when(selection.length()).thenReturn(5L);
+    when(selection.partial()).thenReturn(false);
+    doAnswer(invocation -> {
+      invocation.<java.io.OutputStream>getArgument(1).write("ready".getBytes());
+      return null;
+    }).when(streamer).copyReady(any(), any());
+
+    MvcResult response = mockMvc.perform(get(BASE + "/jobs/ready/stream").with(basic()))
+        .andExpect(request().asyncStarted())
+        .andReturn();
+
+    mockMvc.perform(asyncDispatch(response))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "audio/mp4"));
   }
 
   private MediaJob terminalJob(MediaJobStatus status) {
