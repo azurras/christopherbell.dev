@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   attachSharedFolderAuthorization,
   isSharedFolderApiRequest,
+  sharedFolderDownloadRequestUrl,
   prepareSharedFolderStreamingAuth,
   sharedFolderStreamingDenial,
 } from '../../main/resources/static/js/lib/shared-folder-streaming.js';
@@ -39,6 +40,23 @@ test('native no-cors media requests become same-origin before authorization is a
   assert.equal(authorized.headers.get('Authorization'), 'Bearer jwt-value');
 });
 
+test('download correlation is an exact non-secret same-origin URL', () => {
+  const downloadUrl = sharedFolderDownloadRequestUrl(
+    sharedContent,
+    '11111111-1111-4111-8111-111111111111',
+    origin,
+  );
+
+  assert.equal(new URL(downloadUrl).searchParams.get('downloadId'),
+    '11111111-1111-4111-8111-111111111111');
+  assert.equal(downloadUrl.includes('jwt-value'), false);
+  assert.throws(() => sharedFolderDownloadRequestUrl(
+    'https://outside.test/api/shared-folder/2026-07-17/content',
+    '11111111-1111-4111-8111-111111111111',
+    origin,
+  ));
+});
+
 test('worker delegates no-store forwarding and 401 token eviction to its runtime', () => {
   const worker = fs.readFileSync('website/src/main/resources/static/shared-folder-auth-sw.js', 'utf8');
   const runtime = fs.readFileSync(
@@ -69,7 +87,8 @@ test('shared-folder page starts native anchor and media requests without Blob bu
 
   assert.doesNotMatch(page, /\.blob\(/);
   assert.doesNotMatch(page, /URL\.createObjectURL/);
-  assert.match(page, /link\.href = API\.sharedFolder\.content\(entry\.path\)/);
+  assert.match(page, /prepareSharedFolderDownloadAuth\(token, requestUrl\)/);
+  assert.match(page, /link\.href = requestUrl/);
   assert.match(page, /element\.src = API\.sharedFolder\.preview\(entry\.path\)/);
   assert.match(page, /prepareSharedFolderStreamingAuth/);
   assert.match(page, /function handleSharedFolderAccessLoss\(statusCode\)/);
