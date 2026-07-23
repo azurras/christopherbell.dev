@@ -875,8 +875,8 @@ try {
         $result.configReadDenied = $true
     }
     $manager = [AcceptanceNative]::OpenSCManager($null, $null, 1)
+    $managerError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
     if ($manager -eq [IntPtr]::Zero) {
-        $managerError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
         if ($managerError -eq 5) {
             $result.websiteServiceControlDenied = $true
         } else {
@@ -885,8 +885,9 @@ try {
     } else {
         try {
             $website = [AcceptanceNative]::OpenServiceW($manager, 'ChristopherBellDev', 32)
+            $websiteError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
             if ($website -eq [IntPtr]::Zero) {
-                $result.websiteServiceControlDenied = [Runtime.InteropServices.Marshal]::GetLastWin32Error() -eq 5
+                $result.websiteServiceControlDenied = $websiteError -eq 5
                 if (-not $result.websiteServiceControlDenied) { $result.errorCode = 'SERVICE_HANDLE_CHECK_FAILED' }
             } else { [AcceptanceNative]::CloseServiceHandle($website) | Out-Null }
         } finally { [AcceptanceNative]::CloseServiceHandle($manager) | Out-Null }
