@@ -736,29 +736,23 @@ try {
         $exitMarker = Join-Path $TestDrive 'real-success-exited.txt'
         $boundedResult = Join-Path $TestDrive 'real-success-bounded.json'
         $coordinatorCommand = ConvertTo-TestEncodedCommand -Script @"
-`$watcher = [IO.FileSystemWatcher]::new('$($TestDrive.Replace("'", "''"))', '$([IO.Path]::GetFileName($started))')
-`$watcher.EnableRaisingEvents = `$true
-try {
-    if (-not (Test-Path -LiteralPath '$($started.Replace("'", "''"))')) {
-        `$change = `$watcher.WaitForChanged([IO.WatcherChangeTypes]::Created, 15000)
-        if (`$change.TimedOut) { exit 6 }
-    }
-    `$state = if (Test-Path -LiteralPath '$($job.readyOutputPath.Replace("'", "''"))') { 'present' } else { 'absent' }
-    [IO.File]::WriteAllText('$($observation.Replace("'", "''"))', `$state)
-    [IO.File]::WriteAllText('$($release.Replace("'", "''"))', 'release')
-} finally { `$watcher.Dispose() }
+`$deadline = [DateTime]::UtcNow.AddSeconds(15)
+while (-not (Test-Path -LiteralPath '$($started.Replace("'", "''"))')) {
+    if ([DateTime]::UtcNow -ge `$deadline) { exit 6 }
+    Start-Sleep -Milliseconds 25
+}
+`$state = if (Test-Path -LiteralPath '$($job.readyOutputPath.Replace("'", "''"))') { 'present' } else { 'absent' }
+[IO.File]::WriteAllText('$($observation.Replace("'", "''"))', `$state)
+[IO.File]::WriteAllText('$($release.Replace("'", "''"))', 'release')
 "@
         $transcodeCommand = ConvertTo-TestEncodedCommand -Script @"
 [IO.File]::WriteAllBytes('$($job.partialOutputPath.Replace("'", "''"))', [byte[]](1..64))
 [IO.File]::WriteAllText('$($started.Replace("'", "''"))', 'started')
-`$watcher = [IO.FileSystemWatcher]::new('$($TestDrive.Replace("'", "''"))', '$([IO.Path]::GetFileName($release))')
-`$watcher.EnableRaisingEvents = `$true
-try {
-    if (-not (Test-Path -LiteralPath '$($release.Replace("'", "''"))')) {
-        `$change = `$watcher.WaitForChanged([IO.WatcherChangeTypes]::Created, 15000)
-        if (`$change.TimedOut) { exit 7 }
-    }
-} finally { `$watcher.Dispose() }
+`$deadline = [DateTime]::UtcNow.AddSeconds(15)
+while (-not (Test-Path -LiteralPath '$($release.Replace("'", "''"))')) {
+    if ([DateTime]::UtcNow -ge `$deadline) { exit 7 }
+    Start-Sleep -Milliseconds 25
+}
 [Console]::Out.Write('x' * 200000)
 [Console]::Error.Write('y' * 200000)
 [IO.File]::WriteAllText('$($exitMarker.Replace("'", "''"))', 'exited')

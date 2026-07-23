@@ -23,6 +23,19 @@ Describe 'native Windows service installer' {
         Get-Content $environment -Raw | Should -Match 'keep-this-value'
     }
 
+    It 'replaces the production config tree ACL and verifies the protected result' {
+        $root = Join-Path $TestDrive 'protected-data'
+        $config = Join-Path $root 'config'
+        New-Item -ItemType Directory -Path $config -Force | Out-Null
+        $events = [Collections.Generic.List[string]]::new()
+
+        Protect-ProductionSecrets -Root $root `
+            -ProtectTreeAction { param($Path) $events.Add("protect:$Path") } `
+            -AssertTreeAction { param($Path) $events.Add("assert:$Path") }
+
+        @($events) | Should -Be @("protect:$config", "assert:$config")
+    }
+
     It 'creates configuration examples without real credentials' {
         $root = Join-Path $TestDrive 'new-data'
         New-ProductionDirectories $root
