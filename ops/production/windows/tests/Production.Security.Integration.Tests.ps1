@@ -770,6 +770,18 @@ public static class AcceptanceNative {
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder path, uint length, uint flags);
     [DllImport("kernel32.dll", SetLastError=true)] private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FILE_INFO information);
+    public static int ProbeServiceStopAccess(string serviceName) {
+        IntPtr manager = OpenSCManager(null, null, 1);
+        if (manager == IntPtr.Zero) return Marshal.GetLastWin32Error();
+        try {
+            IntPtr service = OpenServiceW(manager, serviceName, 32);
+            if (service == IntPtr.Zero) return Marshal.GetLastWin32Error();
+            CloseServiceHandle(service);
+            return 0;
+        } finally {
+            CloseServiceHandle(manager);
+        }
+    }
     public static PATH_IDENTITY GetPathIdentity(string path, bool directory) {
         using (SafeFileHandle handle = CreateFileW(path, 0x80, 7, IntPtr.Zero, 3, directory ? 0x02000000u : 0u, IntPtr.Zero)) {
             if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -874,23 +886,13 @@ try {
         if ($_.Exception.NativeErrorCode -ne 5) { throw }
         $result.configReadDenied = $true
     }
-    $manager = [AcceptanceNative]::OpenSCManager($null, $null, 1)
-    $managerError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-    if ($manager -eq [IntPtr]::Zero) {
-        if ($managerError -eq 5) {
-            $result.websiteServiceControlDenied = $true
-        } else {
-            $result.errorCode = 'SERVICE_MANAGER_QUERY_FAILED'
-        }
+    $serviceAccessError = [AcceptanceNative]::ProbeServiceStopAccess('ChristopherBellDev')
+    if ($serviceAccessError -eq 5) {
+        $result.websiteServiceControlDenied = $true
+    } elseif ($serviceAccessError -eq 0) {
+        $result.errorCode = 'SERVICE_HANDLE_CHECK_FAILED'
     } else {
-        try {
-            $website = [AcceptanceNative]::OpenServiceW($manager, 'ChristopherBellDev', 32)
-            $websiteError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-            if ($website -eq [IntPtr]::Zero) {
-                $result.websiteServiceControlDenied = $websiteError -eq 5
-                if (-not $result.websiteServiceControlDenied) { $result.errorCode = 'SERVICE_HANDLE_CHECK_FAILED' }
-            } else { [AcceptanceNative]::CloseServiceHandle($website) | Out-Null }
-        } finally { [AcceptanceNative]::CloseServiceHandle($manager) | Out-Null }
+        $result.errorCode = 'SERVICE_MANAGER_QUERY_FAILED'
     }
     $token = [IntPtr]::Zero
     if (-not [AcceptanceNative]::OpenProcessToken([AcceptanceNative]::GetCurrentProcess(), 8, [ref]$token)) {
@@ -1819,6 +1821,7 @@ Describe 'installed-worker acceptance guard and probe safety' {
         $parseErrors.Count | Should -Be 0
         $ast | Should -Not -BeNullOrEmpty
         $probeScript | Should -Match 'OpenServiceW'
+        $probeScript | Should -Match 'ProbeServiceStopAccess'
         $probeScript | Should -Match 'PrivilegeCheck'
         foreach ($forbidden in @(
             'ControlService', 'Stop-Service', 'Restart-Service', 'shutdown.exe',
