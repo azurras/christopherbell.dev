@@ -217,19 +217,58 @@ function Expand-ValidatedMediaArchive {
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    $destinationItem = Get-Item -LiteralPath $Destination -Force -ErrorAction Stop
+    if ($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Pinned media tool archive destination must not be a reparse point.'
+    }
     $destinationRoot = [IO.Path]::GetFullPath($Destination).TrimEnd('\') + '\'
     $archive = [IO.Compression.ZipFile]::OpenRead($ArchivePath)
     try {
+        $validatedEntries = [Collections.Generic.List[object]]::new()
+        $targetPaths = [Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::OrdinalIgnoreCase)
         foreach ($entry in $archive.Entries) {
+            if ([string]::IsNullOrWhiteSpace([string]$entry.FullName)) {
+                throw 'Pinned media tool archive contains an empty path.'
+            }
             $target = [IO.Path]::GetFullPath((Join-Path $Destination $entry.FullName))
             if (-not $target.StartsWith($destinationRoot, [StringComparison]::OrdinalIgnoreCase)) {
                 throw 'Pinned media tool archive contains an unsafe path.'
             }
+            if (-not $targetPaths.Add($target)) {
+                throw 'Pinned media tool archive contains a duplicate path.'
+            }
+            if (Test-Path -LiteralPath $target) {
+                throw 'Pinned media tool archive target already exists.'
+            }
+            $validatedEntries.Add([pscustomobject]@{
+                Entry = $entry
+                Target = $target
+                IsDirectory = [string]::IsNullOrEmpty([string]$entry.Name)
+            })
+        }
+
+        foreach ($validated in $validatedEntries) {
+            if ($validated.IsDirectory) {
+                New-Item -ItemType Directory -Path $validated.Target -Force | Out-Null
+                continue
+            }
+            New-Item -ItemType Directory `
+                -Path (Split-Path -Parent $validated.Target) `
+                -Force | Out-Null
+            $source = $validated.Entry.Open()
+            try {
+                $targetStream = [IO.FileStream]::new(
+                    $validated.Target,
+                    [IO.FileMode]::CreateNew,
+                    [IO.FileAccess]::Write,
+                    [IO.FileShare]::None)
+                try { $source.CopyTo($targetStream) } finally { $targetStream.Dispose() }
+            } finally { $source.Dispose() }
         }
     } finally {
         $archive.Dispose()
     }
-    [IO.Compression.ZipFile]::ExtractToDirectory($ArchivePath, $Destination, $true)
 }
 
 function Install-PinnedMediaTools {

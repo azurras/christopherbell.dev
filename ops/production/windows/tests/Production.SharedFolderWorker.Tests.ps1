@@ -900,6 +900,81 @@ Describe 'shared-folder runtime isolation' {
         Test-Path -LiteralPath $outside | Should -BeFalse
     }
 
+    It 'extracts nested media tools under Windows PowerShell 5.1' {
+        $archivePath = Join-Path $TestDrive 'legacy-media-tools.zip'
+        $destination = Join-Path $TestDrive 'legacy-expanded'
+        $probe = Join-Path $TestDrive 'legacy-archive-probe.ps1'
+        New-TestMediaArchive -Path $archivePath -Label legacy
+        @'
+param(
+    [Parameter(Mandatory)][string]$ModulePath,
+    [Parameter(Mandatory)][string]$ArchivePath,
+    [Parameter(Mandatory)][string]$Destination
+)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+Expand-ValidatedMediaArchive -ArchivePath $ArchivePath -Destination $Destination
+'@ | Set-Content -LiteralPath $probe
+        $modulePath = (Resolve-Path (
+            Join-Path $moduleRoot 'Production.SharedFolder.psm1')).Path
+
+        & powershell.exe -NoProfile -File $probe `
+            -ModulePath $modulePath `
+            -ArchivePath $archivePath `
+            -Destination $destination
+
+        $LASTEXITCODE | Should -Be 0
+        Join-Path $destination 'package\bin\ffmpeg.exe' |
+            Should -Exist
+        Join-Path $destination 'package\bin\ffprobe.exe' |
+            Should -Exist
+    }
+
+    It 'rejects duplicate canonical archive paths before extracting files' {
+        Add-Type -AssemblyName System.IO.Compression
+        $archivePath = Join-Path $TestDrive 'duplicate-paths.zip'
+        $destination = Join-Path $TestDrive 'duplicate-expanded'
+        $archive = [IO.Compression.ZipFile]::Open(
+            $archivePath,
+            [IO.Compression.ZipArchiveMode]::Create)
+        try {
+            foreach ($entryName in @(
+                'package/bin/ffmpeg.exe',
+                'PACKAGE/BIN/FFMPEG.EXE')) {
+                $entry = $archive.CreateEntry($entryName)
+                $writer = [IO.StreamWriter]::new($entry.Open())
+                try { $writer.Write($entryName) } finally { $writer.Dispose() }
+            }
+        } finally { $archive.Dispose() }
+
+        { Expand-ValidatedMediaArchive `
+                -ArchivePath $archivePath `
+                -Destination $destination } |
+            Should -Throw '*duplicate path*'
+        Test-Path -LiteralPath (
+            Join-Path $destination 'package\bin\ffmpeg.exe') |
+            Should -BeFalse
+    }
+
+    It 'rejects a reparse-point archive destination before extracting files' {
+        $archivePath = Join-Path $TestDrive 'reparse-destination.zip'
+        $actualDestination = Join-Path $TestDrive 'actual-expanded'
+        $linkedDestination = Join-Path $TestDrive 'linked-expanded'
+        New-TestMediaArchive -Path $archivePath -Label reparse
+        New-Item -ItemType Directory -Path $actualDestination | Out-Null
+        New-Item -ItemType Junction `
+            -Path $linkedDestination `
+            -Target $actualDestination | Out-Null
+
+        { Expand-ValidatedMediaArchive `
+                -ArchivePath $archivePath `
+                -Destination $linkedDestination } |
+            Should -Throw '*reparse point*'
+        Test-Path -LiteralPath (
+            Join-Path $actualDestination 'package\bin\ffmpeg.exe') |
+            Should -BeFalse
+    }
+
     It 'reads the exact pinned HTTPS media tool manifest' {
         $manifestPath = Join-Path $PSScriptRoot '..\config\media-tools-manifest.json'
 
