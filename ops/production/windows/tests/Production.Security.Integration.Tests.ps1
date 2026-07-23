@@ -1229,6 +1229,11 @@ function New-InstalledWorkerProbeDependencies {
             if ($matches.Count -eq 1) { return $matches[0] }
             return $null
         }
+        GetTaskInfo = {
+            param($Name)
+            $information = Get-ScheduledTaskInfo -TaskName $Name -ErrorAction Stop
+            [pscustomobject]@{ LastTaskResult = [int64]$information.LastTaskResult }
+        }
         StartTask = { param($Name) Start-ScheduledTask -TaskName $Name -ErrorAction Stop }
         StopTask = {
             param($Name)
@@ -1282,7 +1287,7 @@ function Invoke-InstalledWorkerLocalServiceProbe {
     $requiredDependencies = @(
         'NewNonce','ResultRootParent','ValidateResultRootParent','ValidateProbeExecutable',
         'CreateResultDirectory','ValidateResultDirectory','ValidateResultFile',
-        'RegisterTask','GetTask','StartTask','StopTask','UnregisterTask','GetPathIdentity',
+        'RegisterTask','GetTask','GetTaskInfo','StartTask','StopTask','UnregisterTask','GetPathIdentity',
         'ResultExists','ResultDirectoryExists','RemoveResultDirectory','ProbeExists','UtcNow',
         'Wait','ReadResult')
     $missingDependencies = @($requiredDependencies | Where-Object {
@@ -1352,7 +1357,17 @@ function Invoke-InstalledWorkerLocalServiceProbe {
         $deadline = (& $Dependencies.UtcNow).AddSeconds(45)
         while (-not (& $Dependencies.ResultExists $resultPath)) {
             if ((& $Dependencies.UtcNow) -ge $deadline) {
-                throw 'The bounded LocalService probe did not produce a result.'
+                $taskResult = 'unavailable'
+                try {
+                    $taskInformation = & $Dependencies.GetTaskInfo $taskName
+                    if ($taskInformation -and
+                        $taskInformation.PSObject.Properties['LastTaskResult']) {
+                        $unsignedResult = [int64]$taskInformation.LastTaskResult -band 0xFFFFFFFFL
+                        $taskResult = '{0} (0x{1})' -f $unsignedResult,
+                            $unsignedResult.ToString('X8')
+                    }
+                } catch { }
+                throw "The bounded LocalService probe did not produce a result. LastTaskResult=$taskResult."
             }
             & $Dependencies.Wait ([TimeSpan]::FromMilliseconds(250))
         }
@@ -1539,6 +1554,11 @@ function New-TestInstalledWorkerProbeScenario {
             $events.Add('get-task')
             if ($state.TaskPresent) { return $state.Task }
             return $null
+        }.GetNewClosure()
+        GetTaskInfo = {
+            param($Name)
+            $events.Add('get-task-info')
+            [pscustomobject]@{ LastTaskResult = 2147942402 }
         }.GetNewClosure()
         StartTask = {
             param($Name)
@@ -2003,6 +2023,7 @@ Describe 'installed-worker acceptance guard and probe safety' {
                     State = 'Ready'
                 }
             } }
+            GetTaskInfo = { [pscustomobject]@{ LastTaskResult = 0 } }
             StartTask = { $events.Add('start') }
             StopTask = { $events.Add('stop') }
             UnregisterTask = { $events.Add('unregister'); $taskState.Present = $false }
@@ -2070,7 +2091,7 @@ Describe 'installed-worker acceptance guard and probe safety' {
             Registration = 'registration failed'
             Start = 'start failed'
             Result = 'result failed'
-            Timeout = 'did not produce a result'
+            Timeout = 'did not produce a result*LastTaskResult=2147942402 (0x80070002)'
         }
         foreach ($phase in $expectations.Keys) {
             $scenario = New-TestInstalledWorkerProbeScenario `
