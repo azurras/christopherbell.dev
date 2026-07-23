@@ -256,6 +256,66 @@ function Assert-ProtectedProductionTree {
     }
 }
 
+function Invoke-ProductionWebRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][uri]$Uri,
+        [ValidateSet('Get','Post')][string]$Method = 'Get',
+        [string]$ContentType,
+        [string]$Body,
+        [ValidateRange(1,300)][int]$TimeoutSec = 15
+    )
+
+    $parameters = @{
+        Uri = $Uri
+        Method = $Method
+        TimeoutSec = $TimeoutSec
+        UseBasicParsing = $true
+    }
+    if (-not [string]::IsNullOrEmpty($ContentType)) {
+        $parameters.ContentType = $ContentType
+    }
+    if ($PSBoundParameters.ContainsKey('Body')) { $parameters.Body = $Body }
+
+    try {
+        return Invoke-WebRequest @parameters
+    } catch {
+        $errorDetailsProperty = $_.PSObject.Properties['ErrorDetails']
+        $errorContent = if ($errorDetailsProperty -and $errorDetailsProperty.Value) {
+            [string]$errorDetailsProperty.Value
+        } else { '' }
+        $responseProperty = $_.Exception.PSObject.Properties['Response']
+        if (-not $responseProperty -or $null -eq $responseProperty.Value) { throw }
+        $response = $responseProperty.Value
+        try {
+            $contentProperty = $response.PSObject.Properties['Content']
+            $content = if ($contentProperty -and $contentProperty.Value -is [string]) {
+                [string]$contentProperty.Value
+            } elseif ($contentProperty -and $contentProperty.Value -and
+                $contentProperty.Value.PSObject.Methods['ReadAsStringAsync']) {
+                try {
+                    $contentProperty.Value.ReadAsStringAsync().GetAwaiter().GetResult()
+                } catch {
+                    $errorContent
+                }
+            } elseif ($response.PSObject.Methods['GetResponseStream']) {
+                $stream = $response.GetResponseStream()
+                if ($null -eq $stream) { '' } else {
+                    $reader = [IO.StreamReader]::new($stream)
+                    try { $reader.ReadToEnd() } finally { $reader.Dispose() }
+                }
+            } else { $errorContent }
+            if ([string]::IsNullOrEmpty([string]$content)) { $content = $errorContent }
+            return [pscustomobject]@{
+                StatusCode = [int]$response.StatusCode
+                Content = [string]$content
+            }
+        } finally {
+            if ($response -is [IDisposable]) { $response.Dispose() }
+        }
+    }
+}
+
 function Wait-HttpStatus {
     [CmdletBinding()]
     param(
@@ -266,7 +326,7 @@ function Wait-HttpStatus {
     $deadline = [DateTime]::UtcNow + $Timeout
     do {
         try {
-            $response = Invoke-WebRequest -Uri $Uri -SkipHttpErrorCheck -TimeoutSec 5
+            $response = Invoke-ProductionWebRequest -Uri $Uri -TimeoutSec 5
             if ([int]$response.StatusCode -eq $ExpectedStatus) { return $response }
         } catch { }
         Start-Sleep -Milliseconds 500
@@ -361,4 +421,4 @@ Commands: install, deploy, status, logs, restart, releases, rollback, backup,
 '@ | Write-Output
 }
 
-Export-ModuleMember -Function Read-ProductionConfig,New-ProductionProcessStartInfo,Invoke-CheckedProcess,Enter-DeploymentLock,New-ProtectedProductionAcl,Assert-ProductionPathNotReparse,Assert-ProductionTreeNotReparse,Assert-ProtectedProductionPath,Protect-ProductionPath,Protect-ProductionTree,Assert-ProtectedProductionTree,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Get-TrustedGitArguments,Show-ProductionHelp
+Export-ModuleMember -Function Read-ProductionConfig,New-ProductionProcessStartInfo,Invoke-CheckedProcess,Enter-DeploymentLock,New-ProtectedProductionAcl,Assert-ProductionPathNotReparse,Assert-ProductionTreeNotReparse,Assert-ProtectedProductionPath,Protect-ProductionPath,Protect-ProductionTree,Assert-ProtectedProductionTree,Invoke-ProductionWebRequest,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Get-TrustedGitArguments,Show-ProductionHelp

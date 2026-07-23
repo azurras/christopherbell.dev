@@ -214,7 +214,7 @@ Describe 'native Windows deployment' {
 
         It 'allows three minutes for a production cold start' {
             Mock Wait-HttpStatus { 200 }
-            Mock Invoke-WebRequest {
+            Mock Invoke-ProductionWebRequest {
                 [pscustomobject]@{ StatusCode = 401; Content = '{"code":"UNAUTHORIZED"}' }
             }
             $configuration = [pscustomobject]@{ smokeAccountEmail = 'admin@example.com' }
