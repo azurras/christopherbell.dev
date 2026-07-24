@@ -130,6 +130,11 @@ Unavailable` and never falls back to an unchecked production path.
   container. A native playback error requests one fixed `VIDEO_MP4` or `AUDIO_M4A` profile; the
   isolated worker performs the actual media inspection in the worker task. The website never
   accepts an executable, codec, or extra-argument field and never launches a media process.
+- Before assigning a native media URL, the page stages that exact preview or job-stream URL with
+  the service worker. This volatile, owner-scoped authorization supports repeated range requests
+  from mobile browsers that omit a service-worker client ID; it is bounded by count and time and
+  is cleared on logout or an authorization denial. Tokens never appear in media URLs or persistent
+  browser storage.
 - Media jobs are owner-scoped Mongo records with bounded global and per-account admission. Their
   cache identity includes the relative source path, size, modification time, fixed profile, and
   profile version. Ready matches are reused; changed source metadata or profile versions create a

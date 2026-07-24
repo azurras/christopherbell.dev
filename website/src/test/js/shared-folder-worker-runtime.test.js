@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 import {
+  clearSharedFolderMediaAuthorizations,
   respondToSharedFolderFetch,
   stageSharedFolderDownloadAuthorization,
+  stageSharedFolderMediaAuthorization,
 } from '../../main/resources/static/js/lib/shared-folder-worker-runtime.js';
 
 const origin = 'https://example.test';
@@ -152,6 +154,99 @@ test('one exact download without a client id consumes one bounded in-memory auth
   assert.equal(requests[0].headers.get('Authorization'), 'Bearer download-jwt');
   assert.equal(requests[0].url, downloadUrl);
   assert.equal(downloads.size, 0);
+});
+
+test('clientless mobile media range requests reuse one exact staged authorization', async () => {
+  const streamUrl = `${origin}/api/shared-folder/2026-07-17/media/jobs/11111111-1111-4111-8111-111111111111/stream`;
+  const mediaAuthorizations = new Map();
+  const requests = [];
+  assert.equal(stageSharedFolderMediaAuthorization({
+    requestUrl: streamUrl,
+    token: 'media-jwt',
+    clientId: 'page-client',
+    mediaAuthorizations,
+    origin,
+    nowMs: 1000,
+  }), true);
+
+  for (const range of ['bytes=0-1', 'bytes=10-19']) {
+    const response = await respondToSharedFolderFetch({
+      request: new Request(streamUrl, { headers: { Range: range } }),
+      clientId: '',
+      clientTokens: new Map(),
+      mediaAuthorizations,
+      clients: { get: async () => null },
+      origin,
+      nowFn: () => 1001,
+      fetchFn: async request => {
+        requests.push(request);
+        return new Response('media', { status: 206 });
+      },
+    });
+    assert.equal(response.status, 206);
+  }
+
+  assert.deepEqual(requests.map(request => request.headers.get('Range')),
+    ['bytes=0-1', 'bytes=10-19']);
+  assert.ok(requests.every(request =>
+    request.headers.get('Authorization') === 'Bearer media-jwt'));
+  assert.equal(mediaAuthorizations.size, 1);
+});
+
+test('media authorization accepts only exact preview and stream URLs and clears by owner', () => {
+  const authorizations = new Map();
+  const common = {
+    token: 'media-jwt',
+    clientId: 'page-client',
+    mediaAuthorizations: authorizations,
+    origin,
+    nowMs: 1000,
+  };
+  assert.equal(stageSharedFolderMediaAuthorization({
+    ...common,
+    requestUrl: `${origin}/api/shared-folder/2026-07-17/preview?path=video.mkv`,
+  }), true);
+  assert.equal(stageSharedFolderMediaAuthorization({
+    ...common,
+    requestUrl: `${origin}/api/shared-folder/2026-07-17/content?path=video.mkv`,
+  }), false);
+  assert.equal(stageSharedFolderMediaAuthorization({
+    ...common,
+    requestUrl: 'https://outside.test/api/shared-folder/2026-07-17/preview?path=video.mkv',
+  }), false);
+
+  clearSharedFolderMediaAuthorizations(authorizations, 'other-client');
+  assert.equal(authorizations.size, 1);
+  clearSharedFolderMediaAuthorizations(authorizations, 'page-client');
+  assert.equal(authorizations.size, 0);
+});
+
+test('a controlled media request prefers its current page token over a staged fallback', async () => {
+  const streamUrl = `${origin}/api/shared-folder/2026-07-17/media/jobs/11111111-1111-4111-8111-111111111111/stream`;
+  const mediaAuthorizations = new Map();
+  stageSharedFolderMediaAuthorization({
+    requestUrl: streamUrl,
+    token: 'older-media-jwt',
+    clientId: 'page-client',
+    mediaAuthorizations,
+    origin,
+  });
+  let authorization;
+
+  await respondToSharedFolderFetch({
+    request: new Request(streamUrl),
+    clientId: 'page-client',
+    clientTokens: new Map([['page-client', 'current-page-jwt']]),
+    mediaAuthorizations,
+    clients: { get: async () => null },
+    origin,
+    fetchFn: async request => {
+      authorization = request.headers.get('Authorization');
+      return new Response('media', { status: 200 });
+    },
+  });
+
+  assert.equal(authorization, 'Bearer current-page-jwt');
 });
 
 test('worker recovery keeps tokens out of URLs and persistent browser storage', () => {

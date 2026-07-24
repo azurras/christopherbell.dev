@@ -1,11 +1,14 @@
 import { isSharedFolderApiRequest } from './js/lib/shared-folder-streaming.js';
 import {
+  clearSharedFolderMediaAuthorizations,
   respondToSharedFolderFetch,
   stageSharedFolderDownloadAuthorization,
+  stageSharedFolderMediaAuthorization,
 } from './js/lib/shared-folder-worker-runtime.js';
 
 const clientTokens = new Map();
 const downloadTokens = new Map();
+const mediaAuthorizations = new Map();
 
 self.addEventListener('install', event => {
   event.waitUntil(self.skipWaiting());
@@ -20,6 +23,7 @@ self.addEventListener('message', event => {
   const clientId = event.source.id;
   if (event.data?.type === 'shared-folder-auth-clear') {
     clientTokens.delete(clientId);
+    clearSharedFolderMediaAuthorizations(mediaAuthorizations, clientId);
     return;
   }
   if (event.data?.type === 'shared-folder-download-token') {
@@ -31,6 +35,19 @@ self.addEventListener('message', event => {
     });
     event.ports[0]?.postMessage({
       type: accepted ? 'shared-folder-download-ready' : 'shared-folder-download-rejected',
+    });
+    return;
+  }
+  if (event.data?.type === 'shared-folder-media-token') {
+    const accepted = stageSharedFolderMediaAuthorization({
+      requestUrl: event.data.requestUrl,
+      token: event.data.token,
+      clientId,
+      mediaAuthorizations,
+      origin: self.location.origin,
+    });
+    event.ports[0]?.postMessage({
+      type: accepted ? 'shared-folder-media-ready' : 'shared-folder-media-rejected',
     });
     return;
   }
@@ -49,6 +66,7 @@ self.addEventListener('fetch', event => {
     clientId: event.clientId,
     clientTokens,
     downloadTokens,
+    mediaAuthorizations,
     clients: self.clients,
     origin: self.location.origin,
   }));
