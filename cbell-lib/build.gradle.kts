@@ -17,7 +17,7 @@ dependencies {
     api("io.jsonwebtoken:jjwt-api:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")
-    implementation("org.slf4j:slf4j-api:2.0.13")
+    implementation("org.slf4j:slf4j-api:2.0.18")
     implementation("tools.jackson.core:jackson-databind")
 
     compileOnly("org.projectlombok:lombok:1.18.46")
