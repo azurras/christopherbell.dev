@@ -32,6 +32,7 @@ import {
 import {
   clearSharedFolderStreamingAuth,
   prepareSharedFolderDownloadAuth,
+  prepareSharedFolderMediaAuth,
   prepareSharedFolderStreamingAuth,
   sharedFolderDownloadRequestUrl,
   sharedFolderStreamingDenial,
@@ -81,9 +82,14 @@ function handleSharedFolderAccessLoss(statusCode) {
   }
 }
 
-async function prepareNativeStreaming() {
+async function prepareNativeStreaming(requestUrl = null) {
   try {
-    await prepareSharedFolderStreamingAuth(getAuthToken());
+    const token = getAuthToken();
+    if (requestUrl) {
+      await prepareSharedFolderMediaAuth(token, requestUrl);
+    } else {
+      await prepareSharedFolderStreamingAuth(token);
+    }
     return true;
   } catch (error) {
     status(error?.message || 'Secure shared-folder streaming is unavailable.');
@@ -189,7 +195,9 @@ async function preview(entry) {
       if (currentPreviewLostAccess || controller.signal.aborted) return;
       startMediaFallback(entry, element, host, controller.signal);
     }, { once: true });
-    element.src = API.sharedFolder.preview(entry.path);
+    const previewUrl = API.sharedFolder.preview(entry.path);
+    if (!await prepareNativeStreaming(previewUrl)) return;
+    element.src = previewUrl;
   } else {
     element.addEventListener('error', () => {
       if (!currentPreviewLostAccess) status('The preview could not be loaded.');
@@ -238,8 +246,9 @@ async function requestMediaFallback(entry, element, host, signal) {
   const observe = { signal, load, onStatus: job => status(mediaStatusMessage(job.status)) };
   const playable = await waitForPlayableMediaJob(initial, observe);
   signal?.throwIfAborted();
-  if (!await prepareNativeStreaming()) return;
-  element.src = API.sharedFolder.media.stream(playable.jobId || playable.id);
+  const streamUrl = API.sharedFolder.media.stream(playable.jobId || playable.id);
+  if (!await prepareNativeStreaming(streamUrl)) return;
+  element.src = streamUrl;
   element.addEventListener('error', () => {
     if (signal?.aborted || currentPreviewLostAccess) return;
     status('The browser-compatible stream stopped. You can retry it.');

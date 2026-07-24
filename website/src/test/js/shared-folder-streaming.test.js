@@ -7,6 +7,7 @@ import {
   installSharedFolderAuthRecovery,
   isSharedFolderApiRequest,
   sharedFolderDownloadRequestUrl,
+  prepareSharedFolderMediaAuth,
   prepareSharedFolderStreamingAuth,
   sharedFolderStreamingDenial,
 } from '../../main/resources/static/js/lib/shared-folder-streaming.js';
@@ -114,6 +115,7 @@ test('shared-folder page starts native anchor and media requests without Blob bu
   assert.doesNotMatch(page, /\.blob\(/);
   assert.doesNotMatch(page, /URL\.createObjectURL/);
   assert.match(page, /prepareSharedFolderDownloadAuth\(token, requestUrl\)/);
+  assert.match(page, /prepareSharedFolderMediaAuth\(token, requestUrl\)/);
   assert.match(page, /link\.href = requestUrl/);
   assert.match(page, /element\.src = API\.sharedFolder\.preview\(entry\.path\)/);
   assert.match(page, /prepareSharedFolderStreamingAuth/);
@@ -122,6 +124,7 @@ test('shared-folder page starts native anchor and media requests without Blob bu
   assert.match(page, /handleSharedFolderAccessLoss\(event\.data\.status\)/);
   assert.match(page, /redirectOnUnauthorized: false/);
   assert.match(worker, /respondToSharedFolderFetch/);
+  assert.match(worker, /shared-folder-media-token/);
   assert.match(runtime, /attachSharedFolderAuthorization/);
   assert.match(runtime, /shared-folder-auth-denied/);
 });
@@ -133,7 +136,7 @@ test('worker registration waits for the root-scoped controller and its token ack
   const registrations = [];
   const messages = [];
   const controller = {
-    scriptURL: `${origin}/shared-folder-auth-sw.js`,
+    scriptURL: `${origin}/shared-folder-auth-sw.js?v=20260723`,
     postMessage(message, ports) {
       messages.push(message);
       ports[0].deliver({ type: 'shared-folder-auth-ready' });
@@ -182,8 +185,69 @@ test('worker registration waits for the root-scoped controller and its token ack
   }
 
   assert.deepEqual(registrations, [{
-    path: '/shared-folder-auth-sw.js',
+    path: '/shared-folder-auth-sw.js?v=20260723',
     options: { scope: '/', type: 'module' },
   }]);
   assert.deepEqual(messages, [{ type: 'shared-folder-auth-token', token: 'jwt-value' }]);
+});
+
+test('native media authorization stages the exact URL after worker authentication', async () => {
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const originalMessageChannel = Object.getOwnPropertyDescriptor(globalThis, 'MessageChannel');
+  const messages = [];
+  const streamUrl = `${origin}/api/shared-folder/2026-07-17/media/jobs/11111111-1111-4111-8111-111111111111/stream`;
+  const controller = {
+    scriptURL: `${origin}/shared-folder-auth-sw.js?v=20260723`,
+    postMessage(message, ports) {
+      messages.push(message);
+      const type = message.type === 'shared-folder-auth-token'
+        ? 'shared-folder-auth-ready' : 'shared-folder-media-ready';
+      ports[0].deliver({ type });
+    },
+  };
+
+  class BrowserMessageChannel {
+    constructor() {
+      this.port1 = { onmessage: null };
+      this.port2 = { deliver: data => this.port1.onmessage?.({ data }) };
+    }
+  }
+
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      serviceWorker: {
+        controller,
+        ready: Promise.resolve(),
+        register: async () => {},
+        addEventListener() {},
+        removeEventListener() {},
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { setTimeout, clearTimeout },
+  });
+  Object.defineProperty(globalThis, 'MessageChannel', {
+    configurable: true,
+    value: BrowserMessageChannel,
+  });
+
+  try {
+    await prepareSharedFolderMediaAuth('jwt-value', streamUrl);
+  } finally {
+    if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator);
+    else delete globalThis.navigator;
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else delete globalThis.window;
+    if (originalMessageChannel) Object.defineProperty(globalThis, 'MessageChannel', originalMessageChannel);
+    else delete globalThis.MessageChannel;
+  }
+
+  assert.deepEqual(messages, [
+    { type: 'shared-folder-auth-token', token: 'jwt-value' },
+    { type: 'shared-folder-media-token', token: 'jwt-value', requestUrl: streamUrl },
+  ]);
 });

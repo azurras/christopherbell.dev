@@ -5,8 +5,11 @@ import {
 
 const TOKEN_RECOVERY_TIMEOUT_MS = 5000;
 const DOWNLOAD_AUTHORIZATION_TTL_MS = 10000;
+const MEDIA_AUTHORIZATION_TTL_MS = 4 * 60 * 60 * 1000;
 const MAX_PENDING_DOWNLOADS = 64;
+const MAX_MEDIA_AUTHORIZATIONS = 32;
 const DOWNLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MEDIA_STREAM_PATH = /^\/api\/shared-folder\/2026-07-17\/media\/jobs\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/stream$/i;
 
 /**
  * Authorize one exact shared-folder request in the worker. A worker restart loses the
@@ -18,6 +21,7 @@ export async function respondToSharedFolderFetch({
   clientId,
   clientTokens,
   downloadTokens = new Map(),
+  mediaAuthorizations = new Map(),
   clients,
   origin,
   fetchFn = fetch,
@@ -27,12 +31,20 @@ export async function respondToSharedFolderFetch({
   timeoutMs = TOKEN_RECOVERY_TIMEOUT_MS,
   nowFn = Date.now,
 }) {
+  const nowMs = nowFn();
   let token = consumeSharedFolderDownloadAuthorization(
     request.url,
     downloadTokens,
-    nowFn(),
+    nowMs,
   );
   if (!token) token = requestBearerToken(request);
+  if (!token && !clientId) {
+    token = sharedFolderMediaAuthorization(
+      request.url,
+      mediaAuthorizations,
+      nowMs,
+    );
+  }
   if (!token) token = clientTokens.get(clientId);
   if (!token) {
     token = await recoverClientToken({
@@ -60,6 +72,7 @@ export async function respondToSharedFolderFetch({
   );
   if (response.status === 401 || response.status === 403) {
     if (response.status === 401) clientTokens.delete(clientId);
+    mediaAuthorizations.delete(request.url);
     await notifySharedFolderDenial(clients, clientId, response.status);
   }
   return response;
@@ -102,11 +115,77 @@ export function stageSharedFolderDownloadAuthorization({
   return true;
 }
 
+/**
+ * Stage one exact native media URL for repeated clientless range requests. The
+ * authorization remains volatile, bounded, and owned by the page that staged it.
+ */
+export function stageSharedFolderMediaAuthorization({
+  requestUrl,
+  token,
+  clientId,
+  mediaAuthorizations,
+  origin,
+  nowMs = Date.now(),
+}) {
+  const normalizedToken = typeof token === 'string' ? token.trim() : '';
+  const normalizedClientId = typeof clientId === 'string' ? clientId.trim() : '';
+  let url;
+  try {
+    url = new URL(requestUrl, origin);
+  } catch (_) {
+    return false;
+  }
+  if (!normalizedToken || !normalizedClientId || url.origin !== origin
+      || !isNativeMediaUrl(url)) {
+    return false;
+  }
+  removeExpiredMediaAuthorizations(mediaAuthorizations, nowMs);
+  if (!mediaAuthorizations.has(url.href)
+      && mediaAuthorizations.size >= MAX_MEDIA_AUTHORIZATIONS) {
+    return false;
+  }
+  mediaAuthorizations.set(url.href, {
+    token: normalizedToken,
+    clientId: normalizedClientId,
+    expiresAt: nowMs + MEDIA_AUTHORIZATION_TTL_MS,
+  });
+  return true;
+}
+
+/** Remove volatile media authorizations owned by one controlled page. */
+export function clearSharedFolderMediaAuthorizations(mediaAuthorizations, clientId) {
+  for (const [url, authorization] of mediaAuthorizations) {
+    if (authorization.clientId === clientId) mediaAuthorizations.delete(url);
+  }
+}
+
 function consumeSharedFolderDownloadAuthorization(requestUrl, downloadTokens, nowMs) {
   const authorization = downloadTokens.get(requestUrl);
   if (!authorization) return '';
   downloadTokens.delete(requestUrl);
   return authorization.expiresAt > nowMs ? authorization.token : '';
+}
+
+function sharedFolderMediaAuthorization(requestUrl, mediaAuthorizations, nowMs) {
+  const authorization = mediaAuthorizations.get(requestUrl);
+  if (!authorization) return '';
+  if (authorization.expiresAt <= nowMs) {
+    mediaAuthorizations.delete(requestUrl);
+    return '';
+  }
+  return authorization.token;
+}
+
+function removeExpiredMediaAuthorizations(mediaAuthorizations, nowMs) {
+  for (const [url, authorization] of mediaAuthorizations) {
+    if (authorization.expiresAt <= nowMs) mediaAuthorizations.delete(url);
+  }
+}
+
+function isNativeMediaUrl(url) {
+  const previewPath = url.searchParams.get('path') || '';
+  return (url.pathname === `${SHARED_FOLDER_API_PREFIX}preview` && previewPath !== '')
+    || MEDIA_STREAM_PATH.test(url.pathname);
 }
 
 async function recoverClientToken({

@@ -125,7 +125,10 @@ Owns browser-side behavior for server-rendered pages.
   reply produces a controlled 401 rather than an unauthenticated network request. The worker
   receives no token in a URL or persistent worker storage, attaches it only to the exact versioned
   shared-folder API prefix, preserves `Range`, forwards with `cache: 'no-store'`, and clears its
-  per-client token on 401 or logout. Text and native-stream 401/403 responses use one actionable
+  per-client token on 401 or logout. Native media also stages one exact preview or job-stream URL
+  in bounded volatile worker memory so mobile browsers can issue repeated range requests even
+  when they omit the page client ID; those entries expire and are cleared with their owner.
+  Text and native-stream 401/403 responses use one actionable
   access-loss handler. Its root bootstrap script is intentionally public for exact anonymous
   `GET /shared-folder-auth-sw.js` so installation can happen before it has a bearer token; all
   shared-folder API requests stay protected. Write-capable users can create folders, rename, move,

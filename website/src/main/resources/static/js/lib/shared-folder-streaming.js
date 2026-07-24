@@ -1,5 +1,8 @@
 export const SHARED_FOLDER_API_PREFIX = '/api/shared-folder/2026-07-17/';
 export const SHARED_FOLDER_AUTH_WORKER_PATH = '/shared-folder-auth-sw.js';
+const SHARED_FOLDER_AUTH_WORKER_REVISION = '20260723';
+const SHARED_FOLDER_AUTH_WORKER_URL =
+  `${SHARED_FOLDER_AUTH_WORKER_PATH}?v=${SHARED_FOLDER_AUTH_WORKER_REVISION}`;
 const DOWNLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Return whether a request is same-origin and precisely inside the shared-folder API surface. */
@@ -50,7 +53,7 @@ export async function prepareSharedFolderStreamingAuth(token) {
   if (!('serviceWorker' in navigator)) {
     throw new Error('This browser cannot securely stream shared-folder files.');
   }
-  await navigator.serviceWorker.register(SHARED_FOLDER_AUTH_WORKER_PATH, {
+  await navigator.serviceWorker.register(SHARED_FOLDER_AUTH_WORKER_URL, {
     scope: '/',
     type: 'module',
   });
@@ -64,6 +67,12 @@ export async function prepareSharedFolderStreamingAuth(token) {
 export async function prepareSharedFolderDownloadAuth(token, requestUrl) {
   const controller = await prepareSharedFolderStreamingAuth(token);
   await setWorkerDownloadAuthorization(controller, token, requestUrl);
+}
+
+/** Stage one exact native media URL for browsers that omit a media request client id. */
+export async function prepareSharedFolderMediaAuth(token, requestUrl) {
+  const controller = await prepareSharedFolderStreamingAuth(token);
+  await setWorkerMediaAuthorization(controller, token, requestUrl);
 }
 
 /** Remove this browser client’s transient streaming token after logout. */
@@ -92,8 +101,10 @@ export function installSharedFolderAuthRecovery(
 }
 
 function isExpectedWorker(worker) {
-  return !!worker
-    && new URL(worker.scriptURL).pathname === SHARED_FOLDER_AUTH_WORKER_PATH;
+  if (!worker) return false;
+  const url = new URL(worker.scriptURL);
+  return url.pathname === SHARED_FOLDER_AUTH_WORKER_PATH
+    && url.search === `?v=${SHARED_FOLDER_AUTH_WORKER_REVISION}`;
 }
 
 function waitForExpectedController() {
@@ -147,6 +158,27 @@ function setWorkerDownloadAuthorization(controller, token, requestUrl) {
     };
     controller.postMessage({
       type: 'shared-folder-download-token',
+      token,
+      requestUrl,
+    }, [channel.port2]);
+  });
+}
+
+function setWorkerMediaAuthorization(controller, token, requestUrl) {
+  return new Promise((resolve, reject) => {
+    const channel = new MessageChannel();
+    const timeout = window.setTimeout(() => reject(
+      new Error('Secure shared-folder media authorization timed out.')), 5000);
+    channel.port1.onmessage = event => {
+      window.clearTimeout(timeout);
+      if (event.data?.type === 'shared-folder-media-ready') {
+        resolve();
+      } else {
+        reject(new Error('Secure shared-folder media authorization was rejected.'));
+      }
+    };
+    controller.postMessage({
+      type: 'shared-folder-media-token',
       token,
       requestUrl,
     }, [channel.port2]);
