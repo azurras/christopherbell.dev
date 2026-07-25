@@ -10,17 +10,27 @@ import './components/nav.js';
 import './components/footer.js';
 import './components/blog.js';
 import './components/gallery.js';
+import './components/site-media-player.js';
 import pubsub from './components/pubsub.js';
 import {
     clearSharedFolderStreamingAuth,
     installSharedFolderAuthRecovery,
 } from './lib/shared-folder-streaming.js';
 import { getAuthToken } from './lib/util.js';
+import {
+    handleSiteNavigationClick,
+    siteMediaPlayerHost,
+    stopSiteMediaPlayback,
+} from './lib/site-media-player.js';
 
 installSharedFolderAuthRecovery(getAuthToken);
 
 /** Wire core layout and global auth behavior once DOM is ready. */
 document.addEventListener('DOMContentLoaded', () => {
+    if (window.top === window && !siteMediaPlayerHost()) {
+        document.body.appendChild(document.createElement('site-media-player'));
+    }
+
     const navContainer = document.getElementById('nav');
     if (navContainer) {
         navContainer.appendChild(document.createElement('app-nav'));
@@ -42,12 +52,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     pubsub.subscribe('auth:logout', () => {
+        const playerHost = siteMediaPlayerHost();
+        stopSiteMediaPlayback();
         clearSharedFolderStreamingAuth();
         localStorage.removeItem('cbellLoginToken');
         localStorage.removeItem('cbellUsername');
         localStorage.removeItem('cbellRole');
         // Redirect to login for clear feedback
-        window.location.href = '/login';
+        const siteWindow = playerHost?.ownerDocument?.defaultView || window;
+        siteWindow.location.href = '/login';
     });
 
 });
+
+document.addEventListener('click', event => {
+    handleSiteNavigationClick(event);
+}, true);

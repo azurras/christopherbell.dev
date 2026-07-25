@@ -457,6 +457,8 @@ test('file-browser presentation exposes familiar types, sizes, and folder-first 
 test('shared-folder shell presents an explorer layout with compact actions and responsive preview', () => {
   const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
   const page = fs.readFileSync('website/src/main/resources/static/js/shared-folder.js', 'utf8');
+  const player = fs.readFileSync(
+    'website/src/main/resources/static/js/components/site-media-player.js', 'utf8');
   const template = fs.readFileSync('website/src/main/resources/templates/shared-folder.html', 'utf8');
   assert.match(template, /shared-folder-list-header/);
   assert.match(template, /Name[\s\S]*Size[\s\S]*Modified/);
@@ -488,12 +490,13 @@ test('shared-folder shell presents an explorer layout with compact actions and r
   assert.match(page, /API\.sharedFolder\.move/);
   assert.match(page, /API\.sharedFolder\.delete/);
   assert.match(page, /window\.confirm/);
-  assert.match(page, /requestMediaFallback/);
-  assert.match(page, /waitForPlayableMediaJob/);
-  assert.match(page, /waitForTerminalMediaJob/);
-  assert.match(page, /API\.sharedFolder\.media\.playback/);
-  assert.match(page, /shared-folder-media-retry/);
-  assert.match(page, /API\.sharedFolder\.media\.stream/);
+  assert.match(page, /playSharedFolderMedia/);
+  assert.match(player, /loadFallbackSource/);
+  assert.match(player, /waitForPlayableMediaJob/);
+  assert.match(player, /waitForTerminalMediaJob/);
+  assert.match(player, /API\.sharedFolder\.media\.playback/);
+  assert.match(player, /site-media-player-retry/);
+  assert.match(player, /API\.sharedFolder\.media\.stream/);
   assert.match(page, /window\.history\.pushState/);
   assert.doesNotMatch(page, /window\.location\.href\s*=/);
 });
