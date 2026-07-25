@@ -137,6 +137,13 @@ class SharedFolderSecurityIntegrationTest {
   }
 
   @Test
+  void responsesAllowSameOriginFramingForThePersistentMediaShell() throws Exception {
+    mockMvc.perform(get(BASE + "/entries"))
+        .andExpect(status().isForbidden())
+        .andExpect(header().string("X-Frame-Options", "SAMEORIGIN"));
+  }
+
+  @Test
   void anonymousRequestsAreDeniedAtEverySharedFolderBoundary() throws Exception {
     mockMvc.perform(get(BASE + "/entries"))
         .andExpect(status().isForbidden())
@@ -178,7 +185,6 @@ class SharedFolderSecurityIntegrationTest {
         .andExpect(status().isCreated())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
         .andExpect(header().string("X-Content-Type-Options", "nosniff"))
-        .andExpect(header().string("X-Frame-Options", "DENY"))
         .andExpect(jsonPath("$.path").value("docs"));
   }
 

@@ -110,6 +110,9 @@ public class SecurityConfig {
         // Disable CSRF for APIs (use with care)
         .csrf(AbstractHttpConfigurer::disable)
 
+        // The persistent media shell embeds only pages from this exact origin.
+        .headers(headers -> headers.frameOptions(frameOptions -> frameOptions.sameOrigin()))
+
         // Configure authorization rules
         .authorizeHttpRequests(auth -> auth
             .requestMatchers(publicMatchers()).permitAll() // Allow public access to defined URLs
