@@ -24,24 +24,19 @@ import {
   createUploadOperationGate,
   runUploadWorkflow,
   cancelUploadWorkflow,
-  mediaOutputProfile,
-  mediaStatusMessage,
   sortSharedFolderEntries,
-  waitForPlayableMediaJob,
-  waitForTerminalMediaJob,
 } from './lib/shared-folder.js';
 import {
   clearSharedFolderStreamingAuth,
   prepareSharedFolderDownloadAuth,
-  prepareSharedFolderMediaAuth,
   prepareSharedFolderStreamingAuth,
   sharedFolderDownloadRequestUrl,
   sharedFolderStreamingDenial,
 } from './lib/shared-folder-streaming.js';
+import { playSharedFolderMedia, stopSiteMediaPlayback } from './lib/site-media-player.js';
 
 const root = typeof document === 'undefined' ? null : document.getElementById('shared-folder-app');
 let currentPreviewLostAccess = false;
-let currentMediaPlayback = null;
 const UPLOAD_RESUME_KEY = 'shared-folder-upload-resume-v1';
 const uploadOperationGate = createUploadOperationGate();
 
@@ -71,6 +66,7 @@ function renderBreadcrumbs(path, navigatePath) {
 function handleSharedFolderAccessLoss(statusCode) {
   const denial = sharedFolderStreamingDenial(statusCode);
   currentPreviewLostAccess = true;
+  stopSiteMediaPlayback();
   status(denial.message);
   if (denial.redirectToLogin && !window.location.pathname.startsWith('/login')) {
     clearSharedFolderStreamingAuth();
@@ -79,14 +75,10 @@ function handleSharedFolderAccessLoss(statusCode) {
   }
 }
 
-async function prepareNativeStreaming(requestUrl = null) {
+async function prepareNativeStreaming() {
   try {
     const token = getAuthToken();
-    if (requestUrl) {
-      await prepareSharedFolderMediaAuth(token, requestUrl);
-    } else {
-      await prepareSharedFolderStreamingAuth(token);
-    }
+    await prepareSharedFolderStreamingAuth(token);
     return true;
   } catch (error) {
     status(error?.message || 'Secure shared-folder streaming is unavailable.');
@@ -128,8 +120,6 @@ async function copyLink(entry) {
 }
 
 async function preview(entry) {
-  currentMediaPlayback?.abort();
-  currentMediaPlayback = null;
   const host = document.getElementById('shared-preview');
   clear(host);
   host.hidden = false;
@@ -145,6 +135,17 @@ async function preview(entry) {
     formatSharedFolderModifiedAt(entry.modifiedAt),
   ].join(' · ');
   host.append(metadata);
+
+  if (['AUDIO', 'VIDEO'].includes(entry.previewKind)) {
+    await playSharedFolderMedia(entry);
+    const message = document.createElement('p');
+    message.className = 'shared-folder-player-message';
+    message.textContent = 'Playing in the media bar. You can keep browsing anywhere on the site.';
+    host.append(message);
+    status(`Playing ${entry.name}`);
+    return;
+  }
+
   revealSharedFolderPreview(host, window.matchMedia('(max-width: 767px)').matches);
 
   if (entry.previewKind === 'TEXT') {
@@ -168,94 +169,22 @@ async function preview(entry) {
     return;
   }
 
-  if (!['IMAGE', 'AUDIO', 'VIDEO', 'PDF'].includes(entry.previewKind)) {
+  if (!['IMAGE', 'PDF'].includes(entry.previewKind)) {
     host.append(document.createTextNode('No inline preview is available. Download the file to view it.'));
     return;
   }
 
   if (!await prepareNativeStreaming()) return;
   currentPreviewLostAccess = false;
-  const element = entry.previewKind === 'IMAGE' ? document.createElement('img')
-    : entry.previewKind === 'AUDIO' ? document.createElement('audio')
-      : entry.previewKind === 'VIDEO' ? document.createElement('video')
-        : document.createElement('iframe');
+  const element = entry.previewKind === 'IMAGE'
+    ? document.createElement('img') : document.createElement('iframe');
   element.title = `${entry.name} preview`;
-  if (element instanceof HTMLMediaElement) element.controls = true;
   if (entry.previewKind === 'PDF') element.setAttribute('sandbox', '');
-  if (['AUDIO', 'VIDEO'].includes(entry.previewKind)) {
-    const controller = new AbortController();
-    currentMediaPlayback = controller;
-    await fetchJson(API.sharedFolder.media.playback, {
-      method: 'POST', headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
-      body: JSON.stringify({ path: entry.path }), signal: controller.signal,
-    });
-    element.addEventListener('error', () => {
-      if (currentPreviewLostAccess || controller.signal.aborted) return;
-      startMediaFallback(entry, element, host, controller.signal);
-    }, { once: true });
-    const previewUrl = API.sharedFolder.preview(entry.path);
-    if (!await prepareNativeStreaming(previewUrl)) return;
-    element.src = previewUrl;
-  } else {
-    element.addEventListener('error', () => {
-      if (!currentPreviewLostAccess) status('The preview could not be loaded.');
-    });
-    element.src = API.sharedFolder.preview(entry.path);
-  }
-  host.append(element);
-}
-
-function startMediaFallback(entry, element, host, signal) {
-  void requestMediaFallback(entry, element, host, signal).catch(error => {
-    if (error?.name === 'AbortError') return;
-    if (isSharedFolderAccessDenied(error)) {
-      handleSharedFolderAccessLoss(error.status);
-      return;
-    }
-    status(error?.message || 'The media could not be prepared.');
-    showMediaRetry(entry, element, host, signal);
-  });
-}
-
-function showMediaRetry(entry, element, host, signal) {
-  host.querySelector?.('.shared-folder-media-retry')?.remove();
-  const retry = document.createElement('button');
-  retry.type = 'button';
-  retry.className = 'btn btn-sm btn-outline-light shared-folder-media-retry';
-  retry.textContent = 'Retry media';
-  retry.addEventListener('click', () => {
-    retry.remove();
-    startMediaFallback(entry, element, host, signal);
-  }, { once: true });
-  host.append(retry);
-}
-
-async function requestMediaFallback(entry, element, host, signal) {
-  signal?.throwIfAborted();
-  status('Preparing a browser-compatible version…');
-  const initial = await fetchJson(API.sharedFolder.media.fallback, {
-    method: 'POST', headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
-    body: JSON.stringify({ path: entry.path, profile: mediaOutputProfile(entry) }), signal,
-  });
-  const load = (id, requestSignal) => fetchJson(API.sharedFolder.media.job(id), {
-    headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
-    signal: requestSignal,
-  });
-  const observe = { signal, load, onStatus: job => status(mediaStatusMessage(job.status)) };
-  const playable = await waitForPlayableMediaJob(initial, observe);
-  signal?.throwIfAborted();
-  const streamUrl = API.sharedFolder.media.stream(playable.jobId || playable.id);
-  if (!await prepareNativeStreaming(streamUrl)) return;
-  element.src = streamUrl;
   element.addEventListener('error', () => {
-    if (signal?.aborted || currentPreviewLostAccess) return;
-    status('The browser-compatible stream stopped. You can retry it.');
-    showMediaRetry(entry, element, host, signal);
-  }, { once: true });
-  element.load?.();
-  status(mediaStatusMessage(playable.status));
-  host.scrollIntoView?.({ block: 'nearest' });
-  if (playable.status !== 'READY') await waitForTerminalMediaJob(playable, observe);
+    if (!currentPreviewLostAccess) status('The preview could not be loaded.');
+  });
+  element.src = API.sharedFolder.preview(entry.path);
+  host.append(element);
 }
 
 async function mutationRequest(url, method, body) {

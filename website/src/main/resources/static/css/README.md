@@ -67,6 +67,9 @@ Owns site styling for server-rendered pages and frontend components.
 - The shared-folder portal uses `.shared-folder-*` classes for its keyboard-visible entry and
   mutation controls, two-column listing/preview surface, bounded text preview, upload picker,
   drag/drop state, progress/cancel controls, and single-column mobile layout below 768px.
+- The site-wide media surface uses `.site-media-player-*` for its fixed audio/video controls and
+  `.site-player-content-*` for the full-viewport navigation frame above it. A measured CSS custom
+  property keeps framed pages clear of the player as audio/video height changes on desktop and mobile.
 - Responsive rules live near the related component styles when possible. Broad
   page-level breakpoints are kept at the end of `main.css`.
 

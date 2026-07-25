@@ -117,7 +117,8 @@ Owns browser-side behavior for server-rendered pages.
 - `shared-folder.js` owns the Shared Folder shell: it redirects visitors without a token,
   checks the current account's effective shared read capability, renders relative-path breadcrumbs
   and accessible button controls, copies same-origin `/shared?path=` links, starts native
-  attachment downloads and media previews without Blob buffering, and inserts text previews only
+  attachment downloads and hands audio/video selections to the site-wide player without Blob buffering,
+  and inserts text previews only
   with `textContent`. Before assigning a protected native URL it waits for the shared-folder
   service worker to acknowledge the current JWT; 401 redirects to login and 403/revocation is
   shown inline. If a restarted worker has lost its per-client in-memory token, it asks only the
@@ -128,8 +129,7 @@ Owns browser-side behavior for server-rendered pages.
   per-client token on 401 or logout. Native media also stages one exact preview or job-stream URL
   in bounded volatile worker memory so mobile browsers can issue repeated range requests even
   when they omit the page client ID; those entries expire and are cleared with their owner.
-  Folder navigation replaces only the breadcrumbs, toolbar, and entry list, leaving the mounted
-  media player running while the user browses. Browser history restores folders without a page
+  Folder navigation replaces only the breadcrumbs, toolbar, and entry list. Browser history restores folders without a page
   reload, and a navigation generation guard prevents slower stale responses from replacing the
   latest folder.
   Text and native-stream 401/403 responses use one actionable
@@ -141,6 +141,13 @@ Owns browser-side behavior for server-rendered pages.
   and refresh recovery from non-secret local session metadata; terminal sessions clear that local
   record. The shared nav adds Shared Folder only after the current-account API reports effective
   read access.
+- `components/site-media-player.js` owns the single audio/video element in the top document. It
+  keeps native controls in a fixed bottom bar, shows video pixels there, and reuses the existing
+  authenticated direct-stream and progressive transcoding paths. While media is active, ordinary
+  same-origin link clicks load a full-page content frame above the original document, so existing
+  server-rendered pages and their scripts keep working without replacing the player. The top URL,
+  title, Back/Forward history, logout, and access-revocation behavior remain synchronized. External,
+  download, new-tab, modifier, hash-only, and API links retain browser-owned behavior.
 
 ## Design Notes
 

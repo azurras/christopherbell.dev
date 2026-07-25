@@ -108,16 +108,21 @@ test('global auth recovery answers an existing worker after navigation to Back O
 
 test('shared-folder page starts native anchor and media requests without Blob buffering', () => {
   const page = fs.readFileSync('website/src/main/resources/static/js/shared-folder.js', 'utf8');
+  const player = fs.readFileSync(
+    'website/src/main/resources/static/js/components/site-media-player.js', 'utf8');
   const worker = fs.readFileSync('website/src/main/resources/static/shared-folder-auth-sw.js', 'utf8');
   const runtime = fs.readFileSync(
     'website/src/main/resources/static/js/lib/shared-folder-worker-runtime.js', 'utf8');
 
   assert.doesNotMatch(page, /\.blob\(/);
   assert.doesNotMatch(page, /URL\.createObjectURL/);
+  assert.doesNotMatch(player, /\.blob\(/);
+  assert.doesNotMatch(player, /URL\.createObjectURL/);
   assert.match(page, /prepareSharedFolderDownloadAuth\(token, requestUrl\)/);
-  assert.match(page, /prepareSharedFolderMediaAuth\(token, requestUrl\)/);
+  assert.match(player, /prepareSharedFolderMediaAuth\(getAuthToken\(\), url\)/);
   assert.match(page, /link\.href = requestUrl/);
   assert.match(page, /element\.src = API\.sharedFolder\.preview\(entry\.path\)/);
+  assert.match(player, /playback\.media\.src = url/);
   assert.match(page, /prepareSharedFolderStreamingAuth/);
   assert.match(page, /function handleSharedFolderAccessLoss\(statusCode\)/);
   assert.match(page, /handleSharedFolderAccessLoss\(error\.status\)/);
