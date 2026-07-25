@@ -60,6 +60,7 @@ dependencies {
     annotationProcessor("org.projectlombok:lombok-mapstruct-binding:0.2.0")
 
     // Testing
+    testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.security:spring-security-test")
@@ -148,13 +149,23 @@ tasks.register<Exec>("jsTest") {
     inputs.dir("src/main/resources/templates")
 
     val nodeExecutable = providers.environmentVariable("NODE_EXE").orElse("node")
+    val junitReport = layout.buildDirectory.file("test-results/jsTest/results.xml")
+    outputs.file(junitReport)
 
     doFirst {
         val files = jsTestFiles.files.sortedBy { it.name }.map { it.absolutePath }
         if (files.isEmpty()) {
             throw GradleException("No JavaScript tests found under website/src/test/js.")
         }
-        commandLine(listOf(nodeExecutable.get(), "--test") + files)
+        val reportFile = junitReport.get().asFile
+        reportFile.parentFile.mkdirs()
+        commandLine(listOf(
+            nodeExecutable.get(),
+            "--test",
+            "--test-reporter=spec",
+            "--test-reporter=junit",
+            "--test-reporter-destination=stdout",
+            "--test-reporter-destination=${reportFile.absolutePath}") + files)
     }
 }
 
