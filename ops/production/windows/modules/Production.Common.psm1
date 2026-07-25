@@ -15,6 +15,32 @@ function Read-ProductionConfig {
             throw "Missing deploy config value: $name"
         }
     }
+    $publicUrlsProperty = $config.PSObject.Properties['publicUrls']
+    $publicUrls = @()
+    if ($publicUrlsProperty) { $publicUrls = @($publicUrlsProperty.Value) }
+    if ($publicUrls.Count -lt 2) {
+        throw 'publicUrls must contain at least two unique absolute HTTPS roots.'
+    }
+    $normalizedPublicUrls = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($publicUrl in $publicUrls) {
+        $parsedPublicUrl = $null
+        if (-not [uri]::TryCreate([string]$publicUrl, [UriKind]::Absolute, [ref]$parsedPublicUrl) -or
+            $parsedPublicUrl.Scheme -ne 'https' -or
+            $parsedPublicUrl.AbsolutePath -ne '/' -or
+            -not [string]::IsNullOrEmpty($parsedPublicUrl.Query) -or
+            -not [string]::IsNullOrEmpty($parsedPublicUrl.Fragment)) {
+            throw 'publicUrls entries must be absolute HTTPS roots without query strings or fragments.'
+        }
+        if (-not $normalizedPublicUrls.Add($parsedPublicUrl.AbsoluteUri)) {
+            throw 'publicUrls entries must be unique.'
+        }
+    }
+    $canonicalPublicUrl = $null
+    if (-not [uri]::TryCreate([string]$config.publicUrl, [UriKind]::Absolute, [ref]$canonicalPublicUrl) -or
+        -not $normalizedPublicUrls.Contains($canonicalPublicUrl.AbsoluteUri)) {
+        throw 'publicUrl must be an absolute URL included in publicUrls.'
+    }
     foreach ($name in 'candidatePort','productionPort') {
         $port = [int]$config.$name
         if ($port -lt 1 -or $port -gt 65535) { throw "$name must be between 1 and 65535." }

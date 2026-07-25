@@ -10,6 +10,10 @@
   "cloudflaredExe": "C:\\Program Files (x86)\\cloudflared\\cloudflared.exe",
   "backupRoot": "A:\\Projects\\christopherbell.dev-backups",
   "publicUrl": "https://www.christopherbell.dev/",
+  "publicUrls": [
+    "https://christopherbell.dev/",
+    "https://www.christopherbell.dev/"
+  ],
   "candidatePort": 8081,
   "productionPort": 8080,
   "smokeAccountEmail": "operator@example.com",

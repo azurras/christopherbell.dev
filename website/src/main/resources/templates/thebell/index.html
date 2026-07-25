@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <th:block th:replace="~{fragments/social-preview :: socialPreview('The Bell', 'The Bell archive on christopherbell.dev.', 'https://www.christopherbell.dev/thebell', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
   <title>The Bell</title>
-  <link rel="stylesheet" type="text/css" href="/css/thebell.css">
-  <link rel="shortcut icon" href="/images/thebell/res/icons/yui-peeking.jpg">
+  <link rel="stylesheet" type="text/css" href="/css/thebell.css" th:href="@{/css/thebell.css}">
+  <link rel="shortcut icon" href="/images/thebell/res/icons/yui-peeking.jpg" th:href="@{/images/thebell/res/icons/yui-peeking.jpg}">
 </head>
 
 <body>
@@ -97,7 +97,7 @@
 
 
   <div class="article">
-    <img src="/images/thebell/res/icons/K-On.jpg" alt="K-On!" width="200" height="200">
+    <img src="/images/thebell/res/icons/K-On.jpg" th:src="@{/images/thebell/res/icons/K-On.jpg}" alt="K-On!" width="200" height="200">
     <div class="article-text">
       <div class="article-title">
         <p>
@@ -151,7 +151,7 @@
   </div>
 
   <div class="article">
-    <img src="/images/thebell/res/chrisbellweek2014.png" alt="Chris Bell Week" width="700" height="400">
+    <img src="/images/thebell/res/chrisbellweek2014.png" th:src="@{/images/thebell/res/chrisbellweek2014.png}" alt="Chris Bell Week" width="700" height="400">
 
     <div class="article-text">
       <p>
@@ -167,7 +167,7 @@
   </div>
 
   <div class="article">
-    <img src="/images/thebell/res/img.png" alt="Motherboard" width="600" height="350">
+    <img src="/images/thebell/res/img.png" th:src="@{/images/thebell/res/img.png}" alt="Motherboard" width="600" height="350">
 
 
     <div class="article-text">

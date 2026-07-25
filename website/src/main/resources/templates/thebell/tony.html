@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <th:block th:replace="~{fragments/social-preview :: socialPreview('Tony the Cat', 'Tony archive page on christopherbell.dev.', 'https://www.christopherbell.dev/thebell/tony', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
   <title>Tony the Cat</title>
-  <link rel="stylesheet" type="text/css" href="/css/thebell.css">
+  <link rel="stylesheet" type="text/css" href="/css/thebell.css" th:href="@{/css/thebell.css}">
   <link rel="shortcut icon" href="K-on_Icon.jpg">
 </head>
 
@@ -34,15 +34,15 @@
   <h1 style="font-size: 70px;">Tony</h1>
 
   <div class="article">
-    <img src="/images/thebell/res/Tony/IMG_0278.JPG" alt="Tony1" width="600" height="400" style="margin-left:100px;">+
+    <img src="/images/thebell/res/Tony/IMG_0278.JPG" th:src="@{/images/thebell/res/Tony/IMG_0278.JPG}" alt="Tony1" width="600" height="400" style="margin-left:100px;">+
   </div>
 
   <div class="article">
-    <img src="/images/thebell/res/Tony/IMG_0279.JPG" alt="Tony2" width="600" height="400" style="margin-left:100px;">+
+    <img src="/images/thebell/res/Tony/IMG_0279.JPG" th:src="@{/images/thebell/res/Tony/IMG_0279.JPG}" alt="Tony2" width="600" height="400" style="margin-left:100px;">+
   </div>
 
   <div class="article">
-    <img src="/images/thebell/res/Tony/IMG_0280.JPG" alt="Tony3" width="600" height="400" style="margin-left:100px;">+
+    <img src="/images/thebell/res/Tony/IMG_0280.JPG" th:src="@{/images/thebell/res/Tony/IMG_0280.JPG}" alt="Tony3" width="600" height="400" style="margin-left:100px;">+
   </div>
 </div>
 

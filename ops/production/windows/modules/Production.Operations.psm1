@@ -199,12 +199,13 @@ function Test-ProductionStartup {
     $task = Get-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction Stop
     Assert-AutoDeployTaskContract -Task $task -Config $config
     Test-ProductionEndpoints $config $config.productionPort
-    Wait-HttpStatus -Uri $config.publicUrl -ExpectedStatus 200 -Timeout ([timespan]::FromSeconds(30)) | Out-Null
+    $publicRouteChecks = Test-ProductionPublicEndpoints -Config $config
     [pscustomobject]@{
         Services = 'RunningAutomatic'
         AutoDeployTask = $task.State
         NativeEndpoint = 200
         PublicEndpoint = 200
+        PublicRouteChecks = $publicRouteChecks
         SensorLibrariesEnabled = [bool]$config.sensorLibrariesEnabled
         CpuTemperatureCelsius = $cpuTemperature
     }

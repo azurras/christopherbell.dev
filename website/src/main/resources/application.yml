@@ -1,10 +1,35 @@
 spring:
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          max-age: 1h
+          cache-public: true
+      chain:
+        strategy:
+          fixed:
+            enabled: true
+            paths: /css/**,/js/**,/images/**,/favicon.ico
+            version: ${GIT_COMMIT:dev}
   config:
     import:
       - optional:file:.env[.properties]
       - optional:file:../.env[.properties]
   profiles:
     default: local
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,mongo
 logging:
   level:
     root: INFO

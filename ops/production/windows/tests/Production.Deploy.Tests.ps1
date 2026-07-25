@@ -212,7 +212,7 @@ Describe 'native Windows deployment' {
             } | Should -Throw '*Suspended recovery policy verification failed*'
         }
 
-        It 'allows three minutes for a production cold start' {
+        It 'allows three minutes while checking every local public-delivery route' {
             Mock Wait-HttpStatus { 200 }
             Mock Invoke-ProductionWebRequest {
                 [pscustomobject]@{ StatusCode = 401; Content = '{"code":"UNAUTHORIZED"}' }
@@ -221,11 +221,70 @@ Describe 'native Windows deployment' {
 
             Test-ProductionEndpoints -Config $configuration -Port 8080
 
-            Should -Invoke Wait-HttpStatus -Times 1 -Exactly -ParameterFilter {
-                $Uri -eq 'http://127.0.0.1:8080/' -and
-                $ExpectedStatus -eq 200 -and
-                $Timeout.TotalSeconds -eq 180
+            $expectedPaths = @(
+                '/', '/blog', '/wfl', '/canes-box-tracker', '/robots.txt', '/sitemap.xml',
+                '/favicon.ico', '/actuator/health/liveness', '/actuator/health/readiness'
+            )
+            Should -Invoke Wait-HttpStatus -Times $expectedPaths.Count -Exactly -ParameterFilter {
+                ([uri]$Uri).AbsolutePath -in $expectedPaths -and
+                    $ExpectedStatus -eq 200
             }
+            Should -Invoke Wait-HttpStatus -Times 1 -Exactly -ParameterFilter {
+                ([uri]$Uri).AbsolutePath -eq '/' -and $Timeout.TotalSeconds -eq 180
+            }
+            Should -Invoke Wait-HttpStatus -Times ($expectedPaths.Count - 1) -Exactly -ParameterFilter {
+                ([uri]$Uri).AbsolutePath -ne '/' -and $Timeout.TotalSeconds -eq 30
+            }
+        }
+
+        It 'exports a public endpoint verifier for every configured hostname' {
+            Get-Command Test-ProductionPublicEndpoints -ErrorAction SilentlyContinue |
+                Should -Not -BeNullOrEmpty
+        }
+
+        It 'checks the complete route matrix for every configured public hostname' {
+            Mock Wait-HttpStatus { 200 }
+            $configuration = [pscustomobject]@{
+                publicUrls = @('https://christopherbell.dev/','https://www.christopherbell.dev/')
+            }
+
+            $count = Test-ProductionPublicEndpoints -Config $configuration
+
+            $count | Should -Be 18
+            Should -Invoke Wait-HttpStatus -Times 18 -Exactly -ParameterFilter {
+                ([uri]$Uri).Scheme -eq 'https' -and
+                    ([uri]$Uri).Host -in @('christopherbell.dev','www.christopherbell.dev') -and
+                    $ExpectedStatus -eq 200 -and
+                    $Timeout.TotalSeconds -eq 30
+            }
+        }
+
+        It 'binds the production release SHA to the application asset version' {
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+            $release = Join-Path $TestDrive "releases\$sha"
+            $script:capturedEnvironment = $null
+            Mock Assert-ReleasePath { $release }
+            Mock Test-Path { $true }
+            Mock Read-ProductionEnvironment { @{ APP_JWT_SECRET='test' } }
+            Mock New-ProductionProcessStartInfo {
+                param($FilePath, $ArgumentList, $WorkingDirectory, $Environment)
+                $script:capturedEnvironment = $Environment.Clone()
+                $start = [Diagnostics.ProcessStartInfo]::new()
+                $start.FileName = Join-Path $PSHOME 'pwsh.exe'
+                $start.Arguments = '-NoLogo -NoProfile -Command exit'
+                $start.UseShellExecute = $false
+                return $start
+            }
+            $configuration = [pscustomobject]@{
+                programDataRoot = $TestDrive
+                javaExe = Join-Path $PSHOME 'pwsh.exe'
+            }
+
+            $process = Start-ProductionJar `
+                -Config $configuration -Release $release -Port 8081 -Profiles 'prod'
+            $process.WaitForExit(10000) | Out-Null
+
+            $script:capturedEnvironment.GIT_COMMIT | Should -Be $sha
         }
 
         It 'bounds checked processes that do not exit' {

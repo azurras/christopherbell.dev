@@ -43,6 +43,10 @@ public class SecurityConfig {
 
   private static final String[] PUBLIC_URLS = {
       "/",
+      "GET:/robots.txt",
+      "GET:/sitemap.xml",
+      "GET:/actuator/health/liveness",
+      "GET:/actuator/health/readiness",
       "/shared",
       "GET:/shared-folder-auth-sw.js",
       "/api/accounts" + APIVersion.V20241215 + "/login",
@@ -75,6 +79,10 @@ public class SecurityConfig {
       "/css/**",
       "/images/**",
       "/js/**",
+      "GET:/{assetVersion}/css/**",
+      "GET:/{assetVersion}/images/**",
+      "GET:/{assetVersion}/js/**",
+      "GET:/{assetVersion}/favicon.ico",
       "/login",
       "/forgot-password",
       "/reset-password",
