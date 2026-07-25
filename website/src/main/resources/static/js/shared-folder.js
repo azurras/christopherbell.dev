@@ -54,11 +54,7 @@ function status(message) {
   if (target) target.textContent = message;
 }
 
-function navigate(path) {
-  window.location.href = internalSharedFolderUrl(path);
-}
-
-function renderBreadcrumbs(path) {
+function renderBreadcrumbs(path, navigatePath) {
   const host = document.getElementById('shared-breadcrumbs');
   clear(host);
   breadcrumbItems(path).forEach((item, index) => {
@@ -67,7 +63,7 @@ function renderBreadcrumbs(path) {
     button.type = 'button';
     button.className = 'btn btn-sm btn-link';
     button.textContent = item.label;
-    button.addEventListener('click', () => navigate(item.path));
+    button.addEventListener('click', () => { void navigatePath(item.path); });
     host.append(button);
   });
 }
@@ -426,7 +422,7 @@ async function uploadFile(parentPath, file, signal) {
   return upload;
 }
 
-async function configureUploadPanel(path, account) {
+async function configureUploadPanel(account, currentPath) {
   if (typeof document === 'undefined') return;
   const panel = document.getElementById('shared-upload-panel');
   if (!panel || !accountHasSharedFolderWrite(account)) return;
@@ -455,7 +451,7 @@ async function configureUploadPanel(path, account) {
     }
   }
   const startUpload = file => {
-    const operation = uploadOperationGate.start(signal => uploadFile(path, file, signal));
+    const operation = uploadOperationGate.start(signal => uploadFile(currentPath(), file, signal));
     if (!operation) {
       status('An upload is already in progress. Pause it before choosing another file.');
       return;
@@ -516,7 +512,7 @@ async function findReplacement(destinationPath, name) {
     String(entry.name).toLocaleLowerCase() === String(name).toLocaleLowerCase()) || null;
 }
 
-function renderEntries(response, canWrite = false) {
+function renderEntries(response, canWrite = false, navigatePath) {
   const host = document.getElementById('shared-list');
   clear(host);
   if (!response.entries?.length) {
@@ -554,7 +550,7 @@ function renderEntries(response, canWrite = false) {
     open.append(icon, identity);
     open.addEventListener('click', () => {
       if (entry.type === 'DIRECTORY') {
-        navigate(entry.path);
+        void navigatePath(entry.path);
       } else {
         host.querySelector('.shared-folder-entry.is-selected')?.classList.remove('is-selected');
         row.classList.add('is-selected');
@@ -654,6 +650,31 @@ function renderEntries(response, canWrite = false) {
   });
 }
 
+/** Own cancellable folder-list navigation while leaving the mounted preview untouched. */
+export function createSharedFolderNavigator({ load, render, pushPath, onError }) {
+  let generation = 0;
+
+  const visit = async (path, push) => {
+    const requestGeneration = ++generation;
+    try {
+      const response = await load(path);
+      if (requestGeneration !== generation) return false;
+      await render(response);
+      if (requestGeneration !== generation) return false;
+      if (push) pushPath(response.path);
+      return true;
+    } catch (error) {
+      if (requestGeneration === generation) onError(error);
+      return false;
+    }
+  };
+
+  return Object.freeze({
+    open: path => visit(path, true),
+    restore: path => visit(path, false),
+  });
+}
+
 export async function initializeSharedFolderPage({
   pageRoot = root,
   getAuthTokenFn = getAuthToken,
@@ -668,6 +689,8 @@ export async function initializeSharedFolderPage({
   statusFn = status,
   handleAccessLossFn = handleSharedFolderAccessLoss,
   redirectToLogin = () => window.location.replace(loginRedirectUrl(currentRedirectTarget())),
+  pushPath = path => window.history.pushState({}, '', internalSharedFolderUrl(path)),
+  addPopstateListener = listener => globalThis.window?.addEventListener('popstate', listener),
 } = {}) {
   if (!pageRoot) return;
   if (!getAuthTokenFn()) {
@@ -684,18 +707,34 @@ export async function initializeSharedFolderPage({
       statusFn('Your account does not have shared-folder read access.');
       return;
     }
-    const path = requestedPath();
-    const response = await fetchJsonFn(API.sharedFolder.entries(path), {
-      headers: authHeadersFn(),
-      redirectOnUnauthorized: false,
-    });
-    pageRoot.classList.remove('d-none');
-    renderBreadcrumbsFn(response.path);
     const canWrite = accountHasSharedFolderWrite(account);
-    renderToolbarFn(response.path, canWrite);
-    renderEntriesFn(response, canWrite);
-    await configureUploadPanelFn(response.path, account);
-    statusFn(`${response.entries.length} item${response.entries.length === 1 ? '' : 's'}`);
+    let activePath = '';
+    let navigator;
+    const navigatePath = path => navigator.open(path);
+    const handleFolderError = error => {
+      pageRoot.classList.remove('d-none');
+      if (isSharedFolderAccessDenied(error)) handleAccessLossFn(error.status);
+      else statusFn(error?.message || 'The shared folder is unavailable.');
+    };
+    navigator = createSharedFolderNavigator({
+      load: path => fetchJsonFn(API.sharedFolder.entries(path), {
+        headers: authHeadersFn(),
+        redirectOnUnauthorized: false,
+      }),
+      render: async response => {
+        activePath = response.path;
+        pageRoot.classList.remove('d-none');
+        renderBreadcrumbsFn(response.path, navigatePath);
+        renderToolbarFn(response.path, canWrite);
+        renderEntriesFn(response, canWrite, navigatePath);
+        statusFn(`${response.entries.length} item${response.entries.length === 1 ? '' : 's'}`);
+      },
+      pushPath,
+      onError: handleFolderError,
+    });
+    if (!await navigator.restore(requestedPath())) return;
+    await configureUploadPanelFn(account, () => activePath);
+    addPopstateListener(() => { void navigator.restore(requestedPath()); });
   } catch (error) {
     pageRoot.classList.remove('d-none');
     if (isSharedFolderAccessDenied(error)) {

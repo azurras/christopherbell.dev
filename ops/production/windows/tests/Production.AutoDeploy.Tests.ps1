@@ -46,13 +46,27 @@ Describe 'automatic origin main deployment' {
         Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
     }
 
+    It 'checks once and exits without keeping a console process alive' {
+        InModuleScope Production.AutoDeploy {
+            $config = [pscustomobject]@{ programDataRoot=$TestDrive }
+            Mock Read-ProductionConfig { $config }
+            Mock Invoke-AutoDeployOnce {}
+            Mock Start-Sleep { throw 'A one-shot scheduled task must not sleep.' }
+
+            { Start-AutoDeployLoop } | Should -Not -Throw
+
+            Should -Invoke Invoke-AutoDeployOnce -Times 1 -Exactly -ParameterFilter { $Config -eq $config }
+            Should -Invoke Start-Sleep -Times 0
+        }
+    }
+
     It 'registers the startup task with an absolute PowerShell 7 executable when PATH is empty' {
         InModuleScope Production.AutoDeploy {
             $originalPath = $env:PATH
             try {
                 $env:PATH = ''
                 Mock Assert-Administrator {}
-                Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive } }
+                Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive; autoDeployPollSeconds=60 } }
                 Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
                 Mock New-Item {}
                 Mock Copy-Item {}
@@ -61,6 +75,11 @@ Describe 'automatic origin main deployment' {
                 Mock Get-ScheduledTask { [pscustomobject]@{ State='Ready' } }
                 Mock Register-ScheduledTask {
                     if (-not $script:existingTaskStopped) { throw 'Existing task must be stopped before registration.' }
+                    $script:registeredTask = [pscustomobject]@{
+                        Action=$Action
+                        Triggers=@($Trigger)
+                        Settings=$Settings
+                    }
                 }
                 Mock Start-ScheduledTask {}
 
@@ -69,6 +88,19 @@ Describe 'automatic origin main deployment' {
                 Should -Invoke Register-ScheduledTask -ParameterFilter {
                     $Action.Execute -eq (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
                 }
+                $script:registeredTask.Action.Arguments | Should -Match '(?:^| )-NonInteractive(?: |$)'
+                $script:registeredTask.Action.Arguments | Should -Match '(?:^| )-WindowStyle Hidden(?: |$)'
+                $script:registeredTask.Action.Arguments | Should -Match ' auto-deploy$'
+                $script:registeredTask.Triggers.Count | Should -Be 2
+                @($script:registeredTask.Triggers | Where-Object {
+                    $_.CimClass.CimClassName -eq 'MSFT_TaskTimeTrigger' -and
+                    [string]$_.Repetition.Interval -eq 'PT1M'
+                }).Count | Should -Be 1
+                $script:registeredTask.Settings.Hidden | Should -BeTrue
+                $script:registeredTask.Settings.StartWhenAvailable | Should -BeTrue
+                $script:registeredTask.Settings.DisallowStartIfOnBatteries | Should -BeFalse
+                $script:registeredTask.Settings.StopIfGoingOnBatteries | Should -BeFalse
+                [string]$script:registeredTask.Settings.ExecutionTimeLimit | Should -Be 'PT2H'
                 Should -Invoke Stop-ScheduledTask -Times 1 -ParameterFilter { $TaskName -eq 'ChristopherBellAutoDeploy' }
             }
             finally {
@@ -80,7 +112,7 @@ Describe 'automatic origin main deployment' {
     It 'does not overwrite tools or stop the task while a deployment is active' {
         InModuleScope Production.AutoDeploy {
             Mock Assert-Administrator {}
-            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive } }
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive; autoDeployPollSeconds=60 } }
             Mock Enter-DeploymentLock { throw 'A production deployment is already running.' }
             Mock New-Item {}
             Mock Copy-Item {}
@@ -98,7 +130,7 @@ Describe 'automatic origin main deployment' {
     It 'does not register or restart when the existing task refuses to stop' {
         InModuleScope Production.AutoDeploy {
             Mock Assert-Administrator {}
-            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive } }
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive; autoDeployPollSeconds=60 } }
             Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
             Mock New-Item {}
             Mock Copy-Item {}
@@ -125,7 +157,7 @@ Describe 'automatic origin main deployment' {
         InModuleScope Production.AutoDeploy {
             $script:events = [Collections.Generic.List[string]]::new()
             Mock Assert-Administrator {}
-            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive } }
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive; autoDeployPollSeconds=60 } }
             Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
             Mock Stop-ScheduledTask { $script:events.Add('stop') }
             Mock Get-ScheduledTask { [pscustomobject]@{ State='Ready' } }

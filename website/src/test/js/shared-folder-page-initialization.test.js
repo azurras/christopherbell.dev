@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { API } from '../../main/resources/static/js/lib/api.js';
+import * as sharedFolderPage from '../../main/resources/static/js/shared-folder.js';
 import { initializeSharedFolderPage } from '../../main/resources/static/js/shared-folder.js';
 
 function pageRoot() {
@@ -72,4 +73,48 @@ test('page initialization stops before entries when the unwrapped account lacks 
   assert.deepEqual(requests, [API.accounts.me]);
   assert.equal(root.classList.removed, true);
   assert.deepEqual(rendered, ['Your account does not have shared-folder read access.']);
+});
+
+test('folder navigation replaces only folder chrome and pushes the canonical path', async () => {
+  assert.equal(typeof sharedFolderPage.createSharedFolderNavigator, 'function');
+  const events = [];
+  const navigator = sharedFolderPage.createSharedFolderNavigator({
+    load: async path => {
+      events.push(['load', path]);
+      return { path: 'music/live', entries: [{ name: 'set.flac' }] };
+    },
+    render: async response => events.push(['render', response.path]),
+    pushPath: path => events.push(['push', path]),
+    onError: error => events.push(['error', error.message]),
+  });
+
+  assert.equal(await navigator.open('music/live'), true);
+  assert.deepEqual(events, [
+    ['load', 'music/live'],
+    ['render', 'music/live'],
+    ['push', 'music/live'],
+  ]);
+});
+
+test('folder navigation ignores stale responses and restores history without another push', async () => {
+  assert.equal(typeof sharedFolderPage.createSharedFolderNavigator, 'function');
+  const pending = new Map();
+  const rendered = [];
+  const pushed = [];
+  const navigator = sharedFolderPage.createSharedFolderNavigator({
+    load: path => new Promise(resolve => pending.set(path, resolve)),
+    render: async response => rendered.push(response.path),
+    pushPath: path => pushed.push(path),
+    onError: error => assert.fail(error),
+  });
+
+  const slower = navigator.open('music');
+  const faster = navigator.restore('video');
+  pending.get('video')({ path: 'video', entries: [] });
+  assert.equal(await faster, true);
+  pending.get('music')({ path: 'music', entries: [] });
+  assert.equal(await slower, false);
+
+  assert.deepEqual(rendered, ['video']);
+  assert.deepEqual(pushed, []);
 });

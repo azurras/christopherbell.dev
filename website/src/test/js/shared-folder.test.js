@@ -494,4 +494,6 @@ test('shared-folder shell presents an explorer layout with compact actions and r
   assert.match(page, /API\.sharedFolder\.media\.playback/);
   assert.match(page, /shared-folder-media-retry/);
   assert.match(page, /API\.sharedFolder\.media\.stream/);
+  assert.match(page, /window\.history\.pushState/);
+  assert.doesNotMatch(page, /window\.location\.href\s*=/);
 });
