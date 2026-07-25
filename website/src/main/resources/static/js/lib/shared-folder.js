@@ -247,6 +247,13 @@ export function sharedFolderEntryKind(entry) {
   })[String(entry?.previewKind || '').toUpperCase()] || 'file';
 }
 
+/** Bring a newly selected file into view when the browser uses the stacked mobile layout. */
+export function revealSharedFolderPreview(preview, mobileView) {
+  if (!mobileView || typeof preview?.scrollIntoView !== 'function') return false;
+  preview.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return true;
+}
+
 /** Format a non-negative byte count without hiding the original order of magnitude. */
 export function formatSharedFolderSize(value) {
   const bytes = Number(value);

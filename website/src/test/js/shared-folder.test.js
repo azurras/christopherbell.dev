@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 import { API } from '../../main/resources/static/js/lib/api.js';
+import * as sharedFolder from '../../main/resources/static/js/lib/shared-folder.js';
 import {
   accountHasSharedFolderRead,
   accountHasSharedFolderWrite,
@@ -408,6 +409,22 @@ test('preview text is rendered as text and keyboard activation is explicit', () 
   assert.equal(shouldActivateEntry({ key: 'Enter' }), true);
   assert.equal(shouldActivateEntry({ key: ' ' }), true);
   assert.equal(shouldActivateEntry({ key: 'Tab' }), false);
+});
+
+test('mobile file selection reveals the preview without moving the desktop viewport', () => {
+  assert.equal(typeof sharedFolder.revealSharedFolderPreview, 'function');
+  const scrollRequests = [];
+  const preview = {
+    scrollIntoView(options) {
+      scrollRequests.push(options);
+    },
+  };
+
+  assert.equal(sharedFolder.revealSharedFolderPreview(preview, true), true);
+  assert.deepEqual(scrollRequests, [{ behavior: 'smooth', block: 'start' }]);
+  assert.equal(sharedFolder.revealSharedFolderPreview(preview, false), false);
+  assert.equal(sharedFolder.revealSharedFolderPreview(null, true), false);
+  assert.equal(scrollRequests.length, 1);
 });
 
 test('permission denial distinguishes 401 and 403 from other failures', () => {

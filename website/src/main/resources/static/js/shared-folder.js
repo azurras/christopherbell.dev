@@ -17,6 +17,7 @@ import {
   isSharedFolderAccessDenied,
   moveMutationPayload,
   renderPreviewText,
+  revealSharedFolderPreview,
   sharedFolderEntryKind,
   uploadProgressPercent,
   uploadIsTerminal,
@@ -148,6 +149,7 @@ async function preview(entry) {
     formatSharedFolderModifiedAt(entry.modifiedAt),
   ].join(' · ');
   host.append(metadata);
+  revealSharedFolderPreview(host, window.matchMedia('(max-width: 767px)').matches);
 
   if (entry.previewKind === 'TEXT') {
     let response;
