@@ -1,19 +1,45 @@
 name: Mark stale issues and pull requests
 
+permissions: {}
+
 on:
   schedule:
-  - cron: "0 0 * * *"
+    - cron: '43 7 * * *'
+  workflow_dispatch:
 
 jobs:
   stale:
-
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
 
     steps:
-    - uses: actions/stale@v10
-      with:
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-        stale-issue-message: 'Stale issue message'
-        stale-pr-message: 'Stale pull request message'
-        stale-issue-label: 'no-issue-activity'
-        stale-pr-label: 'no-pr-activity'
+      - uses: actions/stale@v10
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-issue-stale: 60
+          days-before-issue-close: 14
+          days-before-pr-stale: 30
+          days-before-pr-close: 14
+          stale-issue-message: >-
+            This issue has had no activity for 60 days. It will close after 14 more
+            days unless updated, assigned, placed on a roadmap milestone, or given
+            a pinned, roadmap, security, or codex protection label.
+          close-issue-message: >-
+            Closing after 74 days without activity. Reopen with current evidence
+            if the work is still needed.
+          stale-pr-message: >-
+            This pull request has had no activity for 30 days. It will close after
+            14 more days unless updated or given an exempt active-work label.
+          close-pr-message: >-
+            Closing after 44 days without activity. Open a current pull request
+            when the branch is ready for review.
+          stale-issue-label: 'no-issue-activity'
+          stale-pr-label: 'no-pr-activity'
+          exempt-issue-labels: 'pinned,roadmap,security,codex'
+          exempt-pr-labels: 'security,codex'
+          exempt-all-issue-milestones: true
+          exempt-all-issue-assignees: true
+          remove-stale-when-updated: true
+          operations-per-run: 100

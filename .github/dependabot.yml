@@ -1,10 +1,29 @@
 version: 2
 updates:
-- package-ecosystem: "gradle"
-  directory: "/"
-  schedule:
-    interval: "weekly"
-- package-ecosystem: "github-actions"
-  directory: "/"
-  schedule:
-    interval: "weekly"
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "java"]
+    groups:
+      spring:
+        patterns: ["org.springframework*", "io.spring*", "org.springdoc*"]
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:30"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "github_actions"]
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

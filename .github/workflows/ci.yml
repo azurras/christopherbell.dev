@@ -32,6 +32,11 @@ jobs:
         with:
           node-version: 24
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
       - name: Set BUILD_NUMBER env
         if: runner.os != 'Windows'
         run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
@@ -51,3 +56,15 @@ jobs:
       - name: Build and Test on Windows
         if: runner.os == 'Windows'
         run: .\gradlew.bat build
+
+      - name: Upload failed test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-${{ matrix.os }}-java-${{ matrix.java-version }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
+            **/build/reports/problems/**

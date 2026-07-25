@@ -419,3 +419,18 @@ Static JS changes are not visible:
 
 - Hard-refresh the browser.
 - Restart `:website:bootRun` if template or server config changed.
+
+## Repository Automation
+
+Pull requests and main run the Java 25 build on Ubuntu, macOS, and Windows.
+CI caches Gradle state and retains Java, JavaScript, and Gradle diagnostic
+reports for 14 days when a matrix job fails. Browser tests write JUnit XML
+under `website/build/test-results/jsTest/`.
+
+CodeQL analyzes Java changes and Dependency Review rejects newly introduced
+high-or-critical vulnerable dependencies. Dependabot groups weekly Gradle and
+GitHub Actions updates. Assigned, milestone, pinned, roadmap, security, and
+codex active work is exempt from the documented stale windows. Because the
+stale action cannot read GitHub pin metadata, apply the `pinned` label to every
+pinned issue; the `roadmap` label protects roadmap work that does not use a
+milestone.
