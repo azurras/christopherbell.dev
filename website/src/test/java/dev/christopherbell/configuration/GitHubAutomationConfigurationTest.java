@@ -33,7 +33,7 @@ class GitHubAutomationConfigurationTest {
   }
 
   @Test
-  void codeQlScansJavaWithNarrowPermissions() throws IOException {
+  void codeQlPreservesAllDefaultSetupLanguagesAndBuildsJava() throws IOException {
     var workflow = readYaml(".github/workflows/codeql.yml");
     assertThat(workflow.at("/permissions/contents").asText()).isEqualTo("read");
     assertThat(workflow.at("/permissions/security-events").asText()).isEqualTo("write");
@@ -41,9 +41,21 @@ class GitHubAutomationConfigurationTest {
     assertThat(workflow.at("/on/push/branches/0").asText()).isEqualTo("main");
     assertThat(workflow.at("/on/schedule/0/cron").asText()).isNotBlank();
 
+    var configurations = workflow.at("/jobs/analyze/strategy/matrix/include");
+    assertThat(textValues(configurations, "language"))
+        .containsExactlyInAnyOrder("java-kotlin", "javascript-typescript", "actions");
+    assertThat(entryFor(configurations, "language", "java-kotlin").path("build-mode").asText())
+        .isEqualTo("manual");
+    assertThat(entryFor(configurations, "language", "javascript-typescript")
+        .path("build-mode").asText()).isEqualTo("none");
+    assertThat(entryFor(configurations, "language", "actions").path("build-mode").asText())
+        .isEqualTo("none");
+
     var steps = workflow.at("/jobs/analyze/steps");
     assertThat(stepUsing(steps, "github/codeql-action/init@v4")
-        .at("/with/languages").asText()).isEqualTo("java-kotlin");
+        .at("/with/languages").asText()).isEqualTo("${{ matrix.language }}");
+    assertThat(stepRunning(steps, "./gradlew :website:classes").path("if").asText())
+        .isEqualTo("matrix.language == 'java-kotlin'");
     assertThat(stepUsing(steps, "github/codeql-action/analyze@v4").isMissingNode()).isFalse();
   }
 
@@ -125,8 +137,28 @@ class GitHubAutomationConfigurationTest {
         .orElse(MissingNode.getInstance());
   }
 
+  private static JsonNode entryFor(JsonNode entries, String field, String expected) {
+    return StreamSupport.stream(entries.spliterator(), false)
+        .filter(entry -> expected.equals(entry.path(field).asText()))
+        .findFirst()
+        .orElse(MissingNode.getInstance());
+  }
+
+  private static JsonNode stepRunning(JsonNode steps, String command) {
+    return StreamSupport.stream(steps.spliterator(), false)
+        .filter(step -> command.equals(step.path("run").asText()))
+        .findFirst()
+        .orElse(MissingNode.getInstance());
+  }
+
   private static List<String> textValues(JsonNode values) {
     return StreamSupport.stream(values.spliterator(), false).map(JsonNode::asText).toList();
+  }
+
+  private static List<String> textValues(JsonNode values, String field) {
+    return StreamSupport.stream(values.spliterator(), false)
+        .map(value -> value.path(field).asText())
+        .toList();
   }
 
   private static Path locateRepositoryRoot() {
