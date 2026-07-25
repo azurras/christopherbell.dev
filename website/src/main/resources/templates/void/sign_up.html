@@ -9,7 +9,7 @@
     <th:block th:replace="~{fragments/social-preview :: socialPreview('Void | Sign Up', 'Create an account and step into the Void feed.', 'https://www.christopherbell.dev/void/signup', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
     <title>Void | Sign Up</title>
 
-    <link rel="stylesheet" type="text/css" href="/css/main.css"/>
+    <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}"/>
 </head>
 
 <body>
@@ -23,7 +23,7 @@
         </div>
     </main>
     <footer id="footer"></footer>
-    <script type="module" src="/js/app.js"></script>
+    <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
 </body>
 
 </html>

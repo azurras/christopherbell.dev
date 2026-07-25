@@ -18,6 +18,7 @@ Describe 'production common operations' {
             backupRoot=$backup
             cloudflaredExe=(New-Item -ItemType File -Force (Join-Path $TestDrive 'cloudflared.exe')).FullName
             publicUrl='https://www.christopherbell.dev/'
+            publicUrls=@('https://christopherbell.dev/','https://www.christopherbell.dev/')
             smokeAccountEmail='admin@christopherbell.dev'; candidatePort=8081; productionPort=8080
             sensorLibrariesEnabled=$false
             releaseRetention=5; autoDeployPollSeconds=60; autoDeployFailureBackoffSeconds=900
@@ -34,6 +35,39 @@ Describe 'production common operations' {
         $config = Read-ProductionConfig -Path $configPath
         $config.publicUrl | Should -Be 'https://www.christopherbell.dev/'
         $config.PSObject.Properties.Name | Should -Not -Contain 'wslDistro'
+    }
+
+    It 'derives the apex and canonical roots for an existing www-only configuration' {
+        $validConfig.Remove('publicUrls')
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+
+        $config = Read-ProductionConfig -Path $configPath
+
+        @($config.publicUrls) | Should -Be @(
+            'https://christopherbell.dev/',
+            'https://www.christopherbell.dev/'
+        )
+    }
+
+    It 'requires explicitly configured roots to contain two unique absolute HTTPS roots' {
+        $validConfig.publicUrls = @('https://www.christopherbell.dev/')
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+        { Read-ProductionConfig -Path $configPath } | Should -Throw '*publicUrls*two*'
+
+        $validConfig.publicUrls = @('https://www.christopherbell.dev/','https://www.christopherbell.dev/')
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+        { Read-ProductionConfig -Path $configPath } | Should -Throw '*publicUrls*unique*'
+
+        $validConfig.publicUrls = @('http://christopherbell.dev/','https://www.christopherbell.dev/')
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+        { Read-ProductionConfig -Path $configPath } | Should -Throw '*publicUrls*HTTPS*'
+    }
+
+    It 'requires the canonical public URL in the public route roots' {
+        $validConfig.publicUrls = @('https://christopherbell.dev/','https://app.christopherbell.dev/')
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+
+        { Read-ProductionConfig -Path $configPath } | Should -Throw '*publicUrl*publicUrls*'
     }
 
     It 'rejects a missing or string sensor provider switch' {

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Report Post', 'Flag a Void post that needs a closer look.', 'https://www.christopherbell.dev/report', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
   <title>Report Post</title>
-  <link rel="stylesheet" type="text/css" href="/css/main.css"/>
+  <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}"/>
 </head>
 <body class="site-page report-page">
   <div id="nav"></div>
@@ -55,7 +55,7 @@
     </section>
   </main>
   <footer id="footer"></footer>
-  <script type="module" src="/js/app.js"></script>
-  <script type="module" src="/js/report.js"></script>
+  <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
+  <script type="module" src="/js/report.js" th:src="@{/js/report.js}"></script>
 </body>
 </html>

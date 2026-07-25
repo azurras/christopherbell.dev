@@ -1,5 +1,16 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:ProductionSmokePaths = @(
+    '/',
+    '/blog',
+    '/wfl',
+    '/canes-box-tracker',
+    '/robots.txt',
+    '/sitemap.xml',
+    '/favicon.ico',
+    '/actuator/health/liveness',
+    '/actuator/health/readiness'
+)
 function Resolve-OriginMainRelease {
     param($Config)
     $fetchArguments = Get-TrustedGitArguments $Config.repositoryPath @('fetch','--prune',$Config.remote,$Config.branch)
@@ -53,6 +64,11 @@ function Start-ProductionJar {
     if (-not (Test-Path -LiteralPath $jar -PathType Leaf)) { throw "Missing release JAR: $jar" }
     $environment = Read-ProductionEnvironment (Join-Path $Config.programDataRoot 'config\app.env')
     foreach ($entry in $AdditionalEnvironment.GetEnumerator()) { $environment[$entry.Key] = [string]$entry.Value }
+    $releaseCommit = Split-Path -Leaf $release
+    if ($releaseCommit -notmatch '^[0-9a-f]{40}$') {
+        throw 'Production release directory must use a full Git SHA.'
+    }
+    $environment.GIT_COMMIT = $releaseCommit
     $arguments = @(
         '-Xrs',
         '--enable-native-access=ALL-UNNAMED',
@@ -71,7 +87,18 @@ function Start-ProductionJar {
 
 function Test-ProductionEndpoints {
     param($Config, [int]$Port)
-    Wait-HttpStatus -Uri "http://127.0.0.1:$Port/" -ExpectedStatus 200 -Timeout ([timespan]::FromMinutes(3)) | Out-Null
+    for ($index = 0; $index -lt $script:ProductionSmokePaths.Count; $index++) {
+        $path = $script:ProductionSmokePaths[$index]
+        $timeout = if ($index -eq 0) {
+            [timespan]::FromMinutes(3)
+        } else {
+            [timespan]::FromSeconds(30)
+        }
+        Wait-HttpStatus `
+            -Uri "http://127.0.0.1:$Port$path" `
+            -ExpectedStatus 200 `
+            -Timeout $timeout | Out-Null
+    }
     $body = @{ email=$Config.smokeAccountEmail; password='deployment-smoke-intentionally-invalid' } | ConvertTo-Json
     $response = Invoke-ProductionWebRequest `
         -Uri "http://127.0.0.1:$Port/api/accounts/2024-12-15/login" `
@@ -81,6 +108,23 @@ function Test-ProductionEndpoints {
         -TimeoutSec 15
     if ([int]$response.StatusCode -ne 401) { throw "Smoke login expected HTTP 401, received $($response.StatusCode)." }
     if ([string]$response.Content -match 'RESOURCE_NOT_FOUND') { throw 'Smoke account was not found in the configured production database.' }
+}
+
+function Test-ProductionPublicEndpoints {
+    param($Config)
+    $checkCount = 0
+    foreach ($publicUrl in @($Config.publicUrls)) {
+        $baseUri = [uri]$publicUrl
+        foreach ($path in $script:ProductionSmokePaths) {
+            $uri = [uri]::new($baseUri, $path.TrimStart('/'))
+            Wait-HttpStatus `
+                -Uri $uri `
+                -ExpectedStatus 200 `
+                -Timeout ([timespan]::FromSeconds(30)) | Out-Null
+            $checkCount++
+        }
+    }
+    return $checkCount
 }
 
 function Test-CandidateRelease {
@@ -403,6 +447,7 @@ function Switch-ProductionRelease {
         Set-AtomicJunction $Config $currentPath $release
         Start-Service ChristopherBellDev
         Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
+        Test-ProductionPublicEndpoints -Config $Config | Out-Null
     } catch {
         $deploymentFailure = $_.Exception
         if ($old) {
@@ -411,6 +456,7 @@ function Switch-ProductionRelease {
                 Set-AtomicJunction $Config $currentPath $old
                 Start-Service ChristopherBellDev
                 Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
+                Test-ProductionPublicEndpoints -Config $Config | Out-Null
             } catch {
                 throw [System.AggregateException]::new(
                     'Production deployment and automatic rollback both failed.',
@@ -451,4 +497,4 @@ function Invoke-ProductionDeploy {
     } finally { $lock.Dispose() }
 }
 
-Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,New-ReleaseFromOriginMain,Start-ProductionJar,Test-ProductionEndpoints,Test-CandidateRelease,Stop-ProductionWebsiteService,Switch-ProductionRelease,Remove-ExpiredReleases
+Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,New-ReleaseFromOriginMain,Start-ProductionJar,Test-ProductionEndpoints,Test-ProductionPublicEndpoints,Test-CandidateRelease,Stop-ProductionWebsiteService,Switch-ProductionRelease,Remove-ExpiredReleases

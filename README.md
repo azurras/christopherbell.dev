@@ -374,7 +374,14 @@ soon as installation succeeds. Existing cloudflared services do not require the
 token again. `deploy` fetches the exact latest `origin/main` commit into a clean
 detached Windows worktree, builds and tests it, validates it on port 8081,
 atomically switches the active release, and rolls back when port-8080
-verification fails.
+or public-route verification fails. Candidate and production checks cover the
+home, blog, WFL, Canes tracker, crawler metadata, favicon, liveness, and
+readiness routes. Protected `deploy.json` configuration lists both
+`https://christopherbell.dev/` and `https://www.christopherbell.dev/` in
+`publicUrls`; `publicUrl` remains the canonical `www` root. Existing protected
+configurations that predate `publicUrls` derive the apex root from that canonical
+`www` root in memory, so the first upgraded deployment does not require rewriting
+the secret-bearing configuration file.
 
 `auto-install` creates a hidden, noninteractive SYSTEM Scheduled Task that runs
 at boot and once per minute. Each invocation checks the remote SHA once and
@@ -403,6 +410,17 @@ WinSW and Windows shutdown executables configured in `application-prod.yml`.
 Local/default operation remains simulated. Before changing these paths, confirm
 they still match the installed service layout; browser requests cannot supply or
 override executable, service, or log paths.
+
+Public crawler and availability contracts:
+
+- `/robots.txt` and `/sitemap.xml` are public, deterministic, and revalidated.
+- `/actuator/health/liveness` and `/actuator/health/readiness` are public and
+  expose status without component details. The readiness group includes MongoDB.
+- `/actuator/health` and component-specific health routes remain protected.
+- Thymeleaf emits release-SHA-prefixed CSS, JavaScript, image, and favicon URLs;
+  those responses use one-year immutable public caching, while direct
+  unversioned paths use a bounded one-hour cache. Relative ES-module imports
+  stay within the same versioned namespace.
 
 ### MongoDB Backups and Restores
 
