@@ -10,5 +10,5 @@ if not exist "%PWSH_EXE%" (
     exit /b 1
 )
 :run
-"%PWSH_EXE%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%ops\production\windows\prod.ps1" %*
+"%PWSH_EXE%" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%SCRIPT_DIR%ops\production\windows\prod.ps1" %*
 exit /b %ERRORLEVEL%

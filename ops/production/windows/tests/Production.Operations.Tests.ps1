@@ -11,14 +11,28 @@ Describe 'native Windows production operations' {
                 [pscustomobject]@{
                     State = 'Ready'
                     Principal = [pscustomobject]@{ UserId='SYSTEM'; LogonType='ServiceAccount'; RunLevel='Highest' }
-                    Triggers = @([pscustomobject]@{ Enabled=$true; CimClass=[pscustomobject]@{ CimClassName='MSFT_TaskBootTrigger' } })
+                    Triggers = @(
+                        [pscustomobject]@{
+                            Enabled=$true
+                            CimClass=[pscustomobject]@{ CimClassName='MSFT_TaskBootTrigger' }
+                        }
+                        [pscustomobject]@{
+                            Enabled=$true
+                            Repetition=[pscustomobject]@{ Interval='PT1M' }
+                            CimClass=[pscustomobject]@{ CimClassName='MSFT_TaskTimeTrigger' }
+                        }
+                    )
                     Actions = @([pscustomobject]@{
                         Execute = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
-                        Arguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$ProgramDataRoot\tools\prod.ps1`" auto-deploy"
+                        Arguments = "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ProgramDataRoot\tools\prod.ps1`" auto-deploy"
                     })
                     Settings = [pscustomobject]@{
                         Enabled=$true
-                        ExecutionTimeLimit='PT0S'
+                        Hidden=$true
+                        StartWhenAvailable=$true
+                        DisallowStartIfOnBatteries=$false
+                        StopIfGoingOnBatteries=$false
+                        ExecutionTimeLimit='PT2H'
                         RestartCount=3
                         RestartInterval='PT1M'
                         MultipleInstances='IgnoreNew'
@@ -319,7 +333,7 @@ Describe 'native Windows production operations' {
             Should -Invoke Assert-ProductionSensorReady -Times 0
         }
 
-        It 'accepts the complete automatic deployment startup contract' {
+        It 'accepts the complete hidden repeating automatic deployment contract' {
             $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60 }
             { Assert-AutoDeployTaskContract -Task (New-ValidStartupTask) -Config $config } | Should -Not -Throw
         }
@@ -335,7 +349,22 @@ Describe 'native Windows production operations' {
             $task = New-ValidStartupTask
             $task.Triggers[0].CimClass.CimClassName = 'MSFT_TaskLogonTrigger'
             $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60 }
-            { Assert-AutoDeployTaskContract -Task $task -Config $config } | Should -Throw '*startup trigger*'
+            { Assert-AutoDeployTaskContract -Task $task -Config $config } | Should -Throw '*startup and one-minute repeating triggers*'
+        }
+
+        It 'rejects an automatic deployment task without a one-minute repeating trigger' {
+            $task = New-ValidStartupTask
+            $task.Triggers = @($task.Triggers[0])
+            $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60 }
+            { Assert-AutoDeployTaskContract -Task $task -Config $config } | Should -Throw '*repeating trigger*'
+        }
+
+        It 'rejects a visible or interactive automatic deployment task' {
+            $task = New-ValidStartupTask
+            $task.Settings.Hidden = $false
+            $task.Actions[0].Arguments = $task.Actions[0].Arguments.Replace(' -NonInteractive -WindowStyle Hidden', '')
+            $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=60 }
+            { Assert-AutoDeployTaskContract -Task $task -Config $config } | Should -Throw '*hidden and noninteractive*'
         }
 
         It 'rejects an automatic deployment task with a disabled boot trigger' {

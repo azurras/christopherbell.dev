@@ -144,11 +144,18 @@ function Assert-AutoDeployTaskContract {
     }
     $triggers = @($Task.Triggers)
     $startupTrigger = @($triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskBootTrigger' })
-    if ($triggers.Count -ne 1 -or $startupTrigger.Count -ne 1) {
-        throw 'ChristopherBellAutoDeploy must have exactly one startup trigger.'
+    $repeatingTrigger = @($triggers | Where-Object {
+        $_.CimClass.CimClassName -eq 'MSFT_TaskTimeTrigger' -and
+        [string]$_.Repetition.Interval -eq 'PT1M'
+    })
+    if ($triggers.Count -ne 2 -or $startupTrigger.Count -ne 1 -or $repeatingTrigger.Count -ne 1) {
+        throw 'ChristopherBellAutoDeploy must have startup and one-minute repeating triggers.'
     }
     if (-not $startupTrigger[0].Enabled) {
         throw 'ChristopherBellAutoDeploy must have an enabled startup trigger.'
+    }
+    if (-not $repeatingTrigger[0].Enabled) {
+        throw 'ChristopherBellAutoDeploy must have an enabled one-minute repeating trigger.'
     }
     $actions = @($Task.Actions)
     if ($actions.Count -ne 1) { throw 'ChristopherBellAutoDeploy must have exactly one action.' }
@@ -156,12 +163,17 @@ function Assert-AutoDeployTaskContract {
     if (-not [string]::Equals([string]$actions[0].Execute, $expectedPowerShell, [StringComparison]::OrdinalIgnoreCase)) {
         throw "ChristopherBellAutoDeploy must use the PowerShell 7 executable at $expectedPowerShell."
     }
-    $expectedArguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$($Config.programDataRoot)\tools\prod.ps1`" auto-deploy"
+    $expectedArguments = "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden " +
+        "-ExecutionPolicy Bypass -File `"$($Config.programDataRoot)\tools\prod.ps1`" auto-deploy"
     if ([string]$actions[0].Arguments -ne $expectedArguments) {
-        throw 'ChristopherBellAutoDeploy must run the installed production auto-deploy command.'
+        throw 'ChristopherBellAutoDeploy must run the installed production auto-deploy command hidden and noninteractive.'
     }
-    if ([string]$Task.Settings.ExecutionTimeLimit -ne 'PT0S') {
-        throw 'ChristopherBellAutoDeploy must have an unlimited execution time.'
+    if (-not $Task.Settings.Hidden -or -not $Task.Settings.StartWhenAvailable -or
+        $Task.Settings.DisallowStartIfOnBatteries -or $Task.Settings.StopIfGoingOnBatteries) {
+        throw 'ChristopherBellAutoDeploy must remain hidden and available without interactive power-state prompts.'
+    }
+    if ([string]$Task.Settings.ExecutionTimeLimit -ne 'PT2H') {
+        throw 'ChristopherBellAutoDeploy must bound each deployment check to two hours.'
     }
     if ([int]$Task.Settings.RestartCount -lt 3 -or [string]$Task.Settings.RestartInterval -ne 'PT1M') {
         throw 'ChristopherBellAutoDeploy must restart at least three times at one-minute intervals.'

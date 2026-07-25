@@ -376,10 +376,13 @@ detached Windows worktree, builds and tests it, validates it on port 8081,
 atomically switches the active release, and rolls back when port-8080
 verification fails.
 
-`auto-install` creates a boot-started Scheduled Task that checks the remote SHA
-once per minute. Unchanged checks do not fetch, build, or restart the site. A
-changed SHA enters the same locked deployment and rollback pipeline; no inbound
-webhook or GitHub runner is required.
+`auto-install` creates a hidden, noninteractive SYSTEM Scheduled Task that runs
+at boot and once per minute. Each invocation checks the remote SHA once and
+exits, so there is no persistent terminal process to interrupt or confirm.
+Unchanged checks do not fetch, build, or restart the site. A changed SHA enters
+the same locked deployment and rollback pipeline; no inbound webhook, GitHub
+runner, routine administrator approval, or manual deployment command is
+required.
 
 Common operations:
 

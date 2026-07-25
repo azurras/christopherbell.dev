@@ -77,13 +77,11 @@ function Invoke-AutoDeployOnce {
 
 function Start-AutoDeployLoop {
     $config = Read-ProductionConfig
-    while ($true) {
-        try { Invoke-AutoDeployOnce $config }
-        catch {
-            $log = Join-Path $config.programDataRoot 'logs\auto-deploy-errors.log'
-            "$(Get-Date -Format o) $($_.Exception.Message)" | Add-Content -LiteralPath $log
-        }
-        Start-Sleep -Seconds ([int]$config.autoDeployPollSeconds)
+    try { Invoke-AutoDeployOnce $config }
+    catch {
+        $log = Join-Path $config.programDataRoot 'logs\auto-deploy-errors.log'
+        "$(Get-Date -Format o) $($_.Exception.Message)" | Add-Content -LiteralPath $log
+        throw
     }
 }
 
@@ -127,11 +125,33 @@ function Install-AutoDeployTask {
         Copy-Item (Join-Path $PSScriptRoot '..\*') $tools -Recurse -Force
         Protect-ProductionTree -Path $tools
         Assert-ProtectedProductionTree -Path $tools
-        $action = New-ScheduledTaskAction -Execute (Resolve-PowerShell7Executable) -Argument "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$tools\prod.ps1`" auto-deploy"
-        $trigger = New-ScheduledTaskTrigger -AtStartup
-        $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([timespan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
+        $actionArguments = "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden " +
+            "-ExecutionPolicy Bypass -File `"$tools\prod.ps1`" auto-deploy"
+        $action = New-ScheduledTaskAction `
+            -Execute (Resolve-PowerShell7Executable) `
+            -Argument $actionArguments
+        $startupTrigger = New-ScheduledTaskTrigger -AtStartup
+        $repeatingTrigger = New-ScheduledTaskTrigger `
+            -Once `
+            -At (Get-Date).AddMinutes(1) `
+            -RepetitionInterval (New-TimeSpan -Seconds ([int]$config.autoDeployPollSeconds))
+        $settings = New-ScheduledTaskSettingsSet `
+            -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
+            -RestartCount 3 `
+            -RestartInterval (New-TimeSpan -Minutes 1) `
+            -MultipleInstances IgnoreNew `
+            -Hidden `
+            -StartWhenAvailable `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries
         $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-        Register-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+        Register-ScheduledTask `
+            -TaskName 'ChristopherBellAutoDeploy' `
+            -Action $action `
+            -Trigger @($startupTrigger, $repeatingTrigger) `
+            -Settings $settings `
+            -Principal $principal `
+            -Force | Out-Null
     }
     finally {
         $lock.Dispose()

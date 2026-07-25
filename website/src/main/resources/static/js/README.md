@@ -128,6 +128,10 @@ Owns browser-side behavior for server-rendered pages.
   per-client token on 401 or logout. Native media also stages one exact preview or job-stream URL
   in bounded volatile worker memory so mobile browsers can issue repeated range requests even
   when they omit the page client ID; those entries expire and are cleared with their owner.
+  Folder navigation replaces only the breadcrumbs, toolbar, and entry list, leaving the mounted
+  media player running while the user browses. Browser history restores folders without a page
+  reload, and a navigation generation guard prevents slower stale responses from replacing the
+  latest folder.
   Text and native-stream 401/403 responses use one actionable
   access-loss handler. Its root bootstrap script is intentionally public for exact anonymous
   `GET /shared-folder-auth-sw.js` so installation can happen before it has a bearer token; all

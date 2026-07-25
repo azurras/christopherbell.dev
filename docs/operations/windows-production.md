@@ -18,9 +18,10 @@ Cloudflare edge
   -> MongoDB Windows service (Automatic)
 ```
 
-`ChristopherBellAutoDeploy` is a SYSTEM Scheduled Task with an AtStartup
-trigger. It checks `origin/main` once per minute and deploys only when the remote
-SHA differs from the active release.
+`ChristopherBellAutoDeploy` is a hidden, noninteractive SYSTEM Scheduled Task
+with startup and one-minute repeating triggers. Each invocation checks
+`origin/main` once and exits. It deploys only when the remote SHA differs from
+the active release.
 
 ## Prerequisites
 
@@ -142,8 +143,9 @@ Installation configures:
 - `ChristopherBellMediaWorker`: delayed Automatic startup as LocalService,
   below-normal priority, bounded rolling logs, and restart-on-failure recovery.
 - `cloudflared`: Automatic startup and restart-on-failure recovery.
-- `ChristopherBellAutoDeploy`: SYSTEM principal, highest privileges, AtStartup
-  trigger, and bounded restart policy.
+- `ChristopherBellAutoDeploy`: SYSTEM principal, highest privileges, hidden
+  noninteractive action, startup plus one-minute repeating triggers, a two-hour
+  execution bound, and bounded restart policy.
 
 Verify the existing website, database, tunnel, deployment-task, and smoke-test
 contract with:
@@ -238,9 +240,11 @@ release and does not depend on refreshing the installed service launcher.
 
 Normal releases require only a merge or push to `origin/main`. The poller reads
 the remote SHA without an inbound webhook or GitHub token. Unchanged checks do
-not fetch, build, restart, or modify the database.
+not fetch, build, restart, or modify the database. The one-shot check runs as a
+hidden, noninteractive SYSTEM task, so routine releases require neither a
+visible terminal nor an administrator approval prompt.
 
-Manual deployment remains available:
+Manual deployment remains available as a break-glass operation:
 
 ```powershell
 .\prod.cmd deploy -WhatIf
