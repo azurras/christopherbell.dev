@@ -37,10 +37,22 @@ Describe 'production common operations' {
         $config.PSObject.Properties.Name | Should -Not -Contain 'wslDistro'
     }
 
-    It 'requires both unique absolute HTTPS public roots' {
+    It 'derives the apex and canonical roots for an existing www-only configuration' {
         $validConfig.Remove('publicUrls')
         $validConfig | ConvertTo-Json | Set-Content $configPath
-        { Read-ProductionConfig -Path $configPath } | Should -Throw '*publicUrls*'
+
+        $config = Read-ProductionConfig -Path $configPath
+
+        @($config.publicUrls) | Should -Be @(
+            'https://christopherbell.dev/',
+            'https://www.christopherbell.dev/'
+        )
+    }
+
+    It 'requires explicitly configured roots to contain two unique absolute HTTPS roots' {
+        $validConfig.publicUrls = @('https://www.christopherbell.dev/')
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+        { Read-ProductionConfig -Path $configPath } | Should -Throw '*publicUrls*two*'
 
         $validConfig.publicUrls = @('https://www.christopherbell.dev/','https://www.christopherbell.dev/')
         $validConfig | ConvertTo-Json | Set-Content $configPath

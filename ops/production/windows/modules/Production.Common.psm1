@@ -16,6 +16,27 @@ function Read-ProductionConfig {
         }
     }
     $publicUrlsProperty = $config.PSObject.Properties['publicUrls']
+    if (-not $publicUrlsProperty) {
+        $canonicalRoot = $null
+        $isCanonicalRoot = [uri]::TryCreate(
+            [string]$config.publicUrl,
+            [UriKind]::Absolute,
+            [ref]$canonicalRoot) -and
+            $canonicalRoot.Scheme -eq 'https' -and
+            $canonicalRoot.AbsolutePath -eq '/' -and
+            [string]::IsNullOrEmpty($canonicalRoot.Query) -and
+            [string]::IsNullOrEmpty($canonicalRoot.Fragment) -and
+            $canonicalRoot.Host.StartsWith('www.', [StringComparison]::OrdinalIgnoreCase)
+        if ($isCanonicalRoot) {
+            $apexRoot = [UriBuilder]::new($canonicalRoot)
+            $apexRoot.Host = $canonicalRoot.Host.Substring(4)
+            $config | Add-Member -MemberType NoteProperty -Name 'publicUrls' -Value @(
+                $apexRoot.Uri.AbsoluteUri,
+                $canonicalRoot.AbsoluteUri
+            )
+            $publicUrlsProperty = $config.PSObject.Properties['publicUrls']
+        }
+    }
     $publicUrls = @()
     if ($publicUrlsProperty) { $publicUrls = @($publicUrlsProperty.Value) }
     if ($publicUrls.Count -lt 2) {

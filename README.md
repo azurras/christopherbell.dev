@@ -378,7 +378,10 @@ or public-route verification fails. Candidate and production checks cover the
 home, blog, WFL, Canes tracker, crawler metadata, favicon, liveness, and
 readiness routes. Protected `deploy.json` configuration lists both
 `https://christopherbell.dev/` and `https://www.christopherbell.dev/` in
-`publicUrls`; `publicUrl` remains the canonical `www` root.
+`publicUrls`; `publicUrl` remains the canonical `www` root. Existing protected
+configurations that predate `publicUrls` derive the apex root from that canonical
+`www` root in memory, so the first upgraded deployment does not require rewriting
+the secret-bearing configuration file.
 
 `auto-install` creates a hidden, noninteractive SYSTEM Scheduled Task that runs
 at boot and once per minute. Each invocation checks the remote SHA once and
