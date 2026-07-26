@@ -4,6 +4,10 @@ import static dev.christopherbell.libs.api.APIVersion.V20260717;
 
 import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewResponse;
+import dev.christopherbell.sharedfolder.model.SharedFolderSearchResponse;
+import dev.christopherbell.sharedfolder.model.SharedFolderRadioDurationRequest;
+import dev.christopherbell.sharedfolder.model.SharedFolderRadioResponse;
+import dev.christopherbell.sharedfolder.radio.SharedFolderRadioService;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
@@ -12,6 +16,7 @@ import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService.Shar
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService.SharedFolderPreview;
 import dev.christopherbell.sharedfolder.service.SharedFolderBrowserService;
+import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
 import dev.christopherbell.sharedfolder.service.SharedFolderRangeNotSatisfiableException;
 import java.util.List;
 import org.springframework.core.io.Resource;
@@ -19,6 +24,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -30,21 +37,27 @@ import org.springframework.web.bind.annotation.RestController;
 public class SharedFolderReadController {
   private final SharedFolderAccessService access;
   private final SharedFolderBrowserService browser;
+  private final SharedFolderCatalogService catalog;
   private final SharedFolderDownloadService downloads;
   private final SharedFolderPreviewService previews;
+  private final SharedFolderRadioService radio;
   private final SharedFolderAuditRecorder audit;
 
   /** Creates the protected read-only endpoint group. */
   public SharedFolderReadController(
       SharedFolderAccessService access,
       SharedFolderBrowserService browser,
+      SharedFolderCatalogService catalog,
       SharedFolderDownloadService downloads,
       SharedFolderPreviewService previews,
+      SharedFolderRadioService radio,
       SharedFolderAuditRecorder audit) {
     this.access = access;
     this.browser = browser;
+    this.catalog = catalog;
     this.downloads = downloads;
     this.previews = previews;
+    this.radio = radio;
     this.audit = audit;
   }
 
@@ -61,6 +74,45 @@ public class SharedFolderReadController {
     } catch (RuntimeException failure) {
       throw failure;
     }
+  }
+
+  /** Searches the fresh public-safe catalog after refreshing effective read access. */
+  @GetMapping("/search")
+  public ResponseEntity<SharedFolderSearchResponse> search(
+      @RequestParam(required = false) String query) {
+    try {
+      Account account = access.requireRead();
+      SharedFolderSearchResponse response = catalog.search(query);
+      audit.recordFor(account, "SEARCH", "search", null, "accepted", null);
+      return ResponseEntity.ok()
+          .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+          .body(response);
+    } catch (RuntimeException failure) {
+      throw failure;
+    }
+  }
+
+  /** Returns the durable station state after refreshing effective read access. */
+  @GetMapping("/radio")
+  public ResponseEntity<SharedFolderRadioResponse> currentRadio() {
+    Account account = access.requireRead();
+    SharedFolderRadioResponse response = radio.current();
+    audit.recordFor(account, "RADIO_LISTEN", "radio", null, "accepted", null);
+    return ResponseEntity.ok()
+        .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+        .body(response);
+  }
+
+  /** Applies a bounded active-track duration report after refreshing effective read access. */
+  @PostMapping("/radio/duration")
+  public ResponseEntity<SharedFolderRadioResponse> reportRadioDuration(
+      @RequestBody SharedFolderRadioDurationRequest request) {
+    Account account = access.requireRead();
+    SharedFolderRadioResponse response = radio.reportDuration(request);
+    audit.recordFor(account, "RADIO_DURATION_REPORTED", "radio", null, "accepted", null);
+    return ResponseEntity.ok()
+        .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+        .body(response);
   }
 
   /**

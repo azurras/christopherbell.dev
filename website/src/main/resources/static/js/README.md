@@ -124,7 +124,9 @@ Owns browser-side behavior for server-rendered pages.
   shown inline. The worker handles only the exact versioned shared-folder API prefix and forwards the original
   cookie-authenticated request with its `Range` and credentials mode intact and
   `cache: 'no-store'`; it never receives, stores, or attaches a bearer token.
-  Folder navigation replaces only the breadcrumbs, toolbar, and entry list. Browser history restores folders without a page
+  Folder navigation replaces only the breadcrumbs, toolbar, and entry list. Its semantic global-search form validates the
+  recursive response before rendering, labels each result with its parent path as text, reports server-side result caps,
+  cancels stale requests, and restores the active folder when cleared. Browser history restores folders without a page
   reload, and a navigation generation guard prevents slower stale responses from replacing the
   latest folder.
   Text and native-stream 401/403 responses use one actionable

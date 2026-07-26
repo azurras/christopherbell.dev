@@ -70,6 +70,18 @@ Unavailable` and never falls back to an unchecked production path.
   uses a revalidating disk-backed resource plus a bounded range resource for streaming and supports
   exactly one HTTP byte range, including correct `206`, `416`, `Content-Range`, `Accept-Ranges`,
   and `HEAD` semantics. It never calls `readAllBytes` or exposes an absolute local path.
+- `GET /search?query=...` requires a trimmed one-to-200-character query and returns at most 200
+  case-insensitive name or relative-path matches from a public-safe, breadth-first catalog snapshot
+  that is refreshed at most once every 15 seconds. Catalog traversal calls only the existing
+  held-root browser boundary; neither the response nor the `SEARCH` audit action includes a local
+  absolute path.
+- `GET /radio` returns one Mongo-backed station shared by all authorized readers, selecting only
+  audio files recursively below the root-level `Music` directory. `POST /radio/duration` accepts
+  only a finite one-to-86,400-second observation for the active path and sequence. Station
+  transitions snapshot the catalog before their in-process lock, avoid immediate repeats when at
+  least two tracks exist, and expose only public-safe entry metadata with server-computed timing.
+  An empty catalog persists a tombstone identity so removed tracks cannot accept duration reports
+  or resume stale playback when music reappears; station sequences remain monotonic throughout.
 - `GET /preview` returns bounded UTF-8 text as JSON for text files; allowlisted raster image,
   audio, video, and PDF types stream inline. HTML, SVG, and every unknown type stay attachment
   only. Native media `Range` requests are preserved through to Spring's resource streaming.

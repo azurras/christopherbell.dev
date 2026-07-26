@@ -9,6 +9,8 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -19,7 +21,12 @@ import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntryType;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
+import dev.christopherbell.sharedfolder.model.SharedFolderSearchResponse;
+import dev.christopherbell.sharedfolder.model.SharedFolderRadioDurationRequest;
+import dev.christopherbell.sharedfolder.model.SharedFolderRadioResponse;
+import dev.christopherbell.sharedfolder.radio.SharedFolderRadioService;
 import dev.christopherbell.sharedfolder.service.SharedFolderBrowserService;
+import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
 import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService;
 import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService.SharedFolderDownload;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
@@ -70,14 +77,21 @@ class SharedFolderReadControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private SharedFolderAccessService access;
   @MockitoBean private SharedFolderBrowserService browser;
+  @MockitoBean private SharedFolderCatalogService catalog;
   @MockitoBean private SharedFolderDownloadService downloads;
   @MockitoBean private SharedFolderPreviewService previews;
+  @MockitoBean private SharedFolderRadioService radio;
   @MockitoBean private SharedFolderAuditRecorder audit;
 
   @Test
   void everyReadRoute_whenAnonymous_returnsUnauthorized() throws Exception {
     for (MockHttpServletRequestBuilder request : List.of(
         get(BASE + "/entries").queryParam("path", "music"),
+        get(BASE + "/search").queryParam("query", "track"),
+        get(BASE + "/search"),
+        get(BASE + "/radio"),
+        post(BASE + "/radio/duration").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"stationSequence\":1,\"path\":\"Music/song.mp3\",\"durationSeconds\":120}"),
         get(BASE + "/content").queryParam("path", "music/track.flac"),
         get(BASE + "/preview").queryParam("path", "music/notes.txt"))) {
       mockMvc.perform(request)
@@ -85,7 +99,7 @@ class SharedFolderReadControllerTest {
           .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
     }
 
-    verifyNoInteractions(access, browser, downloads, previews);
+    verifyNoInteractions(access, browser, catalog, downloads, previews, radio);
   }
 
   @Test
@@ -131,6 +145,11 @@ class SharedFolderReadControllerTest {
 
     for (MockHttpServletRequestBuilder request : List.of(
         get(BASE + "/entries").queryParam("path", "music"),
+        get(BASE + "/search").queryParam("query", "track"),
+        get(BASE + "/search"),
+        get(BASE + "/radio"),
+        post(BASE + "/radio/duration").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"stationSequence\":1,\"path\":\"Music/song.mp3\",\"durationSeconds\":120}"),
         get(BASE + "/content").queryParam("path", "music/track.flac"),
         get(BASE + "/preview").queryParam("path", "music/notes.txt"))) {
       mockMvc.perform(request)
@@ -138,7 +157,95 @@ class SharedFolderReadControllerTest {
           .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
     }
 
-    verifyNoInteractions(browser, downloads, previews);
+    verifyNoInteractions(browser, catalog, downloads, previews, radio);
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void readUser_canListenToPublicSafeRadioStateWithFreshAccess() throws Exception {
+    SharedDirectoryEntry track = new SharedDirectoryEntry(
+        "song.mp3", "Music/song.mp3", SharedDirectoryEntryType.FILE, 128,
+        Instant.parse("2026-07-25T12:00:00Z"), SharedFolderPreviewKind.AUDIO,
+        "observed-token");
+    SharedFolderRadioResponse response = SharedFolderRadioResponse.playing(
+        new SharedFolderRadioResponse.Playback(
+            7, Instant.parse("2026-07-25T12:01:00Z"), 12.5, 180.0, track));
+    when(radio.current()).thenReturn(response);
+
+    mockMvc.perform(get(BASE + "/radio"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
+        .andExpect(jsonPath("$.status").value("PLAYING"))
+        .andExpect(jsonPath("$.playback.stationSequence").value(7))
+        .andExpect(jsonPath("$.playback.positionSeconds").value(12.5))
+        .andExpect(jsonPath("$.playback.entry.path").value("Music/song.mp3"))
+        .andExpect(content().string(not(containsString("A:\\Shared"))));
+
+    verify(access).requireRead();
+    verify(radio).current();
+    verify(audit).recordFor(null, "RADIO_LISTEN", "radio", null, "accepted", null);
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void durationReport_refreshesAccessBeforeValidationAndAuditsOnlyAcceptedState()
+      throws Exception {
+    SharedDirectoryEntry track = new SharedDirectoryEntry(
+        "song.mp3", "Music/song.mp3", SharedDirectoryEntryType.FILE, 128,
+        Instant.parse("2026-07-25T12:00:00Z"), SharedFolderPreviewKind.AUDIO);
+    SharedFolderRadioResponse response = SharedFolderRadioResponse.playing(
+        new SharedFolderRadioResponse.Playback(
+            7, Instant.parse("2026-07-25T12:01:00Z"), 12.5, 180.0, track));
+    SharedFolderRadioDurationRequest request = new SharedFolderRadioDurationRequest(
+        7, "Music/song.mp3", 180);
+    when(radio.reportDuration(request)).thenReturn(response);
+
+    mockMvc.perform(post(BASE + "/radio/duration").with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"stationSequence\":7,\"path\":\"Music/song.mp3\",\"durationSeconds\":180}"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
+        .andExpect(jsonPath("$.status").value("PLAYING"))
+        .andExpect(jsonPath("$.playback.durationSeconds").value(180.0));
+
+    verify(access).requireRead();
+    verify(radio).reportDuration(request);
+    verify(audit).recordFor(
+        null, "RADIO_DURATION_REPORTED", "radio", null, "accepted", null);
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void missingSearchQuery_refreshesReadAccessBeforeCatalogValidation() throws Exception {
+    when(catalog.search(null)).thenThrow(new ResponseStatusException(
+        org.springframework.http.HttpStatus.BAD_REQUEST, "Search query is required"));
+
+    mockMvc.perform(get(BASE + "/search"))
+        .andExpect(status().isBadRequest())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
+
+    verify(access).requireRead();
+    verify(catalog).search(null);
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void readUser_canSearchWithFreshAccessAndReceivesOnlyPublicSafeMetadata() throws Exception {
+    when(catalog.search("track")).thenReturn(new SharedFolderSearchResponse("track", List.of(
+        new SharedDirectoryEntry("track.flac", "music/track.flac", SharedDirectoryEntryType.FILE,
+            10, Instant.parse("2026-07-17T00:00:00Z"), SharedFolderPreviewKind.AUDIO)), false));
+
+    mockMvc.perform(get(BASE + "/search").queryParam("query", "track"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
+        .andExpect(jsonPath("$.query").value("track"))
+        .andExpect(jsonPath("$.entries[0].path").value("music/track.flac"))
+        .andExpect(jsonPath("$.truncated").value(false))
+        .andExpect(content().string(not(containsString("A:\\Shared"))));
+
+    verify(access).requireRead();
+    verify(catalog).search("track");
+    verify(audit).recordFor(null, "SEARCH", "search", null, "accepted", null);
   }
 
   @Test

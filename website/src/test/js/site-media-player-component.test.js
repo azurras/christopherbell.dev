@@ -13,6 +13,29 @@ globalThis.customElements = {
 const { SiteMediaPlayer } = await import(
   '../../main/resources/static/js/components/site-media-player.js');
 
+test('failed Play resync is consumed without an immediate repeated radio operation', async () => {
+  const player = Object.create(SiteMediaPlayer.prototype);
+  player.radioController = new AbortController();
+  player.radioGeneration = 7;
+  player.radioPlayRequested = false;
+  player.radioSyncPromise = null;
+  let operationCalls = 0;
+  player.performRadioSync = () => {
+    operationCalls += 1;
+    return operationCalls === 1
+      ? Promise.reject(new Error('Radio request failed'))
+      : new Promise(() => {});
+  };
+  player.handleRadioSyncError = () => {};
+
+  assert.equal(await player.syncRadio({ requestPlay: true }), false);
+  await Promise.resolve();
+
+  assert.equal(operationCalls, 1);
+  assert.equal(player.radioPlayRequested, false);
+  assert.equal(player.radioSyncPromise, null);
+});
+
 test('component keeps playing intent when restored autoplay emits pause and rejects', async () => {
   const storage = memoryStorage();
   globalThis.sessionStorage = storage;

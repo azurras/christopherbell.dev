@@ -229,6 +229,79 @@ export function breadcrumbItems(path = '') {
   return items;
 }
 
+/** Validate and copy one untrusted recursive-search result before the browser renders it. */
+function validatedSharedFolderSearchEntry(entry) {
+  const safeRelativePath = typeof entry?.path === 'string'
+    && entry.path.length > 0
+    && !entry.path.includes('\\')
+    && !entry.path.includes('\0')
+    && entry.path.split('/').every(segment => segment && segment !== '.' && segment !== '..');
+  const finalPathSegment = safeRelativePath
+    ? entry.path.slice(entry.path.lastIndexOf('/') + 1) : null;
+  const safeName = typeof entry?.name === 'string'
+    && entry.name === entry.name.trim()
+    && !/[\\/\u0000-\u001F\u007F-\u009F]/u.test(entry.name)
+    && entry.name !== '.' && entry.name !== '..'
+    && entry.name === finalPathSegment;
+  const validTimestamp = typeof entry?.modifiedAt === 'string'
+    && Number.isFinite(Date.parse(entry.modifiedAt));
+  const validPreviewKind = ['NONE', 'TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'PDF']
+    .includes(entry?.previewKind);
+  if (!entry || typeof entry.name !== 'string' || typeof entry.path !== 'string'
+      || !safeName || !safeRelativePath
+      || !['DIRECTORY', 'FILE'].includes(entry.type) || typeof entry.size !== 'number'
+      || !Number.isSafeInteger(entry.size) || entry.size < 0 || !validTimestamp || !validPreviewKind
+      || entry.type === 'DIRECTORY' && entry.previewKind !== 'NONE'
+      || !(entry.observedToken === undefined || entry.observedToken === null
+        || typeof entry.observedToken === 'string')) {
+    throw new Error('The shared folder returned an invalid search response.');
+  }
+  return Object.freeze({
+    name: entry.name,
+    path: entry.path,
+    type: entry.type,
+    size: entry.size,
+    modifiedAt: entry.modifiedAt,
+    previewKind: entry.previewKind,
+    observedToken: entry.observedToken ?? null,
+  });
+}
+
+/** Validate the shared-folder search boundary before recursive entries reach the page. */
+export function validateSharedFolderSearchResponse(response) {
+  if (!response || typeof response.query !== 'string' || response.query !== response.query.trim()
+      || response.query.length < 1 || response.query.length > 200
+      || !Array.isArray(response.entries) || typeof response.truncated !== 'boolean') {
+    throw new Error('The shared folder returned an invalid search response.');
+  }
+  return Object.freeze({
+    query: response.query,
+    entries: Object.freeze(response.entries.map(validatedSharedFolderSearchEntry)),
+    truncated: response.truncated,
+  });
+}
+
+/** Return the decoded relative directory that contains a recursive search entry. */
+export function sharedFolderEntryParentPath(entry) {
+  const path = String(entry?.path || '');
+  const separator = path.lastIndexOf('/');
+  return separator > 0 ? path.slice(0, separator) : '';
+}
+
+/** Render one recursive result's parent directory as plain text, never markup. */
+export function renderSharedFolderEntryParentPath(target, entry) {
+  target.textContent = `In ${sharedFolderEntryParentPath(entry) || 'Shared'}`;
+}
+
+/** Build accessible search-result status text, including the server-owned result cap. */
+export function sharedFolderSearchResultDescription(response) {
+  const validated = validateSharedFolderSearchResponse(response);
+  const count = validated.entries.length;
+  const noun = count === 1 ? 'result' : 'results';
+  const truncated = validated.truncated ? ' Results are limited; refine your search.' : '';
+  return `${count} ${noun} for “${validated.query}”.${truncated}`;
+}
+
 /** Build a same-origin link that can be copied without exposing a filesystem path. */
 export function internalSharedFolderUrl(path = '') {
   const params = new URLSearchParams({ path: String(path || '') });

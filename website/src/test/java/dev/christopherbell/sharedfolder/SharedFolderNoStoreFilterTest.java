@@ -64,12 +64,24 @@ class SharedFolderNoStoreFilterTest {
     var filter = new SharedFolderNoStoreFilter(audit);
 
     reject(filter, "GET", "/api/shared-folder/2026-07-17/content", 403);
+    reject(filter, "GET", "/api/shared-folder/2026-07-17/search", 400);
+    reject(filter, "GET", "/api/shared-folder/2026-07-17/search", 403);
+    reject(filter, "GET", "/api/shared-folder/2026-07-17/radio", 403);
+    reject(filter, "POST", "/api/shared-folder/2026-07-17/radio/duration", 409);
     reject(filter, "PUT", "/api/shared-folder/2026-07-17/uploads/u-1/chunks/0", 409);
     reject(filter, "PATCH",
         "/api/accounts/2026-07-17/bad%3Aid/shared-folder-permissions", 400);
 
     org.mockito.Mockito.verify(audit).recordRejectedOnce(
         "DOWNLOAD_STARTED", null, "access_denied");
+    org.mockito.Mockito.verify(audit).recordRejectedOnce(
+        "SEARCH", "search", "invalid_request");
+    org.mockito.Mockito.verify(audit).recordRejectedOnce(
+        "SEARCH", "search", "access_denied");
+    org.mockito.Mockito.verify(audit).recordRejectedOnce(
+        "RADIO_LISTEN", "radio", "access_denied");
+    org.mockito.Mockito.verify(audit).recordRejectedOnce(
+        "RADIO_DURATION_REPORTED", "radio", "conflict");
     org.mockito.Mockito.verify(audit).recordRejectedOnce(
         "UPLOAD_APPEND", "upload", "conflict");
     org.mockito.Mockito.verify(audit).recordRejectedOnce(

@@ -88,6 +88,10 @@ export const API = {
       const params = new URLSearchParams({ path: String(path || '') });
       return `/api/shared-folder/2026-07-17/entries?${params}`;
     },
+    search: (query) => {
+      const params = new URLSearchParams({ query: String(query ?? '') });
+      return `/api/shared-folder/2026-07-17/search?${params}`;
+    },
     content: (path) => {
       const params = new URLSearchParams({ path: String(path || '') });
       return `/api/shared-folder/2026-07-17/content?${params}`;
@@ -95,6 +99,10 @@ export const API = {
     preview: (path) => {
       const params = new URLSearchParams({ path: String(path || '') });
       return `/api/shared-folder/2026-07-17/preview?${params}`;
+    },
+    radio: {
+      playback: '/api/shared-folder/2026-07-17/radio',
+      duration: '/api/shared-folder/2026-07-17/radio/duration',
     },
     media: {
       playback: '/api/shared-folder/2026-07-17/media/playback',

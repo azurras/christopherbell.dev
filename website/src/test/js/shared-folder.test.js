@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import { API } from '../../main/resources/static/js/lib/api.js';
 import * as sharedFolder from '../../main/resources/static/js/lib/shared-folder.js';
+import * as sharedFolderPage from '../../main/resources/static/js/shared-folder.js';
 import {
   accountHasSharedFolderRead,
   accountHasSharedFolderWrite,
@@ -45,6 +46,241 @@ test('shared-folder API paths encode each decoded relative path once', () => {
     '/api/shared-folder/2026-07-17/media/jobs/job%2Fid');
   assert.equal(API.sharedFolder.media.stream('job/id'),
     '/api/shared-folder/2026-07-17/media/jobs/job%2Fid/stream');
+  assert.equal(API.sharedFolder.radio.playback,
+    '/api/shared-folder/2026-07-17/radio');
+  assert.equal(API.sharedFolder.radio.duration,
+    '/api/shared-folder/2026-07-17/radio/duration');
+});
+
+test('shared-folder radio control delegates playback and reports an empty station safely', async () => {
+  assert.equal(typeof sharedFolderPage.bindSharedFolderRadioControl, 'function');
+  const button = fakeButton();
+  const statuses = [];
+  let playCalls = 0;
+  const bound = sharedFolderPage.bindSharedFolderRadioControl({
+    button,
+    playRadioFn: async () => {
+      playCalls += 1;
+      return { status: 'EMPTY', playback: null };
+    },
+    statusFn: message => statuses.push(message),
+  });
+
+  assert.equal(bound, true);
+  await button.click();
+  assert.equal(playCalls, 1);
+  assert.equal(button.disabled, false);
+  assert.deepEqual(statuses, [
+    'Connecting to shared-folder radio…',
+    'The shared-folder radio has no audio tracks yet.',
+  ]);
+});
+
+test('shared-folder search encodes queries and presents validated recursive results', () => {
+  assert.equal(typeof API.sharedFolder.search, 'function');
+  assert.equal(API.sharedFolder.search('plans & notes'),
+    '/api/shared-folder/2026-07-17/search?query=plans+%26+notes');
+  assert.equal(typeof sharedFolder.validateSharedFolderSearchResponse, 'function');
+  assert.equal(typeof sharedFolder.sharedFolderSearchResultDescription, 'function');
+  assert.equal(typeof sharedFolder.sharedFolderEntryParentPath, 'function');
+
+  const response = sharedFolder.validateSharedFolderSearchResponse({
+    query: 'report',
+    entries: [{
+      name: 'report.txt', path: 'archive/2026/report.txt', type: 'FILE', size: 12,
+      modifiedAt: '2026-07-25T00:00:00Z', previewKind: 'TEXT', observedToken: 'proof',
+    }],
+    truncated: true,
+  });
+  assert.deepEqual(response.entries.map(entry => entry.name), ['report.txt']);
+  assert.equal(sharedFolder.sharedFolderEntryParentPath(response.entries[0]), 'archive/2026');
+  assert.equal(sharedFolder.sharedFolderSearchResultDescription(response),
+    '1 result for “report”. Results are limited; refine your search.');
+});
+
+test('shared-folder search rejects every malformed result partition before row actions use it', () => {
+  const validEntry = {
+    name: 'report.txt', path: 'archive/2026/report.txt', type: 'FILE', size: 12,
+    modifiedAt: '2026-07-25T00:00:00Z', previewKind: 'TEXT', observedToken: 'proof',
+  };
+  const invalidResponses = [
+    ['blank query', { query: '', entries: [], truncated: false }],
+    ['whitespace query', { query: ' ', entries: [], truncated: false }],
+    ['untrimmed query', { query: ' report', entries: [], truncated: false }],
+    ['overlong query', { query: 'x'.repeat(201), entries: [], truncated: false }],
+    ['blank name', { query: 'report', entries: [{ ...validEntry, name: '  ' }], truncated: false }],
+    ['untrimmed name', { query: 'report', entries: [{ ...validEntry, name: ' report.txt' }], truncated: false }],
+    ['mismatched name', { query: 'report', entries: [{ ...validEntry, name: 'target.txt' }], truncated: false }],
+    ['slash in name', { query: 'report', entries: [{ ...validEntry, name: 'archive/report.txt' }], truncated: false }],
+    ['backslash in name', { query: 'report', entries: [{ ...validEntry, name: 'archive\\report.txt' }], truncated: false }],
+    ['dot name', { query: 'report', entries: [{ ...validEntry, name: '.' }], truncated: false }],
+    ['NUL in name', { query: 'report', entries: [{ ...validEntry, name: 'report\0.txt' }], truncated: false }],
+    ['control character in name', { query: 'report', entries: [{ ...validEntry, name: 'report\n.txt' }], truncated: false }],
+    ['C1 control character in name', {
+      query: 'report',
+      entries: [{ ...validEntry, name: 'report\u0085.txt', path: 'archive/2026/report\u0085.txt' }],
+      truncated: false,
+    }],
+    ['empty path', { query: 'report', entries: [{ ...validEntry, path: '' }], truncated: false }],
+    ['absolute path', { query: 'report', entries: [{ ...validEntry, path: '/report.txt' }], truncated: false }],
+    ['empty path segment', { query: 'report', entries: [{ ...validEntry, path: 'archive//report.txt' }], truncated: false }],
+    ['current-directory path segment', { query: 'report', entries: [{ ...validEntry, path: 'archive/./report.txt' }], truncated: false }],
+    ['traversal path segment', { query: 'report', entries: [{ ...validEntry, path: 'archive/../report.txt' }], truncated: false }],
+    ['backslash path separator', { query: 'report', entries: [{ ...validEntry, path: 'archive\\report.txt' }], truncated: false }],
+    ['unknown entry type', { query: 'report', entries: [{ ...validEntry, type: 'SYMLINK' }], truncated: false }],
+    ['fractional size', { query: 'report', entries: [{ ...validEntry, size: 1.5 }], truncated: false }],
+    ['negative size', { query: 'report', entries: [{ ...validEntry, size: -1 }], truncated: false }],
+    ['unsafe size', { query: 'report', entries: [{ ...validEntry, size: Number.MAX_SAFE_INTEGER + 1 }], truncated: false }],
+    ['invalid timestamp', { query: 'report', entries: [{ ...validEntry, modifiedAt: 'not-a-date' }], truncated: false }],
+    ['unknown preview kind', { query: 'report', entries: [{ ...validEntry, previewKind: 'SCRIPT' }], truncated: false }],
+    ['directory preview kind', { query: 'report', entries: [{ ...validEntry, type: 'DIRECTORY', previewKind: 'TEXT' }], truncated: false }],
+    ['invalid truncation flag', { query: 'report', entries: [], truncated: 'false' }],
+  ];
+
+  invalidResponses.forEach(([name, response]) => {
+    assert.throws(() => sharedFolder.validateSharedFolderSearchResponse(response),
+      /invalid search response/i, name);
+  });
+
+  const validUnicodeName = 'Résumé final 2026.txt';
+  const validUnicodeResponse = sharedFolder.validateSharedFolderSearchResponse({
+    query: 'résumé',
+    entries: [{
+      ...validEntry,
+      name: validUnicodeName,
+      path: `archive/${validUnicodeName}`,
+    }],
+    truncated: false,
+  });
+  assert.equal(validUnicodeResponse.entries[0].name, validUnicodeName);
+});
+
+test('shared-folder search controller ignores stale results and clear restores the active folder', async () => {
+  assert.equal(typeof sharedFolderPage.createSharedFolderSearchController, 'function');
+  let resolveFirst;
+  const rendered = [];
+  const restoredPaths = [];
+  const errors = [];
+  const controller = sharedFolderPage.createSharedFolderSearchController({
+    load: query => query === 'first'
+      ? new Promise(resolve => { resolveFirst = resolve; })
+      : Promise.resolve({ query, entries: [], truncated: false }),
+    render: response => rendered.push(response.query),
+    restore: async () => { restoredPaths.push('archive/2026'); return true; },
+    onError: error => errors.push(error.message),
+  });
+
+  const first = controller.search('first');
+  assert.equal(controller.active(), true);
+  await controller.clear();
+  assert.deepEqual(restoredPaths, ['archive/2026']);
+  assert.equal(controller.active(), false);
+  resolveFirst({ query: 'first', entries: [], truncated: false });
+  assert.equal(await first, false);
+  assert.deepEqual(rendered, []);
+  assert.deepEqual(errors, []);
+
+  assert.equal(await controller.search('second'), true);
+  assert.deepEqual(rendered, ['second']);
+  assert.equal(controller.leave(), true);
+  assert.equal(controller.active(), false);
+});
+
+test('search invalidates a deferred folder navigation before it can render or rewrite history', async () => {
+  let resolveFolder;
+  const events = [];
+  const navigator = sharedFolderPage.createSharedFolderNavigator({
+    load: () => new Promise(resolve => { resolveFolder = resolve; }),
+    render: response => events.push(['folder', response.path]),
+    pushPath: path => events.push(['history', path]),
+    onError: error => assert.fail(error),
+  });
+  const controller = sharedFolderPage.createSharedFolderSearchController({
+    load: async query => ({ query, entries: [], truncated: false }),
+    render: response => events.push(['search', response.query]),
+    restore: async () => true,
+    onError: error => assert.fail(error),
+    invalidateNavigation: navigator.invalidate,
+  });
+
+  const pendingFolder = navigator.open('archive');
+  assert.equal(await controller.search('report'), true);
+  resolveFolder({ path: 'archive', entries: [] });
+  assert.equal(await pendingFolder, false);
+  assert.deepEqual(events, [['search', 'report']]);
+});
+
+function fakeSearchControl() {
+  const listeners = new Map();
+  return {
+    disabled: false,
+    value: '',
+    addEventListener(type, listener) {
+      listeners.set(type, listener);
+    },
+    dispatch(type) {
+      const event = {
+        prevented: false,
+        preventDefault() { this.prevented = true; },
+      };
+      listeners.get(type)?.(event);
+      return event;
+    },
+  };
+}
+
+async function flushSearchFormEvents() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+test('search form submits, warns on an emptied active query, and clears through the DOM boundary', async () => {
+  assert.equal(typeof sharedFolderPage.bindSharedFolderSearchForm, 'function');
+  assert.equal(typeof sharedFolder.renderSharedFolderEntryParentPath, 'function');
+  const form = fakeSearchControl();
+  const input = fakeSearchControl();
+  const clearButton = fakeSearchControl();
+  const requests = [];
+  const statuses = [];
+  const parentPath = { textContent: '' };
+  const restoredPaths = [];
+  const controller = sharedFolderPage.createSharedFolderSearchController({
+    load: async query => {
+      requests.push(API.sharedFolder.search(query));
+      return {
+        query,
+        entries: [{
+          name: 'report.txt', path: '<img src=x>/report.txt', type: 'FILE', size: 1,
+          modifiedAt: '2026-07-25T00:00:00Z', previewKind: 'TEXT', observedToken: 'proof',
+        }],
+        truncated: false,
+      };
+    },
+    render: response => sharedFolder.renderSharedFolderEntryParentPath(parentPath, response.entries[0]),
+    restore: async () => { restoredPaths.push('archive/2026'); return true; },
+    onError: error => assert.fail(error),
+  });
+  sharedFolderPage.bindSharedFolderSearchForm({ form, input, clearButton, controller,
+    statusFn: message => statuses.push(message) });
+
+  assert.equal(clearButton.disabled, true);
+  input.value = 'report';
+  const submitted = form.dispatch('submit');
+  assert.equal(submitted.prevented, true);
+  await flushSearchFormEvents();
+  assert.deepEqual(requests, ['/api/shared-folder/2026-07-17/search?query=report']);
+  assert.equal(clearButton.disabled, false);
+  assert.equal(parentPath.textContent, 'In <img src=x>');
+
+  input.value = '';
+  input.dispatch('input');
+  assert.deepEqual(statuses, ['Clear search to return to the current folder.']);
+  input.value = 'report';
+  clearButton.dispatch('click');
+  await flushSearchFormEvents();
+  assert.deepEqual(restoredPaths, ['archive/2026']);
+  assert.equal(input.value, '');
+  assert.equal(clearButton.disabled, true);
 });
 
 test('media profiles and every public job state have clear browser text', () => {
@@ -500,3 +736,39 @@ test('shared-folder shell presents an explorer layout with compact actions and r
   assert.match(page, /window\.history\.pushState/);
   assert.doesNotMatch(page, /window\.location\.href\s*=/);
 });
+
+test('shared-folder command bar stacks before tablet controls can overflow', () => {
+  const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
+  const tablet = cssMediaBlock(css, '@media (max-width: 1024px)');
+
+  assert.match(tablet,
+    /\.shared-folder-command-bar\s*\{[^}]*align-items:\s*flex-start;[^}]*flex-direction:\s*column;/);
+  assert.match(tablet,
+    /\.shared-folder-command-bar,\s*\.shared-folder-toolbar,\s*\.shared-folder-search\s*\{[^}]*width:\s*100%;/);
+});
+
+function fakeButton() {
+  let clickHandler = null;
+  return {
+    disabled: false,
+    addEventListener(name, handler) {
+      if (name === 'click') clickHandler = handler;
+    },
+    click() {
+      return clickHandler?.({ preventDefault() {} });
+    },
+  };
+}
+
+function cssMediaBlock(css, heading) {
+  const headingStart = css.indexOf(heading);
+  assert.notEqual(headingStart, -1, `Missing CSS media query: ${heading}`);
+  const bodyStart = css.indexOf('{', headingStart);
+  let depth = 0;
+  for (let index = bodyStart; index < css.length; index += 1) {
+    if (css[index] === '{') depth += 1;
+    if (css[index] === '}') depth -= 1;
+    if (depth === 0) return css.slice(headingStart, index + 1);
+  }
+  assert.fail(`Unclosed CSS media query: ${heading}`);
+}

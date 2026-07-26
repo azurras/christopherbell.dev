@@ -19,12 +19,16 @@ import {
   renderPreviewText,
   revealSharedFolderPreview,
   sharedFolderEntryKind,
+  sharedFolderEntryParentPath,
+  renderSharedFolderEntryParentPath,
+  sharedFolderSearchResultDescription,
   uploadProgressPercent,
   uploadIsTerminal,
   createUploadOperationGate,
   runUploadWorkflow,
   cancelUploadWorkflow,
   sortSharedFolderEntries,
+  validateSharedFolderSearchResponse,
 } from './lib/shared-folder.js';
 import {
   prepareSharedFolderDownloadAuth,
@@ -32,7 +36,11 @@ import {
   sharedFolderDownloadRequestUrl,
   sharedFolderStreamingDenial,
 } from './lib/shared-folder-streaming.js';
-import { playSharedFolderMedia, stopSiteMediaPlayback } from './lib/site-media-player.js';
+import {
+  playSharedFolderMedia,
+  playSharedFolderRadio as joinSharedFolderRadio,
+  stopSiteMediaPlayback,
+} from './lib/site-media-player.js';
 
 const root = typeof document === 'undefined' ? null : document.getElementById('shared-folder-app');
 let currentPreviewLostAccess = false;
@@ -437,13 +445,14 @@ async function findReplacement(destinationPath, name) {
     String(entry.name).toLocaleLowerCase() === String(name).toLocaleLowerCase()) || null;
 }
 
-function renderEntries(response, canWrite = false, navigatePath) {
+function renderEntries(response, canWrite = false, navigatePath, options = {}) {
   const host = document.getElementById('shared-list');
+  const searchResults = Boolean(options.searchResults);
   clear(host);
   if (!response.entries?.length) {
     const empty = document.createElement('p');
     empty.className = 'shared-folder-list-empty';
-    empty.textContent = 'This folder is empty.';
+    empty.textContent = searchResults ? `No results for “${response.query}”.` : 'This folder is empty.';
     host.append(empty);
     return;
   }
@@ -472,6 +481,12 @@ function renderEntries(response, canWrite = false, navigatePath) {
     type.className = 'shared-folder-entry-type';
     type.textContent = kind === 'folder' ? 'Folder' : kind;
     identity.append(name, type);
+    if (searchResults) {
+      const parentPath = document.createElement('span');
+      parentPath.className = 'shared-folder-entry-parent-path';
+      renderSharedFolderEntryParentPath(parentPath, entry);
+      identity.append(parentPath);
+    }
     open.append(icon, identity);
     open.addEventListener('click', () => {
       if (entry.type === 'DIRECTORY') {
@@ -535,7 +550,8 @@ function renderEntries(response, canWrite = false, navigatePath) {
       });
       menuButton('Move', () => {
         menu.open = false;
-        const destinationPath = window.prompt('Destination folder path', response.path || '');
+        const destinationPath = window.prompt('Destination folder path',
+          response.path ?? sharedFolderEntryParentPath(entry));
         if (destinationPath === null) return;
         const name = window.prompt('Destination name', entry.name);
         if (!name?.trim()) return;
@@ -597,6 +613,136 @@ export function createSharedFolderNavigator({ load, render, pushPath, onError })
   return Object.freeze({
     open: path => visit(path, true),
     restore: path => visit(path, false),
+    invalidate: () => { generation += 1; },
+  });
+}
+
+/** Bind the visible command to the top-document radio owner with safe status outcomes. */
+export function bindSharedFolderRadioControl({
+  button,
+  playRadioFn = joinSharedFolderRadio,
+  statusFn = status,
+  handleAccessLossFn = handleSharedFolderAccessLoss,
+}) {
+  if (!button || typeof playRadioFn !== 'function') return false;
+  button.addEventListener('click', async () => {
+    if (button.disabled) return;
+    button.disabled = true;
+    statusFn('Connecting to shared-folder radio…');
+    try {
+      const response = await playRadioFn();
+      statusFn(response?.status === 'EMPTY'
+        ? 'The shared-folder radio has no audio tracks yet.'
+        : 'Shared-folder radio is live.');
+    } catch (error) {
+      if (isSharedFolderAccessDenied(error)) handleAccessLossFn(error.status);
+      else statusFn(error?.message || 'The shared-folder radio is unavailable.');
+    } finally {
+      button.disabled = false;
+    }
+  });
+  return true;
+}
+
+function configureSharedFolderRadioControl() {
+  if (typeof document === 'undefined') return false;
+  return bindSharedFolderRadioControl({
+    button: document.getElementById('shared-folder-radio'),
+  });
+}
+
+/** Own search request cancellation so an older result cannot replace a newer page state. */
+export function createSharedFolderSearchController({
+  load, render, restore, onError, invalidateNavigation = () => {},
+}) {
+  let generation = 0;
+  let active = false;
+  let currentController = null;
+
+  const begin = () => {
+    generation += 1;
+    currentController?.abort();
+    currentController = new AbortController();
+    return { generation, signal: currentController.signal };
+  };
+
+  const search = async query => {
+    const requestedQuery = String(query ?? '').trim();
+    if (!requestedQuery) {
+      onError(new Error('Enter a search term.'));
+      return false;
+    }
+    active = true;
+    invalidateNavigation();
+    const request = begin();
+    try {
+      const response = validateSharedFolderSearchResponse(await load(requestedQuery, request.signal));
+      if (request.generation !== generation) return false;
+      render(response);
+      return true;
+    } catch (error) {
+      if (request.generation !== generation || error?.name === 'AbortError') return false;
+      onError(error);
+      return false;
+    }
+  };
+
+  const clear = async () => {
+    active = false;
+    const request = begin();
+    try {
+      const restored = await restore(request.signal);
+      return request.generation === generation && restored !== false;
+    } catch (error) {
+      if (request.generation !== generation || error?.name === 'AbortError') return false;
+      onError(error);
+      return false;
+    }
+  };
+
+  const leave = () => {
+    const wasActive = active;
+    active = false;
+    begin();
+    return wasActive;
+  };
+
+  return Object.freeze({ search, clear, leave, active: () => active });
+}
+
+export function bindSharedFolderSearchForm({ form, input, clearButton, controller, statusFn = status }) {
+  if (!form || !input || !clearButton || !controller) return false;
+
+  const updateClearAction = () => {
+    clearButton.disabled = !controller.active();
+  };
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    void controller.search(input.value).then(updateClearAction);
+  });
+  clearButton.addEventListener('click', () => {
+    void controller.clear().then(restored => {
+      if (restored) input.value = '';
+      updateClearAction();
+    });
+  });
+  input.addEventListener('input', () => {
+    if (!input.value.trim() && controller.active()) {
+      statusFn('Clear search to return to the current folder.');
+    }
+  });
+  updateClearAction();
+  return true;
+}
+
+function configureSharedFolderSearchForm({ controller, statusFn = status }) {
+  if (typeof document === 'undefined') return;
+  bindSharedFolderSearchForm({
+    form: document.getElementById('shared-folder-search-form'),
+    input: document.getElementById('shared-folder-search-query'),
+    clearButton: document.getElementById('shared-folder-search-clear'),
+    controller,
+    statusFn,
   });
 }
 
@@ -632,10 +778,15 @@ export async function initializeSharedFolderPage({
       statusFn('Your account does not have shared-folder read access.');
       return;
     }
+    configureSharedFolderRadioControl();
     const canWrite = accountHasSharedFolderWrite(account);
     let activePath = '';
     let navigator;
-    const navigatePath = path => navigator.open(path);
+    let searchController;
+    const navigatePath = path => {
+      searchController?.leave();
+      return navigator.open(path);
+    };
     const handleFolderError = error => {
       pageRoot.classList.remove('d-none');
       if (isSharedFolderAccessDenied(error)) handleAccessLossFn(error.status);
@@ -647,6 +798,7 @@ export async function initializeSharedFolderPage({
         redirectOnUnauthorized: false,
       }),
       render: async response => {
+        if (searchController?.active()) return;
         activePath = response.path;
         pageRoot.classList.remove('d-none');
         renderBreadcrumbsFn(response.path, navigatePath);
@@ -658,8 +810,27 @@ export async function initializeSharedFolderPage({
       onError: handleFolderError,
     });
     if (!await navigator.restore(requestedPath())) return;
+    searchController = createSharedFolderSearchController({
+      load: (query, signal) => fetchJsonFn(API.sharedFolder.search(query), {
+        headers: authHeadersFn(),
+        redirectOnUnauthorized: false,
+        signal,
+      }),
+      render: response => {
+        pageRoot.classList.remove('d-none');
+        renderEntriesFn(response, canWrite, navigatePath, { searchResults: true });
+        statusFn(sharedFolderSearchResultDescription(response));
+      },
+      restore: () => navigator.restore(activePath),
+      onError: handleFolderError,
+      invalidateNavigation: navigator.invalidate,
+    });
+    configureSharedFolderSearchForm({ controller: searchController, statusFn });
     await configureUploadPanelFn(account, () => activePath);
-    addPopstateListener(() => { void navigator.restore(requestedPath()); });
+    addPopstateListener(() => {
+      searchController.leave();
+      void navigator.restore(requestedPath());
+    });
   } catch (error) {
     pageRoot.classList.remove('d-none');
     if (isSharedFolderAccessDenied(error)) {

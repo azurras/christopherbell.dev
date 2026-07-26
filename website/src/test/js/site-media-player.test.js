@@ -127,6 +127,10 @@ test('framed pages delegate playback and navigation to the top document owner', 
       calls.push(['play', entry.path]);
       return Promise.resolve('playing');
     },
+    playSharedFolderRadio: () => {
+      calls.push(['radio']);
+      return Promise.resolve('live');
+    },
     navigateFromClick: (anchorValue, eventValue) => {
       calls.push(['navigate', anchorValue.href, eventValue.button]);
       return true;
@@ -148,13 +152,214 @@ test('framed pages delegate playback and navigation to the top document owner', 
 
   assert.equal(await siteMedia.playSharedFolderMedia({ path: 'music/song.flac' }, frameWindow),
     'playing');
+  assert.equal(await siteMedia.playSharedFolderRadio(frameWindow), 'live');
   assert.equal(siteMedia.handleSiteNavigationClick(event, frameWindow), true);
   siteMedia.stopSiteMediaPlayback(frameWindow);
   assert.deepEqual(calls, [
     ['play', 'music/song.flac'],
+    ['radio'],
     ['navigate', '/void', 0],
     ['stop'],
   ]);
+});
+
+test('radio response boundary accepts only complete empty or playable audio states', () => {
+  assert.equal(typeof siteMedia.validateSiteRadioResponse, 'function');
+  const playing = validRadioResponse();
+
+  assert.deepEqual(siteMedia.validateSiteRadioResponse({ status: 'EMPTY', playback: null }), {
+    status: 'EMPTY', playback: null,
+  });
+  assert.deepEqual(siteMedia.validateSiteRadioResponse(playing), playing);
+  assert.deepEqual(siteMedia.validateSiteRadioResponse({
+    ...playing,
+    playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'music/Song.mp3' },
+    },
+  }).playback.entry.path, 'music/Song.mp3');
+
+  const malformed = [
+    { ...playing, status: 'EMPTY' },
+    { ...playing, playback: { ...playing.playback, stationSequence: 0 } },
+    { ...playing, playback: { ...playing.playback, startedAt: 'not-an-instant' } },
+    { ...playing, playback: { ...playing.playback, positionSeconds: -1 } },
+    { ...playing, playback: { ...playing.playback, durationSeconds: 86_401 } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: '../Song.mp3' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, name: 'Other.mp3' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, previewKind: 'VIDEO' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'Other/Song.mp3' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'Music/ Album/Song.mp3' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'Music/Album /Song.mp3' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'Music/Al\nbum/Song.mp3' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'Music/Al\u0085bum/Song.mp3' },
+    } },
+  ];
+  for (const response of malformed) {
+    assert.throws(() => siteMedia.validateSiteRadioResponse(response), /invalid radio response/i);
+  }
+});
+
+test('radio synchronization replaces identity changes and corrects drift only above three seconds', () => {
+  assert.equal(typeof siteMedia.siteRadioSyncDecision, 'function');
+  const response = validRadioResponse();
+  const current = { stationSequence: 7, path: 'Music/Song.mp3' };
+
+  assert.deepEqual(siteMedia.siteRadioSyncDecision(null, response, 0), {
+    action: 'REPLACE', targetPositionSeconds: 12.5,
+  });
+  assert.deepEqual(siteMedia.siteRadioSyncDecision(current, response, 9.5), {
+    action: 'KEEP', targetPositionSeconds: 12.5,
+  });
+  assert.deepEqual(siteMedia.siteRadioSyncDecision(current, response, 9.49), {
+    action: 'SEEK', targetPositionSeconds: 12.5,
+  });
+  assert.deepEqual(siteMedia.siteRadioSyncDecision(
+    { ...current, path: 'Music/Other.mp3' }, response, 12.5,
+  ), { action: 'REPLACE', targetPositionSeconds: 12.5 });
+  assert.deepEqual(siteMedia.siteRadioSyncDecision(
+    current, { status: 'EMPTY', playback: null }, 12.5,
+  ), { action: 'EMPTY', targetPositionSeconds: null });
+});
+
+test('radio resume keeps local intent and preferences while joining the current server position', () => {
+  assert.equal(typeof siteMedia.siteRadioResumeState, 'function');
+  const resume = {
+    descriptor: {
+      mode: 'RADIO', kind: 'AUDIO', title: 'Old.mp3', path: 'Music/Old.mp3',
+    },
+    positionSeconds: 400,
+    wasPlaying: false,
+    playbackRate: 2,
+    muted: true,
+    volume: 0.25,
+  };
+
+  assert.deepEqual(siteMedia.siteRadioResumeState(resume, validRadioResponse().playback), {
+    descriptor: {
+      mode: 'RADIO', kind: 'AUDIO', title: 'Song.mp3', path: 'Music/Song.mp3',
+      stationSequence: 7,
+    },
+    positionSeconds: 12.5,
+    wasPlaying: false,
+    playbackRate: 1,
+    muted: true,
+    volume: 0.25,
+  });
+});
+
+test('radio duration report accepts inclusive backend bounds for the exact identity', () => {
+  assert.equal(typeof siteMedia.siteRadioDurationReport, 'function');
+  const playback = validRadioResponse().playback;
+
+  assert.deepEqual(siteMedia.siteRadioDurationReport(playback, 1), {
+    stationSequence: 7, path: 'Music/Song.mp3', durationSeconds: 1,
+  });
+  assert.deepEqual(siteMedia.siteRadioDurationReport(playback, 86_400), {
+    stationSequence: 7, path: 'Music/Song.mp3', durationSeconds: 86_400,
+  });
+  for (const duration of [0, 86_401, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(siteMedia.siteRadioDurationReport(playback, duration), null);
+  }
+});
+
+test('radio duration reporter emits at most once for each media source and sequence', async () => {
+  assert.equal(typeof siteMedia.createSiteRadioDurationReporter, 'function');
+  const reports = [];
+  const reporter = siteMedia.createSiteRadioDurationReporter({
+    report: request => { reports.push(request); return Promise.resolve(); },
+  });
+  const playback = validRadioResponse().playback;
+
+  assert.equal(await reporter.loaded(playback, '/preview?track=Song.mp3', 120), true);
+  assert.equal(await reporter.loaded(playback, '/preview?track=Song.mp3', 120), false);
+  assert.equal(await reporter.loaded(playback, '/media/jobs/job-1/stream', 120), true);
+  assert.deepEqual(reports, [
+    { stationSequence: 7, path: 'Music/Song.mp3', durationSeconds: 120 },
+    { stationSequence: 7, path: 'Music/Song.mp3', durationSeconds: 120 },
+  ]);
+});
+
+test('radio control state disables item-only transport while item playback stays seekable', () => {
+  assert.equal(typeof siteMedia.siteMediaControlState, 'function');
+  assert.deepEqual(siteMedia.siteMediaControlState({ mode: 'RADIO' }, 120), {
+    live: true,
+    seekDisabled: true,
+    rewindDisabled: true,
+    forwardDisabled: true,
+    rateDisabled: true,
+  });
+  assert.deepEqual(siteMedia.siteMediaControlState({ mode: 'ITEM' }, 120), {
+    live: false,
+    seekDisabled: false,
+    rewindDisabled: false,
+    forwardDisabled: false,
+    rateDisabled: false,
+  });
+});
+
+test('radio scheduler waits exactly fifteen seconds, serializes polls, and owns teardown', async () => {
+  assert.equal(typeof siteMedia.createSiteRadioScheduler, 'function');
+  const scheduled = [];
+  const cancelled = [];
+  let pollCalls = 0;
+  let finishPoll;
+  const scheduler = siteMedia.createSiteRadioScheduler({
+    poll: () => {
+      pollCalls += 1;
+      return new Promise(resolve => { finishPoll = resolve; });
+    },
+    schedule: (callback, delayMilliseconds) => {
+      const timer = { callback, delayMilliseconds };
+      scheduled.push(timer);
+      return timer;
+    },
+    cancel: timer => cancelled.push(timer),
+  });
+
+  scheduler.start();
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0].delayMilliseconds, 15_000);
+  const firstTimer = scheduled.shift();
+  firstTimer.callback();
+  firstTimer.callback();
+  assert.equal(pollCalls, 1);
+  assert.equal(scheduled.length, 0);
+
+  finishPoll();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0].delayMilliseconds, 15_000);
+
+  const pendingTimer = scheduled[0];
+  scheduler.stop();
+  assert.deepEqual(cancelled, [pendingTimer]);
+  pendingTimer.callback();
+  assert.equal(pollCalls, 1);
 });
 
 test('same-tab resume storage round-trips only validated non-secret playback state', () => {
@@ -179,7 +384,7 @@ test('same-tab resume storage round-trips only validated non-secret playback sta
 
   assert.equal(siteMedia.saveSiteMediaResume(storage, descriptor, media), true);
   assert.deepEqual(siteMedia.readSiteMediaResume(storage), {
-    descriptor: { kind: 'AUDIO', title: 'Song.flac', path: 'music/Song.flac' },
+    descriptor: { mode: 'ITEM', kind: 'AUDIO', title: 'Song.flac', path: 'music/Song.flac' },
     positionSeconds: 134.5,
     wasPlaying: true,
     playbackRate: 1.25,
@@ -203,6 +408,27 @@ test('same-tab resume storage rejects malformed state and clears completed playb
     currentTime: 20, paused: true, ended: true, playbackRate: 1, muted: false, volume: 1,
   });
   assert.equal(storage.value(), null);
+});
+
+test('same-tab resume treats legacy descriptors as items and preserves explicit radio mode', () => {
+  const legacyStorage = memoryStorage(JSON.stringify({
+    version: 1,
+    descriptor: { kind: 'AUDIO', title: 'Legacy.mp3', path: 'Music/Legacy.mp3' },
+    positionSeconds: 42,
+    wasPlaying: true,
+    playbackRate: 1,
+    muted: false,
+    volume: 1,
+  }));
+  assert.equal(siteMedia.readSiteMediaResume(legacyStorage).descriptor.mode, 'ITEM');
+
+  const radioStorage = memoryStorage();
+  assert.equal(siteMedia.saveSiteMediaResume(radioStorage, {
+    mode: 'RADIO', kind: 'AUDIO', title: 'Song.mp3', path: 'Music/Song.mp3',
+  }, {
+    currentTime: 12.5, paused: true, ended: false, playbackRate: 1, muted: false, volume: 0.5,
+  }), true);
+  assert.equal(siteMedia.readSiteMediaResume(radioStorage).descriptor.mode, 'RADIO');
 });
 
 test('same-tab resume preserves explicit playing intent while restored media is paused', () => {
@@ -499,5 +725,26 @@ function fakeEventTarget() {
     },
     dispatch(name, event = undefined) { listeners.get(name)?.(event); },
     eventNames() { return [...listeners.keys()].sort(); },
+  };
+}
+
+function validRadioResponse() {
+  return {
+    status: 'PLAYING',
+    playback: {
+      stationSequence: 7,
+      startedAt: '2026-07-25T12:00:00Z',
+      positionSeconds: 12.5,
+      durationSeconds: null,
+      entry: {
+        name: 'Song.mp3',
+        path: 'Music/Song.mp3',
+        type: 'FILE',
+        size: 12_345,
+        modifiedAt: '2026-07-24T12:00:00Z',
+        previewKind: 'AUDIO',
+        observedToken: 'proof',
+      },
+    },
   };
 }

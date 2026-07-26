@@ -6,6 +6,10 @@ const AUDIO_METADATA_TEXT_LIMIT = 512;
 const AUDIO_ARTWORK_BYTE_LIMIT = 5 * 1024 * 1024;
 const AUDIO_METADATA_READ_BYTE_LIMIT = 6 * 1024 * 1024;
 const AUDIO_ARTWORK_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const SITE_RADIO_POLL_MILLISECONDS = 15_000;
+const SITE_RADIO_DRIFT_SECONDS = 3;
+const SITE_RADIO_MIN_DURATION_SECONDS = 1;
+const SITE_RADIO_MAX_DURATION_SECONDS = 86_400;
 
 function validString(value) {
   return typeof value === 'string' && value.trim().length > 0 && value.length <= 4096;
@@ -15,9 +19,203 @@ function finiteInRange(value, minimum, maximum) {
   return Number.isFinite(value) && value >= minimum && value <= maximum;
 }
 
+function validRadioPathSegment(segment) {
+  return typeof segment === 'string' && segment.length > 0 && segment === segment.trim()
+    && segment !== '.' && segment !== '..'
+    && !/[\\/\u0000-\u001F\u007F-\u009F]/u.test(segment);
+}
+
+function validRadioEntry(entry) {
+  const path = entry?.path;
+  const pathParts = typeof path === 'string' ? path.split('/') : [];
+  const name = pathParts.at(-1);
+  return typeof path === 'string' && path.length > 0 && path.length <= 4096
+    && pathParts.length >= 2 && pathParts[0].toLowerCase() === 'music'
+    && pathParts.every(validRadioPathSegment)
+    && typeof entry.name === 'string' && entry.name === name && entry.name === entry.name.trim()
+    && entry.type === 'FILE' && entry.previewKind === 'AUDIO'
+    && Number.isSafeInteger(entry.size) && entry.size >= 0
+    && typeof entry.modifiedAt === 'string' && Number.isFinite(Date.parse(entry.modifiedAt))
+    && (entry.observedToken === undefined || entry.observedToken === null
+      || typeof entry.observedToken === 'string');
+}
+
+function validatedSiteRadioPlayback(playback) {
+  const validDuration = playback?.durationSeconds === null
+    || finiteInRange(playback?.durationSeconds,
+      SITE_RADIO_MIN_DURATION_SECONDS, SITE_RADIO_MAX_DURATION_SECONDS);
+  if (!Number.isSafeInteger(playback?.stationSequence) || playback.stationSequence < 1
+      || typeof playback.startedAt !== 'string' || !Number.isFinite(Date.parse(playback.startedAt))
+      || !finiteInRange(playback.positionSeconds, 0, Number.MAX_SAFE_INTEGER)
+      || !validDuration || !validRadioEntry(playback.entry)) {
+    throw new Error('The shared folder returned an invalid radio response.');
+  }
+  return Object.freeze({
+    stationSequence: playback.stationSequence,
+    startedAt: playback.startedAt,
+    positionSeconds: playback.positionSeconds,
+    durationSeconds: playback.durationSeconds,
+    entry: Object.freeze({
+      name: playback.entry.name,
+      path: playback.entry.path,
+      type: playback.entry.type,
+      size: playback.entry.size,
+      modifiedAt: playback.entry.modifiedAt,
+      previewKind: playback.entry.previewKind,
+      observedToken: playback.entry.observedToken ?? null,
+    }),
+  });
+}
+
+/** Validate the complete untrusted radio response before media or URL effects use it. */
+export function validateSiteRadioResponse(response) {
+  if (response?.status === 'EMPTY' && response.playback === null) {
+    return Object.freeze({ status: 'EMPTY', playback: null });
+  }
+  if (response?.status !== 'PLAYING' || !response.playback) {
+    throw new Error('The shared folder returned an invalid radio response.');
+  }
+  return Object.freeze({ status: 'PLAYING', playback: validatedSiteRadioPlayback(response.playback) });
+}
+
+/** Decide the only player mutation needed to match one validated station snapshot. */
+export function siteRadioSyncDecision(current, response, mediaPositionSeconds) {
+  const station = validateSiteRadioResponse(response);
+  if (station.status === 'EMPTY') {
+    return Object.freeze({ action: 'EMPTY', targetPositionSeconds: null });
+  }
+  const next = station.playback;
+  const sameIdentity = current?.stationSequence === next.stationSequence
+    && current?.path === next.entry.path;
+  if (!sameIdentity) {
+    return Object.freeze({ action: 'REPLACE', targetPositionSeconds: next.positionSeconds });
+  }
+  const currentPosition = Number.isFinite(mediaPositionSeconds) ? mediaPositionSeconds : 0;
+  const action = Math.abs(currentPosition - next.positionSeconds) > SITE_RADIO_DRIFT_SECONDS
+    ? 'SEEK' : 'KEEP';
+  return Object.freeze({ action, targetPositionSeconds: next.positionSeconds });
+}
+
+/** Build radio startup state without restoring a stale per-item position or playback rate. */
+export function siteRadioResumeState(resume, playback) {
+  const validatedResume = validatedSiteMediaResume({ version: 1, ...resume });
+  const station = validatedSiteRadioPlayback(playback);
+  if (validatedResume?.descriptor.mode !== 'RADIO') {
+    throw new TypeError('Site radio resume state is invalid.');
+  }
+  return Object.freeze({
+    descriptor: Object.freeze({
+      mode: 'RADIO',
+      kind: 'AUDIO',
+      title: station.entry.name,
+      path: station.entry.path,
+      stationSequence: station.stationSequence,
+    }),
+    positionSeconds: station.positionSeconds,
+    wasPlaying: validatedResume.wasPlaying,
+    playbackRate: 1,
+    muted: validatedResume.muted,
+    volume: validatedResume.volume,
+  });
+}
+
+/** Build one bounded duration observation tied to the exact station identity. */
+export function siteRadioDurationReport(playback, durationSeconds) {
+  if (!finiteInRange(durationSeconds,
+    SITE_RADIO_MIN_DURATION_SECONDS, SITE_RADIO_MAX_DURATION_SECONDS)) return null;
+  const station = validatedSiteRadioPlayback(playback);
+  return Object.freeze({
+    stationSequence: station.stationSequence,
+    path: station.entry.path,
+    durationSeconds,
+  });
+}
+
+/** Own de-duplication of bounded duration effects for one radio joining lifetime. */
+export function createSiteRadioDurationReporter({ report }) {
+  if (typeof report !== 'function') {
+    throw new TypeError('Site radio duration reporting requires a report function.');
+  }
+  const reported = new Set();
+  return Object.freeze({
+    async loaded(playback, source, durationSeconds) {
+      if (!validString(source)) return false;
+      const request = siteRadioDurationReport(playback, durationSeconds);
+      if (!request) return false;
+      const key = `${request.stationSequence}\0${source}`;
+      if (reported.has(key)) return false;
+      reported.add(key);
+      await report(request);
+      return true;
+    },
+  });
+}
+
+/** Return the item-only controls that must be disabled for live radio playback. */
+export function siteMediaControlState(descriptor, durationSeconds) {
+  const live = descriptor?.mode === 'RADIO';
+  return Object.freeze({
+    live,
+    seekDisabled: live || !Number.isFinite(durationSeconds) || durationSeconds <= 0,
+    rewindDisabled: live,
+    forwardDisabled: live,
+    rateDisabled: live,
+  });
+}
+
+/** Own one exact-delay, non-overlapping radio polling lifecycle through injected timers. */
+export function createSiteRadioScheduler({ poll, schedule, cancel, onError = () => {} }) {
+  if (typeof poll !== 'function' || typeof schedule !== 'function'
+      || typeof cancel !== 'function' || typeof onError !== 'function') {
+    throw new TypeError('Site radio scheduling requires poll, schedule, cancel, and error functions.');
+  }
+  let active = false;
+  let running = false;
+  let timer = null;
+
+  const queue = () => {
+    if (!active || running || timer !== null) return;
+    timer = schedule(run, SITE_RADIO_POLL_MILLISECONDS);
+  };
+  const run = () => {
+    timer = null;
+    if (!active || running) return;
+    running = true;
+    let result;
+    try {
+      result = poll();
+    } catch (error) {
+      result = Promise.reject(error);
+    }
+    void Promise.resolve(result)
+      .catch(onError)
+      .finally(() => {
+        running = false;
+        queue();
+      });
+  };
+
+  return Object.freeze({
+    start() {
+      if (active) return;
+      active = true;
+      queue();
+    },
+    stop() {
+      active = false;
+      if (timer !== null) cancel(timer);
+      timer = null;
+    },
+    active: () => active,
+  });
+}
+
 function validatedSiteMediaResume(value) {
   const descriptor = value?.descriptor;
-  if (value?.version !== 1 || !['AUDIO', 'VIDEO'].includes(descriptor?.kind)
+  const mode = descriptor?.mode ?? 'ITEM';
+  if (value?.version !== 1 || !['ITEM', 'RADIO'].includes(mode)
+      || !['AUDIO', 'VIDEO'].includes(descriptor?.kind)
+      || mode === 'RADIO' && descriptor.kind !== 'AUDIO'
       || !validString(descriptor?.title) || !validString(descriptor?.path)
       || !finiteInRange(value.positionSeconds, 0, Number.MAX_SAFE_INTEGER)
       || typeof value.wasPlaying !== 'boolean'
@@ -28,6 +226,7 @@ function validatedSiteMediaResume(value) {
   }
   return Object.freeze({
     descriptor: Object.freeze({
+      mode,
       kind: descriptor.kind,
       title: descriptor.title,
       path: descriptor.path,
@@ -483,6 +682,15 @@ export function playSharedFolderMedia(entry, browserWindow = window) {
     throw new Error('The site-wide media player is unavailable.');
   }
   return host.playSharedFolder(entry);
+}
+
+/** Join the authenticated shared-folder radio through the top same-origin player. */
+export function playSharedFolderRadio(browserWindow = window) {
+  const host = siteMediaPlayerHost(browserWindow);
+  if (typeof host?.playSharedFolderRadio !== 'function') {
+    throw new Error('The site-wide media player is unavailable.');
+  }
+  return host.playSharedFolderRadio();
 }
 
 /** Let every same-origin document delegate ordinary link clicks to the top player. */
