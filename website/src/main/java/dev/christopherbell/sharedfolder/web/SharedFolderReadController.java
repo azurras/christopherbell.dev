@@ -4,6 +4,7 @@ import static dev.christopherbell.libs.api.APIVersion.V20260717;
 
 import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewResponse;
+import dev.christopherbell.sharedfolder.model.SharedFolderSearchResponse;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
@@ -12,6 +13,7 @@ import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService.Shar
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService.SharedFolderPreview;
 import dev.christopherbell.sharedfolder.service.SharedFolderBrowserService;
+import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
 import dev.christopherbell.sharedfolder.service.SharedFolderRangeNotSatisfiableException;
 import java.util.List;
 import org.springframework.core.io.Resource;
@@ -30,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class SharedFolderReadController {
   private final SharedFolderAccessService access;
   private final SharedFolderBrowserService browser;
+  private final SharedFolderCatalogService catalog;
   private final SharedFolderDownloadService downloads;
   private final SharedFolderPreviewService previews;
   private final SharedFolderAuditRecorder audit;
@@ -38,11 +41,13 @@ public class SharedFolderReadController {
   public SharedFolderReadController(
       SharedFolderAccessService access,
       SharedFolderBrowserService browser,
+      SharedFolderCatalogService catalog,
       SharedFolderDownloadService downloads,
       SharedFolderPreviewService previews,
       SharedFolderAuditRecorder audit) {
     this.access = access;
     this.browser = browser;
+    this.catalog = catalog;
     this.downloads = downloads;
     this.previews = previews;
     this.audit = audit;
@@ -55,6 +60,21 @@ public class SharedFolderReadController {
       Account account = access.requireRead();
       SharedDirectoryResponse response = browser.list(path);
       audit.recordFor(account, "LIST", path, null, "accepted", null);
+      return ResponseEntity.ok()
+          .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+          .body(response);
+    } catch (RuntimeException failure) {
+      throw failure;
+    }
+  }
+
+  /** Searches the fresh public-safe catalog after refreshing effective read access. */
+  @GetMapping("/search")
+  public ResponseEntity<SharedFolderSearchResponse> search(@RequestParam String query) {
+    try {
+      Account account = access.requireRead();
+      SharedFolderSearchResponse response = catalog.search(query);
+      audit.recordFor(account, "SEARCH", "search", null, "accepted", null);
       return ResponseEntity.ok()
           .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
           .body(response);

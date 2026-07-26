@@ -19,7 +19,9 @@ import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntryType;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
+import dev.christopherbell.sharedfolder.model.SharedFolderSearchResponse;
 import dev.christopherbell.sharedfolder.service.SharedFolderBrowserService;
+import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
 import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService;
 import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService.SharedFolderDownload;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
@@ -70,6 +72,7 @@ class SharedFolderReadControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private SharedFolderAccessService access;
   @MockitoBean private SharedFolderBrowserService browser;
+  @MockitoBean private SharedFolderCatalogService catalog;
   @MockitoBean private SharedFolderDownloadService downloads;
   @MockitoBean private SharedFolderPreviewService previews;
   @MockitoBean private SharedFolderAuditRecorder audit;
@@ -78,6 +81,7 @@ class SharedFolderReadControllerTest {
   void everyReadRoute_whenAnonymous_returnsUnauthorized() throws Exception {
     for (MockHttpServletRequestBuilder request : List.of(
         get(BASE + "/entries").queryParam("path", "music"),
+        get(BASE + "/search").queryParam("query", "track"),
         get(BASE + "/content").queryParam("path", "music/track.flac"),
         get(BASE + "/preview").queryParam("path", "music/notes.txt"))) {
       mockMvc.perform(request)
@@ -85,7 +89,7 @@ class SharedFolderReadControllerTest {
           .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
     }
 
-    verifyNoInteractions(access, browser, downloads, previews);
+    verifyNoInteractions(access, browser, catalog, downloads, previews);
   }
 
   @Test
@@ -131,6 +135,7 @@ class SharedFolderReadControllerTest {
 
     for (MockHttpServletRequestBuilder request : List.of(
         get(BASE + "/entries").queryParam("path", "music"),
+        get(BASE + "/search").queryParam("query", "track"),
         get(BASE + "/content").queryParam("path", "music/track.flac"),
         get(BASE + "/preview").queryParam("path", "music/notes.txt"))) {
       mockMvc.perform(request)
@@ -138,7 +143,27 @@ class SharedFolderReadControllerTest {
           .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
     }
 
-    verifyNoInteractions(browser, downloads, previews);
+    verifyNoInteractions(browser, catalog, downloads, previews);
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void readUser_canSearchWithFreshAccessAndReceivesOnlyPublicSafeMetadata() throws Exception {
+    when(catalog.search("track")).thenReturn(new SharedFolderSearchResponse("track", List.of(
+        new SharedDirectoryEntry("track.flac", "music/track.flac", SharedDirectoryEntryType.FILE,
+            10, Instant.parse("2026-07-17T00:00:00Z"), SharedFolderPreviewKind.AUDIO)), false));
+
+    mockMvc.perform(get(BASE + "/search").queryParam("query", "track"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
+        .andExpect(jsonPath("$.query").value("track"))
+        .andExpect(jsonPath("$.entries[0].path").value("music/track.flac"))
+        .andExpect(jsonPath("$.truncated").value(false))
+        .andExpect(content().string(not(containsString("A:\\Shared"))));
+
+    verify(access).requireRead();
+    verify(catalog).search("track");
+    verify(audit).recordFor(null, "SEARCH", "search", null, "accepted", null);
   }
 
   @Test

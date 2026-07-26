@@ -70,6 +70,11 @@ Unavailable` and never falls back to an unchecked production path.
   uses a revalidating disk-backed resource plus a bounded range resource for streaming and supports
   exactly one HTTP byte range, including correct `206`, `416`, `Content-Range`, `Accept-Ranges`,
   and `HEAD` semantics. It never calls `readAllBytes` or exposes an absolute local path.
+- `GET /search?query=...` requires a trimmed one-to-200-character query and returns at most 200
+  case-insensitive name or relative-path matches from a public-safe, breadth-first catalog snapshot
+  that is refreshed at most once every 15 seconds. Catalog traversal calls only the existing
+  held-root browser boundary; neither the response nor the `SEARCH` audit action includes a local
+  absolute path.
 - `GET /preview` returns bounded UTF-8 text as JSON for text files; allowlisted raster image,
   audio, video, and PDF types stream inline. HTML, SVG, and every unknown type stay attachment
   only. Native media `Range` requests are preserved through to Spring's resource streaming.
