@@ -146,7 +146,10 @@ Owns browser-side behavior for server-rendered pages.
   the existing authenticated direct-stream and progressive transcoding paths. It stores only the
   current file descriptor, timestamp, play state, speed, mute state, and volume in same-tab
   `sessionStorage`; it never stores a token or prepared stream URL. Refresh restores and seeks the
-  secure source before attempting to continue playback, while close, completion, logout, malformed
+  secure source before attempting to continue playback. If autoplay policy blocks that attempt,
+  the next page gesture resumes it without losing the saved playing intent. Audio tags provide an
+  optional title, artist, album, embedded cover, and Media Session presentation; missing or invalid
+  tags leave the filename and music-note fallback intact. Close, completion, logout, malformed
   state, and access loss clear the record. While media is active, ordinary
   same-origin link clicks load a full-page content frame above the original document, so existing
   server-rendered pages and their scripts keep working without replacing the player. The top URL,

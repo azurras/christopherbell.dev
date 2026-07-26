@@ -1,6 +1,11 @@
 export const SITE_MEDIA_PLAYER_TAG = 'site-media-player';
 const SITE_MEDIA_RESUME_KEY = 'cbellSiteMediaResumeV1';
 const PLAYBACK_RATES = Object.freeze([1, 1.25, 1.5, 2]);
+const AUDIO_METADATA_TAGS = Object.freeze(['title', 'artist', 'album', 'picture']);
+const AUDIO_METADATA_TEXT_LIMIT = 512;
+const AUDIO_ARTWORK_BYTE_LIMIT = 5 * 1024 * 1024;
+const AUDIO_METADATA_READ_BYTE_LIMIT = 6 * 1024 * 1024;
+const AUDIO_ARTWORK_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
 function validString(value) {
   return typeof value === 'string' && value.trim().length > 0 && value.length <= 4096;
@@ -50,7 +55,7 @@ export function readSiteMediaResume(storage) {
 }
 
 /** Save only the non-secret facts needed to restore playback in this tab. */
-export function saveSiteMediaResume(storage, descriptor, media) {
+export function saveSiteMediaResume(storage, descriptor, media, playbackIntent = undefined) {
   if (media?.ended) {
     clearSiteMediaResume(storage);
     return false;
@@ -59,7 +64,7 @@ export function saveSiteMediaResume(storage, descriptor, media) {
     version: 1,
     descriptor,
     positionSeconds: Number(media?.currentTime),
-    wasPlaying: media?.paused === false,
+    wasPlaying: playbackIntent?.wasPlaying ?? media?.paused === false,
     playbackRate: Number(media?.playbackRate),
     muted: media?.muted,
     volume: Number(media?.volume),
@@ -74,6 +79,212 @@ export function saveSiteMediaResume(storage, descriptor, media) {
   } catch (_) {
     return false;
   }
+}
+
+/** Resume a browser-blocked playback request inside the next real user gesture. */
+export function armSiteMediaGestureResume(
+    media, eventTarget, onStarted = () => {}, shouldResume = () => true) {
+  if (typeof media?.play !== 'function'
+      || typeof eventTarget?.addEventListener !== 'function'
+      || typeof eventTarget?.removeEventListener !== 'function'
+      || typeof onStarted !== 'function'
+      || typeof shouldResume !== 'function') {
+    throw new TypeError('Gesture playback resume requires media, an event target, and a callback.');
+  }
+  let active = true;
+  let attemptInFlight = false;
+  const cancel = () => {
+    if (!active) return;
+    active = false;
+    eventTarget.removeEventListener('pointerdown', retry, true);
+    eventTarget.removeEventListener('keydown', retry, true);
+  };
+  const retry = event => {
+    if (!active || attemptInFlight || !shouldResume(event)) return;
+    attemptInFlight = true;
+    let attempt;
+    try {
+      attempt = media.play();
+    } catch (_) {
+      attemptInFlight = false;
+      return;
+    }
+    void Promise.resolve(attempt).then(() => {
+      cancel();
+      onStarted();
+    }, () => {
+      attemptInFlight = false;
+    });
+  };
+  eventTarget.addEventListener('pointerdown', retry, true);
+  eventTarget.addEventListener('keydown', retry, true);
+  return cancel;
+}
+
+function normalizedAudioMetadataText(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= AUDIO_METADATA_TEXT_LIMIT
+    ? normalized : null;
+}
+
+function normalizedAudioArtwork(picture) {
+  const suppliedType = picture?.format ?? picture?.type;
+  const type = typeof suppliedType === 'string' ? suppliedType.toLowerCase() : '';
+  const data = picture?.data ?? picture?.bytes;
+  if (!AUDIO_ARTWORK_TYPES.has(type)
+      || !(Array.isArray(data) || data instanceof Uint8Array)
+      || data.length === 0 || data.length > AUDIO_ARTWORK_BYTE_LIMIT) {
+    return null;
+  }
+  for (const byte of data) {
+    if (!Number.isInteger(byte) || byte < 0 || byte > 255) return null;
+  }
+  return Object.freeze({ type, bytes: Uint8Array.from(data) });
+}
+
+/** Validate untrusted third-party audio tags before the player renders them. */
+export function normalizeSiteAudioMetadata(tags) {
+  return Object.freeze({
+    title: normalizedAudioMetadataText(tags?.title),
+    artist: normalizedAudioMetadataText(tags?.artist),
+    album: normalizedAudioMetadataText(tags?.album),
+    picture: normalizedAudioArtwork(tags?.picture),
+  });
+}
+
+/** Produce the complete text/artwork model rendered by the audio player. */
+export function siteAudioPresentation(metadata, fallbackTitle) {
+  const safeFallback = normalizedAudioMetadataText(fallbackTitle) || 'Unknown audio';
+  const normalized = normalizeSiteAudioMetadata(metadata);
+  return Object.freeze({
+    title: normalized.title || safeFallback,
+    artist: normalized.artist || '',
+    album: normalized.album || '',
+    subtitle: [normalized.artist, normalized.album].filter(Boolean).join(' · '),
+    picture: normalized.picture,
+  });
+}
+
+function siteMediaAbortError() {
+  if (typeof DOMException === 'function') {
+    return new DOMException('Audio metadata reading was aborted.', 'AbortError');
+  }
+  const error = new Error('Audio metadata reading was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function createBoundedAudioMetadataReader(Reader, url, signal) {
+  const reader = new Reader(url);
+  const DefaultFileReader = reader._findFileReader?.();
+  if (typeof DefaultFileReader !== 'function' || typeof reader.setFileReader !== 'function') {
+    throw new TypeError('Audio metadata reader does not expose its pinned range interface.');
+  }
+  const activeRequests = new Set();
+
+  class BoundedFileReader extends DefaultFileReader {
+    constructor(location) {
+      super(location);
+      this.remainingReadBytes = AUDIO_METADATA_READ_BYTE_LIMIT;
+    }
+
+    loadRange(range, callbacks) {
+      const start = Number(range?.[0]);
+      const end = Number(range?.[1]);
+      if (signal?.aborted) {
+        callbacks.onError?.({ type: 'abort', info: 'Audio metadata reading was aborted.' });
+        return;
+      }
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start) {
+        callbacks.onError?.({ type: 'range', info: 'Audio metadata requested an invalid range.' });
+        return;
+      }
+      const fileEnd = Number.isSafeInteger(this._size) ? Math.min(this._size, end) : end;
+      const isCached = this._fileData?.hasDataRange?.(start, fileEnd) === true;
+      if (!isCached) {
+        const rounded = typeof this._roundRangeToChunkMultiple === 'function'
+          ? this._roundRangeToChunkMultiple([start, end]) : [start, end];
+        const requestEnd = Number.isSafeInteger(this._size)
+          ? Math.min(this._size, rounded[1]) : rounded[1];
+        const requestBytes = requestEnd - rounded[0] + 1;
+        if (!Number.isSafeInteger(requestBytes)
+            || requestBytes <= 0 || requestBytes > this.remainingReadBytes) {
+          callbacks.onError?.({
+            type: 'budget',
+            info: 'Audio metadata exceeded the 6 MiB byte budget.',
+          });
+          return;
+        }
+        this.remainingReadBytes -= requestBytes;
+      }
+      super.loadRange(range, callbacks);
+    }
+
+    _fetchEntireFile(callbacks) {
+      callbacks.onError?.({
+        type: 'budget',
+        info: 'Audio metadata whole-file reads are disabled.',
+      });
+    }
+
+    _createXHRObject() {
+      const xhr = super._createXHRObject();
+      activeRequests.add(xhr);
+      xhr.addEventListener?.('loadend', () => activeRequests.delete(xhr), { once: true });
+      return xhr;
+    }
+  }
+
+  return Object.freeze({
+    reader: reader.setFileReader(BoundedFileReader),
+    abort() {
+      for (const xhr of activeRequests) xhr.abort?.();
+      activeRequests.clear();
+    },
+  });
+}
+
+function audioMetadataReadError(cause) {
+  const detail = typeof cause?.info === 'string' ? ` ${cause.info}` : '';
+  return new Error(`Audio metadata could not be read.${detail}`, { cause });
+}
+
+/** Read four display tags through an abortable reader with a hard range-I/O budget. */
+export async function readSiteAudioMetadata(url, loadReader, signal = undefined) {
+  if (!validString(url) || typeof loadReader !== 'function') {
+    throw new TypeError('Audio metadata reading requires a URL and reader loader.');
+  }
+  const Reader = await loadReader();
+  if (typeof Reader !== 'function') throw new TypeError('Audio metadata reader is unavailable.');
+  if (signal?.aborted) throw siteMediaAbortError();
+  const bounded = createBoundedAudioMetadataReader(Reader, url, signal);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (complete, value) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener?.('abort', onAbort);
+      complete(value);
+    };
+    const onAbort = () => {
+      bounded.abort();
+      settle(reject, siteMediaAbortError());
+    };
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    try {
+      bounded.reader.setTagsToRead([...AUDIO_METADATA_TAGS]).read({
+        onSuccess: result => settle(resolve, normalizeSiteAudioMetadata(result?.tags)),
+        onError: cause => {
+          bounded.abort();
+          settle(reject, audioMetadataReadError(cause));
+        },
+      });
+    } catch (cause) {
+      bounded.abort();
+      settle(reject, audioMetadataReadError(cause));
+    }
+  });
 }
 
 /** Remove this tab's resumable playback without exposing storage failures. */

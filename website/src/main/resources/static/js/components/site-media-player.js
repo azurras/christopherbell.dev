@@ -13,15 +13,18 @@ import {
 } from '../lib/shared-folder-streaming.js';
 import {
   applySiteMediaResume,
+  armSiteMediaGestureResume,
   clearSiteMediaResume,
   createPersistentSiteNavigator,
   createSiteMediaSession,
   formatSiteMediaTime,
   nextSiteMediaPlaybackRate,
   persistentNavigationTarget,
+  readSiteAudioMetadata,
   readSiteMediaResume,
   saveSiteMediaResume,
   seekSiteMediaBy,
+  siteAudioPresentation,
   SITE_MEDIA_PLAYER_TAG,
   toggleSiteMediaMute,
   toggleSiteMediaPlayback,
@@ -36,6 +39,35 @@ import {
 } from '../lib/util.js';
 
 const PLAYER_HEIGHT_PROPERTY = '--site-media-player-height';
+const AUDIO_METADATA_LIBRARY_URL = '/vendor/jsmediatags-3.9.7.min.js';
+let audioMetadataReaderPromise = null;
+
+function loadAudioMetadataReader() {
+  if (typeof globalThis.jsmediatags?.Reader === 'function') {
+    return Promise.resolve(globalThis.jsmediatags.Reader);
+  }
+  if (audioMetadataReaderPromise) return audioMetadataReaderPromise;
+  audioMetadataReaderPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = AUDIO_METADATA_LIBRARY_URL;
+    script.async = true;
+    script.addEventListener('load', () => {
+      if (typeof globalThis.jsmediatags?.Reader === 'function') {
+        resolve(globalThis.jsmediatags.Reader);
+      } else {
+        reject(new Error('The audio metadata reader did not initialize.'));
+      }
+    }, { once: true });
+    script.addEventListener('error', () => {
+      reject(new Error('The audio metadata reader could not be loaded.'));
+    }, { once: true });
+    document.head.append(script);
+  }).catch(error => {
+    audioMetadataReaderPromise = null;
+    throw error;
+  });
+  return audioMetadataReaderPromise;
+}
 
 /** One top-document media owner that survives navigation through a same-origin content shell. */
 export class SiteMediaPlayer extends HTMLElement {
@@ -52,6 +84,8 @@ export class SiteMediaPlayer extends HTMLElement {
     });
     this.resumeByMedia = new WeakMap();
     this.sourceVersionByMedia = new WeakMap();
+    this.playbackIntentByMedia = new WeakMap();
+    this.pendingPlaybackStart = new WeakSet();
     this.bindControls();
     this.pageHideHandler = () => this.persistPlayback();
     window.addEventListener('pagehide', this.pageHideHandler);
@@ -77,6 +111,9 @@ export class SiteMediaPlayer extends HTMLElement {
   disconnectedCallback() {
     if (this.pageHideHandler) window.removeEventListener('pagehide', this.pageHideHandler);
     this.resizeObserver?.disconnect();
+    this.cancelGestureResume();
+    this.releaseArtwork();
+    this.clearMediaSessionMetadata();
   }
 
   renderStructure() {
@@ -100,7 +137,11 @@ export class SiteMediaPlayer extends HTMLElement {
     state.className = 'site-media-player-status';
     state.dataset.sitePlayerStatus = '';
     state.setAttribute('aria-live', 'polite');
-    details.append(eyebrow, title, state);
+    const trackMetadata = document.createElement('span');
+    trackMetadata.className = 'site-media-player-track-metadata';
+    trackMetadata.dataset.sitePlayerTrackMetadata = '';
+    trackMetadata.hidden = true;
+    details.append(eyebrow, title, trackMetadata, state);
 
     const timeline = document.createElement('div');
     timeline.className = 'site-media-player-timeline';
@@ -179,6 +220,12 @@ export class SiteMediaPlayer extends HTMLElement {
     this.querySelector('[data-site-player-control="play"]').addEventListener('click', () => {
       const media = this.currentMedia();
       if (!media) return;
+      const intendsToPlay = media.paused || media.ended;
+      this.playbackIntentByMedia.set(media, intendsToPlay);
+      if (!intendsToPlay) {
+        this.pendingPlaybackStart.delete(media);
+        this.cancelGestureResume();
+      }
       void toggleSiteMediaPlayback(media).catch(() => this.setStatus('Press play to start'));
     });
     this.querySelector('[data-site-player-control="rewind"]').addEventListener('click', () => {
@@ -263,7 +310,21 @@ export class SiteMediaPlayer extends HTMLElement {
         persist();
       }
     });
-    for (const eventName of ['play', 'pause', 'seeked', 'volumechange', 'ratechange']) {
+    playback.media.addEventListener('play', () => {
+      this.playbackIntentByMedia.set(playback.media, true);
+      this.pendingPlaybackStart.delete(playback.media);
+      this.cancelGestureResume(playback);
+      sync();
+      persist();
+    });
+    playback.media.addEventListener('pause', () => {
+      if (!this.pendingPlaybackStart.has(playback.media)) {
+        this.playbackIntentByMedia.set(playback.media, false);
+      }
+      sync();
+      persist();
+    });
+    for (const eventName of ['seeked', 'volumechange', 'ratechange']) {
       playback.media.addEventListener(eventName, () => {
         sync();
         persist();
@@ -282,12 +343,24 @@ export class SiteMediaPlayer extends HTMLElement {
       if (playback.signal.aborted
           || this.sourceVersionByMedia.get(playback.media) !== sourceVersion) return;
       const resume = this.resumeByMedia.get(playback.media);
+      if (resume?.wasPlaying) this.pendingPlaybackStart.add(playback.media);
       void applySiteMediaResume(playback.media, resume)
-        .then(() => this.syncControls(playback))
+        .then(() => {
+          this.pendingPlaybackStart.delete(playback.media);
+          this.cancelGestureResume(playback);
+          this.syncControls(playback);
+        })
         .catch(() => {
           this.syncControls(playback);
-          this.persistPlayback();
-          this.setStatus('Press play to start');
+          if (resume?.wasPlaying) {
+            this.persistPlayback();
+            this.armGestureResume(playback);
+            this.setStatus('Tap anywhere to continue');
+          } else {
+            this.pendingPlaybackStart.delete(playback.media);
+            this.persistPlayback();
+            this.setStatus('Press play to start');
+          }
         });
     }, { once: true });
   }
@@ -295,7 +368,36 @@ export class SiteMediaPlayer extends HTMLElement {
   persistPlayback() {
     const playback = this.session?.snapshot();
     if (!playback || playback.signal.aborted) return false;
-    return saveSiteMediaResume(sessionStorage, playback.descriptor, playback.media);
+    return saveSiteMediaResume(sessionStorage, playback.descriptor, playback.media, {
+      wasPlaying: this.playbackIntentByMedia.get(playback.media)
+        ?? playback.media.paused === false,
+    });
+  }
+
+  armGestureResume(playback) {
+    this.cancelGestureResume();
+    this.gestureResumePlayback = playback;
+    this.gestureResumeCancel = armSiteMediaGestureResume(
+      playback.media,
+      document,
+      () => {
+        if (this.session?.snapshot() !== playback || playback.signal.aborted) return;
+        this.pendingPlaybackStart.delete(playback.media);
+        this.playbackIntentByMedia.set(playback.media, true);
+        this.gestureResumeCancel = null;
+        this.gestureResumePlayback = null;
+        this.setStatus('Ready');
+        this.syncControls(playback);
+        this.persistPlayback();
+      },
+      event => !event?.target?.closest?.('[data-site-player-control="play"]'));
+  }
+
+  cancelGestureResume(expectedPlayback = null) {
+    if (expectedPlayback && this.gestureResumePlayback !== expectedPlayback) return;
+    this.gestureResumeCancel?.();
+    this.gestureResumeCancel = null;
+    this.gestureResumePlayback = null;
   }
 
   syncControls(expectedPlayback = null) {
@@ -382,6 +484,8 @@ export class SiteMediaPlayer extends HTMLElement {
     media.playsInline = true;
     media.title = entry.name;
     if (!resume) clearSiteMediaResume(sessionStorage);
+    this.cancelGestureResume();
+    this.releaseArtwork();
     const playback = this.session.start({
       kind,
       title: entry.name,
@@ -396,6 +500,8 @@ export class SiteMediaPlayer extends HTMLElement {
       volume: 1,
     };
     this.resumeByMedia.set(media, initialResume);
+    this.playbackIntentByMedia.set(media, initialResume.wasPlaying);
+    if (initialResume.wasPlaying) this.pendingPlaybackStart.add(media);
     saveSiteMediaResume(sessionStorage, playback.descriptor, {
       currentTime: initialResume.positionSeconds,
       paused: !initialResume.wasPlaying,
@@ -403,7 +509,7 @@ export class SiteMediaPlayer extends HTMLElement {
       playbackRate: initialResume.playbackRate,
       muted: initialResume.muted,
       volume: initialResume.volume,
-    });
+    }, { wasPlaying: initialResume.wasPlaying });
     this.bindPlaybackEvents(playback);
     this.setStatus('Opening secure media…');
     try {
@@ -426,6 +532,9 @@ export class SiteMediaPlayer extends HTMLElement {
     const url = API.sharedFolder.preview(entry.path);
     await prepareSharedFolderMediaAuth(getAuthToken(), url);
     playback.signal.throwIfAborted();
+    if (playback.descriptor.kind === 'AUDIO') {
+      void this.loadAudioMetadata(playback, new URL(url, window.location.href).href);
+    }
     playback.media.addEventListener('error', () => {
       if (!playback.signal.aborted) void this.loadFallbackSource(entry, playback);
     }, { once: true });
@@ -433,6 +542,17 @@ export class SiteMediaPlayer extends HTMLElement {
     playback.media.src = url;
     playback.media.load();
     this.setStatus('Ready');
+  }
+
+  async loadAudioMetadata(playback, url) {
+    try {
+      const metadata = await readSiteAudioMetadata(
+        url, loadAudioMetadataReader, playback.signal);
+      if (playback.signal.aborted || this.session?.snapshot() !== playback) return;
+      this.renderAudioPresentation(playback, metadata);
+    } catch (_) {
+      // Tag parsing is optional; filename playback remains the complete fallback.
+    }
   }
 
   async loadFallbackSource(entry, playback) {
@@ -528,8 +648,11 @@ export class SiteMediaPlayer extends HTMLElement {
       artwork.setAttribute('aria-hidden', 'true');
       artwork.textContent = '♫';
       mediaHost.replaceChildren(artwork, playback.media);
+      this.renderAudioPresentation(playback, null);
     } else {
       mediaHost.replaceChildren(playback.media);
+      this.querySelector('[data-site-player-track-metadata]').hidden = true;
+      this.clearMediaSessionMetadata();
     }
     this.querySelector('[data-site-player-title]').textContent = playback.descriptor.title;
     this.dataset.kind = playback.descriptor.kind.toLowerCase();
@@ -543,6 +666,9 @@ export class SiteMediaPlayer extends HTMLElement {
 
   unmountPlayback() {
     clearSiteMediaResume(sessionStorage);
+    this.cancelGestureResume();
+    this.releaseArtwork();
+    this.clearMediaSessionMetadata();
     this.hidden = true;
     this.removeAttribute('data-kind');
     this.querySelector('[data-site-player-media]').replaceChildren();
@@ -551,6 +677,65 @@ export class SiteMediaPlayer extends HTMLElement {
     document.documentElement.style.removeProperty(PLAYER_HEIGHT_PROPERTY);
     this.navigator.currentFrame()?.element.remove();
     this.navigator = this.createNavigator();
+  }
+
+  renderAudioPresentation(playback, metadata) {
+    if (playback.descriptor.kind !== 'AUDIO' || this.session?.snapshot() !== playback) return;
+    const presentation = siteAudioPresentation(metadata, playback.descriptor.title);
+    this.querySelector('[data-site-player-title]').textContent = presentation.title;
+    const trackMetadata = this.querySelector('[data-site-player-track-metadata]');
+    trackMetadata.textContent = presentation.subtitle;
+    trackMetadata.hidden = presentation.subtitle.length === 0;
+
+    this.releaseArtwork();
+    let artwork = null;
+    if (presentation.picture) {
+      this.artworkUrl = URL.createObjectURL(new Blob(
+        [presentation.picture.bytes], { type: presentation.picture.type }));
+      artwork = document.createElement('img');
+      artwork.className = 'site-media-player-artwork';
+      artwork.src = this.artworkUrl;
+      artwork.alt = '';
+    } else {
+      artwork = document.createElement('span');
+      artwork.className = 'site-media-player-artwork';
+      artwork.setAttribute('aria-hidden', 'true');
+      artwork.textContent = '♫';
+    }
+    const mediaHost = this.querySelector('[data-site-player-media]');
+    mediaHost.replaceChildren(artwork, playback.media);
+    this.setMediaSessionMetadata(presentation);
+  }
+
+  setMediaSessionMetadata(presentation) {
+    if (!navigator.mediaSession || typeof globalThis.MediaMetadata !== 'function') return;
+    const artwork = this.artworkUrl && presentation.picture
+      ? [{ src: this.artworkUrl, type: presentation.picture.type }] : [];
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: presentation.title,
+        artist: presentation.artist,
+        album: presentation.album || '',
+        artwork,
+      });
+    } catch (_) {
+      // Lock-screen metadata is optional and must never interrupt playback.
+    }
+  }
+
+  clearMediaSessionMetadata() {
+    if (!navigator.mediaSession) return;
+    try {
+      navigator.mediaSession.metadata = null;
+    } catch (_) {
+      // Some partial Media Session implementations expose a read-only surface.
+    }
+  }
+
+  releaseArtwork() {
+    if (!this.artworkUrl) return;
+    URL.revokeObjectURL(this.artworkUrl);
+    this.artworkUrl = null;
   }
 
   stopPlayback() {
