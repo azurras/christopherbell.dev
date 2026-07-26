@@ -363,9 +363,7 @@ export class SiteMediaPlayer extends HTMLElement {
     }
     playback.media.addEventListener('ended', () => {
       if (playback.descriptor.mode === 'RADIO') {
-        void this.syncRadio({
-          requestPlay: this.playbackIntentByMedia.get(playback.media) !== false,
-        });
+        void this.syncRadio({ requestPlay: true });
       } else {
         clearSiteMediaResume(sessionStorage);
       }

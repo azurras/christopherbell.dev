@@ -78,6 +78,39 @@ test('component keeps playing intent when restored autoplay emits pause and reje
   assert.equal(player.status, 'Tap anywhere to continue');
 });
 
+test('natural radio completion requests playback after the terminal pause event', () => {
+  globalThis.sessionStorage = memoryStorage();
+  const media = fakeMedia();
+  const playback = {
+    descriptor: {
+      mode: 'RADIO', kind: 'AUDIO', title: 'First.flac', path: 'Music/First.flac',
+      stationSequence: 1,
+    },
+    media,
+    signal: new AbortController().signal,
+  };
+  const syncRequests = [];
+  const player = Object.create(SiteMediaPlayer.prototype);
+  player.session = { snapshot: () => playback };
+  player.playbackIntentByMedia = new WeakMap([[media, true]]);
+  player.pendingPlaybackStart = new WeakSet();
+  player.syncControls = () => {};
+  player.persistPlayback = () => true;
+  player.cancelGestureResume = () => {};
+  player.syncRadio = request => {
+    syncRequests.push(request);
+    return Promise.resolve(true);
+  };
+
+  player.bindPlaybackEvents(playback);
+  media.paused = true;
+  media.ended = true;
+  media.dispatch('pause');
+  media.dispatch('ended');
+
+  assert.deepEqual(syncRequests, [{ requestPlay: true }]);
+});
+
 test('component gesture retry ignores its Play control and resumes from page content once', async () => {
   const eventTarget = fakeEventTarget();
   globalThis.document = eventTarget;
