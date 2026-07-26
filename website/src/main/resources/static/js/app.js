@@ -12,18 +12,13 @@ import './components/blog.js';
 import './components/gallery.js';
 import './components/site-media-player.js';
 import pubsub from './components/pubsub.js';
-import {
-    clearSharedFolderStreamingAuth,
-    installSharedFolderAuthRecovery,
-} from './lib/shared-folder-streaming.js';
-import { getAuthToken } from './lib/util.js';
+import { API } from './lib/api.js';
+import { clearAuthState, fetchJson } from './lib/util.js';
 import {
     handleSiteNavigationClick,
     siteMediaPlayerHost,
     stopSiteMediaPlayback,
 } from './lib/site-media-player.js';
-
-installSharedFolderAuthRecovery(getAuthToken);
 
 /** Wire core layout and global auth behavior once DOM is ready. */
 document.addEventListener('DOMContentLoaded', () => {
@@ -51,16 +46,16 @@ document.addEventListener('DOMContentLoaded', () => {
         galleryContainer.appendChild(document.createElement('photo-gallery'));
     }
 
-    pubsub.subscribe('auth:logout', () => {
+    pubsub.subscribe('auth:logout', async () => {
         const playerHost = siteMediaPlayerHost();
-        stopSiteMediaPlayback();
-        clearSharedFolderStreamingAuth();
-        localStorage.removeItem('cbellLoginToken');
-        localStorage.removeItem('cbellUsername');
-        localStorage.removeItem('cbellRole');
-        // Redirect to login for clear feedback
-        const siteWindow = playerHost?.ownerDocument?.defaultView || window;
-        siteWindow.location.href = '/login';
+        try {
+            await fetchJson(API.accounts.logout, { method: 'POST' });
+        } finally {
+            stopSiteMediaPlayback();
+            clearAuthState();
+            const siteWindow = playerHost?.ownerDocument?.defaultView || window;
+            siteWindow.location.href = '/login';
+        }
     });
 
 });

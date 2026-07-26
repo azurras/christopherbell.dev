@@ -3,258 +3,91 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 import {
-  attachSharedFolderAuthorization,
-  installSharedFolderAuthRecovery,
   isSharedFolderApiRequest,
-  sharedFolderDownloadRequestUrl,
-  prepareSharedFolderMediaAuth,
   prepareSharedFolderStreamingAuth,
+  sharedFolderDownloadRequestUrl,
   sharedFolderStreamingDenial,
 } from '../../main/resources/static/js/lib/shared-folder-streaming.js';
 
 const origin = 'https://example.test';
 const sharedContent = `${origin}/api/shared-folder/2026-07-17/content?path=music%2Ftrack.flac`;
 
-test('native shared-folder requests attach authorization only to the exact versioned API prefix', () => {
+test('native shared-folder interception is restricted to the exact same-origin API prefix', () => {
   assert.equal(isSharedFolderApiRequest(sharedContent, origin), true);
   assert.equal(isSharedFolderApiRequest(`${origin}/api/shared-folder/2026-07-17x/content`, origin), false);
   assert.equal(isSharedFolderApiRequest(`${origin}/api/accounts/me`, origin), false);
   assert.equal(isSharedFolderApiRequest(`https://outside.test/api/shared-folder/2026-07-17/content`, origin), false);
 });
 
-test('native shared-folder authorization preserves Range and never puts a bearer token in a URL', () => {
-  const original = new Request(sharedContent, { headers: { Range: 'bytes=4-9' } });
-  const authorized = attachSharedFolderAuthorization(original, 'jwt-value', origin);
-
-  assert.equal(authorized.headers.get('Authorization'), 'Bearer jwt-value');
-  assert.equal(authorized.headers.get('Range'), 'bytes=4-9');
-  assert.equal(authorized.url, sharedContent);
-  assert.equal(new URL(authorized.url).searchParams.has('token'), false);
-  assert.equal(new URL(authorized.url).searchParams.has('access_token'), false);
-});
-
-test('native no-cors media requests become same-origin before authorization is attached', () => {
-  const original = new Request(sharedContent, { mode: 'no-cors' });
-  const authorized = attachSharedFolderAuthorization(original, 'jwt-value', origin);
-
-  assert.equal(original.mode, 'no-cors');
-  assert.equal(authorized.mode, 'same-origin');
-  assert.equal(authorized.headers.get('Authorization'), 'Bearer jwt-value');
-});
-
 test('download correlation is an exact non-secret same-origin URL', () => {
-  const downloadUrl = sharedFolderDownloadRequestUrl(
-    sharedContent,
-    '11111111-1111-4111-8111-111111111111',
-    origin,
+  const downloadId = '11111111-1111-4111-8111-111111111111';
+  const result = sharedFolderDownloadRequestUrl(sharedContent, downloadId, origin);
+
+  assert.equal(new URL(result).searchParams.get('downloadId'), downloadId);
+  assert.equal(new URL(result).searchParams.has('token'), false);
+  assert.throws(
+    () => sharedFolderDownloadRequestUrl('https://outside.test/file', downloadId, origin),
+    /invalid/i,
   );
-
-  assert.equal(new URL(downloadUrl).searchParams.get('downloadId'),
-    '11111111-1111-4111-8111-111111111111');
-  assert.equal(downloadUrl.includes('jwt-value'), false);
-  assert.throws(() => sharedFolderDownloadRequestUrl(
-    'https://outside.test/api/shared-folder/2026-07-17/content',
-    '11111111-1111-4111-8111-111111111111',
-    origin,
-  ));
 });
 
-test('worker delegates no-store forwarding and 401 token eviction to its runtime', () => {
-  const worker = fs.readFileSync('website/src/main/resources/static/shared-folder-auth-sw.js', 'utf8');
-  const runtime = fs.readFileSync(
-    'website/src/main/resources/static/js/lib/shared-folder-worker-runtime.js', 'utf8');
-
-  assert.match(worker, /respondToSharedFolderFetch/);
-  assert.match(runtime, /fetchFn\(\s*attachSharedFolderAuthorization\([\s\S]*?\{ cache: 'no-store' \}/);
-  assert.match(runtime, /response\.status === 401[\s\S]*?clientTokens\.delete\(clientId\)/);
-  assert.match(worker, /shared-folder-auth-clear[\s\S]*?clientTokens\.delete\(clientId\)/);
-});
-
-test('download and binary-preview denial states are actionable without a rejected Blob request', () => {
+test('native denial states remain actionable', () => {
   assert.deepEqual(sharedFolderStreamingDenial(401), {
     message: 'Your session expired. Redirecting to login.',
     redirectToLogin: true,
   });
-  assert.deepEqual(sharedFolderStreamingDenial(403), {
-    message: 'Shared-folder access was denied. Your access may have been revoked.',
-    redirectToLogin: false,
-  });
+  assert.equal(sharedFolderStreamingDenial(403).redirectToLogin, false);
 });
 
-test('global auth recovery answers an existing worker after navigation to Back Office', () => {
-  let onMessage;
-  const replies = [];
-  const controller = { scriptURL: `${origin}/shared-folder-auth-sw.js` };
-  const serviceWorker = {
-    controller,
-    addEventListener(type, listener) {
-      assert.equal(type, 'message');
-      onMessage = listener;
-    },
-  };
-
-  installSharedFolderAuthRecovery(() => 'current-jwt', serviceWorker);
-  onMessage({
-    data: { type: 'shared-folder-auth-request-token' },
-    source: controller,
-    ports: [{ postMessage: reply => replies.push(reply) }],
-  });
-
-  assert.deepEqual(replies, [{
-    type: 'shared-folder-auth-recovery',
-    token: 'current-jwt',
-  }]);
-});
-
-test('shared-folder page starts native anchor and media requests without Blob buffering', () => {
-  const page = fs.readFileSync('website/src/main/resources/static/js/shared-folder.js', 'utf8');
-  const player = fs.readFileSync(
-    'website/src/main/resources/static/js/components/site-media-player.js', 'utf8');
-  const worker = fs.readFileSync('website/src/main/resources/static/shared-folder-auth-sw.js', 'utf8');
-  const runtime = fs.readFileSync(
-    'website/src/main/resources/static/js/lib/shared-folder-worker-runtime.js', 'utf8');
-
-  assert.doesNotMatch(page, /\.blob\(/);
-  assert.doesNotMatch(page, /URL\.createObjectURL/);
-  assert.doesNotMatch(player, /\.blob\(/);
-  assert.doesNotMatch(player, /playback\.media\.src\s*=\s*URL\.createObjectURL/);
-  assert.match(player,
-    /URL\.createObjectURL\(new Blob\(\s*\[presentation\.picture\.bytes\]/);
-  assert.match(page, /prepareSharedFolderDownloadAuth\(token, requestUrl\)/);
-  assert.match(player, /prepareSharedFolderMediaAuth\(getAuthToken\(\), url\)/);
-  assert.match(page, /link\.href = requestUrl/);
-  assert.match(page, /element\.src = API\.sharedFolder\.preview\(entry\.path\)/);
-  assert.match(player, /playback\.media\.src = url/);
-  assert.match(page, /prepareSharedFolderStreamingAuth/);
-  assert.match(page, /function handleSharedFolderAccessLoss\(statusCode\)/);
-  assert.match(page, /handleSharedFolderAccessLoss\(error\.status\)/);
-  assert.match(page, /handleSharedFolderAccessLoss\(event\.data\.status\)/);
-  assert.match(page, /redirectOnUnauthorized: false/);
-  assert.match(worker, /respondToSharedFolderFetch/);
-  assert.match(worker, /shared-folder-media-token/);
-  assert.match(runtime, /attachSharedFolderAuthorization/);
-  assert.match(runtime, /shared-folder-auth-denied/);
-});
-
-test('worker registration waits for the root-scoped controller and its token acknowledgement', async () => {
+test('worker registration requires no readable credential or message staging', async () => {
   const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-  const originalMessageChannel = Object.getOwnPropertyDescriptor(globalThis, 'MessageChannel');
   const registrations = [];
-  const messages = [];
   const controller = {
-    scriptURL: `${origin}/shared-folder-auth-sw.js?v=20260723`,
-    postMessage(message, ports) {
-      messages.push(message);
-      ports[0].deliver({ type: 'shared-folder-auth-ready' });
-    },
+    scriptURL: `${origin}/shared-folder-auth-sw.js?v=20260725`,
   };
-
-  class BrowserMessageChannel {
-    constructor() {
-      this.port1 = { onmessage: null };
-      this.port2 = {
-        deliver: data => this.port1.onmessage?.({ data }),
-      };
-    }
-  }
-
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: {
       serviceWorker: {
         controller,
         ready: Promise.resolve(),
-        register: async (path, options) => registrations.push({ path, options }),
-        addEventListener() {},
-        removeEventListener() {},
+        register: async (path, options) => { registrations.push({ path, options }); },
       },
     },
   });
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
-    value: { setTimeout, clearTimeout },
-  });
-  Object.defineProperty(globalThis, 'MessageChannel', {
-    configurable: true,
-    value: BrowserMessageChannel,
+    value: { location: { origin } },
   });
 
   try {
-    await prepareSharedFolderStreamingAuth('jwt-value');
+    assert.equal(await prepareSharedFolderStreamingAuth(), controller);
   } finally {
     if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator);
     else delete globalThis.navigator;
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
     else delete globalThis.window;
-    if (originalMessageChannel) Object.defineProperty(globalThis, 'MessageChannel', originalMessageChannel);
-    else delete globalThis.MessageChannel;
   }
 
   assert.deepEqual(registrations, [{
-    path: '/shared-folder-auth-sw.js?v=20260723',
+    path: '/shared-folder-auth-sw.js?v=20260725',
     options: { scope: '/', type: 'module' },
   }]);
-  assert.deepEqual(messages, [{ type: 'shared-folder-auth-token', token: 'jwt-value' }]);
 });
 
-test('native media authorization stages the exact URL after worker authentication', async () => {
-  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
-  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-  const originalMessageChannel = Object.getOwnPropertyDescriptor(globalThis, 'MessageChannel');
-  const messages = [];
-  const streamUrl = `${origin}/api/shared-folder/2026-07-17/media/jobs/11111111-1111-4111-8111-111111111111/stream`;
-  const controller = {
-    scriptURL: `${origin}/shared-folder-auth-sw.js?v=20260723`,
-    postMessage(message, ports) {
-      messages.push(message);
-      const type = message.type === 'shared-folder-auth-token'
-        ? 'shared-folder-auth-ready' : 'shared-folder-media-ready';
-      ports[0].deliver({ type });
-    },
-  };
+test('shared-folder streaming code contains no bearer-token transport', () => {
+  const paths = [
+    'website/src/main/resources/static/shared-folder-auth-sw.js',
+    'website/src/main/resources/static/js/lib/shared-folder-streaming.js',
+    'website/src/main/resources/static/js/lib/shared-folder-worker-runtime.js',
+    'website/src/main/resources/static/js/shared-folder.js',
+    'website/src/main/resources/static/js/components/site-media-player.js',
+  ];
+  const sources = paths.map(path => fs.readFileSync(path, 'utf8')).join('\n');
 
-  class BrowserMessageChannel {
-    constructor() {
-      this.port1 = { onmessage: null };
-      this.port2 = { deliver: data => this.port1.onmessage?.({ data }) };
-    }
-  }
-
-  Object.defineProperty(globalThis, 'navigator', {
-    configurable: true,
-    value: {
-      serviceWorker: {
-        controller,
-        ready: Promise.resolve(),
-        register: async () => {},
-        addEventListener() {},
-        removeEventListener() {},
-      },
-    },
-  });
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: { setTimeout, clearTimeout },
-  });
-  Object.defineProperty(globalThis, 'MessageChannel', {
-    configurable: true,
-    value: BrowserMessageChannel,
-  });
-
-  try {
-    await prepareSharedFolderMediaAuth('jwt-value', streamUrl);
-  } finally {
-    if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator);
-    else delete globalThis.navigator;
-    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
-    else delete globalThis.window;
-    if (originalMessageChannel) Object.defineProperty(globalThis, 'MessageChannel', originalMessageChannel);
-    else delete globalThis.MessageChannel;
-  }
-
-  assert.deepEqual(messages, [
-    { type: 'shared-folder-auth-token', token: 'jwt-value' },
-    { type: 'shared-folder-media-token', token: 'jwt-value', requestUrl: streamUrl },
-  ]);
+  assert.doesNotMatch(sources, /cbellLoginToken|Authorization:\s*`Bearer|shared-folder-auth-token/);
+  assert.match(sources, /prepareSharedFolderDownloadAuth\(requestUrl\)/);
+  assert.match(sources, /prepareSharedFolderMediaAuth\(url\)/);
+  assert.match(sources, /shared-folder-auth-denied/);
 });

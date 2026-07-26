@@ -1,5 +1,6 @@
 server:
   port: 8080
+  forward-headers-strategy: none
 spring:
   mongodb:
     database: christopherbell
@@ -19,6 +20,10 @@ spring:
           starttls:
             enable: true
 app:
+  browser-security:
+    public-base-url: ${APP_PUBLIC_BASE_URL:https://www.christopherbell.dev}
+    authentication-cookie-secure: true
+    hsts-enabled: true
   jwt:
     secret: ${APP_JWT_SECRET:}
   mail:

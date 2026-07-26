@@ -1,5 +1,5 @@
 import { API } from './lib/api.js';
-import { authHeaders, fetchJson } from './lib/util.js';
+import { authHeaders, fetchJson, isLoggedIn } from './lib/util.js';
 import {
   ACTION_PHRASES,
   actionCountdown,
@@ -63,7 +63,7 @@ function redirectLostSignal() {
 
 /** Verify the exact server-reported role before revealing or populating the shell. */
 async function gateCommandCenter() {
-  if (!localStorage.getItem('cbellLoginToken')) {
+  if (!isLoggedIn()) {
     redirectLostSignal();
     return;
   }

@@ -27,7 +27,6 @@ import {
   sortSharedFolderEntries,
 } from './lib/shared-folder.js';
 import {
-  clearSharedFolderStreamingAuth,
   prepareSharedFolderDownloadAuth,
   prepareSharedFolderStreamingAuth,
   sharedFolderDownloadRequestUrl,
@@ -69,7 +68,6 @@ function handleSharedFolderAccessLoss(statusCode) {
   stopSiteMediaPlayback();
   status(denial.message);
   if (denial.redirectToLogin && !window.location.pathname.startsWith('/login')) {
-    clearSharedFolderStreamingAuth();
     clearAuthState();
     window.location.replace(loginRedirectUrl(currentRedirectTarget()));
   }
@@ -77,8 +75,7 @@ function handleSharedFolderAccessLoss(statusCode) {
 
 async function prepareNativeStreaming() {
   try {
-    const token = getAuthToken();
-    await prepareSharedFolderStreamingAuth(token);
+    await prepareSharedFolderStreamingAuth();
     return true;
   } catch (error) {
     status(error?.message || 'Secure shared-folder streaming is unavailable.');
@@ -88,8 +85,7 @@ async function prepareNativeStreaming() {
 
 async function download(entry) {
   status(`Preparing ${entry.name}`);
-  const token = getAuthToken();
-  if (!token) {
+  if (!getAuthToken()) {
     status('Authentication is required for shared-folder downloads.');
     return;
   }
@@ -99,7 +95,7 @@ async function download(entry) {
     window.location.origin,
   );
   try {
-    await prepareSharedFolderDownloadAuth(token, requestUrl);
+    await prepareSharedFolderDownloadAuth(requestUrl);
   } catch (error) {
     status(error?.message || 'Secure shared-folder download is unavailable.');
     return;
@@ -676,15 +672,6 @@ export async function initializeSharedFolderPage({
 
 if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', event => {
-    if (event.data?.type === 'shared-folder-auth-request-token') {
-      const controller = navigator.serviceWorker.controller;
-      if (event.source !== controller || !event.ports?.[0]) return;
-      event.ports[0].postMessage({
-        type: 'shared-folder-auth-recovery',
-        token: getAuthToken() || null,
-      });
-      return;
-    }
     if (event.data?.type === 'shared-folder-auth-denied') {
       handleSharedFolderAccessLoss(event.data.status);
     }

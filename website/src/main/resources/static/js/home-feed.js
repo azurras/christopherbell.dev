@@ -128,8 +128,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initPostImageLightbox();
 
   // Load current user to determine delete permissions before first render
-  const token = localStorage.getItem('cbellLoginToken');
-  if (token) {
+  if (isLoggedIn()) {
     try {
       const me = await fetchJson(API.accounts.me, { headers: authHeaders() });
       USER_STATE = { id: me.id, role: me.role, username: me.username };

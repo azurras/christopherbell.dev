@@ -66,14 +66,16 @@ Owns reusable browser-side modules that are not tied to one page.
 - Prefer explicit context objects over hidden imports for behavior that varies by
   page, such as delete permissions or reply handlers.
 - Shared modules should be safe to import on any page.
-- `getAuthToken` normalizes the stored JWT, rejects expired or malformed tokens,
-  and clears unusable values so the app never sends an empty or stale
-  `Authorization: Bearer` header.
-- `getAuthClaims` exposes decoded JWT claims for non-authoritative UI decisions
-  such as whether a page should render signed-in controls. Server endpoints must
-  still enforce permissions.
-- `authHeaders` accepts optional extra headers and merges them with the
-  normalized bearer token so page modules do not hand-build auth headers.
+- `getAuthToken` is a compatibility shim that reads only the non-secret
+  `CBELL_AUTH_STATE` cookie marker. The browser JWT remains in the HttpOnly
+  `CBELL_AUTH` cookie and is never exposed to JavaScript.
+- `getAuthClaims` exposes only cached, non-authoritative UI metadata. Server
+  endpoints must still enforce authentication and permissions.
+- `authHeaders` accepts optional extra headers and echoes the readable
+  `XSRF-TOKEN` cookie as `X-XSRF-TOKEN`; browser authentication is carried by
+  same-origin cookies.
+- `fetchJson` sends same-origin credentials and automatically attaches the CSRF
+  header for unsafe methods.
 - `fetchJson` clears stale auth state on `401` but only redirects when the caller
   passes `redirectOnUnauthorized: true`. Public tools and nav background fetches
   should not opt into redirects.

@@ -8,8 +8,12 @@ subfeature services own the larger account workflows.
 
 - Account CRUD and lookup facade methods.
 - `auth` owns login validation and JWT creation for active accounts.
+- Login returns no JWT in the JSON body. Browser sessions receive the JWT in an
+  HttpOnly, SameSite=Lax cookie plus a separate non-secret UI marker; explicit
+  bearer tokens remain supported for API clients. Logout clears both cookies.
 - `passwordreset` owns reset token storage, expiration, password replacement,
-  and reset-link notification handoff.
+  and reset-link notification handoff. Reset links use the configured public
+  application origin rather than request or forwarded host headers.
 - `profile` owns self-account detail reads and public username-only profiles,
   including safe activity and network stats for post count, reply count,
   followers, and following.
@@ -19,6 +23,8 @@ subfeature services own the larger account workflows.
   account ids are hidden from personal feed reads, and blocks also prevent
   direct messages in either direction.
 - Case-insensitive email normalization and lookup for sign-up, login, and password reset.
+- Login and password-reset request models reject blank, malformed, or oversized
+  fields through Bean Validation before account services run.
 - Username sanitization on account creation/update and case-insensitive username uniqueness checks.
 - Signed-in username prefix search for recipient autocomplete. The search
   endpoint returns active, public-safe username suggestions only and excludes the

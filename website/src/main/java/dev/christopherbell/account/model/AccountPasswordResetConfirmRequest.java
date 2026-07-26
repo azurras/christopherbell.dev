@@ -1,5 +1,7 @@
 package dev.christopherbell.account.model;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Builder;
 
 /**
@@ -7,6 +9,6 @@ import lombok.Builder;
  */
 @Builder
 public record AccountPasswordResetConfirmRequest(
-    String token,
-    String password
+    @NotBlank @Size(max = 512) String token,
+    @NotBlank @Size(min = 8, max = 128) String password
 ) {}

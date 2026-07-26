@@ -123,18 +123,16 @@ Owns browser-side behavior for server-rendered pages.
   service worker to acknowledge the current JWT; 401 redirects to login and 403/revocation is
   shown inline. If a restarted worker has lost its per-client in-memory token, it asks only the
   initiating controlled page for a one-shot recovery reply over a bounded message port; a missing
-  reply produces a controlled 401 rather than an unauthenticated network request. The worker
-  receives no token in a URL or persistent worker storage, attaches it only to the exact versioned
-  shared-folder API prefix, preserves `Range`, forwards with `cache: 'no-store'`, and clears its
-  per-client token on 401 or logout. Native media also stages one exact preview or job-stream URL
-  in bounded volatile worker memory so mobile browsers can issue repeated range requests even
-  when they omit the page client ID; those entries expire and are cleared with their owner.
+  reply produces a controlled 401 rather than an opaque media failure. The worker
+  handles only the exact versioned shared-folder API prefix and forwards the original
+  cookie-authenticated request with its `Range` and credentials mode intact and
+  `cache: 'no-store'`; it never receives, stores, or attaches a bearer token.
   Folder navigation replaces only the breadcrumbs, toolbar, and entry list. Browser history restores folders without a page
   reload, and a navigation generation guard prevents slower stale responses from replacing the
   latest folder.
   Text and native-stream 401/403 responses use one actionable
   access-loss handler. Its root bootstrap script is intentionally public for exact anonymous
-  `GET /shared-folder-auth-sw.js` so installation can happen before it has a bearer token; all
+  `GET /shared-folder-auth-sw.js` so installation can happen before login; all
   shared-folder API requests stay protected. Write-capable users can create folders, rename, move,
   explicitly replace, and delete entries with observed tokens. The same module owns resumable
   8 MiB chunk uploads, SHA-256 chunk digests, progress, cancel, drag/drop, explicit replacement,

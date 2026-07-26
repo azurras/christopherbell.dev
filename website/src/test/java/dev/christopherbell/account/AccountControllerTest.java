@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -12,6 +14,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -26,6 +29,8 @@ import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.configuration.security.ControllerSliceSecurityTestConfig;
+import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
+import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
@@ -36,6 +41,7 @@ import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import java.util.List;
+import java.net.URI;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +50,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -52,6 +59,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @WebMvcTest(AccountController.class)
 @Import({
     ControllerExceptionHandler.class,
+    BrowserAuthenticationCookies.class,
     ControllerSliceSecurityTestConfig.class,
     SharedFolderNoStoreFilter.class,
     AccountControllerTest.MethodSecurityTestConfig.class
@@ -60,11 +68,14 @@ public class AccountControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private AccountService accountService;
+  @MockitoBean private BrowserSecurityProperties browserSecurityProperties;
   @MockitoBean private SharedFolderAuditRecorder sharedFolderAudit;
 
   @BeforeEach
   void allowMethodSecuredControllerCalls() {
     when(permissionService.hasAuthority(anyString())).thenReturn(true);
+    when(browserSecurityProperties.publicBaseUrl())
+        .thenReturn(URI.create("http://localhost"));
   }
 
   @Test
@@ -534,7 +545,7 @@ public class AccountControllerTest {
   }
 
   @Test
-  @DisplayName("testLoginAccount_whenValid_Returns200WithToken")
+  @DisplayName("Login returns HttpOnly browser cookie without exposing the JWT")
   @WithMockUser
   public void testLoginAccount_whenValid_Returns200WithToken() throws Exception {
     when(accountService.loginAccount(eq(new dev.christopherbell.account.model.AccountLoginRequest("user@example.com", "pass"))))
@@ -550,7 +561,35 @@ public class AccountControllerTest {
                 .contentType(MediaType.APPLICATION_JSON_VALUE))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.payload").value("jwt-token"));
+        .andExpect(jsonPath("$.payload").doesNotExist())
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, allOf(
+            containsString("CBELL_AUTH=jwt-token"),
+            containsString("HttpOnly"),
+            containsString("SameSite=Lax"))));
+  }
+
+  @Test
+  @DisplayName("Logout clears the browser authentication cookie")
+  @WithMockUser
+  void logoutAccount_clearsBrowserAuthenticationCookie() throws Exception {
+    mockMvc.perform(post("/api/accounts" + APIVersion.V20241215 + "/logout").with(csrf()))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, allOf(
+            containsString("CBELL_AUTH="),
+            containsString("Max-Age=0"))));
+  }
+
+  @Test
+  @DisplayName("Malformed login payload is rejected before account authentication")
+  @WithMockUser
+  void loginAccount_whenPayloadMalformed_returnsBadRequestWithoutServiceCall() throws Exception {
+    mockMvc.perform(post("/api/accounts" + APIVersion.V20241215 + "/login")
+            .with(csrf())
+            .content("{\"email\":\"not-an-email\",\"password\":\"\"}")
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isBadRequest());
+
+    verifyNoInteractions(accountService);
   }
 
   @Test
@@ -563,6 +602,8 @@ public class AccountControllerTest {
         .perform(
             post("/api/accounts" + APIVersion.V20241215 + "/password-reset/request")
                 .with(csrf())
+                .header("X-Forwarded-Proto", "https")
+                .header("X-Forwarded-Host", "attacker.example")
                 .content(json)
                 .contentType(MediaType.APPLICATION_JSON_VALUE))
         .andExpect(status().isOk())
@@ -572,6 +613,20 @@ public class AccountControllerTest {
     verify(accountService).requestPasswordReset(
         eq(new AccountPasswordResetRequest("user@example.com")),
         eq("http://localhost"));
+  }
+
+  @Test
+  @DisplayName("Malformed reset request is rejected before account lookup")
+  @WithMockUser
+  void requestPasswordReset_whenEmailMalformed_returnsBadRequestWithoutServiceCall()
+      throws Exception {
+    mockMvc.perform(post("/api/accounts" + APIVersion.V20241215 + "/password-reset/request")
+            .with(csrf())
+            .content("{\"email\":\"not-an-email\"}")
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isBadRequest());
+
+    verifyNoInteractions(accountService);
   }
 
   @Test
@@ -592,6 +647,20 @@ public class AccountControllerTest {
         .andExpect(jsonPath("$.payload").value("Your password has been reset."));
 
     verify(accountService).resetPassword(eq(request));
+  }
+
+  @Test
+  @DisplayName("Malformed reset confirmation is rejected before password mutation")
+  @WithMockUser
+  void resetPassword_whenPayloadMalformed_returnsBadRequestWithoutServiceCall()
+      throws Exception {
+    mockMvc.perform(post("/api/accounts" + APIVersion.V20241215 + "/password-reset/confirm")
+            .with(csrf())
+            .content("{\"token\":\"\",\"password\":\"short\"}")
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isBadRequest());
+
+    verifyNoInteractions(accountService);
   }
 
   @TestConfiguration

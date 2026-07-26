@@ -22,9 +22,11 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
+import org.springframework.security.web.header.writers.StaticHeadersWriter;
+import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
@@ -38,8 +40,26 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 @EnableMethodSecurity
 @EnableWebSecurity
 @EnableConfigurationProperties({
-    ClientIpProperties.class, RateLimitProperties.class, SharedFolderProperties.class})
+    BrowserSecurityProperties.class, ClientIpProperties.class, RateLimitProperties.class,
+    SharedFolderProperties.class})
 public class SecurityConfig {
+
+  private static final String CONTENT_SECURITY_POLICY = String.join("; ",
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "script-src 'self' https://cdn.jsdelivr.net",
+      "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://maxcdn.bootstrapcdn.com",
+      "font-src 'self' data: https://maxcdn.bootstrapcdn.com",
+      "img-src 'self' data: blob: https:",
+      "connect-src 'self' https://gateway.raisingcanes.com https://order.raisingcanes.com",
+      "frame-src https://www.youtube.com https://www.youtube-nocookie.com https://open.spotify.com https://w.soundcloud.com",
+      "frame-ancestors 'self'",
+      "media-src 'self' blob:",
+      "worker-src 'self' blob:",
+      "form-action 'self'");
+  private static final String PERMISSIONS_POLICY =
+      "camera=(), geolocation=(), microphone=(), payment=(), usb=()";
 
   private static final String[] PUBLIC_URLS = {
       "/",
@@ -50,6 +70,7 @@ public class SecurityConfig {
       "/shared",
       "GET:/shared-folder-auth-sw.js",
       "/api/accounts" + APIVersion.V20241215 + "/login",
+      "/api/accounts" + APIVersion.V20241215 + "/logout",
       "/api/accounts" + APIVersion.V20241215 + "/create",
       "/api/accounts" + APIVersion.V20241215 + "/password-reset/request",
       "/api/accounts" + APIVersion.V20241215 + "/password-reset/confirm",
@@ -110,16 +131,27 @@ public class SecurityConfig {
    */
   @Bean
   public SecurityFilterChain securityFilterChain(HttpSecurity http,
+      BrowserSecurityProperties browserSecurityProperties,
       RateLimitFilter rateLimitFilter,
       JwtAuthenticationFilter jwtAuthenticationFilter,
       RequestSizeLimitFilter requestSizeLimitFilter,
       SharedFolderNoStoreFilter sharedFolderNoStoreFilter) throws Exception {
     return http
-        // Disable CSRF for APIs (use with care)
-        .csrf(AbstractHttpConfigurer::disable)
+        .csrf(csrf -> csrf
+            .spa()
+            .ignoringRequestMatchers(SecurityConfig::hasExplicitBearerToken))
 
-        // The persistent media shell embeds only pages from this exact origin.
-        .headers(headers -> headers.frameOptions(frameOptions -> frameOptions.sameOrigin()))
+        .headers(headers -> {
+          headers.contentSecurityPolicy(csp -> csp.policyDirectives(CONTENT_SECURITY_POLICY));
+          headers.frameOptions(frameOptions -> frameOptions.sameOrigin());
+          headers.httpStrictTransportSecurity(hsts -> hsts
+              .requestMatcher(request -> browserSecurityProperties.hstsEnabled())
+              .includeSubDomains(true)
+              .maxAgeInSeconds(31_536_000));
+          headers.addHeaderWriter(new StaticHeadersWriter("Permissions-Policy", PERMISSIONS_POLICY));
+          headers.referrerPolicy(referrer -> referrer
+              .policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN));
+        })
 
         // Configure authorization rules
         .authorizeHttpRequests(auth -> auth
@@ -131,7 +163,7 @@ public class SecurityConfig {
         .addFilterBefore(jwtAuthenticationFilter, AuthorizationFilter.class)
         .addFilterBefore(rateLimitFilter, JwtAuthenticationFilter.class)
         .addFilterBefore(requestSizeLimitFilter, RateLimitFilter.class)
-        .addFilterBefore(sharedFolderNoStoreFilter, RequestSizeLimitFilter.class)
+        .addFilterBefore(sharedFolderNoStoreFilter, CsrfFilter.class)
         
         // Build the SecurityFilterChain
         .build();
@@ -162,6 +194,13 @@ public class SecurityConfig {
   @Bean
   public JwtAuthenticationFilter jwtAuthenticationFilter() {
     return new JwtAuthenticationFilter(publicMatchersList());
+  }
+
+  private static boolean hasExplicitBearerToken(jakarta.servlet.http.HttpServletRequest request) {
+    var authorization = request.getHeader(org.springframework.http.HttpHeaders.AUTHORIZATION);
+    return authorization != null
+        && authorization.startsWith("Bearer ")
+        && !authorization.substring("Bearer ".length()).isBlank();
   }
 
   /**

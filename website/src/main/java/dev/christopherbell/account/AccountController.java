@@ -14,15 +14,18 @@ import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
+import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -58,8 +61,10 @@ import org.springframework.web.bind.annotation.PutMapping;
 @RequestMapping("/api/accounts")
 @RestController
 public class AccountController {
-  private AccountService accountService;
-  private PermissionService permissionService;
+  private final AccountService accountService;
+  private final PermissionService permissionService;
+  private final BrowserAuthenticationCookies browserAuthenticationCookies;
+  private final BrowserSecurityProperties browserSecurityProperties;
 
     /**
    * Approves a pending or unapproved account.
@@ -346,13 +351,24 @@ public class AccountController {
       consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE
   )
-  public ResponseEntity<Response<String>> loginAccount(
-      @RequestBody AccountLoginRequest accountLoginRequest
+  public ResponseEntity<Response<Void>> loginAccount(
+      @Valid @RequestBody AccountLoginRequest accountLoginRequest
   ) throws Exception {
-    return new ResponseEntity<>(Response.<String>builder()
-        .payload(accountService.loginAccount(accountLoginRequest))
+    var token = accountService.loginAccount(accountLoginRequest);
+    return new ResponseEntity<>(Response.<Void>builder()
         .success(true)
-        .build(), HttpStatus.OK);
+        .build(), cookieHeaders(browserAuthenticationCookies.authenticated(token)), HttpStatus.OK);
+  }
+
+  /** Clears browser authentication cookies. CSRF remains required for this public endpoint. */
+  @PostMapping(
+      value = V20241215 + "/logout",
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  public ResponseEntity<Response<Void>> logoutAccount() {
+    return new ResponseEntity<>(Response.<Void>builder()
+        .success(true)
+        .build(), cookieHeaders(browserAuthenticationCookies.cleared()), HttpStatus.OK);
   }
 
   /**
@@ -369,10 +385,10 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   public ResponseEntity<Response<String>> requestPasswordReset(
-      @RequestBody AccountPasswordResetRequest requestBody,
-      HttpServletRequest servletRequest
+      @Valid @RequestBody AccountPasswordResetRequest requestBody
   ) {
-    accountService.requestPasswordReset(requestBody, getBaseUrl(servletRequest));
+    accountService.requestPasswordReset(
+        requestBody, browserSecurityProperties.publicBaseUrl().toString());
     return new ResponseEntity<>(Response.<String>builder()
         .payload("If an account exists for that email, a password reset link has been sent.")
         .success(true)
@@ -392,7 +408,7 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   public ResponseEntity<Response<String>> resetPassword(
-      @RequestBody AccountPasswordResetConfirmRequest request
+      @Valid @RequestBody AccountPasswordResetConfirmRequest request
   ) throws Exception {
     accountService.resetPassword(request);
     return new ResponseEntity<>(Response.<String>builder()
@@ -450,16 +466,9 @@ public class AccountController {
         .build());
   }
 
-  private String getBaseUrl(HttpServletRequest request) {
-    var forwardedProto = request.getHeader("X-Forwarded-Proto");
-    var forwardedHost = request.getHeader("X-Forwarded-Host");
-    if (forwardedProto != null && !forwardedProto.isBlank()
-        && forwardedHost != null && !forwardedHost.isBlank()) {
-      return forwardedProto + "://" + forwardedHost;
-    }
-
-    var url = request.getRequestURL();
-    var uri = request.getRequestURI();
-    return url.substring(0, url.length() - uri.length());
+  private HttpHeaders cookieHeaders(List<ResponseCookie> cookies) {
+    var headers = new HttpHeaders();
+    cookies.forEach(cookie -> headers.add(HttpHeaders.SET_COOKIE, cookie.toString()));
+    return headers;
   }
 }

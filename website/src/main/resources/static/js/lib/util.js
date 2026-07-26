@@ -10,63 +10,24 @@ const USERNAME_MENTION_RE = /(^|[^A-Za-z0-9._@-])@([A-Za-z0-9](?:[A-Za-z0-9._-]{
 const WEB_URL_RE = /\bhttps?:\/\/[^\s<>()]+/gi;
 const URL_TRAILING_PUNCTUATION = /[.,!?;:]$/;
 
-function decodeJwtPayload(token) {
-  const payload = token.split('.')[1] || '';
-  const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
-  return JSON.parse(atob(padded));
-}
-
-/** Return decoded JWT claims for UI-only decisions, or null when no usable token exists. */
+/** Return non-authoritative browser session metadata for UI-only decisions. */
 export function getAuthClaims() {
-  const token = getAuthToken();
-  if (!token) return null;
-
-  try {
-    return decodeJwtPayload(token);
-  } catch (_) {
-    clearAuthState();
-    return null;
-  }
+  if (!isLoggedIn()) return null;
+  return {
+    sub: 'browser-session',
+    role: String(localStorage.getItem('cbellRole') || ''),
+  };
 }
 
-/** Return the stored JWT when it is present and shaped like a usable token. */
+/**
+ * Compatibility shim for older UI gates. The returned value is a non-secret
+ * cookie marker, never an authentication credential.
+ */
 export function getAuthToken() {
-  const storedToken = String(localStorage.getItem('cbellLoginToken') || '').trim();
-  const token = storedToken.startsWith('Bearer ')
-    ? storedToken.substring('Bearer '.length).trim()
-    : storedToken;
-
-  if (!token || token === 'Bearer' || token === 'undefined' || token === 'null') {
-    clearAuthState();
-    return '';
-  }
-
-  if (token.split('.').length !== 3) {
-    clearAuthState();
-    return '';
-  }
-
-  try {
-    const claims = decodeJwtPayload(token);
-    const expiresAt = Number(claims?.exp || 0) * 1000;
-    if (!expiresAt || expiresAt <= Date.now()) {
-      clearAuthState();
-      return '';
-    }
-  } catch (_) {
-    clearAuthState();
-    return '';
-  }
-
-  if (token !== storedToken) {
-    localStorage.setItem('cbellLoginToken', token);
-  }
-
-  return token;
+  return readCookie('CBELL_AUTH_STATE');
 }
 
-/** Whether a usable login token exists in localStorage. */
+/** Whether the non-secret browser session marker is present. */
 export function isLoggedIn() {
   return !!getAuthToken();
 }
@@ -101,24 +62,27 @@ export function loginRedirectUrl(target = currentRedirectTarget()) {
 }
 
 /**
- * Build request headers with the stored bearer token when one exists.
+ * Build same-origin request headers. Authentication is carried by an HttpOnly
+ * cookie; the readable CSRF cookie is echoed for unsafe Spring Security flows.
  *
  * @param {Record<string, string>} extraHeaders caller-specific headers
  * @returns {Record<string, string>} headers for authenticated API calls
  */
 export function authHeaders(extraHeaders = {}) {
-  const token = getAuthToken();
+  const csrfToken = readCookie('XSRF-TOKEN');
   return {
     ...extraHeaders,
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(csrfToken ? { 'X-XSRF-TOKEN': csrfToken } : {}),
   };
 }
 
-/** Clear cached auth data when the token is missing, stale, or explicitly removed. */
+/** Clear non-secret UI state after logout or an authentication failure. */
 export function clearAuthState() {
-  localStorage.removeItem('cbellLoginToken');
   localStorage.removeItem('cbellUsername');
   localStorage.removeItem('cbellRole');
+  if (typeof document !== 'undefined') {
+    document.cookie = 'CBELL_AUTH_STATE=; Max-Age=0; Path=/; SameSite=Lax';
+  }
 }
 
 /**
@@ -136,10 +100,14 @@ export async function fetchJson(url, options = {}) {
     redirectOnUnauthorized = false,
     ...fetchOptions
   } = options;
+  const method = String(fetchOptions.method || 'GET').toUpperCase();
+  const unsafeMethod = !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method);
   const resp = await fetch(url, {
     ...fetchOptions,
+    credentials: fetchOptions.credentials || 'same-origin',
     headers: {
       'Content-Type': 'application/json',
+      ...(unsafeMethod ? authHeaders() : {}),
       ...(fetchOptions.headers || {}),
     },
   });
@@ -160,6 +128,21 @@ export async function fetchJson(url, options = {}) {
     throw error;
   }
   return data.payload ?? data;
+}
+
+function readCookie(name) {
+  if (typeof document === 'undefined') return '';
+  const prefix = `${encodeURIComponent(name)}=`;
+  for (const item of String(document.cookie || '').split(';')) {
+    const cookie = item.trim();
+    if (!cookie.startsWith(prefix)) continue;
+    try {
+      return decodeURIComponent(cookie.substring(prefix.length));
+    } catch (_) {
+      return '';
+    }
+  }
+  return '';
 }
 
 /** Escape HTML metacharacters for safe text and attribute injection. */

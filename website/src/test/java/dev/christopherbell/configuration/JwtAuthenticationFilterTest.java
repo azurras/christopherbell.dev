@@ -8,6 +8,7 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.security.JwtAuthenticationFilter;
 import dev.christopherbell.permission.PermissionService;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.util.List;
@@ -41,6 +42,39 @@ class JwtAuthenticationFilterTest {
     assertEquals("account-1", authentication.getName());
     assertEquals("USER", authentication.getAuthorities().iterator().next().getAuthority());
     assertEquals(200, response.getStatus());
+  }
+
+  @Test
+  @DisplayName("Valid browser authentication cookie authenticates the request")
+  void doFilter_whenAuthenticationCookieValid_setsAuthentication()
+      throws ServletException, IOException {
+    var filter = new JwtAuthenticationFilter(List.of());
+    var request = new MockHttpServletRequest("GET", "/api/protected");
+    request.setCookies(new Cookie("CBELL_AUTH", token(Role.USER)));
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(request, response, new MockFilterChain());
+
+    var authentication = SecurityContextHolder.getContext().getAuthentication();
+    assertNotNull(authentication);
+    assertEquals("account-1", authentication.getName());
+    assertEquals(200, response.getStatus());
+  }
+
+  @Test
+  @DisplayName("Explicit bearer header takes precedence over browser cookie")
+  void doFilter_whenBearerAndCookiePresent_prioritizesBearer()
+      throws ServletException, IOException {
+    var filter = new JwtAuthenticationFilter(List.of());
+    var request = new MockHttpServletRequest("GET", "/api/protected");
+    request.addHeader("Authorization", "Bearer not-a-token");
+    request.setCookies(new Cookie("CBELL_AUTH", token(Role.USER)));
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(request, response, new MockFilterChain());
+
+    assertNull(SecurityContextHolder.getContext().getAuthentication());
+    assertEquals(401, response.getStatus());
   }
 
   @Test

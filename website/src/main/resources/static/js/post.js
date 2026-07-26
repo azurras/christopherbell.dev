@@ -353,7 +353,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       fetchJson(API.posts.thread(id), { headers: authHeaders() })
     ]);
     let me = null;
-    if (localStorage.getItem('cbellLoginToken')) {
+    if (isLoggedIn()) {
       try { me = await fetchJson(API.accounts.me, { headers: authHeaders() }); } catch (_) {}
     }
     currentPost = post;

@@ -21,10 +21,11 @@ import java.io.IOException;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpHeaders;
+import org.springframework.web.util.WebUtils;
 
 /**
- * Servlet filter that authenticates requests using a JWT found in the
- * {@code Authorization: Bearer <token>} header.
+ * Servlet filter that authenticates an explicit bearer JWT or the HttpOnly browser cookie.
  *
  * <p>Skips paths matched by the configured {@link RequestMatcher}s. When a
  * valid token is present, sets the Spring Security {@link Authentication}
@@ -47,8 +48,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
    */
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
-    // If request carries a Bearer token, do not skip: valid tokens can still personalize public routes.
-    return isPublicRequest(request) && !hasBearerToken(request);
+    return isPublicRequest(request) && resolveToken(request) == null;
   }
 
   @Override
@@ -86,23 +86,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     return skipMatchers.stream().anyMatch(matcher -> matcher.matches(request));
   }
 
-  private boolean hasBearerToken(HttpServletRequest request) {
-    String auth = request.getHeader("Authorization");
-    return auth != null && auth.startsWith("Bearer ");
-  }
-
   /**
-   * Extracts the bearer token from the {@code Authorization} header.
+   * Resolves an explicit bearer token first, otherwise the browser authentication cookie.
    *
    * @param request current HTTP request
-   * @return the JWT value, or {@code null} if header is missing or not a bearer token
+   * @return the JWT value, or {@code null} when no supported credential is present
    */
   private String resolveToken(HttpServletRequest request) {
-    String bearerToken = request.getHeader("Authorization");
+    String bearerToken = request.getHeader(HttpHeaders.AUTHORIZATION);
     if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
-      return bearerToken.substring(7);
+      var token = bearerToken.substring("Bearer ".length()).trim();
+      return token.isEmpty() ? null : token;
     }
-    return null;
+    var cookie = WebUtils.getCookie(request, BrowserAuthenticationCookies.AUTH_COOKIE_NAME);
+    if (cookie == null || cookie.getValue() == null || cookie.getValue().isBlank()) {
+      return null;
+    }
+    return cookie.getValue().trim();
   }
 
   /**
