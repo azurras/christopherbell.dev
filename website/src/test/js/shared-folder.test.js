@@ -737,6 +737,16 @@ test('shared-folder shell presents an explorer layout with compact actions and r
   assert.doesNotMatch(page, /window\.location\.href\s*=/);
 });
 
+test('shared-folder command bar stacks before tablet controls can overflow', () => {
+  const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
+  const tablet = cssMediaBlock(css, '@media (max-width: 1024px)');
+
+  assert.match(tablet,
+    /\.shared-folder-command-bar\s*\{[^}]*align-items:\s*flex-start;[^}]*flex-direction:\s*column;/);
+  assert.match(tablet,
+    /\.shared-folder-command-bar,\s*\.shared-folder-toolbar,\s*\.shared-folder-search\s*\{[^}]*width:\s*100%;/);
+});
+
 function fakeButton() {
   let clickHandler = null;
   return {
@@ -748,4 +758,17 @@ function fakeButton() {
       return clickHandler?.({ preventDefault() {} });
     },
   };
+}
+
+function cssMediaBlock(css, heading) {
+  const headingStart = css.indexOf(heading);
+  assert.notEqual(headingStart, -1, `Missing CSS media query: ${heading}`);
+  const bodyStart = css.indexOf('{', headingStart);
+  let depth = 0;
+  for (let index = bodyStart; index < css.length; index += 1) {
+    if (css[index] === '{') depth += 1;
+    if (css[index] === '}') depth -= 1;
+    if (depth === 0) return css.slice(headingStart, index + 1);
+  }
+  assert.fail(`Unclosed CSS media query: ${heading}`);
 }

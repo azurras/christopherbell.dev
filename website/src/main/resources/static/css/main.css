@@ -6352,6 +6352,17 @@ body {
 }
 
 @media (max-width: 1024px) {
+  .shared-folder-command-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .shared-folder-command-bar,
+  .shared-folder-toolbar,
+  .shared-folder-search {
+    width: 100%;
+  }
+
   .shared-folder-list-header,
   .shared-folder-entry {
     grid-template-columns: minmax(220px, 1fr) 82px 126px;
@@ -6370,15 +6381,11 @@ body {
   }
 
   .shared-folder-hero,
-  .shared-folder-command-bar,
   .shared-folder-upload-heading {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .shared-folder-command-bar,
-  .shared-folder-toolbar,
-  .shared-folder-search,
   .shared-folder-radio {
     width: 100%;
   }
