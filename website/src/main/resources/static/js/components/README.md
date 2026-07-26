@@ -19,7 +19,8 @@ Owns reusable browser-side components shared across pages.
 - Profile, user profile, and messages pages rely on defensive wrapping/stacking rules in `main.css` so long usernames, timestamps, buttons, and message text do not overlap.
 - `pubsub.js` provides lightweight cross-component events, especially auth login/logout updates.
 - `site-media-player.js` owns the persistent audio/video bar, adaptive custom controls,
-  same-tab refresh restoration, and the same-origin navigation shell used while media plays.
+  same-tab refresh restoration with gesture fallback, validated audio-tag presentation, and the
+  same-origin navigation shell used while media plays.
 
 ## Update This Doc
 

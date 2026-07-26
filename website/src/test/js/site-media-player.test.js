@@ -205,6 +205,23 @@ test('same-tab resume storage rejects malformed state and clears completed playb
   assert.equal(storage.value(), null);
 });
 
+test('same-tab resume preserves explicit playing intent while restored media is paused', () => {
+  const storage = memoryStorage();
+
+  assert.equal(siteMedia.saveSiteMediaResume(storage, {
+    kind: 'AUDIO', title: 'Song.flac', path: 'music/Song.flac',
+  }, {
+    currentTime: 134.5,
+    paused: true,
+    ended: false,
+    playbackRate: 1,
+    muted: false,
+    volume: 1,
+  }, { wasPlaying: true }), true);
+
+  assert.equal(siteMedia.readSiteMediaResume(storage).wasPlaying, true);
+});
+
 test('resume application restores position and preferences before requesting playback', async () => {
   assert.equal(typeof siteMedia.applySiteMediaResume, 'function');
   const calls = [];
@@ -276,6 +293,180 @@ test('custom media transport toggles playback and mute through the media boundar
   assert.deepEqual(calls, ['play', 'pause']);
 });
 
+test('blocked autoplay resumes synchronously on the first pointer or keyboard gesture', async () => {
+  assert.equal(typeof siteMedia.armSiteMediaGestureResume, 'function');
+  const target = fakeEventTarget();
+  const calls = [];
+  const media = {
+    play() {
+      calls.push('play');
+      return Promise.resolve();
+    },
+  };
+
+  const cancel = siteMedia.armSiteMediaGestureResume(media, target, () => calls.push('started'));
+  target.dispatch('pointerdown');
+  assert.deepEqual(calls, ['play']);
+  await Promise.resolve();
+  assert.deepEqual(calls, ['play', 'started']);
+  assert.deepEqual(target.eventNames(), []);
+
+  cancel();
+});
+
+test('gesture resume can leave the play control to its own click handler', async () => {
+  const target = fakeEventTarget();
+  const calls = [];
+  const media = { play: () => { calls.push('play'); return Promise.resolve(); } };
+  const shouldResume = event => event?.target !== 'play-control';
+
+  siteMedia.armSiteMediaGestureResume(
+    media, target, () => calls.push('started'), shouldResume);
+  target.dispatch('pointerdown', { target: 'play-control' });
+  await Promise.resolve();
+  assert.deepEqual(calls, []);
+
+  target.dispatch('pointerdown', { target: 'page-content' });
+  assert.deepEqual(calls, ['play']);
+  await Promise.resolve();
+  assert.deepEqual(calls, ['play', 'started']);
+});
+
+test('audio tag boundary accepts safe details and artwork while rejecting active artwork', () => {
+  assert.equal(typeof siteMedia.normalizeSiteAudioMetadata, 'function');
+  assert.deepEqual(siteMedia.normalizeSiteAudioMetadata({
+    title: '  Get Yo Shine On  ',
+    artist: ' B.G. ',
+    album: ' The Heart of tha Streetz, Vol. 2 ',
+    picture: { format: 'image/jpeg', data: [0, 127, 255] },
+  }), {
+    title: 'Get Yo Shine On',
+    artist: 'B.G.',
+    album: 'The Heart of tha Streetz, Vol. 2',
+    picture: { type: 'image/jpeg', bytes: new Uint8Array([0, 127, 255]) },
+  });
+
+  assert.deepEqual(siteMedia.normalizeSiteAudioMetadata({
+    title: '<b>Rendered as text</b>',
+    picture: { format: 'image/svg+xml', data: [60, 115, 118, 103] },
+  }), {
+    title: '<b>Rendered as text</b>', artist: null, album: null, picture: null,
+  });
+});
+
+test('audio presentation prefers tags and falls back cleanly to the file name', () => {
+  assert.equal(typeof siteMedia.siteAudioPresentation, 'function');
+  assert.deepEqual(siteMedia.siteAudioPresentation({
+    title: 'Get Yo Shine On', artist: 'B.G.', album: 'The Heart of tha Streetz, Vol. 2',
+    picture: null,
+  }, '24 - B.G. - Get Yo Shine On 2005.flac'), {
+    title: 'Get Yo Shine On',
+    artist: 'B.G.',
+    album: 'The Heart of tha Streetz, Vol. 2',
+    subtitle: 'B.G. · The Heart of tha Streetz, Vol. 2',
+    picture: null,
+  });
+  assert.deepEqual(siteMedia.siteAudioPresentation(null, 'unknown.flac'), {
+    title: 'unknown.flac', artist: '', album: '', subtitle: '', picture: null,
+  });
+});
+
+test('audio metadata reader requests only display tags and validates the result', async () => {
+  assert.equal(typeof siteMedia.readSiteAudioMetadata, 'function');
+  const observed = {};
+  class Reader {
+    constructor(url) { observed.url = url; }
+    _findFileReader() { return class DefaultFileReader {}; }
+    setFileReader() { return this; }
+    setTagsToRead(tags) {
+      observed.tags = tags;
+      return this;
+    }
+    read(callbacks) {
+      callbacks.onSuccess({ tags: { title: 'Song', artist: 'Artist', album: 'Album' } });
+    }
+  }
+
+  const metadata = await siteMedia.readSiteAudioMetadata(
+    '/api/shared-folder/2026-07-17/preview/music%2FSong.flac', async () => Reader);
+
+  assert.deepEqual(observed, {
+    url: '/api/shared-folder/2026-07-17/preview/music%2FSong.flac',
+    tags: ['title', 'artist', 'album', 'picture'],
+  });
+  assert.deepEqual(metadata, {
+    title: 'Song', artist: 'Artist', album: 'Album', picture: null,
+  });
+});
+
+test('audio metadata reader rejects oversized parser ranges before network I/O', async () => {
+  const loadedRanges = [];
+  class DefaultFileReader {
+    constructor() {
+      this._size = 20 * 1024 * 1024;
+      this._fileData = { hasDataRange: () => false };
+    }
+    init(callbacks) { callbacks.onSuccess(); }
+    getSize() { return this._size; }
+    _roundRangeToChunkMultiple(range) { return range; }
+    loadRange(range, callbacks) {
+      loadedRanges.push(range);
+      callbacks.onSuccess();
+    }
+  }
+  class Reader {
+    _findFileReader() { return DefaultFileReader; }
+    setFileReader(FileReader) { this.FileReader = FileReader; return this; }
+    setTagsToRead() { return this; }
+    read(callbacks) {
+      const file = new this.FileReader('https://www.christopherbell.dev/media.flac');
+      file.init({
+        onSuccess: () => file.loadRange([0, 7 * 1024 * 1024], callbacks),
+        onError: callbacks.onError,
+      });
+    }
+  }
+
+  await assert.rejects(
+    siteMedia.readSiteAudioMetadata('https://www.christopherbell.dev/media.flac',
+      async () => Reader),
+    /byte budget/i);
+  assert.deepEqual(loadedRanges, []);
+});
+
+test('audio metadata reader aborts parser requests with the playback lifetime', async () => {
+  const controller = new AbortController();
+  let requestAborted = false;
+  let markRequestStarted;
+  const requestStarted = new Promise(resolve => { markRequestStarted = resolve; });
+  class DefaultFileReader {
+    _createXHRObject() {
+      return {
+        abort() { requestAborted = true; },
+        addEventListener() {},
+      };
+    }
+  }
+  class Reader {
+    _findFileReader() { return DefaultFileReader; }
+    setFileReader(FileReader) { this.FileReader = FileReader; return this; }
+    setTagsToRead() { return this; }
+    read() {
+      const file = new this.FileReader('https://www.christopherbell.dev/media.m4a');
+      file._createXHRObject();
+      markRequestStarted();
+    }
+  }
+
+  const result = siteMedia.readSiteAudioMetadata(
+    'https://www.christopherbell.dev/media.m4a', async () => Reader, controller.signal);
+  await requestStarted;
+  controller.abort();
+
+  await assert.rejects(result, error => error?.name === 'AbortError');
+  assert.equal(requestAborted, true);
+});
+
 function fakeMedia() {
   return {
     pauseCalls: 0,
@@ -296,5 +487,17 @@ function memoryStorage(initialValue = null) {
     setItem(_key, next) { value = next; },
     removeItem() { value = null; },
     value() { return value; },
+  };
+}
+
+function fakeEventTarget() {
+  const listeners = new Map();
+  return {
+    addEventListener(name, listener) { listeners.set(name, listener); },
+    removeEventListener(name, listener) {
+      if (listeners.get(name) === listener) listeners.delete(name);
+    },
+    dispatch(name, event = undefined) { listeners.get(name)?.(event); },
+    eventNames() { return [...listeners.keys()].sort(); },
   };
 }

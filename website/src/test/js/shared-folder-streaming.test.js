@@ -117,7 +117,9 @@ test('shared-folder page starts native anchor and media requests without Blob bu
   assert.doesNotMatch(page, /\.blob\(/);
   assert.doesNotMatch(page, /URL\.createObjectURL/);
   assert.doesNotMatch(player, /\.blob\(/);
-  assert.doesNotMatch(player, /URL\.createObjectURL/);
+  assert.doesNotMatch(player, /playback\.media\.src\s*=\s*URL\.createObjectURL/);
+  assert.match(player,
+    /URL\.createObjectURL\(new Blob\(\s*\[presentation\.picture\.bytes\]/);
   assert.match(page, /prepareSharedFolderDownloadAuth\(token, requestUrl\)/);
   assert.match(player, /prepareSharedFolderMediaAuth\(getAuthToken\(\), url\)/);
   assert.match(page, /link\.href = requestUrl/);
