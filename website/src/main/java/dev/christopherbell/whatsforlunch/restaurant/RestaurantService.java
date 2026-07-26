@@ -3,6 +3,7 @@ package dev.christopherbell.whatsforlunch.restaurant;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
@@ -112,7 +113,7 @@ public class RestaurantService {
     } catch (DuplicateKeyException e) {
       throw new ResourceExistsException("Restaurant already exists", e);
     } catch (DataAccessException e) {
-      throw new RuntimeException("Failed to save restaurant", e);
+      throw new ServiceUnavailableException("Failed to save restaurant", e);
     }
   }
 
@@ -123,7 +124,7 @@ public class RestaurantService {
    * @return the details of the deleted restaurant (snapshot of its state before deletion)
    * @throws InvalidRequestException if the id is null or blank
    * @throws ResourceNotFoundException if no restaurant with the provided id exists
-   * @throws RuntimeException if the deletion fails due to persistence errors
+   * @throws ServiceUnavailableException if deletion fails due to persistence errors
    */
   public RestaurantDetail deleteRestaurantById(
       String id
@@ -138,7 +139,7 @@ public class RestaurantService {
     try {
       restaurantRepository.delete(restaurant);
     } catch (DataAccessException e) {
-      throw new RuntimeException("Failed to delete restaurant with id: " + id, e);
+      throw new ServiceUnavailableException("Failed to delete restaurant with id: " + id, e);
     }
     return toRatedDetail(restaurant);
   }
@@ -499,7 +500,7 @@ public class RestaurantService {
     try {
       restaurantRepository.delete(restaurant);
     } catch (DataAccessException e) {
-      throw new RuntimeException("Failed to delete restaurant with id: " + id, e);
+      throw new ServiceUnavailableException("Failed to delete restaurant with id: " + id, e);
     }
 
     log.info("Deleted today's lunch restaurant id: {}.", id);
@@ -725,7 +726,7 @@ public class RestaurantService {
    * @throws InvalidRequestException if the request or id is null/blank
    * @throws ResourceNotFoundException if the restaurant with the given id does not exist
    * @throws ResourceExistsException if another restaurant already uses the same normalized name
-   * @throws RuntimeException if persistence fails
+   * @throws ServiceUnavailableException if persistence fails
    */
   public RestaurantDetail updateRestaurant(
       RestaurantUpdateRequest request
@@ -750,7 +751,8 @@ public class RestaurantService {
       var saved = restaurantRepository.save(restaurantToUpdate);
       return toRatedDetail(saved);
     } catch (DataAccessException e) {
-      throw new RuntimeException("Failed to update restaurant with id: " + request.id(), e);
+      throw new ServiceUnavailableException(
+          "Failed to update restaurant with id: " + request.id(), e);
     }
   }
 

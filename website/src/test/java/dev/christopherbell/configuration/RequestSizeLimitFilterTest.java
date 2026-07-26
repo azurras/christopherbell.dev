@@ -1,61 +1,68 @@
 package dev.christopherbell.configuration;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.same;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
+import dev.christopherbell.configuration.filter.ApiErrorResponseWriter;
 import dev.christopherbell.configuration.filter.RequestSizeLimitFilter;
 import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
-import jakarta.servlet.http.HttpServletResponse;
-import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.util.unit.DataSize;
+import tools.jackson.databind.ObjectMapper;
 
-public class RequestSizeLimitFilterTest {
+class RequestSizeLimitFilterTest {
+  private final ApiErrorResponseWriter errors =
+      new ApiErrorResponseWriter(new ObjectMapper());
 
   @Test
-  public void rejectsLargeRequest() throws ServletException, IOException {
-    RequestSizeLimitFilter filter = new RequestSizeLimitFilter(10);
-    MockHttpServletRequest request = new MockHttpServletRequest();
-    request.setContent(new byte[20]);
-    MockHttpServletResponse response = new MockHttpServletResponse();
-    FilterChain chain = mock(FilterChain.class);
+  void oversizedJsonUsesStandardEnvelopeWithoutInvokingTheChain() throws Exception {
+    var filter = new RequestSizeLimitFilter(
+        new RequestSizeProperties(DataSize.ofBytes(10)), DataSize.ofBytes(8), errors);
+    var request = new MockHttpServletRequest("POST", "/api/example");
+    var sensitiveBody = "sensitive-request-body";
+    request.setContentType(MediaType.APPLICATION_JSON_VALUE);
+    request.setContent(sensitiveBody.getBytes(StandardCharsets.UTF_8));
+    var response = new MockHttpServletResponse();
+    var chain = mock(FilterChain.class);
 
     filter.doFilter(request, response, chain);
 
-    assertEquals(413, response.getStatus());
-    verify(chain, times(0)).doFilter(request, response);
+    assertThat(response.getStatus()).isEqualTo(413);
+    assertThat(response.getContentAsString())
+        .contains("\"success\":false", "REQUEST_TOO_LARGE")
+        .doesNotContain(sensitiveBody);
+    verifyNoInteractions(chain);
   }
 
   @Test
-  public void allowsSmallRequest() throws ServletException, IOException {
-    RequestSizeLimitFilter filter = new RequestSizeLimitFilter(10);
-    MockHttpServletRequest request = new MockHttpServletRequest();
-    request.setContent(new byte[5]);
-    MockHttpServletResponse response = new MockHttpServletResponse();
-    FilterChain chain = mock(FilterChain.class);
+  void unknownLengthJsonAndUploadChunksRemainIndependentlyBounded() throws Exception {
+    var filter = new RequestSizeLimitFilter(
+        new RequestSizeProperties(DataSize.ofBytes(10)), DataSize.ofBytes(8), errors);
 
-    filter.doFilter(request, response, chain);
-
-    assertEquals(200, response.getStatus());
-    verify(chain, times(1)).doFilter(any(HttpServletRequest.class), same(response));
+    assertStreamingStatus(filter, "POST", "/api/example", 11, 413);
+    assertStreamingStatus(
+        filter, "PUT", "/api/shared-folder/2026-07-17/uploads/id/chunks/0", 8, 200);
+    assertStreamingStatus(
+        filter, "PUT", "/api/shared-folder/2026-07-17/uploads/id/chunks/0", 9, 413);
   }
 
   @Test
-  public void rejectsLargeRequestWhenContentLengthIsMissing()
-      throws ServletException, IOException {
-    RequestSizeLimitFilter filter = new RequestSizeLimitFilter(10);
-    MockHttpServletRequest request = new MockHttpServletRequest();
-    request.setContent(new byte[20]);
-    var streamingRequest = new HttpServletRequestWrapper(request) {
+  void unknownLengthOverflowIsRejectedWhenDownstreamReadsOnlyOneByte() throws Exception {
+    var filter = new RequestSizeLimitFilter(
+        new RequestSizeProperties(DataSize.ofBytes(10)), DataSize.ofBytes(8), errors);
+    var request = new MockHttpServletRequest("POST", "/api/example");
+    request.setContentType(MediaType.APPLICATION_JSON_VALUE);
+    request.setContent(new byte[11]);
+    var streamedRequest = new HttpServletRequestWrapper(request) {
       @Override
       public int getContentLength() {
         return -1;
@@ -66,67 +73,82 @@ public class RequestSizeLimitFilterTest {
         return -1;
       }
     };
-    MockHttpServletResponse response = new MockHttpServletResponse();
-    FilterChain chain = (servletRequest, servletResponse) -> {
-      ServletInputStream inputStream = ((HttpServletRequest) servletRequest).getInputStream();
-      while (inputStream.read() != -1) {
-        // Drain the request body to exercise streaming enforcement.
-      }
-    };
+    var response = new MockHttpServletResponse();
+    FilterChain earlyReader = (servletRequest, servletResponse) ->
+        ((HttpServletRequest) servletRequest).getInputStream().read();
 
-    filter.doFilter(streamingRequest, response, chain);
+    filter.doFilter(streamedRequest, response, earlyReader);
 
-    assertEquals(413, response.getStatus());
+    assertThat(response.getStatus()).isEqualTo(413);
+    assertThat(response.getContentAsString()).contains("REQUEST_TOO_LARGE");
   }
 
   @Test
-  public void sharedFolderUploadChunksUseTheirConfiguredLimitWithoutChangingOtherRoutes()
-      throws ServletException, IOException {
-    RequestSizeLimitFilter filter = new RequestSizeLimitFilter(10, 8);
+  void unknownLengthUploadChunkRemainsStreaming() throws Exception {
+    var filter = new RequestSizeLimitFilter(
+        new RequestSizeProperties(DataSize.ofBytes(10)), DataSize.ofBytes(8), errors);
+    var request = new MockHttpServletRequest(
+        "PUT", "/api/shared-folder/2026-07-17/uploads/id/chunks/0");
+    request.setContent(new byte[8]);
+    var streamedRequest = new HttpServletRequestWrapper(request) {
+      @Override
+      public int getContentLength() {
+        return -1;
+      }
+
+      @Override
+      public long getContentLengthLong() {
+        return -1;
+      }
+    };
+    var observedLength = new AtomicLong(Long.MIN_VALUE);
+    FilterChain earlyReader = (servletRequest, servletResponse) -> {
+      var bounded = (HttpServletRequest) servletRequest;
+      observedLength.set(bounded.getContentLengthLong());
+      bounded.getInputStream().read();
+    };
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(streamedRequest, response, earlyReader);
+
+    assertThat(response.getStatus()).isEqualTo(200);
+    assertThat(observedLength).hasValue(-1);
+  }
+
+  private void assertStreamingStatus(
+      RequestSizeLimitFilter filter,
+      String method,
+      String path,
+      int bodySize,
+      int expectedStatus
+  ) throws Exception {
+    var request = new MockHttpServletRequest(method, path);
+    request.setContentType(MediaType.APPLICATION_JSON_VALUE);
+    request.setContent(new byte[bodySize]);
+    var streamedRequest = new HttpServletRequestWrapper(request) {
+      @Override
+      public int getContentLength() {
+        return -1;
+      }
+
+      @Override
+      public long getContentLengthLong() {
+        return -1;
+      }
+    };
+    var response = new MockHttpServletResponse();
     FilterChain drain = (servletRequest, servletResponse) -> {
       ServletInputStream input = ((HttpServletRequest) servletRequest).getInputStream();
       while (input.read() != -1) {
-        // Exercise the same streamed enforcement used for chunked HTTP bodies.
+        // Drain the request body to exercise streamed enforcement.
       }
     };
 
-    MockHttpServletRequest exactChunk = new MockHttpServletRequest(
-        "PUT", "/api/shared-folder/2026-07-17/uploads/id/chunks/0");
-    exactChunk.setContent(new byte[8]);
-    MockHttpServletResponse exactResponse = new MockHttpServletResponse();
-    filter.doFilter(exactChunk, exactResponse, drain);
+    filter.doFilter(streamedRequest, response, drain);
 
-    MockHttpServletRequest oversizeChunk = new MockHttpServletRequest(
-        "PUT", "/api/shared-folder/2026-07-17/uploads/id/chunks/0");
-    oversizeChunk.setContent(new byte[9]);
-    MockHttpServletResponse oversizeResponse = new MockHttpServletResponse();
-    filter.doFilter(oversizeChunk, oversizeResponse, drain);
-
-    MockHttpServletRequest ordinary = new MockHttpServletRequest("POST", "/api/ordinary");
-    ordinary.setContent(new byte[11]);
-    MockHttpServletResponse ordinaryResponse = new MockHttpServletResponse();
-    filter.doFilter(ordinary, ordinaryResponse, drain);
-
-    MockHttpServletRequest complete = new MockHttpServletRequest(
-        "POST", "/api/shared-folder/2026-07-17/uploads/id/complete");
-    complete.setContent(new byte[9]);
-    MockHttpServletResponse completeResponse = new MockHttpServletResponse();
-    filter.doFilter(complete, completeResponse, drain);
-
-    MockHttpServletRequest unknownLengthChunk = new MockHttpServletRequest(
-        "PUT", "/api/shared-folder/2026-07-17/uploads/id/chunks/0");
-    unknownLengthChunk.setContent(new byte[9]);
-    HttpServletRequestWrapper streamedChunk = new HttpServletRequestWrapper(unknownLengthChunk) {
-      @Override public int getContentLength() { return -1; }
-      @Override public long getContentLengthLong() { return -1; }
-    };
-    MockHttpServletResponse streamedChunkResponse = new MockHttpServletResponse();
-    filter.doFilter(streamedChunk, streamedChunkResponse, drain);
-
-    assertEquals(200, exactResponse.getStatus());
-    assertEquals(413, oversizeResponse.getStatus());
-    assertEquals(413, ordinaryResponse.getStatus());
-    assertEquals(200, completeResponse.getStatus());
-    assertEquals(413, streamedChunkResponse.getStatus());
+    assertThat(response.getStatus()).isEqualTo(expectedStatus);
+    if (expectedStatus == 413) {
+      assertThat(response.getContentAsString()).contains("REQUEST_TOO_LARGE");
+    }
   }
 }

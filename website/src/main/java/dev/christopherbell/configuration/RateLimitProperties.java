@@ -1,19 +1,51 @@
 package dev.christopherbell.configuration;
 
 import dev.christopherbell.libs.api.APIVersion;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import lombok.Data;
+import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * Typed configuration for endpoint-aware global rate limits.
  */
 @ConfigurationProperties(prefix = "rate-limit")
+@Validated
 @Data
 public class RateLimitProperties {
-  private List<Rule> rules = defaultRules();
+  @Min(1)
+  private int maxBuckets = 10_000;
+
+  @Valid
+  @NotNull
+  private List<@NotNull @Valid Rule> rules = defaultRules();
+
+  @AssertTrue(message = "rate limit rule names must be unique")
+  public boolean isRuleNamesUnique() {
+    if (rules == null) {
+      return true;
+    }
+    var names = new HashSet<String>();
+    for (Rule rule : rules) {
+      if (rule == null || rule.getName() == null || rule.getName().isBlank()) {
+        continue;
+      }
+      if (!names.add(rule.getName().toLowerCase(Locale.ROOT))) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   private static List<Rule> defaultRules() {
     var rules = new ArrayList<Rule>();
@@ -80,10 +112,16 @@ public class RateLimitProperties {
    */
   @Data
   public static class Rule {
+    @NotBlank
     private String name = "default";
+    @Min(1)
     private long capacity = 10_000;
+    @NotNull
+    @DurationMin(millis = 1)
     private Duration window = Duration.ofMinutes(1);
+    @NotNull
     private List<String> methods = new ArrayList<>();
+    @NotNull
     private List<String> paths = new ArrayList<>(List.of("/**"));
 
     public Rule() {}

@@ -1,5 +1,6 @@
 package dev.christopherbell.configuration;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -7,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import dev.christopherbell.configuration.filter.ApiErrorResponseWriter;
 import dev.christopherbell.configuration.filter.RateLimitFilter;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
@@ -16,38 +18,67 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import tools.jackson.databind.ObjectMapper;
 
 public class RateLimitFilterTest {
 
   @Test
-  public void testRateLimitExceeded() throws ServletException, IOException {
-    Supplier<Bucket> supplier = () -> Bucket4j.builder()
-        .addLimit(Bandwidth.simple(1, Duration.ofMinutes(1)))
-        .build();
-    RateLimitFilter filter = new RateLimitFilter(supplier, new ClientIpResolver(new ClientIpProperties()));
-    MockHttpServletRequest request = new MockHttpServletRequest();
-    request.setRemoteAddr("1.1.1.1");
-    MockHttpServletResponse response = new MockHttpServletResponse();
-    FilterChain chain = mock(FilterChain.class);
+  void exhaustedBucketReturnsStandardEnvelopeAndRateLimitGuidance() throws Exception {
+    var properties = new RateLimitProperties();
+    properties.setRules(List.of(rule(
+        "test", 1, Duration.ofSeconds(30), List.of("POST"), List.of("/api/test"))));
+    var filter = new RateLimitFilter(
+        new ClientIpResolver(new ClientIpProperties()),
+        properties,
+        new ApiErrorResponseWriter(new ObjectMapper()),
+        Clock.fixed(Instant.parse("2026-07-25T12:00:00Z"), ZoneOffset.UTC));
+    var request = request("POST", "/api/test");
+    var chain = mock(FilterChain.class);
+    var allowed = new MockHttpServletResponse();
+    filter.doFilter(request, allowed, chain);
+    var denied = new MockHttpServletResponse();
 
-    // First request allowed
-    filter.doFilter(request, response, chain);
-    verify(chain, times(1)).doFilter(request, response);
+    filter.doFilter(request, denied, chain);
 
-    // Second request denied
-    MockHttpServletResponse response2 = new MockHttpServletResponse();
-    filter.doFilter(request, response2, chain);
-    assertEquals(429, response2.getStatus());
-    assertEquals("application/json", response2.getContentType());
-    assertEquals(
-        "{\"code\":\"RATE_LIMITED\",\"message\":\"Too many requests. Try again later.\"}",
-        response2.getContentAsString());
+    assertThat(allowed.getHeader("X-RateLimit-Limit")).isEqualTo("1");
+    assertThat(allowed.getHeader("X-RateLimit-Remaining")).isEqualTo("0");
+    assertThat(allowed.getHeader("X-RateLimit-Reset")).isEqualTo("1784980830");
+    assertThat(denied.getStatus()).isEqualTo(429);
+    assertThat(denied.getHeader("Retry-After")).isEqualTo("30");
+    assertThat(denied.getHeader("X-RateLimit-Limit")).isEqualTo("1");
+    assertThat(denied.getHeader("X-RateLimit-Remaining")).isEqualTo("0");
+    assertThat(denied.getHeader("X-RateLimit-Reset")).isEqualTo("1784980830");
+    assertThat(denied.getContentAsString())
+        .contains("\"success\":false", "RATE_LIMITED");
+  }
+
+  @Test
+  void fractionalRetryDelayRoundsUpToTheNextSecond() throws Exception {
+    var properties = new RateLimitProperties();
+    properties.setRules(List.of(rule(
+        "test", 1, Duration.ofMillis(1500), List.of("POST"), List.of("/api/test"))));
+    var filter = new RateLimitFilter(
+        new ClientIpResolver(new ClientIpProperties()),
+        properties,
+        new ApiErrorResponseWriter(new ObjectMapper()),
+        Clock.fixed(Instant.parse("2026-07-25T12:00:00Z"), ZoneOffset.UTC));
+    var request = request("POST", "/api/test");
+    filter.doFilter(request, new MockHttpServletResponse(), mock(FilterChain.class));
+    var denied = new MockHttpServletResponse();
+
+    filter.doFilter(request, denied, mock(FilterChain.class));
+
+    assertThat(denied.getHeader("Retry-After")).isEqualTo("2");
+    assertThat(denied.getHeader("X-RateLimit-Reset")).isEqualTo("1784980802");
   }
 
   @Test
@@ -300,6 +331,16 @@ public class RateLimitFilterTest {
     return new RateLimitProperties.Rule(name, capacity, Duration.ofMinutes(1), methods, paths);
   }
 
+  private RateLimitProperties.Rule rule(
+      String name,
+      long capacity,
+      Duration window,
+      List<String> methods,
+      List<String> paths
+  ) {
+    return new RateLimitProperties.Rule(name, capacity, window, methods, paths);
+  }
+
   private void assertUsesDedicatedBucket(String method, String path, String ruleName)
       throws Exception {
     RateLimitProperties properties = new RateLimitProperties();
@@ -315,10 +356,9 @@ public class RateLimitFilterTest {
     filter.doFilter(request(method, path), denied, chain);
 
     assertEquals(429, denied.getStatus());
-    assertEquals("application/json", denied.getContentType());
-    assertEquals(
-        "{\"code\":\"RATE_LIMITED\",\"message\":\"Too many requests. Try again later.\"}",
-        denied.getContentAsString());
+    assertThat(denied.getContentType()).startsWith("application/json");
+    assertThat(denied.getContentAsString())
+        .contains("\"success\":false", "RATE_LIMITED");
     verify(chain).doFilter(any(HttpServletRequest.class), any(HttpServletResponse.class));
   }
 

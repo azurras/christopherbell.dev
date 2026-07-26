@@ -23,6 +23,7 @@ import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.InternalServiceException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.EmailSanitizer;
@@ -95,7 +96,7 @@ public class AccountService {
       accountRepository.save(account);
       log.info("Successfully created account for username {}", accountCreateRequest.username());
     } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
-      throw new RuntimeException("Can't create account due to password issues", e);
+      throw new InternalServiceException("Failed to create account credentials", e);
     } catch (DuplicateKeyException | MongoWriteException e) {
       throw new ResourceExistsException("Account with given email or username already exists.", e);
     }

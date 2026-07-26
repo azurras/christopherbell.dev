@@ -5,6 +5,8 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
 ## What Lives Here
 
 - Restaurant CRUD and admin-only maintenance endpoints under `restaurant`.
+- Restaurant persistence outages use the shared service-unavailable contract
+  with preserved diagnostic causes and a redacted public response.
 - Public location-aware lunch picks that query bounded nearby candidates and
   return three shuffled suggestions within the user's selected radius from their
   browser location or entered ZIP code. ZIP searches resolve their radius origin

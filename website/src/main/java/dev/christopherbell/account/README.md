@@ -28,6 +28,9 @@ subfeature services own the larger account workflows.
 - Login and password-reset request models reject blank, malformed, or oversized
   fields through Bean Validation before account services run.
 - Username sanitization on account creation/update and case-insensitive username uniqueness checks.
+- Credential-provider failures are explicit internal service failures: causes
+  remain available to diagnostics while API clients receive the safe generic
+  internal-error envelope.
 - Signed-in username prefix search for recipient autocomplete. The search
   endpoint returns active, public-safe username suggestions only and excludes the
   current caller.

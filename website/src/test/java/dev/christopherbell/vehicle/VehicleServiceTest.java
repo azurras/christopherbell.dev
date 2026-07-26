@@ -16,6 +16,7 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.vehicle.core.VehicleCrudService;
 import dev.christopherbell.vehicle.core.VehicleMapper;
 import dev.christopherbell.vehicle.core.VehicleRepository;
@@ -32,6 +33,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 /**
  * Unit tests for {@link VehicleService}.
@@ -102,6 +104,22 @@ public class VehicleServiceTest {
   }
 
   @Test
+  @DisplayName("Create vehicle preserves persistence failure in named exception")
+  void createVehicleWhenPersistenceFailsUsesServiceUnavailableException() {
+    var request = VehicleStub.getVehicleCreateRequestStub();
+    var vehicle = VehicleStub.getVehicleStub(null);
+    var failure = new DataAccessResourceFailureException("database-secret");
+    when(vehicleMapper.toVehicle(request)).thenReturn(vehicle);
+    when(vehicleRepository.save(vehicle)).thenThrow(failure);
+
+    var exception = assertThrows(
+        ServiceUnavailableException.class,
+        () -> vehicleService.createVehicle(request));
+
+    assertSame(failure, exception.getCause());
+  }
+
+  @Test
   @DisplayName("Creates vehicle from VIN only")
   public void testCreateVehicleFromVin_whenValidRequest_ReturnsVehicleDetail() throws Exception {
     var request = new VehicleVinRequest("  " + VehicleStub.VIN.toLowerCase() + " ");
@@ -135,6 +153,20 @@ public class VehicleServiceTest {
     assertThrows(InvalidRequestException.class, () -> vehicleService.createVehicleFromVin(new VehicleVinRequest("bad")));
 
     verifyNoInteractions(vehicleMapper, vehicleRepository);
+  }
+
+  @Test
+  @DisplayName("VIN-only create preserves persistence failure in named exception")
+  void createVehicleFromVinWhenPersistenceFailsUsesServiceUnavailableException() {
+    var failure = new DataAccessResourceFailureException("database-secret");
+    when(clock.instant()).thenReturn(VehicleStub.CREATED_ON);
+    when(vehicleRepository.save(any())).thenThrow(failure);
+
+    var exception = assertThrows(
+        ServiceUnavailableException.class,
+        () -> vehicleService.createVehicleFromVin(new VehicleVinRequest(VehicleStub.VIN)));
+
+    assertSame(failure, exception.getCause());
   }
 
   @Test
@@ -196,6 +228,22 @@ public class VehicleServiceTest {
 
     verify(vehicleRepository).existsByVin(eq(VehicleStub.VIN));
     verifyNoMoreInteractions(vehicleMapper, vehicleRepository);
+  }
+
+  @Test
+  @DisplayName("VIN batch create preserves persistence failure in named exception")
+  void createVehiclesFromVinsWhenPersistenceFailsUsesServiceUnavailableException() {
+    var request = new VehicleVinBatchRequest(List.of(VehicleStub.VIN));
+    var failure = new DataAccessResourceFailureException("database-secret");
+    when(vehicleRepository.existsByVin(VehicleStub.VIN)).thenReturn(false);
+    when(clock.instant()).thenReturn(VehicleStub.CREATED_ON);
+    when(vehicleRepository.saveAll(any())).thenThrow(failure);
+
+    var exception = assertThrows(
+        ServiceUnavailableException.class,
+        () -> vehicleService.createVehiclesFromVins(request));
+
+    assertSame(failure, exception.getCause());
   }
 
   @Test
@@ -299,6 +347,24 @@ public class VehicleServiceTest {
   }
 
   @Test
+  @DisplayName("Update vehicle preserves persistence failure in named exception")
+  void updateVehicleWhenPersistenceFailsUsesServiceUnavailableException() {
+    var request = VehicleStub.getVehicleUpdateRequestStub();
+    var existing = VehicleStub.getVehicleStub(VehicleStub.ID);
+    var update = VehicleStub.getVehicleStub(null);
+    var failure = new DataAccessResourceFailureException("database-secret");
+    when(vehicleRepository.findById(VehicleStub.ID)).thenReturn(Optional.of(existing));
+    when(vehicleMapper.toVehicle(request)).thenReturn(update);
+    when(vehicleRepository.save(update)).thenThrow(failure);
+
+    var exception = assertThrows(
+        ServiceUnavailableException.class,
+        () -> vehicleService.updateVehicle(VehicleStub.ID, request));
+
+    assertSame(failure, exception.getCause());
+  }
+
+  @Test
   @DisplayName("Deletes vehicle by id")
   public void testDeleteVehicleById_whenFound_ReturnsDeletedVehicleDetail() throws Exception {
     var vehicle = VehicleStub.getVehicleStub(VehicleStub.ID);
@@ -314,5 +380,20 @@ public class VehicleServiceTest {
     verify(vehicleRepository).delete(eq(vehicle));
     verify(vehicleMapper).toVehicleDetail(eq(vehicle));
     verifyNoMoreInteractions(vehicleMapper, vehicleRepository);
+  }
+
+  @Test
+  @DisplayName("Delete vehicle preserves persistence failure in named exception")
+  void deleteVehicleWhenPersistenceFailsUsesServiceUnavailableException() {
+    var vehicle = VehicleStub.getVehicleStub(VehicleStub.ID);
+    var failure = new DataAccessResourceFailureException("database-secret");
+    when(vehicleRepository.findById(VehicleStub.ID)).thenReturn(Optional.of(vehicle));
+    org.mockito.Mockito.doThrow(failure).when(vehicleRepository).delete(vehicle);
+
+    var exception = assertThrows(
+        ServiceUnavailableException.class,
+        () -> vehicleService.deleteVehicleById(VehicleStub.ID));
+
+    assertSame(failure, exception.getCause());
   }
 }

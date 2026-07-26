@@ -20,6 +20,8 @@ spring:
           starttls:
             enable: true
 app:
+  request-size:
+    default-max: ${APP_REQUEST_SIZE_DEFAULT_MAX:1MB}
   browser-security:
     public-base-url: ${APP_PUBLIC_BASE_URL:https://www.christopherbell.dev}
     authentication-cookie-secure: true

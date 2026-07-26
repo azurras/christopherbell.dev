@@ -2,10 +2,12 @@ package dev.christopherbell.libs.api.controller;
 
 import dev.christopherbell.libs.api.model.Message;
 import dev.christopherbell.libs.api.model.Response;
+import dev.christopherbell.libs.api.exception.InternalServiceException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
+import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +29,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @Slf4j
 public class ControllerExceptionHandler {
   private static final String INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR";
+  private static final String SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE";
   private static final String RESOURCE_EXISTS = "RESOURCE_EXISTS";
   private static final String RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND";
   private static final String INVALID_REQUEST = "INVALID_REQUEST";
@@ -48,6 +51,28 @@ public class ControllerExceptionHandler {
       return errorResponse(REQUEST_ERROR, e.getMessage(), frameworkStatus);
     }
 
+    log.error(INTERNAL_SERVER_ERROR, e);
+    return errorResponse(
+        INTERNAL_SERVER_ERROR,
+        "An unexpected error occurred. Please try again later.",
+        HttpStatus.INTERNAL_SERVER_ERROR);
+  }
+
+  /** Maps known temporary infrastructure failures without exposing diagnostic context. */
+  @ExceptionHandler(ServiceUnavailableException.class)
+  public ResponseEntity<Response<?>> handleServiceUnavailableException(
+      ServiceUnavailableException e
+  ) {
+    log.error(SERVICE_UNAVAILABLE, e);
+    return errorResponse(
+        SERVICE_UNAVAILABLE,
+        "The service is temporarily unavailable. Please try again later.",
+        HttpStatus.SERVICE_UNAVAILABLE);
+  }
+
+  /** Maps known internal operational failures to the same safe generic 500 contract. */
+  @ExceptionHandler(InternalServiceException.class)
+  public ResponseEntity<Response<?>> handleInternalServiceException(InternalServiceException e) {
     log.error(INTERNAL_SERVER_ERROR, e);
     return errorResponse(
         INTERNAL_SERVER_ERROR,

@@ -3,6 +3,7 @@ package dev.christopherbell.whatsforlunch.restaurant;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
@@ -33,6 +34,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -138,24 +140,84 @@ public class RestaurantServiceTest {
   }
 
   @Test
-  @DisplayName("Wraps DataAccessException into RuntimeException with message")
-  public void testCreateRestaurant_whenDataAccessFails_ThrowsRuntimeException() {
+  @DisplayName("Translates create persistence failure into ServiceUnavailableException")
+  public void createRestaurantWhenDataAccessFailsPreservesCauseInNamedException() {
     var request = RestaurantStub.getRestaurantCreateRequestStub();
     var restaurant = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
 
     when(restaurantMapper.toRestaurant(eq(request))).thenReturn(restaurant);
     when(restaurantRepository.findByNormalizedName(eq("pflugerville taco house"))).thenReturn(Optional.empty());
     when(restaurantRepository.findAll()).thenReturn(List.of());
-    when(restaurantRepository.save(eq(restaurant))).thenThrow(new DataAccessException("boom") {});
+    var failure = new DataAccessResourceFailureException("database-secret");
+    when(restaurantRepository.save(eq(restaurant))).thenThrow(failure);
 
-    var ex = assertThrows(RuntimeException.class, () -> restaurantService.createRestaurant(request));
-    assertTrue(ex.getMessage().contains("Failed to save restaurant"));
+    var exception = assertThrows(
+        ServiceUnavailableException.class,
+        () -> restaurantService.createRestaurant(request));
+    assertSame(failure, exception.getCause());
 
     verify(restaurantMapper).toRestaurant(eq(request));
     verify(restaurantRepository).findByNormalizedName(eq("pflugerville taco house"));
     verify(restaurantRepository).findAll();
     verify(restaurantRepository).save(eq(restaurant));
     verifyNoMoreInteractions(restaurantMapper, restaurantRepository);
+  }
+
+  @Test
+  @DisplayName("Translates delete persistence failure into ServiceUnavailableException")
+  void deleteRestaurantWhenDataAccessFailsPreservesCauseInNamedException() {
+    var restaurant = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
+    var failure = new DataAccessResourceFailureException("database-secret");
+    when(restaurantRepository.findById(RestaurantStub.ID)).thenReturn(Optional.of(restaurant));
+    org.mockito.Mockito.doThrow(failure).when(restaurantRepository).delete(restaurant);
+
+    var exception = assertThrows(
+        ServiceUnavailableException.class,
+        () -> restaurantService.deleteRestaurantById(RestaurantStub.ID));
+
+    assertSame(failure, exception.getCause());
+  }
+
+  @Test
+  @DisplayName("Translates lunch-pick delete failure into ServiceUnavailableException")
+  void deleteLunchPickWhenDataAccessFailsPreservesCauseInNamedException() {
+    var restaurant = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
+    var failure = new DataAccessResourceFailureException("database-secret");
+    when(restaurantRepository.findById(RestaurantStub.ID)).thenReturn(Optional.of(restaurant));
+    org.mockito.Mockito.doThrow(failure).when(restaurantRepository).delete(restaurant);
+
+    var exception = assertThrows(
+        ServiceUnavailableException.class,
+        () -> restaurantService.deleteRestaurantFromTodaysLunchPicks(RestaurantStub.ID));
+
+    assertSame(failure, exception.getCause());
+  }
+
+  @Test
+  @DisplayName("Translates update persistence failure into ServiceUnavailableException")
+  void updateRestaurantWhenDataAccessFailsPreservesCauseInNamedException() {
+    var request = dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest.builder()
+        .id(RestaurantStub.ID)
+        .name(RestaurantStub.NAME)
+        .address(RestaurantStub.getAddressStub())
+        .phoneNumber(RestaurantStub.PHONE_NUMBER)
+        .website(RestaurantStub.WEBSITE)
+        .build();
+    var existing = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
+    var update = RestaurantStub.getRestaurantStub(null);
+    var failure = new DataAccessResourceFailureException("database-secret");
+    when(restaurantRepository.findById(RestaurantStub.ID)).thenReturn(Optional.of(existing));
+    when(restaurantMapper.toRestaurant(request)).thenReturn(update);
+    when(restaurantRepository.findByNormalizedName("pflugerville taco house"))
+        .thenReturn(Optional.empty());
+    when(restaurantRepository.findAll()).thenReturn(List.of());
+    when(restaurantRepository.save(update)).thenThrow(failure);
+
+    var exception = assertThrows(
+        ServiceUnavailableException.class,
+        () -> restaurantService.updateRestaurant(request));
+
+    assertSame(failure, exception.getCause());
   }
 
   @Test

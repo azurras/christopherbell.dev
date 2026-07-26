@@ -3,12 +3,15 @@ package dev.christopherbell.configuration.security;
 import dev.christopherbell.configuration.ClientIpProperties;
 import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.configuration.RateLimitProperties;
+import dev.christopherbell.configuration.RequestSizeProperties;
 import dev.christopherbell.configuration.SharedFolderProperties;
+import dev.christopherbell.configuration.filter.ApiErrorResponseWriter;
 import dev.christopherbell.configuration.filter.RateLimitFilter;
 import dev.christopherbell.configuration.filter.RequestSizeLimitFilter;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import java.time.Clock;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -29,6 +32,7 @@ import org.springframework.security.web.header.writers.StaticHeadersWriter;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Spring Security configuration.
@@ -41,7 +45,7 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 @EnableWebSecurity
 @EnableConfigurationProperties({
     BrowserSecurityProperties.class, ClientIpProperties.class, RateLimitProperties.class,
-    SharedFolderProperties.class})
+    RequestSizeProperties.class, SharedFolderProperties.class})
 public class SecurityConfig {
 
   private static final String CONTENT_SECURITY_POLICY = String.join("; ",
@@ -183,9 +187,14 @@ public class SecurityConfig {
   @Bean
   public RateLimitFilter rateLimitFilter(
       ClientIpResolver clientIpResolver,
-      RateLimitProperties rateLimitProperties
+      RateLimitProperties rateLimitProperties,
+      ApiErrorResponseWriter apiErrorResponseWriter
   ) {
-    return new RateLimitFilter(clientIpResolver, rateLimitProperties);
+    return new RateLimitFilter(
+        clientIpResolver,
+        rateLimitProperties,
+        apiErrorResponseWriter,
+        Clock.systemUTC());
   }
 
   /**
@@ -224,8 +233,21 @@ public class SecurityConfig {
    * Configures the request size limiting filter bean.
    */
   @Bean
-  public RequestSizeLimitFilter requestSizeLimitFilter(SharedFolderProperties sharedFolderProperties) {
-    return new RequestSizeLimitFilter(1_000_000L, sharedFolderProperties.uploadChunk().toBytes());
+  public RequestSizeLimitFilter requestSizeLimitFilter(
+      RequestSizeProperties requestSizeProperties,
+      SharedFolderProperties sharedFolderProperties,
+      ApiErrorResponseWriter apiErrorResponseWriter
+  ) {
+    return new RequestSizeLimitFilter(
+        requestSizeProperties,
+        sharedFolderProperties.uploadChunk(),
+        apiErrorResponseWriter);
+  }
+
+  /** Uses the configured JSON mapper for servlet-boundary API error envelopes. */
+  @Bean
+  public ApiErrorResponseWriter apiErrorResponseWriter(ObjectMapper objectMapper) {
+    return new ApiErrorResponseWriter(objectMapper);
   }
 
   /** Applies no-store headers before authentication can return a protected shared-folder error. */

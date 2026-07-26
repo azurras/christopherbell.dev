@@ -8,6 +8,8 @@ Owns vehicle storage, VIN decoding, and vehicle data enrichment.
   keep the public API surface stable.
 - `core` owns CRUD, mapping, repository access, and data collection state reads.
 - `vin` owns VIN-only and batch VIN vehicle creation.
+- CRUD and VIN persistence outages use the shared service-unavailable contract
+  with preserved diagnostic causes and a redacted public response.
 - `nhtsa.decode` owns public VIN decode calls, caching, rate limiting, and NHTSA client access.
 - Public VIN decode anonymous rate-limit keys use the shared trusted-proxy
   client IP resolver.

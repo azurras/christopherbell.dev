@@ -3,6 +3,7 @@ package dev.christopherbell.vehicle.core;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.vehicle.model.VehicleCreateRequest;
 import dev.christopherbell.vehicle.model.VehicleDetail;
 import dev.christopherbell.vehicle.model.VehicleUpdateRequest;
@@ -39,7 +40,7 @@ public class VehicleCrudService {
     } catch (DuplicateKeyException e) {
       throw new ResourceExistsException("Vehicle already exists for VIN: " + request.getVin(), e);
     } catch (DataAccessException e) {
-      throw new RuntimeException("Failed to save vehicle", e);
+      throw new ServiceUnavailableException("Failed to save vehicle", e);
     }
   }
 
@@ -56,7 +57,7 @@ public class VehicleCrudService {
     try {
       vehicleRepository.delete(vehicle);
     } catch (DataAccessException e) {
-      throw new RuntimeException("Failed to delete vehicle with id: " + id, e);
+      throw new ServiceUnavailableException("Failed to delete vehicle with id: " + id, e);
     }
 
     return vehicleMapper.toVehicleDetail(vehicle);
@@ -120,7 +121,7 @@ public class VehicleCrudService {
     } catch (DuplicateKeyException e) {
       throw new ResourceExistsException("Vehicle already exists for VIN: " + request.vin(), e);
     } catch (DataAccessException e) {
-      throw new RuntimeException("Failed to update vehicle with id: " + id, e);
+      throw new ServiceUnavailableException("Failed to update vehicle with id: " + id, e);
     }
   }
 
