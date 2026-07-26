@@ -10,7 +10,7 @@ spring:
           fixed:
             enabled: true
             paths: /css/**,/js/**,/images/**,/favicon.ico
-            version: ${GIT_COMMIT:dev}
+            version: ${GIT_COMMIT:@releaseGitCommit@}
   config:
     import:
       - optional:file:.env[.properties]

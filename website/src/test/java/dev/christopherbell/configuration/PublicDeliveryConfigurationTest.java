@@ -86,7 +86,7 @@ class PublicDeliveryConfigurationTest {
     assertThat(configuration.at("/spring/web/resources/chain/strategy/fixed/enabled").asBoolean())
         .isTrue();
     assertThat(configuration.at("/spring/web/resources/chain/strategy/fixed/version").asText())
-        .isEqualTo("${GIT_COMMIT:dev}");
+        .isEqualTo("${GIT_COMMIT:@releaseGitCommit@}");
     assertThat(configuration.at("/spring/web/resources/chain/strategy/fixed/paths").asText())
         .isEqualTo("/css/**,/js/**,/images/**,/favicon.ico");
     assertThat(isPublic("GET", "/release-sha/css/main.css")).isTrue();
@@ -94,6 +94,17 @@ class PublicDeliveryConfigurationTest {
     assertThat(isPublic("GET", "/release-sha/images/previews/site.png")).isTrue();
     assertThat(isPublic("GET", "/release-sha/favicon.ico")).isTrue();
     assertThat(isPublic("POST", "/release-sha/js/app.js")).isFalse();
+  }
+
+  @Test
+  void packagedConfigurationEmbedsReleaseShaAsAssetFallback() throws Exception {
+    try (var packagedConfiguration = getClass().getResourceAsStream("/application.yml")) {
+      assertThat(packagedConfiguration).isNotNull();
+      var configuration = YAML.readTree(packagedConfiguration);
+
+      assertThat(configuration.at("/spring/web/resources/chain/strategy/fixed/version").asText())
+          .matches("\\$\\{GIT_COMMIT:[0-9a-f]{40}}");
+    }
   }
 
   @Test
