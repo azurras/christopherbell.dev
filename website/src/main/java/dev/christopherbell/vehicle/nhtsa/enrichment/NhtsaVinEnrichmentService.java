@@ -1,5 +1,7 @@
 package dev.christopherbell.vehicle.nhtsa.enrichment;
 
+import dev.christopherbell.configuration.mongo.lease.CollectorLeaseGuard;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.Vehicle;
@@ -19,6 +21,7 @@ import java.util.Optional;
 import java.util.stream.IntStream;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -28,11 +31,13 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class NhtsaVinEnrichmentService {
+  public static final String LEASE_NAME = "vehicle-nhtsa-enrichment";
   private final Clock clock;
   private final NhtsaVinClient nhtsaVinClient;
   private final NhtsaVinImportStateRepository nhtsaVinImportStateRepository;
   private final VehicleProperties.NhtsaVin properties;
   private final VehicleRepository vehicleRepository;
+  private final ScheduledCollectorCoordinator coordinator;
 
   /**
    * Creates an NHTSA enrichment service.
@@ -50,21 +55,53 @@ public class NhtsaVinEnrichmentService {
       VehicleProperties vehicleProperties,
       VehicleRepository vehicleRepository
   ) {
+    this(
+        clock,
+        nhtsaVinClient,
+        nhtsaVinImportStateRepository,
+        vehicleProperties,
+        vehicleRepository,
+        null);
+  }
+
+  @Autowired
+  public NhtsaVinEnrichmentService(
+      Clock clock,
+      NhtsaVinClient nhtsaVinClient,
+      NhtsaVinImportStateRepository nhtsaVinImportStateRepository,
+      VehicleProperties vehicleProperties,
+      VehicleRepository vehicleRepository,
+      ScheduledCollectorCoordinator coordinator
+  ) {
     this.clock = clock;
     this.nhtsaVinClient = nhtsaVinClient;
     this.nhtsaVinImportStateRepository = nhtsaVinImportStateRepository;
     this.properties = vehicleProperties.getNhtsaVin();
     this.vehicleRepository = vehicleRepository;
+    this.coordinator = coordinator;
   }
 
   /**
    * Enriches all stored VINs that have not already been decoded by NHTSA.
    */
-  @Scheduled(fixedDelayString = "${vehicles.nhtsa-vin.fixed-delay}")
+  @Scheduled(
+      initialDelayString = "${vehicles.nhtsa-vin.initial-delay}",
+      fixedDelayString = "${vehicles.nhtsa-vin.fixed-delay}")
   public void enrichStoredVins() {
     if (!properties.isEnabled()) {
       return;
     }
+    if (coordinator == null) {
+      enrichStoredVinsOwned(CollectorLeaseGuard.NONE);
+      return;
+    }
+    coordinator.run(LEASE_NAME, properties.getLeaseDuration(), guard -> {
+      enrichStoredVinsOwned(guard);
+      return null;
+    });
+  }
+
+  private void enrichStoredVinsOwned(CollectorLeaseGuard leaseGuard) {
     var state = currentState();
     if (isCoolingDown(state)) {
       log.debug("NHTSA VIN enrichment is cooling down until {}.", state.getDisabledUntil());
@@ -84,7 +121,8 @@ public class NhtsaVinEnrichmentService {
       if (isCoolingDown(state) || isPermanentlyDisabled(state)) {
         return;
       }
-      enrichVehicleBatch(state, batch);
+      leaseGuard.verifyHeld();
+      enrichVehicleBatch(state, batch, leaseGuard);
     }
   }
 
@@ -104,11 +142,16 @@ public class NhtsaVinEnrichmentService {
    * @param state the persisted NHTSA import state to update
    * @param vehicles the vehicles to enrich in one batch
    */
-  private void enrichVehicleBatch(NhtsaVinImportState state, List<Vehicle> vehicles) {
+  private void enrichVehicleBatch(
+      NhtsaVinImportState state,
+      List<Vehicle> vehicles,
+      CollectorLeaseGuard leaseGuard
+  ) {
     try {
       recordAttempt(state, vehicles.size());
       var decodedValuesByVin = decodedValuesByVin(nhtsaVinClient.decodeVins(toDecodeRequests(vehicles)));
       for (var vehicle : vehicles) {
+        leaseGuard.verifyHeld();
         var decodedValues = decodedValuesByVin.get(normalizeVin(vehicle.getVin()));
         if (decodedValues == null) {
           deleteUnusableVehicle(vehicle, "NHTSA batch response did not include VIN");

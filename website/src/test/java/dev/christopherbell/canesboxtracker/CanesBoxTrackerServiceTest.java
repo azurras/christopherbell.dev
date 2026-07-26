@@ -3,6 +3,8 @@ package dev.christopherbell.canesboxtracker;
 import dev.christopherbell.canesboxtracker.model.CanesBoxMetroPrice;
 import dev.christopherbell.canesboxtracker.model.CanesBoxPriceSnapshot;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorRunStatus;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -21,9 +23,31 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.ArgumentMatchers.eq;
 
 @DisplayName("Raising Canes Box Index service")
 class CanesBoxTrackerServiceTest {
+
+  @Test
+  void scheduledCollectionSkipsAllEffectsWhenDistributedLeaseIsContended() {
+    var repository = mock(CanesBoxPriceSnapshotRepository.class);
+    var client = mock(CanesBoxPriceClient.class);
+    var coordinator = mock(ScheduledCollectorCoordinator.class);
+    when(coordinator.run(eq(CanesBoxTrackerService.LEASE_NAME), any(), any()))
+        .thenReturn(new ScheduledCollectorCoordinator.Outcome<>(
+            ScheduledCollectorRunStatus.SKIPPED_LOCKED, null));
+    var service = new CanesBoxTrackerService(
+        repository,
+        client,
+        properties(target("Dallas-Fort Worth", "101")),
+        Clock.fixed(Instant.parse("2026-06-04T12:00:00Z"), ZoneId.of("America/Chicago")),
+        coordinator);
+
+    service.collectCurrentWeek();
+
+    verifyNoInteractions(repository, client);
+  }
 
   @Test
   void collectWeekAveragesSuccessfulMetroPricesAndStoresFailures() throws Exception {

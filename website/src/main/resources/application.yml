@@ -103,6 +103,19 @@ app:
 posts:
   edit-window: 15m
   edit-audit-limit: 10
+  link-previews:
+    connect-timeout: 2s
+    request-timeout: 3s
+    overall-timeout: 5s
+    max-redirects: 3
+    max-response-bytes: 262144
+    allowed-content-types: [text/html, application/xhtml+xml]
+    max-urls-per-post: 3
+    max-title-length: 200
+    max-description-length: 500
+    max-image-url-length: 2048
+    success-ttl: 7d
+    failure-ttl: 15m
   expiration:
     enabled: true
     cleanup-interval: 600000
@@ -117,6 +130,7 @@ canes-box-tracker:
   minimum-public-menu-price: 10.00
   connect-timeout: 10s
   request-timeout: 20s
+  lease-duration: 2m
   collection:
     cron: "0 0 6 * * MON"
     zone: America/Chicago
@@ -575,7 +589,9 @@ vehicles:
   nhtsa-vin:
     enabled: true
     url: https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVINValuesBatch
-    fixed-delay: 3600000
+    initial-delay: 1m
+    fixed-delay: 1h
+    lease-duration: 2m
     connect-timeout: 10s
     request-timeout: 20s
     cooldown: 24h
@@ -586,14 +602,17 @@ vehicles:
   random-vin:
     enabled: false
     url: https://randomvin.com/getvin.php?type=real
-    fixed-delay: 1000 #600000
+    initial-delay: 1m
+    fixed-delay: 10m
+    minimum-safe-delay: 1m
+    lease-duration: 2m
     robots-url: https://randomvin.com/robots.txt
     path: /getvin.php
     user-agent: vinner
     connect-timeout: 10s
     request-timeout: 15s
     cooldown: 24h
-    max-calls-per-day: 50000
+    max-calls-per-day: 144
     robots-fail-closed: true
     state-id: randomvin
     state-note: VIN data sourced from randomvin.com
@@ -601,6 +620,9 @@ vehicles:
   vin-decoder:
     rate-limit-capacity: 20
     rate-limit-window: 1m
+    decoder-version: vpic-2026-07
+    cache-ttl: 30d
+    max-batch-size: 20
 wfl:
   restaurant-of-the-day:
     enabled: true

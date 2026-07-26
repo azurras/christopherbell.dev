@@ -62,7 +62,12 @@ Owns Void posts and feed behavior.
   full reply tree. Reply deletion still removes that reply subtree so descendants
   do not survive a missing parent.
 - Post creation extracts each distinct HTTP or HTTPS URL from text and stores
-  fetched link preview metadata on the post. A preview fetch failure leaves the
+  bounded, SSRF-checked link preview metadata on the post. Every initial and
+  redirected destination is resolved and revalidated; network deadlines,
+  redirect count, bytes, content types, URL count, and metadata lengths are
+  configured under `posts.link-previews`. Successes and safe failure categories
+  use separate Mongo TTLs. The server does not execute JavaScript or proxy
+  preview images. A preview fetch failure leaves the
   post intact; shared browser rendering still makes the raw URL clickable. The
   shared feed renderer upgrades allowlisted providers into richer cards without
   changing stored post text: YouTube uses `youtube-nocookie.com`, direct image

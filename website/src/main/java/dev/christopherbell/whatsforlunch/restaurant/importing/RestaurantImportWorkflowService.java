@@ -1,6 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant.importing;
 
 import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
+import dev.christopherbell.configuration.mongo.lease.RenewingMongoLease;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantImportStateRepository;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantService;
@@ -13,7 +14,6 @@ import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -244,18 +244,8 @@ public class RestaurantImportWorkflowService {
 
   private RestaurantImportLeaseGuard renewingLeaseGuard(String ownerToken, Instant renewedOn) {
     var duration = properties.getRestaurantImport().getLeaseDuration();
-    var renewalInterval = duration.dividedBy(2);
-    var nextRenewal = new AtomicReference<>(renewedOn.plus(renewalInterval));
-    return () -> {
-      var now = Instant.now(clock);
-      if (now.isBefore(nextRenewal.get())) {
-        return;
-      }
-      if (!leases.renew(LEASE_NAME, ownerToken, now, now.plus(duration))) {
-        throw new ResponseStatusException(HttpStatus.CONFLICT, "OpenStreetMap import lease was lost");
-      }
-      nextRenewal.set(now.plus(renewalInterval));
-    };
+    var guard = new RenewingMongoLease(leases, clock, LEASE_NAME, ownerToken, duration, renewedOn);
+    return guard::verifyHeld;
   }
 
   private String safeCategory(Exception failure) {

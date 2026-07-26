@@ -3,6 +3,7 @@ package dev.christopherbell.vehicle.randomvin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -11,6 +12,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.vehicle.VehicleStub;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorRunStatus;
 import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.randomvin.importing.RandomVinClient;
@@ -47,6 +50,7 @@ public class RandomVinImportServiceTest {
   @Mock private RandomVinImportStateRepository randomVinImportStateRepository;
   @Mock private RandomVinRobotsPolicy randomVinRobotsPolicy;
   @Mock private VehicleRepository vehicleRepository;
+  @Mock private ScheduledCollectorCoordinator coordinator;
   private RandomVinImportService randomVinImportService;
 
   @BeforeEach
@@ -72,6 +76,26 @@ public class RandomVinImportServiceTest {
         Clock.fixed(IMPORTED_ON, ZoneOffset.UTC),
         vehicleProperties(false)
     );
+
+    randomVinImportService.importRandomVin();
+
+    verifyNoInteractions(randomVinClient, randomVinImportStateRepository, randomVinRobotsPolicy, vehicleRepository);
+  }
+
+  @Test
+  @DisplayName("Skips all RandomVIN effects when the distributed lease is held elsewhere")
+  public void testImportRandomVin_whenLeaseContended_skipsAllEffects() {
+    when(coordinator.run(eq(RandomVinImportService.LEASE_NAME), any(), any()))
+        .thenReturn(new ScheduledCollectorCoordinator.Outcome<>(
+            ScheduledCollectorRunStatus.SKIPPED_LOCKED, null));
+    randomVinImportService = new RandomVinImportService(
+        randomVinClient,
+        randomVinImportStateRepository,
+        randomVinRobotsPolicy,
+        vehicleRepository,
+        Clock.fixed(IMPORTED_ON, ZoneOffset.UTC),
+        vehicleProperties(true),
+        coordinator);
 
     randomVinImportService.importRandomVin();
 

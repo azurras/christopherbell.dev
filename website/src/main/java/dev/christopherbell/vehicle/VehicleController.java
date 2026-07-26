@@ -1,6 +1,7 @@
 package dev.christopherbell.vehicle;
 
 import static dev.christopherbell.libs.api.APIVersion.V20260509;
+import static dev.christopherbell.libs.api.APIVersion.V20260726;
 
 import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.libs.api.model.Response;
@@ -11,6 +12,8 @@ import dev.christopherbell.vehicle.model.VehicleDetail;
 import dev.christopherbell.vehicle.model.VehicleUpdateRequest;
 import dev.christopherbell.vehicle.model.VehicleVinBatchRequest;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeRequest;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchRequest;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchResponse;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeResponse;
 import dev.christopherbell.vehicle.model.VehicleVinRequest;
 import dev.christopherbell.vehicle.nhtsa.decode.VehicleVinDecodeService;
@@ -119,6 +122,33 @@ public class VehicleController {
             .success(true)
             .build(),
         HttpStatus.OK);
+  }
+
+  /**
+   * Decodes an ordered VIN batch with one success or safe error per submitted position.
+   *
+   * @param request the ordered VIN batch
+   * @param servletRequest the current HTTP request used to derive the rate-limit key
+   * @return ordered partial-success decode results
+   * @throws Exception when envelope validation or rate limiting fails
+   */
+  @PostMapping(
+      value = V20260726 + "/vin/decode/batch",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  public ResponseEntity<Response<VehicleVinDecodeBatchResponse>> decodeVinBatch(
+      @Valid @RequestBody VehicleVinDecodeBatchRequest request,
+      HttpServletRequest servletRequest
+  ) throws Exception {
+    var clientIp = clientIpResolver.resolveClientIp(servletRequest);
+    var clientKey = clientKey(servletRequest, clientIp);
+    log.info("VIN batch decoder used from ip={} clientKey={} count={}.",
+        clientIp, clientKey, request.vins().size());
+    return ResponseEntity.ok(Response.<VehicleVinDecodeBatchResponse>builder()
+        .payload(vehicleVinDecodeService.decodeBatch(request, clientKey))
+        .success(true)
+        .build());
   }
 
   private String clientKey(HttpServletRequest request, String clientIp) {
