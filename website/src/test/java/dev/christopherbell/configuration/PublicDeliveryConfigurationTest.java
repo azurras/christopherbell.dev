@@ -88,10 +88,12 @@ class PublicDeliveryConfigurationTest {
     assertThat(configuration.at("/spring/web/resources/chain/strategy/fixed/version").asText())
         .isEqualTo("${GIT_COMMIT:@releaseGitCommit@}");
     assertThat(configuration.at("/spring/web/resources/chain/strategy/fixed/paths").asText())
-        .isEqualTo("/css/**,/js/**,/images/**,/favicon.ico");
+        .isEqualTo("/css/**,/js/**,/images/**,/vendor/**,/favicon.ico");
     assertThat(isPublic("GET", "/release-sha/css/main.css")).isTrue();
     assertThat(isPublic("GET", "/release-sha/js/app.js")).isTrue();
     assertThat(isPublic("GET", "/release-sha/images/previews/site.png")).isTrue();
+    assertThat(isPublic("GET", "/vendor/jsmediatags-3.9.7.min.js")).isTrue();
+    assertThat(isPublic("GET", "/release-sha/vendor/jsmediatags-3.9.7.min.js")).isTrue();
     assertThat(isPublic("GET", "/release-sha/favicon.ico")).isTrue();
     assertThat(isPublic("POST", "/release-sha/js/app.js")).isFalse();
   }
@@ -111,9 +113,13 @@ class PublicDeliveryConfigurationTest {
   void onlyVersionedAssetsReceiveTheLongLivedImmutableDirective() throws Exception {
     var filter = new VersionedStaticAssetCacheFilter();
     var versionedResponse = filterResponse(filter, "GET", "/release-sha/js/app.js");
+    var versionedVendorResponse = filterResponse(
+        filter, "GET", "/release-sha/vendor/jsmediatags-3.9.7.min.js");
     var unversionedResponse = filterResponse(filter, "GET", "/js/app.js");
 
     assertThat(versionedResponse.getHeader("Cache-Control"))
+        .isEqualTo("max-age=31536000, public, immutable");
+    assertThat(versionedVendorResponse.getHeader("Cache-Control"))
         .isEqualTo("max-age=31536000, public, immutable");
     assertThat(unversionedResponse.getHeader("Cache-Control"))
         .isEqualTo("max-age=3600, public");
