@@ -26,6 +26,8 @@ import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingSetReq
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionService;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportWorkflowService;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantDataFreshness;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -43,7 +45,23 @@ class RestaurantControllerMemberSecurityTest {
   @Autowired private ObjectMapper objectMapper;
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private RestaurantService restaurantService;
+  @MockitoBean private RestaurantImportWorkflowService restaurantImportWorkflowService;
   @MockitoBean private WhatsForLunchSessionService whatsForLunchSessionService;
+
+  @Test
+  @DisplayName("Anonymous request can read WFL data freshness")
+  void getFreshness_whenAnonymous_returns200() throws Exception {
+    when(restaurantImportWorkflowService.getPublicFreshness())
+        .thenReturn(new RestaurantDataFreshness(
+            "OpenStreetMap", null, false, 45, List.of("Austin, TX")));
+
+    mockMvc
+        .perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260726 + "/freshness")
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.source").value("OpenStreetMap"))
+        .andExpect(jsonPath("$.payload.cityCoverage[0]").value("Austin, TX"));
+  }
 
   @Test
   @DisplayName("Member token can get WFL filters")

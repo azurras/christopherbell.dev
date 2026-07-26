@@ -7,6 +7,10 @@ import dev.christopherbell.location.zip.ZipCoordinateGazetteerReader;
 import dev.christopherbell.location.zip.ZipCoordinateRepository;
 import dev.christopherbell.location.zip.ZipCoordinateService;
 import java.util.List;
+import java.time.Clock;
+import java.time.Instant;
+import dev.christopherbell.location.zip.ZipCoordinateImportStateRepository;
+import dev.christopherbell.location.model.ZipCoordinateImportState;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,10 +33,13 @@ import static org.mockito.Mockito.when;
 class ZipCoordinateServiceTest {
   @Mock private ZipCoordinateGazetteerReader zipCoordinateGazetteerReader;
   @Mock private ZipCoordinateRepository zipCoordinateRepository;
+  @Mock private ZipCoordinateImportStateRepository zipCoordinateImportStateRepository;
+  @Mock private Clock clock;
   @InjectMocks private ZipCoordinateService zipCoordinateService;
 
   @Test
   void importRefreshCreatesUpdatesLeavesUnchangedAndDeletesStaleCensusRows() {
+    when(clock.instant()).thenReturn(Instant.parse("2026-07-26T12:00:00Z"));
     when(zipCoordinateGazetteerReader.readBundledCensusData()).thenReturn(List.of(
         coordinate("78701", 30.271128, -97.743699),
         coordinate("70112", 29.956439, -90.074284),
@@ -51,6 +58,9 @@ class ZipCoordinateServiceTest {
     assertEquals(1, result.deleted());
     assertEquals("Census Gazetteer ZCTA", result.source());
     assertEquals(2025, result.sourceYear());
+    assertEquals(false, result.noOp());
+    assertEquals(64, result.checksum().length());
+    assertEquals(Instant.parse("2026-07-26T12:00:00Z"), result.importedOn());
 
     @SuppressWarnings("unchecked")
     var savedCaptor = ArgumentCaptor.forClass(Iterable.class);
@@ -64,6 +74,27 @@ class ZipCoordinateServiceTest {
     verify(zipCoordinateRepository).deleteAll(deletedCaptor.capture());
     var deleted = ((Iterable<ZipCoordinate>) deletedCaptor.getValue()).iterator();
     assertEquals("99999", deleted.next().getZipCode());
+  }
+
+  @Test
+  void unchangedDatasetChecksumReturnsNoOpWithoutReadingOrWritingCoordinates() {
+    var coordinates = List.of(coordinate("78701", 30.271128, -97.743699));
+    when(zipCoordinateGazetteerReader.readBundledCensusData()).thenReturn(coordinates);
+    when(zipCoordinateImportStateRepository.findById(eq("census-zcta")))
+        .thenReturn(java.util.Optional.of(ZipCoordinateImportState.builder()
+            .id("census-zcta")
+            .checksum(ZipCoordinateService.datasetChecksum(coordinates))
+            .importedOn(Instant.parse("2026-07-25T12:00:00Z"))
+            .build()));
+
+    var result = zipCoordinateService.importCensusZipCoordinates();
+
+    assertEquals(true, result.noOp());
+    assertEquals(1, result.processed());
+    assertEquals(1, result.unchanged());
+    verify(zipCoordinateRepository, never()).findAllBySource(any());
+    verify(zipCoordinateRepository, never()).saveAll(any());
+    verify(zipCoordinateImportStateRepository, never()).save(any());
   }
 
   @Test

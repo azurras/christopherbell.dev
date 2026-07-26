@@ -21,12 +21,19 @@ import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeResult;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeApplyRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupePreview;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingSetRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportApplyRequest;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantDataFreshness;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewResponse;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportRunDetail;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportWorkflowService;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
@@ -46,6 +53,7 @@ public class RestaurantController {
 
   private final PermissionService permissionService;
   private final RestaurantService restaurantService;
+  private final RestaurantImportWorkflowService restaurantImportWorkflowService;
   private final WhatsForLunchSessionService whatsForLunchSessionService;
 
   /**
@@ -539,16 +547,53 @@ public class RestaurantController {
    *
    * @return HTTP 200 with import counts
    */
-  @PostMapping(value = APIVersion.V20260517 + "/import/openstreetmap", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PostMapping(value = APIVersion.V20260726 + "/import/openstreetmap/preview", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
-  public ResponseEntity<Response<RestaurantImportResult>> importOpenStreetMapRestaurants()
+  public ResponseEntity<Response<RestaurantImportPreviewResponse>> previewOpenStreetMapRestaurants()
       throws Exception {
-    var response = restaurantService.importConfiguredMetroRestaurantsFromOpenStreetMap();
+    var response = restaurantImportWorkflowService.previewOpenStreetMapImport();
     return new ResponseEntity<>(
-        Response.<RestaurantImportResult>builder()
+        Response.<RestaurantImportPreviewResponse>builder()
             .payload(response)
             .success(true)
             .build(), HttpStatus.OK);
+  }
+
+  /** Applies a reviewed OpenStreetMap import preview. */
+  @PostMapping(
+      value = APIVersion.V20260726 + "/import/openstreetmap/apply",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  public ResponseEntity<Response<RestaurantImportRunDetail>> applyOpenStreetMapRestaurants(
+      @RequestBody RestaurantImportApplyRequest request
+  ) throws Exception {
+    var response = restaurantImportWorkflowService.applyOpenStreetMapImport(
+        request == null ? null : request.token());
+    return ResponseEntity.ok(Response.<RestaurantImportRunDetail>builder()
+        .payload(response)
+        .success(true)
+        .build());
+  }
+
+  /** Returns durable status for the most recent OpenStreetMap import attempt. */
+  @GetMapping(value = APIVersion.V20260726 + "/import/openstreetmap/status", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  public ResponseEntity<Response<RestaurantImportState>> getOpenStreetMapImportStatus() {
+    var response = restaurantImportWorkflowService.getStatus().orElse(null);
+    return ResponseEntity.ok(Response.<RestaurantImportState>builder()
+        .payload(response)
+        .success(true)
+        .build());
+  }
+
+  /** Returns public restaurant source freshness and configured city coverage. */
+  @GetMapping(value = APIVersion.V20260726 + "/freshness", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<Response<RestaurantDataFreshness>> getRestaurantDataFreshness() {
+    return ResponseEntity.ok(Response.<RestaurantDataFreshness>builder()
+        .payload(restaurantImportWorkflowService.getPublicFreshness())
+        .success(true)
+        .build());
   }
 
   /**
@@ -556,15 +601,31 @@ public class RestaurantController {
    *
    * @return HTTP 200 with cleanup counts
    */
-  @PostMapping(value = APIVersion.V20260517 + "/dedupe-names", produces = MediaType.APPLICATION_JSON_VALUE)
+  @GetMapping(value = APIVersion.V20260726 + "/dedupe-names/preview", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
-  public ResponseEntity<Response<RestaurantDedupeResult>> removeDuplicateNamedRestaurants() {
-    var response = restaurantService.removeDuplicateNamedRestaurants();
+  public ResponseEntity<Response<RestaurantDedupePreview>> previewDuplicateNamedRestaurants() {
+    var response = restaurantService.previewDuplicateNamedRestaurants();
     return new ResponseEntity<>(
-        Response.<RestaurantDedupeResult>builder()
+        Response.<RestaurantDedupePreview>builder()
             .payload(response)
             .success(true)
             .build(), HttpStatus.OK);
+  }
+
+  /** Applies exact duplicate groups that still match a reviewed preview. */
+  @PostMapping(
+      value = APIVersion.V20260726 + "/dedupe-names/apply",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  public ResponseEntity<Response<RestaurantDedupeResult>> applyDuplicateNamedRestaurants(
+      @RequestBody RestaurantDedupeApplyRequest request
+  ) {
+    var response = restaurantService.applyDuplicateNamedRestaurants(request);
+    return ResponseEntity.ok(Response.<RestaurantDedupeResult>builder()
+        .payload(response)
+        .success(true)
+        .build());
   }
 
   /**

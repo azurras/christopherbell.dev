@@ -656,12 +656,33 @@ async function getWflCountsMarkup() {
 
 async function importRestaurants(button) {
   button.disabled = true;
-  renderOperationResult(wflOperationStatus, 'Importing restaurants from OpenStreetMap…');
+  renderOperationResult(wflOperationStatus, 'Preparing an OpenStreetMap import preview…');
   try {
-    const result = await fetchJson(API.whatsForLunch.importOpenStreetMap, {
+    const preview = await fetchJson(API.whatsForLunch.importOpenStreetMapPreview, {
       method: 'POST',
       headers: authHeaders(),
     });
+    const counts = preview?.counts || {};
+    renderOperationResult(wflOperationStatus, `
+      <p class="operation-message">Review the import preview before applying.</p>
+      ${resultSummary(counts, [
+        ['fetched', 'Fetched'],
+        ['created', 'Create'],
+        ['updated', 'Update'],
+        ['deleted', 'Delete'],
+        ['unchanged', 'Unchanged'],
+        ['invalid', 'Invalid'],
+      ])}
+      <p>${(preview?.representativeChanges || []).map(sanitize).join('<br>') || 'No changed records.'}</p>
+    `);
+    if (!window.confirm('Apply this exact OpenStreetMap import preview?')) return;
+    renderOperationResult(wflOperationStatus, 'Applying the reviewed import…');
+    const outcome = await fetchJson(API.whatsForLunch.importOpenStreetMapApply, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ token: preview.token }),
+    });
+    const result = outcome?.result || {};
     renderOperationResult(wflOperationStatus, `
       <p class="operation-message">Import complete.</p>
       ${resultSummary(result, [
@@ -680,11 +701,28 @@ async function importRestaurants(button) {
 
 async function dedupeRestaurants(button) {
   button.disabled = true;
-  renderOperationResult(wflOperationStatus, 'Removing duplicate restaurant names…');
+  renderOperationResult(wflOperationStatus, 'Preparing a duplicate-name preview…');
   try {
-    const result = await fetchJson(API.whatsForLunch.dedupeNames, {
-      method: 'POST',
+    const preview = await fetchJson(API.whatsForLunch.dedupeNamesPreview, {
       headers: authHeaders(),
+    });
+    const groups = Array.isArray(preview?.groups) ? preview.groups : [];
+    renderOperationResult(wflOperationStatus, `
+      <p class="operation-message">Review ${groups.length} duplicate group${groups.length === 1 ? '' : 's'}.</p>
+      ${groups.map(group => `<p><strong>${sanitize(group.normalizedName)}</strong>: keep ${sanitize(group.survivorId)}, remove ${Math.max(0, (group.memberIds || []).length - 1)}</p>`).join('') || '<p>No duplicate groups found.</p>'}
+    `);
+    if (groups.length === 0 || !window.confirm('Delete the previewed duplicate records?')) return;
+    const result = await fetchJson(API.whatsForLunch.dedupeNamesApply, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        groups: groups.map(({ normalizedName, version, survivorId, memberIds }) => ({
+          normalizedName,
+          version,
+          survivorId,
+          memberIds,
+        })),
+      }),
     });
     renderOperationResult(wflOperationStatus, `
       <p class="operation-message">Duplicate cleanup complete.</p>

@@ -5,19 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import tools.jackson.databind.ObjectMapper;
+import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import org.junit.jupiter.api.Test;
 
 class OpenStreetMapRestaurantClientTest {
 
   @Test
   void parseRestaurants_mapsOpenStreetMapTags() throws Exception {
-    var client = new OpenStreetMapRestaurantClient(
-        new ObjectMapper(),
-        "https://example.com",
-        "29.95,-98.25,30.75,-97.15",
-        25,
-        500,
-        true);
+    var client = client();
     var method = OpenStreetMapRestaurantClient.class.getDeclaredMethod("parseRestaurants", String.class);
     method.setAccessible(true);
     var body = """
@@ -74,13 +69,7 @@ class OpenStreetMapRestaurantClientTest {
 
   @Test
   void parseRestaurants_defaultsMissingAddressCityToImportedMetro() throws Exception {
-    var client = new OpenStreetMapRestaurantClient(
-        new ObjectMapper(),
-        "https://example.com",
-        "29.95,-98.25,30.75,-97.15",
-        25,
-        500,
-        true);
+    var client = client();
     var method = OpenStreetMapRestaurantClient.class.getDeclaredMethod("parseRestaurants", String.class);
     method.setAccessible(true);
     var body = """
@@ -117,13 +106,7 @@ class OpenStreetMapRestaurantClientTest {
 
   @Test
   void parseRestaurants_sortsByNameWithoutFastFoodPenalty() throws Exception {
-    var client = new OpenStreetMapRestaurantClient(
-        new ObjectMapper(),
-        "https://example.com",
-        "29.95,-98.25,30.75,-97.15",
-        25,
-        500,
-        true);
+    var client = client();
     var method = OpenStreetMapRestaurantClient.class.getDeclaredMethod("parseRestaurants", String.class);
     method.setAccessible(true);
     var body = """
@@ -160,22 +143,24 @@ class OpenStreetMapRestaurantClientTest {
 
   @Test
   void buildQuery_includesAllConfiguredMetroBoundingBoxes() throws Exception {
-    var client = new OpenStreetMapRestaurantClient(
-        new ObjectMapper(),
-        "https://example.com",
-        "29.95,-98.25,30.75,-97.15;37.20,-122.65,38.20,-121.65;29.70,-90.45,30.25,-89.65;32.45,-97.35,33.15,-96.35",
-        25,
-        500,
-        true);
+    var client = client();
     var method = OpenStreetMapRestaurantClient.class.getDeclaredMethod("buildQuery");
     method.setAccessible(true);
 
     var query = (String) method.invoke(client);
 
     assertTrue(query.contains("29.95,-98.25,30.75,-97.15"));
-    assertTrue(query.contains("37.20,-122.65,38.20,-121.65"));
-    assertTrue(query.contains("29.70,-90.45,30.25,-89.65"));
+    assertTrue(query.contains("37.2,-122.65,38.2,-121.65"));
+    assertTrue(query.contains("29.7,-90.45,30.25,-89.65"));
     assertTrue(query.contains("32.45,-97.35,33.15,-96.35"));
     assertTrue(query.contains("fast_food"));
+  }
+
+  private OpenStreetMapRestaurantClient client() {
+    var properties = new WflProperties();
+    properties.getRestaurantImport().getOsm().setEndpoint(java.net.URI.create("https://example.com"));
+    properties.getRestaurantImport().getOsm().setTimeout(java.time.Duration.ofSeconds(25));
+    properties.getRestaurantImport().getOsm().setResultLimit(500);
+    return new OpenStreetMapRestaurantClient(new ObjectMapper(), properties);
   }
 }

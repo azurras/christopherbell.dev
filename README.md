@@ -310,8 +310,11 @@ they appear on the tracker.
 ## What's For Lunch Data
 
 WFL restaurant data is imported from OpenStreetMap through Overpass. The import
-is admin-only and can be triggered from Back Office. The default import coverage
-includes Austin, the San Francisco Bay Area, New Orleans, and Dallas.
+is leased across scheduled and admin triggers. Back Office requires a dry-run
+preview and confirmation before applying a re-fetched, checksum-matched payload.
+The default startup-validated coverage includes Austin, the San Francisco Bay
+Area, New Orleans, and Dallas. Public WFL pages show source freshness and city
+coverage without exposing operator or failure details.
 
 The public WFL page asks for the browser location or a ZIP code and returns up
 to three restaurant suggestions within the selected radius. Browser-location
@@ -335,16 +338,16 @@ curl -X POST \
   http://localhost:8081/api/location/zip/import/census
 ```
 
-Admin endpoints:
+Admin preview endpoints (Back Office performs the corresponding confirmed apply calls):
 
 ```bash
 curl -X POST \
   -H "Authorization: Bearer <admin-token>" \
-  http://localhost:8081/api/whatsforlunch/restaurant/2026-05-17/import/openstreetmap
+  http://localhost:8081/api/whatsforlunch/restaurant/2026-07-26/import/openstreetmap/preview
 
-curl -X POST \
+curl \
   -H "Authorization: Bearer <admin-token>" \
-  http://localhost:8081/api/whatsforlunch/restaurant/2026-05-17/dedupe-names
+  http://localhost:8081/api/whatsforlunch/restaurant/2026-07-26/dedupe-names/preview
 ```
 
 ## Common Development Tasks

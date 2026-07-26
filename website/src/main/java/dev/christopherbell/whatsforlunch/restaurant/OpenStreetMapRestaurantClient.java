@@ -2,10 +2,10 @@ package dev.christopherbell.whatsforlunch.restaurant;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.model.Address;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import java.io.IOException;
-import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -16,7 +16,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -24,35 +23,16 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class OpenStreetMapRestaurantClient {
-  private static final String DEFAULT_IMPORT_BBOXES = String.join(";",
-      "29.95,-98.25,30.75,-97.15", // Austin
-      "37.20,-122.65,38.20,-121.65", // San Francisco Bay Area
-      "29.70,-90.45,30.25,-89.65", // New Orleans
-      "32.45,-97.35,33.15,-96.35" // Dallas
-  );
-
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
-  private final String endpoint;
-  private final String bboxes;
-  private final int timeoutSeconds;
-  private final int resultLimit;
-  private final boolean includeFastFood;
+  private final WflProperties.Osm properties;
 
   public OpenStreetMapRestaurantClient(
       ObjectMapper objectMapper,
-      @Value("${wfl.restaurant-import.osm.endpoint:https://overpass-api.de/api/interpreter}") String endpoint,
-      @Value("${wfl.restaurant-import.osm.bbox:}") String bboxes,
-      @Value("${wfl.restaurant-import.osm.timeout-seconds:60}") int timeoutSeconds,
-      @Value("${wfl.restaurant-import.osm.result-limit:20000}") int resultLimit,
-      @Value("${wfl.restaurant-import.osm.include-fast-food:true}") boolean includeFastFood
+      WflProperties wflProperties
   ) {
     this.objectMapper = objectMapper;
-    this.endpoint = endpoint;
-    this.bboxes = bboxes;
-    this.timeoutSeconds = timeoutSeconds;
-    this.resultLimit = resultLimit;
-    this.includeFastFood = includeFastFood;
+    this.properties = wflProperties.getRestaurantImport().getOsm();
     this.httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
         .build();
@@ -61,9 +41,9 @@ public class OpenStreetMapRestaurantClient {
   public List<Restaurant> getConfiguredMetroRestaurants()
       throws IOException, InterruptedException {
     var query = buildQuery();
-    var request = HttpRequest.newBuilder(URI.create(endpoint))
+    var request = HttpRequest.newBuilder(properties.getEndpoint())
         .POST(HttpRequest.BodyPublishers.ofString("data=" + URLEncoder.encode(query, StandardCharsets.UTF_8)))
-        .timeout(Duration.ofSeconds(timeoutSeconds + 10L))
+        .timeout(properties.getTimeout().plusSeconds(10))
         .header("Accept", "application/json")
         .header("Content-Type", "application/x-www-form-urlencoded")
         .header("User-Agent", "christopherbell.dev whats-for-lunch importer")
@@ -78,7 +58,7 @@ public class OpenStreetMapRestaurantClient {
   }
 
   private String buildQuery() {
-    var amenityPattern = includeFastFood
+    var amenityPattern = properties.isIncludeFastFood()
         ? "^(restaurant|cafe|food_court|fast_food)$"
         : "^(restaurant|cafe|food_court)$";
     var clauses = String.join("\n", importBoundingBoxes().stream()
@@ -94,17 +74,14 @@ public class OpenStreetMapRestaurantClient {
         %s
         );
         out center %d;
-        """.formatted(timeoutSeconds, clauses, resultLimit);
+        """.formatted(properties.getTimeout().toSeconds(), clauses, properties.getResultLimit());
   }
 
   private List<String> importBoundingBoxes() {
-    var configured = List.of((bboxes == null ? "" : bboxes).split(";")).stream()
-        .map(String::strip)
-        .filter(bbox -> !bbox.isBlank())
+    return properties.getMetros().stream()
+        .map(WflProperties.Metro::getBounds)
+        .map(WflProperties.BoundingBox::toOverpassValue)
         .toList();
-    return configured.isEmpty()
-        ? List.of(DEFAULT_IMPORT_BBOXES.split(";"))
-        : configured;
   }
 
   private List<Restaurant> parseRestaurants(String body) throws IOException {

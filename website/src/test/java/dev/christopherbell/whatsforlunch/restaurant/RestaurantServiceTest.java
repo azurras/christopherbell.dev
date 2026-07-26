@@ -7,19 +7,26 @@ import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportLeaseGuard;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportSnapshot;
 import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeConfirmation;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeApplyRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRating;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreference;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
 import dev.christopherbell.whatsforlunch.restaurant.preference.WhatsForLunchPreferenceRepository;
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
+import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingQueryRepository;
+import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingSummary;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -32,10 +39,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.web.server.ResponseStatusException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -63,13 +72,14 @@ public class RestaurantServiceTest {
   @Mock private DailyLunchPicksRepository dailyLunchPicksRepository;
   @Mock private OpenStreetMapRestaurantClient openStreetMapRestaurantClient;
   @Mock private PermissionService permissionService;
-  @Mock private RestaurantImportStateRepository restaurantImportStateRepository;
   @Mock private RestaurantMapper restaurantMapper;
   @Mock private RestaurantFavoriteRepository restaurantFavoriteRepository;
   @Mock private RestaurantRatingRepository restaurantRatingRepository;
+  @Mock private RestaurantRatingQueryRepository restaurantRatingQueryRepository;
   @Mock private RestaurantRepository restaurantRepository;
   @Mock private WhatsForLunchPreferenceRepository whatsForLunchPreferenceRepository;
   @Mock private ZipCoordinateService zipCoordinateService;
+  @Spy private WflProperties wflProperties = new WflProperties();
   @InjectMocks private RestaurantService restaurantService;
 
   @Test
@@ -726,7 +736,10 @@ public class RestaurantServiceTest {
         RestaurantRating.builder().restaurantId("five-two").accountId("account-2").rating(5).build(),
         RestaurantRating.builder().restaurantId("four-star").accountId("account-1").rating(4).build());
 
-    when(restaurantRatingRepository.findAll()).thenReturn(ratings);
+    when(restaurantRatingQueryRepository.topRated(eq(10))).thenReturn(List.of(
+        new RestaurantRatingSummary("five-two", 2, 10),
+        new RestaurantRatingSummary("five-one", 1, 5),
+        new RestaurantRatingSummary("four-star", 1, 4)));
     when(restaurantRepository.findAllById(eq(List.of("five-two", "five-one", "four-star"))))
         .thenReturn(List.of(fiveWithOneRating, fourStar, fiveWithTwoRatings));
     when(restaurantMapper.toRestaurantDetail(eq(fiveWithTwoRatings))).thenReturn(fiveWithTwoRatingsDetail);
@@ -740,6 +753,8 @@ public class RestaurantServiceTest {
     assertEquals(List.of(fiveWithTwoRatingsDetail, fiveWithOneRatingDetail, fourStarDetail), result);
     assertEquals(2, result.get(0).getRatingCount());
     assertEquals(10, result.get(0).getRatingSum());
+    verify(restaurantRatingQueryRepository).topRated(eq(10));
+    verify(restaurantRatingRepository, never()).findAll();
   }
 
   @Test
@@ -895,10 +910,10 @@ public class RestaurantServiceTest {
     assertEquals(1, result.skippedExisting());
     assertEquals(1, result.skippedInvalid());
     verify(openStreetMapRestaurantClient).getConfiguredMetroRestaurants();
-    verify(restaurantRepository).findById(eq("osm:node:1"));
-    verify(restaurantRepository).findById(eq("osm:node:2"));
-    verify(restaurantRepository).findByNormalizedName(eq("pflugerville taco house"));
-    verify(restaurantRepository).findAll();
+    verify(restaurantRepository, times(2)).findById(eq("osm:node:1"));
+    verify(restaurantRepository, times(2)).findById(eq("osm:node:2"));
+    verify(restaurantRepository, times(2)).findByNormalizedName(eq("pflugerville taco house"));
+    verify(restaurantRepository, times(2)).findAll();
     verify(restaurantRepository).save(eq(newRestaurant));
   }
 
@@ -963,75 +978,58 @@ public class RestaurantServiceTest {
   }
 
   @Test
-  @DisplayName("Monthly import: tracked run saves completed state")
-  public void testRunTrackedOpenStreetMapImport_savesCompletedState() throws Exception {
-    var started = Instant.parse("2026-05-15T08:00:00Z");
-    var completed = Instant.parse("2026-05-15T08:00:03Z");
-    var fixedClock = Clock.fixed(started, ZoneId.of("UTC"));
+  @DisplayName("Prepared import verifies lease before each write and after completion")
+  public void testApplyPreparedImport_verifiesLeaseThroughoutMutation() throws Exception {
+    var imported = RestaurantStub.getRestaurantStub("osm:node:lease");
+    var guard = org.mockito.Mockito.mock(RestaurantImportLeaseGuard.class);
+    when(restaurantRepository.findById(eq(imported.getId()))).thenReturn(Optional.empty());
+    when(restaurantRepository.findByNormalizedName(eq("pflugerville taco house")))
+        .thenReturn(Optional.empty());
+    when(restaurantRepository.findAll()).thenReturn(List.of());
+    var snapshot = new RestaurantImportSnapshot(
+        "checksum",
+        List.of(imported),
+        new RestaurantImportPreviewCounts(1, 1, 0, 0, 0, 0),
+        List.of());
 
-    when(clock.instant()).thenReturn(started, completed);
-    when(clock.withZone(any(ZoneId.class))).thenReturn(fixedClock);
-    when(restaurantImportStateRepository.findById(eq("openstreetmap-monthly")))
-        .thenReturn(Optional.empty(), Optional.empty());
-    when(restaurantImportStateRepository.save(any(RestaurantImportState.class)))
-        .thenAnswer(invocation -> invocation.getArgument(0));
-    when(openStreetMapRestaurantClient.getConfiguredMetroRestaurants()).thenReturn(List.of());
+    restaurantService.applyPreparedImport(snapshot, guard);
 
-    restaurantService.runTrackedOpenStreetMapImport("test");
-
-    var captor = ArgumentCaptor.forClass(RestaurantImportState.class);
-    verify(restaurantImportStateRepository, times(2)).save(captor.capture());
-    var startedState = captor.getAllValues().get(0);
-    var completedState = captor.getAllValues().get(1);
-    assertEquals("openstreetmap-monthly", startedState.getId());
-    assertEquals(started, startedState.getLastStartedOn());
-    assertEquals("openstreetmap-monthly", completedState.getId());
-    assertEquals(completed, completedState.getLastCompletedOn());
-    assertEquals("2026-05", completedState.getLastCompletedMonth());
-    assertNotNull(completedState.getLastResult());
-    assertEquals(0, completedState.getLastResult().fetched());
+    verify(guard, times(2)).verifyHeld();
+    verify(restaurantRepository).save(eq(imported));
   }
 
   @Test
-  @DisplayName("Monthly import catch-up: skips when an import completed last month")
-  public void testRunMissedMonthlyOpenStreetMapImport_whenLastMonthCompleted_skipsImport()
-      throws Exception {
-    var fixedClock = Clock.fixed(Instant.parse("2026-05-18T08:00:00Z"), ZoneId.of("UTC"));
-    when(clock.withZone(any(ZoneId.class))).thenReturn(fixedClock);
-    when(restaurantImportStateRepository.findById(eq("openstreetmap-monthly")))
-        .thenReturn(Optional.of(RestaurantImportState.builder()
-            .id("openstreetmap-monthly")
-            .lastCompletedMonth("2026-04")
-            .build()));
+  @DisplayName("Dedupe preview: selects stable survivor without deleting")
+  public void testPreviewDuplicateNamedRestaurants_selectsStableSurvivorWithoutDeleting() {
+    var laterId = RestaurantStub.getRestaurantStub("b-id");
+    var stableId = RestaurantStub.getRestaurantStub("a-id");
+    when(restaurantRepository.findAll()).thenReturn(List.of(laterId, stableId));
 
-    restaurantService.runMissedMonthlyOpenStreetMapImport();
+    var preview = restaurantService.previewDuplicateNamedRestaurants();
 
-    verify(restaurantImportStateRepository).findById(eq("openstreetmap-monthly"));
-    verifyNoInteractions(openStreetMapRestaurantClient);
+    assertEquals(1, preview.groups().size());
+    assertEquals("a-id", preview.groups().getFirst().survivorId());
+    assertEquals(List.of("a-id", "b-id"), preview.groups().getFirst().memberIds());
+    assertTrue(!preview.groups().getFirst().version().isBlank());
+    verify(restaurantRepository, never()).deleteAll(any());
   }
 
   @Test
-  @DisplayName("Monthly import catch-up: runs immediately when last month is missing")
-  public void testRunMissedMonthlyOpenStreetMapImport_whenLastMonthMissing_runsImport()
-      throws Exception {
-    var started = Instant.parse("2026-05-18T08:00:00Z");
-    var completed = Instant.parse("2026-05-18T08:00:03Z");
-    var fixedClock = Clock.fixed(started, ZoneId.of("UTC"));
+  @DisplayName("Dedupe apply: validates all group versions before deleting")
+  public void testApplyDuplicateNamedRestaurants_whenAnyGroupIsStale_DeletesNothing() {
+    var first = RestaurantStub.getRestaurantStub("a-id");
+    var second = RestaurantStub.getRestaurantStub("b-id");
+    when(restaurantRepository.findAll()).thenReturn(List.of(first, second));
+    var request = new RestaurantDedupeApplyRequest(List.of(
+        new RestaurantDedupeConfirmation(
+            "pflugerville taco house", "stale-version", "a-id", List.of("a-id", "b-id"))));
 
-    when(clock.withZone(any(ZoneId.class))).thenReturn(fixedClock);
-    when(clock.instant()).thenReturn(started, completed);
-    when(restaurantImportStateRepository.findById(eq("openstreetmap-monthly")))
-        .thenReturn(Optional.empty(), Optional.empty(), Optional.empty());
-    when(restaurantImportStateRepository.save(any(RestaurantImportState.class)))
-        .thenAnswer(invocation -> invocation.getArgument(0));
-    when(openStreetMapRestaurantClient.getConfiguredMetroRestaurants()).thenReturn(List.of());
+    var failure = assertThrows(
+        ResponseStatusException.class,
+        () -> restaurantService.applyDuplicateNamedRestaurants(request));
 
-    restaurantService.runMissedMonthlyOpenStreetMapImport();
-
-    verify(openStreetMapRestaurantClient).getConfiguredMetroRestaurants();
-    verify(restaurantImportStateRepository).save(argThat(state ->
-        "2026-05".equals(state.getLastCompletedMonth())
-            && state.getLastResult() != null));
+    assertEquals(409, failure.getStatusCode().value());
+    verify(restaurantRepository, never()).deleteAll(any());
   }
 
   @Test

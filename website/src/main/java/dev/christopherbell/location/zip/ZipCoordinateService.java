@@ -5,10 +5,17 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.location.model.ZipCoordinate;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.location.model.ZipCoordinateImportResult;
+import dev.christopherbell.location.model.ZipCoordinateImportState;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HexFormat;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -18,7 +25,11 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 @Service
 public class ZipCoordinateService {
+  private static final String CENSUS_STATE_ID = "census-zcta";
+
+  private final Clock clock;
   private final ZipCoordinateGazetteerReader zipCoordinateGazetteerReader;
+  private final ZipCoordinateImportStateRepository zipCoordinateImportStateRepository;
   private final ZipCoordinateRepository zipCoordinateRepository;
 
   /**
@@ -28,6 +39,19 @@ public class ZipCoordinateService {
    */
   public ZipCoordinateImportResult importCensusZipCoordinates() {
     var importedCoordinates = zipCoordinateGazetteerReader.readBundledCensusData();
+    var checksum = datasetChecksum(importedCoordinates);
+    var previousState = zipCoordinateImportStateRepository.findById(CENSUS_STATE_ID);
+    if (previousState.map(ZipCoordinateImportState::getChecksum).filter(checksum::equals).isPresent()) {
+      return ZipCoordinateImportResult.builder()
+          .processed(importedCoordinates.size())
+          .unchanged(importedCoordinates.size())
+          .source(ZipCoordinateGazetteerReader.CENSUS_SOURCE)
+          .sourceYear(ZipCoordinateGazetteerReader.CENSUS_SOURCE_YEAR)
+          .checksum(checksum)
+          .importedOn(previousState.get().getImportedOn())
+          .noOp(true)
+          .build();
+    }
     var existingByZipCode = existingCensusCoordinatesByZipCode();
     var changedCoordinates = new ArrayList<ZipCoordinate>();
     var created = 0;
@@ -56,7 +80,8 @@ public class ZipCoordinateService {
       zipCoordinateRepository.deleteAll(staleCensusCoordinates);
     }
 
-    return ZipCoordinateImportResult.builder()
+    var importedOn = Instant.now(clock);
+    var result = ZipCoordinateImportResult.builder()
         .processed(importedCoordinates.size())
         .created(created)
         .updated(updated)
@@ -64,7 +89,38 @@ public class ZipCoordinateService {
         .deleted(staleCensusCoordinates.size())
         .source(ZipCoordinateGazetteerReader.CENSUS_SOURCE)
         .sourceYear(ZipCoordinateGazetteerReader.CENSUS_SOURCE_YEAR)
+        .checksum(checksum)
+        .importedOn(importedOn)
+        .noOp(false)
         .build();
+    zipCoordinateImportStateRepository.save(ZipCoordinateImportState.builder()
+        .id(CENSUS_STATE_ID)
+        .checksum(checksum)
+        .source(ZipCoordinateGazetteerReader.CENSUS_SOURCE)
+        .sourceYear(ZipCoordinateGazetteerReader.CENSUS_SOURCE_YEAR)
+        .importedOn(importedOn)
+        .result(result)
+        .build());
+    return result;
+  }
+
+  /** Produces a stable checksum independent of repository order. */
+  public static String datasetChecksum(List<ZipCoordinate> coordinates) {
+    try {
+      var digest = MessageDigest.getInstance("SHA-256");
+      coordinates.stream()
+          .map(coordinate -> "%s|%s|%s|%s|%s".formatted(
+              coordinate.getZipCode(),
+              coordinate.getLatitude(),
+              coordinate.getLongitude(),
+              coordinate.getSource(),
+              coordinate.getSourceYear()))
+          .sorted()
+          .forEach(value -> digest.update((value + "\n").getBytes(StandardCharsets.UTF_8)));
+      return HexFormat.of().formatHex(digest.digest());
+    } catch (NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 is unavailable", impossible);
+    }
   }
 
   /**
