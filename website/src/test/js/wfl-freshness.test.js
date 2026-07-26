@@ -15,7 +15,8 @@ test('freshness markup reports source, timestamp, state, and coverage safely', (
   assert.match(markup, /OpenStreetMap/);
   assert.match(markup, /Current/);
   assert.match(markup, /Austin, TX/);
-  assert.doesNotMatch(markup, /<script>/);
+  assert.ok(markup.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
+  assert.equal(markup.includes('<script>'), false);
 });
 
 test('freshness markup is honest when no successful refresh exists', () => {
