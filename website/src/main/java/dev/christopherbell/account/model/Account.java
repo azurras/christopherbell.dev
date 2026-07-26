@@ -2,6 +2,8 @@ package dev.christopherbell.account.model;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import dev.christopherbell.admin.activity.ModerationAuditCommand;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
@@ -77,6 +79,7 @@ public class Account {
   @Builder.Default
   private Set<AccountPermission> permissions = new HashSet<>();
   private AccountStatus status;
+  @JsonIgnore private ModerationAuditCommand pendingModerationAudit;
   private Set<String> followingIds;
 
   @Indexed(unique = true)

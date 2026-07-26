@@ -1,7 +1,7 @@
 import { sanitize, authHeaders, fetchJson, isLoggedIn, formatWhen, closeOnOutside } from './lib/util.js';
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
-import { makeRendererContext, canDeleteFor } from './lib/feed-context.js';
+import { makeRendererContext, canDeleteFor, canEditFor } from './lib/feed-context.js';
 import { initPostImageLightbox } from './lib/image-lightbox.js';
 import { initLazyMedia } from './lib/lazy-media.js';
 import {
@@ -127,6 +127,7 @@ function renderRoot(post, currentUser) {
     formatWhen,
     isLoggedIn,
     canDelete: canDeleteFor(currentUser),
+    canEdit: canEditFor(currentUser),
     currentUserName: currentUser?.username || null,
     suppressParentContext: true,
     onExpire: () => renderExpiredRootState(root)
@@ -304,7 +305,7 @@ function renderThread(items, currentUser, currentId) {
       </div>`;
     return directReplies;
   }
-  const ctx = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(currentUser), currentUserName: currentUser?.username || null, suppressParentContext: true });
+  const ctx = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(currentUser), canEdit: canEditFor(currentUser), currentUserName: currentUser?.username || null, suppressParentContext: true });
   const childIds = replyIdsWithChildren(thread);
   const selectedLevel = numericLevel(thread.find(post => post?.id === currentId));
   for (const p of visibleReplies) {

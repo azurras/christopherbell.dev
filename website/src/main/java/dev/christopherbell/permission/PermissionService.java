@@ -69,6 +69,12 @@ public class PermissionService {
       AccountLoginRequest accountLoginRequest,
       Account account
   ) throws NoSuchAlgorithmException, InvalidKeySpecException {
+    if (accountLoginRequest == null || account == null
+        || accountLoginRequest.password() == null
+        || account.getPasswordSalt() == null || account.getPasswordSalt().isBlank()
+        || account.getPasswordHash() == null || account.getPasswordHash().isBlank()) {
+      return false;
+    }
     var password = accountLoginRequest.password();
     var salt = account.getPasswordSalt();
     var hash = account.getPasswordHash();

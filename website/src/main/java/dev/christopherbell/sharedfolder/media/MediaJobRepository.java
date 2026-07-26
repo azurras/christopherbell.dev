@@ -22,6 +22,8 @@ public interface MediaJobRepository extends MongoRepository<MediaJob, String> {
 
   long countByOwnerIdAndStatusIn(String ownerId, Collection<MediaJobStatus> statuses);
 
+  Slice<MediaJob> findByOwnerIdOrderByIdAsc(String ownerId, Pageable pageable);
+
   List<MediaJob> findByStatusIn(Collection<MediaJobStatus> statuses);
 
   Optional<MediaJob> findFirstByStatusAndDescriptorPublishedFalseOrderByCreatedAtAsc(

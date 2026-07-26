@@ -39,6 +39,7 @@ public final class AccountServiceStub {
         .role(Role.ADMIN)
         .status(AccountStatus.ACTIVE)
         .isApproved(true)
+        .moderationReason("Account review")
         .build();
   }
 
@@ -46,6 +47,7 @@ public final class AccountServiceStub {
     return AccountUpdateRequest.builder()
         .id(ID)
         .role(Role.ADMIN)
+        .moderationReason("Role promotion")
         .build();
   }
 
@@ -54,6 +56,7 @@ public final class AccountServiceStub {
         .id(ID)
         .status(AccountStatus.ACTIVE)
         .isApproved(true)
+        .moderationReason("Account activation")
         .build();
   }
 

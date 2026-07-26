@@ -3,6 +3,8 @@ package dev.christopherbell.message;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.message.conversation.ConversationService;
+import dev.christopherbell.message.conversation.ConversationArchiveResult;
+import dev.christopherbell.message.conversation.ConversationPage;
 import dev.christopherbell.message.delivery.MessageDeliveryService;
 import dev.christopherbell.message.model.ConversationSummary;
 import dev.christopherbell.message.model.MessageCreateRequest;
@@ -33,5 +35,17 @@ public class MessageService {
   /** Delegates conversation summary reads to the conversation subfeature. */
   public List<ConversationSummary> getConversations(int limit) throws ResourceNotFoundException {
     return conversationService.getConversations(limit);
+  }
+
+  /** Delegates stable cursor-based conversation paging. */
+  public ConversationPage getConversationPage(String username, String cursor, int size)
+      throws InvalidRequestException, ResourceNotFoundException {
+    return conversationService.getConversationPage(username, cursor, size);
+  }
+
+  /** Archives only the current account's view of a conversation. */
+  public ConversationArchiveResult archiveConversation(String username)
+      throws ResourceNotFoundException {
+    return conversationService.archive(username);
   }
 }

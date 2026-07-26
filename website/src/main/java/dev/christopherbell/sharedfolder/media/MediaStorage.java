@@ -223,6 +223,16 @@ public class MediaStorage {
     }
   }
 
+  /** Deletes only job-owned worker artifacts; shared ready-cache bytes remain eviction-managed. */
+  public void deleteJobArtifacts(MediaJob job) throws IOException {
+    requireKey(job.getId());
+    boundary.deleteIfExists(JOBS, job.getId() + ".json");
+    boundary.deleteIfExists(JOBS, job.getId() + ".ready");
+    boundary.deleteIfExists(PARTIAL, partialKey(job));
+    boundary.deleteIfExists(STATUS, job.getId() + ".json");
+    boundary.deleteIfExists(CANCEL, job.getId() + ".cancel");
+  }
+
   /** Reads one bounded worker-owned status document; malformed or mismatched files are ignored. */
   public Optional<MediaWorkerStatus> readStatus(MediaJob job, long maxOutputBytes)
       throws IOException {

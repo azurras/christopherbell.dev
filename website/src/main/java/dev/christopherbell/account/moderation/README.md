@@ -8,6 +8,8 @@ Owns administrator-driven account changes.
 - Status and approval flag updates.
 - Role promotion/update persistence.
 - Email and username uniqueness checks during admin account updates.
+- Required, bounded reasons and one append-only audit event for account role and
+  status changes, with allowlisted before/after state.
 
 ## Update This Doc
 

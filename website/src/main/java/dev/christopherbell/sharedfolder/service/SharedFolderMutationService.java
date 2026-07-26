@@ -686,6 +686,18 @@ public class SharedFolderMutationService {
     }
   }
 
+  /** Reconciles account-owned replacement journals before account metadata is removed. */
+  public void deleteOwnedPrivateState(String ownerId) {
+    if (ownerId == null || ownerId.isBlank() || recoveries == null) throw unavailable();
+    var owned = recoveries.findTop100ByOwnerIdOrderByUpdatedAtAsc(ownerId);
+    for (var recovery : owned) {
+      reconcileRecovery(recovery);
+    }
+    if (!recoveries.findTop100ByOwnerIdOrderByUpdatedAtAsc(ownerId).isEmpty()) {
+      throw unavailable();
+    }
+  }
+
   private void reconcileRecovery(SharedFolderMutationRecovery recovery) {
     if (!recovery.isNativeMode() && !nativeBoundary.testOnlyPortableMode()) {
       return;

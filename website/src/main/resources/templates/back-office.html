@@ -77,7 +77,27 @@
                     </div>
                     <span class="queue-count" id="reportQueueCount">—</span>
                   </div>
+                  <form id="reportFilters" class="admin-filter-bar" aria-label="Filter reports">
+                    <label><span>Status</span><select class="form-select" name="status">
+                      <option value="">All statuses</option><option value="OPEN">Open</option><option value="RESOLVED">Resolved</option>
+                    </select></label>
+                    <label><span>Report type</span><select class="form-select" name="reportType">
+                      <option value="">All types</option><option value="SPAM">Spam</option><option value="HARASSMENT">Harassment</option><option value="VIOLENCE">Violence</option><option value="SEXUAL">Sexual</option><option value="COPYRIGHT">Copyright</option><option value="OTHER">Other</option>
+                    </select></label>
+                    <label><span>Target</span><select class="form-select" name="targetType">
+                      <option value="">All targets</option><option value="POST">Post</option>
+                    </select></label>
+                    <label><span>Reporter</span><input class="form-control" name="reporter" maxlength="100" placeholder="Username"></label>
+                    <label><span>From</span><input class="form-control" type="datetime-local" name="from"></label>
+                    <label><span>To</span><input class="form-control" type="datetime-local" name="to"></label>
+                    <button class="btn btn-primary align-self-end" type="submit">Apply filters</button>
+                  </form>
                   <div id="reportQueue" class="queue-list" aria-live="polite"></div>
+                  <nav class="queue-pagination" aria-label="Report pages">
+                    <button class="btn btn-outline-secondary" id="reportPrevious" type="button">Previous</button>
+                    <span id="reportPage" aria-live="polite">Page 0 of 0</span>
+                    <button class="btn btn-outline-secondary" id="reportNext" type="button">Next</button>
+                  </nav>
                 </div>
               </div>
               <div class="tab-pane fade" id="panel-users" role="tabpanel">
@@ -89,7 +109,56 @@
                     </div>
                     <span class="queue-count" id="userQueueCount">—</span>
                   </div>
+                  <form id="userFilters" class="admin-filter-bar" aria-label="Filter accounts">
+                    <label>
+                      <span>Search</span>
+                      <input class="form-control" type="search" name="text" maxlength="100"
+                             placeholder="Name, username, or email">
+                    </label>
+                    <label>
+                      <span>Status</span>
+                      <select class="form-select" name="status">
+                        <option value="">All statuses</option>
+                        <option value="ACTIVE">Active</option>
+                        <option value="INACTIVE">Inactive</option>
+                        <option value="SUSPENDED">Suspended</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Role</span>
+                      <select class="form-select" name="role">
+                        <option value="">All roles</option>
+                        <option value="USER">User</option>
+                        <option value="MOD">Moderator</option>
+                        <option value="ADMIN">Admin</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Sort</span>
+                      <select class="form-select" name="sort">
+                        <option value="createdOn">Created</option>
+                        <option value="lastUpdatedOn">Last updated</option>
+                        <option value="username">Username</option>
+                        <option value="email">Email</option>
+                        <option value="status">Status</option>
+                        <option value="role">Role</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Direction</span>
+                      <select class="form-select" name="direction">
+                        <option value="desc">Descending</option>
+                        <option value="asc">Ascending</option>
+                      </select>
+                    </label>
+                    <button class="btn btn-primary align-self-end" type="submit">Apply filters</button>
+                  </form>
                   <div id="userQueue" class="queue-list" aria-live="polite"></div>
+                  <nav class="queue-pagination" aria-label="Account pages">
+                    <button class="btn btn-outline-secondary" id="userPrevious" type="button">Previous</button>
+                    <span id="userPage" aria-live="polite">Page 0 of 0</span>
+                    <button class="btn btn-outline-secondary" id="userNext" type="button">Next</button>
+                  </nav>
                 </div>
               </div>
               <div class="tab-pane fade" id="panel-operations" role="tabpanel">
@@ -242,7 +311,29 @@
                 <h2>Recent Activity</h2>
               </div>
             </div>
+            <form id="activityFilters" class="admin-filter-bar activity-filter-bar" aria-label="Filter audit activity">
+              <label><span>Action</span><select class="form-select" name="action">
+                <option value="">All actions</option>
+                <option value="ACCOUNT_STATUS_CHANGED">Account status</option>
+                <option value="ACCOUNT_ROLE_CHANGED">Account role</option>
+                <option value="ACCOUNT_MODERATION_CHANGED">Account role and status</option>
+                <option value="REPORT_RESOLVED">Report resolved</option>
+                <option value="REPORT_REOPENED">Report reopened</option>
+              </select></label>
+              <label><span>Target</span><select class="form-select" name="targetType">
+                <option value="">All targets</option><option value="ACCOUNT">Account</option><option value="REPORT">Report</option>
+              </select></label>
+              <label><span>Actor</span><input class="form-control" name="actor" maxlength="64" placeholder="Username"></label>
+              <label><span>From</span><input class="form-control" type="datetime-local" name="from"></label>
+              <label><span>To</span><input class="form-control" type="datetime-local" name="to"></label>
+              <button class="btn btn-primary" type="submit">Apply filters</button>
+            </form>
             <div id="activityList" class="activity-list" aria-live="polite"></div>
+            <nav class="queue-pagination" aria-label="Audit pages">
+              <button class="btn btn-outline-secondary" id="activityPrevious" type="button">Previous</button>
+              <span id="activityPage" aria-live="polite">Page 0 of 0</span>
+              <button class="btn btn-outline-secondary" id="activityNext" type="button">Next</button>
+            </nav>
           </aside>
         </div>
       </div>

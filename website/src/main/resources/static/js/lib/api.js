@@ -6,6 +6,16 @@
 export const API = {
   admin: {
     activity: '/api/admin/activity/2026-05-09',
+    activityPage: ({ page = 0, size = 25, action = '', targetType = '', actor = '',
+      from = '', to = '' } = {}) => {
+      const params = new URLSearchParams({ page: String(page), size: String(size) });
+      if (action) params.set('action', String(action));
+      if (targetType) params.set('targetType', String(targetType));
+      if (actor) params.set('actor', String(actor));
+      if (from) params.set('from', String(from));
+      if (to) params.set('to', String(to));
+      return `/api/admin/activity/2026-07-26?${params}`;
+    },
     commandCenter: {
       snapshot: '/api/admin/command-center/2026-07-12/snapshot',
       logs: '/api/admin/command-center/2026-07-12/logs',
@@ -25,6 +35,19 @@ export const API = {
   },
   accounts: {
     base: '/api/accounts/2024-12-15',
+    adminPage: ({ page = 0, size = 25, sort = 'createdOn', direction = 'desc',
+      status = '', role = '', text = '' } = {}) => {
+      const params = new URLSearchParams({
+        page: String(page),
+        size: String(size),
+        sort: String(sort),
+        direction: String(direction),
+      });
+      if (status) params.set('status', String(status));
+      if (role) params.set('role', String(role));
+      if (text) params.set('text', String(text));
+      return `/api/accounts/2026-07-26/admin?${params}`;
+    },
     login: '/api/accounts/2024-12-15/login',
     logout: '/api/accounts/2024-12-15/logout',
     create: '/api/accounts/2024-12-15/create',
@@ -50,16 +73,30 @@ export const API = {
   reports: {
     create: '/api/reports/2025-09-03',
     list: '/api/reports/2025-09-03',
+    page: (query = {}) => {
+      const params = new URLSearchParams();
+      params.set('page', String(query.page ?? 0));
+      params.set('size', String(query.size ?? 25));
+      for (const key of ['status', 'reportType', 'targetType', 'reporter', 'from', 'to']) {
+        if (query[key]) params.set(key, query[key]);
+      }
+      return `/api/reports/2026-07-26?${params.toString()}`;
+    },
     resolve: (id) => `/api/reports/2025-09-03/${encodeURIComponent(id)}/resolve`,
   },
   posts: {
     base: '/api/posts/2025-09-14',
+    feedPage: '/api/posts/2026-07-26/feed',
+    followingFeedPage: '/api/posts/2026-07-26/following/feed',
+    userFeedPage: (username) => `/api/posts/2026-07-26/user/${encodeURIComponent(username)}/feed`,
+    meFeedPage: '/api/posts/2026-07-26/me/feed',
     feed: '/api/posts/2025-09-14/feed',
     followingFeed: '/api/posts/2025-09-14/following/feed',
     userFeed: (username) => `/api/posts/2025-09-14/user/${encodeURIComponent(username)}/feed`,
     meFeed: '/api/posts/2025-09-14/me/feed',
     create: '/api/posts/2025-09-14/create',
     byId: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}`,
+    edit: (id) => `/api/posts/2026-07-26/${encodeURIComponent(id)}`,
     like: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}/like`,
     thread: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}/thread`,
     byAccount: (accountId) => `/api/posts/2025-09-14/account/${encodeURIComponent(accountId)}`,
@@ -68,6 +105,8 @@ export const API = {
   },
   notifications: {
     base: '/api/notifications/2025-09-14',
+    page: (cursor, size = 25) => `/api/notifications/2026-07-26?size=${encodeURIComponent(size)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+    markAllRead: '/api/notifications/2026-07-26/read-all',
     unreadCount: '/api/notifications/2025-09-14/unread-count',
     preferences: '/api/notifications/2025-09-14/preferences',
     markRead: (id) => `/api/notifications/2025-09-14/${encodeURIComponent(id)}/read`,
@@ -135,6 +174,13 @@ export const API = {
     base: '/api/messages/2025-09-14',
     conversations: '/api/messages/2025-09-14/conversations',
     conversation: (username) => `/api/messages/2025-09-14/conversation/${encodeURIComponent(username)}`,
+    conversationPage: (username, cursor = null, size = 50) => {
+      const params = new URLSearchParams({ size: String(size) });
+      if (cursor) params.set('cursor', String(cursor));
+      return `/api/messages/2026-07-26/conversation/${encodeURIComponent(username)}?${params}`;
+    },
+    archiveConversation: (username) =>
+      `/api/messages/2026-07-26/conversation/${encodeURIComponent(username)}/archive`,
   },
   whatsForLunch: {
     restaurants: '/api/whatsforlunch/restaurant/2025-09-12',

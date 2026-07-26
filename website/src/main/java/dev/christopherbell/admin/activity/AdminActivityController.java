@@ -1,9 +1,12 @@
 package dev.christopherbell.admin.activity;
 
 import static dev.christopherbell.libs.api.APIVersion.V20260509;
+import static dev.christopherbell.libs.api.APIVersion.V20260726;
 
 import dev.christopherbell.admin.model.AdminActivity;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.model.Response;
+import java.time.Instant;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -12,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RequiredArgsConstructor
@@ -19,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class AdminActivityController {
   private final AdminActivityService adminActivityService;
+  private final AdminActivityQueryService adminActivityQueryService;
 
   @GetMapping(value = V20260509, produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
@@ -29,5 +34,24 @@ public class AdminActivityController {
             .success(true)
             .build(),
         HttpStatus.OK);
+  }
+
+  @GetMapping(value = V20260726, produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  public ResponseEntity<Response<AdminActivityPage>> queryActivity(
+      @RequestParam(required = false) String action,
+      @RequestParam(required = false) String targetType,
+      @RequestParam(required = false) String actor,
+      @RequestParam(required = false) Instant from,
+      @RequestParam(required = false) Instant to,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "25") int size
+  ) throws InvalidRequestException {
+    var result = adminActivityQueryService.query(new AdminActivityQuery(
+        action, targetType, actor, from, to, page, size));
+    return ResponseEntity.ok(Response.<AdminActivityPage>builder()
+        .payload(result)
+        .success(true)
+        .build());
   }
 }

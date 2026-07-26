@@ -1,12 +1,16 @@
 package dev.christopherbell.post;
 
 import static dev.christopherbell.libs.api.APIVersion.V20250914;
+import static dev.christopherbell.libs.api.APIVersion.V20260726;
 
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
+import dev.christopherbell.post.feed.PostFeedPage;
+import dev.christopherbell.post.editing.PostEditRequest;
+import dev.christopherbell.post.editing.PostEditingService;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +21,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -36,6 +41,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class PostController {
   private final PostService postService;
   private final PermissionService permissionService;
+  private final PostEditingService postEditingService;
 
   /**
    * Creates a post for the authenticated user.
@@ -93,6 +99,18 @@ public class PostController {
         HttpStatus.OK);
   }
 
+  @GetMapping(value = V20260726 + "/me/feed", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<PostFeedPage>> getMyFeedPage(
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @RequestParam(value = "size", required = false, defaultValue = "20") int size
+  ) throws Exception {
+    return ResponseEntity.ok(Response.<PostFeedPage>builder()
+        .payload(postService.getMyFeedPage(cursor, size))
+        .success(true)
+        .build());
+  }
+
   /**
    * Feed-style posts from accounts the current user follows.
    */
@@ -108,6 +126,18 @@ public class PostController {
             .success(true)
             .build(),
         HttpStatus.OK);
+  }
+
+  @GetMapping(value = V20260726 + "/following/feed", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<PostFeedPage>> getFollowingFeedPage(
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @RequestParam(value = "size", required = false, defaultValue = "20") int size
+  ) throws Exception {
+    return ResponseEntity.ok(Response.<PostFeedPage>builder()
+        .payload(postService.getFollowingFeedPage(cursor, size))
+        .success(true)
+        .build());
   }
 
   /**
@@ -148,6 +178,17 @@ public class PostController {
         HttpStatus.OK);
   }
 
+  @GetMapping(value = V20260726 + "/feed", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<Response<PostFeedPage>> getGlobalFeedPage(
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @RequestParam(value = "size", required = false, defaultValue = "20") int size
+  ) throws Exception {
+    return ResponseEntity.ok(Response.<PostFeedPage>builder()
+        .payload(postService.getGlobalFeedPage(cursor, size))
+        .success(true)
+        .build());
+  }
+
   /**
    * Public user feed endpoint returning newest posts for a given username.
    */
@@ -163,6 +204,37 @@ public class PostController {
             .success(true)
             .build(),
         HttpStatus.OK);
+  }
+
+  @GetMapping(value = V20260726 + "/user/{username}/feed", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<Response<PostFeedPage>> getUserFeedPage(
+      @PathVariable String username,
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @RequestParam(value = "size", required = false, defaultValue = "20") int size
+  ) throws Exception {
+    return ResponseEntity.ok(Response.<PostFeedPage>builder()
+        .payload(postService.getUserFeedPage(username, cursor, size))
+        .success(true)
+        .build());
+  }
+
+  /** Edits an active post or reply within the configured author window. */
+  @PatchMapping(
+      value = V20260726 + "/{postId}",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<PostDetail>> editPost(
+      @PathVariable String postId,
+      @Valid @RequestBody PostEditRequest request
+  ) throws Exception {
+    return ResponseEntity.ok(Response.<PostDetail>builder()
+        .payload(postEditingService.edit(
+            postId,
+            request,
+            permissionService.getSelfId()))
+        .success(true)
+        .build());
   }
 
   /**

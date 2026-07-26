@@ -1,6 +1,7 @@
 package dev.christopherbell.notification;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -17,6 +18,12 @@ import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import java.util.Optional;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import dev.christopherbell.notification.delivery.NotificationDeliveryPermit;
+import dev.christopherbell.notification.delivery.NotificationEventIdentity;
+import dev.christopherbell.notification.delivery.NotificationFanoutGuard;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +37,7 @@ class NotificationServiceTest {
   @Mock private AccountRepository accountRepository;
   @Mock private PermissionService permissionService;
   @Mock private NotificationPreferenceService notificationPreferenceService;
+  @Mock private NotificationFanoutGuard fanoutGuard;
 
   @Test
   @DisplayName("Mention notifications are created for existing mentioned users")
@@ -178,8 +186,37 @@ class NotificationServiceTest {
   }
 
   private NotificationService service() {
+    org.mockito.Mockito.lenient()
+        .when(fanoutGuard.tryAcquire(any(NotificationEventIdentity.class), any(Instant.class)))
+        .thenReturn(Optional.of(new NotificationDeliveryPermit("claim", "rate")));
     return new NotificationService(
-        new NotificationDeliveryService(notificationRepository, accountRepository, notificationPreferenceService),
-        new NotificationInboxService(notificationRepository, permissionService));
+        new NotificationDeliveryService(
+            notificationRepository,
+            accountRepository,
+            notificationPreferenceService,
+            fanoutGuard,
+            Clock.fixed(Instant.parse("2026-07-26T12:00:00Z"), ZoneOffset.UTC)),
+        new NotificationInboxService(notificationRepository, permissionService, null, null));
+  }
+
+  @Test
+  @DisplayName("Notification persistence failure releases its dedupe permit for retry")
+  void delivery_whenPersistenceFails_releasesPermit() {
+    var service = service();
+    var actor = Account.builder().id("actor").username("liker").build();
+    var recipient = Account.builder().id("recipient").username("writer").build();
+    var post = Post.builder().id("post-1").accountId("recipient").text("hello").build();
+    var permit = new NotificationDeliveryPermit("claim", "rate");
+    when(notificationPreferenceService.shouldDeliver("recipient", NotificationType.LIKE))
+        .thenReturn(true);
+    when(fanoutGuard.tryAcquire(any(NotificationEventIdentity.class), any(Instant.class)))
+        .thenReturn(Optional.of(permit));
+    when(notificationRepository.save(any(Notification.class)))
+        .thenThrow(new IllegalStateException("mongo unavailable"));
+
+    assertThrows(IllegalStateException.class, () ->
+        service.createPostLikeNotification(post, actor, recipient));
+
+    verify(fanoutGuard).release(permit);
   }
 }

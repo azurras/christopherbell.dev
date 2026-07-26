@@ -8,6 +8,7 @@ import {
   formatLifespanCountdown,
   githubCardDetail,
   linkPreviewCardMarkup,
+  postStatusChips,
   remainingLifespanMs,
   richEmbedMarkupForPost,
   richEmbedsForPost,
@@ -16,6 +17,11 @@ import {
   youtubeEmbedUrl,
   youtubeEmbedUrlsForPost
 } from '../../main/resources/static/js/lib/feed-render.js';
+
+test('edited posts expose a clear status chip', () => {
+  assert.match(postStatusChips({ editedOn: '2026-07-26T12:00:00Z' }, false), />Edited</);
+  assert.doesNotMatch(postStatusChips({}, false), />Edited</);
+});
 
 test('formatLifespanCountdown shows days and a tabular clock', () => {
   const now = Date.UTC(2026, 4, 21, 12, 0, 0);

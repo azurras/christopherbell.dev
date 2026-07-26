@@ -1,11 +1,14 @@
 package dev.christopherbell.message;
 
 import static dev.christopherbell.libs.api.APIVersion.V20250914;
+import static dev.christopherbell.libs.api.APIVersion.V20260726;
 
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.message.model.ConversationSummary;
 import dev.christopherbell.message.model.MessageCreateRequest;
 import dev.christopherbell.message.model.MessageDetail;
+import dev.christopherbell.message.conversation.ConversationArchiveResult;
+import dev.christopherbell.message.conversation.ConversationPage;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -67,5 +70,31 @@ public class MessageController {
             .success(true)
             .build(),
         HttpStatus.OK);
+  }
+
+  @GetMapping(value = V20260726 + "/conversation/{username}",
+      produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<ConversationPage>> getConversationPage(
+      @PathVariable String username,
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @RequestParam(value = "size", required = false, defaultValue = "50") int size
+  ) throws Exception {
+    return ResponseEntity.ok(Response.<ConversationPage>builder()
+        .payload(messageService.getConversationPage(username, cursor, size))
+        .success(true)
+        .build());
+  }
+
+  @PostMapping(value = V20260726 + "/conversation/{username}/archive",
+      produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<ConversationArchiveResult>> archiveConversation(
+      @PathVariable String username
+  ) throws Exception {
+    return ResponseEntity.ok(Response.<ConversationArchiveResult>builder()
+        .payload(messageService.archiveConversation(username))
+        .success(true)
+        .build());
   }
 }

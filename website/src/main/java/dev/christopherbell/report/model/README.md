@@ -6,7 +6,8 @@ Owns moderation report persistence and API records.
 
 - `PostReport` is the Mongo-backed moderation report entity.
 - `ReportCreateRequest` carries report submission input.
-- `ReportResolveRequest` carries admin resolution input.
+- `ReportResolveRequest` carries the admin resolution and required bounded audit
+  reason.
 - `ReportResolution` and `ReportStatus` constrain moderation state.
 
 ## Design Notes

@@ -51,8 +51,14 @@
                 <p class="profile-label">Private signal</p>
                 <h2 id="conversationTitle">Pick a conversation</h2>
               </div>
-              <a id="conversationProfileLink" class="btn btn-outline-dark btn-sm d-none" href="/void">View profile</a>
+              <div class="message-thread-actions">
+                <button id="archiveConversation" class="btn btn-outline-secondary btn-sm d-none"
+                        type="button">Archive</button>
+                <a id="conversationProfileLink" class="btn btn-outline-dark btn-sm d-none" href="/void">View profile</a>
+              </div>
             </div>
+            <button id="loadOlderMessages" class="btn btn-outline-secondary btn-sm d-none"
+                    type="button">Load older messages</button>
             <div id="messageList" class="message-list">
               <div class="feed-empty-state message-empty-state">
                 <h2>No signal selected</h2>

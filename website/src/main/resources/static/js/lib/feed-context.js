@@ -29,6 +29,19 @@ export function canDeleteFor(currentUser) {
   };
 }
 
+/** Build the same 15-minute author/admin edit predicate exposed by the server. */
+export function canEditFor(currentUser, now = Date.now()) {
+  return function (post) {
+    if (!currentUser || !post?.createdOn) return false;
+    if (currentUser.role !== 'ADMIN' && currentUser.id !== post.accountId) return false;
+    const created = new Date(post.createdOn).getTime();
+    const expires = post.expiresOn ? new Date(post.expiresOn).getTime() : Number.POSITIVE_INFINITY;
+    return Number.isFinite(created)
+      && now < created + 15 * 60 * 1000
+      && now < expires;
+  };
+}
+
 /**
  * Build an onLike action that posts to the API and returns updated like state.
  * @param {(url:string, options?:object)=>Promise<object>} fetchJson
@@ -47,6 +60,15 @@ export function onLikeAction(fetchJson, authHeaders) {
  */
 export function onDeleteAction(fetchJson, authHeaders) {
   return (postId) => fetchJson(API.posts.byId(postId), { method: 'DELETE', headers: authHeaders() });
+}
+
+/** Build a bounded post-text edit action. */
+export function onEditAction(fetchJson, authHeaders) {
+  return (postId, text) => fetchJson(API.posts.edit(postId), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ text })
+  });
 }
 
 /**
@@ -95,6 +117,7 @@ export function makeRendererContext({
   formatWhen,
   isLoggedIn,
   canDelete,
+  canEdit,
   currentUserName,
   suppressParentContext = false,
   onExpire = null
@@ -105,11 +128,13 @@ export function makeRendererContext({
     formatWhen,
     isLoggedIn,
     canDelete,
+    canEdit: canEdit || (() => false),
     fetchRoot: fetchPost,
     fetchParent: fetchPost,
     fetchThread: createThreadFetcher(fetchJson, authHeaders),
     onLike: onLikeAction(fetchJson, authHeaders),
     onDelete: onDeleteAction(fetchJson, authHeaders),
+    onEdit: onEditAction(fetchJson, authHeaders),
     onReply: onReplyAction(fetchJson, authHeaders),
     onHideThread: onHideThreadAction(fetchJson, authHeaders),
     currentUserName: currentUserName || null,

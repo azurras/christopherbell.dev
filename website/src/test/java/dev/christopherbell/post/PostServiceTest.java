@@ -25,6 +25,8 @@ import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.post.creation.PostCreationService;
 import dev.christopherbell.post.expiration.PostExpirationService;
 import dev.christopherbell.post.feed.PostFeedService;
+import dev.christopherbell.post.feed.PostFeedQueryRepository;
+import dev.christopherbell.pagination.StableCursorCodec;
 import dev.christopherbell.post.hide.HiddenPostThreadService;
 import dev.christopherbell.post.interaction.PostInteractionService;
 import dev.christopherbell.post.model.Post;
@@ -60,6 +62,7 @@ public class PostServiceTest {
   @Mock private PostLinkPreviewService postLinkPreviewService;
   @Mock private AccountTrustService accountTrustService;
   @Mock private HiddenPostThreadService hiddenPostThreadService;
+  @Mock private PostFeedQueryRepository postFeedQueryRepository;
   private PostService postService;
   private PostExpirationService postExpirationService;
 
@@ -83,7 +86,9 @@ public class PostServiceTest {
             postMapper,
             postExpirationService,
             accountTrustService,
-            hiddenPostThreadService),
+            hiddenPostThreadService,
+            postFeedQueryRepository,
+            new StableCursorCodec()),
         new PostThreadService(postRepository, accountRepository, postExpirationService),
         new PostInteractionService(
             postRepository,

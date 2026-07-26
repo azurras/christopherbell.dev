@@ -5,6 +5,7 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.creation.PostCreationService;
 import dev.christopherbell.post.feed.PostFeedService;
+import dev.christopherbell.post.feed.PostFeedPage;
 import dev.christopherbell.post.interaction.PostInteractionService;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
@@ -41,10 +42,22 @@ public class PostService {
     return postFeedService.getMyFeed(getSelfId(), before, limit);
   }
 
+  /** Returns one stable page from the current user's own feed. */
+  public PostFeedPage getMyFeedPage(String cursor, int size)
+      throws InvalidRequestException, ResourceNotFoundException {
+    return postFeedService.getMyFeedPage(getSelfId(), cursor, size);
+  }
+
   /** Returns posts from accounts the current user follows. */
   public List<PostFeedItem> getFollowingFeed(Instant before, int limit)
       throws ResourceNotFoundException {
     return postFeedService.getFollowingFeed(getSelfId(), before, limit);
+  }
+
+  /** Returns one stable page from followed accounts. */
+  public PostFeedPage getFollowingFeedPage(String cursor, int size)
+      throws InvalidRequestException, ResourceNotFoundException {
+    return postFeedService.getFollowingFeedPage(getSelfId(), cursor, size);
   }
 
   /** Lists posts for a specific account id. */
@@ -63,10 +76,21 @@ public class PostService {
     return postFeedService.getGlobalFeed(before, limit, getSelfIdOrNull());
   }
 
+  /** Returns one stable global feed page. */
+  public PostFeedPage getGlobalFeedPage(String cursor, int size) throws InvalidRequestException {
+    return postFeedService.getGlobalFeedPage(cursor, size, getSelfIdOrNull());
+  }
+
   /** Returns a public feed for one username. */
   public List<PostFeedItem> getUserFeed(String username, Instant before, int limit)
       throws ResourceNotFoundException {
     return postFeedService.getUserFeed(username, before, limit, getSelfIdOrNull());
+  }
+
+  /** Returns one stable page for a public username. */
+  public PostFeedPage getUserFeedPage(String username, String cursor, int size)
+      throws InvalidRequestException, ResourceNotFoundException {
+    return postFeedService.getUserFeedPage(username, cursor, size, getSelfIdOrNull());
   }
 
   /** Returns one post by id. */

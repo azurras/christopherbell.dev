@@ -2,6 +2,8 @@ package dev.christopherbell.account;
 
 import com.mongodb.MongoWriteException;
 import dev.christopherbell.account.auth.AccountAuthenticationService;
+import dev.christopherbell.account.deletion.AccountDeletionResult;
+import dev.christopherbell.account.deletion.AccountDeletionService;
 import dev.christopherbell.account.follow.AccountFollowService;
 import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.account.model.dto.AccountDetail;
@@ -40,6 +42,7 @@ import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
@@ -58,6 +61,7 @@ public class AccountService {
 
   private final AccountMapper accountMapper;
   private final AccountRepository accountRepository;
+  private final AccountDeletionService accountDeletionService;
   private final AccountAuthenticationService accountAuthenticationService;
   private final PasswordResetService passwordResetService;
   private final AccountProfileService accountProfileService;
@@ -74,7 +78,8 @@ public class AccountService {
    * @return the approved account.
    * @throws ResourceNotFoundException if the account cannot be found.
    */
-  public AccountDetail approveAccount(String accountId) throws ResourceNotFoundException {
+  public AccountDetail approveAccount(String accountId)
+      throws InvalidRequestException, ResourceNotFoundException {
     return accountModerationService.approveAccount(accountId);
   }
 
@@ -133,18 +138,9 @@ public class AccountService {
    * @return the deleted account.
    * @throws ResourceNotFoundException if the account cannot be found.
    */
-  public AccountDetail deleteAccount(String accountId) throws ResourceNotFoundException {
-    log.info("Deleting account with id: {}", accountId);
-    var account =
-        accountRepository
-            .findById(accountId)
-            .orElseThrow(
-                () ->
-                    new ResourceNotFoundException(
-                        String.format("Account with id %s not found.", accountId)));
-    accountRepository.delete(account);
-    log.info("Successfully deleted account with id: {}", accountId);
-    return accountMapper.toAccount(account);
+  public AccountDeletionResult deleteAccount(String accountId)
+      throws InvalidRequestException, ResourceNotFoundException {
+    return accountDeletionService.delete(accountId);
   }
 
   /**
@@ -248,8 +244,13 @@ public class AccountService {
    * @return a list of all accounts.
    */
   public List<AccountDetail> getAccounts() {
-    log.info("Getting all accounts");
-    var accounts = accountRepository.findAll();
+    log.info("Getting first bounded account page for compatibility endpoint");
+    var page = PageRequest.of(
+        0,
+        50,
+        Sort.by(Sort.Direction.DESC, "createdOn")
+            .and(Sort.by(Sort.Direction.DESC, "id")));
+    var accounts = accountRepository.findAll(page).getContent();
     return accounts.stream().map(accountMapper::toAccount).toList();
   }
 

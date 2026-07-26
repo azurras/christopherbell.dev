@@ -46,6 +46,7 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 @Slf4j
 public class SharedFolderUploadService {
+  private static final int PRIVATE_DELETION_PAGE_SIZE = 100;
   private static final String STAGING_DIRECTORY = "shared-folder-upload-staging";
   private static final String QUARANTINE_DIRECTORY = "shared-folder-upload-quarantine";
   private static final Duration SESSION_TTL = Duration.ofHours(24);
@@ -204,6 +205,33 @@ public class SharedFolderUploadService {
     }
     if (deferralPersistenceFailed) throw unavailable();
     return expired;
+  }
+
+  /** Reconciles and removes every private upload artifact owned by a deleted account. */
+  public void deleteOwnedPrivateState(String ownerId) {
+    if (ownerId == null || ownerId.isBlank()) throw unavailable();
+    while (true) {
+      var page = sessions.findByOwnerIdOrderByIdAsc(
+          ownerId, PageRequest.of(0, PRIVATE_DELETION_PAGE_SIZE));
+      for (var candidate : page) {
+        try {
+          var current = reconcileExpiredAppendLease(candidate);
+          if (current.getState() == SharedFolderUploadState.APPENDING) {
+            throw unavailable();
+          }
+          current = reconcilePending(current);
+          if (current.getState() == SharedFolderUploadState.FINALIZING
+              || current.getState() == SharedFolderUploadState.CANCEL_PENDING) {
+            throw unavailable();
+          }
+          deleteExpiredPrivatePayloads(current);
+          sessions.deleteById(current.getId());
+        } catch (IOException failure) {
+          throw unavailable();
+        }
+      }
+      if (!page.hasNext()) return;
+    }
   }
 
   private void deferExpiredMaintenance(SharedFolderUploadSession session, Instant now) {

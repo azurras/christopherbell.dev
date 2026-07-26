@@ -12,6 +12,8 @@ Owns Void posts and feed behavior.
 - Like toggling and delete authorization live under `interaction`.
 - Lifespan calculation, expiration repair, reply synchronization, and cleanup live under `expiration`.
 - Per-account hidden thread roots live under `hide`.
+- Time-bounded editing lives under `editing`; only the original author can edit,
+  including when another caller has an administrator role.
 - Stored rich metadata for HTTP and HTTPS links mentioned in posts lives under `preview`.
 - The `/p/{id}` post detail page, which renders a single-column Spectral Thread
   view for the selected post, its root/parent context, compact reply composer,

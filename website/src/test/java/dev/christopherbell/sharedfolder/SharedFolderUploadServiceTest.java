@@ -56,6 +56,31 @@ class SharedFolderUploadServiceTest {
   @TempDir Path temp;
 
   @Test
+  void accountDeletionRemovesOwnedPrivateStagingThroughUploadBoundary() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("account-deletion-upload"));
+    SharedFolderProperties properties = properties(root);
+    SharedFolderUploadSessionRepository repository = mock(
+        SharedFolderUploadSessionRepository.class);
+    SharedFolderUploadService uploads = new SharedFolderUploadService(
+        mock(SharedFolderAccessService.class), repository, properties);
+    String stagingKey = UUID.randomUUID().toString();
+    SharedFolderUploadSession session = activeSession("owned-upload", "account-1", stagingKey);
+    Path staging = Files.createDirectories(
+        properties.systemRoot().resolve("shared-folder-upload-staging")).resolve(stagingKey);
+    Files.writeString(staging, "private bytes");
+    when(repository.findByOwnerIdOrderByIdAsc(
+        "account-1", org.springframework.data.domain.PageRequest.of(0, 100)))
+        .thenReturn(new SliceImpl<>(List.of(session)));
+
+    uploads.deleteOwnedPrivateState("account-1");
+
+    assertThat(staging).doesNotExist();
+    verify(repository).deleteById("owned-upload");
+    verify(repository).findByOwnerIdOrderByIdAsc(
+        "account-1", org.springframework.data.domain.PageRequest.of(0, 100));
+  }
+
+  @Test
   void abandonedUploadRetryStateIsDurableAndQueriedOnlyWhenDue()
       throws ReflectiveOperationException {
     SharedFolderUploadSession session = activeSession("retry", "account-1", "staging-key");

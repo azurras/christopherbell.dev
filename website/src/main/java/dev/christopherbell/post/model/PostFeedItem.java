@@ -29,5 +29,6 @@ public record PostFeedItem(
     Integer replyCount,
     Instant createdOn,
     Instant lastUpdatedOn,
+    Instant editedOn,
     Instant expiresOn
 ) {}

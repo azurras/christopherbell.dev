@@ -26,6 +26,7 @@ public interface AccountMapper {
   @Mapping(target = "passwordResetTokenHash", ignore = true)
   @Mapping(target = "passwordResetTokenExpiresOn", ignore = true)
   @Mapping(target = "followingIds", ignore = true)
+  @Mapping(target = "pendingModerationAudit", ignore = true)
   Account toAccountEntity(AccountDetail accountDetail);
 
   /**

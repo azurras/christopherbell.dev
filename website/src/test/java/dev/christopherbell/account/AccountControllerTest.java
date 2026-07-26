@@ -19,6 +19,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.deletion.AccountDeletionResult;
+import dev.christopherbell.account.deletion.AccountDeletionStatus;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
@@ -68,6 +70,7 @@ public class AccountControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private AccountService accountService;
+  @MockitoBean private AdminAccountQueryService adminAccountQueryService;
   @MockitoBean private BrowserSecurityProperties browserSecurityProperties;
   @MockitoBean private SharedFolderAuditRecorder sharedFolderAudit;
 
@@ -76,6 +79,36 @@ public class AccountControllerTest {
     when(permissionService.hasAuthority(anyString())).thenReturn(true);
     when(browserSecurityProperties.publicBaseUrl())
         .thenReturn(URI.create("http://localhost"));
+  }
+
+  @Test
+  @DisplayName("Admin account list returns validated page metadata")
+  @WithMockUser(authorities = {"ADMIN"})
+  void getAdminAccounts_returnsPagedResult() throws Exception {
+    var detail = AccountDetail.builder().id("account-1").username("alpha").build();
+    var page = new AdminAccountPage(
+        List.of(detail), 1, 20, 21L, 2, "username", "ASC");
+    var query = AdminAccountQuery.from(1, 20, "username", "asc", "ACTIVE", "USER", "alpha");
+    when(adminAccountQueryService.getAccounts(eq(query))).thenReturn(page);
+
+    mockMvc.perform(get("/api/accounts/2026-07-26/admin")
+            .param("page", "1")
+            .param("size", "20")
+            .param("sort", "username")
+            .param("direction", "asc")
+            .param("status", "ACTIVE")
+            .param("role", "USER")
+            .param("text", "alpha")
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.items[0].username").value("alpha"))
+        .andExpect(jsonPath("$.payload.page").value(1))
+        .andExpect(jsonPath("$.payload.totalElements").value(21))
+        .andExpect(jsonPath("$.payload.sort").value("username"))
+        .andExpect(jsonPath("$.payload.direction").value("ASC"));
+
+    verify(adminAccountQueryService).getAccounts(eq(query));
   }
 
   @Test
@@ -381,11 +414,18 @@ public class AccountControllerTest {
   }
 
   @Test
-  @DisplayName("testDeleteAccount_whenAuthorized_Returns200")
+  @DisplayName("Legacy delete account returns the deleted account detail")
   @WithMockUser(authorities = {"ADMIN"})
-  public void testDeleteAccount_whenAuthorized_Returns200() throws Exception {
-    var detail = AccountDetail.builder().id("to-del").build();
-    when(accountService.deleteAccount(eq("to-del"))).thenReturn(detail);
+  public void legacyDeleteAccount_whenAuthorized_preservesResponseShape() throws Exception {
+    var detail = AccountDetail.builder()
+        .id("to-del")
+        .email("user@example.com")
+        .username("departing-user")
+        .build();
+    var deletion = new AccountDeletionResult(
+        "deleted:abcdef012345", AccountDeletionStatus.COMPLETE, 6);
+    when(accountService.getAccountById(eq("to-del"))).thenReturn(detail);
+    when(accountService.deleteAccount(eq("to-del"))).thenReturn(deletion);
 
     mockMvc
         .perform(
@@ -394,7 +434,32 @@ public class AccountControllerTest {
                 .contentType(MediaType.APPLICATION_JSON_VALUE))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.payload.id").value("to-del"));
+        .andExpect(jsonPath("$.payload.id").value("to-del"))
+        .andExpect(jsonPath("$.payload.username").value("departing-user"))
+        .andExpect(jsonPath("$.payload.pseudonym").doesNotExist());
+
+    verify(accountService).getAccountById(eq("to-del"));
+    verify(accountService).deleteAccount(eq("to-del"));
+  }
+
+  @Test
+  @DisplayName("Versioned delete account returns resumable deletion result")
+  @WithMockUser(authorities = {"ADMIN"})
+  public void versionedDeleteAccount_whenAuthorized_returnsDeletionResult() throws Exception {
+    var deletion = new AccountDeletionResult(
+        "deleted:abcdef012345", AccountDeletionStatus.COMPLETE, 6);
+    when(accountService.deleteAccount(eq("to-del"))).thenReturn(deletion);
+
+    mockMvc
+        .perform(
+            delete("/api/accounts" + APIVersion.V20260726 + "/{id}", "to-del")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.pseudonym").value("deleted:abcdef012345"))
+        .andExpect(jsonPath("$.payload.status").value("COMPLETE"))
+        .andExpect(jsonPath("$.payload.completedSteps").value(6));
 
     verify(accountService).deleteAccount(eq("to-del"));
   }

@@ -4,8 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.christopherbell.message.model.Message;
+import dev.christopherbell.admin.model.AdminActivity;
 import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.post.model.Post;
+import dev.christopherbell.report.model.PostReport;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -13,16 +15,50 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
+import org.springframework.data.mongodb.core.index.Indexed;
 
 class MongoIndexAnnotationTest {
+
+  @Test
+  @DisplayName("Admin activity declares stable audit filter indexes")
+  void adminActivityIndexes_matchAuditQueryPaths() {
+    var indexes = compoundIndexes(AdminActivity.class);
+
+    assertEquals(
+        "{'createdOn': -1, '_id': -1}", indexes.get("admin_activity_created_id_desc"));
+    assertEquals(
+        "{'action': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("admin_activity_action_created_id_desc"));
+    assertEquals(
+        "{'targetType': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("admin_activity_target_created_id_desc"));
+    assertEquals(
+        "{'actorUsername': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("admin_activity_actor_created_id_desc"));
+  }
+
+  @Test
+  @DisplayName("Report document declares stable queue and sparse unique open-report indexes")
+  void reportIndexes_matchQueueAndDedupePaths() throws Exception {
+    var indexes = compoundIndexes(PostReport.class);
+    assertEquals("{'createdOn': -1, '_id': -1}", indexes.get("report_created_id_desc"));
+    assertEquals(
+        "{'status': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("report_status_created_id_desc"));
+    var dedupe = PostReport.class.getDeclaredField("openDedupeKey").getAnnotation(Indexed.class);
+    assertTrue(dedupe.unique());
+    assertTrue(dedupe.sparse());
+  }
 
   @Test
   @DisplayName("Post document declares indexes for feed and thread query paths")
   void postIndexes_matchRepositoryQueryPaths() {
     var indexes = compoundIndexes(Post.class);
 
-    assertEquals("{'accountId': 1, 'createdOn': -1}", indexes.get("post_account_created_desc"));
-    assertEquals("{'createdOn': -1}", indexes.get("post_created_desc"));
+    assertEquals(
+        "{'accountId': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("post_account_created_id_desc"));
+    assertEquals("{'createdOn': -1, '_id': -1}", indexes.get("post_created_id_desc"));
     assertEquals("{'rootId': 1, 'createdOn': 1}", indexes.get("post_root_created_asc"));
     assertEquals("{'parentId': 1}", indexes.get("post_parent"));
     assertEquals("{'expiresOn': 1}", indexes.get("post_expires"));
@@ -34,7 +70,9 @@ class MongoIndexAnnotationTest {
   void notificationIndexes_matchRepositoryQueryPaths() {
     var indexes = compoundIndexes(Notification.class);
 
-    assertEquals("{'accountId': 1, 'createdOn': -1}", indexes.get("notification_account_created_desc"));
+    assertEquals(
+        "{'accountId': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("notification_account_created_id_desc"));
     assertEquals("{'accountId': 1, 'read': 1}", indexes.get("notification_account_read"));
   }
 
@@ -44,7 +82,13 @@ class MongoIndexAnnotationTest {
     var indexes = compoundIndexes(Message.class);
 
     assertEquals("{'conversationKey': 1, 'createdOn': 1}", indexes.get("message_conversation_created_asc"));
+    assertEquals(
+        "{'conversationKey': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("message_conversation_created_id_desc"));
     assertEquals("{'participantIds': 1, 'createdOn': -1}", indexes.get("message_participant_created_desc"));
+    assertEquals(
+        "{'participantIds': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("message_participant_created_id_desc"));
     assertEquals(
         "{'recipientAccountId': 1, 'senderAccountId': 1, 'read': 1}",
         indexes.get("message_recipient_sender_read"));

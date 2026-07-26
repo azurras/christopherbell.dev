@@ -16,6 +16,8 @@ import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.message.model.ConversationSummary;
 import dev.christopherbell.message.model.MessageCreateRequest;
 import dev.christopherbell.message.model.MessageDetail;
+import dev.christopherbell.message.conversation.ConversationArchiveResult;
+import dev.christopherbell.message.conversation.ConversationPage;
 import dev.christopherbell.permission.PermissionService;
 import java.time.Instant;
 import java.util.List;
@@ -109,5 +111,36 @@ public class MessageControllerTest {
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload[0].username").value("alex"))
         .andExpect(jsonPath("$.payload[0].unreadCount").value(1));
+  }
+
+  @Test
+  @DisplayName("Stable conversation page: USER -> 200 page and continuation cursor")
+  @WithMockUser(authorities = {"USER"})
+  void getConversationPage_whenUser_returnsPage() throws Exception {
+    when(messageService.getConversationPage("alex", null, 2)).thenReturn(new ConversationPage(
+        List.of(MessageDetail.builder().id("m2").text("newest").build()), "next-cursor"));
+
+    mockMvc.perform(get("/api/messages/2026-07-26/conversation/{username}", "alex")
+            .param("size", "2")
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.items[0].id").value("m2"))
+        .andExpect(jsonPath("$.payload.nextCursor").value("next-cursor"));
+  }
+
+  @Test
+  @DisplayName("Archive conversation: USER -> archives only caller view")
+  @WithMockUser(authorities = {"USER"})
+  void archiveConversation_whenUser_returnsArchiveResult() throws Exception {
+    var archivedAt = Instant.parse("2026-07-26T12:00:00Z");
+    when(messageService.archiveConversation("alex"))
+        .thenReturn(new ConversationArchiveResult("alex:self", archivedAt));
+
+    mockMvc.perform(post("/api/messages/2026-07-26/conversation/{username}/archive", "alex")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.conversationKey").value("alex:self"))
+        .andExpect(jsonPath("$.payload.archivedAt").value(archivedAt.toString()));
   }
 }

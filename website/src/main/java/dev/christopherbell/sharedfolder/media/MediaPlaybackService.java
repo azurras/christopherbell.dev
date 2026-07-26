@@ -28,6 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class MediaPlaybackService {
   public static final int PROFILE_VERSION = 1;
   private static final int CACHE_PAGE_SIZE = 200;
+  private static final int PRIVATE_DELETION_PAGE_SIZE = 100;
 
   private final SharedFolderAccessService access;
   private final MediaJobRepository jobs;
@@ -187,6 +188,47 @@ public class MediaPlaybackService {
       }
       return MediaPlaybackDescriptor.from(job);
     }
+  }
+
+  /** Cancels and removes private worker metadata owned by a deleted account. */
+  public void deleteOwnedPrivateState(String ownerId) {
+    if (ownerId == null || ownerId.isBlank()) throw unavailable();
+    while (true) {
+      var page = jobs.findByOwnerIdOrderByIdAsc(
+          ownerId, PageRequest.of(0, PRIVATE_DELETION_PAGE_SIZE));
+      for (var job : page) {
+        try {
+          if (!job.getStatus().terminal()) {
+            if (job.isDescriptorPublished()) {
+              storage.requestCancellation(job);
+              awaitWorkerTerminal(job);
+            }
+            jobs.cancelActive(job.getId(), ownerId, clock.instant());
+          }
+          storage.deleteJobArtifacts(job);
+          jobs.deleteById(job.getId());
+        } catch (IOException | RuntimeException failure) {
+          throw unavailable(failure);
+        }
+      }
+      if (!page.hasNext()) return;
+    }
+  }
+
+  private void awaitWorkerTerminal(MediaJob job) throws IOException {
+    long timeoutNanos = properties.progressiveIdleTimeout().toNanos();
+    long started = System.nanoTime();
+    while (System.nanoTime() - started < timeoutNanos) {
+      var status = storage.readStatus(job, properties.maxOutput().toBytes());
+      if (status.isPresent() && status.get().status().terminal()) return;
+      try {
+        Thread.sleep(Math.max(1L, properties.progressivePollInterval().toMillis()));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new IOException("Interrupted while waiting for media worker cancellation.", interrupted);
+      }
+    }
+    throw new IOException("Timed out waiting for media worker cancellation.");
   }
 
   public MediaJob requireVisibleJob(String id) {

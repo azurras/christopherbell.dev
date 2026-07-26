@@ -4,11 +4,13 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.admin.activity.AdminActivityService;
+import dev.christopherbell.admin.activity.ModerationAuditCommand;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.report.ReportRepository;
+import dev.christopherbell.report.ReportOpenDedupeKey;
 import dev.christopherbell.report.model.PostReport;
 import dev.christopherbell.report.model.ReportResolution;
 import dev.christopherbell.report.model.ReportResolveRequest;
@@ -16,6 +18,9 @@ import dev.christopherbell.report.model.ReportStatus;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.dao.DuplicateKeyException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -36,7 +41,8 @@ public class ReportModerationService {
    * Returns reports in the order admins need to review them.
    */
   public List<PostReport> getReports() {
-    return reportRepository.findAllByOrderByCreatedOnDesc().stream()
+    var page = PageRequest.of(0, 100, Sort.by(Sort.Direction.DESC, "createdOn", "id"));
+    return reportRepository.findAllByOrderByCreatedOnDesc(page).stream()
         .peek(this::includeRepeatReportContext)
         .toList();
   }
@@ -51,9 +57,10 @@ public class ReportModerationService {
 
     PostReport report = reportRepository.findById(reportId)
         .orElseThrow(() -> new ResourceNotFoundException("Report not found."));
+    report = completePendingAudit(report);
 
     if (request.resolution() == ReportResolution.REOPEN) {
-      return reopenReport(report);
+      return reopenReport(report, request.reason());
     }
 
     if (report.getStatus() == ReportStatus.RESOLVED) {
@@ -61,16 +68,27 @@ public class ReportModerationService {
       return report;
     }
 
+    var auditCommand = reportAuditCommand(
+        "REPORT_RESOLVED",
+        report,
+        request.reason(),
+        Map.of(
+            "status", stateValue(report.getStatus()),
+            "resolution", stateValue(report.getResolution())),
+        Map.of(
+            "status", ReportStatus.RESOLVED.name(),
+            "resolution", request.resolution().name()));
     boolean deletedPost = deletePostIfRequested(report, request.resolution());
     String suspendedUsername = suspendUserIfRequested(report, request.resolution());
 
     report.setStatus(ReportStatus.RESOLVED);
+    report.setOpenDedupeKey(null);
     report.setResolution(request.resolution());
     report.setResolvedBy(permissionService.getSelfId());
     report.setResolvedOn(Instant.now());
-    PostReport saved = reportRepository.save(report);
+    report.setPendingModerationAudit(auditCommand);
+    PostReport saved = completePendingAudit(reportRepository.save(report));
     includeRepeatReportContext(saved);
-    recordReportResolved(saved);
     if (deletedPost) {
       recordPostDeleted(saved);
     }
@@ -88,17 +106,69 @@ public class ReportModerationService {
     if (request == null || request.resolution() == null) {
       throw new InvalidRequestException("Resolution is required.");
     }
+    if (request.reason() == null || request.reason().isBlank()
+        || request.reason().strip().length() > 500) {
+      throw new InvalidRequestException("Moderation reason is required and must be 500 characters or fewer.");
+    }
   }
 
-  private PostReport reopenReport(PostReport report) {
+  private PostReport reopenReport(PostReport report, String reason) throws InvalidRequestException {
+    String openKey = openKey(report);
+    if (openKey != null) {
+      var existing = reportRepository.findByOpenDedupeKey(openKey)
+          .or(() -> reportRepository.findFirstByReporterAccountIdAndPostIdAndStatus(
+              report.getReporterAccountId(), report.getPostId(), ReportStatus.OPEN))
+          .filter(open -> !open.getId().equals(report.getId()));
+      if (existing.isPresent()) {
+        includeRepeatReportContext(existing.get());
+        return existing.get();
+      }
+    }
+    var auditCommand = reportAuditCommand(
+        "REPORT_REOPENED",
+        report,
+        reason,
+        Map.of(
+            "status", stateValue(report.getStatus()),
+            "resolution", stateValue(report.getResolution())),
+        Map.of("status", ReportStatus.OPEN.name(), "resolution", ""));
     report.setStatus(ReportStatus.OPEN);
+    report.setOpenDedupeKey(openKey);
     report.setResolution(null);
     report.setResolvedBy(null);
     report.setResolvedOn(null);
-    PostReport saved = reportRepository.save(report);
+    report.setPendingModerationAudit(auditCommand);
+    PostReport saved;
+    try {
+      saved = reportRepository.save(report);
+    } catch (DuplicateKeyException race) {
+      if (openKey != null) {
+        return reportRepository.findByOpenDedupeKey(openKey).orElseThrow(() -> race);
+      }
+      throw race;
+    }
+    saved = completePendingAudit(saved);
     includeRepeatReportContext(saved);
-    recordReportReopened(saved);
     return saved;
+  }
+
+  private PostReport completePendingAudit(PostReport report) {
+    var pending = report.getPendingModerationAudit();
+    if (pending == null) return report;
+    adminActivityService.recordModeration(pending);
+    report.setPendingModerationAudit(null);
+    return reportRepository.save(report);
+  }
+
+  private String openKey(PostReport report) {
+    if (report.getReporterAccountId() == null || report.getReporterAccountId().isBlank()
+        || report.getPostId() == null || report.getPostId().isBlank()) {
+      return null;
+    }
+    return ReportOpenDedupeKey.forTarget(
+        report.getReporterAccountId(),
+        dev.christopherbell.report.model.ReportTargetType.POST,
+        report.getPostId());
   }
 
   private void includeRepeatReportContext(PostReport report) {
@@ -143,27 +213,34 @@ public class ReportModerationService {
     return suspendedUsername;
   }
 
-  private void recordReportResolved(PostReport report) {
-    adminActivityService.record(
-        "REPORT_RESOLVED",
+  private ModerationAuditCommand reportAuditCommand(
+      String action,
+      PostReport report,
+      String reason,
+      Map<String, String> before,
+      Map<String, String> after
+  ) throws InvalidRequestException {
+    var actorId = permissionService.getSelfId();
+    var actorUsername = accountRepository.findById(actorId)
+        .map(account -> account.getUsername() == null ? actorId : account.getUsername())
+        .orElse(actorId);
+    return ModerationAuditCommand.create(
+        actorId,
+        actorUsername,
+        action,
         "REPORT",
         report.getId(),
-        report.getReason(),
-        "%s resolved report " + report.getId(),
+        "Report " + report.getId(),
+        reason,
+        action.equals("REPORT_REOPENED")
+            ? "%s reopened report " + report.getId() + "."
+            : "%s resolved report " + report.getId() + ".",
+        before,
+        after,
         Map.of(
+            "source", "back-office",
             "reportId", nullSafe(report.getId()),
-            "resolution", report.getResolution() == null ? "" : report.getResolution().name()
-        ));
-  }
-
-  private void recordReportReopened(PostReport report) {
-    adminActivityService.record(
-        "REPORT_REOPENED",
-        "REPORT",
-        report.getId(),
-        report.getReason(),
-        "%s reopened report " + report.getId(),
-        Map.of("reportId", nullSafe(report.getId())));
+            "resolution", after.getOrDefault("resolution", "")));
   }
 
   private void recordPostDeleted(PostReport report) {
@@ -171,7 +248,7 @@ public class ReportModerationService {
         "POST_DELETED",
         "POST",
         report.getPostId(),
-        report.getPostText(),
+        "Post " + report.getPostId(),
         "%s deleted post " + report.getPostId(),
         Map.of(
             "reportId", nullSafe(report.getId()),
@@ -195,5 +272,9 @@ public class ReportModerationService {
 
   private String nullSafe(String value) {
     return value == null ? "" : value;
+  }
+
+  private String stateValue(Enum<?> value) {
+    return value == null ? "" : value.name();
   }
 }

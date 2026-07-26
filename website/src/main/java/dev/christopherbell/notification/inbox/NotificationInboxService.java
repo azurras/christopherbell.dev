@@ -6,6 +6,7 @@ import dev.christopherbell.notification.NotificationRepository;
 import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.notification.model.NotificationDetail;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.pagination.StableCursorCodec;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -18,6 +19,8 @@ import org.springframework.stereotype.Service;
 public class NotificationInboxService {
   private final NotificationRepository notificationRepository;
   private final PermissionService permissionService;
+  private final NotificationQueryRepository notificationQueryRepository;
+  private final StableCursorCodec cursorCodec;
 
   /** Lists the current user's notifications newest first. */
   public List<NotificationDetail> getMyNotifications(int limit) {
@@ -27,6 +30,18 @@ public class NotificationInboxService {
     return notificationRepository.findByAccountIdOrderByCreatedOnDesc(selfId, page).stream()
         .map(this::toDetail)
         .toList();
+  }
+
+  /** Returns one stable notification page for the current user. */
+  public NotificationPage getMyNotifications(String cursor, int size)
+      throws InvalidRequestException {
+    return notificationQueryRepository.page(
+        permissionService.getSelfId(), cursorCodec.decode(cursor), size);
+  }
+
+  /** Atomically marks all of the current user's notifications read. */
+  public NotificationReadResult markAllRead() {
+    return notificationQueryRepository.markAllRead(permissionService.getSelfId());
   }
 
   /** Counts unread notifications for the current user. */

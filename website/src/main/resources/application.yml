@@ -65,6 +65,10 @@ command-center:
 rate-limit:
   max-buckets: ${RATE_LIMIT_MAX_BUCKETS:10000}
 app:
+  notification-delivery:
+    dedupe-window: 5m
+    rate-window: 1m
+    max-events-per-window: 20
   request-size:
     default-max: ${APP_REQUEST_SIZE_DEFAULT_MAX:1MB}
   mail:
@@ -97,6 +101,8 @@ app:
       initial-buffer: 2MB
       max-output: 50GB
 posts:
+  edit-window: 15m
+  edit-audit-limit: 10
   expiration:
     enabled: true
     cleanup-interval: 600000

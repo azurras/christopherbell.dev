@@ -3,6 +3,7 @@ import { appendTextWithMentionLinks, authHeaders, fetchJson, formatWhen, isLogge
 
 let ACTIVE_USERNAME = null;
 let CONVERSATIONS = [];
+let THREAD_STATE = { items: [], nextCursor: null };
 let suggestionTimer = null;
 let suggestionRequest = null;
 const MESSAGE_SUGGESTION_LIMIT = 8;
@@ -28,6 +29,19 @@ export function conversationRowMarkup(conversation, activeUsername) {
 
 export function shouldFetchMessageSuggestions(value) {
   return String(value || '').trim().length > 0;
+}
+
+export function parseConversationPage(payload) {
+  const validCursor = payload?.nextCursor === null
+      || typeof payload?.nextCursor === 'string';
+  if (!payload || !Array.isArray(payload.items) || !validCursor) {
+    throw new TypeError('Server returned an invalid conversation page.');
+  }
+  return { items: [...payload.items], nextCursor: payload.nextCursor };
+}
+
+export function mergeOlderConversationPage(currentItems, olderPage) {
+  return [...olderPage.items, ...currentItems];
 }
 
 export function messageSuggestionListMarkup(suggestions) {
@@ -141,7 +155,7 @@ function renderConversations() {
   });
 }
 
-function renderMessages(messages) {
+function renderMessages(messages, scrollToEnd = true) {
   const list = document.getElementById('messageList');
   if (!list) return;
   if (!messages.length) {
@@ -167,7 +181,14 @@ function renderMessages(messages) {
     appendTextWithMentionLinks(row.querySelector('p'), message.text || '');
     list.appendChild(row);
   }
-  list.scrollTop = list.scrollHeight;
+  if (scrollToEnd) list.scrollTop = list.scrollHeight;
+}
+
+function renderConversationActions() {
+  const older = document.getElementById('loadOlderMessages');
+  const archive = document.getElementById('archiveConversation');
+  older?.classList.toggle('d-none', !ACTIVE_USERNAME || !THREAD_STATE.nextCursor);
+  archive?.classList.toggle('d-none', !ACTIVE_USERNAME);
 }
 
 async function loadConversations() {
@@ -192,16 +213,75 @@ async function openConversation(username) {
   }
   document.getElementById('messageForm')?.classList.remove('d-none');
   renderConversations();
-  const messages = await fetchJson(`${API.messages.conversation(ACTIVE_USERNAME)}?limit=100`, {
+  const page = parseConversationPage(await fetchJson(
+      API.messages.conversationPage(ACTIVE_USERNAME, null, 50), {
     headers: authHeaders(),
     redirectOnUnauthorized: true,
-  });
-  renderMessages(messages || []);
+  }));
+  THREAD_STATE = page;
+  renderMessages(THREAD_STATE.items);
+  renderConversationActions();
   await loadConversations();
   renderConversations();
   const url = new URL(window.location.href);
   url.searchParams.set('with', ACTIVE_USERNAME);
   window.history.replaceState({}, '', url.toString());
+}
+
+async function loadOlderMessages() {
+  if (!ACTIVE_USERNAME || !THREAD_STATE.nextCursor) return;
+  const button = document.getElementById('loadOlderMessages');
+  const list = document.getElementById('messageList');
+  const priorHeight = list?.scrollHeight || 0;
+  try {
+    if (button) button.disabled = true;
+    const olderPage = parseConversationPage(await fetchJson(
+        API.messages.conversationPage(ACTIVE_USERNAME, THREAD_STATE.nextCursor, 50), {
+          headers: authHeaders(),
+          redirectOnUnauthorized: true,
+        }));
+    THREAD_STATE = {
+      items: mergeOlderConversationPage(THREAD_STATE.items, olderPage),
+      nextCursor: olderPage.nextCursor,
+    };
+    renderMessages(THREAD_STATE.items, false);
+    if (list) list.scrollTop = Math.max(0, list.scrollHeight - priorHeight);
+    renderConversationActions();
+  } catch (err) {
+    showAlert(err?.message || 'Failed to load older messages.');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function archiveActiveConversation() {
+  if (!ACTIVE_USERNAME) return;
+  const button = document.getElementById('archiveConversation');
+  try {
+    if (button) button.disabled = true;
+    await fetchJson(API.messages.archiveConversation(ACTIVE_USERNAME), {
+      method: 'POST',
+      headers: authHeaders(),
+      redirectOnUnauthorized: true,
+      body: '{}',
+    });
+    ACTIVE_USERNAME = null;
+    THREAD_STATE = { items: [], nextCursor: null };
+    document.getElementById('messageForm')?.classList.add('d-none');
+    document.getElementById('conversationProfileLink')?.classList.add('d-none');
+    const title = document.getElementById('conversationTitle');
+    if (title) title.textContent = 'Pick a conversation';
+    renderMessages([]);
+    renderConversationActions();
+    await loadConversations();
+    const url = new URL(window.location.href);
+    url.searchParams.delete('with');
+    window.history.replaceState({}, '', url.toString());
+  } catch (err) {
+    showAlert(err?.message || 'Failed to archive conversation.');
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 async function sendActiveMessage() {
@@ -242,6 +322,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     event.preventDefault();
     await sendActiveMessage();
   });
+  document.getElementById('loadOlderMessages')?.addEventListener('click', loadOlderMessages);
+  document.getElementById('archiveConversation')?.addEventListener(
+      'click', archiveActiveConversation);
   document.getElementById('newConversationForm')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const username = document.getElementById('recipientHandle')?.value || '';

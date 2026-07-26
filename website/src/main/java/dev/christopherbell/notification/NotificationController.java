@@ -1,10 +1,13 @@
 package dev.christopherbell.notification;
 
 import static dev.christopherbell.libs.api.APIVersion.V20250914;
+import static dev.christopherbell.libs.api.APIVersion.V20260726;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.notification.inbox.NotificationInboxService;
+import dev.christopherbell.notification.inbox.NotificationPage;
+import dev.christopherbell.notification.inbox.NotificationReadResult;
 import dev.christopherbell.notification.model.NotificationDetail;
 import dev.christopherbell.notification.model.NotificationPreferenceDetail;
 import dev.christopherbell.notification.model.NotificationPreferenceUpdateRequest;
@@ -39,6 +42,31 @@ public class NotificationController {
     return new ResponseEntity<>(
         Response.<List<NotificationDetail>>builder()
             .payload(notificationInboxService.getMyNotifications(limit))
+            .success(true)
+            .build(),
+        HttpStatus.OK);
+  }
+
+  @GetMapping(value = V20260726, produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<NotificationPage>> getMyNotificationPage(
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @RequestParam(value = "size", required = false, defaultValue = "25") int size
+  ) throws InvalidRequestException {
+    return new ResponseEntity<>(
+        Response.<NotificationPage>builder()
+            .payload(notificationInboxService.getMyNotifications(cursor, size))
+            .success(true)
+            .build(),
+        HttpStatus.OK);
+  }
+
+  @PostMapping(value = V20260726 + "/read-all", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<NotificationReadResult>> markAllRead() {
+    return new ResponseEntity<>(
+        Response.<NotificationReadResult>builder()
+            .payload(notificationInboxService.markAllRead())
             .success(true)
             .build(),
         HttpStatus.OK);

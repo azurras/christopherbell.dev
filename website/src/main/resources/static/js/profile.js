@@ -1,7 +1,7 @@
 import { authHeaders, fetchJson, sanitize, isLoggedIn, formatWhen, loginRedirectUrl } from './lib/util.js';
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
-import { makeRendererContext } from './lib/feed-context.js';
+import { canEditFor, makeRendererContext } from './lib/feed-context.js';
 import { initPostImageLightbox } from './lib/image-lightbox.js';
 import { initLazyMedia } from './lib/lazy-media.js';
 import { profileActivityStats } from './lib/profile-stats.js';
@@ -106,6 +106,7 @@ function renderPosts(posts, username) {
     formatWhen,
     isLoggedIn,
     canDelete,
+    canEdit: post => canEditFor({ id: post.accountId })(post),
     currentUserName: username
   });
   for (const p of posts) {

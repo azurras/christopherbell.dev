@@ -4,12 +4,29 @@ import test from 'node:test';
 const {
   browserNotificationsToShow,
   notificationPreferencePayload,
+  mergeNotificationPages,
+  unreadNotificationCount,
   notificationSettingsMarkup,
   notificationTargetUrl,
   notificationText,
   notificationTitle,
   recentNotifications
 } = await import('../../main/resources/static/js/lib/notifications.js');
+
+test('notification pages append without duplicating an existing id', () => {
+  const current = [{ id: 'n2', read: false }, { id: 'n1', read: true }];
+  const next = [{ id: 'n1', read: true }, { id: 'n0', read: false }];
+
+  assert.deepEqual(mergeNotificationPages(current, next).map(item => item.id), ['n2', 'n1', 'n0']);
+});
+
+test('unread notification count reflects locally marked pages', () => {
+  assert.equal(unreadNotificationCount([
+    { id: 'n2', read: false },
+    { id: 'n1', read: true },
+    { id: 'n0', read: false }
+  ]), 2);
+});
 
 test('notification titles describe like and comment activity', () => {
   assert.equal(

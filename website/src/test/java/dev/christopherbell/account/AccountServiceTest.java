@@ -15,6 +15,9 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.auth.AccountAuthenticationService;
+import dev.christopherbell.account.deletion.AccountDeletionResult;
+import dev.christopherbell.account.deletion.AccountDeletionService;
+import dev.christopherbell.account.deletion.AccountDeletionStatus;
 import dev.christopherbell.account.follow.AccountFollowService;
 import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.account.model.Account;
@@ -31,6 +34,8 @@ import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.passwordreset.PasswordResetNotificationService;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
+import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.libs.api.exception.InternalServiceException;
@@ -55,6 +60,8 @@ import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -62,10 +69,13 @@ import org.springframework.security.core.context.SecurityContextHolder;
 public class AccountServiceTest {
   @Mock private AccountMapper accountMapper;
   @Mock private AccountRepository accountRepository;
+  @Mock private AccountDeletionService accountDeletionService;
   @Mock private PasswordResetNotificationService passwordResetNotificationService;
   @Mock private PostRepository postRepository;
   @Mock private SharedFolderAuditRecorder sharedFolderAudit;
   @Mock private SharedFolderAccessService sharedFolderAccess;
+  @Mock private AdminActivityService adminActivityService;
+  @Mock private PermissionService permissionService;
   private AccountService accountService;
 
   @BeforeEach
@@ -74,10 +84,12 @@ public class AccountServiceTest {
     var passwordResetService = new PasswordResetService(accountRepository, passwordResetNotificationService);
     var profileService = new AccountProfileService(accountRepository, accountMapper, postRepository);
     var followService = new AccountFollowService(accountRepository, profileService);
-    var moderationService = new AccountModerationService(accountRepository, accountMapper);
+    var moderationService = new AccountModerationService(
+        accountRepository, accountMapper, adminActivityService, permissionService);
     accountService = new AccountService(
         accountMapper,
         accountRepository,
+        accountDeletionService,
         authenticationService,
         passwordResetService,
         profileService,
@@ -87,6 +99,7 @@ public class AccountServiceTest {
         sharedFolderAccess);
     org.mockito.Mockito.lenient().when(sharedFolderAccess.requireAdmin()).thenReturn(
         Account.builder().id("admin-1").role(Role.ADMIN).build());
+    org.mockito.Mockito.lenient().when(permissionService.getSelfId()).thenReturn("admin-1");
   }
 
   @Test
@@ -457,33 +470,26 @@ public class AccountServiceTest {
   }
 
   @Test
-  @DisplayName("Delete: found -> deletes and returns mapped detail")
-  public void testDeleteAccount_whenFound_DeletesAndReturnsDetail() throws Exception {
-    var entity = AccountServiceStub.getAccountWhenExistsStub();
-    var detail = AccountDetail.builder().id(entity.getId()).build();
-
-    when(accountRepository.findById(eq(AccountServiceStub.ID)))
-        .thenReturn(Optional.of(entity));
-    when(accountMapper.toAccount(eq(entity))).thenReturn(detail);
+  @DisplayName("Delete delegates to the durable privacy deletion service")
+  public void testDeleteAccount_whenFound_ReturnsDeletionResult() throws Exception {
+    var deletion = new AccountDeletionResult(
+        "deleted:abcdef012345", AccountDeletionStatus.COMPLETE, 6);
+    when(accountDeletionService.delete(AccountServiceStub.ID)).thenReturn(deletion);
 
     var result = accountService.deleteAccount(AccountServiceStub.ID);
 
-    assertEquals(detail, result);
-    verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verify(accountRepository).delete(eq(entity));
-    verify(accountMapper).toAccount(eq(entity));
-    verifyNoMoreInteractions(accountRepository, accountMapper);
+    assertEquals(deletion, result);
+    verify(accountDeletionService).delete(AccountServiceStub.ID);
   }
 
   @Test
   @DisplayName("Delete: not found -> throws 404")
-  public void testDeleteAccount_whenNotFound_Throws404() {
-    when(accountRepository.findById(eq(AccountServiceStub.ID)))
-        .thenReturn(Optional.empty());
+  public void testDeleteAccount_whenNotFound_Throws404() throws Exception {
+    when(accountDeletionService.delete(AccountServiceStub.ID))
+        .thenThrow(new ResourceNotFoundException("Account was not found."));
 
     assertThrows(ResourceNotFoundException.class, () -> accountService.deleteAccount(AccountServiceStub.ID));
-    verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verifyNoMoreInteractions(accountRepository);
+    verify(accountDeletionService).delete(AccountServiceStub.ID);
   }
 
   @Test
@@ -505,7 +511,7 @@ public class AccountServiceTest {
       assertEquals(approved, result);
       assertEquals("self-1", entity.getApprovedBy());
       verify(accountRepository).findById(eq(AccountServiceStub.ID));
-      verify(accountRepository).save(eq(entity));
+      verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(entity));
       verify(accountMapper).toAccount(eq(entity));
     } finally {
       SecurityContextHolder.clearContext();
@@ -583,9 +589,10 @@ public class AccountServiceTest {
     assertEquals(AccountStatus.ACTIVE, result.getStatus());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
+    verify(accountRepository).findById("admin-1");
     verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
     verify(accountRepository).findByUsernameIgnoreCase(eq("Chris.Bell"));
-    verify(accountRepository).save(eq(existing));
+    verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
   }
@@ -623,7 +630,8 @@ public class AccountServiceTest {
     assertEquals(existing.getIsApproved(), result.getIsApproved());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verify(accountRepository).save(eq(existing));
+    verify(accountRepository).findById("admin-1");
+    verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
   }
@@ -656,7 +664,8 @@ public class AccountServiceTest {
     assertEquals(true, result.getIsApproved());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verify(accountRepository).save(eq(existing));
+    verify(accountRepository).findById("admin-1");
+    verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
   }
@@ -750,6 +759,7 @@ public class AccountServiceTest {
     assertThrows(ResourceExistsException.class, () -> accountService.updateAccount(request));
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
+    verify(accountRepository).findById("admin-1");
     verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
     verifyNoMoreInteractions(accountRepository);
   }
@@ -777,6 +787,7 @@ public class AccountServiceTest {
     assertThrows(ResourceExistsException.class, () -> accountService.updateAccount(request));
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
+    verify(accountRepository).findById("admin-1");
     verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
     verify(accountRepository).findByUsernameIgnoreCase(eq("Chris.Bell"));
     verifyNoMoreInteractions(accountRepository);
@@ -860,6 +871,24 @@ public class AccountServiceTest {
 
     verify(sharedFolderAudit).recordRejectedOnce(
         "PERMISSION_CHANGE", "invalid-account", "invalid_request");
+  }
+
+  @Test
+  @DisplayName("Legacy admin account list is bounded to a stable first page")
+  void getAccounts_usesBoundedCompatibilityPage() {
+    var account = Account.builder().id("account-1").build();
+    var detail = AccountDetail.builder().id("account-1").build();
+    var pageRequest = PageRequest.of(
+        0,
+        50,
+        Sort.by(Sort.Direction.DESC, "createdOn")
+            .and(Sort.by(Sort.Direction.DESC, "id")));
+    when(accountRepository.findAll(pageRequest)).thenReturn(new PageImpl<>(List.of(account)));
+    when(accountMapper.toAccount(account)).thenReturn(detail);
+
+    assertEquals(List.of(detail), accountService.getAccounts());
+
+    verify(accountRepository).findAll(pageRequest);
   }
 
   private String hashResetToken(String token) throws Exception {

@@ -12,7 +12,10 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.EmailSanitizer;
 import dev.christopherbell.libs.security.UsernameSanitizer;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.admin.activity.AdminActivityService;
+import dev.christopherbell.admin.activity.ModerationAuditCommand;
 import java.time.Instant;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,19 +29,38 @@ import org.springframework.stereotype.Service;
 public class AccountModerationService {
   private final AccountRepository accountRepository;
   private final AccountMapper accountMapper;
+  private final AdminActivityService adminActivityService;
+  private final PermissionService permissionService;
 
   /**
    * Approves an account and records the current admin id.
    */
-  public AccountDetail approveAccount(String accountId) throws ResourceNotFoundException {
+  public AccountDetail approveAccount(String accountId)
+      throws InvalidRequestException, ResourceNotFoundException {
     log.info("Approving account with id {}", accountId);
     var account = getExistingOrThrow(accountId);
+    completePendingAudit(account);
+    var before = ModerationAccountSnapshot.from(account);
+    var after = new ModerationAccountSnapshot(account.getRole(), AccountStatus.ACTIVE);
+    var actor = currentActor();
+    var auditCommand = ModerationAuditCommand.create(
+        actor.id(), actor.username(),
+        "ACCOUNT_STATUS_CHANGED",
+        "ACCOUNT",
+        account.getId(),
+        "@" + (account.getUsername() == null ? account.getId() : account.getUsername()),
+        "Account approved through the admin approval endpoint.",
+        "%s approved an account.",
+        before.values(),
+        after.values(),
+        Map.of("source", "admin-approval", "accountId", account.getId()));
     account.setApprovedBy(PermissionService.getSelf());
     account.setIsApproved(true);
     account.setStatus(AccountStatus.ACTIVE);
     account.setLastUpdatedOn(Instant.now());
-    accountRepository.save(account);
-    return accountMapper.toAccount(account);
+    account.setPendingModerationAudit(auditCommand);
+    var saved = accountRepository.save(account);
+    return accountMapper.toAccount(completePendingAudit(saved));
   }
 
   /**
@@ -48,9 +70,68 @@ public class AccountModerationService {
       throws InvalidRequestException, ResourceNotFoundException, ResourceExistsException {
     validateUpdateRequest(request);
     var existing = getExistingOrThrow(request.id());
+    completePendingAudit(existing);
+    var before = ModerationAccountSnapshot.from(existing);
+    var proposed = before.with(request);
+    boolean moderated = !before.equals(proposed);
+    if (moderated && (request.moderationReason() == null
+        || request.moderationReason().isBlank())) {
+      throw new InvalidRequestException("Moderation reason is required.");
+    }
+    var auditCommand = moderated
+        ? moderationCommand(
+            moderationAction(before, proposed),
+            "ACCOUNT",
+            existing.getId(),
+            "@" + (existing.getUsername() == null ? existing.getId() : existing.getUsername()),
+            request.moderationReason(),
+            "%s changed account moderation state.",
+            before.values(),
+            proposed.values(),
+            Map.of("source", "back-office", "accountId", existing.getId()))
+        : null;
     applyUpdates(existing, request);
+    existing.setPendingModerationAudit(auditCommand);
     var saved = accountRepository.save(existing);
+    if (moderated) {
+      saved = completePendingAudit(saved);
+    }
     return accountMapper.toAccount(saved);
+  }
+
+  private ModerationAuditCommand moderationCommand(
+      String action,
+      String targetType,
+      String targetId,
+      String targetLabel,
+      String reason,
+      String message,
+      Map<String, String> before,
+      Map<String, String> after,
+      Map<String, String> metadata
+  ) throws InvalidRequestException {
+    var actor = currentActor();
+    return ModerationAuditCommand.create(
+        actor.id(), actor.username(), action, targetType, targetId, targetLabel,
+        reason, message, before, after, metadata);
+  }
+
+  private ModerationActor currentActor() {
+    var actorId = permissionService.getSelfId();
+    var username = accountRepository.findById(actorId)
+        .map(account -> account.getUsername() == null ? actorId : account.getUsername())
+        .orElse(actorId);
+    return new ModerationActor(actorId, username);
+  }
+
+  private record ModerationActor(String id, String username) {}
+
+  private Account completePendingAudit(Account account) {
+    var pending = account.getPendingModerationAudit();
+    if (pending == null) return account;
+    adminActivityService.recordModeration(pending);
+    account.setPendingModerationAudit(null);
+    return accountRepository.save(account);
   }
 
   private void validateUpdateRequest(AccountUpdateRequest request) throws InvalidRequestException {
@@ -112,6 +193,36 @@ public class AccountModerationService {
     var owner = accountRepository.findByUsernameIgnoreCase(username);
     if (owner.isPresent() && !owner.get().getId().equals(selfId)) {
       throw new ResourceExistsException("Username already in use by another account.");
+    }
+  }
+
+  private String moderationAction(
+      ModerationAccountSnapshot before,
+      ModerationAccountSnapshot after) {
+    if (before.role() != after.role() && before.status() != after.status()) {
+      return "ACCOUNT_MODERATION_CHANGED";
+    }
+    return before.role() != after.role() ? "ACCOUNT_ROLE_CHANGED" : "ACCOUNT_STATUS_CHANGED";
+  }
+
+  private record ModerationAccountSnapshot(
+      dev.christopherbell.account.model.Role role,
+      AccountStatus status) {
+
+    private static ModerationAccountSnapshot from(Account account) {
+      return new ModerationAccountSnapshot(account.getRole(), account.getStatus());
+    }
+
+    private ModerationAccountSnapshot with(AccountUpdateRequest request) {
+      return new ModerationAccountSnapshot(
+          request.role() == null ? role : request.role(),
+          request.status() == null ? status : request.status());
+    }
+
+    private Map<String, String> values() {
+      return Map.of(
+          "role", role == null ? "" : role.name(),
+          "status", status == null ? "" : status.name());
     }
   }
 }
