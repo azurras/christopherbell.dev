@@ -45,6 +45,16 @@ class SecurityConfigTest {
   }
 
   @Test
+  void publicMatchers_whenVinBatchDecodeRequested_matchesOnlyExactPost() throws Exception {
+    var path = "/api/vehicles/2026-07-26/vin/decode/batch";
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request("POST", path))));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request("GET", path))));
+    assertFalse(publicMatchers().stream()
+        .anyMatch(matcher -> matcher.matches(request("POST", path + "/extra"))));
+  }
+
+  @Test
   @DisplayName("Location ZIP coordinate endpoint is public")
   void publicMatchers_whenLocationZipRequested_matchesWithoutAuthentication() throws Exception {
     var path = "/api/location/zip/78701";

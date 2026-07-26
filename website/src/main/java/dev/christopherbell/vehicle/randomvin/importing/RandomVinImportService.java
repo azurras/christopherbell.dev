@@ -1,5 +1,7 @@
 package dev.christopherbell.vehicle.randomvin.importing;
 
+import dev.christopherbell.configuration.mongo.lease.CollectorLeaseGuard;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.Vehicle;
@@ -18,6 +20,7 @@ import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -27,6 +30,7 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class RandomVinImportService {
+  public static final String LEASE_NAME = "vehicle-randomvin-import";
   private static final Pattern VIN_PATTERN = Pattern.compile("^[A-HJ-NPR-Z0-9]{17}$");
 
   private final RandomVinClient randomVinClient;
@@ -35,6 +39,7 @@ public class RandomVinImportService {
   private final VehicleRepository vehicleRepository;
   private final Clock clock;
   private final VehicleProperties.RandomVin properties;
+  private final ScheduledCollectorCoordinator coordinator;
 
   /**
    * Creates a RandomVIN import service with its outbound client, state repository, robots policy,
@@ -55,12 +60,33 @@ public class RandomVinImportService {
       Clock clock,
       VehicleProperties vehicleProperties
   ) {
+    this(
+        randomVinClient,
+        randomVinImportStateRepository,
+        randomVinRobotsPolicy,
+        vehicleRepository,
+        clock,
+        vehicleProperties,
+        null);
+  }
+
+  @Autowired
+  public RandomVinImportService(
+      RandomVinClient randomVinClient,
+      RandomVinImportStateRepository randomVinImportStateRepository,
+      RandomVinRobotsPolicy randomVinRobotsPolicy,
+      VehicleRepository vehicleRepository,
+      Clock clock,
+      VehicleProperties vehicleProperties,
+      ScheduledCollectorCoordinator coordinator
+  ) {
     this.randomVinClient = randomVinClient;
     this.randomVinImportStateRepository = randomVinImportStateRepository;
     this.randomVinRobotsPolicy = randomVinRobotsPolicy;
     this.vehicleRepository = vehicleRepository;
     this.clock = clock;
     this.properties = vehicleProperties.getRandomVin();
+    this.coordinator = coordinator;
   }
 
   /**
@@ -77,11 +103,24 @@ public class RandomVinImportService {
   /**
    * Runs one scheduled RandomVIN import attempt when collection is enabled and policy guards pass.
    */
-  @Scheduled(fixedDelayString = "${vehicles.random-vin.fixed-delay}")
+  @Scheduled(
+      initialDelayString = "${vehicles.random-vin.initial-delay}",
+      fixedDelayString = "${vehicles.random-vin.fixed-delay}")
   public void importRandomVin() {
     if (!properties.isEnabled()) {
       return;
     }
+    if (coordinator == null) {
+      importRandomVinOwned(CollectorLeaseGuard.NONE);
+      return;
+    }
+    coordinator.run(LEASE_NAME, properties.getLeaseDuration(), guard -> {
+      importRandomVinOwned(guard);
+      return null;
+    });
+  }
+
+  private void importRandomVinOwned(CollectorLeaseGuard leaseGuard) {
     log.info("RandomVIN import job started.");
     try {
       var state = currentState();
@@ -98,7 +137,9 @@ public class RandomVinImportService {
         return;
       }
 
+      leaseGuard.verifyHeld();
       var robotsPolicyResult = randomVinRobotsPolicy.evaluate();
+      leaseGuard.verifyHeld();
       recordRobotsPolicy(state, robotsPolicyResult);
       if (!robotsPolicyResult.allowed()) {
         log.warn("RandomVIN collection skipped by robots.txt policy: {}.", robotsPolicyResult.reason());
@@ -107,7 +148,9 @@ public class RandomVinImportService {
 
       recordAttempt(state);
       var vin = normalizeVin(getRandomVin(state));
+      leaseGuard.verifyHeld();
       recordVinsProcessed(state, 1);
+      leaseGuard.verifyHeld();
       saveVin(vin);
     } catch (DuplicateKeyException e) {
       log.info("RandomVIN returned a VIN that already exists.");

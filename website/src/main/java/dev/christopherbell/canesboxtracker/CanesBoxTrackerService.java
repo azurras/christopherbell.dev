@@ -5,6 +5,9 @@ import dev.christopherbell.canesboxtracker.model.CanesBoxPriceSnapshot;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerHistory;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
 import dev.christopherbell.canesboxtracker.model.CanesBoxWeeklyPriceDetail;
+import dev.christopherbell.configuration.mongo.lease.CollectorLeaseGuard;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorRunStatus;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -18,8 +21,11 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Collects and exposes weekly Raising Canes Box Index price history.
@@ -27,10 +33,12 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class CanesBoxTrackerService {
+  public static final String LEASE_NAME = "canes-box-price-collection";
   private final CanesBoxPriceSnapshotRepository repository;
   private final CanesBoxPriceClient priceClient;
   private final CanesBoxTrackerProperties properties;
   private final Clock clock;
+  private final ScheduledCollectorCoordinator coordinator;
 
   /**
    * Creates the Raising Canes Box Index service.
@@ -41,10 +49,22 @@ public class CanesBoxTrackerService {
       CanesBoxTrackerProperties properties,
       Clock clock
   ) {
+    this(repository, priceClient, properties, clock, null);
+  }
+
+  @Autowired
+  public CanesBoxTrackerService(
+      CanesBoxPriceSnapshotRepository repository,
+      CanesBoxPriceClient priceClient,
+      CanesBoxTrackerProperties properties,
+      Clock clock,
+      ScheduledCollectorCoordinator coordinator
+  ) {
     this.repository = repository;
     this.priceClient = priceClient;
     this.properties = properties;
     this.clock = clock;
+    this.coordinator = coordinator;
   }
 
   /**
@@ -59,14 +79,29 @@ public class CanesBoxTrackerService {
       return;
     }
     var weekStart = currentWeekStart();
+    if (coordinator != null) {
+      coordinator.run(LEASE_NAME, properties.getLeaseDuration(), guard -> {
+        collectCurrentWeek(weekStart, guard);
+        return null;
+      });
+      return;
+    }
+    collectCurrentWeek(weekStart, CollectorLeaseGuard.NONE);
+  }
+
+  private CanesBoxPriceSnapshot collectCurrentWeek(
+      LocalDate weekStart,
+      CollectorLeaseGuard leaseGuard
+  ) {
     log.info("Raising Canes Box Index weekly collection started. Week: {}.", weekStart);
-    var snapshot = collectWeek(weekStart);
+    var snapshot = collectWeek(weekStart, leaseGuard);
     log.info(
         "Raising Canes Box Index weekly collection completed. Week: {}, successful metros: {}/{}, average price: {}.",
         snapshot.getWeekStartDate(),
         snapshot.getSuccessfulMetroCount(),
         snapshot.getTotalMetroCount(),
         snapshot.getAveragePrice());
+    return snapshot;
   }
 
   /**
@@ -76,15 +111,15 @@ public class CanesBoxTrackerService {
    */
   public CanesBoxWeeklyPriceDetail collectCurrentWeekForAdmin() {
     var weekStart = currentWeekStart();
-    log.info("Raising Canes Box Index admin collection started. Week: {}.", weekStart);
-    var snapshot = collectWeek(weekStart);
-    log.info(
-        "Raising Canes Box Index admin collection completed. Week: {}, successful metros: {}/{}, average price: {}.",
-        snapshot.getWeekStartDate(),
-        snapshot.getSuccessfulMetroCount(),
-        snapshot.getTotalMetroCount(),
-        snapshot.getAveragePrice());
-    return toDetail(snapshot);
+    if (coordinator != null) {
+      var outcome = coordinator.run(
+          LEASE_NAME, properties.getLeaseDuration(), guard -> collectCurrentWeek(weekStart, guard));
+      if (outcome.status() == ScheduledCollectorRunStatus.SKIPPED_LOCKED) {
+        throw new ResponseStatusException(HttpStatus.CONFLICT, "Price collection is already running");
+      }
+      return toDetail(outcome.value());
+    }
+    return toDetail(collectCurrentWeek(weekStart, CollectorLeaseGuard.NONE));
   }
 
   /**
@@ -94,15 +129,25 @@ public class CanesBoxTrackerService {
    * @return saved snapshot
    */
   CanesBoxPriceSnapshot collectWeek(LocalDate weekStartDate) {
-    var prices = properties.getMetros().stream()
-        .map(this::fetchMetroPrice)
-        .toList();
+    return collectWeek(weekStartDate, CollectorLeaseGuard.NONE);
+  }
+
+  private CanesBoxPriceSnapshot collectWeek(
+      LocalDate weekStartDate,
+      CollectorLeaseGuard leaseGuard
+  ) {
+    var prices = new ArrayList<CanesBoxMetroPrice>();
+    for (var target : properties.getMetros()) {
+      leaseGuard.verifyHeld();
+      prices.add(fetchMetroPrice(target));
+    }
     var snapshot = new CanesBoxPriceSnapshot();
     snapshot.setId(weekStartDate.toString());
     snapshot.setWeekStartDate(weekStartDate.toString());
     snapshot.setCollectedOn(Instant.now(clock));
     snapshot.setMetroPrices(prices);
     recalculateSnapshot(snapshot, prices.size());
+    leaseGuard.verifyHeld();
     return repository.save(snapshot);
   }
 

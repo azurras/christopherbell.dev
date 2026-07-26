@@ -1,6 +1,9 @@
 package dev.christopherbell.vehicle.nhtsa.decode;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchEntry;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchRequest;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchResponse;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeCache;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeRequest;
@@ -8,6 +11,10 @@ import dev.christopherbell.vehicle.model.VehicleVinDecodeResponse;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
@@ -26,6 +33,7 @@ public class VehicleVinDecodeService {
   private final VehicleVinDecodeCacheRepository cacheRepository;
   private final NhtsaVinClient nhtsaVinClient;
   private final VehicleProperties.NhtsaVin nhtsaProperties;
+  private final VehicleProperties.VinDecoder vinDecoderProperties;
   private final VehicleVinDecodeRateLimiter rateLimiter;
   private final Map<String, Object> vinLocks = new ConcurrentHashMap<>();
 
@@ -42,6 +50,7 @@ public class VehicleVinDecodeService {
     this.cacheRepository = cacheRepository;
     this.nhtsaVinClient = nhtsaVinClient;
     this.nhtsaProperties = vehicleProperties.getNhtsaVin();
+    this.vinDecoderProperties = vehicleProperties.getVinDecoder();
     this.rateLimiter = rateLimiter;
   }
 
@@ -107,6 +116,8 @@ public class VehicleVinDecodeService {
   private VehicleVinDecodeResponse cachedResponse(String vin) {
     try {
       return cacheRepository.findById(vin)
+          .filter(cached -> cached.isFresh(
+              vinDecoderProperties.getDecoderVersion(), Instant.now(clock)))
           .map(VehicleVinDecodeCache::getResponse)
           .orElse(null);
     } catch (DataAccessException e) {
@@ -120,12 +131,126 @@ public class VehicleVinDecodeService {
       cacheRepository.save(VehicleVinDecodeCache.builder()
           .vin(vin)
           .response(response)
+          .decoderVersion(vinDecoderProperties.getDecoderVersion())
+          .refreshedOn(now)
+          .expiresOn(now.plus(vinDecoderProperties.getCacheTtl()))
           .createdOn(now)
           .lastUpdatedOn(now)
           .build());
     } catch (DataAccessException e) {
       log.warn("Unable to cache VIN decode response for {}.", vin, e);
     }
+  }
+
+  public VehicleVinDecodeBatchResponse decodeBatch(
+      VehicleVinDecodeBatchRequest request, String clientKey) throws InvalidRequestException {
+    validateBatchEnvelope(request);
+    rateLimiter.check(rateLimitKey(clientKey), request.vins().size());
+
+    var normalizedByIndex = new ArrayList<String>(request.vins().size());
+    var decodedByVin = new LinkedHashMap<String, VehicleVinDecodeResponse>();
+    var misses = new LinkedHashMap<String, NhtsaVinClient.NhtsaVinDecodeRequest>();
+    var cacheUnavailableVins = new HashSet<String>();
+    for (var submittedVin : request.vins()) {
+      try {
+        var normalizedVin = normalizeVin(submittedVin);
+        normalizedByIndex.add(normalizedVin);
+        final VehicleVinDecodeResponse cached;
+        try {
+          cached = cachedResponse(normalizedVin);
+        } catch (VehicleVinDecodeUnavailableException failure) {
+          cacheUnavailableVins.add(normalizedVin);
+          continue;
+        }
+        if (cached != null) {
+          decodedByVin.put(normalizedVin, cached);
+        } else {
+          misses.putIfAbsent(
+              normalizedVin, new NhtsaVinClient.NhtsaVinDecodeRequest(normalizedVin, null));
+        }
+      } catch (InvalidRequestException ignored) {
+        normalizedByIndex.add(null);
+      }
+    }
+
+    var unavailable = false;
+    if (!misses.isEmpty()) {
+      if (isNhtsaCoolingDown()) {
+        unavailable = true;
+      } else {
+        try {
+          for (var values : nhtsaVinClient.decodeVins(List.copyOf(misses.values()))) {
+            var vin = normalizeNhtsaVin(values);
+            if (vin != null && misses.containsKey(vin)) {
+              var response = toResponse(vin, values);
+              decodedByVin.put(vin, response);
+              saveCachedResponse(vin, response);
+            }
+          }
+        } catch (NhtsaVinClientException | InvalidRequestException | IOException e) {
+          coolDownNhtsa("NHTSA VIN batch decode failed", e);
+          unavailable = true;
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          coolDownNhtsa("NHTSA VIN batch decode was interrupted", e);
+          unavailable = true;
+        }
+      }
+    }
+
+    var results = new ArrayList<VehicleVinDecodeBatchEntry>(request.vins().size());
+    for (var index = 0; index < request.vins().size(); index++) {
+      var submittedVin = request.vins().get(index);
+      var normalizedVin = normalizedByIndex.get(index);
+      if (normalizedVin == null) {
+        results.add(VehicleVinDecodeBatchEntry.error(
+            index, submittedVin, null, "INVALID_VIN", "VIN must be 17 valid VIN characters."));
+      } else if (decodedByVin.containsKey(normalizedVin)) {
+        results.add(VehicleVinDecodeBatchEntry.success(
+            index, submittedVin, normalizedVin, decodedByVin.get(normalizedVin)));
+      } else if (cacheUnavailableVins.contains(normalizedVin)) {
+        results.add(VehicleVinDecodeBatchEntry.error(
+            index,
+            submittedVin,
+            normalizedVin,
+            "CACHE_UNAVAILABLE",
+            "VIN cache is temporarily unavailable."));
+      } else if (unavailable) {
+        results.add(VehicleVinDecodeBatchEntry.error(
+            index,
+            submittedVin,
+            normalizedVin,
+            "UPSTREAM_UNAVAILABLE",
+            TEMPORARILY_UNAVAILABLE));
+      } else {
+        results.add(VehicleVinDecodeBatchEntry.error(
+            index,
+            submittedVin,
+            normalizedVin,
+            "UPSTREAM_NO_RESULT",
+            "NHTSA returned no result for this VIN."));
+      }
+    }
+    return VehicleVinDecodeBatchResponse.from(results);
+  }
+
+  private void validateBatchEnvelope(VehicleVinDecodeBatchRequest request)
+      throws InvalidRequestException {
+    if (request == null || request.vins() == null || request.vins().isEmpty()) {
+      throw new InvalidRequestException("VIN decode batch must contain at least one VIN.");
+    }
+    if (request.vins().size() > vinDecoderProperties.getMaxBatchSize()) {
+      throw new InvalidRequestException("VIN decode batch cannot contain more than "
+          + vinDecoderProperties.getMaxBatchSize() + " VINs.");
+    }
+  }
+
+  private String normalizeNhtsaVin(Map<String, String> values) {
+    var vin = value(values, "VIN");
+    if (vin == null || vin.isBlank()) {
+      return null;
+    }
+    return vin.trim().toUpperCase();
   }
 
   private boolean isNhtsaCoolingDown() {

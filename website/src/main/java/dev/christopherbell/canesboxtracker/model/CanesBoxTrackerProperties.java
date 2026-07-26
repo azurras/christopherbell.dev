@@ -4,9 +4,13 @@ import java.time.Duration;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * Configuration for the Raising Canes Box Index collector.
@@ -16,6 +20,7 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration
 @ConfigurationProperties(prefix = "canes-box-tracker")
+@Validated
 @Data
 public class CanesBoxTrackerProperties {
   private boolean enabled = true;
@@ -26,10 +31,19 @@ public class CanesBoxTrackerProperties {
   private int officialSearchLimit = 5;
   private boolean publicMenuFallbackEnabled = false;
   private BigDecimal minimumPublicMenuPrice = new BigDecimal("10.00");
+  @NotNull @DurationMin(seconds = 1)
   private Duration connectTimeout = Duration.ofSeconds(10);
+  @NotNull @DurationMin(seconds = 1)
   private Duration requestTimeout = Duration.ofSeconds(20);
+  @NotNull @DurationMin(seconds = 30)
+  private Duration leaseDuration = Duration.ofMinutes(2);
   private CollectionSchedule collection = new CollectionSchedule();
   private List<MetroTarget> metros = new ArrayList<>();
+
+  @AssertTrue
+  public boolean isLeaseLongerThanRequest() {
+    return leaseDuration == null || requestTimeout == null || leaseDuration.compareTo(requestTimeout) > 0;
+  }
 
   /**
    * Weekly collection schedule metadata used by the service.

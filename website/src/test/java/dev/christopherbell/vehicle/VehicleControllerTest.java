@@ -29,6 +29,9 @@ import dev.christopherbell.vehicle.model.VehicleDataCollectionState;
 import dev.christopherbell.vehicle.model.VehicleUpdateRequest;
 import dev.christopherbell.vehicle.model.VehicleVinBatchRequest;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeRequest;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchEntry;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchRequest;
+import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchResponse;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeResponse;
 import dev.christopherbell.vehicle.model.VehicleVinRequest;
 import dev.christopherbell.vehicle.nhtsa.decode.VehicleVinDecodeService;
@@ -231,6 +234,35 @@ public class VehicleControllerTest {
         .andExpect(jsonPath("$.success").value(false));
 
     verifyNoInteractions(vehicleVinDecodeService);
+  }
+
+  @Test
+  @DisplayName("Batch decode returns ordered partial results")
+  @WithMockUser
+  public void testDecodeVinBatch_whenMixed_returnsOrderedPartialResults() throws Exception {
+    var invalid = "bad";
+    var decoded = VehicleVinDecodeResponse.builder().vin(VehicleStub.VIN).make(VehicleStub.MAKE).build();
+    var requestObject = new VehicleVinDecodeBatchRequest(List.of(VehicleStub.VIN, invalid));
+    var response = VehicleVinDecodeBatchResponse.from(List.of(
+        VehicleVinDecodeBatchEntry.success(0, VehicleStub.VIN, VehicleStub.VIN, decoded),
+        VehicleVinDecodeBatchEntry.error(
+            1, invalid, null, "INVALID_VIN", "VIN must be 17 valid VIN characters.")
+    ));
+    when(vehicleVinDecodeService.decodeBatch(eq(requestObject), anyString())).thenReturn(response);
+
+    mockMvc.perform(post("/api/vehicles" + APIVersion.V20260726 + "/vin/decode/batch")
+            .with(csrf())
+            .content("""
+                {"vins":["%s","%s"]}
+                """.formatted(VehicleStub.VIN, invalid))
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.submittedCount").value(2))
+        .andExpect(jsonPath("$.payload.results[0].status").value("SUCCESS"))
+        .andExpect(jsonPath("$.payload.results[1].status").value("INVALID_VIN"));
+
+    verify(vehicleVinDecodeService).decodeBatch(eq(requestObject), eq("account:user"));
   }
 
   @Test

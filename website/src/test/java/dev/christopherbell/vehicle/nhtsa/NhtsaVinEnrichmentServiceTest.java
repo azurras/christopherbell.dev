@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -12,6 +13,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorRunStatus;
 import dev.christopherbell.vehicle.VehicleStub;
 import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.VehicleProperties;
@@ -49,6 +52,7 @@ public class NhtsaVinEnrichmentServiceTest {
   @Mock private NhtsaVinClient nhtsaVinClient;
   @Mock private NhtsaVinImportStateRepository nhtsaVinImportStateRepository;
   @Mock private VehicleRepository vehicleRepository;
+  @Mock private ScheduledCollectorCoordinator coordinator;
   private NhtsaVinEnrichmentService nhtsaVinEnrichmentService;
 
   @BeforeEach
@@ -60,6 +64,25 @@ public class NhtsaVinEnrichmentServiceTest {
         vehicleProperties(),
         vehicleRepository
     );
+  }
+
+  @Test
+  @DisplayName("Skips all NHTSA effects when the distributed lease is held elsewhere")
+  public void testEnrichStoredVins_whenLeaseContended_skipsAllEffects() {
+    when(coordinator.run(eq(NhtsaVinEnrichmentService.LEASE_NAME), any(), any()))
+        .thenReturn(new ScheduledCollectorCoordinator.Outcome<>(
+            ScheduledCollectorRunStatus.SKIPPED_LOCKED, null));
+    nhtsaVinEnrichmentService = new NhtsaVinEnrichmentService(
+        Clock.fixed(DECODED_ON, ZoneOffset.UTC),
+        nhtsaVinClient,
+        nhtsaVinImportStateRepository,
+        vehicleProperties(),
+        vehicleRepository,
+        coordinator);
+
+    nhtsaVinEnrichmentService.enrichStoredVins();
+
+    verifyNoInteractions(nhtsaVinClient, nhtsaVinImportStateRepository, vehicleRepository);
   }
 
   @Test

@@ -91,6 +91,7 @@ public class SecurityConfig {
       "GET:/api/photo/v1",
       "GET:/api/canes-box-tracker" + APIVersion.V20260604 + "/history",
       "POST:/api/vehicles" + APIVersion.V20260509 + "/vin/decode",
+      "POST:/api/vehicles" + APIVersion.V20260726 + "/vin/decode/batch",
       "GET:/api/location/zip/**",
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/today",
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/nearby",
