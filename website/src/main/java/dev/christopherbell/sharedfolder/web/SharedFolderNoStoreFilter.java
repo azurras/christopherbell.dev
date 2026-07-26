@@ -82,6 +82,12 @@ public class SharedFolderNoStoreFilter extends OncePerRequestFilter {
     if (path.equals("search") && method.equals("GET")) {
       return new AuditAttempt("SEARCH", "search");
     }
+    if (path.equals("radio") && method.equals("GET")) {
+      return new AuditAttempt("RADIO_LISTEN", "radio");
+    }
+    if (path.equals("radio/duration") && method.equals("POST")) {
+      return new AuditAttempt("RADIO_DURATION_REPORTED", "radio");
+    }
     if (path.equals("content")) {
       return new AuditAttempt("DOWNLOAD_STARTED", request.getParameter("path"));
     }

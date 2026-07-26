@@ -2,6 +2,7 @@ package dev.christopherbell.sharedfolder.service;
 
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntryType;
+import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
 import dev.christopherbell.sharedfolder.model.SharedFolderSearchResponse;
 import java.time.Clock;
 import java.time.Duration;
@@ -50,6 +51,13 @@ public class SharedFolderCatalogService {
     return new SharedFolderSearchResponse(validatedQuery, matches, truncated);
   }
 
+  /** Returns audio files recursively below a root-level Music directory. */
+  public List<SharedDirectoryEntry> audioTracksBelowMusic() {
+    return currentSnapshot().entries().stream()
+        .filter(this::isAudioTrackBelowMusic)
+        .toList();
+  }
+
   private CatalogSnapshot currentSnapshot() {
     Instant now = clock.instant();
     CatalogSnapshot current = snapshot;
@@ -85,6 +93,15 @@ public class SharedFolderCatalogService {
   private boolean matches(SharedDirectoryEntry entry, String normalizedQuery) {
     return entry.name().toLowerCase(Locale.ROOT).contains(normalizedQuery)
         || entry.path().toLowerCase(Locale.ROOT).contains(normalizedQuery);
+  }
+
+  private boolean isAudioTrackBelowMusic(SharedDirectoryEntry entry) {
+    if (entry.type() != SharedDirectoryEntryType.FILE
+        || entry.previewKind() != SharedFolderPreviewKind.AUDIO) {
+      return false;
+    }
+    int separator = entry.path().indexOf('/');
+    return separator > 0 && entry.path().substring(0, separator).equalsIgnoreCase("Music");
   }
 
   private String requireQuery(String query) {

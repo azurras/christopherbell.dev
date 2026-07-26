@@ -83,6 +83,27 @@ class SharedFolderCatalogServiceTest {
             exception -> assertThat(exception.getStatusCode().value()).isEqualTo(400));
   }
 
+  @Test
+  void audioTracksBelowMusic_returnsOnlyRecursiveAudioFilesUnderRootMusicIgnoringCase() {
+    SharedFolderBrowserService browser = Mockito.mock(SharedFolderBrowserService.class);
+    when(browser.list("")).thenReturn(directory("", List.of(
+        directoryEntry("mUsIc", "mUsIc"), directoryEntry("Elsewhere", "Elsewhere"))));
+    when(browser.list("mUsIc")).thenReturn(directory("mUsIc", List.of(
+        directoryEntry("Live", "mUsIc/Live"),
+        file("root.mp3", "mUsIc/root.mp3"),
+        nonAudioFile("cover.jpg", "mUsIc/cover.jpg"))));
+    when(browser.list("mUsIc/Live")).thenReturn(directory("mUsIc/Live", List.of(
+        file("nested.flac", "mUsIc/Live/nested.flac"))));
+    when(browser.list("Elsewhere")).thenReturn(directory("Elsewhere", List.of(
+        file("outside.mp3", "Elsewhere/outside.mp3"))));
+
+    var tracks = new SharedFolderCatalogService(browser, Clock.fixed(MODIFIED_AT, ZoneOffset.UTC))
+        .audioTracksBelowMusic();
+
+    assertThat(tracks).extracting(SharedDirectoryEntry::path)
+        .containsExactly("mUsIc/root.mp3", "mUsIc/Live/nested.flac");
+  }
+
   private List<SharedDirectoryEntry> tracks() {
     List<SharedDirectoryEntry> entries = new ArrayList<>();
     for (int number = 1; number <= 201; number++) {
@@ -104,6 +125,11 @@ class SharedFolderCatalogServiceTest {
   private SharedDirectoryEntry file(String name, String path) {
     return new SharedDirectoryEntry(name, path, SharedDirectoryEntryType.FILE, 1, MODIFIED_AT,
         SharedFolderPreviewKind.AUDIO);
+  }
+
+  private SharedDirectoryEntry nonAudioFile(String name, String path) {
+    return new SharedDirectoryEntry(name, path, SharedDirectoryEntryType.FILE, 1, MODIFIED_AT,
+        SharedFolderPreviewKind.IMAGE);
   }
 
   private static final class MutableClock extends Clock {
