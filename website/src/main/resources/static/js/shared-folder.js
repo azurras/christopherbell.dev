@@ -20,6 +20,7 @@ import {
   revealSharedFolderPreview,
   sharedFolderEntryKind,
   sharedFolderEntryParentPath,
+  renderSharedFolderEntryParentPath,
   sharedFolderSearchResultDescription,
   uploadProgressPercent,
   uploadIsTerminal,
@@ -479,7 +480,7 @@ function renderEntries(response, canWrite = false, navigatePath, options = {}) {
     if (searchResults) {
       const parentPath = document.createElement('span');
       parentPath.className = 'shared-folder-entry-parent-path';
-      parentPath.textContent = `In ${sharedFolderEntryParentPath(entry) || 'Shared'}`;
+      renderSharedFolderEntryParentPath(parentPath, entry);
       identity.append(parentPath);
     }
     open.append(icon, identity);
@@ -608,11 +609,14 @@ export function createSharedFolderNavigator({ load, render, pushPath, onError })
   return Object.freeze({
     open: path => visit(path, true),
     restore: path => visit(path, false),
+    invalidate: () => { generation += 1; },
   });
 }
 
 /** Own search request cancellation so an older result cannot replace a newer page state. */
-export function createSharedFolderSearchController({ load, render, restore, onError }) {
+export function createSharedFolderSearchController({
+  load, render, restore, onError, invalidateNavigation = () => {},
+}) {
   let generation = 0;
   let active = false;
   let currentController = null;
@@ -631,6 +635,7 @@ export function createSharedFolderSearchController({ load, render, restore, onEr
       return false;
     }
     active = true;
+    invalidateNavigation();
     const request = begin();
     try {
       const response = validateSharedFolderSearchResponse(await load(requestedQuery, request.signal));
@@ -667,12 +672,8 @@ export function createSharedFolderSearchController({ load, render, restore, onEr
   return Object.freeze({ search, clear, leave, active: () => active });
 }
 
-function configureSharedFolderSearchForm({ controller, statusFn = status }) {
-  if (typeof document === 'undefined') return;
-  const form = document.getElementById('shared-folder-search-form');
-  const input = document.getElementById('shared-folder-search-query');
-  const clearButton = document.getElementById('shared-folder-search-clear');
-  if (!form || !input || !clearButton) return;
+export function bindSharedFolderSearchForm({ form, input, clearButton, controller, statusFn = status }) {
+  if (!form || !input || !clearButton || !controller) return false;
 
   const updateClearAction = () => {
     clearButton.disabled = !controller.active();
@@ -693,6 +694,18 @@ function configureSharedFolderSearchForm({ controller, statusFn = status }) {
     }
   });
   updateClearAction();
+  return true;
+}
+
+function configureSharedFolderSearchForm({ controller, statusFn = status }) {
+  if (typeof document === 'undefined') return;
+  bindSharedFolderSearchForm({
+    form: document.getElementById('shared-folder-search-form'),
+    input: document.getElementById('shared-folder-search-query'),
+    clearButton: document.getElementById('shared-folder-search-clear'),
+    controller,
+    statusFn,
+  });
 }
 
 export async function initializeSharedFolderPage({
@@ -771,6 +784,7 @@ export async function initializeSharedFolderPage({
       },
       restore: () => navigator.restore(activePath),
       onError: handleFolderError,
+      invalidateNavigation: navigator.invalidate,
     });
     configureSharedFolderSearchForm({ controller: searchController, statusFn });
     await configureUploadPanelFn(account, () => activePath);

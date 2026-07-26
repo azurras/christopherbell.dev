@@ -231,10 +231,20 @@ export function breadcrumbItems(path = '') {
 
 /** Validate and copy one untrusted recursive-search result before the browser renders it. */
 function validatedSharedFolderSearchEntry(entry) {
+  const safeRelativePath = typeof entry?.path === 'string'
+    && entry.path.length > 0
+    && !entry.path.includes('\\')
+    && !entry.path.includes('\0')
+    && entry.path.split('/').every(segment => segment && segment !== '.' && segment !== '..');
+  const validTimestamp = typeof entry?.modifiedAt === 'string'
+    && Number.isFinite(Date.parse(entry.modifiedAt));
+  const validPreviewKind = ['NONE', 'TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'PDF']
+    .includes(entry?.previewKind);
   if (!entry || typeof entry.name !== 'string' || typeof entry.path !== 'string'
+      || !entry.name.trim() || !safeRelativePath
       || !['DIRECTORY', 'FILE'].includes(entry.type) || typeof entry.size !== 'number'
-      || !Number.isFinite(entry.size) || entry.size < 0
-      || typeof entry.modifiedAt !== 'string' || typeof entry.previewKind !== 'string'
+      || !Number.isSafeInteger(entry.size) || entry.size < 0 || !validTimestamp || !validPreviewKind
+      || entry.type === 'DIRECTORY' && entry.previewKind !== 'NONE'
       || !(entry.observedToken === undefined || entry.observedToken === null
         || typeof entry.observedToken === 'string')) {
     throw new Error('The shared folder returned an invalid search response.');
@@ -252,7 +262,8 @@ function validatedSharedFolderSearchEntry(entry) {
 
 /** Validate the shared-folder search boundary before recursive entries reach the page. */
 export function validateSharedFolderSearchResponse(response) {
-  if (!response || typeof response.query !== 'string' || !response.query.trim()
+  if (!response || typeof response.query !== 'string' || response.query !== response.query.trim()
+      || response.query.length < 1 || response.query.length > 200
       || !Array.isArray(response.entries) || typeof response.truncated !== 'boolean') {
     throw new Error('The shared folder returned an invalid search response.');
   }
@@ -268,6 +279,11 @@ export function sharedFolderEntryParentPath(entry) {
   const path = String(entry?.path || '');
   const separator = path.lastIndexOf('/');
   return separator > 0 ? path.slice(0, separator) : '';
+}
+
+/** Render one recursive result's parent directory as plain text, never markup. */
+export function renderSharedFolderEntryParentPath(target, entry) {
+  target.textContent = `In ${sharedFolderEntryParentPath(entry) || 'Shared'}`;
 }
 
 /** Build accessible search-result status text, including the server-owned result cap. */
