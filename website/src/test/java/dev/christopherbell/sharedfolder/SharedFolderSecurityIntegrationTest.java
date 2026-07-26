@@ -149,6 +149,8 @@ class SharedFolderSecurityIntegrationTest {
         .andExpect(header().string("X-Frame-Options", "SAMEORIGIN"))
         .andExpect(header().string("Content-Security-Policy",
             org.hamcrest.Matchers.containsString("frame-ancestors 'self'")))
+        .andExpect(header().string("Content-Security-Policy",
+            org.hamcrest.Matchers.containsString("frame-src 'self'")))
         .andExpect(header().string("Referrer-Policy", "strict-origin-when-cross-origin"))
         .andExpect(header().string("Permissions-Policy",
             "camera=(), geolocation=(), microphone=(), payment=(), usb=()"));

@@ -35,6 +35,8 @@ Owns application-wide Spring and web infrastructure.
   nonblank bearer header bypass CSRF for API compatibility.
 - Browser responses set CSP, SAMEORIGIN framing, Permissions Policy,
   strict-origin-when-cross-origin referrer policy, and production-configured HSTS.
+  CSP permits same-origin content frames for the persistent media shell while frame ancestry
+  remains restricted to the same origin.
   Browser cookie security, HSTS, and the canonical password-reset origin bind
   under `app.browser-security`; production ignores forwarding headers.
 - Rate limiting and request size protection filters under `filter`. Ordinary
