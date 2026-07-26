@@ -7,6 +7,7 @@ Owns photography/photo listing behavior.
 - Photo controllers and services.
 - Photo metadata models under `model`.
 - Read-side behavior for photography pages.
+- `GET /api/photo/v1` is an anonymous read API whose standard response envelope exposes photos as `payload.images`.
 
 ## Package Shape
 

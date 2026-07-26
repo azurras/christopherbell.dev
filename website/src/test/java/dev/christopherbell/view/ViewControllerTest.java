@@ -177,6 +177,19 @@ public class ViewControllerTest {
   }
 
   @Test
+  @DisplayName("Photography usage page is public and linked from the gallery")
+  void getPhotographyUsagePage_rendersUsageContract() throws Exception {
+    mockMvc
+        .perform(get("/photos"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("href=\"/photos/usage\"")));
+    mockMvc
+        .perform(get("/photos/usage"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("Photography Usage")));
+  }
+
+  @Test
   @DisplayName("Post page renders canonical post social URL")
   public void getPostPage_rendersPostSocialUrl() throws Exception {
     mockMvc

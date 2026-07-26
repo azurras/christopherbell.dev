@@ -1,14 +1,28 @@
 /**
- * PhotoGallery web component.
+ * Public photo-gallery component.
  *
- * Responsibilities:
- * - Fetch image metadata and render a responsive grid
+ * Fetches configured image metadata and renders content images with meaningful alternatives.
  */
+import { API } from '../lib/api.js';
+import { fetchJson } from '../lib/util.js';
+
+/** Return a stable owned image collection from the standard API envelope. */
+export function galleryImagesFromResponse(response) {
+    const images = response?.payload?.images ?? response?.images;
+    return Array.isArray(images) ? [...images] : [];
+}
+
+/** Content images prefer their description, then name, then an honest generic fallback. */
+export function galleryAltText(image) {
+    return String(image?.description || '').trim()
+        || String(image?.name || '').trim()
+        || 'Gallery photo';
+}
+
 class PhotoGallery extends HTMLElement {
     constructor() {
         super();
         this.images = [];
-        this.location = '/api/photos';
     }
 
     connectedCallback() {
@@ -18,36 +32,35 @@ class PhotoGallery extends HTMLElement {
 
     async loadImages() {
         try {
-            const res = await fetch(this.location);
-            const data = await res.json();
-            this.images = data.images || [];
+            this.images = galleryImagesFromResponse(await fetchJson(API.photos.images));
             this.update();
-        } catch (e) {
-            console.error('Failed to load gallery images', e);
+        } catch (error) {
+            console.error('Failed to load gallery images', error);
         }
     }
 
     update() {
         const row = this.querySelector('.gallery-row');
-        row.innerHTML = '';
-        this.images.forEach(image => {
+        row.replaceChildren();
+        for (const image of this.images) {
             const col = document.createElement('div');
             col.className = 'col';
             const img = document.createElement('img');
-            img.src = image.path;
+            img.src = String(image?.path || '');
             img.className = 'img-fluid rounded';
-            img.alt = '';
+            img.alt = galleryAltText(image);
             col.appendChild(img);
             row.appendChild(col);
-        });
+        }
     }
 
     render() {
-        this.innerHTML = `
-            <div class="container-fluid">
-                <div class="row row-cols-1 row-cols-sm-1 row-cols-md-2 g-2 gallery-row"></div>
-            </div>
-        `;
+        const container = document.createElement('div');
+        container.className = 'container-fluid';
+        const row = document.createElement('div');
+        row.className = 'row row-cols-1 row-cols-sm-1 row-cols-md-2 g-2 gallery-row';
+        container.appendChild(row);
+        this.replaceChildren(container);
     }
 }
 

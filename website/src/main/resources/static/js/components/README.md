@@ -18,6 +18,8 @@ Owns reusable browser-side components shared across pages.
 - Dropdowns use Bootstrap when present and include vanilla fallbacks for pages that do not load Bootstrap JavaScript.
 - Profile, user profile, and messages pages rely on defensive wrapping/stacking rules in `main.css` so long usernames, timestamps, buttons, and message text do not overlap.
 - `pubsub.js` provides lightweight cross-component events, especially auth login/logout updates.
+- `blog.js` reads the public versioned blog API once, unwraps the standard response envelope, and renders configured post text without unsupported tag filtering.
+- `gallery.js` reads the public versioned photo API, unwraps `payload.images`, and uses description, name, then `Gallery photo` as the image-alt fallback order.
 - `site-media-player.js` owns the persistent audio/video bar, adaptive custom controls,
   same-tab refresh restoration with gesture fallback, validated audio-tag presentation, and the
   same-origin navigation shell used while media plays.

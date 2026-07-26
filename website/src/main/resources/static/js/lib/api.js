@@ -179,4 +179,7 @@ export const API = {
   blog: {
     posts: '/api/blog/v1/posts',
   },
+  photos: {
+    images: '/api/photo/v1',
+  },
 };
