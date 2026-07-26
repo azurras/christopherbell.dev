@@ -16,6 +16,8 @@ import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.notification.inbox.NotificationInboxService;
+import dev.christopherbell.notification.inbox.NotificationPage;
+import dev.christopherbell.notification.inbox.NotificationReadResult;
 import dev.christopherbell.notification.model.NotificationDetail;
 import dev.christopherbell.notification.model.NotificationPreferenceDetail;
 import dev.christopherbell.notification.model.NotificationPreferenceUpdateRequest;
@@ -38,6 +40,33 @@ class NotificationControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private NotificationInboxService notificationInboxService;
   @MockitoBean private NotificationPreferenceService notificationPreferenceService;
+
+  @Test
+  @DisplayName("Get notification page: user -> 200 with cursor metadata")
+  @WithMockUser(authorities = {"USER"})
+  void getMyNotificationPage_whenUser_returnsPage() throws Exception {
+    when(notificationInboxService.getMyNotifications(eq("cursor-1"), eq(10)))
+        .thenReturn(new NotificationPage(List.of(detail("notification-1")), "cursor-2"));
+
+    mockMvc.perform(get("/api/notifications" + APIVersion.V20260726)
+            .param("cursor", "cursor-1")
+            .param("size", "10"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.items[0].id").value("notification-1"))
+        .andExpect(jsonPath("$.payload.nextCursor").value("cursor-2"));
+  }
+
+  @Test
+  @DisplayName("Mark all read: user -> 200 with modified count")
+  @WithMockUser(authorities = {"USER"})
+  void markAllRead_whenUser_returnsModifiedCount() throws Exception {
+    when(notificationInboxService.markAllRead()).thenReturn(new NotificationReadResult(3));
+
+    mockMvc.perform(post("/api/notifications" + APIVersion.V20260726 + "/read-all")
+            .with(csrf()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.updatedCount").value(3));
+  }
 
   @Test
   @DisplayName("Get notifications: user -> 200 with requested limit")

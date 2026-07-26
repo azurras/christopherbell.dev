@@ -68,6 +68,26 @@ export function recentNotifications(notifications, limit = DEFAULT_RECENT_LIMIT)
   return Array.isArray(notifications) ? notifications.slice(0, limit) : [];
 }
 
+/** Appends page items without duplicating an already rendered notification. */
+export function mergeNotificationPages(current, incoming) {
+  const merged = [];
+  const seen = new Set();
+  for (const notification of [...(current || []), ...(incoming || [])]) {
+    const id = notification?.id;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    merged.push(notification);
+  }
+  return merged;
+}
+
+/** Counts unread items in the currently loaded notification page state. */
+export function unreadNotificationCount(notifications) {
+  return (Array.isArray(notifications) ? notifications : [])
+    .filter(notification => notification && !notification.read)
+    .length;
+}
+
 /** Unread notifications that have not already been shown by the browser API. */
 export function browserNotificationsToShow(notifications, seenIds, preferences = null) {
   const seen = seenIds instanceof Set ? seenIds : new Set();

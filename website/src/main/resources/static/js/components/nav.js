@@ -107,6 +107,10 @@ class AppNav extends HTMLElement {
         this.render();
         this.loadUserInfo();
         this.loadNotifications();
+        if (!this.notificationChangedHandler) {
+            this.notificationChangedHandler = () => this.loadNotifications();
+            document.addEventListener('notifications:changed', this.notificationChangedHandler);
+        }
         if (!this.notificationPoll) {
             this.notificationPoll = window.setInterval(() => this.loadNotifications(), 30000);
         }
@@ -130,6 +134,10 @@ class AppNav extends HTMLElement {
         if (this.notificationPoll) {
             window.clearInterval(this.notificationPoll);
             this.notificationPoll = null;
+        }
+        if (this.notificationChangedHandler) {
+            document.removeEventListener('notifications:changed', this.notificationChangedHandler);
+            this.notificationChangedHandler = null;
         }
         if (this.notificationOutsideClickHandler) {
             document.removeEventListener('click', this.notificationOutsideClickHandler);

@@ -19,7 +19,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @NoArgsConstructor
 @CompoundIndexes({
-    @CompoundIndex(name = "notification_account_created_desc", def = "{'accountId': 1, 'createdOn': -1}"),
+    @CompoundIndex(name = "notification_account_created_id_desc", def = "{'accountId': 1, 'createdOn': -1, '_id': -1}"),
     @CompoundIndex(name = "notification_account_read", def = "{'accountId': 1, 'read': 1}")
 })
 @Document("notifications")

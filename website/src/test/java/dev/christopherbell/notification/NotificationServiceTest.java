@@ -17,6 +17,12 @@ import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import java.util.Optional;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import dev.christopherbell.notification.delivery.NotificationDeliveryPermit;
+import dev.christopherbell.notification.delivery.NotificationEventIdentity;
+import dev.christopherbell.notification.delivery.NotificationFanoutGuard;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +36,7 @@ class NotificationServiceTest {
   @Mock private AccountRepository accountRepository;
   @Mock private PermissionService permissionService;
   @Mock private NotificationPreferenceService notificationPreferenceService;
+  @Mock private NotificationFanoutGuard fanoutGuard;
 
   @Test
   @DisplayName("Mention notifications are created for existing mentioned users")
@@ -178,8 +185,16 @@ class NotificationServiceTest {
   }
 
   private NotificationService service() {
+    org.mockito.Mockito.lenient()
+        .when(fanoutGuard.tryAcquire(any(NotificationEventIdentity.class), any(Instant.class)))
+        .thenReturn(Optional.of(new NotificationDeliveryPermit("claim")));
     return new NotificationService(
-        new NotificationDeliveryService(notificationRepository, accountRepository, notificationPreferenceService),
-        new NotificationInboxService(notificationRepository, permissionService));
+        new NotificationDeliveryService(
+            notificationRepository,
+            accountRepository,
+            notificationPreferenceService,
+            fanoutGuard,
+            Clock.fixed(Instant.parse("2026-07-26T12:00:00Z"), ZoneOffset.UTC)),
+        new NotificationInboxService(notificationRepository, permissionService, null, null));
   }
 }

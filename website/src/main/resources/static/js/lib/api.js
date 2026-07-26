@@ -81,6 +81,8 @@ export const API = {
   },
   notifications: {
     base: '/api/notifications/2025-09-14',
+    page: (cursor, size = 25) => `/api/notifications/2026-07-26?size=${encodeURIComponent(size)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+    markAllRead: '/api/notifications/2026-07-26/read-all',
     unreadCount: '/api/notifications/2025-09-14/unread-count',
     preferences: '/api/notifications/2025-09-14/preferences',
     markRead: (id) => `/api/notifications/2025-09-14/${encodeURIComponent(id)}/read`,

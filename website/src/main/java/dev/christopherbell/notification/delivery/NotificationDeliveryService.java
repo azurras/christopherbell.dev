@@ -10,7 +10,7 @@ import dev.christopherbell.notification.model.NotificationType;
 import dev.christopherbell.notification.preference.NotificationPreferenceService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -28,6 +28,8 @@ public class NotificationDeliveryService {
   private final NotificationRepository notificationRepository;
   private final AccountRepository accountRepository;
   private final NotificationPreferenceService notificationPreferenceService;
+  private final NotificationFanoutGuard fanoutGuard;
+  private final Clock clock;
 
   /** Creates mention notifications for valid mentioned usernames in a post. */
   public void createMentionNotifications(Post post, Account actor) {
@@ -35,13 +37,10 @@ public class NotificationDeliveryService {
       return;
     }
 
-    var now = Instant.now();
     for (var username : extractMentionUsernames(post.getText())) {
       accountRepository.findByUsernameIgnoreCase(username)
           .filter(account -> !account.getId().equals(actor.getId()))
-          .filter(account -> shouldDeliver(account.getId(), NotificationType.MENTION))
-          .ifPresent(account -> notificationRepository.save(Notification.builder()
-              .id(UUID.randomUUID().toString())
+          .ifPresent(account -> deliver(Notification.builder()
               .accountId(account.getId())
               .actorAccountId(actor.getId())
               .actorUsername(actor.getUsername())
@@ -49,8 +48,7 @@ public class NotificationDeliveryService {
               .postText(post.getText())
               .notificationType(NotificationType.MENTION)
               .read(false)
-              .createdOn(now)
-              .build()));
+              .build(), post.getId()));
     }
   }
 
@@ -59,11 +57,7 @@ public class NotificationDeliveryService {
     if (message == null || actor == null || recipient == null) {
       return;
     }
-    if (!shouldDeliver(recipient.getId(), NotificationType.MESSAGE)) {
-      return;
-    }
-    notificationRepository.save(Notification.builder()
-        .id(UUID.randomUUID().toString())
+    deliver(Notification.builder()
         .accountId(recipient.getId())
         .actorAccountId(actor.getId())
         .actorUsername(actor.getUsername())
@@ -71,8 +65,7 @@ public class NotificationDeliveryService {
         .messageText(message.getText())
         .notificationType(NotificationType.MESSAGE)
         .read(false)
-        .createdOn(Instant.now())
-        .build());
+        .build(), message.getId());
   }
 
   /** Creates a notification when another user likes a post. */
@@ -94,11 +87,7 @@ public class NotificationDeliveryService {
     if (session == null || actor == null || recipient == null) {
       return;
     }
-    if (!shouldDeliver(recipient.getId(), NotificationType.WFL_SESSION)) {
-      return;
-    }
-    notificationRepository.save(Notification.builder()
-        .id(UUID.randomUUID().toString())
+    deliver(Notification.builder()
         .accountId(recipient.getId())
         .actorAccountId(actor.getId())
         .actorUsername(actor.getUsername())
@@ -106,8 +95,7 @@ public class NotificationDeliveryService {
         .whatsForLunchSessionText("Vote on today's lunch picks.")
         .notificationType(NotificationType.WFL_SESSION)
         .read(false)
-        .createdOn(Instant.now())
-        .build());
+        .build(), session.getId());
   }
 
   static Set<String> extractMentionUsernames(String text) {
@@ -139,12 +127,7 @@ public class NotificationDeliveryService {
     if (actor.getId() != null && actor.getId().equals(recipient.getId())) {
       return;
     }
-    if (!shouldDeliver(recipient.getId(), notificationType)) {
-      return;
-    }
-
-    notificationRepository.save(Notification.builder()
-        .id(UUID.randomUUID().toString())
+    deliver(Notification.builder()
         .accountId(recipient.getId())
         .actorAccountId(actor.getId())
         .actorUsername(actor.getUsername())
@@ -152,11 +135,33 @@ public class NotificationDeliveryService {
         .postText(post.getText())
         .notificationType(notificationType)
         .read(false)
-        .createdOn(Instant.now())
-        .build());
+        .build(), post.getId());
   }
 
   private boolean shouldDeliver(String accountId, NotificationType notificationType) {
     return notificationPreferenceService.shouldDeliver(accountId, notificationType);
+  }
+
+  private void deliver(Notification notification, String targetId) {
+    if (notification.getAccountId() == null
+        || notification.getActorAccountId() == null
+        || notification.getNotificationType() == null
+        || targetId == null) {
+      return;
+    }
+    if (!shouldDeliver(notification.getAccountId(), notification.getNotificationType())) {
+      return;
+    }
+    var identity = new NotificationEventIdentity(
+        notification.getAccountId(),
+        notification.getActorAccountId(),
+        notification.getNotificationType(),
+        targetId);
+    var now = clock.instant();
+    fanoutGuard.tryAcquire(identity, now).ifPresent(permit -> {
+      notification.setId(UUID.randomUUID().toString());
+      notification.setCreatedOn(now);
+      notificationRepository.save(notification);
+    });
   }
 }

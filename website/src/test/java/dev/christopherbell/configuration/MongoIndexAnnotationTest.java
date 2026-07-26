@@ -34,7 +34,9 @@ class MongoIndexAnnotationTest {
   void notificationIndexes_matchRepositoryQueryPaths() {
     var indexes = compoundIndexes(Notification.class);
 
-    assertEquals("{'accountId': 1, 'createdOn': -1}", indexes.get("notification_account_created_desc"));
+    assertEquals(
+        "{'accountId': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("notification_account_created_id_desc"));
     assertEquals("{'accountId': 1, 'read': 1}", indexes.get("notification_account_read"));
   }
 

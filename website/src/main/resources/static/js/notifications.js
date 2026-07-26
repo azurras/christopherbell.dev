@@ -8,10 +8,12 @@ import { API } from './lib/api.js';
 import { authHeaders, fetchJson, formatWhen, getAuthToken, loginRedirectUrl, sanitize } from './lib/util.js';
 import {
   notificationPreferencePayload,
+  mergeNotificationPages,
   notificationSettingsMarkup,
   notificationTargetUrl,
   notificationText,
-  notificationTitle
+  notificationTitle,
+  unreadNotificationCount
 } from './lib/notifications.js';
 
 const page = document.getElementById('notificationsPage');
@@ -19,6 +21,9 @@ const list = document.getElementById('notificationsList');
 const alertBox = document.getElementById('notificationsAlert');
 const settingsForm = document.getElementById('notificationSettingsForm');
 const settingsStatus = document.getElementById('notificationSettingsStatus');
+const loadMoreButton = document.getElementById('loadMoreNotifications');
+const markAllReadButton = document.getElementById('markAllNotificationsRead');
+const notificationState = { items: [], nextCursor: null, loading: false };
 
 function showError(message) {
   if (!alertBox) return;
@@ -90,6 +95,17 @@ async function saveNotificationSettings() {
   }
 }
 
+function updateNotificationControls() {
+  if (loadMoreButton) {
+    loadMoreButton.classList.toggle('d-none', !notificationState.nextCursor);
+    loadMoreButton.disabled = notificationState.loading;
+  }
+  if (markAllReadButton) {
+    markAllReadButton.disabled = notificationState.loading
+      || unreadNotificationCount(notificationState.items) === 0;
+  }
+}
+
 function renderNotifications(notifications) {
   if (!list) return;
   if (!Array.isArray(notifications) || notifications.length === 0) {
@@ -113,6 +129,9 @@ function renderNotifications(notifications) {
             headers: authHeaders(),
             redirectOnUnauthorized: true,
           });
+          notificationState.items = notificationState.items.map(notification =>
+            notification.id === notificationId ? { ...notification, read: true } : notification);
+          document.dispatchEvent(new CustomEvent('notifications:changed'));
         } catch (_) {
           // Navigation is still useful even if marking read fails.
         }
@@ -120,27 +139,65 @@ function renderNotifications(notifications) {
       window.location.href = targetUrl;
     });
   });
+  updateNotificationControls();
 }
 
-async function loadNotifications() {
+async function loadNotifications(cursor = null) {
   if (!page) return;
   if (!getAuthToken()) {
     window.location.href = loginRedirectUrl('/notifications');
     return;
   }
+  if (notificationState.loading) return;
   clearError();
+  notificationState.loading = true;
+  updateNotificationControls();
   try {
-    const [notifications] = await Promise.all([
-      fetchJson(`${API.notifications.base}?limit=50`, {
+    const [notificationPage] = await Promise.all([
+      fetchJson(API.notifications.page(cursor, 25), {
         headers: authHeaders(),
         redirectOnUnauthorized: true,
       }),
-      loadNotificationSettings()
+      cursor ? Promise.resolve() : loadNotificationSettings()
     ]);
-    renderNotifications(notifications);
+    notificationState.items = mergeNotificationPages(
+      cursor ? notificationState.items : [], notificationPage?.items || []);
+    notificationState.nextCursor = notificationPage?.nextCursor || null;
+    renderNotifications(notificationState.items);
   } catch (error) {
     showError(error.message || 'Could not load notifications.');
+  } finally {
+    notificationState.loading = false;
+    updateNotificationControls();
   }
 }
+
+async function markAllRead() {
+  if (notificationState.loading) return;
+  notificationState.loading = true;
+  updateNotificationControls();
+  clearError();
+  try {
+    await fetchJson(API.notifications.markAllRead, {
+      method: 'POST',
+      headers: authHeaders(),
+      redirectOnUnauthorized: true,
+    });
+    notificationState.items = notificationState.items.map(notification => ({
+      ...notification,
+      read: true
+    }));
+    renderNotifications(notificationState.items);
+    document.dispatchEvent(new CustomEvent('notifications:changed'));
+  } catch (error) {
+    showError(error.message || 'Could not mark notifications read.');
+  } finally {
+    notificationState.loading = false;
+    updateNotificationControls();
+  }
+}
+
+loadMoreButton?.addEventListener('click', () => loadNotifications(notificationState.nextCursor));
+markAllReadButton?.addEventListener('click', markAllRead);
 
 document.addEventListener('DOMContentLoaded', loadNotifications);
