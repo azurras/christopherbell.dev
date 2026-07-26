@@ -104,8 +104,14 @@ C:\ProgramData\christopherbell.dev\config\app.env
 Use absolute native Windows paths. Set `cloudflaredExe` to the signed
 machine-wide executable, `publicUrl` to
 `https://www.christopherbell.dev/`, a real smoke-account email, a stable JWT
-secret of at least 32 characters, and
-`SPRING_MONGODB_URI=mongodb://127.0.0.1:27017`.
+secret of at least 32 characters, and an explicit
+`SPRING_MONGODB_URI=mongodb://127.0.0.1:27017`; production has no MongoDB URI
+fallback. Set `APP_MAIL_ENABLED=true` with `RESEND_API_KEY` and `APP_MAIL_FROM`,
+or set it to `false` to intentionally disable password-reset delivery.
+Production settings are validated before Spring refresh, and immutable leased
+MongoDB migrations run before readiness. Back up before migration releases and
+use the [migration runbook](mongodb-migrations.md) for failed or incomplete
+recovery.
 
 Create a temporary protected file containing only the rotated Cloudflare token,
 then finish setup:

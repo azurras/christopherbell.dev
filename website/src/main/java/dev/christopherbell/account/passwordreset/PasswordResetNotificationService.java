@@ -1,10 +1,10 @@
 package dev.christopherbell.account.passwordreset;
 
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.configuration.mail.MailProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -18,11 +18,14 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class PasswordResetNotificationService {
   private final ObjectProvider<JavaMailSender> mailSenderProvider;
-
-  @Value("${app.mail.from:noreply@christopherbell.dev}")
-  private String fromAddress;
+  private final MailProperties mailProperties;
 
   public void sendPasswordReset(Account account, String resetUrl) {
+    if (!mailProperties.enabled()) {
+      log.info("Password reset email for account {} was not sent because mail is disabled.",
+          account.getId());
+      return;
+    }
     var mailSender = mailSenderProvider.getIfAvailable();
     if (mailSender == null) {
       log.warn("Password reset email for account {} was not sent because mail is not configured.",
@@ -31,7 +34,7 @@ public class PasswordResetNotificationService {
     }
 
     var message = new SimpleMailMessage();
-    message.setFrom(fromAddress);
+    message.setFrom(mailProperties.from());
     message.setTo(account.getEmail());
     message.setSubject("Reset your password");
     message.setText("""

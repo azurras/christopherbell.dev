@@ -385,8 +385,8 @@ function Read-ProductionEnvironment {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing environment file: $Path" }
-    $required = @('APP_JWT_SECRET','RESEND_API_KEY','APP_MAIL_FROM','SPRING_MONGODB_URI')
-    $optional = @('APP_SHARED_FOLDER_ENABLED')
+    $required = @('APP_JWT_SECRET','SPRING_MONGODB_URI')
+    $optional = @('APP_MAIL_ENABLED','RESEND_API_KEY','APP_MAIL_FROM','APP_SHARED_FOLDER_ENABLED')
     $allowed = @($required) + @($optional)
     $values = @{}
     foreach ($line in Get-Content -LiteralPath $Path) {
@@ -395,21 +395,45 @@ function Read-ProductionEnvironment {
         if ($allowed -notcontains $Matches[1]) { throw "Unsupported app.env key: $($Matches[1])" }
         $values[$Matches[1]] = $Matches[2]
     }
+    $violations = @()
     foreach ($requiredKey in $required) {
         if (-not $values.ContainsKey($requiredKey) -or
             [string]::IsNullOrWhiteSpace($values[$requiredKey])) {
-            throw "Missing app.env value: $requiredKey"
+            $violations += "$requiredKey is required"
         }
     }
-    if ($values.ContainsKey('APP_SHARED_FOLDER_ENABLED') -and
-        $values.APP_SHARED_FOLDER_ENABLED -notin @('true','false')) {
-        throw 'APP_SHARED_FOLDER_ENABLED must be a Boolean.'
+    $mailEnabled = if ($values.ContainsKey('APP_MAIL_ENABLED') -and
+        $values.APP_MAIL_ENABLED -in @('true','false')) {
+        $values.APP_MAIL_ENABLED
+    } else { 'true' }
+    foreach ($booleanKey in @('APP_MAIL_ENABLED','APP_SHARED_FOLDER_ENABLED')) {
+        if ($values.ContainsKey($booleanKey) -and $values[$booleanKey] -notin @('true','false')) {
+            $violations += "$booleanKey must be a Boolean"
+        }
     }
-    if ($values.APP_JWT_SECRET -match '^replace-with-' -or $values.APP_JWT_SECRET.Length -lt 32) {
-        throw 'APP_JWT_SECRET must be a non-placeholder value of at least 32 characters.'
+    if ($mailEnabled -eq 'true') {
+        foreach ($mailKey in @('APP_MAIL_FROM','RESEND_API_KEY')) {
+            if (-not $values.ContainsKey($mailKey) -or
+                [string]::IsNullOrWhiteSpace($values[$mailKey])) {
+                $violations += "$mailKey is required when mail is enabled"
+            }
+        }
     }
-    if ($values.RESEND_API_KEY -eq 're_your_resend_api_key') { throw 'RESEND_API_KEY must not use the example value.' }
-    if ($values.APP_MAIL_FROM -eq 'noreply@your-verified-domain.com') { throw 'APP_MAIL_FROM must not use the example value.' }
+    if ($values.ContainsKey('APP_JWT_SECRET') -and
+        ($values.APP_JWT_SECRET -match '^replace-with-' -or $values.APP_JWT_SECRET.Length -lt 32)) {
+        $violations += 'APP_JWT_SECRET must be a non-placeholder value of at least 32 characters'
+    }
+    if ($mailEnabled -eq 'true' -and $values.ContainsKey('RESEND_API_KEY') -and
+        $values.RESEND_API_KEY -eq 're_your_resend_api_key') {
+        $violations += 'RESEND_API_KEY must be a non-placeholder value'
+    }
+    if ($mailEnabled -eq 'true' -and $values.ContainsKey('APP_MAIL_FROM') -and
+        $values.APP_MAIL_FROM -eq 'noreply@your-verified-domain.com') {
+        $violations += 'APP_MAIL_FROM must be a non-placeholder value'
+    }
+    if ($violations.Count -gt 0) {
+        throw "Invalid app.env configuration: $($violations -join '; ')"
+    }
     return $values
 }
 

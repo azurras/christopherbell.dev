@@ -3,25 +3,31 @@ package dev.christopherbell.configuration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.core.io.ClassPathResource;
 
 class MongoProfileConfigurationTest {
 
-  @ParameterizedTest
-  @ValueSource(strings = {"application-local.yml", "application-prod.yml"})
-  void profileUsesSpringBootFourMongoConnectionProperties(String resourceName) throws IOException {
-    var source = load(resourceName);
+  @Test
+  void localProfileKeepsLoopbackMongoDefault() throws IOException {
+    var source = load("application-local.yml");
     assertThat(source.getProperty("spring.mongodb.database")).isEqualTo("christopherbell");
     assertThat(source.getProperty("spring.mongodb.uri")).isEqualTo("mongodb://localhost:27017");
     assertThat(source.getProperty("spring.data.mongodb.auto-index-creation")).isEqualTo(true);
-    assertThat(Stream.of("spring.data.mongodb.database", "spring.data.mongodb.uri")
-        .map(source::getProperty)
-        .toList()).containsOnlyNulls();
+  }
+
+  @Test
+  void productionProfileRequiresEnvironmentMongoUriAndExplicitMailSwitch()
+      throws IOException {
+    var source = load("application-prod.yml");
+
+    assertThat(source.getProperty("spring.mongodb.database"))
+        .isEqualTo("${SPRING_MONGODB_DATABASE:christopherbell}");
+    assertThat(source.getProperty("spring.mongodb.uri")).isEqualTo("${SPRING_MONGODB_URI:}");
+    assertThat(source.getProperty("spring.data.mongodb.auto-index-creation")).isEqualTo(true);
+    assertThat(source.getProperty("app.mail.enabled")).isEqualTo("${APP_MAIL_ENABLED:true}");
+    assertThat(source.getProperty("spring.mail.password")).isEqualTo("${RESEND_API_KEY:}");
   }
 
   @Test

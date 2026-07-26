@@ -111,17 +111,46 @@ Describe 'production common operations' {
 
     It 'parses only allowlisted environment keys' {
         $path = Join-Path $TestDrive 'app.env'
-        @('APP_JWT_SECRET=abcdefghijklmnopqrstuvwxyz123456','RESEND_API_KEY=re_test',
+        @('APP_JWT_SECRET=abcdefghijklmnopqrstuvwxyz123456','APP_MAIL_ENABLED=true','RESEND_API_KEY=re_test',
           'APP_MAIL_FROM=noreply@example.com','SPRING_MONGODB_URI=mongodb://127.0.0.1:27017',
           'APP_SHARED_FOLDER_ENABLED=true') | Set-Content $path
         $environment = Read-ProductionEnvironment $path
+        $environment.APP_MAIL_ENABLED | Should -Be 'true'
         $environment.APP_MAIL_FROM | Should -Be 'noreply@example.com'
         $environment.APP_SHARED_FOLDER_ENABLED | Should -Be 'true'
     }
 
+    It 'allows mail to be explicitly disabled without mail credentials' {
+        $path = Join-Path $TestDrive 'app.env'
+        @('APP_JWT_SECRET=abcdefghijklmnopqrstuvwxyz123456','APP_MAIL_ENABLED=false',
+          'SPRING_MONGODB_URI=mongodb://127.0.0.1:27017') | Set-Content $path
+
+        $environment = Read-ProductionEnvironment $path
+
+        $environment.APP_MAIL_ENABLED | Should -Be 'false'
+        $environment.ContainsKey('APP_MAIL_FROM') | Should -BeFalse
+        $environment.ContainsKey('RESEND_API_KEY') | Should -BeFalse
+    }
+
+    It 'requires mail credentials when mail is enabled' {
+        $path = Join-Path $TestDrive 'app.env'
+        @('APP_JWT_SECRET=abcdefghijklmnopqrstuvwxyz123456','APP_MAIL_ENABLED=true',
+          'SPRING_MONGODB_URI=mongodb://127.0.0.1:27017') | Set-Content $path
+
+        { Read-ProductionEnvironment $path } | Should -Throw '*APP_MAIL_FROM*RESEND_API_KEY*'
+    }
+
+    It 'rejects a non-Boolean mail switch' {
+        $path = Join-Path $TestDrive 'app.env'
+        @('APP_JWT_SECRET=abcdefghijklmnopqrstuvwxyz123456','APP_MAIL_ENABLED=yes',
+          'SPRING_MONGODB_URI=mongodb://127.0.0.1:27017') | Set-Content $path
+
+        { Read-ProductionEnvironment $path } | Should -Throw '*APP_MAIL_ENABLED*Boolean*'
+    }
+
     It 'rejects a non-Boolean shared-folder switch' {
         $path = Join-Path $TestDrive 'app.env'
-        @('APP_JWT_SECRET=abcdefghijklmnopqrstuvwxyz123456','RESEND_API_KEY=re_test',
+        @('APP_JWT_SECRET=abcdefghijklmnopqrstuvwxyz123456','APP_MAIL_ENABLED=true','RESEND_API_KEY=re_test',
           'APP_MAIL_FROM=noreply@example.com','SPRING_MONGODB_URI=mongodb://127.0.0.1:27017',
           'APP_SHARED_FOLDER_ENABLED=yes') | Set-Content $path
 
@@ -136,7 +165,7 @@ Describe 'production common operations' {
 
     It 'rejects placeholder secrets' {
         $path = Join-Path $TestDrive 'app.env'
-        @('APP_JWT_SECRET=replace-with-at-least-32-random-characters','RESEND_API_KEY=re_your_resend_api_key',
+        @('APP_JWT_SECRET=replace-with-at-least-32-random-characters','APP_MAIL_ENABLED=true','RESEND_API_KEY=re_your_resend_api_key',
           'APP_MAIL_FROM=noreply@your-verified-domain.com','SPRING_MONGODB_URI=mongodb://127.0.0.1:27017') | Set-Content $path
         { Read-ProductionEnvironment $path } | Should -Throw '*non-placeholder*'
     }

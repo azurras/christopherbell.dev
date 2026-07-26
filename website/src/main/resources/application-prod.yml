@@ -3,8 +3,8 @@ server:
   forward-headers-strategy: none
 spring:
   mongodb:
-    database: christopherbell
-    uri: mongodb://localhost:27017
+    database: ${SPRING_MONGODB_DATABASE:christopherbell}
+    uri: ${SPRING_MONGODB_URI:}
   data:
     mongodb:
       auto-index-creation: true
@@ -12,7 +12,7 @@ spring:
     host: smtp.resend.com
     port: 587
     username: resend
-    password: ${RESEND_API_KEY}
+    password: ${RESEND_API_KEY:}
     properties:
       mail:
         smtp:
@@ -27,7 +27,8 @@ app:
   jwt:
     secret: ${APP_JWT_SECRET:}
   mail:
-    from: ${APP_MAIL_FROM:noreply@christopherbell.dev}
+    enabled: ${APP_MAIL_ENABLED:true}
+    from: ${APP_MAIL_FROM:}
   shared-folder:
     root: ${APP_SHARED_FOLDER_ROOT:A:/Shared}
     system-root: ${APP_SHARED_FOLDER_SYSTEM_ROOT:A:/Shared-System}
