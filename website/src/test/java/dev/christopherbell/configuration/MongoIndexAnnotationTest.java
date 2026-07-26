@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.christopherbell.message.model.Message;
+import dev.christopherbell.admin.model.AdminActivity;
 import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.report.model.PostReport;
@@ -17,6 +18,24 @@ import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
 
 class MongoIndexAnnotationTest {
+
+  @Test
+  @DisplayName("Admin activity declares stable audit filter indexes")
+  void adminActivityIndexes_matchAuditQueryPaths() {
+    var indexes = compoundIndexes(AdminActivity.class);
+
+    assertEquals(
+        "{'createdOn': -1, '_id': -1}", indexes.get("admin_activity_created_id_desc"));
+    assertEquals(
+        "{'action': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("admin_activity_action_created_id_desc"));
+    assertEquals(
+        "{'targetType': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("admin_activity_target_created_id_desc"));
+    assertEquals(
+        "{'actorUsername': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("admin_activity_actor_created_id_desc"));
+  }
 
   @Test
   @DisplayName("Report document declares stable queue and sparse unique open-report indexes")

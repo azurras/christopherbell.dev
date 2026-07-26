@@ -173,17 +173,15 @@ class ReportServiceTest {
     when(accountRepository.findById("u1")).thenReturn(Optional.of(account));
     when(reportRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-    service.resolveReport("r1", new ReportResolveRequest(ReportResolution.DELETE_POST_AND_SUSPEND_USER));
+    service.resolveReport(
+        "r1",
+        new ReportResolveRequest(
+            ReportResolution.DELETE_POST_AND_SUSPEND_USER,
+            "Confirmed abusive content."));
 
     verify(postRepository).findById("p1");
     verify(accountRepository).save(account);
-    verify(adminActivityService).record(
-        eq("REPORT_RESOLVED"),
-        eq("REPORT"),
-        eq("r1"),
-        any(),
-        any(),
-        any());
+    verify(adminActivityService).recordModeration(any());
     verify(adminActivityService).record(
         eq("POST_DELETED"),
         eq("POST"),

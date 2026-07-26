@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 
 @RequiredArgsConstructor
 @Service
@@ -37,6 +38,34 @@ public class AdminActivityService {
 
     return recordForActor(
         actorId, actorUsername, action, targetType, targetId, targetLabel, message, metadata);
+  }
+
+  /** Records one validated primary moderation event and surfaces persistence failure safely. */
+  public AdminActivity recordModeration(ModerationAuditCommand command) {
+    var actorId = permissionService.getSelfId();
+    var actorUsername = accountRepository.findById(actorId)
+        .map(account -> account.getUsername() == null ? actorId : account.getUsername())
+        .orElse(actorId);
+    var activity = AdminActivity.builder()
+        .actorAccountId(actorId)
+        .actorUsername(actorUsername)
+        .action(command.action())
+        .targetType(command.targetType())
+        .targetId(command.targetId())
+        .targetLabel(command.targetLabel())
+        .reason(command.reason())
+        .message(command.message().formatted(actorUsername))
+        .beforeValues(command.beforeValues())
+        .afterValues(command.afterValues())
+        .metadata(command.metadata())
+        .createdOn(Instant.now(clock))
+        .build();
+    try {
+      return adminActivityRepository.save(activity);
+    } catch (RuntimeException failure) {
+      throw new ServiceUnavailableException(
+          "Moderation audit is temporarily unavailable.", failure);
+    }
   }
 
   /** Records an outcome for an explicitly captured actor outside request security context. */

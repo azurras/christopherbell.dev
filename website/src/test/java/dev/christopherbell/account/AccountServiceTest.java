@@ -34,6 +34,7 @@ import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.passwordreset.PasswordResetNotificationService;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
+import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.libs.api.exception.InternalServiceException;
@@ -72,6 +73,7 @@ public class AccountServiceTest {
   @Mock private PostRepository postRepository;
   @Mock private SharedFolderAuditRecorder sharedFolderAudit;
   @Mock private SharedFolderAccessService sharedFolderAccess;
+  @Mock private AdminActivityService adminActivityService;
   private AccountService accountService;
 
   @BeforeEach
@@ -80,7 +82,8 @@ public class AccountServiceTest {
     var passwordResetService = new PasswordResetService(accountRepository, passwordResetNotificationService);
     var profileService = new AccountProfileService(accountRepository, accountMapper, postRepository);
     var followService = new AccountFollowService(accountRepository, profileService);
-    var moderationService = new AccountModerationService(accountRepository, accountMapper);
+    var moderationService = new AccountModerationService(
+        accountRepository, accountMapper, adminActivityService);
     accountService = new AccountService(
         accountMapper,
         accountRepository,

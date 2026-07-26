@@ -23,6 +23,13 @@ import {
   reportFilterValue,
   reportPageNavigation,
 } from './lib/back-office-reports.js';
+import {
+  activityFilterValue,
+  activityPageNavigation,
+  moderationActivitySummary,
+  moderationReasonValue,
+  parseActivityPage,
+} from './lib/back-office-activity.js';
 import { authHeaders, fetchJson, formatWhen, isLoggedIn, sanitize } from './lib/util.js';
 
 const content = document.getElementById('backOfficeContent');
@@ -38,6 +45,10 @@ const userPrevious = document.getElementById('userPrevious');
 const userNext = document.getElementById('userNext');
 const userPage = document.getElementById('userPage');
 const activityList = document.getElementById('activityList');
+const activityFilters = document.getElementById('activityFilters');
+const activityPrevious = document.getElementById('activityPrevious');
+const activityNext = document.getElementById('activityNext');
+const activityPage = document.getElementById('activityPage');
 const drawer = document.getElementById('backOfficeDrawer');
 const drawerBody = document.getElementById('drawerBody');
 const drawerClose = document.getElementById('drawerClose');
@@ -90,6 +101,16 @@ let reportQuery = {
 };
 let reportPageState = { page: 0, size: 25, totalElements: 0, totalPages: 0 };
 let activities = [];
+let activityQuery = {
+  page: 0,
+  size: 25,
+  action: '',
+  targetType: '',
+  actor: '',
+  from: '',
+  to: '',
+};
+let activityPageState = { page: 0, size: 25, totalElements: 0, totalPages: 0 };
 let restaurants = [];
 let vehicles = [];
 let blogPosts = [];
@@ -180,7 +201,7 @@ function renderMetrics() {
     metricOpenReports: openReports,
     metricPendingUsers: pendingUsers,
     metricSuspendedUsers: suspendedUsers,
-    metricRecentActivity: activities.length,
+    metricRecentActivity: activityPageState.totalElements,
     reportQueueCount: `${totalReports} total`,
     userQueueCount: `${accountPageState.totalElements} total`,
   };
@@ -306,6 +327,24 @@ function renderUserNavigation() {
   if (userPage) userPage.textContent = state.label;
 }
 
+function applyActivityPage(payload) {
+  const parsed = parseActivityPage(payload);
+  activities = parsed.items;
+  activityPageState = {
+    page: parsed.page,
+    size: parsed.size,
+    totalElements: parsed.totalElements,
+    totalPages: parsed.totalPages,
+  };
+}
+
+function renderActivityNavigation() {
+  const state = activityPageNavigation(activityPageState);
+  if (activityPrevious) activityPrevious.disabled = state.previousDisabled;
+  if (activityNext) activityNext.disabled = state.nextDisabled;
+  if (activityPage) activityPage.textContent = state.label;
+}
+
 function applyAccountPage(payload) {
   const parsed = parseAdminAccountPage(payload);
   accounts = parsed.items;
@@ -352,15 +391,20 @@ function renderActivity() {
     return;
   }
 
-  activityList.innerHTML = activities.map(activity => `
-    <article class="activity-item">
-      <div class="activity-dot ${activityClass(activity.action)}"></div>
-      <div>
-        <strong>${sanitize(activity.message || activity.action || 'Activity')}</strong>
-        <span>${activity.createdOn ? formatWhen(activity.createdOn) : '—'}</span>
-      </div>
-    </article>
-  `).join('');
+  activityList.innerHTML = activities.map(activity => {
+    const audit = moderationActivitySummary(activity);
+    return `
+      <article class="activity-item">
+        <div class="activity-dot ${activityClass(activity.action)}"></div>
+        <div>
+          <strong>${sanitize(activity.message || activity.action || 'Activity')}</strong>
+          ${audit.reason ? `<span><b>Reason:</b> ${sanitize(audit.reason)}</span>` : ''}
+          ${audit.transition ? `<span>${sanitize(audit.transition)}</span>` : ''}
+          <span>${activity.createdOn ? formatWhen(activity.createdOn) : '—'}</span>
+        </div>
+      </article>
+    `;
+  }).join('');
 }
 
 function activityClass(action) {
@@ -468,11 +512,11 @@ function renderSharedFolderPermissions(account) {
   host.replaceChildren(fragment);
 }
 
-async function resolveReport(reportId, resolution) {
+async function resolveReport(reportId, resolution, reason) {
   await fetchJson(API.reports.resolve(reportId), {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ resolution })
+    body: JSON.stringify({ resolution, reason })
   });
 }
 
@@ -492,30 +536,23 @@ async function updateSharedFolderPermissions(accountId, { read, write }) {
   });
 }
 
-async function approveAccount(accountId) {
-  return fetchJson(API.accounts.approve(accountId), {
-    method: 'POST',
-    headers: authHeaders(),
-    body: '{}',
-  });
-}
-
 async function refreshDashboard() {
   clearAlert();
-  const [accountPage, reportPagePayload, activityItems] = await Promise.all([
+  const [accountPage, reportPagePayload, activityPagePayload] = await Promise.all([
     fetchJson(API.accounts.adminPage(accountQuery), { headers: authHeaders() }),
     fetchJson(API.reports.page(reportQuery), { headers: authHeaders() }),
-    fetchJson(API.admin.activity, { headers: authHeaders() }),
+    fetchJson(API.admin.activityPage(activityQuery), { headers: authHeaders() }),
   ]);
   applyAccountPage(accountPage);
   applyReportPage(reportPagePayload);
-  activities = activityItems || [];
+  applyActivityPage(activityPagePayload);
   renderMetrics();
   renderReports();
   renderReportNavigation();
   renderUsers();
   renderUserNavigation();
   renderActivity();
+  renderActivityNavigation();
   try {
     await refreshSharedAdministration();
   } catch (err) {
@@ -532,6 +569,15 @@ async function refreshReports() {
   renderMetrics();
   renderReports();
   renderReportNavigation();
+}
+
+async function refreshActivity() {
+  clearAlert();
+  applyActivityPage(await fetchJson(
+      API.admin.activityPage(activityQuery), { headers: authHeaders() }));
+  renderMetrics();
+  renderActivity();
+  renderActivityNavigation();
 }
 
 async function refreshAccounts() {
@@ -822,9 +868,15 @@ async function handleReportAction(target) {
   const resolution = target.value;
   if (!reportId || !resolution) return;
 
+  const reason = moderationReasonValue(window.prompt('Reason for this report decision:'));
+  if (!reason) {
+    target.value = '';
+    showAlert('A moderation reason of 500 characters or fewer is required.');
+    return;
+  }
   target.disabled = true;
   try {
-    await resolveReport(reportId, resolution);
+    await resolveReport(reportId, resolution, reason);
     await refreshDashboard();
     closeDrawer();
   } catch (err) {
@@ -839,18 +891,28 @@ async function handleUserAction(target) {
   const action = target.value;
   if (!accountId || !action) return;
 
+  const reason = moderationReasonValue(window.prompt('Reason for this account change:'));
+  if (!reason) {
+    target.value = '';
+    showAlert('A moderation reason of 500 characters or fewer is required.');
+    return;
+  }
   target.disabled = true;
   try {
     if (action === 'APPROVE') {
-      await approveAccount(accountId);
+      await updateAccount(accountId, {
+        status: 'ACTIVE', isApproved: true, moderationReason: reason,
+      });
     } else if (action === 'SUSPEND') {
-      await updateAccount(accountId, { status: 'SUSPENDED' });
+      await updateAccount(accountId, { status: 'SUSPENDED', moderationReason: reason });
     } else if (action === 'ACTIVATE') {
-      await updateAccount(accountId, { status: 'ACTIVE', isApproved: true });
+      await updateAccount(accountId, {
+        status: 'ACTIVE', isApproved: true, moderationReason: reason,
+      });
     } else {
       const role = promotedRoleForAction(action);
       if (role) {
-        await updateAccount(accountId, { role });
+        await updateAccount(accountId, { role, moderationReason: reason });
       }
     }
     await refreshDashboard();
@@ -950,6 +1012,43 @@ function wireEvents() {
     } catch (err) {
       reportQuery = { ...reportQuery, page: reportQuery.page - 1 };
       showAlert(err?.message || 'Failed to load the next report page.');
+    }
+  });
+
+  activityFilters?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const filters = activityFilterValue(activityFilters);
+    if ((filters.from && !filters.to) || (!filters.from && filters.to)) {
+      showAlert('Audit date filters require both From and To.');
+      return;
+    }
+    activityQuery = { ...activityQuery, ...filters, page: 0 };
+    try {
+      await refreshActivity();
+    } catch (err) {
+      showAlert(err?.message || 'Failed to filter audit activity.');
+    }
+  });
+
+  activityPrevious?.addEventListener('click', async () => {
+    if (activityQuery.page <= 0) return;
+    activityQuery = { ...activityQuery, page: activityQuery.page - 1 };
+    try {
+      await refreshActivity();
+    } catch (err) {
+      activityQuery = { ...activityQuery, page: activityQuery.page + 1 };
+      showAlert(err?.message || 'Failed to load the previous audit page.');
+    }
+  });
+
+  activityNext?.addEventListener('click', async () => {
+    if (activityQuery.page + 1 >= activityPageState.totalPages) return;
+    activityQuery = { ...activityQuery, page: activityQuery.page + 1 };
+    try {
+      await refreshActivity();
+    } catch (err) {
+      activityQuery = { ...activityQuery, page: activityQuery.page - 1 };
+      showAlert(err?.message || 'Failed to load the next audit page.');
     }
   });
 

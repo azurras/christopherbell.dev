@@ -6,6 +6,16 @@
 export const API = {
   admin: {
     activity: '/api/admin/activity/2026-05-09',
+    activityPage: ({ page = 0, size = 25, action = '', targetType = '', actor = '',
+      from = '', to = '' } = {}) => {
+      const params = new URLSearchParams({ page: String(page), size: String(size) });
+      if (action) params.set('action', String(action));
+      if (targetType) params.set('targetType', String(targetType));
+      if (actor) params.set('actor', String(actor));
+      if (from) params.set('from', String(from));
+      if (to) params.set('to', String(to));
+      return `/api/admin/activity/2026-07-26?${params}`;
+    },
     commandCenter: {
       snapshot: '/api/admin/command-center/2026-07-12/snapshot',
       logs: '/api/admin/command-center/2026-07-12/logs',

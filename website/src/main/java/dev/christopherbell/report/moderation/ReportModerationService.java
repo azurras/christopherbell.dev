@@ -4,6 +4,7 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.admin.activity.AdminActivityService;
+import dev.christopherbell.admin.activity.ModerationAuditCommand;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.permission.PermissionService;
@@ -58,7 +59,7 @@ public class ReportModerationService {
         .orElseThrow(() -> new ResourceNotFoundException("Report not found."));
 
     if (request.resolution() == ReportResolution.REOPEN) {
-      return reopenReport(report);
+      return reopenReport(report, request.reason());
     }
 
     if (report.getStatus() == ReportStatus.RESOLVED) {
@@ -66,6 +67,16 @@ public class ReportModerationService {
       return report;
     }
 
+    var auditCommand = reportAuditCommand(
+        "REPORT_RESOLVED",
+        report,
+        request.reason(),
+        Map.of(
+            "status", stateValue(report.getStatus()),
+            "resolution", stateValue(report.getResolution())),
+        Map.of(
+            "status", ReportStatus.RESOLVED.name(),
+            "resolution", request.resolution().name()));
     boolean deletedPost = deletePostIfRequested(report, request.resolution());
     String suspendedUsername = suspendUserIfRequested(report, request.resolution());
 
@@ -76,7 +87,7 @@ public class ReportModerationService {
     report.setResolvedOn(Instant.now());
     PostReport saved = reportRepository.save(report);
     includeRepeatReportContext(saved);
-    recordReportResolved(saved);
+    adminActivityService.recordModeration(auditCommand);
     if (deletedPost) {
       recordPostDeleted(saved);
     }
@@ -94,9 +105,13 @@ public class ReportModerationService {
     if (request == null || request.resolution() == null) {
       throw new InvalidRequestException("Resolution is required.");
     }
+    if (request.reason() == null || request.reason().isBlank()
+        || request.reason().strip().length() > 500) {
+      throw new InvalidRequestException("Moderation reason is required and must be 500 characters or fewer.");
+    }
   }
 
-  private PostReport reopenReport(PostReport report) {
+  private PostReport reopenReport(PostReport report, String reason) throws InvalidRequestException {
     String openKey = openKey(report);
     if (openKey != null) {
       var existing = reportRepository.findByOpenDedupeKey(openKey)
@@ -108,6 +123,14 @@ public class ReportModerationService {
         return existing.get();
       }
     }
+    var auditCommand = reportAuditCommand(
+        "REPORT_REOPENED",
+        report,
+        reason,
+        Map.of(
+            "status", stateValue(report.getStatus()),
+            "resolution", stateValue(report.getResolution())),
+        Map.of("status", ReportStatus.OPEN.name(), "resolution", ""));
     report.setStatus(ReportStatus.OPEN);
     report.setOpenDedupeKey(openKey);
     report.setResolution(null);
@@ -123,7 +146,7 @@ public class ReportModerationService {
       throw race;
     }
     includeRepeatReportContext(saved);
-    recordReportReopened(saved);
+    adminActivityService.recordModeration(auditCommand);
     return saved;
   }
 
@@ -180,27 +203,28 @@ public class ReportModerationService {
     return suspendedUsername;
   }
 
-  private void recordReportResolved(PostReport report) {
-    adminActivityService.record(
-        "REPORT_RESOLVED",
+  private ModerationAuditCommand reportAuditCommand(
+      String action,
+      PostReport report,
+      String reason,
+      Map<String, String> before,
+      Map<String, String> after
+  ) throws InvalidRequestException {
+    return ModerationAuditCommand.create(
+        action,
         "REPORT",
         report.getId(),
-        report.getReason(),
-        "%s resolved report " + report.getId(),
+        "Report " + report.getId(),
+        reason,
+        action.equals("REPORT_REOPENED")
+            ? "%s reopened report " + report.getId() + "."
+            : "%s resolved report " + report.getId() + ".",
+        before,
+        after,
         Map.of(
+            "source", "back-office",
             "reportId", nullSafe(report.getId()),
-            "resolution", report.getResolution() == null ? "" : report.getResolution().name()
-        ));
-  }
-
-  private void recordReportReopened(PostReport report) {
-    adminActivityService.record(
-        "REPORT_REOPENED",
-        "REPORT",
-        report.getId(),
-        report.getReason(),
-        "%s reopened report " + report.getId(),
-        Map.of("reportId", nullSafe(report.getId())));
+            "resolution", after.getOrDefault("resolution", "")));
   }
 
   private void recordPostDeleted(PostReport report) {
@@ -208,7 +232,7 @@ public class ReportModerationService {
         "POST_DELETED",
         "POST",
         report.getPostId(),
-        report.getPostText(),
+        "Post " + report.getPostId(),
         "%s deleted post " + report.getPostId(),
         Map.of(
             "reportId", nullSafe(report.getId()),
@@ -232,5 +256,9 @@ public class ReportModerationService {
 
   private String nullSafe(String value) {
     return value == null ? "" : value;
+  }
+
+  private String stateValue(Enum<?> value) {
+    return value == null ? "" : value.name();
   }
 }

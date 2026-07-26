@@ -2,6 +2,8 @@ package dev.christopherbell.admin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -11,7 +13,9 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.admin.activity.AdminActivityRepository;
 import dev.christopherbell.admin.activity.AdminActivityService;
+import dev.christopherbell.admin.activity.ModerationAuditCommand;
 import dev.christopherbell.admin.model.AdminActivity;
+import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.permission.PermissionService;
 import java.time.Clock;
 import java.time.Instant;
@@ -153,6 +157,45 @@ class AdminActivityServiceTest {
     assertEquals(NOW, result.getCreatedOn());
     verify(adminActivityRepository).save(org.mockito.ArgumentMatchers.any(AdminActivity.class));
     verifyNoMoreInteractions(accountRepository, adminActivityRepository, permissionService);
+  }
+
+  @Test
+  @DisplayName("Moderation record persists bounded reason and state")
+  void recordModeration_savesReasonAndState() throws Exception {
+    var service = service();
+    var command = ModerationAuditCommand.create(
+        "REPORT_RESOLVED", "REPORT", "report-1", "Report report-1",
+        "Confirmed spam.", "%s resolved a report.",
+        Map.of("status", "OPEN"), Map.of("status", "RESOLVED"),
+        Map.of("reportId", "report-1"));
+    when(permissionService.getSelfId()).thenReturn("account-1");
+    when(accountRepository.findById("account-1"))
+        .thenReturn(Optional.of(Account.builder().username("azurras").build()));
+    when(adminActivityRepository.save(any(AdminActivity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    var result = service.recordModeration(command);
+
+    assertEquals("Confirmed spam.", result.getReason());
+    assertEquals(Map.of("status", "OPEN"), result.getBeforeValues());
+    assertEquals(Map.of("status", "RESOLVED"), result.getAfterValues());
+    assertEquals("azurras resolved a report.", result.getMessage());
+  }
+
+  @Test
+  @DisplayName("Moderation audit persistence failure maps to service unavailable")
+  void recordModeration_whenPersistenceFails_returnsServiceUnavailable() throws Exception {
+    var service = service();
+    var command = ModerationAuditCommand.create(
+        "ACCOUNT_STATUS_CHANGED", "ACCOUNT", "account-2", "@reader",
+        "Confirmed abuse.", "%s changed an account.",
+        Map.of("status", "ACTIVE"), Map.of("status", "SUSPENDED"), Map.of());
+    when(permissionService.getSelfId()).thenReturn("account-1");
+    when(accountRepository.findById("account-1")).thenReturn(Optional.empty());
+    when(adminActivityRepository.save(any(AdminActivity.class)))
+        .thenThrow(new IllegalStateException("mongo unavailable"));
+
+    assertThrows(ServiceUnavailableException.class, () -> service.recordModeration(command));
   }
 
   private AdminActivityService service() {

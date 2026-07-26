@@ -94,7 +94,7 @@ public class ReportController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<PostReport>> resolveReport(
       @PathVariable String reportId,
-      @RequestBody ReportResolveRequest request
+      @Valid @RequestBody ReportResolveRequest request
   ) throws InvalidRequestException, ResourceNotFoundException {
     return new ResponseEntity<>(
         Response.<PostReport>builder()

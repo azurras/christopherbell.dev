@@ -114,6 +114,9 @@ Owns reusable browser-side modules that are not tied to one page.
   return previous/next links plus a sanitized nested Signal Rail. They also
   expose newest-reply and collapsed-branch helpers so page modules can add
   thread controls without rebuilding thread maps inline.
+- `back-office-activity.js` validates stable audit pages, filter controls,
+  required moderation reasons, and the allowlisted role/status/resolution
+  summary rendered by Back Office.
 
 ## Update This Doc
 

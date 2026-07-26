@@ -2354,6 +2354,10 @@ body {
     font-weight: 700;
 }
 
+.activity-filter-bar {
+    grid-template-columns: 1fr;
+}
+
 .queue-pagination {
     display: flex;
     align-items: center;

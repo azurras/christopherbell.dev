@@ -311,7 +311,29 @@
                 <h2>Recent Activity</h2>
               </div>
             </div>
+            <form id="activityFilters" class="admin-filter-bar activity-filter-bar" aria-label="Filter audit activity">
+              <label><span>Action</span><select class="form-select" name="action">
+                <option value="">All actions</option>
+                <option value="ACCOUNT_STATUS_CHANGED">Account status</option>
+                <option value="ACCOUNT_ROLE_CHANGED">Account role</option>
+                <option value="ACCOUNT_MODERATION_CHANGED">Account role and status</option>
+                <option value="REPORT_RESOLVED">Report resolved</option>
+                <option value="REPORT_REOPENED">Report reopened</option>
+              </select></label>
+              <label><span>Target</span><select class="form-select" name="targetType">
+                <option value="">All targets</option><option value="ACCOUNT">Account</option><option value="REPORT">Report</option>
+              </select></label>
+              <label><span>Actor</span><input class="form-control" name="actor" maxlength="64" placeholder="Username"></label>
+              <label><span>From</span><input class="form-control" type="datetime-local" name="from"></label>
+              <label><span>To</span><input class="form-control" type="datetime-local" name="to"></label>
+              <button class="btn btn-primary" type="submit">Apply filters</button>
+            </form>
             <div id="activityList" class="activity-list" aria-live="polite"></div>
+            <nav class="queue-pagination" aria-label="Audit pages">
+              <button class="btn btn-outline-secondary" id="activityPrevious" type="button">Previous</button>
+              <span id="activityPage" aria-live="polite">Page 0 of 0</span>
+              <button class="btn btn-outline-secondary" id="activityNext" type="button">Next</button>
+            </nav>
           </aside>
         </div>
       </div>

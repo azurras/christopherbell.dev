@@ -78,7 +78,8 @@ public class AccountService {
    * @return the approved account.
    * @throws ResourceNotFoundException if the account cannot be found.
    */
-  public AccountDetail approveAccount(String accountId) throws ResourceNotFoundException {
+  public AccountDetail approveAccount(String accountId)
+      throws InvalidRequestException, ResourceNotFoundException {
     return accountModerationService.approveAccount(accountId);
   }
 

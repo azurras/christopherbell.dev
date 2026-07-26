@@ -1,6 +1,7 @@
 package dev.christopherbell.report.moderation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -8,6 +9,8 @@ import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.admin.activity.AdminActivityService;
+import dev.christopherbell.admin.activity.ModerationAuditCommand;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.report.ReportRepository;
@@ -21,6 +24,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
@@ -46,10 +50,19 @@ class ReportModerationLifecycleTest {
     when(permissions.getSelfId()).thenReturn("admin");
     when(reports.save(report)).thenReturn(report);
 
-    service.resolveReport("resolved-later", new ReportResolveRequest(ReportResolution.CLOSE_NO_ACTION));
+    service.resolveReport(
+        "resolved-later",
+        new ReportResolveRequest(ReportResolution.CLOSE_NO_ACTION, "No policy violation."));
 
     assertThat(report.getOpenDedupeKey()).isNull();
     assertThat(report.getStatus()).isEqualTo(ReportStatus.RESOLVED);
+    var audit = ArgumentCaptor.forClass(ModerationAuditCommand.class);
+    verify(activity).recordModeration(audit.capture());
+    assertThat(audit.getValue().reason()).isEqualTo("No policy violation.");
+    assertThat(audit.getValue().beforeValues()).containsEntry("status", "OPEN");
+    assertThat(audit.getValue().afterValues())
+        .containsEntry("status", "RESOLVED")
+        .containsEntry("resolution", "CLOSE_NO_ACTION");
   }
 
   @Test
@@ -60,10 +73,24 @@ class ReportModerationLifecycleTest {
     when(reports.findById("resolved")).thenReturn(Optional.of(resolved));
     when(reports.findByOpenDedupeKey(any())).thenReturn(Optional.of(existing));
 
-    var result = service.resolveReport("resolved", new ReportResolveRequest(ReportResolution.REOPEN));
+    var result = service.resolveReport(
+        "resolved", new ReportResolveRequest(ReportResolution.REOPEN, "Needs another review."));
 
     assertThat(result).isSameAs(existing);
     verify(reports, never()).save(resolved);
+    verify(activity, never()).recordModeration(any());
+  }
+
+  @Test
+  @DisplayName("Resolution rejects missing and oversized reasons before loading or saving")
+  void resolveReport_rejectsInvalidReasonBeforeMutation() {
+    assertThrows(InvalidRequestException.class, () -> service.resolveReport(
+        "report-1", new ReportResolveRequest(ReportResolution.CLOSE_NO_ACTION, " ")));
+    assertThrows(InvalidRequestException.class, () -> service.resolveReport(
+        "report-1", new ReportResolveRequest(ReportResolution.CLOSE_NO_ACTION, "x".repeat(501))));
+
+    verify(reports, never()).findById(any());
+    verify(reports, never()).save(any());
   }
 
   private PostReport report(String id, ReportStatus status) {

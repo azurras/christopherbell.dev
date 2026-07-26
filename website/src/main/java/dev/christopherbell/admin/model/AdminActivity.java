@@ -9,11 +9,19 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 
 @AllArgsConstructor
 @Builder
 @Data
 @NoArgsConstructor
+@CompoundIndexes({
+    @CompoundIndex(name = "admin_activity_created_id_desc", def = "{'createdOn': -1, '_id': -1}"),
+    @CompoundIndex(name = "admin_activity_action_created_id_desc", def = "{'action': 1, 'createdOn': -1, '_id': -1}"),
+    @CompoundIndex(name = "admin_activity_target_created_id_desc", def = "{'targetType': 1, 'createdOn': -1, '_id': -1}"),
+    @CompoundIndex(name = "admin_activity_actor_created_id_desc", def = "{'actorUsername': 1, 'createdOn': -1, '_id': -1}")
+})
 @Document("admin_activity")
 public class AdminActivity {
   @Id private String id;
@@ -23,7 +31,10 @@ public class AdminActivity {
   private String targetType;
   private String targetId;
   private String targetLabel;
+  private String reason;
   private String message;
+  private Map<String, String> beforeValues;
+  private Map<String, String> afterValues;
   private Map<String, String> metadata;
 
   @JsonFormat(
