@@ -23,6 +23,11 @@ public class ControllerSliceSecurityTestConfig {
   @Bean
   public SecurityFilterChain controllerSliceSecurityFilterChain(HttpSecurity http) throws Exception {
     return http
+        .csrf(csrf -> csrf
+            .spa()
+            .ignoringRequestMatchers(
+                SecurityConfig::hasExplicitBearerToken,
+                SecurityConfig::isLegacyApiLogin))
         .exceptionHandling(exceptions -> exceptions
             .authenticationEntryPoint((request, response, exception) ->
                 response.sendError(HttpServletResponse.SC_UNAUTHORIZED))

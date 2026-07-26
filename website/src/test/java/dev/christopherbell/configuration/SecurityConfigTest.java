@@ -116,6 +116,21 @@ class SecurityConfigTest {
     assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(sharedFolderApi)));
   }
 
+  @Test
+  @DisplayName("Only legacy API login bypasses CSRF; browser cookie login does not")
+  void csrfBypass_whenLoginModeChanges_matchesOnlyLegacyApiContract() {
+    var legacyLogin = request("POST", "/api/accounts/2024-12-15/login");
+    var browserLogin = request("POST", "/api/accounts/2024-12-15/login");
+    browserLogin.addHeader("X-CBELL-Browser-Session", "cookie");
+    var loginPage = request("GET", "/api/accounts/2024-12-15/login");
+    var otherPost = request("POST", "/api/accounts/2024-12-15/create");
+
+    assertTrue(SecurityConfig.isLegacyApiLogin(legacyLogin));
+    assertFalse(SecurityConfig.isLegacyApiLogin(browserLogin));
+    assertFalse(SecurityConfig.isLegacyApiLogin(loginPage));
+    assertFalse(SecurityConfig.isLegacyApiLogin(otherPost));
+  }
+
   private MockHttpServletRequest request(String method, String path) {
     var request = new MockHttpServletRequest(method, path);
     request.setServletPath(path);

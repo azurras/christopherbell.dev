@@ -5,7 +5,7 @@
  * Redirects authenticated users away.
  */
 import { API } from '../lib/api.js';
-import { fetchJson, isLoggedIn, safeRedirectTarget } from '../lib/util.js';
+import { fetchJson, hasAuthenticatedSession, safeRedirectTarget } from '../lib/util.js';
 const alertBox = () => document.getElementById('signupAlert');
 
 function redirectTarget() {
@@ -41,9 +41,8 @@ export function signupPayload(fields) {
 }
 
 /** Wire form submit and redirect rules once DOM is ready. */
-document.addEventListener('DOMContentLoaded', () => {
-  // If already logged in, redirect to the requested local page.
-  if (isLoggedIn()) {
+document.addEventListener('DOMContentLoaded', async () => {
+  if (await hasAuthenticatedSession(API.accounts.me)) {
     window.location.href = redirectTarget();
     return;
   }

@@ -34,6 +34,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -61,6 +62,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 @RequestMapping("/api/accounts")
 @RestController
 public class AccountController {
+  private static final String BROWSER_SESSION_HEADER = "X-CBELL-Browser-Session";
   private final AccountService accountService;
   private final PermissionService permissionService;
   private final BrowserAuthenticationCookies browserAuthenticationCookies;
@@ -342,8 +344,9 @@ public class AccountController {
   /**
    * Logs in an account.
    *
-   * @param accountLoginRequest - the account login request.
-   * @return a JWT token if the login is successful.
+   * @param accountLoginRequest account credentials
+   * @param sessionMode {@code cookie} for an HttpOnly browser session, otherwise legacy bearer mode
+   * @return a JWT payload for legacy clients or cookie headers with no payload for browser mode
    * @throws Exception if there is an error logging in the account.
    */
   @PostMapping(
@@ -351,13 +354,20 @@ public class AccountController {
       consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE
   )
-  public ResponseEntity<Response<Void>> loginAccount(
-      @Valid @RequestBody AccountLoginRequest accountLoginRequest
+  public ResponseEntity<Response<String>> loginAccount(
+      @Valid @RequestBody AccountLoginRequest accountLoginRequest,
+      @RequestHeader(name = BROWSER_SESSION_HEADER, defaultValue = "") String sessionMode
   ) throws Exception {
     var token = accountService.loginAccount(accountLoginRequest);
-    return new ResponseEntity<>(Response.<Void>builder()
+    var browserSession = "cookie".equalsIgnoreCase(sessionMode.trim());
+    var body = Response.<String>builder()
+        .payload(browserSession ? null : token)
         .success(true)
-        .build(), cookieHeaders(browserAuthenticationCookies.authenticated(token)), HttpStatus.OK);
+        .build();
+    var headers = browserSession
+        ? cookieHeaders(browserAuthenticationCookies.authenticated(token))
+        : new HttpHeaders();
+    return new ResponseEntity<>(body, headers, HttpStatus.OK);
   }
 
   /** Clears browser authentication cookies. CSRF remains required for this public endpoint. */

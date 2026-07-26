@@ -241,6 +241,10 @@ bearer tokens remain available to non-browser API clients. API protection and
 browser security headers are configured in `SecurityConfig`, with method-level
 `@PreAuthorize` annotations enforcing feature permissions.
 
+Browser login sends `X-CBELL-Browser-Session: cookie` to select the cookie-only
+response. Existing API clients that omit the header continue to receive the JWT
+payload for bearer authentication.
+
 Public routes are listed in `SecurityConfig.PUBLIC_URLS`. Admin-only behavior
 usually uses:
 

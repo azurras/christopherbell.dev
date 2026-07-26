@@ -71,6 +71,8 @@ Owns reusable browser-side modules that are not tied to one page.
   `CBELL_AUTH` cookie and is never exposed to JavaScript.
 - `getAuthClaims` exposes only cached, non-authoritative UI metadata. Server
   endpoints must still enforce authentication and permissions.
+- `hasAuthenticatedSession` verifies the readable marker against a protected
+  account endpoint before an auth page redirects, and clears stale UI state.
 - `authHeaders` accepts optional extra headers and echoes the readable
   `XSRF-TOKEN` cookie as `X-XSRF-TOKEN`; browser authentication is carried by
   same-origin cookies.

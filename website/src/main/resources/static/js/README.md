@@ -114,17 +114,14 @@ Owns browser-side behavior for server-rendered pages.
   polling/backoff decisions, cursor-generation decisions, text-only log copying,
   dialog clearing, and countdown helpers. Any 401/403—including one from a stale
   request generation—tears down and hides the console before redirecting.
-- `shared-folder.js` owns the Shared Folder shell: it redirects visitors without a token,
+- `shared-folder.js` owns the Shared Folder shell: it redirects visitors without a browser session marker,
   checks the current account's effective shared read capability, renders relative-path breadcrumbs
   and accessible button controls, copies same-origin `/shared?path=` links, starts native
   attachment downloads and hands audio/video selections to the site-wide player without Blob buffering,
   and inserts text previews only
-  with `textContent`. Before assigning a protected native URL it waits for the shared-folder
-  service worker to acknowledge the current JWT; 401 redirects to login and 403/revocation is
-  shown inline. If a restarted worker has lost its per-client in-memory token, it asks only the
-  initiating controlled page for a one-shot recovery reply over a bounded message port; a missing
-  reply produces a controlled 401 rather than an opaque media failure. The worker
-  handles only the exact versioned shared-folder API prefix and forwards the original
+  with `textContent`. Before assigning a protected native URL it waits for the root-scoped
+  shared-folder service worker to control the page; 401 redirects to login and 403/revocation is
+  shown inline. The worker handles only the exact versioned shared-folder API prefix and forwards the original
   cookie-authenticated request with its `Range` and credentials mode intact and
   `cache: 'no-store'`; it never receives, stores, or attaches a bearer token.
   Folder navigation replaces only the breadcrumbs, toolbar, and entry list. Browser history restores folders without a page

@@ -139,7 +139,9 @@ public class SecurityConfig {
     return http
         .csrf(csrf -> csrf
             .spa()
-            .ignoringRequestMatchers(SecurityConfig::hasExplicitBearerToken))
+            .ignoringRequestMatchers(
+                SecurityConfig::hasExplicitBearerToken,
+                SecurityConfig::isLegacyApiLogin))
 
         .headers(headers -> {
           headers.contentSecurityPolicy(csp -> csp.policyDirectives(CONTENT_SECURITY_POLICY));
@@ -196,11 +198,20 @@ public class SecurityConfig {
     return new JwtAuthenticationFilter(publicMatchersList());
   }
 
-  private static boolean hasExplicitBearerToken(jakarta.servlet.http.HttpServletRequest request) {
+  public static boolean hasExplicitBearerToken(jakarta.servlet.http.HttpServletRequest request) {
     var authorization = request.getHeader(org.springframework.http.HttpHeaders.AUTHORIZATION);
     return authorization != null
         && authorization.startsWith("Bearer ")
         && !authorization.substring("Bearer ".length()).isBlank();
+  }
+
+  /** Keeps the established stateless login contract while browser cookie mode stays CSRF protected. */
+  public static boolean isLegacyApiLogin(jakarta.servlet.http.HttpServletRequest request) {
+    var expectedPath = "/api/accounts" + APIVersion.V20241215 + "/login";
+    var browserMode = request.getHeader("X-CBELL-Browser-Session");
+    return "POST".equalsIgnoreCase(request.getMethod())
+        && expectedPath.equals(request.getRequestURI())
+        && !"cookie".equalsIgnoreCase(browserMode == null ? "" : browserMode.trim());
   }
 
   /**

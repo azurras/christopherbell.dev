@@ -6,7 +6,7 @@
  */
 import pubsub from '../components/pubsub.js';
 import { API } from '../lib/api.js';
-import { fetchJson, isLoggedIn, safeRedirectTarget } from '../lib/util.js';
+import { fetchJson, hasAuthenticatedSession, safeRedirectTarget } from '../lib/util.js';
 
 const alertBox = () => document.getElementById('loginAlert');
 
@@ -24,14 +24,14 @@ function redirectTarget() {
 async function login(email, password) {
   await fetchJson(API.accounts.login, {
     method: 'POST',
+    headers: { 'X-CBELL-Browser-Session': 'cookie' },
     body: JSON.stringify({ email, password })
   });
 }
 
 /** Wire form submit and redirect rules once DOM is ready. */
-document.addEventListener('DOMContentLoaded', () => {
-  // If already logged in, redirect to the requested local page.
-  if (isLoggedIn()) {
+document.addEventListener('DOMContentLoaded', async () => {
+  if (await hasAuthenticatedSession(API.accounts.me)) {
     window.location.href = redirectTarget();
     return;
   }

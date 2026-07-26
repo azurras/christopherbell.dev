@@ -557,6 +557,7 @@ public class AccountControllerTest {
         .perform(
             post("/api/accounts" + APIVersion.V20241215 + "/login")
                 .with(csrf())
+                .header("X-CBELL-Browser-Session", "cookie")
                 .content(json)
                 .contentType(MediaType.APPLICATION_JSON_VALUE))
         .andExpect(status().isOk())
@@ -566,6 +567,34 @@ public class AccountControllerTest {
             containsString("CBELL_AUTH=jwt-token"),
             containsString("HttpOnly"),
             containsString("SameSite=Lax"))));
+  }
+
+  @Test
+  @DisplayName("API login preserves JWT response without setting browser cookies")
+  @WithMockUser
+  void loginAccount_whenBrowserModeAbsent_returnsBearerTokenPayload() throws Exception {
+    when(accountService.loginAccount(eq(new dev.christopherbell.account.model.AccountLoginRequest(
+        "api@example.com", "password")))).thenReturn("api-jwt-token");
+
+    mockMvc.perform(post("/api/accounts" + APIVersion.V20241215 + "/login")
+            .content("{\"email\":\"api@example.com\",\"password\":\"password\"}")
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload").value("api-jwt-token"))
+        .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+  }
+
+  @Test
+  @DisplayName("Browser login requires CSRF before authenticating")
+  void loginAccount_whenBrowserModeOmitsCsrf_returnsForbiddenWithoutServiceCall() throws Exception {
+    mockMvc.perform(post("/api/accounts" + APIVersion.V20241215 + "/login")
+            .header("X-CBELL-Browser-Session", "cookie")
+            .content("{\"email\":\"browser@example.com\",\"password\":\"password\"}")
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isUnauthorized());
+
+    verifyNoInteractions(accountService);
   }
 
   @Test

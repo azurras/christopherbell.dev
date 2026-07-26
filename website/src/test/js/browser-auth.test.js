@@ -5,6 +5,7 @@ import {
   authHeaders,
   fetchJson,
   getAuthClaims,
+  hasAuthenticatedSession,
   isLoggedIn,
 } from '../../main/resources/static/js/lib/util.js';
 
@@ -76,3 +77,9 @@ test('unsafe JSON requests send same-origin cookies and the CSRF token', async (
   assert.equal(requests[0].options.headers['X-XSRF-TOKEN'], 'csrf-value');
 });
 
+test('a stale readable marker is rejected by the server session boundary', async () => {
+  installBrowserGlobals(async () => new Response('{}', { status: 403 }));
+
+  assert.equal(await hasAuthenticatedSession('/api/accounts/me'), false);
+  assert.match(document.cookie, /CBELL_AUTH_STATE=; Max-Age=0/);
+});

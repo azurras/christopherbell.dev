@@ -32,6 +32,18 @@ export function isLoggedIn() {
   return !!getAuthToken();
 }
 
+/** Verify a readable session marker against an authenticated server endpoint. */
+export async function hasAuthenticatedSession(accountUrl) {
+  if (!isLoggedIn()) return false;
+  try {
+    await fetchJson(accountUrl);
+    return true;
+  } catch (_) {
+    clearAuthState();
+    return false;
+  }
+}
+
 /** Current local path, query, and hash for post-login redirects. */
 export function currentRedirectTarget() {
   const current = safeRedirectTarget(`${window.location.pathname || '/'}${window.location.search || ''}${window.location.hash || ''}`);
