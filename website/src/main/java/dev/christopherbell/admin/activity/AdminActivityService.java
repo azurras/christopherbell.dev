@@ -10,6 +10,7 @@ import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
+import org.springframework.dao.DuplicateKeyException;
 
 @RequiredArgsConstructor
 @Service
@@ -47,6 +48,7 @@ public class AdminActivityService {
         .map(account -> account.getUsername() == null ? actorId : account.getUsername())
         .orElse(actorId);
     var activity = AdminActivity.builder()
+        .id(command.eventId())
         .actorAccountId(actorId)
         .actorUsername(actorUsername)
         .action(command.action())
@@ -61,7 +63,11 @@ public class AdminActivityService {
         .createdOn(Instant.now(clock))
         .build();
     try {
-      return adminActivityRepository.save(activity);
+      return adminActivityRepository.insert(activity);
+    } catch (DuplicateKeyException duplicate) {
+      return adminActivityRepository.findById(command.eventId()).orElseThrow(() ->
+          new ServiceUnavailableException(
+              "Moderation audit is temporarily unavailable.", duplicate));
     } catch (RuntimeException failure) {
       throw new ServiceUnavailableException(
           "Moderation audit is temporarily unavailable.", failure);

@@ -68,12 +68,16 @@ class SharedFolderUploadServiceTest {
     Path staging = Files.createDirectories(
         properties.systemRoot().resolve("shared-folder-upload-staging")).resolve(stagingKey);
     Files.writeString(staging, "private bytes");
-    when(repository.findByOwnerId("account-1")).thenReturn(List.of(session));
+    when(repository.findByOwnerIdOrderByIdAsc(
+        "account-1", org.springframework.data.domain.PageRequest.of(0, 100)))
+        .thenReturn(new SliceImpl<>(List.of(session)));
 
     uploads.deleteOwnedPrivateState("account-1");
 
     assertThat(staging).doesNotExist();
     verify(repository).deleteById("owned-upload");
+    verify(repository).findByOwnerIdOrderByIdAsc(
+        "account-1", org.springframework.data.domain.PageRequest.of(0, 100));
   }
 
   @Test

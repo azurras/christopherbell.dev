@@ -3,9 +3,11 @@ package dev.christopherbell.admin.activity;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** Validated moderation audit boundary that excludes secrets and content bodies. */
 public record ModerationAuditCommand(
+    String eventId,
     String action,
     String targetType,
     String targetId,
@@ -45,7 +47,9 @@ public record ModerationAuditCommand(
     var after = validateMap(afterValues, STATE_KEYS, "after state");
     var safeMetadata = validateMap(metadata, METADATA_KEYS, "metadata");
     return new ModerationAuditCommand(
-        action, targetType, targetId, targetLabel, reason.strip(), message,
+        UUID.randomUUID().toString(),
+        action, targetType, targetId, targetLabel,
+        ModerationReasonRedactor.redact(reason.strip()), message,
         before, after, safeMetadata);
   }
 

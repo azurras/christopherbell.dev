@@ -37,6 +37,10 @@ subfeature services own the larger account workflows.
 - Public profiles expose usernames and counts only; first and last names stay private to account detail APIs.
 - Admin account updates can change account status and promote roles when the
   Back Office user queue needs to grant moderator or administrator privileges.
+- Account deletion is resumable through the `2026-07-26` API. Retained posts
+  pseudonymize author and edit-audit ids, remove the deleted account from like
+  sets, and reconcile denormalized like counts. The legacy `2025-09-03` response
+  shape remains available for older clients.
 - Admins can independently grant or revoke persisted shared-folder read/write
   capabilities through the dated account API. These capabilities do not change
   the USER/MOD/ADMIN hierarchy or JWT contents; write always requires read.

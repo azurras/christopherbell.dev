@@ -22,7 +22,7 @@ public enum AccountDeletionStep {
   void execute(AccountDeletionOperations operations, String accountId, String pseudonym) {
     switch (this) {
       case ENSURE_TOMBSTONE -> operations.ensureTombstone();
-      case ANONYMIZE_PUBLIC_POSTS -> operations.anonymizePublicPosts(accountId);
+      case ANONYMIZE_PUBLIC_POSTS -> operations.anonymizePublicPosts(accountId, pseudonym);
       case REMOVE_PRIVATE_DATA -> operations.removePrivateData(accountId);
       case CLEAN_SHARED_FOLDER_STATE -> operations.cleanSharedFolderState(accountId);
       case PSEUDONYMIZE_RETAINED_RECORDS ->

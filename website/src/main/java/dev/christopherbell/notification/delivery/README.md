@@ -8,6 +8,9 @@ Owns notification creation from feature events.
   and WFL session notifications.
 - Delivery checks `notification.preference.NotificationPreferenceService` before
   saving so disabled categories do not create in-app notifications.
+- Stable event identities are claimed atomically for a bounded dedupe window.
+  Expired claims can be replaced before Mongo TTL cleanup, and a failed
+  notification save releases its claim so the event can be retried.
 
 ## Design Notes
 

@@ -45,17 +45,28 @@ public class ReportController {
 
   @PostMapping(value = V20250903, produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
-  public ResponseEntity<Response<PostReport>> createReport(
+  public ResponseEntity<Response<Void>> createReport(
       @Valid @RequestBody ReportCreateRequest request
   ) throws InvalidRequestException, ResourceNotFoundException {
-    var report = reportService.submitReport(request);
+    reportService.submitReport(request);
     return new ResponseEntity<>(
-        Response.<PostReport>builder()
-            .payload(report)
+        Response.<Void>builder()
             .success(true)
             .build(),
         HttpStatus.OK
     );
+  }
+
+  /** Accepts a report and returns the canonical persisted report resource. */
+  @PostMapping(value = V20260726, produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<PostReport>> createReportVersioned(
+      @Valid @RequestBody ReportCreateRequest request
+  ) throws InvalidRequestException, ResourceNotFoundException {
+    return ResponseEntity.ok(Response.<PostReport>builder()
+        .payload(reportService.submitReport(request))
+        .success(true)
+        .build());
   }
 
   @GetMapping(value = V20260726, produces = MediaType.APPLICATION_JSON_VALUE)

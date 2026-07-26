@@ -85,17 +85,91 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
-  void accountDeletionCancelsOwnedMediaAndRemovesPrivateWorkerArtifacts() throws Exception {
-    var job = job("owned-job", "cache-key", MediaJobStatus.QUEUED);
+  void accountDeletionWaitsForWorkerCancellationBeforeRemovingPrivateArtifacts() throws Exception {
+    var job = job("owned-job", "cache-key", MediaJobStatus.TRANSCODING);
     job.setOwnerId("account-1");
-    when(jobs.findByOwnerId("account-1")).thenReturn(List.of(job));
+    job.setDescriptorPublished(true);
+    when(jobs.findByOwnerIdOrderByIdAsc(
+        "account-1", org.springframework.data.domain.PageRequest.of(0, 100)))
+        .thenReturn(new SliceImpl<>(List.of(job)));
     when(jobs.cancelActive("owned-job", "account-1", NOW)).thenReturn(1L);
+    var cancellationRequested = new AtomicBoolean();
+    var statusReads = new AtomicInteger();
+    var artifactsDeleted = new AtomicBoolean();
+    var guardedStorage = new MediaStorage(folderProperties) {
+      @Override
+      public void requestCancellation(MediaJob current) {
+        cancellationRequested.set(true);
+      }
 
-    media.deleteOwnedPrivateState("account-1");
+      @Override
+      public Optional<MediaWorkerStatus> readStatus(MediaJob current, long maxOutputBytes) {
+        assertThat(cancellationRequested).isTrue();
+        return statusReads.incrementAndGet() < 2
+            ? Optional.empty()
+            : Optional.of(new MediaWorkerStatus(MediaJobStatus.CANCELED, 0, "canceled"));
+      }
+
+      @Override
+      public void deleteJobArtifacts(MediaJob current) {
+        assertThat(statusReads).hasValueGreaterThanOrEqualTo(2);
+        artifactsDeleted.set(true);
+      }
+    };
+    var deleting = new MediaPlaybackService(
+        access, jobs, audit, sources, guardedStorage, folderProperties, mediaProperties,
+        Clock.fixed(NOW, ZoneOffset.UTC), () -> "job-1");
+
+    deleting.deleteOwnedPrivateState("account-1");
 
     verify(jobs).cancelActive("owned-job", "account-1", NOW);
     verify(jobs).deleteById("owned-job");
-    assertThat(storage.cancellationPath(job)).doesNotExist();
+    assertThat(artifactsDeleted).isTrue();
+  }
+
+  @Test
+  void accountDeletionPreservesPrivateArtifactsWhenWorkerDoesNotAcknowledgeCancellation()
+      throws Exception {
+    var job = job("owned-job", "cache-key", MediaJobStatus.TRANSCODING);
+    job.setOwnerId("account-1");
+    job.setDescriptorPublished(true);
+    when(jobs.findByOwnerIdOrderByIdAsc(
+        "account-1", org.springframework.data.domain.PageRequest.of(0, 100)))
+        .thenReturn(new SliceImpl<>(List.of(job)));
+    var cancellationRequested = new AtomicBoolean();
+    var artifactsDeleted = new AtomicBoolean();
+    var guardedStorage = new MediaStorage(folderProperties) {
+      @Override
+      public void requestCancellation(MediaJob current) {
+        cancellationRequested.set(true);
+      }
+
+      @Override
+      public Optional<MediaWorkerStatus> readStatus(MediaJob current, long maxOutputBytes) {
+        assertThat(cancellationRequested).isTrue();
+        return Optional.empty();
+      }
+
+      @Override
+      public void deleteJobArtifacts(MediaJob current) {
+        artifactsDeleted.set(true);
+      }
+    };
+    var shortTimeoutProperties = new SharedFolderMediaProperties(
+        4, 2, Duration.ofMinutes(30), Duration.ofMillis(1), Duration.ofMillis(10),
+        DataSize.ofBytes(4), DataSize.ofBytes(100));
+    var deleting = new MediaPlaybackService(
+        access, jobs, audit, sources, guardedStorage, folderProperties, shortTimeoutProperties,
+        Clock.fixed(NOW, ZoneOffset.UTC), () -> "job-1");
+
+    assertThatThrownBy(() -> deleting.deleteOwnedPrivateState("account-1"))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("temporarily unavailable")
+        .hasRootCauseMessage("Timed out waiting for media worker cancellation.");
+
+    verify(jobs, org.mockito.Mockito.never()).cancelActive(any(), any(), any());
+    verify(jobs, org.mockito.Mockito.never()).deleteById(any());
+    assertThat(artifactsDeleted).isFalse();
   }
 
   @Test

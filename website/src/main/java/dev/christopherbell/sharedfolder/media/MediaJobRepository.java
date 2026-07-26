@@ -22,7 +22,7 @@ public interface MediaJobRepository extends MongoRepository<MediaJob, String> {
 
   long countByOwnerIdAndStatusIn(String ownerId, Collection<MediaJobStatus> statuses);
 
-  List<MediaJob> findByOwnerId(String ownerId);
+  Slice<MediaJob> findByOwnerIdOrderByIdAsc(String ownerId, Pageable pageable);
 
   List<MediaJob> findByStatusIn(Collection<MediaJobStatus> statuses);
 

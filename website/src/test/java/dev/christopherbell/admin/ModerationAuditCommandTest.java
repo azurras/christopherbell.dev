@@ -40,6 +40,18 @@ class ModerationAuditCommandTest {
         "reason", Map.of("status", "x".repeat(101))));
   }
 
+  @Test
+  @DisplayName("Moderation audit redacts credentials tokens email and body-shaped content")
+  void constructor_redactsSensitiveReasonValues() throws Exception {
+    var command = command(
+        "password=hunter2 email=reader@example.com Authorization: Bearer abc.def.ghi body=private text",
+        Map.of("status", "ACTIVE"));
+
+    assertThat(command.reason())
+        .doesNotContain("hunter2", "reader@example.com", "abc.def.ghi", "private text")
+        .contains("[REDACTED]");
+  }
+
   private ModerationAuditCommand command(String reason, Map<String, String> after) throws Exception {
     return ModerationAuditCommand.create(
         "ACCOUNT_STATUS_CHANGED", "ACCOUNT", "account-1", "@reader", reason,

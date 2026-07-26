@@ -28,8 +28,7 @@ public class PostEditingService {
   public PostDetail edit(
       String postId,
       PostEditRequest request,
-      String actorAccountId,
-      boolean administrator
+      String actorAccountId
   ) throws InvalidRequestException, ResourceNotFoundException {
     if (postId == null || postId.isBlank() || request == null
         || request.text() == null || request.text().isBlank()) {
@@ -37,7 +36,7 @@ public class PostEditingService {
     }
     var post = posts.findById(postId)
         .orElseThrow(() -> new ResourceNotFoundException(NOT_EDITABLE));
-    if (!administrator && !post.getAccountId().equals(actorAccountId)) {
+    if (!post.getAccountId().equals(actorAccountId)) {
       throw new ResourceNotFoundException(NOT_EDITABLE);
     }
     var now = clock.instant();

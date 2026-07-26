@@ -17,6 +17,7 @@ import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.admin.activity.ModerationAuditCommand;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -77,6 +78,33 @@ class AccountModerationAuditTest {
         .containsEntry("role", "MOD")
         .containsEntry("status", "SUSPENDED");
     assertThat(command.getValue().reason()).isEqualTo("Repeated abuse");
+  }
+
+  @Test
+  @DisplayName("Audit failure leaves a durable pending event that retry completes exactly once")
+  void updateAccount_whenAuditFails_retryCompletesPendingAudit() throws Exception {
+    var account = account();
+    var request = AccountUpdateRequest.builder()
+        .id("account-1")
+        .status(AccountStatus.SUSPENDED)
+        .moderationReason("Confirmed abuse")
+        .build();
+    when(accounts.findById("account-1")).thenReturn(Optional.of(account));
+    when(accounts.save(account)).thenReturn(account);
+    when(mapper.toAccount(account)).thenReturn(AccountDetail.builder().id("account-1").build());
+    when(activity.recordModeration(any()))
+        .thenThrow(new ServiceUnavailableException(
+            "Moderation audit is temporarily unavailable.", new IllegalStateException("down")))
+        .thenAnswer(invocation -> null);
+
+    assertThrows(ServiceUnavailableException.class, () -> service.updateAccount(request));
+    assertThat(account.getStatus()).isEqualTo(AccountStatus.SUSPENDED);
+    assertThat(account.getPendingModerationAudit()).isNotNull();
+
+    service.updateAccount(request);
+
+    assertThat(account.getPendingModerationAudit()).isNull();
+    verify(activity, org.mockito.Mockito.times(2)).recordModeration(any());
   }
 
   private Account account() {

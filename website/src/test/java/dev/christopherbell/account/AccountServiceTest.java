@@ -508,7 +508,7 @@ public class AccountServiceTest {
       assertEquals(approved, result);
       assertEquals("self-1", entity.getApprovedBy());
       verify(accountRepository).findById(eq(AccountServiceStub.ID));
-      verify(accountRepository).save(eq(entity));
+      verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(entity));
       verify(accountMapper).toAccount(eq(entity));
     } finally {
       SecurityContextHolder.clearContext();
@@ -588,7 +588,7 @@ public class AccountServiceTest {
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
     verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
     verify(accountRepository).findByUsernameIgnoreCase(eq("Chris.Bell"));
-    verify(accountRepository).save(eq(existing));
+    verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
   }
@@ -626,7 +626,7 @@ public class AccountServiceTest {
     assertEquals(existing.getIsApproved(), result.getIsApproved());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verify(accountRepository).save(eq(existing));
+    verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
   }
@@ -659,7 +659,7 @@ public class AccountServiceTest {
     assertEquals(true, result.getIsApproved());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verify(accountRepository).save(eq(existing));
+    verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
   }

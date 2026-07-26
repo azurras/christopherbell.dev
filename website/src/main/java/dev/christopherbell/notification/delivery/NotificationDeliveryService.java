@@ -161,7 +161,16 @@ public class NotificationDeliveryService {
     fanoutGuard.tryAcquire(identity, now).ifPresent(permit -> {
       notification.setId(UUID.randomUUID().toString());
       notification.setCreatedOn(now);
-      notificationRepository.save(notification);
+      try {
+        notificationRepository.save(notification);
+      } catch (RuntimeException failure) {
+        try {
+          fanoutGuard.release(permit);
+        } catch (RuntimeException releaseFailure) {
+          failure.addSuppressed(releaseFailure);
+        }
+        throw failure;
+      }
     });
   }
 }

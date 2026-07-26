@@ -11,6 +11,7 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.admin.activity.ModerationAuditCommand;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.report.ReportRepository;
@@ -91,6 +92,30 @@ class ReportModerationLifecycleTest {
 
     verify(reports, never()).findById(any());
     verify(reports, never()).save(any());
+  }
+
+  @Test
+  @DisplayName("Resolved report retry completes its durable pending audit")
+  void resolveReport_whenAuditFails_retryCompletesPendingAudit() throws Exception {
+    var report = report("report-1", ReportStatus.OPEN);
+    var request = new ReportResolveRequest(
+        ReportResolution.CLOSE_NO_ACTION, "Confirmed review");
+    when(reports.findById("report-1")).thenReturn(Optional.of(report));
+    when(permissions.getSelfId()).thenReturn("admin");
+    when(reports.save(report)).thenReturn(report);
+    when(activity.recordModeration(any()))
+        .thenThrow(new ServiceUnavailableException(
+            "Moderation audit is temporarily unavailable.", new IllegalStateException("down")))
+        .thenAnswer(invocation -> null);
+
+    assertThrows(ServiceUnavailableException.class, () -> service.resolveReport("report-1", request));
+    assertThat(report.getStatus()).isEqualTo(ReportStatus.RESOLVED);
+    assertThat(report.getPendingModerationAudit()).isNotNull();
+
+    service.resolveReport("report-1", request);
+
+    assertThat(report.getPendingModerationAudit()).isNull();
+    verify(activity, org.mockito.Mockito.times(2)).recordModeration(any());
   }
 
   private PostReport report(String id, ReportStatus status) {

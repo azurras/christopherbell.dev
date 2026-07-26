@@ -77,7 +77,30 @@ class ReportControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(request))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.success").value(true));
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload").doesNotExist());
+
+    verify(reportService).submitReport(eq(requestObj));
+  }
+
+  @Test
+  @DisplayName("Create report: versioned route returns the accepted report")
+  @WithMockUser(authorities = {"USER"})
+  void createReport_versionedRoute_returnsAcceptedReport() throws Exception {
+    String request = TestUtil.readJsonAsString("/request/report-create-request.json");
+    ReportCreateRequest requestObj =
+        TestUtil.readJsonAsObject("/request/report-create-request.json", ReportCreateRequest.class);
+    when(reportService.submitReport(eq(requestObj)))
+        .thenReturn(PostReport.builder().id("report-1").build());
+
+    mockMvc.perform(
+            post("/api/reports/2026-07-26")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.id").value("report-1"));
 
     verify(reportService).submitReport(eq(requestObj));
   }

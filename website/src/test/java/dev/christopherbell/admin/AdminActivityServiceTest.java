@@ -29,6 +29,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 
 @ExtendWith(MockitoExtension.class)
 class AdminActivityServiceTest {
@@ -171,7 +172,7 @@ class AdminActivityServiceTest {
     when(permissionService.getSelfId()).thenReturn("account-1");
     when(accountRepository.findById("account-1"))
         .thenReturn(Optional.of(Account.builder().username("azurras").build()));
-    when(adminActivityRepository.save(any(AdminActivity.class)))
+    when(adminActivityRepository.insert(any(AdminActivity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
     var result = service.recordModeration(command);
@@ -192,10 +193,28 @@ class AdminActivityServiceTest {
         Map.of("status", "ACTIVE"), Map.of("status", "SUSPENDED"), Map.of());
     when(permissionService.getSelfId()).thenReturn("account-1");
     when(accountRepository.findById("account-1")).thenReturn(Optional.empty());
-    when(adminActivityRepository.save(any(AdminActivity.class)))
+    when(adminActivityRepository.insert(any(AdminActivity.class)))
         .thenThrow(new IllegalStateException("mongo unavailable"));
 
     assertThrows(ServiceUnavailableException.class, () -> service.recordModeration(command));
+  }
+
+  @Test
+  @DisplayName("Moderation audit retry returns the existing immutable event")
+  void recordModeration_whenEventAlreadyExists_returnsExisting() throws Exception {
+    var service = service();
+    var command = ModerationAuditCommand.create(
+        "ACCOUNT_STATUS_CHANGED", "ACCOUNT", "account-2", "@reader",
+        "Confirmed abuse.", "%s changed an account.",
+        Map.of("status", "ACTIVE"), Map.of("status", "SUSPENDED"), Map.of());
+    var existing = AdminActivity.builder().id(command.eventId()).build();
+    when(permissionService.getSelfId()).thenReturn("account-1");
+    when(accountRepository.findById("account-1")).thenReturn(Optional.empty());
+    when(adminActivityRepository.insert(any(AdminActivity.class)))
+        .thenThrow(new DuplicateKeyException("already inserted"));
+    when(adminActivityRepository.findById(command.eventId())).thenReturn(Optional.of(existing));
+
+    assertSame(existing, service.recordModeration(command));
   }
 
   private AdminActivityService service() {

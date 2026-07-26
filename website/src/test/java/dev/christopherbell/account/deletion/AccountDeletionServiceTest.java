@@ -48,7 +48,7 @@ class AccountDeletionServiceTest {
     var ordered = inOrder(operations);
     ordered.verify(operations).accountExists("account-123");
     ordered.verify(operations).ensureTombstone();
-    ordered.verify(operations).anonymizePublicPosts("account-123");
+    ordered.verify(operations).anonymizePublicPosts("account-123", result.pseudonym());
     ordered.verify(operations).removePrivateData("account-123");
     ordered.verify(operations).cleanSharedFolderState("account-123");
     ordered.verify(operations).pseudonymizeRetainedRecords(
@@ -88,7 +88,7 @@ class AccountDeletionServiceTest {
     var result = service.delete("account-456");
 
     verify(operations, never()).ensureTombstone();
-    verify(operations, never()).anonymizePublicPosts(any());
+    verify(operations, never()).anonymizePublicPosts(any(), any());
     verify(operations).removePrivateData("account-456");
     verify(operations).removeReferencesAndAccount("account-456");
     assertThat(result.status()).isEqualTo(AccountDeletionStatus.COMPLETE);

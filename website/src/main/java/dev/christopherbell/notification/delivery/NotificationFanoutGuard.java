@@ -30,16 +30,27 @@ public class NotificationFanoutGuard {
     String claimId = hash(String.join("\n",
         identity.recipientAccountId(), identity.actorAccountId(),
         identity.type().name(), identity.targetId()));
-    var claim = NotificationDeliveryGuard.builder()
-        .id(claimId)
-        .accountId(identity.recipientAccountId())
-        .actorAccountId(identity.actorAccountId())
-        .notificationType(identity.type().name())
-        .targetId(identity.targetId())
-        .expiresAt(now.plus(properties.dedupeWindow()))
-        .build();
+    var claimQuery = new Query(new Criteria().andOperator(
+        Criteria.where("_id").is(claimId),
+        new Criteria().orOperator(
+            Criteria.where("expiresAt").lte(now),
+            Criteria.where("expiresAt").exists(false))));
+    var claimUpdate = new Update()
+        .setOnInsert("_id", claimId)
+        .set("accountId", identity.recipientAccountId())
+        .set("actorAccountId", identity.actorAccountId())
+        .set("notificationType", identity.type().name())
+        .set("targetId", identity.targetId())
+        .set("expiresAt", now.plus(properties.dedupeWindow()));
     try {
-      mongo.insert(claim);
+      var claim = mongo.findAndModify(
+          claimQuery,
+          claimUpdate,
+          FindAndModifyOptions.options().upsert(true).returnNew(true),
+          NotificationDeliveryGuard.class);
+      if (claim == null) {
+        throw new IllegalStateException("Notification dedupe claim was not returned.");
+      }
     } catch (DuplicateKeyException duplicate) {
       return Optional.empty();
     }
@@ -62,17 +73,22 @@ public class NotificationFanoutGuard {
         FindAndModifyOptions.options().upsert(true).returnNew(true),
         NotificationRateLimit.class);
     if (counter == null) {
-      release(claimId);
+      releaseClaim(claimId);
       throw new IllegalStateException("Notification rate counter was not returned.");
     }
     if (counter.getCount() > properties.maxEventsPerWindow()) {
-      release(claimId);
+      releaseClaim(claimId);
       return Optional.empty();
     }
     return Optional.of(new NotificationDeliveryPermit(claimId));
   }
 
-  private void release(String claimId) {
+  /** Releases a dedupe claim when downstream notification persistence did not commit. */
+  public void release(NotificationDeliveryPermit permit) {
+    if (permit != null) releaseClaim(permit.claimId());
+  }
+
+  private void releaseClaim(String claimId) {
     mongo.remove(Query.query(Criteria.where("_id").is(claimId)), NotificationDeliveryGuard.class);
   }
 

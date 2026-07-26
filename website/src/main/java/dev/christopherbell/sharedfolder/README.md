@@ -134,6 +134,9 @@ Unavailable` and never falls back to an unchecked production path.
   private staging; append and finalization lease states are never maintenance deletion targets.
   Failed cleanup is audited with a fixed safe resource and durably deferred using capped
   exponential backoff, so page-zero failures cannot starve later due work after restart.
+- Account deletion reads private upload sessions and media jobs in bounded pages. A published
+  media worker must acknowledge cancellation before its marker, artifacts, or job record are
+  removed; timeout preserves that state so deletion can resume safely.
 
 ## Media Playback and Worker Handoff
 

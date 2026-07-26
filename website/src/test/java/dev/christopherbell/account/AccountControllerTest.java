@@ -414,16 +414,45 @@ public class AccountControllerTest {
   }
 
   @Test
-  @DisplayName("testDeleteAccount_whenAuthorized_Returns200")
+  @DisplayName("Legacy delete account returns the deleted account detail")
   @WithMockUser(authorities = {"ADMIN"})
-  public void testDeleteAccount_whenAuthorized_Returns200() throws Exception {
+  public void legacyDeleteAccount_whenAuthorized_preservesResponseShape() throws Exception {
+    var detail = AccountDetail.builder()
+        .id("to-del")
+        .email("user@example.com")
+        .username("departing-user")
+        .build();
+    var deletion = new AccountDeletionResult(
+        "deleted:abcdef012345", AccountDeletionStatus.COMPLETE, 6);
+    when(accountService.getAccountById(eq("to-del"))).thenReturn(detail);
+    when(accountService.deleteAccount(eq("to-del"))).thenReturn(deletion);
+
+    mockMvc
+        .perform(
+            delete("/api/accounts" + APIVersion.V20250903 + "/{id}", "to-del")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.id").value("to-del"))
+        .andExpect(jsonPath("$.payload.username").value("departing-user"))
+        .andExpect(jsonPath("$.payload.pseudonym").doesNotExist());
+
+    verify(accountService).getAccountById(eq("to-del"));
+    verify(accountService).deleteAccount(eq("to-del"));
+  }
+
+  @Test
+  @DisplayName("Versioned delete account returns resumable deletion result")
+  @WithMockUser(authorities = {"ADMIN"})
+  public void versionedDeleteAccount_whenAuthorized_returnsDeletionResult() throws Exception {
     var deletion = new AccountDeletionResult(
         "deleted:abcdef012345", AccountDeletionStatus.COMPLETE, 6);
     when(accountService.deleteAccount(eq("to-del"))).thenReturn(deletion);
 
     mockMvc
         .perform(
-            delete("/api/accounts" + APIVersion.V20250903 + "/{id}", "to-del")
+            delete("/api/accounts" + APIVersion.V20260726 + "/{id}", "to-del")
                 .with(csrf())
                 .contentType(MediaType.APPLICATION_JSON_VALUE))
         .andExpect(status().isOk())

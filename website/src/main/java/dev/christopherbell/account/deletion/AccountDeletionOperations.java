@@ -6,7 +6,7 @@ public interface AccountDeletionOperations {
 
   void ensureTombstone();
 
-  void anonymizePublicPosts(String accountId);
+  void anonymizePublicPosts(String accountId, String pseudonym);
 
   void removePrivateData(String accountId);
 

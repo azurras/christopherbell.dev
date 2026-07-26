@@ -66,7 +66,7 @@ class PostEditingServiceTest {
     });
 
     var result = service.edit(
-        "post-1", new PostEditRequest("after https://example.com"), "author", false);
+        "post-1", new PostEditRequest("after https://example.com"), "author");
 
     var saved = ArgumentCaptor.forClass(Post.class);
     verify(posts).save(saved.capture());
@@ -87,24 +87,22 @@ class PostEditingServiceTest {
     when(posts.findById("post-1")).thenReturn(Optional.of(post(NOW.minus(Duration.ofMinutes(15)))));
 
     assertThrows(InvalidRequestException.class, () -> service.edit(
-        "post-1", new PostEditRequest("after"), "author", false));
+        "post-1", new PostEditRequest("after"), "author"));
 
     verify(posts, never()).save(any());
   }
 
   @Test
-  @DisplayName("A non-owner sees the same not-found partition while an admin may edit")
-  void edit_partitionsNonOwnerAndAdmin() throws Exception {
+  @DisplayName("Every non-owner including an admin sees the same not-found partition")
+  void edit_rejectsEveryNonOwner() {
     var post = post(NOW.minusSeconds(1));
     when(posts.findById("post-1")).thenReturn(Optional.of(post));
     assertThrows(ResourceNotFoundException.class, () -> service.edit(
-        "post-1", new PostEditRequest("after"), "stranger", false));
+        "post-1", new PostEditRequest("after"), "stranger"));
+    assertThrows(ResourceNotFoundException.class, () -> service.edit(
+        "post-1", new PostEditRequest("after"), "admin"));
 
-    when(posts.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
-    when(mapper.toDetail(any(Post.class))).thenReturn(PostDetail.builder().id("post-1").build());
-    service.edit("post-1", new PostEditRequest("after"), "admin", true);
-
-    verify(posts).save(post);
+    verify(posts, never()).save(post);
   }
 
   @Test
@@ -115,7 +113,7 @@ class PostEditingServiceTest {
     when(expiration.isExpired(post)).thenReturn(true);
 
     assertThrows(InvalidRequestException.class, () -> service.edit(
-        "post-1", new PostEditRequest("after"), "author", false));
+        "post-1", new PostEditRequest("after"), "author"));
   }
 
   @Test
@@ -131,7 +129,7 @@ class PostEditingServiceTest {
     when(posts.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
     when(mapper.toDetail(any(Post.class))).thenReturn(PostDetail.builder().id("post-1").build());
 
-    service.edit("post-1", new PostEditRequest("newest"), "author", false);
+    service.edit("post-1", new PostEditRequest("newest"), "author");
 
     assertThat(post.getEditAudit()).hasSize(10);
     assertThat(post.getEditAudit().get(0).beforeText()).isEqualTo("before-1");

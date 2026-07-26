@@ -57,6 +57,7 @@ public class ReportModerationService {
 
     PostReport report = reportRepository.findById(reportId)
         .orElseThrow(() -> new ResourceNotFoundException("Report not found."));
+    report = completePendingAudit(report);
 
     if (request.resolution() == ReportResolution.REOPEN) {
       return reopenReport(report, request.reason());
@@ -85,9 +86,9 @@ public class ReportModerationService {
     report.setResolution(request.resolution());
     report.setResolvedBy(permissionService.getSelfId());
     report.setResolvedOn(Instant.now());
-    PostReport saved = reportRepository.save(report);
+    report.setPendingModerationAudit(auditCommand);
+    PostReport saved = completePendingAudit(reportRepository.save(report));
     includeRepeatReportContext(saved);
-    adminActivityService.recordModeration(auditCommand);
     if (deletedPost) {
       recordPostDeleted(saved);
     }
@@ -136,7 +137,8 @@ public class ReportModerationService {
     report.setResolution(null);
     report.setResolvedBy(null);
     report.setResolvedOn(null);
-    final PostReport saved;
+    report.setPendingModerationAudit(auditCommand);
+    PostReport saved;
     try {
       saved = reportRepository.save(report);
     } catch (DuplicateKeyException race) {
@@ -145,9 +147,17 @@ public class ReportModerationService {
       }
       throw race;
     }
+    saved = completePendingAudit(saved);
     includeRepeatReportContext(saved);
-    adminActivityService.recordModeration(auditCommand);
     return saved;
+  }
+
+  private PostReport completePendingAudit(PostReport report) {
+    var pending = report.getPendingModerationAudit();
+    if (pending == null) return report;
+    adminActivityService.recordModeration(pending);
+    report.setPendingModerationAudit(null);
+    return reportRepository.save(report);
   }
 
   private String openKey(PostReport report) {

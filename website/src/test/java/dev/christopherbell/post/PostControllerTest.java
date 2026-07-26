@@ -67,7 +67,7 @@ public class PostControllerTest {
     var editedOn = java.time.Instant.parse("2026-07-26T12:00:00Z");
     when(permissionService.getSelfId()).thenReturn("owner");
     when(permissionService.hasAuthority("ADMIN")).thenReturn(false);
-    when(postEditingService.edit("p1", request, "owner", false))
+    when(postEditingService.edit("p1", request, "owner"))
         .thenReturn(PostDetail.builder().id("p1").text("after").editedOn(editedOn).build());
 
     mockMvc.perform(patch("/api/posts" + APIVersion.V20260726 + "/p1")

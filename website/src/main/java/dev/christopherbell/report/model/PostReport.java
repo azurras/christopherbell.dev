@@ -2,6 +2,8 @@ package dev.christopherbell.report.model;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import dev.christopherbell.admin.activity.ModerationAuditCommand;
 import java.time.Instant;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -51,6 +53,7 @@ public class PostReport {
   private String resolvedBy;
   private Long openReportsForAccount;
   private Long resolvedReportsForAccount;
+  @JsonIgnore private ModerationAuditCommand pendingModerationAudit;
 
   @JsonFormat(
       shape = JsonFormat.Shape.STRING,

@@ -1,6 +1,7 @@
 package dev.christopherbell.notification;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -196,5 +197,26 @@ class NotificationServiceTest {
             fanoutGuard,
             Clock.fixed(Instant.parse("2026-07-26T12:00:00Z"), ZoneOffset.UTC)),
         new NotificationInboxService(notificationRepository, permissionService, null, null));
+  }
+
+  @Test
+  @DisplayName("Notification persistence failure releases its dedupe permit for retry")
+  void delivery_whenPersistenceFails_releasesPermit() {
+    var service = service();
+    var actor = Account.builder().id("actor").username("liker").build();
+    var recipient = Account.builder().id("recipient").username("writer").build();
+    var post = Post.builder().id("post-1").accountId("recipient").text("hello").build();
+    var permit = new NotificationDeliveryPermit("claim");
+    when(notificationPreferenceService.shouldDeliver("recipient", NotificationType.LIKE))
+        .thenReturn(true);
+    when(fanoutGuard.tryAcquire(any(NotificationEventIdentity.class), any(Instant.class)))
+        .thenReturn(Optional.of(permit));
+    when(notificationRepository.save(any(Notification.class)))
+        .thenThrow(new IllegalStateException("mongo unavailable"));
+
+    assertThrows(IllegalStateException.class, () ->
+        service.createPostLikeNotification(post, actor, recipient));
+
+    verify(fanoutGuard).release(permit);
   }
 }

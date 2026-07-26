@@ -134,7 +134,26 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
-  public ResponseEntity<Response<AccountDeletionResult>> deleteAccount(
+  public ResponseEntity<Response<AccountDetail>> deleteAccount(
+      @PathVariable String accountId
+  ) throws Exception {
+    var account = accountService.getAccountById(accountId);
+    accountService.deleteAccount(accountId);
+    return new ResponseEntity<>(
+        Response.<AccountDetail>builder()
+            .payload(account)
+            .success(true)
+            .build(), HttpStatus.OK);
+  }
+
+  /** Deletes an account using the resumable workflow and returns its final progress. */
+  @DeleteMapping(
+      value = V20260726 + "/{accountId}",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  public ResponseEntity<Response<AccountDeletionResult>> deleteAccountResumably(
       @PathVariable String accountId
   ) throws Exception {
     return new ResponseEntity<>(

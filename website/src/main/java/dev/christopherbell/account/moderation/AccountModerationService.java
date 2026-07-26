@@ -38,6 +38,7 @@ public class AccountModerationService {
       throws InvalidRequestException, ResourceNotFoundException {
     log.info("Approving account with id {}", accountId);
     var account = getExistingOrThrow(accountId);
+    completePendingAudit(account);
     var before = ModerationAccountSnapshot.from(account);
     var after = new ModerationAccountSnapshot(account.getRole(), AccountStatus.ACTIVE);
     var auditCommand = ModerationAuditCommand.create(
@@ -54,9 +55,9 @@ public class AccountModerationService {
     account.setIsApproved(true);
     account.setStatus(AccountStatus.ACTIVE);
     account.setLastUpdatedOn(Instant.now());
-    accountRepository.save(account);
-    adminActivityService.recordModeration(auditCommand);
-    return accountMapper.toAccount(account);
+    account.setPendingModerationAudit(auditCommand);
+    var saved = accountRepository.save(account);
+    return accountMapper.toAccount(completePendingAudit(saved));
   }
 
   /**
@@ -66,6 +67,7 @@ public class AccountModerationService {
       throws InvalidRequestException, ResourceNotFoundException, ResourceExistsException {
     validateUpdateRequest(request);
     var existing = getExistingOrThrow(request.id());
+    completePendingAudit(existing);
     var before = ModerationAccountSnapshot.from(existing);
     var proposed = before.with(request);
     boolean moderated = !before.equals(proposed);
@@ -86,11 +88,20 @@ public class AccountModerationService {
             Map.of("source", "back-office", "accountId", existing.getId()))
         : null;
     applyUpdates(existing, request);
+    existing.setPendingModerationAudit(auditCommand);
     var saved = accountRepository.save(existing);
     if (moderated) {
-      adminActivityService.recordModeration(auditCommand);
+      saved = completePendingAudit(saved);
     }
     return accountMapper.toAccount(saved);
+  }
+
+  private Account completePendingAudit(Account account) {
+    var pending = account.getPendingModerationAudit();
+    if (pending == null) return account;
+    adminActivityService.recordModeration(pending);
+    account.setPendingModerationAudit(null);
+    return accountRepository.save(account);
   }
 
   private void validateUpdateRequest(AccountUpdateRequest request) throws InvalidRequestException {

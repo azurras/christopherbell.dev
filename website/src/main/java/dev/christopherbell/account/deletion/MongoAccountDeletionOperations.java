@@ -41,10 +41,20 @@ public class MongoAccountDeletionOperations implements AccountDeletionOperations
   }
 
   @Override
-  public void anonymizePublicPosts(String accountId) {
+  public void anonymizePublicPosts(String accountId, String pseudonym) {
     mongo.updateMulti(
         exact("accountId", accountId),
         new Update().set("accountId", TOMBSTONE),
+        "posts");
+    mongo.updateMulti(
+        exact("likedBy", accountId),
+        new Update().pull("likedBy", accountId).inc("likesCount", -1),
+        "posts");
+    mongo.updateMulti(
+        exact("editAudit.editorAccountId", accountId),
+        new Update()
+            .set("editAudit.$[entry].editorAccountId", pseudonym)
+            .filterArray(Criteria.where("entry.editorAccountId").is(accountId)),
         "posts");
   }
 

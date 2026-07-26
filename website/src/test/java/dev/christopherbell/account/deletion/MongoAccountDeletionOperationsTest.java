@@ -55,10 +55,16 @@ class MongoAccountDeletionOperationsTest {
   @Test
   @DisplayName("Public and retained records replace identifiers with stable deletion values")
   void anonymization_updatesPostsReportsAndAuditCollections() {
-    operations.anonymizePublicPosts("account-1");
+    operations.anonymizePublicPosts("account-1", "deleted:abcdef012345");
     operations.pseudonymizeRetainedRecords("account-1", "deleted:abcdef012345");
 
-    verify(mongo).updateMulti(any(Query.class), any(UpdateDefinition.class), eq("posts"));
+    var postUpdates = ArgumentCaptor.forClass(UpdateDefinition.class);
+    verify(mongo, org.mockito.Mockito.times(3)).updateMulti(
+        any(Query.class), postUpdates.capture(), eq("posts"));
+    assertThat(postUpdates.getAllValues().toString())
+        .contains("accountId", "deleted-user")
+        .contains("likedBy", "account-1", "likesCount")
+        .contains("editAudit", "editorAccountId", "deleted:abcdef012345");
     verify(mongo, org.mockito.Mockito.times(3)).updateMulti(
         any(Query.class), any(UpdateDefinition.class), eq("post_reports"));
     verify(mongo, org.mockito.Mockito.times(2)).updateMulti(

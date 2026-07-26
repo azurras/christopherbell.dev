@@ -33,6 +33,10 @@ class NotificationFanoutGuardTest {
   void setUp() {
     var properties = new NotificationDeliveryProperties(Duration.ofMinutes(5), Duration.ofMinutes(1), 2);
     guard = new NotificationFanoutGuard(mongo, properties);
+    org.mockito.Mockito.lenient().when(mongo.findAndModify(
+        any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
+        eq(NotificationDeliveryGuard.class)))
+        .thenReturn(NotificationDeliveryGuard.builder().id("claim").build());
   }
 
   @Test
@@ -40,9 +44,28 @@ class NotificationFanoutGuardTest {
   void tryAcquire_whenDuplicate_returnsEmpty() {
     var identity = identity("recipient", "LIKE", "post-1");
     doThrow(new DuplicateKeyException("duplicate"))
-        .when(mongo).insert(any(NotificationDeliveryGuard.class));
+        .when(mongo).findAndModify(
+            any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
+            eq(NotificationDeliveryGuard.class));
 
     assertThat(guard.tryAcquire(identity, NOW)).isEmpty();
+  }
+
+  @Test
+  @DisplayName("An expired claim is atomically replaceable before TTL cleanup")
+  void tryAcquire_whenClaimExpired_replacesItAtomically() {
+    when(mongo.findAndModify(
+        any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
+        eq(NotificationRateLimit.class)))
+        .thenReturn(NotificationRateLimit.builder().count(1L).build());
+
+    assertThat(guard.tryAcquire(identity("recipient", "LIKE", "post-1"), NOW)).isPresent();
+
+    var query = ArgumentCaptor.forClass(Query.class);
+    verify(mongo).findAndModify(
+        query.capture(), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
+        eq(NotificationDeliveryGuard.class));
+    assertThat(query.getValue().getQueryObject().toString()).contains("expiresAt", "$lte");
   }
 
   @Test

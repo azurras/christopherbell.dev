@@ -16,7 +16,7 @@ public interface SharedFolderUploadSessionRepository
   long countByOwnerIdAndStateIn(
       String ownerId, Collection<SharedFolderUploadState> states);
 
-  List<SharedFolderUploadSession> findByOwnerId(String ownerId);
+  Slice<SharedFolderUploadSession> findByOwnerIdOrderByIdAsc(String ownerId, Pageable pageable);
 
   /** Returns only expired ACTIVE work or EXPIRED cleanup whose durable retry is due. */
   @Query("{ '$or': ["

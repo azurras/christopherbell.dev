@@ -232,8 +232,7 @@ public class PostController {
         .payload(postEditingService.edit(
             postId,
             request,
-            permissionService.getSelfId(),
-            permissionService.hasAuthority("ADMIN")))
+            permissionService.getSelfId()))
         .success(true)
         .build());
   }
