@@ -8,6 +8,9 @@ import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportLeaseGuard;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportSnapshot;
 import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
@@ -972,6 +975,27 @@ public class RestaurantServiceTest {
     assertEquals(0, result.updated());
     assertEquals(1, result.skippedExisting());
     verify(restaurantRepository, never()).save(eq(duplicate));
+  }
+
+  @Test
+  @DisplayName("Prepared import verifies lease before each write and after completion")
+  public void testApplyPreparedImport_verifiesLeaseThroughoutMutation() throws Exception {
+    var imported = RestaurantStub.getRestaurantStub("osm:node:lease");
+    var guard = org.mockito.Mockito.mock(RestaurantImportLeaseGuard.class);
+    when(restaurantRepository.findById(eq(imported.getId()))).thenReturn(Optional.empty());
+    when(restaurantRepository.findByNormalizedName(eq("pflugerville taco house")))
+        .thenReturn(Optional.empty());
+    when(restaurantRepository.findAll()).thenReturn(List.of());
+    var snapshot = new RestaurantImportSnapshot(
+        "checksum",
+        List.of(imported),
+        new RestaurantImportPreviewCounts(1, 1, 0, 0, 0, 0),
+        List.of());
+
+    restaurantService.applyPreparedImport(snapshot, guard);
+
+    verify(guard, times(2)).verifyHeld();
+    verify(restaurantRepository).save(eq(imported));
   }
 
   @Test

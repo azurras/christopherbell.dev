@@ -76,7 +76,7 @@ class RestaurantImportWorkflowServiceTest {
         () -> workflow.applyOpenStreetMapImport("token-1"));
 
     assertEquals(409, failure.getStatusCode().value());
-    verify(restaurantService, never()).applyPreparedImport(any());
+    verify(restaurantService, never()).applyPreparedImport(any(), any());
     verify(leases).release(eq(RestaurantImportWorkflowService.LEASE_NAME), any());
     verify(states, times(2)).save(any());
   }
@@ -106,7 +106,7 @@ class RestaurantImportWorkflowServiceTest {
     when(restaurantService.prepareConfiguredMetroImport()).thenReturn(snapshot);
     when(leases.renew(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(NOW), any()))
         .thenReturn(true);
-    when(restaurantService.applyPreparedImport(eq(snapshot))).thenReturn(result());
+    when(restaurantService.applyPreparedImport(eq(snapshot), any())).thenReturn(result());
 
     var outcome = workflow.applyOpenStreetMapImport("token-1");
 
@@ -114,6 +114,48 @@ class RestaurantImportWorkflowServiceTest {
     assertEquals(1, outcome.result().imported());
     verify(states, times(2)).save(any());
     verify(leases).release(eq(RestaurantImportWorkflowService.LEASE_NAME), any());
+  }
+
+  @Test
+  void longApplyRenewsLeaseAgainBeforeLaterWrites() throws Exception {
+    var advancingClock = org.mockito.Mockito.mock(Clock.class);
+    when(advancingClock.instant()).thenReturn(
+        NOW,
+        NOW,
+        NOW.plusSeconds(61),
+        NOW.plusSeconds(61),
+        NOW.plusSeconds(62),
+        NOW.plusSeconds(62));
+    when(advancingClock.withZone(any())).thenReturn(advancingClock);
+    when(advancingClock.getZone()).thenReturn(ZoneOffset.UTC);
+    var advancingWorkflow = new RestaurantImportWorkflowService(
+        advancingClock,
+        leases,
+        permissionService,
+        previews,
+        states,
+        restaurantService,
+        new WflProperties());
+    when(permissionService.getSelfId()).thenReturn("operator-1");
+    when(leases.tryAcquire(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), eq(NOW), any()))
+        .thenReturn(true);
+    when(previews.claim(eq("token-1"), eq("operator-1"), eq(NOW)))
+        .thenReturn(Optional.of(preview("checksum-a")));
+    var snapshot = snapshot("checksum-a");
+    when(restaurantService.prepareConfiguredMetroImport()).thenReturn(snapshot);
+    when(leases.renew(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), any(), any()))
+        .thenReturn(true);
+    when(restaurantService.applyPreparedImport(eq(snapshot), any())).thenAnswer(invocation -> {
+      var guard = invocation.getArgument(1, RestaurantImportLeaseGuard.class);
+      guard.verifyHeld();
+      guard.verifyHeld();
+      return result();
+    });
+
+    var outcome = advancingWorkflow.applyOpenStreetMapImport("token-1");
+
+    assertEquals(RestaurantImportRunStatus.SUCCEEDED, outcome.status());
+    verify(leases, times(2)).renew(eq(RestaurantImportWorkflowService.LEASE_NAME), any(), any(), any());
   }
 
   @Test

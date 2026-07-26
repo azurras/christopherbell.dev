@@ -10,6 +10,7 @@ import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportLeaseGuard;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportSnapshot;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
@@ -544,9 +545,9 @@ public class RestaurantService {
    *
    * @return import summary
    */
-  public RestaurantImportResult importConfiguredMetroRestaurantsFromOpenStreetMap()
+  RestaurantImportResult importConfiguredMetroRestaurantsFromOpenStreetMap()
       throws IOException, InterruptedException, InvalidRequestException {
-    return applyPreparedImport(prepareConfiguredMetroImport());
+    return applyPreparedImport(prepareConfiguredMetroImport(), RestaurantImportLeaseGuard.NONE);
   }
 
   /** Calculates duplicate groups and stable survivors without mutating data. */
@@ -700,7 +701,10 @@ public class RestaurantService {
   }
 
   /** Applies a previously fetched in-memory snapshot. Durable preview records never contain this payload. */
-  public RestaurantImportResult applyPreparedImport(RestaurantImportSnapshot snapshot)
+  public RestaurantImportResult applyPreparedImport(
+      RestaurantImportSnapshot snapshot,
+      RestaurantImportLeaseGuard leaseGuard
+  )
       throws InvalidRequestException {
     log.info("OpenStreetMap restaurant import started.");
     var fetched = snapshot.restaurants();
@@ -711,6 +715,7 @@ public class RestaurantService {
     var skippedInvalid = 0;
 
     for (Restaurant restaurant : fetched) {
+      leaseGuard.verifyHeld();
       if (!isValidImportRestaurant(restaurant)) {
         skippedInvalid++;
         log.debug("Skipping invalid OpenStreetMap restaurant candidate: {}", restaurant);
@@ -756,6 +761,7 @@ public class RestaurantService {
       imported++;
       log.info("Saved OpenStreetMap restaurant id: {}, name: {}", restaurant.getId(), restaurant.getName());
     }
+    leaseGuard.verifyHeld();
 
     log.info("OpenStreetMap restaurant import completed. Imported: {}, updated: {}, fetched: {}, skipped existing: {}, skipped invalid: {}.",
         imported, updated, fetched.size(), skippedExisting, skippedInvalid);
