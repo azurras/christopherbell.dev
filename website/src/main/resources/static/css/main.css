@@ -5965,6 +5965,11 @@ body {
   gap: 0.45rem;
 }
 
+.shared-folder-radio {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .shared-folder-search .form-control {
   min-width: 0;
   color: #f4f6f8;
@@ -6373,7 +6378,8 @@ body {
 
   .shared-folder-command-bar,
   .shared-folder-toolbar,
-  .shared-folder-search {
+  .shared-folder-search,
+  .shared-folder-radio {
     width: 100%;
   }
 
@@ -6690,6 +6696,12 @@ img.site-media-player-artwork {
 .site-media-player-retry:hover {
   border-color: #ffc107;
   color: #ffc107;
+}
+
+.site-media-player-control:disabled,
+.site-media-player-timeline input:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .site-media-player-play:hover {

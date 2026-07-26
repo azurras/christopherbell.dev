@@ -46,6 +46,34 @@ test('shared-folder API paths encode each decoded relative path once', () => {
     '/api/shared-folder/2026-07-17/media/jobs/job%2Fid');
   assert.equal(API.sharedFolder.media.stream('job/id'),
     '/api/shared-folder/2026-07-17/media/jobs/job%2Fid/stream');
+  assert.equal(API.sharedFolder.radio.playback,
+    '/api/shared-folder/2026-07-17/radio');
+  assert.equal(API.sharedFolder.radio.duration,
+    '/api/shared-folder/2026-07-17/radio/duration');
+});
+
+test('shared-folder radio control delegates playback and reports an empty station safely', async () => {
+  assert.equal(typeof sharedFolderPage.bindSharedFolderRadioControl, 'function');
+  const button = fakeButton();
+  const statuses = [];
+  let playCalls = 0;
+  const bound = sharedFolderPage.bindSharedFolderRadioControl({
+    button,
+    playRadioFn: async () => {
+      playCalls += 1;
+      return { status: 'EMPTY', playback: null };
+    },
+    statusFn: message => statuses.push(message),
+  });
+
+  assert.equal(bound, true);
+  await button.click();
+  assert.equal(playCalls, 1);
+  assert.equal(button.disabled, false);
+  assert.deepEqual(statuses, [
+    'Connecting to shared-folder radio…',
+    'The shared-folder radio has no audio tracks yet.',
+  ]);
 });
 
 test('shared-folder search encodes queries and presents validated recursive results', () => {
@@ -708,3 +736,16 @@ test('shared-folder shell presents an explorer layout with compact actions and r
   assert.match(page, /window\.history\.pushState/);
   assert.doesNotMatch(page, /window\.location\.href\s*=/);
 });
+
+function fakeButton() {
+  let clickHandler = null;
+  return {
+    disabled: false,
+    addEventListener(name, handler) {
+      if (name === 'click') clickHandler = handler;
+    },
+    click() {
+      return clickHandler?.({ preventDefault() {} });
+    },
+  };
+}

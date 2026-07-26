@@ -36,7 +36,11 @@ import {
   sharedFolderDownloadRequestUrl,
   sharedFolderStreamingDenial,
 } from './lib/shared-folder-streaming.js';
-import { playSharedFolderMedia, stopSiteMediaPlayback } from './lib/site-media-player.js';
+import {
+  playSharedFolderMedia,
+  playSharedFolderRadio as joinSharedFolderRadio,
+  stopSiteMediaPlayback,
+} from './lib/site-media-player.js';
 
 const root = typeof document === 'undefined' ? null : document.getElementById('shared-folder-app');
 let currentPreviewLostAccess = false;
@@ -613,6 +617,40 @@ export function createSharedFolderNavigator({ load, render, pushPath, onError })
   });
 }
 
+/** Bind the visible command to the top-document radio owner with safe status outcomes. */
+export function bindSharedFolderRadioControl({
+  button,
+  playRadioFn = joinSharedFolderRadio,
+  statusFn = status,
+  handleAccessLossFn = handleSharedFolderAccessLoss,
+}) {
+  if (!button || typeof playRadioFn !== 'function') return false;
+  button.addEventListener('click', async () => {
+    if (button.disabled) return;
+    button.disabled = true;
+    statusFn('Connecting to shared-folder radio…');
+    try {
+      const response = await playRadioFn();
+      statusFn(response?.status === 'EMPTY'
+        ? 'The shared-folder radio has no audio tracks yet.'
+        : 'Shared-folder radio is live.');
+    } catch (error) {
+      if (isSharedFolderAccessDenied(error)) handleAccessLossFn(error.status);
+      else statusFn(error?.message || 'The shared-folder radio is unavailable.');
+    } finally {
+      button.disabled = false;
+    }
+  });
+  return true;
+}
+
+function configureSharedFolderRadioControl() {
+  if (typeof document === 'undefined') return false;
+  return bindSharedFolderRadioControl({
+    button: document.getElementById('shared-folder-radio'),
+  });
+}
+
 /** Own search request cancellation so an older result cannot replace a newer page state. */
 export function createSharedFolderSearchController({
   load, render, restore, onError, invalidateNavigation = () => {},
@@ -740,6 +778,7 @@ export async function initializeSharedFolderPage({
       statusFn('Your account does not have shared-folder read access.');
       return;
     }
+    configureSharedFolderRadioControl();
     const canWrite = accountHasSharedFolderWrite(account);
     let activePath = '';
     let navigator;

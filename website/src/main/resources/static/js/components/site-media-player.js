@@ -15,6 +15,8 @@ import {
   armSiteMediaGestureResume,
   clearSiteMediaResume,
   createPersistentSiteNavigator,
+  createSiteRadioDurationReporter,
+  createSiteRadioScheduler,
   createSiteMediaSession,
   formatSiteMediaTime,
   nextSiteMediaPlaybackRate,
@@ -24,9 +26,13 @@ import {
   saveSiteMediaResume,
   seekSiteMediaBy,
   siteAudioPresentation,
+  siteMediaControlState,
+  siteRadioResumeState,
+  siteRadioSyncDecision,
   SITE_MEDIA_PLAYER_TAG,
   toggleSiteMediaMute,
   toggleSiteMediaPlayback,
+  validateSiteRadioResponse,
 } from '../lib/site-media-player.js';
 import {
   authHeaders,
@@ -85,6 +91,13 @@ export class SiteMediaPlayer extends HTMLElement {
     this.sourceVersionByMedia = new WeakMap();
     this.playbackIntentByMedia = new WeakMap();
     this.pendingPlaybackStart = new WeakSet();
+    this.radioGeneration = 0;
+    this.radioScheduler = createSiteRadioScheduler({
+      poll: () => this.syncRadio(),
+      schedule: (callback, delayMilliseconds) => window.setTimeout(callback, delayMilliseconds),
+      cancel: timer => window.clearTimeout(timer),
+      onError: error => this.handleRadioSyncError(error),
+    });
     this.bindControls();
     this.pageHideHandler = () => this.persistPlayback();
     window.addEventListener('pagehide', this.pageHideHandler);
@@ -113,6 +126,7 @@ export class SiteMediaPlayer extends HTMLElement {
     this.cancelGestureResume();
     this.releaseArtwork();
     this.clearMediaSessionMetadata();
+    this.stopPlayback();
   }
 
   renderStructure() {
@@ -221,6 +235,11 @@ export class SiteMediaPlayer extends HTMLElement {
       if (!media) return;
       const intendsToPlay = media.paused || media.ended;
       this.playbackIntentByMedia.set(media, intendsToPlay);
+      if (intendsToPlay && this.session.snapshot()?.descriptor.mode === 'RADIO') {
+        this.pendingPlaybackStart.add(media);
+        void this.syncRadio({ requestPlay: true });
+        return;
+      }
       if (!intendsToPlay) {
         this.pendingPlaybackStart.delete(media);
         this.cancelGestureResume();
@@ -229,14 +248,14 @@ export class SiteMediaPlayer extends HTMLElement {
     });
     this.querySelector('[data-site-player-control="rewind"]').addEventListener('click', () => {
       const media = this.currentMedia();
-      if (!media) return;
+      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') return;
       seekSiteMediaBy(media, -10);
       this.syncControls();
       this.persistPlayback();
     });
     this.querySelector('[data-site-player-control="forward"]').addEventListener('click', () => {
       const media = this.currentMedia();
-      if (!media) return;
+      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') return;
       seekSiteMediaBy(media, 10);
       this.syncControls();
       this.persistPlayback();
@@ -250,14 +269,14 @@ export class SiteMediaPlayer extends HTMLElement {
     });
     this.querySelector('[data-site-player-control="rate"]').addEventListener('click', () => {
       const media = this.currentMedia();
-      if (!media) return;
+      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') return;
       media.playbackRate = nextSiteMediaPlaybackRate(media.playbackRate);
       this.syncControls();
       this.persistPlayback();
     });
     this.querySelector('[data-site-player-seek]').addEventListener('input', event => {
       const media = this.currentMedia();
-      if (!media) return;
+      if (!media || this.session.snapshot()?.descriptor.mode === 'RADIO') return;
       media.currentTime = Number(event.currentTarget.value);
       this.syncControls();
       this.persistPlayback();
@@ -287,11 +306,20 @@ export class SiteMediaPlayer extends HTMLElement {
       clearSiteMediaResume(sessionStorage);
       return;
     }
-    await this.playSharedFolder({
-      previewKind: resume.descriptor.kind,
-      name: resume.descriptor.title,
-      path: resume.descriptor.path,
-    }, resume);
+    try {
+      if (resume.descriptor.mode === 'RADIO') {
+        await this.playSharedFolderRadio(resume);
+      } else {
+        await this.playSharedFolder({
+          previewKind: resume.descriptor.kind,
+          name: resume.descriptor.title,
+          path: resume.descriptor.path,
+        }, resume);
+      }
+    } catch (error) {
+      if (isSharedFolderAccessDenied(error)) this.handleAccessLoss(error.status);
+      else clearSiteMediaResume(sessionStorage);
+    }
   }
 
   bindPlaybackEvents(playback) {
@@ -299,8 +327,12 @@ export class SiteMediaPlayer extends HTMLElement {
     const persist = () => {
       if (!playback.signal.aborted) this.persistPlayback();
     };
-    playback.media.addEventListener('loadedmetadata', sync);
-    playback.media.addEventListener('durationchange', sync);
+    const eventOptions = { signal: playback.signal };
+    playback.media.addEventListener('loadedmetadata', () => {
+      sync();
+      if (playback.descriptor.mode === 'RADIO') this.reportRadioDuration(playback);
+    }, eventOptions);
+    playback.media.addEventListener('durationchange', sync, eventOptions);
     playback.media.addEventListener('timeupdate', () => {
       sync();
       const currentSecond = Math.floor(playback.media.currentTime || 0);
@@ -308,31 +340,37 @@ export class SiteMediaPlayer extends HTMLElement {
         this.lastPersistedSecond = currentSecond;
         persist();
       }
-    });
+    }, eventOptions);
     playback.media.addEventListener('play', () => {
       this.playbackIntentByMedia.set(playback.media, true);
       this.pendingPlaybackStart.delete(playback.media);
       this.cancelGestureResume(playback);
       sync();
       persist();
-    });
+    }, eventOptions);
     playback.media.addEventListener('pause', () => {
       if (!this.pendingPlaybackStart.has(playback.media)) {
         this.playbackIntentByMedia.set(playback.media, false);
       }
       sync();
       persist();
-    });
+    }, eventOptions);
     for (const eventName of ['seeked', 'volumechange', 'ratechange']) {
       playback.media.addEventListener(eventName, () => {
         sync();
         persist();
-      });
+      }, eventOptions);
     }
     playback.media.addEventListener('ended', () => {
-      clearSiteMediaResume(sessionStorage);
+      if (playback.descriptor.mode === 'RADIO') {
+        void this.syncRadio({
+          requestPlay: this.playbackIntentByMedia.get(playback.media) !== false,
+        });
+      } else {
+        clearSiteMediaResume(sessionStorage);
+      }
       sync();
-    });
+    }, eventOptions);
   }
 
   resumePlaybackWhenReady(playback) {
@@ -361,7 +399,7 @@ export class SiteMediaPlayer extends HTMLElement {
             this.setStatus('Press play to start');
           }
         });
-    }, { once: true });
+    }, { once: true, signal: playback.signal });
   }
 
   persistPlayback() {
@@ -408,7 +446,8 @@ export class SiteMediaPlayer extends HTMLElement {
     const seek = this.querySelector('[data-site-player-seek]');
     seek.max = String(duration);
     seek.value = String(position);
-    seek.disabled = duration <= 0;
+    const controlState = siteMediaControlState(playback.descriptor, duration);
+    seek.disabled = controlState.seekDisabled;
     seek.style.setProperty('--site-media-progress', `${duration > 0 ? (position / duration) * 100 : 0}%`);
     this.querySelector('[data-site-player-elapsed]').textContent = formatSiteMediaTime(position);
     this.querySelector('[data-site-player-duration]').textContent = formatSiteMediaTime(duration);
@@ -423,6 +462,13 @@ export class SiteMediaPlayer extends HTMLElement {
     mute.setAttribute('aria-label', isMuted ? 'Unmute' : 'Mute');
     this.querySelector('[data-site-player-volume]').value = String(media.volume);
     this.querySelector('[data-site-player-control="rate"]').textContent = `${media.playbackRate}×`;
+    this.querySelector('[data-site-player-control="rewind"]').disabled =
+      controlState.rewindDisabled;
+    this.querySelector('[data-site-player-control="forward"]').disabled =
+      controlState.forwardDisabled;
+    this.querySelector('[data-site-player-control="rate"]').disabled = controlState.rateDisabled;
+    this.querySelector('.site-media-player-eyebrow').textContent =
+      controlState.live ? 'Radio · Live' : 'Now playing';
 
     const isVideo = playback.descriptor.kind === 'VIDEO';
     const pictureInPicture = this.querySelector('[data-site-player-control="picture-in-picture"]');
@@ -471,8 +517,191 @@ export class SiteMediaPlayer extends HTMLElement {
     }
   }
 
+  beginRadioLifetime() {
+    this.stopRadioSync();
+    const generation = this.radioGeneration;
+    this.radioController = new AbortController();
+    this.radioDurationReporter = createSiteRadioDurationReporter({
+      report: async request => {
+        const response = await fetchJson(API.sharedFolder.radio.duration, {
+          method: 'POST',
+          headers: authHeaders(),
+          redirectOnUnauthorized: false,
+          cache: 'no-store',
+          body: JSON.stringify(request),
+          signal: this.radioController.signal,
+        });
+        validateSiteRadioResponse(response);
+      },
+    });
+    return generation;
+  }
+
+  stopRadioSync() {
+    this.radioGeneration = (this.radioGeneration || 0) + 1;
+    this.radioScheduler?.stop();
+    this.radioController?.abort();
+    this.radioController = null;
+    this.radioDurationReporter = null;
+    this.radioPlayback = null;
+    this.radioPlayRequested = false;
+    this.radioSyncPromise = null;
+  }
+
+  async fetchRadioSnapshot(signal) {
+    const response = await fetchJson(API.sharedFolder.radio.playback, {
+      headers: authHeaders(),
+      redirectOnUnauthorized: false,
+      cache: 'no-store',
+      signal,
+    });
+    return validateSiteRadioResponse(response);
+  }
+
+  /** Join the server-owned station, using saved state only for intent and audio preferences. */
+  async playSharedFolderRadio(resume = null) {
+    const replacingRadio = this.session?.snapshot()?.descriptor.mode === 'RADIO';
+    const generation = this.beginRadioLifetime();
+    let response;
+    try {
+      response = await this.fetchRadioSnapshot(this.radioController.signal);
+    } catch (error) {
+      if (generation === this.radioGeneration) this.stopRadioSync();
+      if (replacingRadio) this.stopPlayback();
+      throw error;
+    }
+    if (generation !== this.radioGeneration) return response;
+    if (response.status === 'EMPTY') {
+      if (resume?.descriptor.mode === 'RADIO') clearSiteMediaResume(sessionStorage);
+      if (replacingRadio) this.stopPlayback();
+      else this.stopRadioSync();
+      return response;
+    }
+
+    const station = response.playback;
+    const saved = resume || {
+      descriptor: {
+        mode: 'RADIO', kind: 'AUDIO', title: station.entry.name, path: station.entry.path,
+      },
+      positionSeconds: 0,
+      wasPlaying: true,
+      playbackRate: 1,
+      muted: false,
+      volume: 1,
+    };
+    const radioResume = siteRadioResumeState(saved, station);
+    this.radioPlayback = station;
+    await this.playSharedFolderEntry(station.entry, radioResume, radioResume.descriptor);
+    if (generation === this.radioGeneration) this.radioScheduler.start();
+    return response;
+  }
+
+  async syncRadio({ requestPlay = false } = {}) {
+    if (requestPlay) this.radioPlayRequested = true;
+    if (!this.radioController || this.radioController.signal.aborted) return false;
+    if (this.radioSyncPromise) return this.radioSyncPromise;
+    const generation = this.radioGeneration;
+    const operation = this.performRadioSync(generation).catch(error => {
+      this.handleRadioSyncError(error);
+      return false;
+    });
+    this.radioSyncPromise = operation;
+    void operation.finally(() => {
+      if (this.radioSyncPromise !== operation) return;
+      this.radioSyncPromise = null;
+      if (this.radioPlayRequested && generation === this.radioGeneration) {
+        void this.syncRadio({ requestPlay: true });
+      }
+    });
+    return operation;
+  }
+
+  async performRadioSync(generation) {
+    const response = await this.fetchRadioSnapshot(this.radioController.signal);
+    if (generation !== this.radioGeneration) return false;
+    const current = this.session?.snapshot();
+    if (!current || current.descriptor.mode !== 'RADIO') return false;
+    const decision = siteRadioSyncDecision({
+      stationSequence: current.descriptor.stationSequence,
+      path: current.descriptor.path,
+    }, response, current.media.currentTime);
+    if (decision.action === 'EMPTY') {
+      clearSiteMediaResume(sessionStorage);
+      this.setStatus('The radio has no audio tracks');
+      this.stopPlayback();
+      return true;
+    }
+
+    const requestedPlay = this.radioPlayRequested;
+    this.radioPlayRequested = false;
+    if (decision.action === 'REPLACE') {
+      const wasPlaying = requestedPlay
+        || (this.playbackIntentByMedia.get(current.media) ?? current.media.paused === false);
+      const resume = siteRadioResumeState({
+        descriptor: current.descriptor,
+        positionSeconds: current.media.currentTime,
+        wasPlaying,
+        playbackRate: 1,
+        muted: current.media.muted,
+        volume: current.media.volume,
+      }, response.playback);
+      this.radioPlayback = response.playback;
+      await this.playSharedFolderEntry(response.playback.entry, resume, resume.descriptor);
+      return true;
+    }
+
+    this.radioPlayback = response.playback;
+    if (decision.action === 'SEEK') current.media.currentTime = decision.targetPositionSeconds;
+    if (requestedPlay) await this.continueRadioPlayback(current);
+    this.syncControls(current);
+    this.persistPlayback();
+    return true;
+  }
+
+  async continueRadioPlayback(playback) {
+    if (this.session?.snapshot() !== playback || playback.signal.aborted) return;
+    this.pendingPlaybackStart.add(playback.media);
+    this.playbackIntentByMedia.set(playback.media, true);
+    try {
+      await playback.media.play();
+      this.pendingPlaybackStart.delete(playback.media);
+      this.cancelGestureResume(playback);
+    } catch (_) {
+      this.persistPlayback();
+      this.armGestureResume(playback);
+      this.setStatus('Tap anywhere to continue live radio');
+    }
+  }
+
+  reportRadioDuration(playback) {
+    if (!this.radioDurationReporter || !this.radioPlayback
+        || this.session?.snapshot() !== playback || playback.signal.aborted) return;
+    const source = playback.media.currentSrc || playback.media.src;
+    void this.radioDurationReporter.loaded(
+      this.radioPlayback, source, Number(playback.media.duration),
+    ).catch(error => this.handleRadioSyncError(error));
+  }
+
+  handleRadioSyncError(error) {
+    if (error?.name === 'AbortError') return;
+    if (isSharedFolderAccessDenied(error)) {
+      this.handleAccessLoss(error.status);
+      return;
+    }
+    const playback = this.session?.snapshot();
+    if (playback?.descriptor.mode === 'RADIO') {
+      this.pendingPlaybackStart.delete(playback.media);
+      this.setStatus('Live sync is temporarily unavailable');
+    }
+  }
+
   /** Begin one shared-folder item, replacing any previous item without replacing the player. */
   async playSharedFolder(entry, resume = null) {
+    this.stopRadioSync();
+    return this.playSharedFolderEntry(entry, resume, { mode: 'ITEM' });
+  }
+
+  async playSharedFolderEntry(entry, resume = null, descriptor = { mode: 'ITEM' }) {
     const kind = String(entry?.previewKind || '').toUpperCase();
     if (!['AUDIO', 'VIDEO'].includes(kind)) {
       throw new TypeError('The site player only accepts audio or video files.');
@@ -486,9 +715,12 @@ export class SiteMediaPlayer extends HTMLElement {
     this.cancelGestureResume();
     this.releaseArtwork();
     const playback = this.session.start({
+      mode: descriptor.mode || 'ITEM',
       kind,
       title: entry.name,
       path: entry.path,
+      ...(descriptor.stationSequence === undefined
+        ? {} : { stationSequence: descriptor.stationSequence }),
     }, media);
     const initialResume = resume || {
       descriptor: playback.descriptor,
@@ -540,7 +772,7 @@ export class SiteMediaPlayer extends HTMLElement {
     this.resumePlaybackWhenReady(playback);
     playback.media.src = url;
     playback.media.load();
-    this.setStatus('Ready');
+    this.setStatus(playback.descriptor.mode === 'RADIO' ? 'Live' : 'Ready');
   }
 
   async loadAudioMetadata(playback, url) {
@@ -654,6 +886,7 @@ export class SiteMediaPlayer extends HTMLElement {
     }
     this.querySelector('[data-site-player-title]').textContent = playback.descriptor.title;
     this.dataset.kind = playback.descriptor.kind.toLowerCase();
+    this.dataset.mode = playback.descriptor.mode.toLowerCase();
     this.lastPersistedSecond = null;
     this.querySelector('.site-media-player-more').open = false;
     this.hidden = false;
@@ -669,6 +902,8 @@ export class SiteMediaPlayer extends HTMLElement {
     this.clearMediaSessionMetadata();
     this.hidden = true;
     this.removeAttribute('data-kind');
+    this.removeAttribute('data-mode');
+    this.querySelector('.site-media-player-eyebrow').textContent = 'Now playing';
     this.querySelector('[data-site-player-media]').replaceChildren();
     this.querySelector('[data-site-player-retry]')?.remove();
     document.body.classList.remove('site-media-player-active', 'site-player-shell-active');
@@ -737,6 +972,7 @@ export class SiteMediaPlayer extends HTMLElement {
   }
 
   stopPlayback() {
+    this.stopRadioSync();
     this.session?.stop();
   }
 

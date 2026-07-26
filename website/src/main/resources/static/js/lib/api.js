@@ -100,6 +100,10 @@ export const API = {
       const params = new URLSearchParams({ path: String(path || '') });
       return `/api/shared-folder/2026-07-17/preview?${params}`;
     },
+    radio: {
+      playback: '/api/shared-folder/2026-07-17/radio',
+      duration: '/api/shared-folder/2026-07-17/radio/duration',
+    },
     media: {
       playback: '/api/shared-folder/2026-07-17/media/playback',
       fallback: '/api/shared-folder/2026-07-17/media/fallback',
