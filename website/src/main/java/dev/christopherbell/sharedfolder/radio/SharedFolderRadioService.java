@@ -72,14 +72,21 @@ public final class SharedFolderRadioService {
       SharedFolderRadioDocument current = repository
           .findById(SharedFolderRadioDocument.ID)
           .orElseThrow(this::staleReport);
+      if (current.state() == SharedFolderRadioDocument.State.EMPTY) {
+        throw staleReport();
+      }
+      SharedDirectoryEntry activeTrack = findTrack(tracks, current.path());
+      if (activeTrack == null) {
+        saveEmpty(current);
+        throw staleReport();
+      }
       if (request.stationSequence() != current.stationSequence()
           || !request.path().equals(current.path())) {
         throw staleReport();
       }
       Instant now = clock.instant();
-      SharedFolderRadioDocument withDuration = new SharedFolderRadioDocument(
-          current.id(), current.stationSequence(), current.path(), current.startedAt(),
-          request.durationSeconds());
+      SharedFolderRadioDocument withDuration = SharedFolderRadioDocument.playing(
+          current.stationSequence(), current.path(), current.startedAt(), request.durationSeconds());
       return transition(tracks, withDuration, now, withDuration);
     }
   }
@@ -102,12 +109,18 @@ public final class SharedFolderRadioService {
       Instant now,
       SharedFolderRadioDocument pendingSave) {
     if (tracks.isEmpty()) {
+      saveEmpty(current);
       return SharedFolderRadioResponse.empty();
     }
-    SharedDirectoryEntry activeTrack = findTrack(tracks, current == null ? null : current.path());
-    if (current == null || activeTrack == null) {
+    SharedDirectoryEntry activeTrack = current == null
+        || current.state() == SharedFolderRadioDocument.State.EMPTY
+        ? null : findTrack(tracks, current.path());
+    if (current == null || current.state() == SharedFolderRadioDocument.State.EMPTY
+        || activeTrack == null) {
       long sequence = current == null ? 1 : Math.incrementExact(current.stationSequence());
-      return saveAndRespond(selectTrack(tracks, current == null ? null : current.path()),
+      String previousPath = current == null
+          || current.state() == SharedFolderRadioDocument.State.EMPTY ? null : current.path();
+      return saveAndRespond(selectTrack(tracks, previousPath),
           sequence, now, null, now);
     }
     if (current.durationSeconds() != null) {
@@ -126,14 +139,22 @@ public final class SharedFolderRadioService {
     return respond(current, activeTrack, now);
   }
 
+  private SharedFolderRadioDocument saveEmpty(SharedFolderRadioDocument current) {
+    if (current != null && current.state() == SharedFolderRadioDocument.State.EMPTY) {
+      return current;
+    }
+    long sequence = current == null ? 1 : Math.incrementExact(current.stationSequence());
+    return repository.save(SharedFolderRadioDocument.empty(sequence));
+  }
+
   private SharedFolderRadioResponse saveAndRespond(
       SharedDirectoryEntry track,
       long sequence,
       Instant startedAt,
       Double durationSeconds,
       Instant now) {
-    SharedFolderRadioDocument saved = repository.save(new SharedFolderRadioDocument(
-        SharedFolderRadioDocument.ID, sequence, track.path(), startedAt, durationSeconds));
+    SharedFolderRadioDocument saved = repository.save(SharedFolderRadioDocument.playing(
+        sequence, track.path(), startedAt, durationSeconds));
     return respond(saved, track, now);
   }
 

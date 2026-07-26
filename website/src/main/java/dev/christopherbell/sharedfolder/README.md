@@ -80,6 +80,8 @@ Unavailable` and never falls back to an unchecked production path.
   only a finite one-to-86,400-second observation for the active path and sequence. Station
   transitions snapshot the catalog before their in-process lock, avoid immediate repeats when at
   least two tracks exist, and expose only public-safe entry metadata with server-computed timing.
+  An empty catalog persists a tombstone identity so removed tracks cannot accept duration reports
+  or resume stale playback when music reappears; station sequences remain monotonic throughout.
 - `GET /preview` returns bounded UTF-8 text as JSON for text files; allowlisted raster image,
   audio, video, and PDF types stream inline. HTML, SVG, and every unknown type stay attachment
   only. Native media `Range` requests are preserved through to Spring's resource streaming.
