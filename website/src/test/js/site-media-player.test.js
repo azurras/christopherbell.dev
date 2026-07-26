@@ -171,6 +171,13 @@ test('radio response boundary accepts only complete empty or playable audio stat
     status: 'EMPTY', playback: null,
   });
   assert.deepEqual(siteMedia.validateSiteRadioResponse(playing), playing);
+  assert.deepEqual(siteMedia.validateSiteRadioResponse({
+    ...playing,
+    playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'music/Song.mp3' },
+    },
+  }).playback.entry.path, 'music/Song.mp3');
 
   const malformed = [
     { ...playing, status: 'EMPTY' },
@@ -189,6 +196,26 @@ test('radio response boundary accepts only complete empty or playable audio stat
     { ...playing, playback: {
       ...playing.playback,
       entry: { ...playing.playback.entry, previewKind: 'VIDEO' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'Other/Song.mp3' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'Music/ Album/Song.mp3' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'Music/Album /Song.mp3' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'Music/Al\nbum/Song.mp3' },
+    } },
+    { ...playing, playback: {
+      ...playing.playback,
+      entry: { ...playing.playback.entry, path: 'Music/Al\u0085bum/Song.mp3' },
     } },
   ];
   for (const response of malformed) {

@@ -602,6 +602,7 @@ export class SiteMediaPlayer extends HTMLElement {
     if (this.radioSyncPromise) return this.radioSyncPromise;
     const generation = this.radioGeneration;
     const operation = this.performRadioSync(generation).catch(error => {
+      this.radioPlayRequested = false;
       this.handleRadioSyncError(error);
       return false;
     });

@@ -19,15 +19,20 @@ function finiteInRange(value, minimum, maximum) {
   return Number.isFinite(value) && value >= minimum && value <= maximum;
 }
 
+function validRadioPathSegment(segment) {
+  return typeof segment === 'string' && segment.length > 0 && segment === segment.trim()
+    && segment !== '.' && segment !== '..'
+    && !/[\\/\u0000-\u001F\u007F-\u009F]/u.test(segment);
+}
+
 function validRadioEntry(entry) {
   const path = entry?.path;
   const pathParts = typeof path === 'string' ? path.split('/') : [];
   const name = pathParts.at(-1);
   return typeof path === 'string' && path.length > 0 && path.length <= 4096
-    && !path.includes('\\') && !path.includes('\0')
-    && pathParts.every(part => part && part !== '.' && part !== '..')
+    && pathParts.length >= 2 && pathParts[0].toLowerCase() === 'music'
+    && pathParts.every(validRadioPathSegment)
     && typeof entry.name === 'string' && entry.name === name && entry.name === entry.name.trim()
-    && !/[\\/\u0000-\u001F\u007F-\u009F]/u.test(entry.name)
     && entry.type === 'FILE' && entry.previewKind === 'AUDIO'
     && Number.isSafeInteger(entry.size) && entry.size >= 0
     && typeof entry.modifiedAt === 'string' && Number.isFinite(Date.parse(entry.modifiedAt))
