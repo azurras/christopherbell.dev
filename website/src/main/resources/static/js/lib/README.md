@@ -21,6 +21,9 @@ Owns reusable browser-side modules that are not tied to one page.
   with only the initiating controlled client, keeps a successful reply only in the worker map,
   and returns/notifies a controlled 401 if recovery fails rather than sending an unauthenticated
   shared-folder request. It uses no URL or persistent-storage token channel.
+- `site-media-player.js` validates the same-tab non-secret resume record, owns transport helpers
+  for seeking, speed, mute, and time display, and keeps persistent navigation restricted to the
+  exact same origin.
 - `composer.js` initializes reusable post composer behavior.
 - `composer-preview.js` turns draft post text into a live, sanitized preview
   using the same mention linking and rich embed rendering as feed cards.
