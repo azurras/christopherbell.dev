@@ -37,12 +37,17 @@ Owns application-wide Spring and web infrastructure.
   strict-origin-when-cross-origin referrer policy, and production-configured HSTS.
   Browser cookie security, HSTS, and the canonical password-reset origin bind
   under `app.browser-security`; production ignores forwarding headers.
-- Rate limiting and request size protection filters under `filter`.
+- Rate limiting and request size protection filters under `filter`. Ordinary
+  bodies bind from the positive typed `app.request-size.default-max` setting;
+  streamed shared-folder chunks retain their feature-owned upload-chunk limit.
 - `RateLimitProperties` binds ordered `rate-limit.rules` so environments can
-  tune per-endpoint capacity and window settings. Shared-folder upload, mutation, and transcode
+  tune per-endpoint capacity and window settings, while `rate-limit.max-buckets`
+  hard-bounds process-local client state. Inactive buckets expire after their
+  matched rule window. Shared-folder upload, mutation, and transcode
   rules are first-match groups at 240, 60, and 10 requests per minute respectively; GET, HEAD,
   range, and progressive media reads do not consume those mutation buckets. Rejections use a
-  stable JSON `429` body, and client bucket state is least-recently-used bounded. The mutation
+  standard API-envelope `429` body with `Retry-After` and `X-RateLimit-*`
+  guidance. The mutation
   rule covers deployed `/folders`, `/entries`, and `/admin/recycle/**` writes plus planned aliases;
   transcode admission covers deployed `/media/fallback` plus the planned `/media/jobs` alias.
 - `ClientIpResolver` resolves effective client IPs from `X-Forwarded-For` only

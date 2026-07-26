@@ -5,6 +5,8 @@ command-center:
     mode: SIMULATED
     power-actions-enabled: true
 app:
+  request-size:
+    default-max: ${APP_REQUEST_SIZE_DEFAULT_MAX:2MB}
   shared-folder:
     root: build/shared-folder/local/shared
     system-root: build/shared-folder/local/system

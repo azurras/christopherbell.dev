@@ -2,6 +2,7 @@ package dev.christopherbell.vehicle.vin;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
+import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.vehicle.core.VehicleMapper;
 import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.Vehicle;
@@ -49,7 +50,7 @@ public class VehicleVinService {
     } catch (DuplicateKeyException e) {
       throw new ResourceExistsException("Vehicle already exists for VIN: " + vin, e);
     } catch (DataAccessException e) {
-      throw new RuntimeException("Failed to save vehicle", e);
+      throw new ServiceUnavailableException("Failed to save vehicle", e);
     }
   }
 
@@ -77,7 +78,7 @@ public class VehicleVinService {
     } catch (DuplicateKeyException e) {
       throw new ResourceExistsException("One or more vehicles already exist for the requested VINs.", e);
     } catch (DataAccessException e) {
-      throw new RuntimeException("Failed to save vehicles", e);
+      throw new ServiceUnavailableException("Failed to save vehicles", e);
     }
   }
 

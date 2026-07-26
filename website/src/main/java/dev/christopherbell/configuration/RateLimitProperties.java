@@ -1,18 +1,30 @@
 package dev.christopherbell.configuration;
 
 import dev.christopherbell.libs.api.APIVersion;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.Data;
+import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * Typed configuration for endpoint-aware global rate limits.
  */
 @ConfigurationProperties(prefix = "rate-limit")
+@Validated
 @Data
 public class RateLimitProperties {
+  @Min(1)
+  private int maxBuckets = 10_000;
+
+  @Valid
+  @NotNull
   private List<Rule> rules = defaultRules();
 
   private static List<Rule> defaultRules() {
@@ -80,10 +92,16 @@ public class RateLimitProperties {
    */
   @Data
   public static class Rule {
+    @NotBlank
     private String name = "default";
+    @Min(1)
     private long capacity = 10_000;
+    @NotNull
+    @DurationMin(millis = 1)
     private Duration window = Duration.ofMinutes(1);
+    @NotNull
     private List<String> methods = new ArrayList<>();
+    @NotNull
     private List<String> paths = new ArrayList<>(List.of("/**"));
 
     public Rule() {}

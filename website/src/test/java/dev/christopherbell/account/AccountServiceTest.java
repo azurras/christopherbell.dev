@@ -3,11 +3,13 @@ package dev.christopherbell.account;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -31,6 +33,7 @@ import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
+import dev.christopherbell.libs.api.exception.InternalServiceException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.PasswordUtil;
@@ -49,6 +52,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -135,6 +139,30 @@ public class AccountServiceTest {
 
     assertEquals("chris@example.com", account.getEmail());
     assertEquals("Chris.Bell", account.getUsername());
+  }
+
+  @Test
+  @DisplayName("Create account: credential provider failure preserves cause in named exception")
+  void createAccountWhenPasswordHashingFailsUsesInternalServiceException() throws Exception {
+    var request = AccountCreateRequest.builder()
+        .email("user@example.com")
+        .firstName("User")
+        .lastName("Example")
+        .password("pass")
+        .username("user")
+        .build();
+    var failure = new java.security.NoSuchAlgorithmException("provider-secret");
+
+    try (MockedStatic<PasswordUtil> passwords = mockStatic(PasswordUtil.class)) {
+      passwords.when(PasswordUtil::generateSalt).thenReturn("salt");
+      passwords.when(() -> PasswordUtil.hashPassword("pass", "salt")).thenThrow(failure);
+
+      var exception = assertThrows(
+          InternalServiceException.class,
+          () -> accountService.createAccount(request));
+
+      assertSame(failure, exception.getCause());
+    }
   }
 
   @Test
