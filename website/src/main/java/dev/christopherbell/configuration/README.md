@@ -24,6 +24,10 @@ Owns application-wide Spring and web infrastructure.
   take precedence for API clients; browser requests otherwise authenticate from
   the HttpOnly `CBELL_AUTH` cookie.
 - Stable JWT signing through `APP_JWT_SECRET`.
+- Production settings validation runs before context refresh and reports only
+  invalid setting names, never their values.
+- `app.mail.enabled` explicitly controls password-reset delivery; disabled mail
+  does not resolve the mail sender.
 - Login JWTs and browser authentication cookies expire one day after issue. The
   browser never stores the JWT in JavaScript-readable storage.
 - Browser mutations use Spring Security's SPA CSRF contract: the readable
@@ -43,7 +47,8 @@ Owns application-wide Spring and web infrastructure.
   transcode admission covers deployed `/media/fallback` plus the planned `/media/jobs` alias.
 - `ClientIpResolver` resolves effective client IPs from `X-Forwarded-For` only
   when the immediate remote address is listed in `client-ip.trusted-proxies`.
-- MongoDB auditing configuration under `mongo`.
+- MongoDB auditing, fixed-name leases, and immutable versioned migrations under
+  `mongo`.
 - Shared configuration properties that do not yet need a subpackage.
 - `SharedFolderProperties` binds `app.shared-folder` storage roots, resource limits, retention
   windows, and the feature gate. Local/test roots stay build-owned; production uses

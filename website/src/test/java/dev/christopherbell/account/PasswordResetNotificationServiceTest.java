@@ -4,10 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.passwordreset.PasswordResetNotificationService;
+import dev.christopherbell.configuration.mail.MailProperties;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -26,11 +29,8 @@ class PasswordResetNotificationServiceTest {
 
   @Test
   void sendPasswordReset_whenMailSenderMissing_doesNotLogResetUrlOrToken(CapturedOutput output) {
-    var service = new PasswordResetNotificationService(mailSenderProvider);
-    var account = Account.builder()
-        .id("acc-1")
-        .email("user@example.com")
-        .build();
+    var service = service(true);
+    var account = account();
 
     when(mailSenderProvider.getIfAvailable()).thenReturn(null);
 
@@ -43,11 +43,8 @@ class PasswordResetNotificationServiceTest {
 
   @Test
   void sendPasswordReset_whenMailAuthenticationFails_doesNotThrow(CapturedOutput output) {
-    var service = new PasswordResetNotificationService(mailSenderProvider);
-    var account = Account.builder()
-        .id("acc-1")
-        .email("user@example.com")
-        .build();
+    var service = service(true);
+    var account = account();
 
     when(mailSenderProvider.getIfAvailable()).thenReturn(mailSender);
     doThrow(new MailAuthenticationException("Authentication failed"))
@@ -60,5 +57,38 @@ class PasswordResetNotificationServiceTest {
     assertThat(output).contains("acc-1");
     assertThat(output).doesNotContain("token=abc");
     assertThat(output).doesNotContain("https://example.com/reset-password");
+  }
+
+  @Test
+  void sendPasswordReset_whenMailDisabled_doesNotResolveSenderOrLogToken(CapturedOutput output) {
+    var service = service(false);
+
+    service.sendPasswordReset(
+        account(), "https://example.com/reset-password?token=disabled-secret");
+
+    verifyNoInteractions(mailSenderProvider, mailSender);
+    assertThat(output).contains("acc-1", "disabled");
+    assertThat(output).doesNotContain("disabled-secret", "https://example.com/reset-password");
+  }
+
+  @Test
+  void sendPasswordReset_whenMailEnabled_usesConfiguredSender() {
+    var service = service(true);
+    var message = ArgumentCaptor.forClass(SimpleMailMessage.class);
+    when(mailSenderProvider.getIfAvailable()).thenReturn(mailSender);
+
+    service.sendPasswordReset(account(), "https://example.com/reset-password?token=abc");
+
+    verify(mailSender).send(message.capture());
+    assertThat(message.getValue().getFrom()).isEqualTo("noreply@example.com");
+  }
+
+  private PasswordResetNotificationService service(boolean enabled) {
+    return new PasswordResetNotificationService(
+        mailSenderProvider, new MailProperties(enabled, "noreply@example.com"));
+  }
+
+  private Account account() {
+    return Account.builder().id("acc-1").email("user@example.com").build();
   }
 }

@@ -13,7 +13,7 @@ changes.
 - Java 25
 - Spring Boot 4.1
 - Gradle Wrapper
-- MongoDB
+- MongoDB 8.3.2, or Docker with Compose
 - Thymeleaf templates
 - Vanilla JavaScript ES modules
 - Bootstrap styles and local CSS
@@ -98,8 +98,7 @@ Useful environment variables:
 ```bash
 export SPRING_PROFILES_ACTIVE=local
 export SPRING_MONGODB_URI=mongodb://localhost:27017
-export RESEND_API_KEY=re_your_resend_key
-export APP_MAIL_FROM=noreply@your-verified-domain.com
+export APP_MAIL_ENABLED=false
 export APP_JWT_SECRET=replace-with-at-least-32-random-characters
 ```
 
@@ -108,7 +107,26 @@ commit `.env`.
 
 ## Run Locally
 
-Start MongoDB first. Then run commands from the repository root:
+### Local MongoDB with Docker Compose
+
+From the repository root, start the pinned MongoDB 8.3.2 service and wait for
+Compose to report it healthy:
+
+```bash
+docker compose up -d mongodb
+docker compose ps mongodb
+```
+
+The service listens only on `mongodb://localhost:27017` and stores data in the
+`christopherbell_mongo_data` named volume. `docker compose stop mongodb` keeps
+that data. To reset only this Compose project's local data, first confirm the
+project and volume names, then run `docker compose down --volumes`.
+
+Database shape changes must be appended through the versioned migration runner;
+never edit an applied migration ID or checksum. See the
+[MongoDB migration runbook](docs/operations/mongodb-migrations.md).
+
+With MongoDB running, start the app:
 
 ```bash
 ./gradlew :website:bootRun
@@ -361,6 +379,14 @@ Production runs natively on Windows through the `MongoDB`,
 Automatic startup. WSL contains no website, database, proxy, tunnel, or
 deployment dependency.
 
+Production requires an explicit `SPRING_MONGODB_URI`; there is no localhost
+fallback. Pre-refresh validation also requires a strong `APP_JWT_SECRET` and an
+explicit mail policy. Use `APP_MAIL_ENABLED=true` with `RESEND_API_KEY` and
+`APP_MAIL_FROM`, or `APP_MAIL_ENABLED=false` to intentionally disable delivery.
+Startup applies immutable, leased MongoDB migrations before readiness. Back up
+before migration releases; application rollback does not reverse data. See the
+[MongoDB migration runbook](docs/operations/mongodb-migrations.md).
+
 From an elevated PowerShell prompt, bootstrap and configure the runtime, then
 install automatic deployment:
 
@@ -433,6 +459,8 @@ Public crawler and availability contracts:
 
 Use the [Windows production runbook](docs/operations/windows-production.md) and
 [MongoDB backup and restore runbook](docs/operations/mongodb-backup-restore.md).
+Migration authoring and interrupted-start recovery are documented in the
+[MongoDB migration runbook](docs/operations/mongodb-migrations.md).
 
 ## Troubleshooting
 

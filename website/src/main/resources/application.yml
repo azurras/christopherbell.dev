@@ -63,6 +63,11 @@ command-center:
     gpu-temperature-warning-celsius: 80
     disk-free-warning-percent: 10
 app:
+  mail:
+    enabled: ${APP_MAIL_ENABLED:false}
+    from: ${APP_MAIL_FROM:}
+  migrations:
+    lease-duration: 2m
   browser-security:
     public-base-url: ${APP_PUBLIC_BASE_URL:http://localhost:8081}
     authentication-cookie-secure: false

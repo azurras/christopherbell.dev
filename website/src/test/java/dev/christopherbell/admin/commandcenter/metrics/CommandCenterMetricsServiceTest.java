@@ -131,17 +131,15 @@ class CommandCenterMetricsServiceTest {
     var properties = properties();
     properties.setProviderTimeout(Duration.ofMillis(50));
     var release = new CountDownLatch(1);
-    var completed = new CountDownLatch(1);
     var invocations = new java.util.concurrent.atomic.AtomicInteger();
     HostMetricsProvider blocked = sampledAt -> {
       invocations.incrementAndGet();
       while (release.getCount() > 0) {
         try { release.await(); } catch (InterruptedException ignored) { }
       }
-      completed.countDown();
       return Map.of("cpu.usage", reading("cpu.usage", 10, sampledAt));
     };
-    var executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().factory());
+    var executor = Executors.newSingleThreadExecutor(Thread.ofVirtual().factory());
     try {
       var service = new CommandCenterMetricsService(
           List.of(blocked), properties, clock, "test", timeout -> true, executor,
@@ -154,7 +152,7 @@ class CommandCenterMetricsServiceTest {
           .contains("PROVIDER_IN_FLIGHT");
 
       release.countDown();
-      assertThat(completed.await(1, TimeUnit.SECONDS)).isTrue();
+      executor.submit(() -> { }).get(1, TimeUnit.SECONDS);
       service.collect();
       assertThat(invocations).hasValue(2);
     } finally {

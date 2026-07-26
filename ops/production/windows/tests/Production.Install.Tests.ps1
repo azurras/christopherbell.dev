@@ -80,6 +80,7 @@ Describe 'native Windows service installer' {
         $startup | Should -Match 'COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED'
         $startup | Should -Match '--enable-native-access=ALL-UNNAMED'
         $startup | Should -Match 'APP_SHARED_FOLDER_ENABLED'
+        $startup | Should -Match 'APP_MAIL_ENABLED'
         $startup | Should -Match "SetEnvironmentVariable\(\s*'APP_SHARED_FOLDER_ENABLED',\s*'false',\s*'Process'\s*\)"
         $startup | Should -Not -Match "SetEnvironmentVariable\('COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED',\s*'true'"
     }
@@ -88,6 +89,7 @@ Describe 'native Windows service installer' {
         $environment = Get-Content (Join-Path $PSScriptRoot '..\config\app.env.example')
 
         $environment | Should -Contain 'APP_SHARED_FOLDER_ENABLED=false'
+        $environment | Should -Contain 'APP_MAIL_ENABLED=true'
     }
 
     It 'preserves website service setup while delegating the shared-folder runtime install' {
