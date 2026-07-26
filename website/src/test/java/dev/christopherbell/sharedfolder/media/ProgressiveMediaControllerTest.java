@@ -115,6 +115,7 @@ class ProgressiveMediaControllerTest {
         .andExpect(request().asyncStarted())
         .andReturn();
 
+    response.getAsyncResult();
     mockMvc.perform(asyncDispatch(response))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "audio/mp4"));
