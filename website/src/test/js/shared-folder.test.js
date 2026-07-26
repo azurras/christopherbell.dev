@@ -81,6 +81,13 @@ test('shared-folder search rejects every malformed result partition before row a
     ['untrimmed query', { query: ' report', entries: [], truncated: false }],
     ['overlong query', { query: 'x'.repeat(201), entries: [], truncated: false }],
     ['blank name', { query: 'report', entries: [{ ...validEntry, name: '  ' }], truncated: false }],
+    ['untrimmed name', { query: 'report', entries: [{ ...validEntry, name: ' report.txt' }], truncated: false }],
+    ['mismatched name', { query: 'report', entries: [{ ...validEntry, name: 'target.txt' }], truncated: false }],
+    ['slash in name', { query: 'report', entries: [{ ...validEntry, name: 'archive/report.txt' }], truncated: false }],
+    ['backslash in name', { query: 'report', entries: [{ ...validEntry, name: 'archive\\report.txt' }], truncated: false }],
+    ['dot name', { query: 'report', entries: [{ ...validEntry, name: '.' }], truncated: false }],
+    ['NUL in name', { query: 'report', entries: [{ ...validEntry, name: 'report\0.txt' }], truncated: false }],
+    ['control character in name', { query: 'report', entries: [{ ...validEntry, name: 'report\n.txt' }], truncated: false }],
     ['empty path', { query: 'report', entries: [{ ...validEntry, path: '' }], truncated: false }],
     ['absolute path', { query: 'report', entries: [{ ...validEntry, path: '/report.txt' }], truncated: false }],
     ['empty path segment', { query: 'report', entries: [{ ...validEntry, path: 'archive//report.txt' }], truncated: false }],
@@ -101,6 +108,18 @@ test('shared-folder search rejects every malformed result partition before row a
     assert.throws(() => sharedFolder.validateSharedFolderSearchResponse(response),
       /invalid search response/i, name);
   });
+
+  const validUnicodeName = 'Résumé final 2026.txt';
+  const validUnicodeResponse = sharedFolder.validateSharedFolderSearchResponse({
+    query: 'résumé',
+    entries: [{
+      ...validEntry,
+      name: validUnicodeName,
+      path: `archive/${validUnicodeName}`,
+    }],
+    truncated: false,
+  });
+  assert.equal(validUnicodeResponse.entries[0].name, validUnicodeName);
 });
 
 test('shared-folder search controller ignores stale results and clear restores the active folder', async () => {

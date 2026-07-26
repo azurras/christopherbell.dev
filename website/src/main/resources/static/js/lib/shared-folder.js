@@ -236,12 +236,19 @@ function validatedSharedFolderSearchEntry(entry) {
     && !entry.path.includes('\\')
     && !entry.path.includes('\0')
     && entry.path.split('/').every(segment => segment && segment !== '.' && segment !== '..');
+  const finalPathSegment = safeRelativePath
+    ? entry.path.slice(entry.path.lastIndexOf('/') + 1) : null;
+  const safeName = typeof entry?.name === 'string'
+    && entry.name === entry.name.trim()
+    && !/[\\/\u0000-\u001F\u007F]/u.test(entry.name)
+    && entry.name !== '.' && entry.name !== '..'
+    && entry.name === finalPathSegment;
   const validTimestamp = typeof entry?.modifiedAt === 'string'
     && Number.isFinite(Date.parse(entry.modifiedAt));
   const validPreviewKind = ['NONE', 'TEXT', 'IMAGE', 'AUDIO', 'VIDEO', 'PDF']
     .includes(entry?.previewKind);
   if (!entry || typeof entry.name !== 'string' || typeof entry.path !== 'string'
-      || !entry.name.trim() || !safeRelativePath
+      || !safeName || !safeRelativePath
       || !['DIRECTORY', 'FILE'].includes(entry.type) || typeof entry.size !== 'number'
       || !Number.isSafeInteger(entry.size) || entry.size < 0 || !validTimestamp || !validPreviewKind
       || entry.type === 'DIRECTORY' && entry.previewKind !== 'NONE'
