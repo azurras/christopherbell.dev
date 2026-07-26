@@ -118,6 +118,6 @@
 - [x] Run focused Java tests for catalog, radio, and the read controller.
 - [x] Run `./gradlew.bat :website:jsTest`.
 - [x] Run `./gradlew.bat :website:test` and `./gradlew.bat :website:check` with an isolated Gradle user home if the shared registry is unavailable.
-- [ ] Inspect `git diff --check`, `git status --short --branch`, and the production/test diff for access bypasses, absolute-path leaks, unowned timers, stale state transitions, and unrelated changes.
+- [x] Inspect `git diff --check`, `git status --short --branch`, and the production/test diff for access bypasses, absolute-path leaks, unowned timers, stale state transitions, and unrelated changes.
 - [ ] Commit the cohesive feature, push `codex/shared-folder-search-radio`, open one PR, wait for required CI, merge, and verify the push-to-main deployment without interactive prompts.
 - [ ] Smoke-test production search and radio authorization/state plus the live deployed release SHA; preserve any gap requiring a real browser session explicitly.
