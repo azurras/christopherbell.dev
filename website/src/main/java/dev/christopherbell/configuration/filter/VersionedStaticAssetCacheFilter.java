@@ -21,7 +21,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class VersionedStaticAssetCacheFilter extends OncePerRequestFilter {
   private static final Set<String> CACHEABLE_METHODS = Set.of("GET", "HEAD");
   private static final Pattern VERSIONED_ASSET = Pattern.compile(
-      "^/[^/]+/(?:(?:css|js|images)/.+|favicon\\.ico)$");
+      "^/[^/]+/(?:(?:css|js|images|vendor)/.+|favicon\\.ico)$");
   private static final String BASE_CACHE_CONTROL = CacheControl
       .maxAge(Duration.ofHours(1))
       .cachePublic()

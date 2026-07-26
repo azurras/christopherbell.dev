@@ -9,7 +9,7 @@ spring:
         strategy:
           fixed:
             enabled: true
-            paths: /css/**,/js/**,/images/**,/favicon.ico
+            paths: /css/**,/js/**,/images/**,/vendor/**,/favicon.ico
             version: ${GIT_COMMIT:@releaseGitCommit@}
   config:
     import:

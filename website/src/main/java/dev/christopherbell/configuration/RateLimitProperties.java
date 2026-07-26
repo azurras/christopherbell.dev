@@ -70,7 +70,7 @@ public class RateLimitProperties {
         10_000,
         Duration.ofMinutes(1),
         List.of("GET"),
-        List.of("/css/**", "/images/**", "/js/**", "/favicon.ico")));
+        List.of("/css/**", "/images/**", "/js/**", "/vendor/**", "/favicon.ico")));
     rules.add(new Rule("default", 10_000, Duration.ofMinutes(1), List.of(), List.of("/**")));
     return rules;
   }
