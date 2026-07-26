@@ -131,6 +131,22 @@ class SecurityConfigTest {
     assertFalse(SecurityConfig.isLegacyApiLogin(otherPost));
   }
 
+  @Test
+  @DisplayName("Only GET public-content APIs and the pinned Bootstrap WebJar are public")
+  void publicContentMatchersAreGetOnly() throws Exception {
+    var paths = List.of(
+        "/api/blog/v1/posts",
+        "/api/blog/v1/posts/post-1",
+        "/api/photo/v1",
+        "/webjars/bootstrap/5.3.3/css/bootstrap.min.css",
+        "/webjars/bootstrap/5.3.3/js/bootstrap.bundle.min.js");
+
+    for (var path : paths) {
+      assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request("GET", path))));
+      assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request("POST", path))));
+    }
+  }
+
   private MockHttpServletRequest request(String method, String path) {
     var request = new MockHttpServletRequest(method, path);
     request.setServletPath(path);

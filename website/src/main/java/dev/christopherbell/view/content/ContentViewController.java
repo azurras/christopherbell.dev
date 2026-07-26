@@ -43,6 +43,16 @@ public class ContentViewController {
   }
 
   /**
+   * Serves the photography usage terms.
+   *
+   * @return {@code photo/usage.html}
+   */
+  @GetMapping(value = "/photos/usage")
+  public String getPhotoUsagePage() {
+    return "photo/usage.html";
+  }
+
+  /**
    * Serves the Back Office page shell.
    *
    * @return {@code back-office.html}

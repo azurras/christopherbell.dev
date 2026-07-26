@@ -12,6 +12,8 @@ Owns Spring Security wiring and request authentication infrastructure.
 - The root worker bootstrap `/shared-folder-auth-sw.js` is public only for an exact `GET` so an
   anonymous browser can install it before the worker has a JWT to forward. Its POSTs, near-miss
   paths, and every `/api/shared-folder/**` endpoint remain protected.
+- The blog list/detail APIs, photo list API, and exact Bootstrap 5.3.3 WebJar paths are public for
+  `GET` only. Equivalent mutations and other WebJar versions remain authenticated.
 
 ## Design Notes
 

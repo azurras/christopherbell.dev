@@ -7,6 +7,7 @@ Owns read-only blog post serving.
 - Blog controllers and services for retrieving configured blog posts.
 - Blog DTO/model classes under `model`.
 - Blog content is configured from application properties rather than authored through an admin UI.
+- `GET /api/blog/v1/posts` and `GET /api/blog/v1/posts/{id}` are anonymous read APIs; both return the standard `Response<BlogResponse>` envelope.
 
 ## Package Shape
 
