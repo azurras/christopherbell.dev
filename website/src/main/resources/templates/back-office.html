@@ -89,7 +89,56 @@
                     </div>
                     <span class="queue-count" id="userQueueCount">—</span>
                   </div>
+                  <form id="userFilters" class="admin-filter-bar" aria-label="Filter accounts">
+                    <label>
+                      <span>Search</span>
+                      <input class="form-control" type="search" name="text" maxlength="100"
+                             placeholder="Name, username, or email">
+                    </label>
+                    <label>
+                      <span>Status</span>
+                      <select class="form-select" name="status">
+                        <option value="">All statuses</option>
+                        <option value="ACTIVE">Active</option>
+                        <option value="INACTIVE">Inactive</option>
+                        <option value="SUSPENDED">Suspended</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Role</span>
+                      <select class="form-select" name="role">
+                        <option value="">All roles</option>
+                        <option value="USER">User</option>
+                        <option value="MOD">Moderator</option>
+                        <option value="ADMIN">Admin</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Sort</span>
+                      <select class="form-select" name="sort">
+                        <option value="createdOn">Created</option>
+                        <option value="lastUpdatedOn">Last updated</option>
+                        <option value="username">Username</option>
+                        <option value="email">Email</option>
+                        <option value="status">Status</option>
+                        <option value="role">Role</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Direction</span>
+                      <select class="form-select" name="direction">
+                        <option value="desc">Descending</option>
+                        <option value="asc">Ascending</option>
+                      </select>
+                    </label>
+                    <button class="btn btn-primary align-self-end" type="submit">Apply filters</button>
+                  </form>
                   <div id="userQueue" class="queue-list" aria-live="polite"></div>
+                  <nav class="queue-pagination" aria-label="Account pages">
+                    <button class="btn btn-outline-secondary" id="userPrevious" type="button">Previous</button>
+                    <span id="userPage" aria-live="polite">Page 0 of 0</span>
+                    <button class="btn btn-outline-secondary" id="userNext" type="button">Next</button>
+                  </nav>
                 </div>
               </div>
               <div class="tab-pane fade" id="panel-operations" role="tabpanel">

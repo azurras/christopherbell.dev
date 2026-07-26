@@ -4,6 +4,8 @@
 import { API } from './lib/api.js';
 import { canesBoxIndexResultMarkup } from './lib/back-office-canes-box-index.js';
 import {
+  accountPageNavigation,
+  parseAdminAccountPage,
   promotedRoleForAction,
   rolePromotionOptions,
   sharedFolderPermissionState,
@@ -22,6 +24,10 @@ const content = document.getElementById('backOfficeContent');
 const alertBox = document.getElementById('backOfficeAlert');
 const reportQueue = document.getElementById('reportQueue');
 const userQueue = document.getElementById('userQueue');
+const userFilters = document.getElementById('userFilters');
+const userPrevious = document.getElementById('userPrevious');
+const userNext = document.getElementById('userNext');
+const userPage = document.getElementById('userPage');
 const activityList = document.getElementById('activityList');
 const drawer = document.getElementById('backOfficeDrawer');
 const drawerBody = document.getElementById('drawerBody');
@@ -45,6 +51,23 @@ const sharedRecycleNext = document.getElementById('sharedRecycleNext');
 const sharedRecyclePage = document.getElementById('sharedRecyclePage');
 
 let accounts = [];
+let accountQuery = {
+  page: 0,
+  size: 25,
+  sort: 'createdOn',
+  direction: 'desc',
+  status: '',
+  role: '',
+  text: '',
+};
+let accountPageState = {
+  page: 0,
+  size: 25,
+  totalElements: 0,
+  totalPages: 0,
+  sort: 'createdOn',
+  direction: 'DESC',
+};
 let reports = [];
 let activities = [];
 let restaurants = [];
@@ -139,7 +162,7 @@ function renderMetrics() {
     metricSuspendedUsers: suspendedUsers,
     metricRecentActivity: activities.length,
     reportQueueCount: `${totalReports} total`,
-    userQueueCount: `${accounts.length} total`,
+    userQueueCount: `${accountPageState.totalElements} total`,
   };
 
   Object.entries(metrics).forEach(([id, value]) => {
@@ -236,6 +259,26 @@ function renderUsers() {
       </article>
     `;
   }).join('');
+}
+
+function renderUserNavigation() {
+  const state = accountPageNavigation(accountPageState);
+  if (userPrevious) userPrevious.disabled = state.previousDisabled;
+  if (userNext) userNext.disabled = state.nextDisabled;
+  if (userPage) userPage.textContent = state.label;
+}
+
+function applyAccountPage(payload) {
+  const parsed = parseAdminAccountPage(payload);
+  accounts = parsed.items;
+  accountPageState = {
+    page: parsed.page,
+    size: parsed.size,
+    totalElements: parsed.totalElements,
+    totalPages: parsed.totalPages,
+    sort: parsed.sort,
+    direction: parsed.direction,
+  };
 }
 
 function userActionSelect(account) {
@@ -421,17 +464,18 @@ async function approveAccount(accountId) {
 
 async function refreshDashboard() {
   clearAlert();
-  [accounts, reports, activities] = await Promise.all([
-    fetchJson(API.accounts.base, { headers: authHeaders() }),
+  const [accountPage, reportItems, activityItems] = await Promise.all([
+    fetchJson(API.accounts.adminPage(accountQuery), { headers: authHeaders() }),
     fetchJson(API.reports.list, { headers: authHeaders() }),
     fetchJson(API.admin.activity, { headers: authHeaders() }),
   ]);
-  accounts = accounts || [];
-  reports = reports || [];
-  activities = activities || [];
+  applyAccountPage(accountPage);
+  reports = reportItems || [];
+  activities = activityItems || [];
   renderMetrics();
   renderReports();
   renderUsers();
+  renderUserNavigation();
   renderActivity();
   try {
     await refreshSharedAdministration();
@@ -441,6 +485,16 @@ async function refreshDashboard() {
     renderState(sharedRecycleList, 'Recycle administration is temporarily unavailable.');
     showAlert(err?.message || 'Shared-folder administration is temporarily unavailable.');
   }
+}
+
+async function refreshAccounts() {
+  clearAlert();
+  applyAccountPage(await fetchJson(API.accounts.adminPage(accountQuery), {
+    headers: authHeaders(),
+  }));
+  renderMetrics();
+  renderUsers();
+  renderUserNavigation();
 }
 
 async function refreshSharedAdministration(filters = sharedAuditFilters(sharedAuditForm)) {
@@ -815,6 +869,47 @@ async function handleOperation(button) {
 }
 
 function wireEvents() {
+  userFilters?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const values = new FormData(userFilters);
+    accountQuery = {
+      ...accountQuery,
+      page: 0,
+      text: String(values.get('text') || '').trim(),
+      status: String(values.get('status') || ''),
+      role: String(values.get('role') || ''),
+      sort: String(values.get('sort') || 'createdOn'),
+      direction: String(values.get('direction') || 'desc'),
+    };
+    try {
+      await refreshAccounts();
+    } catch (err) {
+      showAlert(err?.message || 'Failed to filter accounts.');
+    }
+  });
+
+  userPrevious?.addEventListener('click', async () => {
+    if (accountQuery.page <= 0) return;
+    accountQuery = { ...accountQuery, page: accountQuery.page - 1 };
+    try {
+      await refreshAccounts();
+    } catch (err) {
+      accountQuery = { ...accountQuery, page: accountQuery.page + 1 };
+      showAlert(err?.message || 'Failed to load the previous account page.');
+    }
+  });
+
+  userNext?.addEventListener('click', async () => {
+    if (accountQuery.page + 1 >= accountPageState.totalPages) return;
+    accountQuery = { ...accountQuery, page: accountQuery.page + 1 };
+    try {
+      await refreshAccounts();
+    } catch (err) {
+      accountQuery = { ...accountQuery, page: accountQuery.page - 1 };
+      showAlert(err?.message || 'Failed to load the next account page.');
+    }
+  });
+
   document.addEventListener('click', (event) => {
     const action = event.target;
     const operationButton = action.closest?.('[data-operation]');

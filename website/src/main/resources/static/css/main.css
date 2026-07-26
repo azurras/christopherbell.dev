@@ -2339,6 +2339,29 @@ body {
     gap: 0.75rem;
 }
 
+.admin-filter-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.admin-filter-bar label {
+    display: grid;
+    gap: 0.25rem;
+    color: #46515f;
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.queue-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
 .operations-grid {
     display: grid;
     gap: 1rem;

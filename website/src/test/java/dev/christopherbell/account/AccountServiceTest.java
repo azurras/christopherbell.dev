@@ -55,6 +55,8 @@ import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -860,6 +862,24 @@ public class AccountServiceTest {
 
     verify(sharedFolderAudit).recordRejectedOnce(
         "PERMISSION_CHANGE", "invalid-account", "invalid_request");
+  }
+
+  @Test
+  @DisplayName("Legacy admin account list is bounded to a stable first page")
+  void getAccounts_usesBoundedCompatibilityPage() {
+    var account = Account.builder().id("account-1").build();
+    var detail = AccountDetail.builder().id("account-1").build();
+    var pageRequest = PageRequest.of(
+        0,
+        50,
+        Sort.by(Sort.Direction.DESC, "createdOn")
+            .and(Sort.by(Sort.Direction.DESC, "id")));
+    when(accountRepository.findAll(pageRequest)).thenReturn(new PageImpl<>(List.of(account)));
+    when(accountMapper.toAccount(account)).thenReturn(detail);
+
+    assertEquals(List.of(detail), accountService.getAccounts());
+
+    verify(accountRepository).findAll(pageRequest);
   }
 
   private String hashResetToken(String token) throws Exception {

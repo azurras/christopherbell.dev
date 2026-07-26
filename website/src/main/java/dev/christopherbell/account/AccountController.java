@@ -4,6 +4,7 @@ import static dev.christopherbell.libs.api.APIVersion.V20241215;
 import static dev.christopherbell.libs.api.APIVersion.V20250903;
 import static dev.christopherbell.libs.api.APIVersion.V20250914;
 import static dev.christopherbell.libs.api.APIVersion.V20260717;
+import static dev.christopherbell.libs.api.APIVersion.V20260726;
 
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
@@ -16,6 +17,7 @@ import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
 import jakarta.validation.Valid;
@@ -64,6 +66,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 public class AccountController {
   private static final String BROWSER_SESSION_HEADER = "X-CBELL-Browser-Session";
   private final AccountService accountService;
+  private final AdminAccountQueryService adminAccountQueryService;
   private final PermissionService permissionService;
   private final BrowserAuthenticationCookies browserAuthenticationCookies;
   private final BrowserSecurityProperties browserSecurityProperties;
@@ -230,6 +233,28 @@ public class AccountController {
             .payload(accountService.getAccounts())
             .success(true)
             .build(), HttpStatus.OK);
+  }
+
+  /** Returns a bounded, searchable page of accounts for back-office administration. */
+  @GetMapping(
+      value = V20260726 + "/admin",
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  public ResponseEntity<Response<AdminAccountPage>> getAdminAccounts(
+      @RequestParam(required = false) Integer page,
+      @RequestParam(required = false) Integer size,
+      @RequestParam(required = false) String sort,
+      @RequestParam(required = false) String direction,
+      @RequestParam(required = false) String status,
+      @RequestParam(required = false) String role,
+      @RequestParam(required = false) String text
+  ) throws InvalidRequestException {
+    var query = AdminAccountQuery.from(page, size, sort, direction, status, role, text);
+    return ResponseEntity.ok(Response.<AdminAccountPage>builder()
+        .payload(adminAccountQueryService.getAccounts(query))
+        .success(true)
+        .build());
   }
 
   /**

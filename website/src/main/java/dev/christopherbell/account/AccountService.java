@@ -40,6 +40,7 @@ import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
@@ -248,8 +249,13 @@ public class AccountService {
    * @return a list of all accounts.
    */
   public List<AccountDetail> getAccounts() {
-    log.info("Getting all accounts");
-    var accounts = accountRepository.findAll();
+    log.info("Getting first bounded account page for compatibility endpoint");
+    var page = PageRequest.of(
+        0,
+        50,
+        Sort.by(Sort.Direction.DESC, "createdOn")
+            .and(Sort.by(Sort.Direction.DESC, "id")));
+    var accounts = accountRepository.findAll(page).getContent();
     return accounts.stream().map(accountMapper::toAccount).toList();
   }
 

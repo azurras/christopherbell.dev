@@ -25,6 +25,19 @@ export const API = {
   },
   accounts: {
     base: '/api/accounts/2024-12-15',
+    adminPage: ({ page = 0, size = 25, sort = 'createdOn', direction = 'desc',
+      status = '', role = '', text = '' } = {}) => {
+      const params = new URLSearchParams({
+        page: String(page),
+        size: String(size),
+        sort: String(sort),
+        direction: String(direction),
+      });
+      if (status) params.set('status', String(status));
+      if (role) params.set('role', String(role));
+      if (text) params.set('text', String(text));
+      return `/api/accounts/2026-07-26/admin?${params}`;
+    },
     login: '/api/accounts/2024-12-15/login',
     logout: '/api/accounts/2024-12-15/logout',
     create: '/api/accounts/2024-12-15/create',

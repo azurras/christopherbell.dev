@@ -68,6 +68,7 @@ public class AccountControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private AccountService accountService;
+  @MockitoBean private AdminAccountQueryService adminAccountQueryService;
   @MockitoBean private BrowserSecurityProperties browserSecurityProperties;
   @MockitoBean private SharedFolderAuditRecorder sharedFolderAudit;
 
@@ -76,6 +77,36 @@ public class AccountControllerTest {
     when(permissionService.hasAuthority(anyString())).thenReturn(true);
     when(browserSecurityProperties.publicBaseUrl())
         .thenReturn(URI.create("http://localhost"));
+  }
+
+  @Test
+  @DisplayName("Admin account list returns validated page metadata")
+  @WithMockUser(authorities = {"ADMIN"})
+  void getAdminAccounts_returnsPagedResult() throws Exception {
+    var detail = AccountDetail.builder().id("account-1").username("alpha").build();
+    var page = new AdminAccountPage(
+        List.of(detail), 1, 20, 21L, 2, "username", "ASC");
+    var query = AdminAccountQuery.from(1, 20, "username", "asc", "ACTIVE", "USER", "alpha");
+    when(adminAccountQueryService.getAccounts(eq(query))).thenReturn(page);
+
+    mockMvc.perform(get("/api/accounts/2026-07-26/admin")
+            .param("page", "1")
+            .param("size", "20")
+            .param("sort", "username")
+            .param("direction", "asc")
+            .param("status", "ACTIVE")
+            .param("role", "USER")
+            .param("text", "alpha")
+            .accept(MediaType.APPLICATION_JSON))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.items[0].username").value("alpha"))
+        .andExpect(jsonPath("$.payload.page").value(1))
+        .andExpect(jsonPath("$.payload.totalElements").value(21))
+        .andExpect(jsonPath("$.payload.sort").value("username"))
+        .andExpect(jsonPath("$.payload.direction").value("ASC"));
+
+    verify(adminAccountQueryService).getAccounts(eq(query));
   }
 
   @Test

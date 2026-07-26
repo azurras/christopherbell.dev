@@ -1,8 +1,64 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const { promotedRoleForAction, rolePromotionOptions, sharedFolderPermissionState } =
+const {
+  accountPageNavigation,
+  parseAdminAccountPage,
+  promotedRoleForAction,
+  rolePromotionOptions,
+  sharedFolderPermissionState,
+} =
     await import('../../main/resources/static/js/lib/back-office-users.js');
+const { API } = await import('../../main/resources/static/js/lib/api.js');
+
+test('admin account URL sends bounded paging and filter controls', () => {
+  assert.equal(
+      API.accounts.adminPage({
+        page: 2,
+        size: 25,
+        sort: 'username',
+        direction: 'asc',
+        status: 'ACTIVE',
+        role: 'USER',
+        text: 'a.b',
+      }),
+      '/api/accounts/2026-07-26/admin?page=2&size=25&sort=username&direction=asc&status=ACTIVE&role=USER&text=a.b');
+});
+
+test('admin account page parser validates the network boundary and copies items', () => {
+  const payload = {
+    items: [{ id: 'account-1' }],
+    page: 1,
+    size: 25,
+    totalElements: 26,
+    totalPages: 2,
+    sort: 'createdOn',
+    direction: 'DESC',
+  };
+
+  assert.deepEqual(parseAdminAccountPage(payload), payload);
+  assert.throws(
+      () => parseAdminAccountPage({ ...payload, items: null }),
+      /invalid account page/i);
+});
+
+test('admin account navigation reflects exact page bounds', () => {
+  assert.deepEqual(accountPageNavigation({ page: 0, totalPages: 2 }), {
+    previousDisabled: true,
+    nextDisabled: false,
+    label: 'Page 1 of 2',
+  });
+  assert.deepEqual(accountPageNavigation({ page: 1, totalPages: 2 }), {
+    previousDisabled: false,
+    nextDisabled: true,
+    label: 'Page 2 of 2',
+  });
+  assert.deepEqual(accountPageNavigation({ page: 0, totalPages: 0 }), {
+    previousDisabled: true,
+    nextDisabled: true,
+    label: 'Page 0 of 0',
+  });
+});
 
 test('role promotion options only move users to higher-privilege roles', () => {
   assert.deepEqual(rolePromotionOptions({ role: 'USER' }), [
