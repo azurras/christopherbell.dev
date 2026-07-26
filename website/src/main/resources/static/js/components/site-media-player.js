@@ -7,7 +7,6 @@ import {
   waitForTerminalMediaJob,
 } from '../lib/shared-folder.js';
 import {
-  clearSharedFolderStreamingAuth,
   prepareSharedFolderMediaAuth,
   sharedFolderStreamingDenial,
 } from '../lib/shared-folder-streaming.js';
@@ -530,7 +529,7 @@ export class SiteMediaPlayer extends HTMLElement {
 
   async loadDirectSource(entry, playback) {
     const url = API.sharedFolder.preview(entry.path);
-    await prepareSharedFolderMediaAuth(getAuthToken(), url);
+    await prepareSharedFolderMediaAuth(url);
     playback.signal.throwIfAborted();
     if (playback.descriptor.kind === 'AUDIO') {
       void this.loadAudioMetadata(playback, new URL(url, window.location.href).href);
@@ -581,7 +580,7 @@ export class SiteMediaPlayer extends HTMLElement {
       const playable = await waitForPlayableMediaJob(initial, observe);
       playback.signal.throwIfAborted();
       const url = API.sharedFolder.media.stream(playable.jobId || playable.id);
-      await prepareSharedFolderMediaAuth(getAuthToken(), url);
+      await prepareSharedFolderMediaAuth(url);
       playback.signal.throwIfAborted();
       playback.media.addEventListener('error', () => {
         if (!playback.signal.aborted) this.showRetry(entry, playback);
@@ -633,7 +632,6 @@ export class SiteMediaPlayer extends HTMLElement {
     const denial = sharedFolderStreamingDenial(status);
     this.stopPlayback();
     if (denial.redirectToLogin) {
-      clearSharedFolderStreamingAuth();
       clearAuthState();
       window.location.replace(loginRedirectUrl(currentRedirectTarget()));
     }

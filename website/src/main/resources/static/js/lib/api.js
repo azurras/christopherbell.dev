@@ -26,6 +26,7 @@ export const API = {
   accounts: {
     base: '/api/accounts/2024-12-15',
     login: '/api/accounts/2024-12-15/login',
+    logout: '/api/accounts/2024-12-15/logout',
     create: '/api/accounts/2024-12-15/create',
     approve: (id) => `/api/accounts/2025-09-03/approve/${encodeURIComponent(id)}`,
     update: '/api/accounts/2025-09-14',

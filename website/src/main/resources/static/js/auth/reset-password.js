@@ -2,6 +2,7 @@
  * Reset password page behavior.
  */
 import { API } from '../lib/api.js';
+import { fetchJson } from '../lib/util.js';
 
 const alertBox = () => document.getElementById('resetPasswordAlert');
 
@@ -14,17 +15,10 @@ function showAlert(message, type) {
 }
 
 async function resetPassword(token, password) {
-  const resp = await fetch(API.accounts.passwordResetConfirm, {
+  return fetchJson(API.accounts.passwordResetConfirm, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token, password })
   });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok || !data.success) {
-    const msg = data?.messages?.[0]?.description || 'Unable to reset password.';
-    throw new Error(msg);
-  }
-  return data.payload;
 }
 
 document.addEventListener('DOMContentLoaded', () => {

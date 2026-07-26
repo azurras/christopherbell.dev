@@ -5,6 +5,7 @@ import static dev.christopherbell.account.model.AccountPermission.SHARED_FOLDER_
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -32,6 +33,7 @@ import dev.christopherbell.sharedfolder.upload.SharedFolderUploadService;
 import dev.christopherbell.sharedfolder.web.SharedFolderAdminController;
 import dev.christopherbell.sharedfolder.web.SharedFolderReadController;
 import dev.christopherbell.sharedfolder.web.SharedFolderWriteController;
+import jakarta.servlet.http.Cookie;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -137,10 +139,34 @@ class SharedFolderSecurityIntegrationTest {
   }
 
   @Test
-  void responsesAllowSameOriginFramingForThePersistentMediaShell() throws Exception {
-    mockMvc.perform(get(BASE + "/entries"))
+  void responsesEmitTheBrowserSecurityPolicy() throws Exception {
+    mockMvc.perform(get(BASE + "/entries").secure(true))
         .andExpect(status().isForbidden())
-        .andExpect(header().string("X-Frame-Options", "SAMEORIGIN"));
+        .andExpect(header().string("X-Frame-Options", "SAMEORIGIN"))
+        .andExpect(header().string("Content-Security-Policy",
+            org.hamcrest.Matchers.containsString("frame-ancestors 'self'")))
+        .andExpect(header().string("Referrer-Policy", "strict-origin-when-cross-origin"))
+        .andExpect(header().string("Permissions-Policy",
+            "camera=(), geolocation=(), microphone=(), payment=(), usb=()"));
+  }
+
+  @Test
+  void cookieAuthenticatedMutationRequiresCsrf() throws Exception {
+    String token = tokenFor(Role.USER).substring("Bearer ".length());
+    persist(Role.USER, AccountStatus.ACTIVE, true, Set.of(SHARED_FOLDER_WRITE));
+
+    mockMvc.perform(post(BASE + "/folders")
+            .cookie(new Cookie("CBELL_AUTH", token))
+            .contentType("application/json")
+            .content("{\"parentPath\":\"\",\"name\":\"blocked\"}"))
+        .andExpect(status().isForbidden());
+
+    mockMvc.perform(post(BASE + "/folders")
+            .with(csrf())
+            .cookie(new Cookie("CBELL_AUTH", token))
+            .contentType("application/json")
+            .content("{\"parentPath\":\"\",\"name\":\"allowed\"}"))
+        .andExpect(status().isCreated());
   }
 
   @Test

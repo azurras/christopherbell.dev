@@ -20,10 +20,19 @@ Owns application-wide Spring and web infrastructure.
   ADMIN JWT authority and a fresh persisted ADMIN, ACTIVE, approved account.
 - Public read-only WFL routes, including nearby restaurant lookup by browser
   coordinates or ZIP code.
-- JWT authentication filter wiring under `security`.
+- JWT authentication filter wiring under `security`. Explicit bearer headers
+  take precedence for API clients; browser requests otherwise authenticate from
+  the HttpOnly `CBELL_AUTH` cookie.
 - Stable JWT signing through `APP_JWT_SECRET`.
-- Login JWTs expire one day after issue; the browser keeps users signed in until
-  that token expiration.
+- Login JWTs and browser authentication cookies expire one day after issue. The
+  browser never stores the JWT in JavaScript-readable storage.
+- Browser mutations use Spring Security's SPA CSRF contract: the readable
+  `XSRF-TOKEN` cookie is echoed as `X-XSRF-TOKEN`. Only requests with an explicit,
+  nonblank bearer header bypass CSRF for API compatibility.
+- Browser responses set CSP, SAMEORIGIN framing, Permissions Policy,
+  strict-origin-when-cross-origin referrer policy, and production-configured HSTS.
+  Browser cookie security, HSTS, and the canonical password-reset origin bind
+  under `app.browser-security`; production ignores forwarding headers.
 - Rate limiting and request size protection filters under `filter`.
 - `RateLimitProperties` binds ordered `rate-limit.rules` so environments can
   tune per-endpoint capacity and window settings. Shared-folder upload, mutation, and transcode

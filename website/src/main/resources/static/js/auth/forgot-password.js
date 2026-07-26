@@ -2,6 +2,7 @@
  * Forgot password page behavior.
  */
 import { API } from '../lib/api.js';
+import { fetchJson } from '../lib/util.js';
 
 const alertBox = () => document.getElementById('forgotPasswordAlert');
 
@@ -14,17 +15,10 @@ function showAlert(message, type) {
 }
 
 async function requestPasswordReset(email) {
-  const resp = await fetch(API.accounts.passwordResetRequest, {
+  return fetchJson(API.accounts.passwordResetRequest, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email })
   });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok || !data.success) {
-    const msg = data?.messages?.[0]?.description || 'Unable to request a password reset.';
-    throw new Error(msg);
-  }
-  return data.payload;
 }
 
 document.addEventListener('DOMContentLoaded', () => {

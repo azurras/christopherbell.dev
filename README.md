@@ -235,8 +235,15 @@ If you add a new page:
 
 Authentication uses JWTs created by `PermissionService`. JWT signing uses the
 stable `APP_JWT_SECRET` value so tokens remain valid across app restarts and
-instances. API protection is configured in `SecurityConfig` and method-level
-`@PreAuthorize` annotations.
+instances. Browsers receive the JWT only in an HttpOnly, SameSite cookie and
+send the readable Spring CSRF cookie back as a header for mutations; explicit
+bearer tokens remain available to non-browser API clients. API protection and
+browser security headers are configured in `SecurityConfig`, with method-level
+`@PreAuthorize` annotations enforcing feature permissions.
+
+Browser login sends `X-CBELL-Browser-Session: cookie` to select the cookie-only
+response. Existing API clients that omit the header continue to receive the JWT
+payload for bearer authentication.
 
 Public routes are listed in `SecurityConfig.PUBLIC_URLS`. Admin-only behavior
 usually uses:

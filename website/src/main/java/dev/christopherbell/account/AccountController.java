@@ -14,15 +14,18 @@ import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
+import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -31,6 +34,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -58,8 +62,11 @@ import org.springframework.web.bind.annotation.PutMapping;
 @RequestMapping("/api/accounts")
 @RestController
 public class AccountController {
-  private AccountService accountService;
-  private PermissionService permissionService;
+  private static final String BROWSER_SESSION_HEADER = "X-CBELL-Browser-Session";
+  private final AccountService accountService;
+  private final PermissionService permissionService;
+  private final BrowserAuthenticationCookies browserAuthenticationCookies;
+  private final BrowserSecurityProperties browserSecurityProperties;
 
     /**
    * Approves a pending or unapproved account.
@@ -337,8 +344,9 @@ public class AccountController {
   /**
    * Logs in an account.
    *
-   * @param accountLoginRequest - the account login request.
-   * @return a JWT token if the login is successful.
+   * @param accountLoginRequest account credentials
+   * @param sessionMode {@code cookie} for an HttpOnly browser session, otherwise legacy bearer mode
+   * @return a JWT payload for legacy clients or cookie headers with no payload for browser mode
    * @throws Exception if there is an error logging in the account.
    */
   @PostMapping(
@@ -347,12 +355,30 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   public ResponseEntity<Response<String>> loginAccount(
-      @RequestBody AccountLoginRequest accountLoginRequest
+      @Valid @RequestBody AccountLoginRequest accountLoginRequest,
+      @RequestHeader(name = BROWSER_SESSION_HEADER, defaultValue = "") String sessionMode
   ) throws Exception {
-    return new ResponseEntity<>(Response.<String>builder()
-        .payload(accountService.loginAccount(accountLoginRequest))
+    var token = accountService.loginAccount(accountLoginRequest);
+    var browserSession = "cookie".equalsIgnoreCase(sessionMode.trim());
+    var body = Response.<String>builder()
+        .payload(browserSession ? null : token)
         .success(true)
-        .build(), HttpStatus.OK);
+        .build();
+    var headers = browserSession
+        ? cookieHeaders(browserAuthenticationCookies.authenticated(token))
+        : new HttpHeaders();
+    return new ResponseEntity<>(body, headers, HttpStatus.OK);
+  }
+
+  /** Clears browser authentication cookies. CSRF remains required for this public endpoint. */
+  @PostMapping(
+      value = V20241215 + "/logout",
+      produces = MediaType.APPLICATION_JSON_VALUE
+  )
+  public ResponseEntity<Response<Void>> logoutAccount() {
+    return new ResponseEntity<>(Response.<Void>builder()
+        .success(true)
+        .build(), cookieHeaders(browserAuthenticationCookies.cleared()), HttpStatus.OK);
   }
 
   /**
@@ -369,10 +395,10 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   public ResponseEntity<Response<String>> requestPasswordReset(
-      @RequestBody AccountPasswordResetRequest requestBody,
-      HttpServletRequest servletRequest
+      @Valid @RequestBody AccountPasswordResetRequest requestBody
   ) {
-    accountService.requestPasswordReset(requestBody, getBaseUrl(servletRequest));
+    accountService.requestPasswordReset(
+        requestBody, browserSecurityProperties.publicBaseUrl().toString());
     return new ResponseEntity<>(Response.<String>builder()
         .payload("If an account exists for that email, a password reset link has been sent.")
         .success(true)
@@ -392,7 +418,7 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   public ResponseEntity<Response<String>> resetPassword(
-      @RequestBody AccountPasswordResetConfirmRequest request
+      @Valid @RequestBody AccountPasswordResetConfirmRequest request
   ) throws Exception {
     accountService.resetPassword(request);
     return new ResponseEntity<>(Response.<String>builder()
@@ -450,16 +476,9 @@ public class AccountController {
         .build());
   }
 
-  private String getBaseUrl(HttpServletRequest request) {
-    var forwardedProto = request.getHeader("X-Forwarded-Proto");
-    var forwardedHost = request.getHeader("X-Forwarded-Host");
-    if (forwardedProto != null && !forwardedProto.isBlank()
-        && forwardedHost != null && !forwardedHost.isBlank()) {
-      return forwardedProto + "://" + forwardedHost;
-    }
-
-    var url = request.getRequestURL();
-    var uri = request.getRequestURI();
-    return url.substring(0, url.length() - uri.length());
+  private HttpHeaders cookieHeaders(List<ResponseCookie> cookies) {
+    var headers = new HttpHeaders();
+    cookies.forEach(cookie -> headers.add(HttpHeaders.SET_COOKIE, cookie.toString()));
+    return headers;
   }
 }

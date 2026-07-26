@@ -16,7 +16,7 @@ import {
   sharedRecycleButton,
   sharedRecycleMarkup,
 } from './lib/back-office-shared-folder.js';
-import { authHeaders, fetchJson, formatWhen, sanitize } from './lib/util.js';
+import { authHeaders, fetchJson, formatWhen, isLoggedIn, sanitize } from './lib/util.js';
 
 const content = document.getElementById('backOfficeContent');
 const alertBox = document.getElementById('backOfficeAlert');
@@ -945,19 +945,15 @@ function wireEvents() {
 }
 
 async function gateBackOffice() {
-  const token = localStorage.getItem('cbellLoginToken');
-  if (!token) {
+  if (!isLoggedIn()) {
     window.location.replace('/404');
     return;
   }
 
   try {
-    const resp = await fetch(API.accounts.me, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const data = await resp.json().catch(() => ({}));
-    const role = data?.payload?.role || '';
-    if (!resp.ok || role !== 'ADMIN') {
+    const account = await fetchJson(API.accounts.me);
+    const role = account?.role || '';
+    if (role !== 'ADMIN') {
       window.location.replace('/404');
       return;
     }

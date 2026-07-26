@@ -7,7 +7,7 @@
  */
 import pubsub from './pubsub.js';
 import { API } from '../lib/api.js';
-import { authHeaders, fetchJson, formatWhen, getAuthToken, loginRedirectUrl, sanitize } from '../lib/util.js';
+import { authHeaders, fetchJson, formatWhen, isLoggedIn, loginRedirectUrl, sanitize } from '../lib/util.js';
 import { accountHasSharedFolderRead } from '../lib/shared-folder.js';
 import {
     browserNotificationsToShow,
@@ -150,27 +150,18 @@ class AppNav extends HTMLElement {
     }
 
     async loadUserInfo(force = false) {
-        const token = getAuthToken();
-        if (!token) {
+        if (!isLoggedIn()) {
             this.sharedFolderRead = false;
             return;
         }
         if (this.userLoadInFlight) return;
         this.userLoadInFlight = true;
         try {
-            const resp = await fetch(API.accounts.me, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await resp.json().catch(() => ({}));
-            if (resp.ok && data && data.payload) {
-                localStorage.setItem('cbellUsername', data.payload.username || '');
-                localStorage.setItem('cbellRole', data.payload.role || '');
-                this.sharedFolderRead = accountHasSharedFolderRead(data.payload);
-                this.render();
-            } else {
-                this.sharedFolderRead = false;
-                this.render();
-            }
+            const account = await fetchJson(API.accounts.me);
+            localStorage.setItem('cbellUsername', account.username || '');
+            localStorage.setItem('cbellRole', account.role || '');
+            this.sharedFolderRead = accountHasSharedFolderRead(account);
+            this.render();
         } catch (_) {
             // Ignore profile fetch errors to keep nav usable.
             this.sharedFolderRead = false;
@@ -181,8 +172,7 @@ class AppNav extends HTMLElement {
     }
 
     async loadNotifications() {
-        const token = getAuthToken();
-        if (!token || this.notificationLoadInFlight) return;
+        if (!isLoggedIn() || this.notificationLoadInFlight) return;
         this.notificationLoadInFlight = true;
         try {
             const [items, unread] = await Promise.all([
@@ -295,7 +285,7 @@ class AppNav extends HTMLElement {
 
     /** Render the navbar markup based on authentication state. */
     render() {
-        const isAuthenticated = !!getAuthToken();
+        const isAuthenticated = isLoggedIn();
         const storedName = (localStorage.getItem('cbellUsername') || '').trim();
         const initials = storedName ? storedName[0].toUpperCase() : 'C';
         const loginHref = loginRedirectUrl();

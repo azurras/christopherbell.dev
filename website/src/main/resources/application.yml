@@ -63,6 +63,10 @@ command-center:
     gpu-temperature-warning-celsius: 80
     disk-free-warning-percent: 10
 app:
+  browser-security:
+    public-base-url: ${APP_PUBLIC_BASE_URL:http://localhost:8081}
+    authentication-cookie-secure: false
+    hsts-enabled: false
   jwt:
     secret: ${APP_JWT_SECRET:local-development-jwt-secret-change-me-at-least-32-bytes}
   shared-folder:
