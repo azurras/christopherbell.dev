@@ -36,6 +36,15 @@ class SecurityConfigTest {
   }
 
   @Test
+  void publicMatchers_whenWflFreshnessRequested_matchesOnlyGetWithoutAuthentication()
+      throws Exception {
+    var path = "/api/whatsforlunch/restaurant/2026-07-26/freshness";
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request("GET", path))));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request("POST", path))));
+  }
+
+  @Test
   @DisplayName("Location ZIP coordinate endpoint is public")
   void publicMatchers_whenLocationZipRequested_matchesWithoutAuthentication() throws Exception {
     var path = "/api/location/zip/78701";
