@@ -57,7 +57,7 @@ public class SecurityConfig {
       "font-src 'self' data: https://maxcdn.bootstrapcdn.com",
       "img-src 'self' data: blob: https:",
       "connect-src 'self' https://gateway.raisingcanes.com https://order.raisingcanes.com",
-      "frame-src https://www.youtube.com https://www.youtube-nocookie.com https://open.spotify.com https://w.soundcloud.com",
+      "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://open.spotify.com https://w.soundcloud.com",
       "frame-ancestors 'self'",
       "media-src 'self' blob:",
       "worker-src 'self' blob:",
