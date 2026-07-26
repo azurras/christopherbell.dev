@@ -2,17 +2,25 @@ package dev.christopherbell.configuration.filter;
 
 import io.github.bucket4j.Bucket;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.NavigableSet;
+import java.util.TreeSet;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 /** Thread-safe, access-ordered ownership boundary for process-local rate-limit buckets. */
 public final class RateLimitBucketStore {
+  private static final Comparator<Entry> EXPIRY_ORDER =
+      Comparator.comparingLong((Entry entry) -> entry.expiresAtNanos)
+          .thenComparing(entry -> entry.key);
+
   private final int maximumSize;
   private final LongSupplier nanoTime;
   private final LinkedHashMap<String, Entry> entries = new LinkedHashMap<>(128, 0.75f, true);
+  private final NavigableSet<Entry> expirations = new TreeSet<>(EXPIRY_ORDER);
 
   public RateLimitBucketStore(int maximumSize, LongSupplier nanoTime) {
     if (maximumSize <= 0) {
@@ -33,17 +41,21 @@ public final class RateLimitBucketStore {
     removeExpired(now);
     Entry existing = entries.get(key);
     if (existing != null) {
-      existing.lastAccessNanos = now;
-      existing.inactivityNanos = inactivityNanos;
+      expirations.remove(existing);
+      existing.expiresAtNanos = saturatingAdd(now, inactivityNanos);
+      expirations.add(existing);
       return existing.bucket;
     }
 
     Bucket bucket = factory.get();
-    entries.put(key, new Entry(bucket, now, inactivityNanos));
+    Entry added = new Entry(key, bucket, saturatingAdd(now, inactivityNanos));
+    entries.put(key, added);
+    expirations.add(added);
     while (entries.size() > maximumSize) {
       Iterator<Map.Entry<String, Entry>> iterator = entries.entrySet().iterator();
-      iterator.next();
+      Entry eldest = iterator.next().getValue();
       iterator.remove();
+      expirations.remove(eldest);
     }
     return bucket;
   }
@@ -57,12 +69,14 @@ public final class RateLimitBucketStore {
   }
 
   private void removeExpired(long now) {
-    entries.entrySet().removeIf(entry -> isExpired(entry.getValue(), now));
-  }
-
-  private boolean isExpired(Entry entry, long now) {
-    long elapsed = now - entry.lastAccessNanos;
-    return elapsed >= 0 && elapsed >= entry.inactivityNanos;
+    while (!expirations.isEmpty()) {
+      Entry next = expirations.first();
+      if (next.expiresAtNanos > now) {
+        return;
+      }
+      expirations.pollFirst();
+      entries.remove(next.key);
+    }
   }
 
   private long positiveNanos(Duration duration) {
@@ -76,15 +90,23 @@ public final class RateLimitBucketStore {
     }
   }
 
-  private static final class Entry {
-    private final Bucket bucket;
-    private long lastAccessNanos;
-    private long inactivityNanos;
+  private long saturatingAdd(long left, long right) {
+    try {
+      return Math.addExact(left, right);
+    } catch (ArithmeticException ignored) {
+      return Long.MAX_VALUE;
+    }
+  }
 
-    private Entry(Bucket bucket, long lastAccessNanos, long inactivityNanos) {
+  private static final class Entry {
+    private final String key;
+    private final Bucket bucket;
+    private long expiresAtNanos;
+
+    private Entry(String key, Bucket bucket, long expiresAtNanos) {
+      this.key = key;
       this.bucket = bucket;
-      this.lastAccessNanos = lastAccessNanos;
-      this.inactivityNanos = inactivityNanos;
+      this.expiresAtNanos = expiresAtNanos;
     }
   }
 }

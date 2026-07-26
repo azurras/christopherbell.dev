@@ -48,6 +48,22 @@ class RateLimitBucketStoreTest {
         .isSameAs(bucket);
   }
 
+  @Test
+  void differentWindowsExpireInDeadlineOrderRatherThanAccessOrder() {
+    var now = new AtomicLong();
+    var store = new RateLimitBucketStore(10, now::get);
+    store.getOrCreate("long", Duration.ofSeconds(10), this::bucket);
+    store.getOrCreate("short", Duration.ofSeconds(2), this::bucket);
+    store.getOrCreate("medium", Duration.ofSeconds(5), this::bucket);
+    now.set(Duration.ofSeconds(3).toNanos());
+
+    store.getOrCreate("new", Duration.ofSeconds(10), this::bucket);
+
+    assertThat(store.contains("long")).isTrue();
+    assertThat(store.contains("short")).isFalse();
+    assertThat(store.contains("medium")).isTrue();
+  }
+
   private Bucket bucket() {
     return Bucket4j.builder()
         .addLimit(Bandwidth.simple(1, Duration.ofMinutes(1)))

@@ -2,12 +2,15 @@ package dev.christopherbell.configuration;
 
 import dev.christopherbell.libs.api.APIVersion;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import lombok.Data;
 import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -25,7 +28,24 @@ public class RateLimitProperties {
 
   @Valid
   @NotNull
-  private List<Rule> rules = defaultRules();
+  private List<@NotNull @Valid Rule> rules = defaultRules();
+
+  @AssertTrue(message = "rate limit rule names must be unique")
+  public boolean isRuleNamesUnique() {
+    if (rules == null) {
+      return true;
+    }
+    var names = new HashSet<String>();
+    for (Rule rule : rules) {
+      if (rule == null || rule.getName() == null || rule.getName().isBlank()) {
+        continue;
+      }
+      if (!names.add(rule.getName().toLowerCase(Locale.ROOT))) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   private static List<Rule> defaultRules() {
     var rules = new ArrayList<Rule>();

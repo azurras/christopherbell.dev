@@ -11,6 +11,7 @@ import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -80,6 +81,38 @@ class RequestSizeLimitFilterTest {
 
     assertThat(response.getStatus()).isEqualTo(413);
     assertThat(response.getContentAsString()).contains("REQUEST_TOO_LARGE");
+  }
+
+  @Test
+  void unknownLengthUploadChunkRemainsStreaming() throws Exception {
+    var filter = new RequestSizeLimitFilter(
+        new RequestSizeProperties(DataSize.ofBytes(10)), DataSize.ofBytes(8), errors);
+    var request = new MockHttpServletRequest(
+        "PUT", "/api/shared-folder/2026-07-17/uploads/id/chunks/0");
+    request.setContent(new byte[8]);
+    var streamedRequest = new HttpServletRequestWrapper(request) {
+      @Override
+      public int getContentLength() {
+        return -1;
+      }
+
+      @Override
+      public long getContentLengthLong() {
+        return -1;
+      }
+    };
+    var observedLength = new AtomicLong(Long.MIN_VALUE);
+    FilterChain earlyReader = (servletRequest, servletResponse) -> {
+      var bounded = (HttpServletRequest) servletRequest;
+      observedLength.set(bounded.getContentLengthLong());
+      bounded.getInputStream().read();
+    };
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(streamedRequest, response, earlyReader);
+
+    assertThat(response.getStatus()).isEqualTo(200);
+    assertThat(observedLength).hasValue(-1);
   }
 
   private void assertStreamingStatus(

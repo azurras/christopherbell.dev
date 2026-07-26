@@ -110,9 +110,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
       FilterChain filterChain
   ) throws ServletException, IOException {
     String ip = clientIpResolver.resolveClientIp(request);
-    RateLimitProperties.Rule rule = matchingRule(request);
+    MatchedRule matchedRule = matchingRule(request);
+    RateLimitProperties.Rule rule = matchedRule.rule();
     Bucket bucket = buckets.getOrCreate(
-        bucketKey(rule, ip), rule.getWindow(), () -> newBucket(rule));
+        bucketKey(matchedRule, ip), rule.getWindow(), () -> newBucket(rule));
     var probe = bucket.tryConsumeAndReturnRemaining(1);
     long waitSeconds = probe.isConsumed()
         ? durationSecondsCeiling(rule.getWindow())
@@ -147,13 +148,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
     response.setHeader("X-RateLimit-Reset", Long.toString(resetEpochSeconds));
   }
 
-  private RateLimitProperties.Rule matchingRule(HttpServletRequest request) {
-    return rules().stream()
-        .filter(rule -> matchesMethod(rule, request.getMethod()))
-        .filter(rule -> matchesPath(rule, request.getRequestURI()))
-        .findFirst()
-        .orElseGet(() -> new RateLimitProperties.Rule(
-            "default", 10_000, Duration.ofMinutes(1), List.of(), List.of("/**")));
+  private MatchedRule matchingRule(HttpServletRequest request) {
+    List<RateLimitProperties.Rule> configuredRules = rules();
+    for (int index = 0; index < configuredRules.size(); index++) {
+      RateLimitProperties.Rule rule = configuredRules.get(index);
+      if (matchesMethod(rule, request.getMethod())
+          && matchesPath(rule, request.getRequestURI())) {
+        return new MatchedRule(index, rule);
+      }
+    }
+    return new MatchedRule(-1, new RateLimitProperties.Rule(
+        "default", 10_000, Duration.ofMinutes(1), List.of(), List.of("/**")));
   }
 
   private List<RateLimitProperties.Rule> rules() {
@@ -179,10 +184,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
     return paths.stream().anyMatch(pattern -> pathMatcher.match(pattern, path));
   }
 
-  private String bucketKey(RateLimitProperties.Rule rule, String ip) {
+  private String bucketKey(MatchedRule matchedRule, String ip) {
     String safeIp = ip == null || ip.isBlank() || ip.length() > MAX_CLIENT_KEY_LENGTH
         ? "unknown" : ip;
-    return rule.getName().toLowerCase(Locale.ROOT) + ":" + safeIp;
+    return matchedRule.index()
+        + ":" + matchedRule.rule().getName().toLowerCase(Locale.ROOT)
+        + ":" + safeIp;
   }
 
   private Bucket newBucket(RateLimitProperties.Rule rule) {
@@ -213,4 +220,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
       return right >= 0 ? Long.MAX_VALUE : Long.MIN_VALUE;
     }
   }
+
+  private record MatchedRule(int index, RateLimitProperties.Rule rule) {}
 }

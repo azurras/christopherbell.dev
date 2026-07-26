@@ -91,8 +91,8 @@ public class RequestSizeLimitFilter extends OncePerRequestFilter {
   protected void doFilterInternal(HttpServletRequest request,
       HttpServletResponse response,
       FilterChain filterChain) throws ServletException, IOException {
-    long limit = "PUT".equalsIgnoreCase(request.getMethod())
-        && SHARED_UPLOAD_CHUNK.matcher(request.getRequestURI()).matches()
+    boolean sharedUploadChunk = isSharedUploadChunk(request);
+    long limit = sharedUploadChunk
         ? sharedUploadChunkMaxSizeBytes : maxSizeBytes;
     long contentLength = request.getContentLengthLong();
     if (contentLength > limit) {
@@ -101,13 +101,18 @@ public class RequestSizeLimitFilter extends OncePerRequestFilter {
     }
 
     try {
-      HttpServletRequest boundedRequest = contentLength < 0
+      HttpServletRequest boundedRequest = contentLength < 0 && !sharedUploadChunk
           ? cacheUnknownLengthBody(request, limit)
           : new SizeLimitedRequestWrapper(request, limit);
       filterChain.doFilter(boundedRequest, response);
     } catch (RequestPayloadTooLargeException e) {
       reject(request, response);
     }
+  }
+
+  private boolean isSharedUploadChunk(HttpServletRequest request) {
+    return "PUT".equalsIgnoreCase(request.getMethod())
+        && SHARED_UPLOAD_CHUNK.matcher(request.getRequestURI()).matches();
   }
 
   private HttpServletRequest cacheUnknownLengthBody(HttpServletRequest request, long limit)

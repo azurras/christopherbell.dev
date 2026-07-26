@@ -43,11 +43,15 @@ public class RateLimitFilterTest {
         Clock.fixed(Instant.parse("2026-07-25T12:00:00Z"), ZoneOffset.UTC));
     var request = request("POST", "/api/test");
     var chain = mock(FilterChain.class);
-    filter.doFilter(request, new MockHttpServletResponse(), chain);
+    var allowed = new MockHttpServletResponse();
+    filter.doFilter(request, allowed, chain);
     var denied = new MockHttpServletResponse();
 
     filter.doFilter(request, denied, chain);
 
+    assertThat(allowed.getHeader("X-RateLimit-Limit")).isEqualTo("1");
+    assertThat(allowed.getHeader("X-RateLimit-Remaining")).isEqualTo("0");
+    assertThat(allowed.getHeader("X-RateLimit-Reset")).isEqualTo("1784980830");
     assertThat(denied.getStatus()).isEqualTo(429);
     assertThat(denied.getHeader("Retry-After")).isEqualTo("30");
     assertThat(denied.getHeader("X-RateLimit-Limit")).isEqualTo("1");
@@ -55,6 +59,26 @@ public class RateLimitFilterTest {
     assertThat(denied.getHeader("X-RateLimit-Reset")).isEqualTo("1784980830");
     assertThat(denied.getContentAsString())
         .contains("\"success\":false", "RATE_LIMITED");
+  }
+
+  @Test
+  void fractionalRetryDelayRoundsUpToTheNextSecond() throws Exception {
+    var properties = new RateLimitProperties();
+    properties.setRules(List.of(rule(
+        "test", 1, Duration.ofMillis(1500), List.of("POST"), List.of("/api/test"))));
+    var filter = new RateLimitFilter(
+        new ClientIpResolver(new ClientIpProperties()),
+        properties,
+        new ApiErrorResponseWriter(new ObjectMapper()),
+        Clock.fixed(Instant.parse("2026-07-25T12:00:00Z"), ZoneOffset.UTC));
+    var request = request("POST", "/api/test");
+    filter.doFilter(request, new MockHttpServletResponse(), mock(FilterChain.class));
+    var denied = new MockHttpServletResponse();
+
+    filter.doFilter(request, denied, mock(FilterChain.class));
+
+    assertThat(denied.getHeader("Retry-After")).isEqualTo("2");
+    assertThat(denied.getHeader("X-RateLimit-Reset")).isEqualTo("1784980802");
   }
 
   @Test
