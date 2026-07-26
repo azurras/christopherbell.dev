@@ -44,6 +44,7 @@ test('gallery alt text prefers description then name and has a content fallback'
     'Austin skyline'
   );
   assert.equal(galleryAltText({ description: ' ', name: 'Skyline' }), 'Skyline');
+  assert.equal(galleryAltText({ description: 'n/a', name: 'Skyline' }), 'Skyline');
   assert.equal(galleryAltText({}), 'Gallery photo');
 });
 

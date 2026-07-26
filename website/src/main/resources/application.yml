@@ -620,7 +620,7 @@ blog-properties:
         - testTag2
       title: test blog
 photo-properties:
-  images:
+  photos:
     - name: "The River Walk - San Antonio"
       id: "18e1e89a-b739-4dab-9cf9-4d3bebc1f928"
       path: "/images/photos/IMG_0072.jpeg"

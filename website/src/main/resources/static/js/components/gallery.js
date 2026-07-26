@@ -14,9 +14,9 @@ export function galleryImagesFromResponse(response) {
 
 /** Content images prefer their description, then name, then an honest generic fallback. */
 export function galleryAltText(image) {
-    return String(image?.description || '').trim()
-        || String(image?.name || '').trim()
-        || 'Gallery photo';
+    const description = String(image?.description || '').trim();
+    const usableDescription = /^n\/a$/i.test(description) ? '' : description;
+    return usableDescription || String(image?.name || '').trim() || 'Gallery photo';
 }
 
 class PhotoGallery extends HTMLElement {
