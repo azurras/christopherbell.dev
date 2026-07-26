@@ -240,7 +240,7 @@ function validatedSharedFolderSearchEntry(entry) {
     ? entry.path.slice(entry.path.lastIndexOf('/') + 1) : null;
   const safeName = typeof entry?.name === 'string'
     && entry.name === entry.name.trim()
-    && !/[\\/\u0000-\u001F\u007F]/u.test(entry.name)
+    && !/[\\/\u0000-\u001F\u007F-\u009F]/u.test(entry.name)
     && entry.name !== '.' && entry.name !== '..'
     && entry.name === finalPathSegment;
   const validTimestamp = typeof entry?.modifiedAt === 'string'

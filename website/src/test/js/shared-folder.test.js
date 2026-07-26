@@ -88,6 +88,11 @@ test('shared-folder search rejects every malformed result partition before row a
     ['dot name', { query: 'report', entries: [{ ...validEntry, name: '.' }], truncated: false }],
     ['NUL in name', { query: 'report', entries: [{ ...validEntry, name: 'report\0.txt' }], truncated: false }],
     ['control character in name', { query: 'report', entries: [{ ...validEntry, name: 'report\n.txt' }], truncated: false }],
+    ['C1 control character in name', {
+      query: 'report',
+      entries: [{ ...validEntry, name: 'report\u0085.txt', path: 'archive/2026/report\u0085.txt' }],
+      truncated: false,
+    }],
     ['empty path', { query: 'report', entries: [{ ...validEntry, path: '' }], truncated: false }],
     ['absolute path', { query: 'report', entries: [{ ...validEntry, path: '/report.txt' }], truncated: false }],
     ['empty path segment', { query: 'report', entries: [{ ...validEntry, path: 'archive//report.txt' }], truncated: false }],
