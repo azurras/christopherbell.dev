@@ -10,13 +10,16 @@ Owns reusable browser-side components shared across pages.
   notifications while the site is open, routes WFL session invite notifications
   back to `/wfl?session=...`, presents the Void feed as the top-level `Feed`
   destination, and exposes the alphabetized Tools dropdown for Raising Canes Box
-  Index, VIN Decoder, What's For Lunch, and ZIP Coordinates.
+  Index, VIN Decoder, What's For Lunch, and ZIP Coordinates. Shared Folder joins
+  that dropdown only after the current-account response proves effective read access.
 - The notification bell and profile menu are mutually exclusive; opening one
   closes the other so the nav never stacks those popups.
 - The shared nav uses the Void console treatment: a `Signal Online` status row, Void brand mark, compact signal-style links, and dark dropdown/notification/profile menus.
 - Dropdowns use Bootstrap when present and include vanilla fallbacks for pages that do not load Bootstrap JavaScript.
 - Profile, user profile, and messages pages rely on defensive wrapping/stacking rules in `main.css` so long usernames, timestamps, buttons, and message text do not overlap.
 - `pubsub.js` provides lightweight cross-component events, especially auth login/logout updates.
+- `site-media-player.js` owns the persistent audio/video bar, adaptive custom controls,
+  same-tab refresh restoration, and the same-origin navigation shell used while media plays.
 
 ## Update This Doc
 

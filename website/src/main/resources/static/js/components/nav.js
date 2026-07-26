@@ -32,9 +32,10 @@ export function messagesNavHref(isAuthenticated) {
 }
 
 /** Secondary tools shown under the Tools dropdown. */
-export function toolsMenuItems() {
+export function toolsMenuItems(hasSharedFolderRead = false) {
     return [
         { href: '/canes-box-tracker', label: 'Raising Canes Box Index' },
+        ...(hasSharedFolderRead ? [{ href: '/shared', label: 'Shared Folder' }] : []),
         { href: '/vin-decoder', label: 'VIN Decoder' },
         { href: '/wfl', label: "What's For Lunch" },
         { href: '/zip-coordinates', label: 'ZIP Coordinates' },
@@ -57,12 +58,9 @@ export function adminMenuItems(isAdmin) {
     ] : [];
 }
 
-/** Profile-menu destinations that require a current-account capability response. */
-export function profileMenuItems(isAdmin, hasSharedFolderRead) {
-    return [
-        ...adminMenuItems(isAdmin),
-        ...(hasSharedFolderRead ? [{ href: '/shared', label: 'Shared Folder' }] : []),
-    ];
+/** Profile-menu destinations reserved for administrators. */
+export function profileMenuItems(isAdmin) {
+    return adminMenuItems(isAdmin);
 }
 
 /** Determine whether a nav href represents the current browser route. */
@@ -307,7 +305,8 @@ class AppNav extends HTMLElement {
         const hasSharedFolderRead = Boolean(this.sharedFolderRead);
         const unread = Number(this.unreadNotifications || 0);
         const currentPath = window.location.pathname;
-        const toolsActive = toolsMenuItems().some(item => isActiveNavHref(item.href, currentPath));
+        const toolsItems = toolsMenuItems(hasSharedFolderRead);
+        const toolsActive = toolsItems.some(item => isActiveNavHref(item.href, currentPath));
         this.innerHTML = `
 <nav class="navbar navbar-expand-lg navbar-dark void-console-nav">
     <div class="void-nav-status-row">
@@ -328,7 +327,7 @@ class AppNav extends HTMLElement {
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle${toolsActive ? ' active' : ''}" href="#" id="toolsDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false"${toolsActive ? ' aria-current="page"' : ''}>Tools</a>
                     <ul class="dropdown-menu tools-menu" aria-labelledby="toolsDropdown">
-                        ${toolsMenuItems().map(item => `<li><a class="dropdown-item${activeClass(item.href, currentPath)}" href="${item.href}"${ariaCurrent(item.href, currentPath)}>${item.label}</a></li>`).join('')}
+                        ${toolsItems.map(item => `<li><a class="dropdown-item${activeClass(item.href, currentPath)}" href="${item.href}"${ariaCurrent(item.href, currentPath)}>${item.label}</a></li>`).join('')}
                     </ul>
                 </li>
             </ul>
@@ -359,7 +358,7 @@ class AppNav extends HTMLElement {
                         <span class="avatar-initials">${initials}</span>
                     </button>
                     <div class="dropdown-menu dropdown-menu-end profile-menu">
-                        ${profileMenuItems(isAdmin, hasSharedFolderRead).map(item => `<a class="dropdown-item" href="${item.href}">${item.label}</a>`).join('')}
+                        ${profileMenuItems(isAdmin).map(item => `<a class="dropdown-item" href="${item.href}">${item.label}</a>`).join('')}
                         <a class="dropdown-item" href="${profileHref}">Profile</a>
                         <button id="logout" type="button" class="dropdown-item">Logout</button>
                     </div>

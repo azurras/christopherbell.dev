@@ -51,15 +51,16 @@ test('messages nav link sends signed-in users directly to messages', () => {
 
 test('tools menu exposes ZIP coordinate lookup', () => {
   assert.deepEqual(
-    toolsMenuItems().find((item) => item.href === '/zip-coordinates'),
+    toolsMenuItems(false).find((item) => item.href === '/zip-coordinates'),
     { href: '/zip-coordinates', label: 'ZIP Coordinates' }
   );
 });
 
-test('tools menu stays alphabetized by label', () => {
+test('tools menu adds Shared Folder alphabetically only with effective read access', () => {
+  assert.equal(toolsMenuItems(false).some((item) => item.href === '/shared'), false);
   assert.deepEqual(
-    toolsMenuItems().map((item) => item.label),
-    ['Raising Canes Box Index', 'VIN Decoder', "What's For Lunch", 'ZIP Coordinates']
+    toolsMenuItems(true).map((item) => item.label),
+    ['Raising Canes Box Index', 'Shared Folder', 'VIN Decoder', "What's For Lunch", 'ZIP Coordinates']
   );
 });
 
@@ -72,7 +73,7 @@ test('void nav uses Feed as the primary Void link', () => {
 
 test('tools menu includes What’s For Lunch instead of top-level WFL', () => {
   assert.deepEqual(
-    toolsMenuItems().find((item) => item.href === '/wfl'),
+    toolsMenuItems(false).find((item) => item.href === '/wfl'),
     { href: '/wfl', label: "What's For Lunch" }
   );
   assert.equal(topLevelNavItems(true).some((item) => item.href === '/wfl'), false);
@@ -125,10 +126,10 @@ test('admin menu alone exposes back office and command center', () => {
   ]);
 });
 
-test('shared folder nav item appears only after the account reports effective read access', () => {
-  assert.equal(profileMenuItems(false, false).some((item) => item.href === '/shared'), false);
-  assert.deepEqual(profileMenuItems(false, true).find((item) => item.href === '/shared'),
-    { href: '/shared', label: 'Shared Folder' });
-  assert.deepEqual(profileMenuItems(true, true).find((item) => item.href === '/shared'),
-    { href: '/shared', label: 'Shared Folder' });
+test('profile menu keeps administrative links but no longer contains Shared Folder', () => {
+  assert.deepEqual(profileMenuItems(false, true), []);
+  assert.deepEqual(profileMenuItems(true, true), [
+    { href: '/back-office', label: 'Back Office' },
+    { href: '/command-center', label: 'Command Center' },
+  ]);
 });

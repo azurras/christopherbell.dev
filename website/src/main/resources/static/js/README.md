@@ -139,11 +139,15 @@ Owns browser-side behavior for server-rendered pages.
   explicitly replace, and delete entries with observed tokens. The same module owns resumable
   8 MiB chunk uploads, SHA-256 chunk digests, progress, cancel, drag/drop, explicit replacement,
   and refresh recovery from non-secret local session metadata; terminal sessions clear that local
-  record. The shared nav adds Shared Folder only after the current-account API reports effective
-  read access.
+  record. The shared nav adds Shared Folder to the alphabetized Tools menu only after the
+  current-account API reports effective read access.
 - `components/site-media-player.js` owns the single audio/video element in the top document. It
-  keeps native controls in a fixed bottom bar, shows video pixels there, and reuses the existing
-  authenticated direct-stream and progressive transcoding paths. While media is active, ordinary
+  renders accessible adaptive controls in a fixed bottom bar, shows video pixels there, and reuses
+  the existing authenticated direct-stream and progressive transcoding paths. It stores only the
+  current file descriptor, timestamp, play state, speed, mute state, and volume in same-tab
+  `sessionStorage`; it never stores a token or prepared stream URL. Refresh restores and seeks the
+  secure source before attempting to continue playback, while close, completion, logout, malformed
+  state, and access loss clear the record. While media is active, ordinary
   same-origin link clicks load a full-page content frame above the original document, so existing
   server-rendered pages and their scripts keep working without replacing the player. The top URL,
   title, Back/Forward history, logout, and access-revocation behavior remain synchronized. External,
