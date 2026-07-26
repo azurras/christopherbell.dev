@@ -148,6 +148,13 @@ export const API = {
     base: '/api/messages/2025-09-14',
     conversations: '/api/messages/2025-09-14/conversations',
     conversation: (username) => `/api/messages/2025-09-14/conversation/${encodeURIComponent(username)}`,
+    conversationPage: (username, cursor = null, size = 50) => {
+      const params = new URLSearchParams({ size: String(size) });
+      if (cursor) params.set('cursor', String(cursor));
+      return `/api/messages/2026-07-26/conversation/${encodeURIComponent(username)}?${params}`;
+    },
+    archiveConversation: (username) =>
+      `/api/messages/2026-07-26/conversation/${encodeURIComponent(username)}/archive`,
   },
   whatsForLunch: {
     restaurants: '/api/whatsforlunch/restaurant/2025-09-12',

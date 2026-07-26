@@ -3,20 +3,20 @@ package dev.christopherbell.message.conversation;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.security.UsernameSanitizer;
 import dev.christopherbell.message.MessageRepository;
 import dev.christopherbell.message.model.ConversationSummary;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.message.model.MessageDetail;
 import dev.christopherbell.permission.PermissionService;
-import java.util.Comparator;
+import dev.christopherbell.pagination.StableCursorCodec;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 /** Handles conversation reads, summaries, and read-state updates. */
@@ -26,27 +26,32 @@ public class ConversationService {
   private final MessageRepository messageRepository;
   private final AccountRepository accountRepository;
   private final PermissionService permissionService;
+  private final ConversationQueryRepository conversationQueries;
+  private final ConversationArchiveService conversationArchives;
+  private final StableCursorCodec cursorCodec;
 
   /**
    * Loads a conversation with another user and marks incoming unread messages as read.
    */
   public List<MessageDetail> getConversation(String username, int limit)
       throws ResourceNotFoundException {
-    var self = getSelfAccount();
-    var other = accountRepository
-        .findByUsername(UsernameSanitizer.sanitize(username))
-        .orElseThrow(() -> new ResourceNotFoundException(
-            String.format("Account with username %s not found.", username)));
-    var pageSize = Math.max(1, Math.min(limit, 100));
-    var page = PageRequest.of(0, pageSize);
-    var messages = messageRepository
-        .findByConversationKeyOrderByCreatedOnAsc(conversationKey(self.getId(), other.getId()), page)
-        .stream()
-        .sorted(Comparator.comparing(Message::getCreatedOn))
-        .toList();
+    try {
+      return getConversationPage(username, null, limit).items();
+    } catch (InvalidRequestException impossibleBlankCursor) {
+      throw new IllegalStateException("Blank conversation cursor was rejected", impossibleBlankCursor);
+    }
+  }
+
+  /** Loads one stable page of the newest remaining messages and marks page-contained reads. */
+  public ConversationPage getConversationPage(String username, String cursor, int size)
+      throws InvalidRequestException, ResourceNotFoundException {
+    var participants = resolveParticipants(username);
+    var slice = conversationQueries.page(
+        participants.conversationKey(), cursorCodec.decode(cursor), size);
+    var messages = slice.items();
 
     var changed = messages.stream()
-        .filter(message -> self.getId().equals(message.getRecipientAccountId()))
+        .filter(message -> participants.self().getId().equals(message.getRecipientAccountId()))
         .filter(message -> !Boolean.TRUE.equals(message.getRead()))
         .peek(message -> message.setRead(true))
         .toList();
@@ -54,9 +59,16 @@ public class ConversationService {
       messageRepository.saveAll(changed);
     }
 
-    return messages.stream()
-        .map(message -> toDetail(message, self.getId(), Map.of(self.getId(), self, other.getId(), other)))
-        .toList();
+    var details = new ArrayList<>(messages.stream()
+        .map(message -> toDetail(
+            message,
+            participants.self().getId(),
+            Map.of(
+                participants.self().getId(), participants.self(),
+                participants.other().getId(), participants.other())))
+        .toList());
+    Collections.reverse(details);
+    return new ConversationPage(details, slice.nextCursor());
   }
 
   /**
@@ -64,17 +76,12 @@ public class ConversationService {
    */
   public List<ConversationSummary> getConversations(int limit) throws ResourceNotFoundException {
     var self = getSelfAccount();
-    var pageSize = Math.max(1, Math.min(limit, 50));
-    var page = PageRequest.of(0, 200, Sort.by(Sort.Direction.DESC, "createdOn"));
-    var latestByOtherId = new LinkedHashMap<String, Message>();
-    for (var message : messageRepository.findByParticipantIdsContainingOrderByCreatedOnDesc(self.getId(), page)) {
+    var latestByOtherId = new java.util.LinkedHashMap<String, Message>();
+    for (var message : conversationQueries.latestDistinctVisible(self.getId(), limit)) {
       var otherId = self.getId().equals(message.getSenderAccountId())
           ? message.getRecipientAccountId()
           : message.getSenderAccountId();
-      latestByOtherId.putIfAbsent(otherId, message);
-      if (latestByOtherId.size() >= pageSize) {
-        break;
-      }
+      latestByOtherId.put(otherId, message);
     }
 
     var accounts = accountRepository.findAllById(latestByOtherId.keySet());
@@ -83,6 +90,15 @@ public class ConversationService {
     return latestByOtherId.entrySet().stream()
         .map(entry -> summary(entry.getKey(), entry.getValue(), self, accountById.get(entry.getKey())))
         .toList();
+  }
+
+  /** Archives only the current account's view of a resolved conversation. */
+  public ConversationArchiveResult archive(String username) throws ResourceNotFoundException {
+    var participants = resolveParticipants(username);
+    return conversationArchives.archive(
+        participants.self().getId(),
+        participants.conversationKey(),
+        java.util.Set.of(participants.self().getId(), participants.other().getId()));
   }
 
   private ConversationSummary summary(String otherId, Message message, Account self, Account other) {
@@ -103,6 +119,17 @@ public class ConversationService {
     return accountRepository
         .findById(selfId)
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", selfId)));
+  }
+
+  private ConversationParticipants resolveParticipants(String username)
+      throws ResourceNotFoundException {
+    var self = getSelfAccount();
+    var other = accountRepository
+        .findByUsername(UsernameSanitizer.sanitize(username))
+        .orElseThrow(() -> new ResourceNotFoundException(
+            String.format("Account with username %s not found.", username)));
+    return new ConversationParticipants(
+        self, other, conversationKey(self.getId(), other.getId()));
   }
 
   private static String conversationKey(String firstAccountId, String secondAccountId) {
@@ -136,4 +163,10 @@ public class ConversationService {
         .reduce((first, second) -> first + " " + second)
         .orElse(account.getUsername());
   }
+
+  private record ConversationParticipants(
+      Account self,
+      Account other,
+      String conversationKey
+  ) {}
 }

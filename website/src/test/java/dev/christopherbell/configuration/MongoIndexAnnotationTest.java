@@ -44,7 +44,13 @@ class MongoIndexAnnotationTest {
     var indexes = compoundIndexes(Message.class);
 
     assertEquals("{'conversationKey': 1, 'createdOn': 1}", indexes.get("message_conversation_created_asc"));
+    assertEquals(
+        "{'conversationKey': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("message_conversation_created_id_desc"));
     assertEquals("{'participantIds': 1, 'createdOn': -1}", indexes.get("message_participant_created_desc"));
+    assertEquals(
+        "{'participantIds': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("message_participant_created_id_desc"));
     assertEquals(
         "{'recipientAccountId': 1, 'senderAccountId': 1, 'read': 1}",
         indexes.get("message_recipient_sender_read"));

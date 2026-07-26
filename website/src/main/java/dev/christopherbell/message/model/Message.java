@@ -21,7 +21,11 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @NoArgsConstructor
 @CompoundIndexes({
     @CompoundIndex(name = "message_conversation_created_asc", def = "{'conversationKey': 1, 'createdOn': 1}"),
+    @CompoundIndex(name = "message_conversation_created_id_desc",
+        def = "{'conversationKey': 1, 'createdOn': -1, '_id': -1}"),
     @CompoundIndex(name = "message_participant_created_desc", def = "{'participantIds': 1, 'createdOn': -1}"),
+    @CompoundIndex(name = "message_participant_created_id_desc",
+        def = "{'participantIds': 1, 'createdOn': -1, '_id': -1}"),
     @CompoundIndex(
         name = "message_recipient_sender_read",
         def = "{'recipientAccountId': 1, 'senderAccountId': 1, 'read': 1}")

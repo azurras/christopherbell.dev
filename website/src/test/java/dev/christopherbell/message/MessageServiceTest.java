@@ -14,6 +14,10 @@ import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.trust.AccountTrustService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.message.conversation.ConversationService;
+import dev.christopherbell.message.conversation.ConversationArchiveService;
+import dev.christopherbell.message.conversation.ConversationMessageSlice;
+import dev.christopherbell.message.conversation.ConversationQueryRepository;
+import dev.christopherbell.pagination.StableCursorCodec;
 import dev.christopherbell.message.delivery.MessageDeliveryService;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.message.model.MessageCreateRequest;
@@ -27,7 +31,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.PageRequest;
 
 @ExtendWith(MockitoExtension.class)
 public class MessageServiceTest {
@@ -36,6 +39,8 @@ public class MessageServiceTest {
   @Mock private NotificationDeliveryService notificationDeliveryService;
   @Mock private PermissionService permissionService;
   @Mock private AccountTrustService accountTrustService;
+  @Mock private ConversationQueryRepository conversationQueries;
+  @Mock private ConversationArchiveService conversationArchives;
 
   @Test
   public void sendMessage_savesMessageAndNotifiesRecipient() throws Exception {
@@ -132,16 +137,32 @@ public class MessageServiceTest {
     when(permissionService.getSelfId()).thenReturn(self.getId());
     when(accountRepository.findById(eq(self.getId()))).thenReturn(Optional.of(self));
     when(accountRepository.findByUsername(eq("alex"))).thenReturn(Optional.of(other));
-    when(messageRepository.findByConversationKeyOrderByCreatedOnAsc(
-        eq("other:self"),
-        any(PageRequest.class)))
-        .thenReturn(List.of(incoming));
+    when(conversationQueries.page(eq("other:self"), eq(Optional.empty()), eq(50)))
+        .thenReturn(new ConversationMessageSlice(List.of(incoming), null));
 
     var result = service.getConversation("alex", 50);
 
     assertEquals(1, result.size());
     assertEquals(true, incoming.getRead());
     verify(messageRepository).saveAll(eq(List.of(incoming)));
+  }
+
+  @Test
+  void archiveConversation_resolvesParticipantsAndArchivesOnlySelfView() throws Exception {
+    var self = Account.builder().id("self").username("self").build();
+    var other = Account.builder().id("other").username("alex").build();
+    var archived = new dev.christopherbell.message.conversation.ConversationArchiveResult(
+        "other:self", Instant.parse("2026-07-26T12:00:00Z"));
+    when(permissionService.getSelfId()).thenReturn("self");
+    when(accountRepository.findById("self")).thenReturn(Optional.of(self));
+    when(accountRepository.findByUsername("alex")).thenReturn(Optional.of(other));
+    when(conversationArchives.archive("self", "other:self", java.util.Set.of("self", "other")))
+        .thenReturn(archived);
+
+    assertEquals(archived, service().archiveConversation("alex"));
+
+    verify(conversationArchives).archive(
+        "self", "other:self", java.util.Set.of("self", "other"));
   }
 
   private MessageService service() {
@@ -152,6 +173,12 @@ public class MessageServiceTest {
             notificationDeliveryService,
             permissionService,
             accountTrustService),
-        new ConversationService(messageRepository, accountRepository, permissionService));
+        new ConversationService(
+            messageRepository,
+            accountRepository,
+            permissionService,
+            conversationQueries,
+            conversationArchives,
+            new StableCursorCodec()));
   }
 }

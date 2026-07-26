@@ -4651,6 +4651,18 @@ body {
     min-width: 0;
 }
 
+.message-thread-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+#loadOlderMessages {
+    align-self: center;
+    margin-bottom: 0.75rem;
+}
+
 .message-new-form {
     border-bottom: 1px solid #eef0f3;
     margin-bottom: 0.75rem;
