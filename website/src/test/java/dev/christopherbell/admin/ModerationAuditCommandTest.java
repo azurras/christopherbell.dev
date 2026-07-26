@@ -14,6 +14,7 @@ class ModerationAuditCommandTest {
   @DisplayName("Moderation audit accepts allowlisted bounded state")
   void constructor_acceptsBoundedState() throws Exception {
     var command = ModerationAuditCommand.create(
+        "admin-1", "azurras",
         "ACCOUNT_ROLE_CHANGED", "ACCOUNT", "account-1", "@reader", "policy review",
         "%s changed an account role.",
         Map.of("role", "USER", "status", "ACTIVE"),
@@ -54,6 +55,7 @@ class ModerationAuditCommandTest {
 
   private ModerationAuditCommand command(String reason, Map<String, String> after) throws Exception {
     return ModerationAuditCommand.create(
+        "admin-1", "azurras",
         "ACCOUNT_STATUS_CHANGED", "ACCOUNT", "account-1", "@reader", reason,
         "%s changed an account status.", Map.of("status", "INACTIVE"), after, Map.of());
   }

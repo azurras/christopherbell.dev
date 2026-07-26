@@ -220,7 +220,13 @@ public class ReportModerationService {
       Map<String, String> before,
       Map<String, String> after
   ) throws InvalidRequestException {
+    var actorId = permissionService.getSelfId();
+    var actorUsername = accountRepository.findById(actorId)
+        .map(account -> account.getUsername() == null ? actorId : account.getUsername())
+        .orElse(actorId);
     return ModerationAuditCommand.create(
+        actorId,
+        actorUsername,
         action,
         "REPORT",
         report.getId(),

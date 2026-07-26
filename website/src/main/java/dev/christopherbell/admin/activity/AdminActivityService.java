@@ -43,20 +43,16 @@ public class AdminActivityService {
 
   /** Records one validated primary moderation event and surfaces persistence failure safely. */
   public AdminActivity recordModeration(ModerationAuditCommand command) {
-    var actorId = permissionService.getSelfId();
-    var actorUsername = accountRepository.findById(actorId)
-        .map(account -> account.getUsername() == null ? actorId : account.getUsername())
-        .orElse(actorId);
     var activity = AdminActivity.builder()
         .id(command.eventId())
-        .actorAccountId(actorId)
-        .actorUsername(actorUsername)
+        .actorAccountId(command.actorAccountId())
+        .actorUsername(command.actorUsername())
         .action(command.action())
         .targetType(command.targetType())
         .targetId(command.targetId())
         .targetLabel(command.targetLabel())
         .reason(command.reason())
-        .message(command.message().formatted(actorUsername))
+        .message(command.message().formatted(command.actorUsername()))
         .beforeValues(command.beforeValues())
         .afterValues(command.afterValues())
         .metadata(command.metadata())

@@ -34,6 +34,7 @@ import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.passwordreset.PasswordResetNotificationService;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
 import dev.christopherbell.account.profile.AccountProfileService;
+import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
@@ -74,6 +75,7 @@ public class AccountServiceTest {
   @Mock private SharedFolderAuditRecorder sharedFolderAudit;
   @Mock private SharedFolderAccessService sharedFolderAccess;
   @Mock private AdminActivityService adminActivityService;
+  @Mock private PermissionService permissionService;
   private AccountService accountService;
 
   @BeforeEach
@@ -83,7 +85,7 @@ public class AccountServiceTest {
     var profileService = new AccountProfileService(accountRepository, accountMapper, postRepository);
     var followService = new AccountFollowService(accountRepository, profileService);
     var moderationService = new AccountModerationService(
-        accountRepository, accountMapper, adminActivityService);
+        accountRepository, accountMapper, adminActivityService, permissionService);
     accountService = new AccountService(
         accountMapper,
         accountRepository,
@@ -97,6 +99,7 @@ public class AccountServiceTest {
         sharedFolderAccess);
     org.mockito.Mockito.lenient().when(sharedFolderAccess.requireAdmin()).thenReturn(
         Account.builder().id("admin-1").role(Role.ADMIN).build());
+    org.mockito.Mockito.lenient().when(permissionService.getSelfId()).thenReturn("admin-1");
   }
 
   @Test
@@ -586,6 +589,7 @@ public class AccountServiceTest {
     assertEquals(AccountStatus.ACTIVE, result.getStatus());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
+    verify(accountRepository).findById("admin-1");
     verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
     verify(accountRepository).findByUsernameIgnoreCase(eq("Chris.Bell"));
     verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
@@ -626,6 +630,7 @@ public class AccountServiceTest {
     assertEquals(existing.getIsApproved(), result.getIsApproved());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
+    verify(accountRepository).findById("admin-1");
     verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
@@ -659,6 +664,7 @@ public class AccountServiceTest {
     assertEquals(true, result.getIsApproved());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
+    verify(accountRepository).findById("admin-1");
     verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(existing));
     verify(accountMapper).toAccount(eq(existing));
     verifyNoMoreInteractions(accountRepository);
@@ -753,6 +759,7 @@ public class AccountServiceTest {
     assertThrows(ResourceExistsException.class, () -> accountService.updateAccount(request));
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
+    verify(accountRepository).findById("admin-1");
     verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
     verifyNoMoreInteractions(accountRepository);
   }
@@ -780,6 +787,7 @@ public class AccountServiceTest {
     assertThrows(ResourceExistsException.class, () -> accountService.updateAccount(request));
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
+    verify(accountRepository).findById("admin-1");
     verify(accountRepository).findByEmailIgnoreCase(eq("chris@example.com"));
     verify(accountRepository).findByUsernameIgnoreCase(eq("Chris.Bell"));
     verifyNoMoreInteractions(accountRepository);

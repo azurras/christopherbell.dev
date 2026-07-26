@@ -188,7 +188,7 @@ class NotificationServiceTest {
   private NotificationService service() {
     org.mockito.Mockito.lenient()
         .when(fanoutGuard.tryAcquire(any(NotificationEventIdentity.class), any(Instant.class)))
-        .thenReturn(Optional.of(new NotificationDeliveryPermit("claim")));
+        .thenReturn(Optional.of(new NotificationDeliveryPermit("claim", "rate")));
     return new NotificationService(
         new NotificationDeliveryService(
             notificationRepository,
@@ -206,7 +206,7 @@ class NotificationServiceTest {
     var actor = Account.builder().id("actor").username("liker").build();
     var recipient = Account.builder().id("recipient").username("writer").build();
     var post = Post.builder().id("post-1").accountId("recipient").text("hello").build();
-    var permit = new NotificationDeliveryPermit("claim");
+    var permit = new NotificationDeliveryPermit("claim", "rate");
     when(notificationPreferenceService.shouldDeliver("recipient", NotificationType.LIKE))
         .thenReturn(true);
     when(fanoutGuard.tryAcquire(any(NotificationEventIdentity.class), any(Instant.class)))

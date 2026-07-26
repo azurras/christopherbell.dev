@@ -18,6 +18,7 @@ import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.admin.activity.ModerationAuditCommand;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
+import dev.christopherbell.permission.PermissionService;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,11 +33,15 @@ class AccountModerationAuditTest {
   @Mock private AccountRepository accounts;
   @Mock private AccountMapper mapper;
   @Mock private AdminActivityService activity;
+  @Mock private PermissionService permissions;
   private AccountModerationService service;
 
   @BeforeEach
   void setUp() {
-    service = new AccountModerationService(accounts, mapper, activity);
+    service = new AccountModerationService(accounts, mapper, activity, permissions);
+    org.mockito.Mockito.lenient().when(permissions.getSelfId()).thenReturn("admin-a");
+    org.mockito.Mockito.lenient().when(accounts.findById("admin-a")).thenReturn(Optional.of(
+        Account.builder().id("admin-a").username("original-admin").build()));
   }
 
   @Test
@@ -101,10 +106,20 @@ class AccountModerationAuditTest {
     assertThat(account.getStatus()).isEqualTo(AccountStatus.SUSPENDED);
     assertThat(account.getPendingModerationAudit()).isNotNull();
 
+    org.mockito.Mockito.lenient().when(permissions.getSelfId()).thenReturn("admin-b");
+    org.mockito.Mockito.lenient().when(accounts.findById("admin-b")).thenReturn(Optional.of(
+        Account.builder().id("admin-b").username("retrying-admin").build()));
+
     service.updateAccount(request);
 
     assertThat(account.getPendingModerationAudit()).isNull();
-    verify(activity, org.mockito.Mockito.times(2)).recordModeration(any());
+    var commands = ArgumentCaptor.forClass(ModerationAuditCommand.class);
+    verify(activity, org.mockito.Mockito.times(2)).recordModeration(commands.capture());
+    assertThat(commands.getAllValues())
+        .allSatisfy(command -> {
+          assertThat(command.actorAccountId()).isEqualTo("admin-a");
+          assertThat(command.actorUsername()).isEqualTo("original-admin");
+        });
   }
 
   private Account account() {

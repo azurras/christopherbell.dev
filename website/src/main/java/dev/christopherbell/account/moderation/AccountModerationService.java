@@ -30,6 +30,7 @@ public class AccountModerationService {
   private final AccountRepository accountRepository;
   private final AccountMapper accountMapper;
   private final AdminActivityService adminActivityService;
+  private final PermissionService permissionService;
 
   /**
    * Approves an account and records the current admin id.
@@ -41,7 +42,9 @@ public class AccountModerationService {
     completePendingAudit(account);
     var before = ModerationAccountSnapshot.from(account);
     var after = new ModerationAccountSnapshot(account.getRole(), AccountStatus.ACTIVE);
+    var actor = currentActor();
     var auditCommand = ModerationAuditCommand.create(
+        actor.id(), actor.username(),
         "ACCOUNT_STATUS_CHANGED",
         "ACCOUNT",
         account.getId(),
@@ -76,7 +79,7 @@ public class AccountModerationService {
       throw new InvalidRequestException("Moderation reason is required.");
     }
     var auditCommand = moderated
-        ? ModerationAuditCommand.create(
+        ? moderationCommand(
             moderationAction(before, proposed),
             "ACCOUNT",
             existing.getId(),
@@ -95,6 +98,33 @@ public class AccountModerationService {
     }
     return accountMapper.toAccount(saved);
   }
+
+  private ModerationAuditCommand moderationCommand(
+      String action,
+      String targetType,
+      String targetId,
+      String targetLabel,
+      String reason,
+      String message,
+      Map<String, String> before,
+      Map<String, String> after,
+      Map<String, String> metadata
+  ) throws InvalidRequestException {
+    var actor = currentActor();
+    return ModerationAuditCommand.create(
+        actor.id(), actor.username(), action, targetType, targetId, targetLabel,
+        reason, message, before, after, metadata);
+  }
+
+  private ModerationActor currentActor() {
+    var actorId = permissionService.getSelfId();
+    var username = accountRepository.findById(actorId)
+        .map(account -> account.getUsername() == null ? actorId : account.getUsername())
+        .orElse(actorId);
+    return new ModerationActor(actorId, username);
+  }
+
+  private record ModerationActor(String id, String username) {}
 
   private Account completePendingAudit(Account account) {
     var pending = account.getPendingModerationAudit();

@@ -10,7 +10,8 @@ Owns notification creation from feature events.
   saving so disabled categories do not create in-app notifications.
 - Stable event identities are claimed atomically for a bounded dedupe window.
   Expired claims can be replaced before Mongo TTL cleanup, and a failed
-  notification save releases its claim so the event can be retried.
+  notification save releases its claim and refunds the matching rate reservation
+  so the event can be retried without consuming delivery capacity.
 
 ## Design Notes
 

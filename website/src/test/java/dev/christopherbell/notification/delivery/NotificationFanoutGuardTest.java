@@ -78,6 +78,8 @@ class NotificationFanoutGuardTest {
 
     assertThat(guard.tryAcquire(identity("recipient", "LIKE", "post-1"), NOW)).isEmpty();
 
+    verify(mongo).updateFirst(any(Query.class), any(UpdateDefinition.class),
+        eq(NotificationRateLimit.class));
     verify(mongo).remove(any(Query.class), eq(NotificationDeliveryGuard.class));
   }
 
@@ -100,6 +102,22 @@ class NotificationFanoutGuardTest {
     assertThat(queries.getAllValues())
         .extracting(query -> query.getQueryObject().getString("_id"))
         .doesNotHaveDuplicates();
+  }
+
+  @Test
+  @DisplayName("Releasing a failed delivery refunds its rate reservation and dedupe claim")
+  void release_refundsRateReservationAndDedupeClaim() {
+    guard.release(new NotificationDeliveryPermit("claim-id", "rate-id"));
+
+    var rateQuery = ArgumentCaptor.forClass(Query.class);
+    var rateUpdate = ArgumentCaptor.forClass(UpdateDefinition.class);
+    verify(mongo).updateFirst(
+        rateQuery.capture(), rateUpdate.capture(), eq(NotificationRateLimit.class));
+    assertThat(rateQuery.getValue().getQueryObject().toString())
+        .contains("rate-id", "count", "$gt");
+    assertThat(rateUpdate.getValue().getUpdateObject().toString())
+        .contains("$inc", "-1");
+    verify(mongo).remove(any(Query.class), eq(NotificationDeliveryGuard.class));
   }
 
   private NotificationEventIdentity identity(String recipient, String type, String target) {

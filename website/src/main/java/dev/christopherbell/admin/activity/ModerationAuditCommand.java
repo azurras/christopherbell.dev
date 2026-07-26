@@ -8,6 +8,8 @@ import java.util.UUID;
 /** Validated moderation audit boundary that excludes secrets and content bodies. */
 public record ModerationAuditCommand(
     String eventId,
+    String actorAccountId,
+    String actorUsername,
     String action,
     String targetType,
     String targetId,
@@ -27,6 +29,8 @@ public record ModerationAuditCommand(
 
   /** Creates an immutable command after validating every externally supplied partition. */
   public static ModerationAuditCommand create(
+      String actorAccountId,
+      String actorUsername,
       String action,
       String targetType,
       String targetId,
@@ -37,6 +41,8 @@ public record ModerationAuditCommand(
       Map<String, String> afterValues,
       Map<String, String> metadata
   ) throws InvalidRequestException {
+    requireText(actorAccountId, 128, "actor account id");
+    requireText(actorUsername, 128, "actor username");
     requireText(action, 64, "action");
     requireText(targetType, 32, "target type");
     requireText(targetId, 128, "target id");
@@ -48,6 +54,7 @@ public record ModerationAuditCommand(
     var safeMetadata = validateMap(metadata, METADATA_KEYS, "metadata");
     return new ModerationAuditCommand(
         UUID.randomUUID().toString(),
+        actorAccountId, actorUsername,
         action, targetType, targetId, targetLabel,
         ModerationReasonRedactor.redact(reason.strip()), message,
         before, after, safeMetadata);

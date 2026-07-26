@@ -165,13 +165,11 @@ class AdminActivityServiceTest {
   void recordModeration_savesReasonAndState() throws Exception {
     var service = service();
     var command = ModerationAuditCommand.create(
+        "account-1", "azurras",
         "REPORT_RESOLVED", "REPORT", "report-1", "Report report-1",
         "Confirmed spam.", "%s resolved a report.",
         Map.of("status", "OPEN"), Map.of("status", "RESOLVED"),
         Map.of("reportId", "report-1"));
-    when(permissionService.getSelfId()).thenReturn("account-1");
-    when(accountRepository.findById("account-1"))
-        .thenReturn(Optional.of(Account.builder().username("azurras").build()));
     when(adminActivityRepository.insert(any(AdminActivity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -188,11 +186,10 @@ class AdminActivityServiceTest {
   void recordModeration_whenPersistenceFails_returnsServiceUnavailable() throws Exception {
     var service = service();
     var command = ModerationAuditCommand.create(
+        "account-1", "account-1",
         "ACCOUNT_STATUS_CHANGED", "ACCOUNT", "account-2", "@reader",
         "Confirmed abuse.", "%s changed an account.",
         Map.of("status", "ACTIVE"), Map.of("status", "SUSPENDED"), Map.of());
-    when(permissionService.getSelfId()).thenReturn("account-1");
-    when(accountRepository.findById("account-1")).thenReturn(Optional.empty());
     when(adminActivityRepository.insert(any(AdminActivity.class)))
         .thenThrow(new IllegalStateException("mongo unavailable"));
 
@@ -204,12 +201,11 @@ class AdminActivityServiceTest {
   void recordModeration_whenEventAlreadyExists_returnsExisting() throws Exception {
     var service = service();
     var command = ModerationAuditCommand.create(
+        "account-1", "account-1",
         "ACCOUNT_STATUS_CHANGED", "ACCOUNT", "account-2", "@reader",
         "Confirmed abuse.", "%s changed an account.",
         Map.of("status", "ACTIVE"), Map.of("status", "SUSPENDED"), Map.of());
     var existing = AdminActivity.builder().id(command.eventId()).build();
-    when(permissionService.getSelfId()).thenReturn("account-1");
-    when(accountRepository.findById("account-1")).thenReturn(Optional.empty());
     when(adminActivityRepository.insert(any(AdminActivity.class)))
         .thenThrow(new DuplicateKeyException("already inserted"));
     when(adminActivityRepository.findById(command.eventId())).thenReturn(Optional.of(existing));

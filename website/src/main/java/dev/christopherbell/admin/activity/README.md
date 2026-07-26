@@ -21,7 +21,9 @@ orchestration. Moderation events are append-only. State maps admit only role,
 status, and resolution; metadata is allowlisted so credentials, email addresses,
 and content bodies cannot leak into the audit record. Domain records retain a
 pending event until its insert succeeds, and retries reuse the stable id so an
-audit outage cannot silently lose or duplicate the moderation decision.
+audit outage cannot silently lose or duplicate the moderation decision. The
+pending command snapshots the original actor id and username, so another admin
+retrying the operation cannot take attribution for the earlier mutation.
 
 ## Update This Doc
 

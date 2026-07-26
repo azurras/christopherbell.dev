@@ -77,15 +77,21 @@ public class NotificationFanoutGuard {
       throw new IllegalStateException("Notification rate counter was not returned.");
     }
     if (counter.getCount() > properties.maxEventsPerWindow()) {
-      releaseClaim(claimId);
+      release(new NotificationDeliveryPermit(claimId, rateId));
       return Optional.empty();
     }
-    return Optional.of(new NotificationDeliveryPermit(claimId));
+    return Optional.of(new NotificationDeliveryPermit(claimId, rateId));
   }
 
   /** Releases a dedupe claim when downstream notification persistence did not commit. */
   public void release(NotificationDeliveryPermit permit) {
-    if (permit != null) releaseClaim(permit.claimId());
+    if (permit == null) return;
+    var reservedRate = new Query(new Criteria().andOperator(
+        Criteria.where("_id").is(permit.rateId()),
+        Criteria.where("count").gt(0L)));
+    mongo.updateFirst(
+        reservedRate, new Update().inc("count", -1L), NotificationRateLimit.class);
+    releaseClaim(permit.claimId());
   }
 
   private void releaseClaim(String claimId) {
