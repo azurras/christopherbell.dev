@@ -7,6 +7,7 @@ import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
@@ -20,6 +21,8 @@ import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenc
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
 import dev.christopherbell.whatsforlunch.restaurant.preference.WhatsForLunchPreferenceRepository;
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
+import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingQueryRepository;
+import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingSummary;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -32,6 +35,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -67,9 +71,11 @@ public class RestaurantServiceTest {
   @Mock private RestaurantMapper restaurantMapper;
   @Mock private RestaurantFavoriteRepository restaurantFavoriteRepository;
   @Mock private RestaurantRatingRepository restaurantRatingRepository;
+  @Mock private RestaurantRatingQueryRepository restaurantRatingQueryRepository;
   @Mock private RestaurantRepository restaurantRepository;
   @Mock private WhatsForLunchPreferenceRepository whatsForLunchPreferenceRepository;
   @Mock private ZipCoordinateService zipCoordinateService;
+  @Spy private WflProperties wflProperties = new WflProperties();
   @InjectMocks private RestaurantService restaurantService;
 
   @Test
@@ -726,7 +732,10 @@ public class RestaurantServiceTest {
         RestaurantRating.builder().restaurantId("five-two").accountId("account-2").rating(5).build(),
         RestaurantRating.builder().restaurantId("four-star").accountId("account-1").rating(4).build());
 
-    when(restaurantRatingRepository.findAll()).thenReturn(ratings);
+    when(restaurantRatingQueryRepository.topRated(eq(10))).thenReturn(List.of(
+        new RestaurantRatingSummary("five-two", 2, 10),
+        new RestaurantRatingSummary("five-one", 1, 5),
+        new RestaurantRatingSummary("four-star", 1, 4)));
     when(restaurantRepository.findAllById(eq(List.of("five-two", "five-one", "four-star"))))
         .thenReturn(List.of(fiveWithOneRating, fourStar, fiveWithTwoRatings));
     when(restaurantMapper.toRestaurantDetail(eq(fiveWithTwoRatings))).thenReturn(fiveWithTwoRatingsDetail);
@@ -740,6 +749,8 @@ public class RestaurantServiceTest {
     assertEquals(List.of(fiveWithTwoRatingsDetail, fiveWithOneRatingDetail, fourStarDetail), result);
     assertEquals(2, result.get(0).getRatingCount());
     assertEquals(10, result.get(0).getRatingSum());
+    verify(restaurantRatingQueryRepository).topRated(eq(10));
+    verify(restaurantRatingRepository, never()).findAll();
   }
 
   @Test

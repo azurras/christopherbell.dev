@@ -7,6 +7,7 @@ import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
@@ -25,6 +26,7 @@ import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenc
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
 import dev.christopherbell.whatsforlunch.restaurant.preference.WhatsForLunchPreferenceRepository;
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
+import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingQueryRepository;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
@@ -47,7 +49,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -56,13 +57,6 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class RestaurantService {
-  private static final String DEFAULT_SUPPORTED_METRO_CITIES =
-      "Austin,Round Rock,Cedar Park,Georgetown,Pflugerville,Leander,Hutto,Manor,Buda,Kyle,"
-          + "Bee Cave,Lakeway,Dripping Springs,Bastrop,San Marcos,"
-          + "San Francisco,Oakland,Berkeley,San Jose,San Mateo,Palo Alto,Mountain View,Sunnyvale,"
-          + "Santa Clara,Fremont,Hayward,Richmond,Walnut Creek,Redwood City,Daly City,"
-          + "New Orleans,Metairie,Kenner,Gretna,Harvey,Westwego,Chalmette,Slidell,"
-          + "Dallas,Irving,Garland,Richardson,Plano,Mesquite,Carrollton,Grand Prairie,Addison";
   private static final double EARTH_RADIUS_MILES = 3958.7613;
   private static final int NEARBY_LUNCH_PICK_COUNT = 3;
   private static final int DEFAULT_NEARBY_LUNCH_RADIUS_MILES = 15;
@@ -78,22 +72,11 @@ public class RestaurantService {
   private final RestaurantMapper restaurantMapper;
   private final RestaurantFavoriteRepository restaurantFavoriteRepository;
   private final RestaurantRatingRepository restaurantRatingRepository;
+  private final RestaurantRatingQueryRepository restaurantRatingQueryRepository;
   private final RestaurantRepository restaurantRepository;
   private final WhatsForLunchPreferenceRepository whatsForLunchPreferenceRepository;
   private final ZipCoordinateService zipCoordinateService;
-
-  @Value("${wfl.restaurant-of-the-day.enabled:false}")
-  private boolean restaurantOfTheDayEnabled;
-  @Value("${wfl.restaurant-of-the-day.pick-count:3}")
-  private int dailyPickCount = 3;
-  @Value("${wfl.restaurant-of-the-day.zone:America/Chicago}")
-  private String restaurantOfTheDayZone = "America/Chicago";
-  @Value("${wfl.restaurant-of-the-day.supported-metro-cities:" + DEFAULT_SUPPORTED_METRO_CITIES + "}")
-  private String supportedMetroCities = DEFAULT_SUPPORTED_METRO_CITIES;
-  @Value("${wfl.restaurant-import.monthly.enabled:true}")
-  private boolean monthlyRestaurantImportEnabled = true;
-  @Value("${wfl.restaurant-import.monthly.zone:America/Chicago}")
-  private String monthlyRestaurantImportZone = "America/Chicago";
+  private final WflProperties wflProperties;
 
   /**
    * Creates a new restaurant based on the provided request.
@@ -165,7 +148,7 @@ public class RestaurantService {
     var existing = dailyLunchPicksRepository.findById(today.toString())
         .orElseGet(() -> refreshDailyLunchPicks(today));
     var picks = getRestaurantsForPick(existing);
-    if (picks.size() < Math.min(dailyPickCount, getSupportedMetroRestaurants().size())) {
+    if (picks.size() < Math.min(dailyPickCount(), getSupportedMetroRestaurants().size())) {
       picks = getRestaurantsForPick(refreshDailyLunchPicks(today));
     }
     return toRatedDetails(picks);
@@ -455,23 +438,9 @@ public class RestaurantService {
    */
   public List<RestaurantDetail> getTopRatedRestaurants(int limit) {
     var pageSize = Math.max(1, Math.min(limit, 50));
-    var summaries = Optional.ofNullable(restaurantRatingRepository.findAll()).orElseGet(List::of).stream()
-        .filter(rating -> rating.getRestaurantId() != null && !rating.getRestaurantId().isBlank())
-        .filter(rating -> rating.getRating() != null)
-        .collect(Collectors.groupingBy(RestaurantRating::getRestaurantId))
-        .entrySet()
-        .stream()
-        .map(entry -> new RatingSummary(
-            entry.getKey(),
-            entry.getValue().size(),
-            entry.getValue().stream().map(RestaurantRating::getRating).mapToInt(Integer::intValue).sum()))
-        .sorted(Comparator
-            .comparingDouble(RatingSummary::average).reversed()
-            .thenComparing(RatingSummary::count, Comparator.reverseOrder())
-            .thenComparing(RatingSummary::restaurantId))
-        .limit(pageSize)
-        .toList();
-    var restaurantIds = summaries.stream().map(RatingSummary::restaurantId).toList();
+    var summaries = Optional.ofNullable(restaurantRatingQueryRepository.topRated(pageSize))
+        .orElseGet(List::of);
+    var restaurantIds = summaries.stream().map(summary -> summary.restaurantId()).toList();
     var restaurantsById = new java.util.LinkedHashMap<String, Restaurant>();
     restaurantRepository.findAllById(restaurantIds)
         .forEach(restaurant -> restaurantsById.put(restaurant.getId(), restaurant));
@@ -646,7 +615,7 @@ public class RestaurantService {
       zone = "${wfl.restaurant-import.monthly.zone:America/Chicago}"
   )
   public void runMonthlyOpenStreetMapImport() {
-    if (!monthlyRestaurantImportEnabled) {
+    if (!wflProperties.getRestaurantImport().getMonthly().isEnabled()) {
       return;
     }
     runTrackedOpenStreetMapImport("scheduled-monthly");
@@ -657,7 +626,7 @@ public class RestaurantService {
    */
   @EventListener(ApplicationReadyEvent.class)
   public void runMissedMonthlyOpenStreetMapImport() {
-    if (!monthlyRestaurantImportEnabled) {
+    if (!wflProperties.getRestaurantImport().getMonthly().isEnabled()) {
       return;
     }
 
@@ -764,7 +733,7 @@ public class RestaurantService {
       zone = "${wfl.restaurant-of-the-day.zone:America/Chicago}"
   )
   public void setRestaurantOfTheDay() {
-    if (!restaurantOfTheDayEnabled) {
+    if (!wflProperties.getRestaurantOfTheDay().isEnabled()) {
       return;
     }
     log.info("Restaurant of the day job started.");
@@ -780,7 +749,7 @@ public class RestaurantService {
   DailyLunchPicks refreshDailyLunchPicks(LocalDate pickDate) {
     var candidates = orderLunchCandidates(getSupportedMetroRestaurants());
     var restaurantIds = candidates.stream()
-        .limit(Math.max(0, dailyPickCount))
+        .limit(dailyPickCount())
         .map(Restaurant::getId)
         .toList();
     var pick = DailyLunchPicks.builder()
@@ -801,12 +770,12 @@ public class RestaurantService {
     }
 
     var selectedIds = getExistingPickIdsWithoutDeletedRestaurant(existing, deletedRestaurantId);
-    if (selectedIds.size() < Math.max(0, dailyPickCount)) {
+    if (selectedIds.size() < dailyPickCount()) {
       var candidates = orderLunchCandidates(getSupportedMetroRestaurants().stream()
           .filter(restaurant -> !selectedIds.contains(restaurant.getId()))
           .toList());
       for (Restaurant candidate : candidates) {
-        if (selectedIds.size() >= Math.max(0, dailyPickCount)) {
+        if (selectedIds.size() >= dailyPickCount()) {
           break;
         }
         selectedIds.add(candidate.getId());
@@ -923,19 +892,17 @@ public class RestaurantService {
     return rating;
   }
 
-  private record RatingSummary(String restaurantId, int count, int sum) {
-    double average() {
-      return count == 0 ? 0 : (double) sum / count;
-    }
-  }
-
   private List<Restaurant> getSupportedMetroRestaurants() {
-    var cities = parseSupportedMetroCities();
+    var cityStates = wflProperties.getRestaurantImport().getOsm().getMetros().stream()
+        .flatMap(metro -> metro.getCities().stream()
+            .map(city -> normalizeCity(metro.getState()) + ":" + normalizeCity(city)))
+        .collect(Collectors.toSet());
     return Optional.ofNullable(restaurantRepository.findAll()).orElseGet(List::of).stream()
         .filter(restaurant -> restaurant.getId() != null && !restaurant.getId().isBlank())
         .filter(restaurant -> restaurant.getAddress() != null)
-        .filter(restaurant -> "TX".equalsIgnoreCase(nullSafe(restaurant.getAddress().getState())))
-        .filter(restaurant -> cities.contains(normalizeCity(restaurant.getAddress().getCity())))
+        .filter(restaurant -> cityStates.contains(
+            normalizeCity(restaurant.getAddress().getState()) + ":"
+                + normalizeCity(restaurant.getAddress().getCity())))
         .toList();
   }
 
@@ -1089,13 +1056,6 @@ public class RestaurantService {
         .toList();
   }
 
-  private List<String> parseSupportedMetroCities() {
-    return List.of(supportedMetroCities.split(",")).stream()
-        .map(this::normalizeCity)
-        .filter(city -> !city.isBlank())
-        .toList();
-  }
-
   private String normalizeCity(String value) {
     return nullSafe(value).strip().toLowerCase(Locale.ROOT);
   }
@@ -1105,11 +1065,15 @@ public class RestaurantService {
   }
 
   private ZoneId getRestaurantOfTheDayZone() {
-    return ZoneId.of(restaurantOfTheDayZone);
+    return ZoneId.of(wflProperties.getRestaurantOfTheDay().getZone());
   }
 
   private ZoneId getMonthlyRestaurantImportZone() {
-    return ZoneId.of(monthlyRestaurantImportZone);
+    return ZoneId.of(wflProperties.getRestaurantImport().getMonthly().getZone());
+  }
+
+  private int dailyPickCount() {
+    return wflProperties.getRestaurantOfTheDay().getPickCount();
   }
 
   private YearMonth currentMonthlyRestaurantImportMonth() {

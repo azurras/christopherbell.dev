@@ -607,19 +607,35 @@ wfl:
     cron: "0 0 0 * * *"
     zone: America/Chicago
     pick-count: 3
-    supported-metro-cities: Austin,Round Rock,Cedar Park,Georgetown,Pflugerville,Leander,Hutto,Manor,Buda,Kyle,Bee Cave,Lakeway,Dripping Springs,Bastrop,San Marcos,San Francisco,Oakland,Berkeley,San Jose,San Mateo,Palo Alto,Mountain View,Sunnyvale,Santa Clara,Fremont,Hayward,Richmond,Walnut Creek,Redwood City,Daly City,New Orleans,Metairie,Kenner,Gretna,Harvey,Westwego,Chalmette,Slidell,Dallas,Irving,Garland,Richardson,Plano,Mesquite,Carrollton,Grand Prairie,Addison
   restaurant-import:
+    lease-duration: 2m
+    preview-ttl: 15m
     monthly:
       enabled: true
       cron: "0 0 3 15 * *"
       zone: America/Chicago
     osm:
       endpoint: https://overpass-api.de/api/interpreter
-      # Semicolon-separated south,west,north,east boxes for Austin, SF Bay Area, New Orleans, and Dallas.
-      bbox: 29.95,-98.25,30.75,-97.15;37.20,-122.65,38.20,-121.65;29.70,-90.45,30.25,-89.65;32.45,-97.35,33.15,-96.35
-      timeout-seconds: 60
+      timeout: 60s
       result-limit: 20000
       include-fast-food: true
+      metros:
+        - name: Austin
+          state: TX
+          cities: [Austin, Round Rock, Cedar Park, Georgetown, Pflugerville, Leander, Hutto, Manor, Buda, Kyle, Bee Cave, Lakeway, Dripping Springs, Bastrop, San Marcos]
+          bounds: { south: 29.95, west: -98.25, north: 30.75, east: -97.15 }
+        - name: San Francisco Bay Area
+          state: CA
+          cities: [San Francisco, Oakland, Berkeley, San Jose, San Mateo, Palo Alto, Mountain View, Sunnyvale, Santa Clara, Fremont, Hayward, Richmond, Walnut Creek, Redwood City, Daly City]
+          bounds: { south: 37.20, west: -122.65, north: 38.20, east: -121.65 }
+        - name: New Orleans
+          state: LA
+          cities: [New Orleans, Metairie, Kenner, Gretna, Harvey, Westwego, Chalmette, Slidell]
+          bounds: { south: 29.70, west: -90.45, north: 30.25, east: -89.65 }
+        - name: Dallas
+          state: TX
+          cities: [Dallas, Irving, Garland, Richardson, Plano, Mesquite, Carrollton, Grand Prairie, Addison]
+          bounds: { south: 32.45, west: -97.35, north: 33.15, east: -96.35 }
 reports:
   to: report@christopherbell.dev
 blog-properties:
