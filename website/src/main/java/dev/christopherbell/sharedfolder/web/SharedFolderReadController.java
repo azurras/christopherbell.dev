@@ -70,7 +70,8 @@ public class SharedFolderReadController {
 
   /** Searches the fresh public-safe catalog after refreshing effective read access. */
   @GetMapping("/search")
-  public ResponseEntity<SharedFolderSearchResponse> search(@RequestParam String query) {
+  public ResponseEntity<SharedFolderSearchResponse> search(
+      @RequestParam(required = false) String query) {
     try {
       Account account = access.requireRead();
       SharedFolderSearchResponse response = catalog.search(query);

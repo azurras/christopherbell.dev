@@ -82,6 +82,7 @@ class SharedFolderReadControllerTest {
     for (MockHttpServletRequestBuilder request : List.of(
         get(BASE + "/entries").queryParam("path", "music"),
         get(BASE + "/search").queryParam("query", "track"),
+        get(BASE + "/search"),
         get(BASE + "/content").queryParam("path", "music/track.flac"),
         get(BASE + "/preview").queryParam("path", "music/notes.txt"))) {
       mockMvc.perform(request)
@@ -136,6 +137,7 @@ class SharedFolderReadControllerTest {
     for (MockHttpServletRequestBuilder request : List.of(
         get(BASE + "/entries").queryParam("path", "music"),
         get(BASE + "/search").queryParam("query", "track"),
+        get(BASE + "/search"),
         get(BASE + "/content").queryParam("path", "music/track.flac"),
         get(BASE + "/preview").queryParam("path", "music/notes.txt"))) {
       mockMvc.perform(request)
@@ -144,6 +146,20 @@ class SharedFolderReadControllerTest {
     }
 
     verifyNoInteractions(browser, catalog, downloads, previews);
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void missingSearchQuery_refreshesReadAccessBeforeCatalogValidation() throws Exception {
+    when(catalog.search(null)).thenThrow(new ResponseStatusException(
+        org.springframework.http.HttpStatus.BAD_REQUEST, "Search query is required"));
+
+    mockMvc.perform(get(BASE + "/search"))
+        .andExpect(status().isBadRequest())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
+
+    verify(access).requireRead();
+    verify(catalog).search(null);
   }
 
   @Test
