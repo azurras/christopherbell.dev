@@ -13,6 +13,7 @@
  */
 export function createInfiniteScroller({ fetchPage, onPage, getCursor, thresholdPx = 200, limit = 20, onEmpty }) {
   let before = null;
+  let cursor = null;
   let loading = false;
   let done = false;
 
@@ -22,18 +23,34 @@ export function createInfiniteScroller({ fetchPage, onPage, getCursor, threshold
     if (loading || done) return;
     loading = true;
     try {
-      const page = await fetchPage({ before: renew ? null : before, limit });
-      if (!page || page.length === 0) {
-        if (renew && typeof onEmpty === 'function') {
-          onEmpty();
+      let firstRequest = renew;
+      while (!done) {
+        const page = await fetchPage({
+          before: firstRequest ? null : before,
+          cursor: firstRequest ? null : cursor,
+          limit
+        });
+        const items = Array.isArray(page) ? page : page?.items;
+        if (!Array.isArray(items)) {
+          done = true;
+          return;
         }
-        done = true;
-        return;
+        if (!Array.isArray(page)) {
+          cursor = page.nextCursor || null;
+        }
+        if (items.length > 0) {
+          onPage(items);
+          before = cursorFn(items[items.length - 1]);
+          done = Array.isArray(page) ? items.length < limit : !cursor;
+          return;
+        }
+        if (Array.isArray(page) || !cursor) {
+          if (renew && typeof onEmpty === 'function') onEmpty();
+          done = true;
+          return;
+        }
+        firstRequest = false;
       }
-      onPage(page);
-      const last = page[page.length - 1];
-      before = cursorFn(last);
-      if (page.length < limit) done = true;
     } finally {
       loading = false;
     }
@@ -46,6 +63,7 @@ export function createInfiniteScroller({ fetchPage, onPage, getCursor, threshold
 
   function loadInitial() {
     before = null;
+    cursor = null;
     loading = false;
     done = false;
     load(true);

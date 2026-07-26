@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
+import dev.christopherbell.post.editing.PostEditAuditEvent;
 import java.util.Set;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -29,8 +31,8 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @NoArgsConstructor
 @CompoundIndexes({
-    @CompoundIndex(name = "post_account_created_desc", def = "{'accountId': 1, 'createdOn': -1}"),
-    @CompoundIndex(name = "post_created_desc", def = "{'createdOn': -1}"),
+    @CompoundIndex(name = "post_account_created_id_desc", def = "{'accountId': 1, 'createdOn': -1, '_id': -1}"),
+    @CompoundIndex(name = "post_created_id_desc", def = "{'createdOn': -1, '_id': -1}"),
     @CompoundIndex(name = "post_root_created_asc", def = "{'rootId': 1, 'createdOn': 1}"),
     @CompoundIndex(name = "post_parent", def = "{'parentId': 1}"),
     @CompoundIndex(name = "post_expires", def = "{'expiresOn': 1}"),
@@ -68,6 +70,15 @@ public class Post {
       timezone = "UTC")
   @LastModifiedDate
   private Instant lastUpdatedOn;
+
+  @JsonFormat(
+      shape = JsonFormat.Shape.STRING,
+      pattern = "uuuu-MM-dd'T'HH:mm:ss.SSS'Z'",
+      timezone = "UTC")
+  private Instant editedOn;
+
+  @Builder.Default
+  private List<PostEditAuditEvent> editAudit = new ArrayList<>();
 
   @JsonFormat(
       shape = JsonFormat.Shape.STRING,

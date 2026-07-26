@@ -13,6 +13,7 @@ import dev.christopherbell.post.hide.HiddenPostThreadService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
+import dev.christopherbell.pagination.StableCursorCodec;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +38,8 @@ public class PostFeedService {
   private final PostExpirationService postExpirationService;
   private final AccountTrustService accountTrustService;
   private final HiddenPostThreadService hiddenPostThreadService;
+  private final PostFeedQueryRepository postFeedQueryRepository;
+  private final StableCursorCodec cursorCodec;
 
   public List<PostDetail> getMyPosts(String selfId) throws ResourceNotFoundException {
     accountRepository
@@ -68,6 +71,16 @@ public class PostFeedService {
         .toList();
   }
 
+  /** Returns one stable page of posts authored by the current user. */
+  public PostFeedPage getMyFeedPage(String selfId, String cursor, int size)
+      throws InvalidRequestException, ResourceNotFoundException {
+    var account = accountRepository.findById(selfId)
+        .orElseThrow(() -> new ResourceNotFoundException(
+            String.format("Account with id %s not found.", selfId)));
+    var slice = postFeedQueryRepository.account(selfId, cursorCodec.decode(cursor), size);
+    return mapPage(slice, Map.of(selfId, account.getUsername()), selfId, hiddenFor(selfId));
+  }
+
   public List<PostFeedItem> getFollowingFeed(String selfId, Instant before, int limit)
       throws ResourceNotFoundException {
     var self = accountRepository
@@ -92,6 +105,22 @@ public class PostFeedService {
         .filter(p -> isVisibleToSelf(p, hidden))
         .map(p -> toFeedItem(p, idToUser.get(p.getAccountId()), selfId))
         .toList();
+  }
+
+  /** Returns one stable page from the current user's followed accounts. */
+  public PostFeedPage getFollowingFeedPage(String selfId, String cursor, int size)
+      throws InvalidRequestException, ResourceNotFoundException {
+    var self = accountRepository.findById(selfId)
+        .orElseThrow(() -> new ResourceNotFoundException(
+            String.format("Account with id %s not found.", selfId)));
+    var followingIds = self.getFollowingIds() == null
+        ? List.<String>of() : self.getFollowingIds().stream().toList();
+    if (followingIds.isEmpty()) {
+      return new PostFeedPage(List.of(), null);
+    }
+    var slice = postFeedQueryRepository.accounts(
+        followingIds, cursorCodec.decode(cursor), size);
+    return mapPage(slice, usernamesByAccountId(followingIds), selfId, hiddenFor(selfId));
   }
 
   public List<PostDetail> getPostsByAccountId(String accountId)
@@ -128,6 +157,14 @@ public class PostFeedService {
         .toList();
   }
 
+  /** Returns one stable global feed page. */
+  public PostFeedPage getGlobalFeedPage(String cursor, int size, String selfId)
+      throws InvalidRequestException {
+    var slice = postFeedQueryRepository.global(cursorCodec.decode(cursor), size);
+    var authorIds = slice.posts().stream().map(Post::getAccountId).distinct().toList();
+    return mapPage(slice, usernamesByAccountId(authorIds), selfId, hiddenFor(selfId));
+  }
+
   public List<PostFeedItem> getUserFeed(String username, Instant before, int limit, String selfId)
       throws ResourceNotFoundException {
     var sanitized = UsernameSanitizer.sanitize(username);
@@ -147,6 +184,23 @@ public class PostFeedService {
         .filter(p -> isVisibleToSelf(p, hidden))
         .map(p -> toFeedItem(p, account.getUsername(), selfId))
         .toList();
+  }
+
+  /** Returns one stable public page for a username. */
+  public PostFeedPage getUserFeedPage(
+      String username,
+      String cursor,
+      int size,
+      String selfId
+  ) throws InvalidRequestException, ResourceNotFoundException {
+    var sanitized = UsernameSanitizer.sanitize(username);
+    var account = accountRepository.findByUsername(sanitized)
+        .orElseThrow(() -> new ResourceNotFoundException(
+            String.format("Account with username %s not found.", sanitized)));
+    var slice = postFeedQueryRepository.account(
+        account.getId(), cursorCodec.decode(cursor), size);
+    return mapPage(
+        slice, Map.of(account.getId(), account.getUsername()), selfId, hiddenFor(selfId));
   }
 
   private Pageable newFeedPage(int requestedLimit) {
@@ -173,6 +227,21 @@ public class PostFeedService {
     return !hidden.accountIds().contains(post.getAccountId()) && !hidden.rootIds().contains(rootId);
   }
 
+  private PostFeedPage mapPage(
+      PostFeedSlice slice,
+      Map<String, String> usernames,
+      String selfId,
+      HiddenFeedState hidden
+  ) {
+    slice.posts().forEach(postExpirationService::ensureExpirationSet);
+    var items = slice.posts().stream()
+        .filter(post -> !postExpirationService.isExpired(post))
+        .filter(post -> isVisibleToSelf(post, hidden))
+        .map(post -> toFeedItem(post, usernames.get(post.getAccountId()), selfId))
+        .toList();
+    return new PostFeedPage(items, slice.nextCursor());
+  }
+
   private record HiddenFeedState(Set<String> accountIds, Set<String> rootIds) {}
 
   private PostFeedItem toFeedItem(Post post, String username, String currentUserId) {
@@ -192,6 +261,7 @@ public class PostFeedService {
         .replyCount((int) postRepository.countByParentId(post.getId()))
         .createdOn(post.getCreatedOn())
         .lastUpdatedOn(post.getLastUpdatedOn())
+        .editedOn(post.getEditedOn())
         .expiresOn(post.getExpiresOn())
         .build();
   }

@@ -16,5 +16,6 @@ public record PostDetail(
     String text,
     List<PostLinkPreview> linkPreviews,
     Instant createdOn,
-    Instant lastUpdatedOn
+    Instant lastUpdatedOn,
+    Instant editedOn
 ) {}

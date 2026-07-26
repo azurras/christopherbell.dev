@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -21,6 +22,9 @@ import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
+import dev.christopherbell.post.editing.PostEditingService;
+import dev.christopherbell.post.editing.PostEditRequest;
+import dev.christopherbell.post.feed.PostFeedPage;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +42,42 @@ public class PostControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private PermissionService permissionService;
   @MockitoBean private PostService postService;
+  @MockitoBean private PostEditingService postEditingService;
+
+  @Test
+  @DisplayName("Stable global feed returns cursor metadata")
+  public void getGlobalFeedPage_returnsStablePage() throws Exception {
+    var item = PostFeedItem.builder().id("p1").username("user1").build();
+    when(postService.getGlobalFeedPage(eq("cursor-1"), eq(10)))
+        .thenReturn(new PostFeedPage(List.of(item), "cursor-2"));
+
+    mockMvc.perform(get("/api/posts" + APIVersion.V20260726 + "/feed")
+            .param("cursor", "cursor-1")
+            .param("size", "10"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.items[0].id").value("p1"))
+        .andExpect(jsonPath("$.payload.nextCursor").value("cursor-2"));
+  }
+
+  @Test
+  @DisplayName("Edit post: owner -> 200 with edited timestamp")
+  @WithMockUser(authorities = {"USER"})
+  public void editPost_whenOwner_returnsUpdatedDetail() throws Exception {
+    var request = new PostEditRequest("after");
+    var editedOn = java.time.Instant.parse("2026-07-26T12:00:00Z");
+    when(permissionService.getSelfId()).thenReturn("owner");
+    when(permissionService.hasAuthority("ADMIN")).thenReturn(false);
+    when(postEditingService.edit("p1", request, "owner", false))
+        .thenReturn(PostDetail.builder().id("p1").text("after").editedOn(editedOn).build());
+
+    mockMvc.perform(patch("/api/posts" + APIVersion.V20260726 + "/p1")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"text\":\"after\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.text").value("after"))
+        .andExpect(jsonPath("$.payload.editedOn").exists());
+  }
 
   @Test
   @DisplayName("Create post: USER authorized -> 201 with detail")

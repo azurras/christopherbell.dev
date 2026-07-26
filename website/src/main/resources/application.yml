@@ -101,6 +101,8 @@ app:
       initial-buffer: 2MB
       max-output: 50GB
 posts:
+  edit-window: 15m
+  edit-audit-limit: 10
   expiration:
     enabled: true
     cleanup-interval: 600000

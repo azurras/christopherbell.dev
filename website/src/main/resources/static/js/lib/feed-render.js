@@ -340,10 +340,11 @@ export function expiresSoon(post, now = Date.now()) {
   return delta > 0 && delta <= 12 * 60 * 60 * 1000;
 }
 
-function postChips(post, liked) {
+export function postStatusChips(post, liked) {
   const chips = [];
   if (post.level && post.level > 0) chips.push(['reply', 'Reply']);
   if (liked) chips.push(['liked', 'Liked']);
+  if (post.editedOn) chips.push(['edited', 'Edited']);
   if (isRecent(post)) chips.push(['new', 'New']);
   if (expiresSoon(post)) chips.push(['expires', 'Expires soon']);
   return chips.map(([type, label]) => `<span class="post-chip post-chip-${type}">${label}</span>`).join('');
@@ -514,7 +515,7 @@ export function createFeedItem(post, ctx) {
             ${post.expiresOn ? '<span class="post-lifespan" data-post-lifespan aria-label="Post lifespan remaining"></span>' : ''}
           </div>
           <div class="post-meta">
-            <div class="post-chips">${postChips(post, liked)}</div>
+            <div class="post-chips">${postStatusChips(post, liked)}</div>
             <button class="post-menu-btn" data-post="${post.id}" aria-label="More actions">
               <i class="fa fa-ellipsis-h" aria-hidden="true"></i>
             </button>
@@ -522,6 +523,7 @@ export function createFeedItem(post, ctx) {
               <button class="post-copy-btn" type="button" data-post="${post.id}">Copy link</button>
               <button class="post-report-btn" type="button" data-post="${post.id}">Report</button>
               ${ctx.isLoggedIn() && typeof ctx.onHideThread === 'function' ? `<button class="post-hide-thread-btn" type="button" data-post="${post.id}">Hide thread</button>` : ''}
+              ${ctx.canEdit(post) ? `<button class="post-edit-btn" type="button" data-post="${post.id}">Edit</button>` : ''}
               ${ctx.canDelete(post) ? `<button class="post-delete-btn danger" type="button" data-post="${post.id}">Delete</button>` : ''}
             </div>
           </div>
@@ -782,6 +784,21 @@ export function createFeedItem(post, ctx) {
         await ctx.onDelete(post.id);
         item.remove();
       } catch (err) {
+        alert(err.message);
+      }
+    });
+    const edit = item.querySelector('.post-edit-btn');
+    edit?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      menu.classList.add('d-none');
+      const nextText = window.prompt('Edit post', post.text || '');
+      if (nextText === null || nextText.trim() === post.text) return;
+      try {
+        edit.disabled = true;
+        await ctx.onEdit(post.id, nextText.trim());
+        window.location.reload();
+      } catch (err) {
+        edit.disabled = false;
         alert(err.message);
       }
     });

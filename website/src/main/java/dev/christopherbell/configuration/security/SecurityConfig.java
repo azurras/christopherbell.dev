@@ -100,6 +100,8 @@ public class SecurityConfig {
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-rated",
       "GET:/api/posts" + APIVersion.V20250914 + "/feed",
       "GET:/api/posts" + APIVersion.V20250914 + "/user/**",
+      "GET:/api/posts" + APIVersion.V20260726 + "/feed",
+      "GET:/api/posts" + APIVersion.V20260726 + "/user/**",
       "GET:/api/posts" + APIVersion.V20250914 + "/*/thread",
       "/u/**",
       "/p/**",

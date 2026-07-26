@@ -21,8 +21,10 @@ class MongoIndexAnnotationTest {
   void postIndexes_matchRepositoryQueryPaths() {
     var indexes = compoundIndexes(Post.class);
 
-    assertEquals("{'accountId': 1, 'createdOn': -1}", indexes.get("post_account_created_desc"));
-    assertEquals("{'createdOn': -1}", indexes.get("post_created_desc"));
+    assertEquals(
+        "{'accountId': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("post_account_created_id_desc"));
+    assertEquals("{'createdOn': -1, '_id': -1}", indexes.get("post_created_id_desc"));
     assertEquals("{'rootId': 1, 'createdOn': 1}", indexes.get("post_root_created_asc"));
     assertEquals("{'parentId': 1}", indexes.get("post_parent"));
     assertEquals("{'expiresOn': 1}", indexes.get("post_expires"));

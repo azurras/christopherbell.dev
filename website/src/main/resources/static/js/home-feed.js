@@ -1,7 +1,7 @@
 import { authHeaders, fetchJson, sanitize, isLoggedIn, formatWhen, closeOnOutside, loginRedirectUrl } from './lib/util.js';
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
-import { canDeleteFor, makeRendererContext } from './lib/feed-context.js';
+import { canDeleteFor, canEditFor, makeRendererContext } from './lib/feed-context.js';
 import { createInfiniteScroller } from './lib/infinite.js';
 import { initComposer } from './lib/composer.js';
 import { initPostImageLightbox } from './lib/image-lightbox.js';
@@ -192,19 +192,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderFeed();
   });
   showSkeleton();
-  RENDER_CTX = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(USER_STATE), currentUserName: USER_STATE?.username || null });
+  RENDER_CTX = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(USER_STATE), canEdit: canEditFor(USER_STATE), currentUserName: USER_STATE?.username || null });
   SCROLLER = createInfiniteScroller({
     thresholdPx: 200,
     limit: 20,
-    fetchPage: async ({ before, limit }) => {
+    fetchPage: async ({ cursor, limit }) => {
       const params = new URLSearchParams();
-      params.set('limit', String(limit));
-      if (before) params.set('before', before);
+      params.set('size', String(limit));
+      if (cursor) params.set('cursor', cursor);
       const endpoint = ACTIVE_FILTER === 'mine'
-        ? API.posts.meFeed
+        ? API.posts.meFeedPage
         : ACTIVE_FILTER === 'following'
-            ? API.posts.followingFeed
-            : API.posts.feed;
+            ? API.posts.followingFeedPage
+            : API.posts.feedPage;
       return await fetchJson(`${endpoint}?${params.toString()}`, { headers: authHeaders() });
     },
     onPage: (items) => {

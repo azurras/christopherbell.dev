@@ -10,7 +10,7 @@ import { profileActivityStats } from './lib/profile-stats.js';
  * - Renders items with actions and context
  * - Uses shared renderer context to reduce duplication
  */
-import { canDeleteFor, makeRendererContext } from './lib/feed-context.js';
+import { canDeleteFor, canEditFor, makeRendererContext } from './lib/feed-context.js';
 import { createInfiniteScroller } from './lib/infinite.js';
 
 /** Extract the username from the /u/{username} path. */
@@ -191,15 +191,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('muteUserBtn')?.addEventListener('click', () => setTrust('MUTE'));
     document.getElementById('blockUserBtn')?.addEventListener('click', () => setTrust('BLOCK'));
     list.innerHTML = '';
-    RENDER_CTX = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(ME), currentUserName: ME?.username || null });
+    RENDER_CTX = makeRendererContext({ fetchJson, authHeaders, sanitize, formatWhen, isLoggedIn, canDelete: canDeleteFor(ME), canEdit: canEditFor(ME), currentUserName: ME?.username || null });
     SCROLLER = createInfiniteScroller({
       thresholdPx: 200,
       limit: 20,
-      fetchPage: async ({ before, limit }) => {
+      fetchPage: async ({ cursor, limit }) => {
         const params = new URLSearchParams();
-        params.set('limit', String(limit));
-        if (before) params.set('before', before);
-        return await fetchJson(`${API.posts.userFeed(username)}?${params.toString()}`, { headers: authHeaders() });
+        params.set('size', String(limit));
+        if (cursor) params.set('cursor', cursor);
+        return await fetchJson(`${API.posts.userFeedPage(username)}?${params.toString()}`, { headers: authHeaders() });
       },
       onPage: (items) => {
         if (!items || items.length === 0) return;
