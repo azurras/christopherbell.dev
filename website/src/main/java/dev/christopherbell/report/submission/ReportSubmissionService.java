@@ -8,11 +8,15 @@ import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.report.ReportRepository;
+import dev.christopherbell.report.ReportOpenDedupeKey;
 import dev.christopherbell.report.model.PostReport;
 import dev.christopherbell.report.model.ReportCreateRequest;
 import dev.christopherbell.report.model.ReportStatus;
+import dev.christopherbell.report.model.ReportTargetType;
+import dev.christopherbell.report.model.ReportType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DuplicateKeyException;
 
 /**
  * Owns report creation so user-facing report submission stays separate from
@@ -42,6 +46,15 @@ public class ReportSubmissionService {
     Account reported = accountRepository.findById(post.getAccountId())
         .orElseThrow(() -> new ResourceNotFoundException("Reported user not found."));
 
+    var targetType = ReportTargetType.POST;
+    var openKey = ReportOpenDedupeKey.forTarget(reporter.getId(), targetType, post.getId());
+    var existing = reportRepository.findByOpenDedupeKey(openKey)
+        .or(() -> reportRepository.findFirstByReporterAccountIdAndPostIdAndStatus(
+            reporter.getId(), post.getId(), ReportStatus.OPEN));
+    if (existing.isPresent()) {
+      return existing.get();
+    }
+
     PostReport report = PostReport.builder()
         .postId(post.getId())
         .postText(post.getText())
@@ -49,12 +62,19 @@ public class ReportSubmissionService {
         .reportedUsername(reported.getUsername())
         .reporterAccountId(reporter.getId())
         .reporterUsername(reporter.getUsername())
+        .openDedupeKey(openKey)
+        .reportType(ReportType.fromReason(request.reason()))
+        .targetType(targetType)
         .reason(request.reason())
         .details(request.details())
         .status(ReportStatus.OPEN)
         .build();
 
-    return reportRepository.save(report);
+    try {
+      return reportRepository.save(report);
+    } catch (DuplicateKeyException race) {
+      return reportRepository.findByOpenDedupeKey(openKey).orElseThrow(() -> race);
+    }
   }
 
   private void validateRequest(ReportCreateRequest request) throws InvalidRequestException {

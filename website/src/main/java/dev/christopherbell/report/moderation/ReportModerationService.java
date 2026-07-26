@@ -9,6 +9,7 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.report.ReportRepository;
+import dev.christopherbell.report.ReportOpenDedupeKey;
 import dev.christopherbell.report.model.PostReport;
 import dev.christopherbell.report.model.ReportResolution;
 import dev.christopherbell.report.model.ReportResolveRequest;
@@ -16,6 +17,9 @@ import dev.christopherbell.report.model.ReportStatus;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.dao.DuplicateKeyException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -36,7 +40,8 @@ public class ReportModerationService {
    * Returns reports in the order admins need to review them.
    */
   public List<PostReport> getReports() {
-    return reportRepository.findAllByOrderByCreatedOnDesc().stream()
+    var page = PageRequest.of(0, 100, Sort.by(Sort.Direction.DESC, "createdOn", "id"));
+    return reportRepository.findAllByOrderByCreatedOnDesc(page).stream()
         .peek(this::includeRepeatReportContext)
         .toList();
   }
@@ -65,6 +70,7 @@ public class ReportModerationService {
     String suspendedUsername = suspendUserIfRequested(report, request.resolution());
 
     report.setStatus(ReportStatus.RESOLVED);
+    report.setOpenDedupeKey(null);
     report.setResolution(request.resolution());
     report.setResolvedBy(permissionService.getSelfId());
     report.setResolvedOn(Instant.now());
@@ -91,14 +97,45 @@ public class ReportModerationService {
   }
 
   private PostReport reopenReport(PostReport report) {
+    String openKey = openKey(report);
+    if (openKey != null) {
+      var existing = reportRepository.findByOpenDedupeKey(openKey)
+          .or(() -> reportRepository.findFirstByReporterAccountIdAndPostIdAndStatus(
+              report.getReporterAccountId(), report.getPostId(), ReportStatus.OPEN))
+          .filter(open -> !open.getId().equals(report.getId()));
+      if (existing.isPresent()) {
+        includeRepeatReportContext(existing.get());
+        return existing.get();
+      }
+    }
     report.setStatus(ReportStatus.OPEN);
+    report.setOpenDedupeKey(openKey);
     report.setResolution(null);
     report.setResolvedBy(null);
     report.setResolvedOn(null);
-    PostReport saved = reportRepository.save(report);
+    final PostReport saved;
+    try {
+      saved = reportRepository.save(report);
+    } catch (DuplicateKeyException race) {
+      if (openKey != null) {
+        return reportRepository.findByOpenDedupeKey(openKey).orElseThrow(() -> race);
+      }
+      throw race;
+    }
     includeRepeatReportContext(saved);
     recordReportReopened(saved);
     return saved;
+  }
+
+  private String openKey(PostReport report) {
+    if (report.getReporterAccountId() == null || report.getReporterAccountId().isBlank()
+        || report.getPostId() == null || report.getPostId().isBlank()) {
+      return null;
+    }
+    return ReportOpenDedupeKey.forTarget(
+        report.getReporterAccountId(),
+        dev.christopherbell.report.model.ReportTargetType.POST,
+        report.getPostId());
   }
 
   private void includeRepeatReportContext(PostReport report) {

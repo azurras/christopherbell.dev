@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.post.model.Post;
+import dev.christopherbell.report.model.PostReport;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -13,8 +14,22 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
+import org.springframework.data.mongodb.core.index.Indexed;
 
 class MongoIndexAnnotationTest {
+
+  @Test
+  @DisplayName("Report document declares stable queue and sparse unique open-report indexes")
+  void reportIndexes_matchQueueAndDedupePaths() throws Exception {
+    var indexes = compoundIndexes(PostReport.class);
+    assertEquals("{'createdOn': -1, '_id': -1}", indexes.get("report_created_id_desc"));
+    assertEquals(
+        "{'status': 1, 'createdOn': -1, '_id': -1}",
+        indexes.get("report_status_created_id_desc"));
+    var dedupe = PostReport.class.getDeclaredField("openDedupeKey").getAnnotation(Indexed.class);
+    assertTrue(dedupe.unique());
+    assertTrue(dedupe.sparse());
+  }
 
   @Test
   @DisplayName("Post document declares indexes for feed and thread query paths")

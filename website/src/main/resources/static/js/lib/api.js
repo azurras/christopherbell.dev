@@ -63,6 +63,15 @@ export const API = {
   reports: {
     create: '/api/reports/2025-09-03',
     list: '/api/reports/2025-09-03',
+    page: (query = {}) => {
+      const params = new URLSearchParams();
+      params.set('page', String(query.page ?? 0));
+      params.set('size', String(query.size ?? 25));
+      for (const key of ['status', 'reportType', 'targetType', 'reporter', 'from', 'to']) {
+        if (query[key]) params.set(key, query[key]);
+      }
+      return `/api/reports/2026-07-26?${params.toString()}`;
+    },
     resolve: (id) => `/api/reports/2025-09-03/${encodeURIComponent(id)}/resolve`,
   },
   posts: {

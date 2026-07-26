@@ -77,7 +77,27 @@
                     </div>
                     <span class="queue-count" id="reportQueueCount">—</span>
                   </div>
+                  <form id="reportFilters" class="admin-filter-bar" aria-label="Filter reports">
+                    <label><span>Status</span><select class="form-select" name="status">
+                      <option value="">All statuses</option><option value="OPEN">Open</option><option value="RESOLVED">Resolved</option>
+                    </select></label>
+                    <label><span>Report type</span><select class="form-select" name="reportType">
+                      <option value="">All types</option><option value="SPAM">Spam</option><option value="HARASSMENT">Harassment</option><option value="VIOLENCE">Violence</option><option value="SEXUAL">Sexual</option><option value="COPYRIGHT">Copyright</option><option value="OTHER">Other</option>
+                    </select></label>
+                    <label><span>Target</span><select class="form-select" name="targetType">
+                      <option value="">All targets</option><option value="POST">Post</option>
+                    </select></label>
+                    <label><span>Reporter</span><input class="form-control" name="reporter" maxlength="100" placeholder="Username"></label>
+                    <label><span>From</span><input class="form-control" type="datetime-local" name="from"></label>
+                    <label><span>To</span><input class="form-control" type="datetime-local" name="to"></label>
+                    <button class="btn btn-primary align-self-end" type="submit">Apply filters</button>
+                  </form>
                   <div id="reportQueue" class="queue-list" aria-live="polite"></div>
+                  <nav class="queue-pagination" aria-label="Report pages">
+                    <button class="btn btn-outline-secondary" id="reportPrevious" type="button">Previous</button>
+                    <span id="reportPage" aria-live="polite">Page 0 of 0</span>
+                    <button class="btn btn-outline-secondary" id="reportNext" type="button">Next</button>
+                  </nav>
                 </div>
               </div>
               <div class="tab-pane fade" id="panel-users" role="tabpanel">

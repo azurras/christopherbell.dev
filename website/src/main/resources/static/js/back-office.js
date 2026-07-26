@@ -18,11 +18,20 @@ import {
   sharedRecycleButton,
   sharedRecycleMarkup,
 } from './lib/back-office-shared-folder.js';
+import {
+  parseReportPage,
+  reportFilterValue,
+  reportPageNavigation,
+} from './lib/back-office-reports.js';
 import { authHeaders, fetchJson, formatWhen, isLoggedIn, sanitize } from './lib/util.js';
 
 const content = document.getElementById('backOfficeContent');
 const alertBox = document.getElementById('backOfficeAlert');
 const reportQueue = document.getElementById('reportQueue');
+const reportFilters = document.getElementById('reportFilters');
+const reportPrevious = document.getElementById('reportPrevious');
+const reportNext = document.getElementById('reportNext');
+const reportPage = document.getElementById('reportPage');
 const userQueue = document.getElementById('userQueue');
 const userFilters = document.getElementById('userFilters');
 const userPrevious = document.getElementById('userPrevious');
@@ -69,6 +78,17 @@ let accountPageState = {
   direction: 'DESC',
 };
 let reports = [];
+let reportQuery = {
+  page: 0,
+  size: 25,
+  status: '',
+  reportType: '',
+  targetType: '',
+  reporter: '',
+  from: '',
+  to: '',
+};
+let reportPageState = { page: 0, size: 25, totalElements: 0, totalPages: 0 };
 let activities = [];
 let restaurants = [];
 let vehicles = [];
@@ -151,7 +171,7 @@ function fullName(account) {
 }
 
 function renderMetrics() {
-  const totalReports = reports.length;
+  const totalReports = reportPageState.totalElements;
   const openReports = reports.filter(report => (report.status || 'OPEN') === 'OPEN').length;
   const pendingUsers = accounts.filter(account => !account.isApproved).length;
   const suspendedUsers = accounts.filter(account => (account.status || '').toUpperCase() === 'SUSPENDED').length;
@@ -259,6 +279,24 @@ function renderUsers() {
       </article>
     `;
   }).join('');
+}
+
+function applyReportPage(payload) {
+  const parsed = parseReportPage(payload);
+  reports = parsed.items;
+  reportPageState = {
+    page: parsed.page,
+    size: parsed.size,
+    totalElements: parsed.totalElements,
+    totalPages: parsed.totalPages,
+  };
+}
+
+function renderReportNavigation() {
+  const state = reportPageNavigation(reportPageState);
+  if (reportPrevious) reportPrevious.disabled = state.previousDisabled;
+  if (reportNext) reportNext.disabled = state.nextDisabled;
+  if (reportPage) reportPage.textContent = state.label;
 }
 
 function renderUserNavigation() {
@@ -464,16 +502,17 @@ async function approveAccount(accountId) {
 
 async function refreshDashboard() {
   clearAlert();
-  const [accountPage, reportItems, activityItems] = await Promise.all([
+  const [accountPage, reportPagePayload, activityItems] = await Promise.all([
     fetchJson(API.accounts.adminPage(accountQuery), { headers: authHeaders() }),
-    fetchJson(API.reports.list, { headers: authHeaders() }),
+    fetchJson(API.reports.page(reportQuery), { headers: authHeaders() }),
     fetchJson(API.admin.activity, { headers: authHeaders() }),
   ]);
   applyAccountPage(accountPage);
-  reports = reportItems || [];
+  applyReportPage(reportPagePayload);
   activities = activityItems || [];
   renderMetrics();
   renderReports();
+  renderReportNavigation();
   renderUsers();
   renderUserNavigation();
   renderActivity();
@@ -485,6 +524,14 @@ async function refreshDashboard() {
     renderState(sharedRecycleList, 'Recycle administration is temporarily unavailable.');
     showAlert(err?.message || 'Shared-folder administration is temporarily unavailable.');
   }
+}
+
+async function refreshReports() {
+  clearAlert();
+  applyReportPage(await fetchJson(API.reports.page(reportQuery), { headers: authHeaders() }));
+  renderMetrics();
+  renderReports();
+  renderReportNavigation();
 }
 
 async function refreshAccounts() {
@@ -869,6 +916,43 @@ async function handleOperation(button) {
 }
 
 function wireEvents() {
+  reportFilters?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const filters = reportFilterValue(reportFilters);
+    if ((filters.from && !filters.to) || (!filters.from && filters.to)) {
+      showAlert('Report date filters require both From and To.');
+      return;
+    }
+    reportQuery = { ...reportQuery, ...filters, page: 0 };
+    try {
+      await refreshReports();
+    } catch (err) {
+      showAlert(err?.message || 'Failed to filter reports.');
+    }
+  });
+
+  reportPrevious?.addEventListener('click', async () => {
+    if (reportQuery.page <= 0) return;
+    reportQuery = { ...reportQuery, page: reportQuery.page - 1 };
+    try {
+      await refreshReports();
+    } catch (err) {
+      reportQuery = { ...reportQuery, page: reportQuery.page + 1 };
+      showAlert(err?.message || 'Failed to load the previous report page.');
+    }
+  });
+
+  reportNext?.addEventListener('click', async () => {
+    if (reportQuery.page + 1 >= reportPageState.totalPages) return;
+    reportQuery = { ...reportQuery, page: reportQuery.page + 1 };
+    try {
+      await refreshReports();
+    } catch (err) {
+      reportQuery = { ...reportQuery, page: reportQuery.page - 1 };
+      showAlert(err?.message || 'Failed to load the next report page.');
+    }
+  });
+
   userFilters?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const values = new FormData(userFilters);

@@ -11,6 +11,9 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 
 /**
  * MongoDB document representing a report against a post.
@@ -20,6 +23,10 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @NoArgsConstructor
+@CompoundIndexes({
+    @CompoundIndex(name = "report_created_id_desc", def = "{'createdOn': -1, '_id': -1}"),
+    @CompoundIndex(name = "report_status_created_id_desc", def = "{'status': 1, 'createdOn': -1, '_id': -1}")
+})
 @Document("post_reports")
 public class PostReport {
   @Id private String id;
@@ -31,6 +38,11 @@ public class PostReport {
 
   private String reporterAccountId;
   private String reporterUsername;
+
+  @Indexed(unique = true, sparse = true)
+  private String openDedupeKey;
+  @Indexed private ReportType reportType;
+  @Indexed private ReportTargetType targetType;
 
   private String reason;
   private String details;

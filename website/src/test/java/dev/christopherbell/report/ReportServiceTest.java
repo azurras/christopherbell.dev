@@ -25,6 +25,7 @@ import dev.christopherbell.report.submission.ReportSubmissionService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -127,7 +128,7 @@ class ReportServiceTest {
         .status(ReportStatus.OPEN)
         .build();
 
-    when(reportRepository.findAllByOrderByCreatedOnDesc()).thenReturn(List.of(report));
+    when(reportRepository.findAllByOrderByCreatedOnDesc(any(Pageable.class))).thenReturn(List.of(report));
     when(reportRepository.countByReportedAccountIdAndStatus("reported-1", ReportStatus.OPEN)).thenReturn(2L);
     when(reportRepository.countByReportedAccountIdAndStatus("reported-1", ReportStatus.RESOLVED)).thenReturn(3L);
 
