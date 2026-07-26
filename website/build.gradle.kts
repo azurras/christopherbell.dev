@@ -132,7 +132,23 @@ val prepareSensorResources by tasks.registering {
 }
 
 sourceSets.named("main") { resources.srcDir(sensorResourceDirectory) }
-tasks.named<ProcessResources>("processResources") { dependsOn(prepareSensorResources) }
+val releaseGitCommit = providers.exec {
+    commandLine("git", "rev-parse", "HEAD")
+    workingDir(rootProject.projectDir)
+}.standardOutput.asText.map { output ->
+    val commit = output.trim().lowercase()
+    if (!commit.matches(Regex("[0-9a-f]{40}"))) {
+        throw GradleException("Git HEAD must resolve to a full 40-character commit SHA.")
+    }
+    commit
+}
+tasks.named<ProcessResources>("processResources") {
+    dependsOn(prepareSensorResources)
+    inputs.property("releaseGitCommit", releaseGitCommit)
+    filesMatching("application.yml") {
+        filter { line -> line.replace("@releaseGitCommit@", releaseGitCommit.get()) }
+    }
+}
 
 val jsTestFiles = fileTree("src/test/js") {
     include("*.test.js")
