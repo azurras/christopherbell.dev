@@ -9,15 +9,20 @@ import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportSnapshot;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeResult;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeApplyRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeCandidate;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeGroupPreview;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupePreview;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRating;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
@@ -28,14 +33,17 @@ import dev.christopherbell.whatsforlunch.restaurant.preference.WhatsForLunchPref
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingQueryRepository;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -46,12 +54,12 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @RequiredArgsConstructor
 @Service
@@ -62,13 +70,11 @@ public class RestaurantService {
   private static final int DEFAULT_NEARBY_LUNCH_RADIUS_MILES = 15;
   private static final List<Integer> ALLOWED_NEARBY_LUNCH_RADII_MILES = List.of(1, 5, 10, 15, 20);
   private static final int MAX_CUISINE_FILTERS = 20;
-  private static final String OPEN_STREET_MAP_IMPORT_STATE_ID = "openstreetmap-monthly";
 
   private final Clock clock;
   private final DailyLunchPicksRepository dailyLunchPicksRepository;
   private final OpenStreetMapRestaurantClient openStreetMapRestaurantClient;
   private final PermissionService permissionService;
-  private final RestaurantImportStateRepository restaurantImportStateRepository;
   private final RestaurantMapper restaurantMapper;
   private final RestaurantFavoriteRepository restaurantFavoriteRepository;
   private final RestaurantRatingRepository restaurantRatingRepository;
@@ -540,8 +546,164 @@ public class RestaurantService {
    */
   public RestaurantImportResult importConfiguredMetroRestaurantsFromOpenStreetMap()
       throws IOException, InterruptedException, InvalidRequestException {
-    log.info("OpenStreetMap restaurant import started.");
+    return applyPreparedImport(prepareConfiguredMetroImport());
+  }
+
+  /** Calculates duplicate groups and stable survivors without mutating data. */
+  public RestaurantDedupePreview previewDuplicateNamedRestaurants() {
+    var groups = duplicateRestaurantGroups().stream()
+        .map(entry -> toDedupeGroupPreview(entry.getKey(), entry.getValue()))
+        .sorted(Comparator.comparing(RestaurantDedupeGroupPreview::normalizedName))
+        .toList();
+    return new RestaurantDedupePreview(groups);
+  }
+
+  /** Applies only exact, version-matched duplicate groups after validating every confirmation. */
+  public RestaurantDedupeResult applyDuplicateNamedRestaurants(RestaurantDedupeApplyRequest request) {
+    if (request == null || request.groups().isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Duplicate group confirmation is required");
+    }
+    var currentGroups = duplicateRestaurantGroups().stream()
+        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    var confirmedNames = new java.util.HashSet<String>();
+    for (var confirmation : request.groups()) {
+      if (confirmation == null || confirmation.normalizedName() == null
+          || !confirmedNames.add(confirmation.normalizedName())) {
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Duplicate group confirmation is invalid");
+      }
+      var group = currentGroups.get(confirmation.normalizedName());
+      if (group == null || !matchesConfirmation(confirmation, group)) {
+        throw new ResponseStatusException(HttpStatus.CONFLICT, "Duplicate group changed after preview");
+      }
+    }
+
+    var keptIds = new ArrayList<String>();
+    var deletedIds = new ArrayList<String>();
+    var updatedSurvivors = 0;
+    for (var confirmation : request.groups()) {
+      var group = currentGroups.get(confirmation.normalizedName());
+      var survivor = chooseDuplicateSurvivor(group);
+      var duplicates = group.stream()
+          .filter(restaurant -> !restaurant.getId().equals(survivor.getId()))
+          .toList();
+      restaurantRepository.deleteAll(duplicates);
+      duplicates.forEach(restaurant -> deletedIds.add(restaurant.getId()));
+      if (!confirmation.normalizedName().equals(survivor.getNormalizedName())) {
+        survivor.setNormalizedName(confirmation.normalizedName());
+        restaurantRepository.save(survivor);
+        updatedSurvivors++;
+      }
+      keptIds.add(survivor.getId());
+    }
+    return RestaurantDedupeResult.builder()
+        .duplicateGroups(request.groups().size())
+        .deleted(deletedIds.size())
+        .updatedSurvivors(updatedSurvivors)
+        .keptRestaurantIds(List.copyOf(keptIds))
+        .deletedRestaurantIds(List.copyOf(deletedIds))
+        .build();
+  }
+
+  private List<Map.Entry<String, List<Restaurant>>> duplicateRestaurantGroups() {
+    return Optional.ofNullable(restaurantRepository.findAll()).orElseGet(List::of).stream()
+        .filter(restaurant -> restaurant.getName() != null && !restaurant.getName().isBlank())
+        .collect(Collectors.groupingBy(restaurant -> normalizeRestaurantName(restaurant.getName())))
+        .entrySet()
+        .stream()
+        .filter(entry -> entry.getValue().size() > 1)
+        .toList();
+  }
+
+  private RestaurantDedupeGroupPreview toDedupeGroupPreview(
+      String normalizedName,
+      List<Restaurant> group
+  ) {
+    var memberIds = group.stream().map(Restaurant::getId).sorted().toList();
+    return new RestaurantDedupeGroupPreview(
+        normalizedName,
+        dedupeGroupVersion(group),
+        chooseDuplicateSurvivor(group).getId(),
+        memberIds,
+        group.stream()
+            .sorted(Comparator.comparing(restaurant -> nullSafe(restaurant.getId())))
+            .map(restaurant -> new RestaurantDedupeCandidate(
+                restaurant.getId(),
+                restaurant.getName(),
+                restaurant.getAddress(),
+                restaurant.getCreatedOn(),
+                restaurant.getLastUpdatedOn()))
+            .toList());
+  }
+
+  private boolean matchesConfirmation(
+      dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeConfirmation confirmation,
+      List<Restaurant> group
+  ) {
+    var preview = toDedupeGroupPreview(confirmation.normalizedName(), group);
+    return preview.version().equals(confirmation.version())
+        && preview.survivorId().equals(confirmation.survivorId())
+        && preview.memberIds().equals(confirmation.memberIds());
+  }
+
+  private String dedupeGroupVersion(List<Restaurant> group) {
+    try {
+      var digest = MessageDigest.getInstance("SHA-256");
+      group.stream()
+          .map(restaurant -> canonicalImportValue(restaurant) + "|" + nullSafe(
+              restaurant.getLastUpdatedOn() == null ? null : restaurant.getLastUpdatedOn().toString()))
+          .sorted()
+          .forEach(value -> digest.update((value + "\n").getBytes(StandardCharsets.UTF_8)));
+      return HexFormat.of().formatHex(digest.digest());
+    } catch (NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 is unavailable", impossible);
+    }
+  }
+
+  /** Fetches and classifies remote candidates without mutating local restaurant data. */
+  public RestaurantImportSnapshot prepareConfiguredMetroImport()
+      throws IOException, InterruptedException, InvalidRequestException {
     var fetched = openStreetMapRestaurantClient.getConfiguredMetroRestaurants();
+    var created = 0;
+    var updated = 0;
+    var unchanged = 0;
+    var invalid = 0;
+    var representativeChanges = new ArrayList<String>();
+
+    for (var restaurant : fetched) {
+      if (!isValidImportRestaurant(restaurant)) {
+        invalid++;
+        continue;
+      }
+      applyNormalizedName(restaurant);
+      var existing = restaurantRepository.findById(restaurant.getId())
+          .or(() -> findRestaurantByNormalizedName(restaurant.getNormalizedName()));
+      if (existing.isEmpty()) {
+        created++;
+        addRepresentativeChange(representativeChanges, "CREATE", restaurant);
+      } else if (hasSameImportValues(existing.get(), restaurant)) {
+        unchanged++;
+      } else if (existing.get().getId().equals(restaurant.getId())
+          || hasSameNameAndAddress(existing.get(), restaurant)) {
+        updated++;
+        addRepresentativeChange(representativeChanges, "UPDATE", restaurant);
+      } else {
+        unchanged++;
+      }
+    }
+
+    return new RestaurantImportSnapshot(
+        importChecksum(fetched),
+        fetched,
+        new RestaurantImportPreviewCounts(
+            fetched.size(), created, updated, 0, unchanged, invalid),
+        representativeChanges);
+  }
+
+  /** Applies a previously fetched in-memory snapshot. Durable preview records never contain this payload. */
+  public RestaurantImportResult applyPreparedImport(RestaurantImportSnapshot snapshot)
+      throws InvalidRequestException {
+    log.info("OpenStreetMap restaurant import started.");
+    var fetched = snapshot.restaurants();
     log.info("OpenStreetMap restaurant import fetched {} candidates.", fetched.size());
     var imported = 0;
     var updated = 0;
@@ -607,65 +769,52 @@ public class RestaurantService {
         .build();
   }
 
-  /**
-   * Runs the monthly OpenStreetMap import on the fifteenth day of each month.
-   */
-  @Scheduled(
-      cron = "${wfl.restaurant-import.monthly.cron:0 0 3 15 * *}",
-      zone = "${wfl.restaurant-import.monthly.zone:America/Chicago}"
-  )
-  public void runMonthlyOpenStreetMapImport() {
-    if (!wflProperties.getRestaurantImport().getMonthly().isEnabled()) {
-      return;
+  private void addRepresentativeChange(
+      List<String> changes,
+      String operation,
+      Restaurant restaurant
+  ) {
+    if (changes.size() < 10) {
+      changes.add(operation + ": " + restaurant.getName());
     }
-    runTrackedOpenStreetMapImport("scheduled-monthly");
   }
 
-  /**
-   * Runs an immediate catch-up import when the previous month has no completed import record.
-   */
-  @EventListener(ApplicationReadyEvent.class)
-  public void runMissedMonthlyOpenStreetMapImport() {
-    if (!wflProperties.getRestaurantImport().getMonthly().isEnabled()) {
-      return;
-    }
-
-    var previousMonth = currentMonthlyRestaurantImportMonth().minusMonths(1);
-    var completedMonth = restaurantImportStateRepository.findById(OPEN_STREET_MAP_IMPORT_STATE_ID)
-        .map(RestaurantImportState::getLastCompletedMonth)
-        .flatMap(this::parseYearMonth)
-        .orElse(null);
-    if (completedMonth != null && !completedMonth.isBefore(previousMonth)) {
-      log.info("OpenStreetMap monthly restaurant import catch-up skipped. Last completed month: {}.",
-          completedMonth);
-      return;
-    }
-
-    log.info("OpenStreetMap monthly restaurant import catch-up needed. Previous month: {}, last completed month: {}.",
-        previousMonth, completedMonth);
-    runTrackedOpenStreetMapImport("startup-catch-up");
+  private boolean hasSameImportValues(Restaurant existing, Restaurant imported) {
+    return canonicalImportValue(existing).equals(canonicalImportValue(imported));
   }
 
-  void runTrackedOpenStreetMapImport(String trigger) {
-    var startedOn = Instant.now(clock);
-    log.info("OpenStreetMap monthly restaurant import started. Trigger: {}.", trigger);
-    saveImportStarted(startedOn);
+  private String importChecksum(List<Restaurant> restaurants) {
     try {
-      var result = importConfiguredMetroRestaurantsFromOpenStreetMap();
-      var completedOn = Instant.now(clock);
-      saveImportCompleted(startedOn, completedOn, result);
-      log.info(
-          "OpenStreetMap monthly restaurant import completed. Trigger: {}, fetched: {}, imported: {}, updated: {}, skipped existing: {}, skipped invalid: {}.",
-          trigger,
-          result.fetched(),
-          result.imported(),
-          result.updated(),
-          result.skippedExisting(),
-          result.skippedInvalid());
-    } catch (Exception e) {
-      saveImportFailed(startedOn, Instant.now(clock), e);
-      log.error("OpenStreetMap monthly restaurant import failed. Trigger: {}.", trigger, e);
+      var digest = MessageDigest.getInstance("SHA-256");
+      restaurants.stream()
+          .map(this::canonicalImportValue)
+          .sorted()
+          .forEach(value -> digest.update((value + "\n").getBytes(StandardCharsets.UTF_8)));
+      return HexFormat.of().formatHex(digest.digest());
+    } catch (NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 is unavailable", impossible);
     }
+  }
+
+  private String canonicalImportValue(Restaurant restaurant) {
+    if (restaurant == null) {
+      return "<invalid>";
+    }
+    var address = restaurant.getAddress();
+    return String.join("|",
+        nullSafe(restaurant.getId()),
+        nullSafe(restaurant.getName()),
+        nullSafe(restaurant.getCuisine()),
+        nullSafe(restaurant.getPhoneNumber()),
+        nullSafe(restaurant.getSourceAmenity()),
+        nullSafe(restaurant.getWebsite()),
+        address == null ? "" : nullSafe(address.getStreet1()),
+        address == null ? "" : nullSafe(address.getStreet2()),
+        address == null ? "" : nullSafe(address.getCity()),
+        address == null ? "" : nullSafe(address.getState()),
+        address == null ? "" : nullSafe(address.getPostalCode()),
+        address == null || address.getLatitude() == null ? "" : address.getLatitude().toString(),
+        address == null || address.getLongitude() == null ? "" : address.getLongitude().toString());
   }
 
   /**
@@ -1068,65 +1217,8 @@ public class RestaurantService {
     return ZoneId.of(wflProperties.getRestaurantOfTheDay().getZone());
   }
 
-  private ZoneId getMonthlyRestaurantImportZone() {
-    return ZoneId.of(wflProperties.getRestaurantImport().getMonthly().getZone());
-  }
-
   private int dailyPickCount() {
     return wflProperties.getRestaurantOfTheDay().getPickCount();
-  }
-
-  private YearMonth currentMonthlyRestaurantImportMonth() {
-    return YearMonth.now(clock.withZone(getMonthlyRestaurantImportZone()));
-  }
-
-  private void saveImportStarted(Instant startedOn) {
-    var existing = restaurantImportStateRepository.findById(OPEN_STREET_MAP_IMPORT_STATE_ID)
-        .orElseGet(() -> RestaurantImportState.builder()
-            .id(OPEN_STREET_MAP_IMPORT_STATE_ID)
-            .build());
-    existing.setLastStartedOn(startedOn);
-    existing.setLastFailureMessage(null);
-    restaurantImportStateRepository.save(existing);
-  }
-
-  private void saveImportCompleted(
-      Instant startedOn,
-      Instant completedOn,
-      RestaurantImportResult result
-  ) {
-    var existing = restaurantImportStateRepository.findById(OPEN_STREET_MAP_IMPORT_STATE_ID)
-        .orElseGet(() -> RestaurantImportState.builder()
-            .id(OPEN_STREET_MAP_IMPORT_STATE_ID)
-            .build());
-    existing.setLastStartedOn(startedOn);
-    existing.setLastCompletedOn(completedOn);
-    existing.setLastCompletedMonth(currentMonthlyRestaurantImportMonth().toString());
-    existing.setLastFailedOn(null);
-    existing.setLastFailureMessage(null);
-    existing.setLastResult(result);
-    restaurantImportStateRepository.save(existing);
-  }
-
-  private void saveImportFailed(Instant startedOn, Instant failedOn, Exception exception) {
-    var existing = restaurantImportStateRepository.findById(OPEN_STREET_MAP_IMPORT_STATE_ID)
-        .orElseGet(() -> RestaurantImportState.builder()
-            .id(OPEN_STREET_MAP_IMPORT_STATE_ID)
-            .build());
-    existing.setLastStartedOn(startedOn);
-    existing.setLastFailedOn(failedOn);
-    existing.setLastFailureMessage(exception.getMessage());
-    restaurantImportStateRepository.save(existing);
-  }
-
-  private Optional<YearMonth> parseYearMonth(String value) {
-    try {
-      return value == null || value.isBlank()
-          ? Optional.empty()
-          : Optional.of(YearMonth.parse(value));
-    } catch (Exception e) {
-      return Optional.empty();
-    }
   }
 
   private boolean isValidImportRestaurant(Restaurant restaurant) {

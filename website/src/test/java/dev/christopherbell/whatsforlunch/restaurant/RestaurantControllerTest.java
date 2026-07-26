@@ -22,9 +22,13 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.libs.test.TestUtil;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeResult;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeGroupPreview;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupePreview;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewResponse;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportWorkflowService;
+import java.time.Instant;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingSetRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceDetail;
@@ -52,6 +56,7 @@ public class RestaurantControllerTest {
   @Autowired private ObjectMapper objectMapper;
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private RestaurantService restaurantService;
+  @MockitoBean private RestaurantImportWorkflowService restaurantImportWorkflowService;
   @MockitoBean private WhatsForLunchSessionService whatsForLunchSessionService;
 
   @Test
@@ -807,73 +812,61 @@ public class RestaurantControllerTest {
   }
 
   @Test
-  @DisplayName("Should import OpenStreetMap restaurants when caller has ADMIN role.")
+  @DisplayName("Should preview OpenStreetMap restaurants when caller has ADMIN role.")
   @WithMockUser(authorities = {"ADMIN"})
   public void testImportOpenStreetMapRestaurants_whenAdmin_Returns200() throws Exception {
-    var result = RestaurantImportResult.builder()
-        .source("openstreetmap")
-        .fetched(10)
-        .imported(7)
-        .updated(2)
-        .skippedExisting(2)
-        .skippedInvalid(1)
-        .build();
-    when(restaurantService.importConfiguredMetroRestaurantsFromOpenStreetMap()).thenReturn(result);
+    var result = new RestaurantImportPreviewResponse(
+        "token-1",
+        "checksum-1",
+        Instant.parse("2026-07-26T12:15:00Z"),
+        new RestaurantImportPreviewCounts(10, 7, 2, 0, 0, 1),
+        List.of("CREATE: Cafe"));
+    when(restaurantImportWorkflowService.previewOpenStreetMapImport()).thenReturn(result);
 
     mockMvc
-        .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/import/openstreetmap")
+        .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260726 + "/import/openstreetmap/preview")
             .with(csrf())
             .accept(MediaType.APPLICATION_JSON))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.payload.source").value("openstreetmap"))
-        .andExpect(jsonPath("$.payload.fetched").value(10))
-        .andExpect(jsonPath("$.payload.imported").value(7))
-        .andExpect(jsonPath("$.payload.updated").value(2))
-        .andExpect(jsonPath("$.payload.skippedExisting").value(2))
-        .andExpect(jsonPath("$.payload.skippedInvalid").value(1));
+        .andExpect(jsonPath("$.payload.token").value("token-1"))
+        .andExpect(jsonPath("$.payload.checksum").value("checksum-1"))
+        .andExpect(jsonPath("$.payload.counts.fetched").value(10))
+        .andExpect(jsonPath("$.payload.counts.created").value(7))
+        .andExpect(jsonPath("$.payload.counts.updated").value(2));
 
-    verify(restaurantService).importConfiguredMetroRestaurantsFromOpenStreetMap();
+    verify(restaurantImportWorkflowService).previewOpenStreetMapImport();
   }
 
   @Test
   @DisplayName("Should reject OpenStreetMap import without authentication.")
   public void testImportOpenStreetMapRestaurants_whenUnauthenticated_Returns401() throws Exception {
     mockMvc
-        .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/import/openstreetmap")
+        .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260726 + "/import/openstreetmap/preview")
             .with(csrf())
             .accept(MediaType.APPLICATION_JSON))
         .andExpect(status().isUnauthorized());
 
-    verifyNoInteractions(restaurantService);
+    verifyNoInteractions(restaurantImportWorkflowService);
   }
 
   @Test
-  @DisplayName("Should dedupe restaurant names when caller has ADMIN role.")
+  @DisplayName("Should preview duplicate restaurant names when caller has ADMIN role.")
   @WithMockUser(authorities = {"ADMIN"})
   public void testRemoveDuplicateNamedRestaurants_whenAdmin_Returns200() throws Exception {
-    var result = RestaurantDedupeResult.builder()
-        .duplicateGroups(1)
-        .deleted(2)
-        .updatedSurvivors(1)
-        .keptRestaurantIds(List.of("austin-id"))
-        .deletedRestaurantIds(List.of("pflugerville-id", "cedar-park-id"))
-        .build();
-    when(restaurantService.removeDuplicateNamedRestaurants()).thenReturn(result);
+    var result = new RestaurantDedupePreview(List.of(new RestaurantDedupeGroupPreview(
+        "lunch spot", "version-1", "austin-id", List.of("austin-id", "pflugerville-id"), List.of())));
+    when(restaurantService.previewDuplicateNamedRestaurants()).thenReturn(result);
 
     mockMvc
-        .perform(post("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/dedupe-names")
-            .with(csrf())
+        .perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260726 + "/dedupe-names/preview")
             .accept(MediaType.APPLICATION_JSON))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.payload.duplicateGroups").value(1))
-        .andExpect(jsonPath("$.payload.deleted").value(2))
-        .andExpect(jsonPath("$.payload.updatedSurvivors").value(1))
-        .andExpect(jsonPath("$.payload.keptRestaurantIds[0]").value("austin-id"))
-        .andExpect(jsonPath("$.payload.deletedRestaurantIds[0]").value("pflugerville-id"));
+        .andExpect(jsonPath("$.payload.groups[0].version").value("version-1"))
+        .andExpect(jsonPath("$.payload.groups[0].survivorId").value("austin-id"));
 
-    verify(restaurantService).removeDuplicateNamedRestaurants();
+    verify(restaurantService).previewDuplicateNamedRestaurants();
   }
 
   @Test

@@ -1,11 +1,13 @@
 import { API } from './lib/api.js';
 import { authHeaders, fetchJson, getAuthClaims, loginRedirectUrl, sanitize } from './lib/util.js';
+import { wflFreshnessMarkup } from './lib/wfl-freshness.js';
 
 const mount = document.getElementById('wfl-list');
 const mode = mount?.dataset.listMode || 'top-rated';
 const title = mount?.dataset.listTitle || 'Restaurants';
 const isLoggedIn = !!getAuthClaims()?.sub;
 let restaurants = [];
+let dataFreshness = null;
 
 function wflSecondaryNav(active = 'top-rated') {
   const items = [
@@ -101,6 +103,7 @@ function renderList() {
     : 'No rated restaurants yet.';
   mount.innerHTML = `
     ${wflSecondaryNav(mode)}
+    ${wflFreshnessMarkup(dataFreshness)}
     <div class="wfl-list-heading">
       <h2>${sanitize(title)}</h2>
       <p>${mode === 'favorites'
@@ -116,6 +119,7 @@ function renderList() {
 function renderLoginPrompt() {
   mount.innerHTML = `
     ${wflSecondaryNav('favorites')}
+    ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-empty">
       <h2>Sign in to see favorites</h2>
       <p>Your favorite restaurants are saved to your account.</p>
@@ -127,6 +131,7 @@ function renderLoginPrompt() {
 function renderError(err) {
   mount.innerHTML = `
     ${wflSecondaryNav(mode)}
+    ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-empty">
       <h2>Could not load restaurants</h2>
       <p>${sanitize(err.message || 'Please try again later.')}</p>
@@ -137,6 +142,11 @@ function renderError(err) {
 
 async function loadRestaurants() {
   if (!mount) return;
+  try {
+    dataFreshness = await fetchJson(API.whatsForLunch.freshness);
+  } catch (_) {
+    dataFreshness = null;
+  }
   if (mode === 'favorites' && !isLoggedIn) {
     renderLoginPrompt();
     return;

@@ -15,8 +15,14 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
 - Logged-in shared sessions where invited members see the same three restaurants, receive session updates, and vote.
 - Logged-in restaurant ratings with public whole-number rating totals.
 - Legacy daily lunch picks persisted per day and refreshed at midnight Central.
-- OpenStreetMap import for configured metro restaurants, including Austin, the San Francisco Bay Area, New Orleans, and Dallas by default.
-- Duplicate-name cleanup that keeps one stable survivor per duplicate group.
+- Startup-validated OpenStreetMap metro configuration, with Austin, the San
+  Francisco Bay Area, New Orleans, and Dallas enabled by default.
+- One leased import workflow shared by scheduled and manual runs. Manual runs
+  require a short-lived operator-bound preview token, re-fetch the source, and
+  reject changed checksums before writing. Durable admin status records bounded
+  error categories and public pages receive only source freshness and coverage.
+- Duplicate-name cleanup previews every candidate and stable survivor, then
+  validates every confirmed group version before deleting anything.
 - Workflow scaffolding under `workflow`.
 
 ## Update This Doc

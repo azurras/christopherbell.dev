@@ -12,9 +12,10 @@ import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteR
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeConfirmation;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeApplyRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRating;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreference;
@@ -40,6 +41,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.web.server.ResponseStatusException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -67,7 +69,6 @@ public class RestaurantServiceTest {
   @Mock private DailyLunchPicksRepository dailyLunchPicksRepository;
   @Mock private OpenStreetMapRestaurantClient openStreetMapRestaurantClient;
   @Mock private PermissionService permissionService;
-  @Mock private RestaurantImportStateRepository restaurantImportStateRepository;
   @Mock private RestaurantMapper restaurantMapper;
   @Mock private RestaurantFavoriteRepository restaurantFavoriteRepository;
   @Mock private RestaurantRatingRepository restaurantRatingRepository;
@@ -906,10 +907,10 @@ public class RestaurantServiceTest {
     assertEquals(1, result.skippedExisting());
     assertEquals(1, result.skippedInvalid());
     verify(openStreetMapRestaurantClient).getConfiguredMetroRestaurants();
-    verify(restaurantRepository).findById(eq("osm:node:1"));
-    verify(restaurantRepository).findById(eq("osm:node:2"));
-    verify(restaurantRepository).findByNormalizedName(eq("pflugerville taco house"));
-    verify(restaurantRepository).findAll();
+    verify(restaurantRepository, times(2)).findById(eq("osm:node:1"));
+    verify(restaurantRepository, times(2)).findById(eq("osm:node:2"));
+    verify(restaurantRepository, times(2)).findByNormalizedName(eq("pflugerville taco house"));
+    verify(restaurantRepository, times(2)).findAll();
     verify(restaurantRepository).save(eq(newRestaurant));
   }
 
@@ -974,75 +975,37 @@ public class RestaurantServiceTest {
   }
 
   @Test
-  @DisplayName("Monthly import: tracked run saves completed state")
-  public void testRunTrackedOpenStreetMapImport_savesCompletedState() throws Exception {
-    var started = Instant.parse("2026-05-15T08:00:00Z");
-    var completed = Instant.parse("2026-05-15T08:00:03Z");
-    var fixedClock = Clock.fixed(started, ZoneId.of("UTC"));
+  @DisplayName("Dedupe preview: selects stable survivor without deleting")
+  public void testPreviewDuplicateNamedRestaurants_selectsStableSurvivorWithoutDeleting() {
+    var laterId = RestaurantStub.getRestaurantStub("b-id");
+    var stableId = RestaurantStub.getRestaurantStub("a-id");
+    when(restaurantRepository.findAll()).thenReturn(List.of(laterId, stableId));
 
-    when(clock.instant()).thenReturn(started, completed);
-    when(clock.withZone(any(ZoneId.class))).thenReturn(fixedClock);
-    when(restaurantImportStateRepository.findById(eq("openstreetmap-monthly")))
-        .thenReturn(Optional.empty(), Optional.empty());
-    when(restaurantImportStateRepository.save(any(RestaurantImportState.class)))
-        .thenAnswer(invocation -> invocation.getArgument(0));
-    when(openStreetMapRestaurantClient.getConfiguredMetroRestaurants()).thenReturn(List.of());
+    var preview = restaurantService.previewDuplicateNamedRestaurants();
 
-    restaurantService.runTrackedOpenStreetMapImport("test");
-
-    var captor = ArgumentCaptor.forClass(RestaurantImportState.class);
-    verify(restaurantImportStateRepository, times(2)).save(captor.capture());
-    var startedState = captor.getAllValues().get(0);
-    var completedState = captor.getAllValues().get(1);
-    assertEquals("openstreetmap-monthly", startedState.getId());
-    assertEquals(started, startedState.getLastStartedOn());
-    assertEquals("openstreetmap-monthly", completedState.getId());
-    assertEquals(completed, completedState.getLastCompletedOn());
-    assertEquals("2026-05", completedState.getLastCompletedMonth());
-    assertNotNull(completedState.getLastResult());
-    assertEquals(0, completedState.getLastResult().fetched());
+    assertEquals(1, preview.groups().size());
+    assertEquals("a-id", preview.groups().getFirst().survivorId());
+    assertEquals(List.of("a-id", "b-id"), preview.groups().getFirst().memberIds());
+    assertTrue(!preview.groups().getFirst().version().isBlank());
+    verify(restaurantRepository, never()).deleteAll(any());
   }
 
   @Test
-  @DisplayName("Monthly import catch-up: skips when an import completed last month")
-  public void testRunMissedMonthlyOpenStreetMapImport_whenLastMonthCompleted_skipsImport()
-      throws Exception {
-    var fixedClock = Clock.fixed(Instant.parse("2026-05-18T08:00:00Z"), ZoneId.of("UTC"));
-    when(clock.withZone(any(ZoneId.class))).thenReturn(fixedClock);
-    when(restaurantImportStateRepository.findById(eq("openstreetmap-monthly")))
-        .thenReturn(Optional.of(RestaurantImportState.builder()
-            .id("openstreetmap-monthly")
-            .lastCompletedMonth("2026-04")
-            .build()));
+  @DisplayName("Dedupe apply: validates all group versions before deleting")
+  public void testApplyDuplicateNamedRestaurants_whenAnyGroupIsStale_DeletesNothing() {
+    var first = RestaurantStub.getRestaurantStub("a-id");
+    var second = RestaurantStub.getRestaurantStub("b-id");
+    when(restaurantRepository.findAll()).thenReturn(List.of(first, second));
+    var request = new RestaurantDedupeApplyRequest(List.of(
+        new RestaurantDedupeConfirmation(
+            "pflugerville taco house", "stale-version", "a-id", List.of("a-id", "b-id"))));
 
-    restaurantService.runMissedMonthlyOpenStreetMapImport();
+    var failure = assertThrows(
+        ResponseStatusException.class,
+        () -> restaurantService.applyDuplicateNamedRestaurants(request));
 
-    verify(restaurantImportStateRepository).findById(eq("openstreetmap-monthly"));
-    verifyNoInteractions(openStreetMapRestaurantClient);
-  }
-
-  @Test
-  @DisplayName("Monthly import catch-up: runs immediately when last month is missing")
-  public void testRunMissedMonthlyOpenStreetMapImport_whenLastMonthMissing_runsImport()
-      throws Exception {
-    var started = Instant.parse("2026-05-18T08:00:00Z");
-    var completed = Instant.parse("2026-05-18T08:00:03Z");
-    var fixedClock = Clock.fixed(started, ZoneId.of("UTC"));
-
-    when(clock.withZone(any(ZoneId.class))).thenReturn(fixedClock);
-    when(clock.instant()).thenReturn(started, completed);
-    when(restaurantImportStateRepository.findById(eq("openstreetmap-monthly")))
-        .thenReturn(Optional.empty(), Optional.empty(), Optional.empty());
-    when(restaurantImportStateRepository.save(any(RestaurantImportState.class)))
-        .thenAnswer(invocation -> invocation.getArgument(0));
-    when(openStreetMapRestaurantClient.getConfiguredMetroRestaurants()).thenReturn(List.of());
-
-    restaurantService.runMissedMonthlyOpenStreetMapImport();
-
-    verify(openStreetMapRestaurantClient).getConfiguredMetroRestaurants();
-    verify(restaurantImportStateRepository).save(argThat(state ->
-        "2026-05".equals(state.getLastCompletedMonth())
-            && state.getLastResult() != null));
+    assertEquals(409, failure.getStatusCode().value());
+    verify(restaurantRepository, never()).deleteAll(any());
   }
 
   @Test

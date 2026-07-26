@@ -1,5 +1,6 @@
 package dev.christopherbell.location.model;
 
+import java.time.Instant;
 import lombok.Builder;
 
 /**
@@ -13,5 +14,8 @@ public record ZipCoordinateImportResult(
     int unchanged,
     int deleted,
     String source,
-    int sourceYear
+    int sourceYear,
+    String checksum,
+    Instant importedOn,
+    boolean noOp
 ) {}

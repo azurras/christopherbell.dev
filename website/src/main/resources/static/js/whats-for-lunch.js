@@ -1,5 +1,6 @@
 import { API } from './lib/api.js';
 import { authHeaders, fetchJson, getAuthClaims, linkMentions, loginRedirectUrl, sanitize } from './lib/util.js';
+import { wflFreshnessMarkup } from './lib/wfl-freshness.js';
 
 const mount = document.getElementById('whats-for-lunch');
 const LOCATION_OPTIONS = {
@@ -43,6 +44,7 @@ let activeSession = null;
 let visibleRatingControls = new Set();
 let sessionPollId = null;
 let sessionPollInFlight = false;
+let dataFreshness = null;
 
 function wflSecondaryNav(active = 'picks') {
   const items = [
@@ -409,6 +411,7 @@ function renderPicks(picks) {
     : `Showing ${picks.length} ${suggestionLabel} within ${selectedRadiusMiles} mile${selectedRadiusMiles === 1 ? '' : 's'}.${sanitize(selectedFilterLabel())}`;
   mount.innerHTML = `
     ${wflSecondaryNav('picks')}
+    ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-toolbar">
       <div>
         <p>${toolbarText}</p>
@@ -440,6 +443,7 @@ function renderPicksLoading(message = 'Picking lunch...') {
 function renderEmpty() {
   mount.innerHTML = `
     ${wflSecondaryNav('picks')}
+    ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-empty">
       <h2>No nearby lunch picks</h2>
       <p>No restaurants matched within ${selectedRadiusMiles} mile${selectedRadiusMiles === 1 ? '' : 's'}.${sanitize(selectedFilterLabel())}</p>
@@ -453,6 +457,7 @@ function renderLocationPrompt(message) {
   activeControlPanel = 'location';
   mount.innerHTML = `
     ${wflSecondaryNav('picks')}
+    ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-empty">
       <h2>Share your location</h2>
       <p>${sanitize(message || 'Use your browser location or enter a ZIP code to find nearby lunch spots.')}</p>
@@ -464,6 +469,7 @@ function renderLocationPrompt(message) {
 function renderError(err) {
   mount.innerHTML = `
     ${wflSecondaryNav('picks')}
+    ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-empty">
       <h2>Could not load lunch picks</h2>
       <p>${sanitize(err.message || 'Please try again later.')}</p>
@@ -820,6 +826,11 @@ async function refreshActiveSession() {
 
 async function loadLunchPicks() {
   if (!mount) return;
+  try {
+    dataFreshness = await fetchJson(API.whatsForLunch.freshness);
+  } catch (_) {
+    dataFreshness = null;
+  }
   isAdmin = await loadAdminState();
   await loadPreferences();
   const sessionId = new URLSearchParams(window.location.search).get('session');

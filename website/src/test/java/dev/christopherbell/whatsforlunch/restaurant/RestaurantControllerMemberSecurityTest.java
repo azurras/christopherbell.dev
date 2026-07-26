@@ -26,6 +26,7 @@ import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingSetReq
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionService;
+import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportWorkflowService;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,7 @@ class RestaurantControllerMemberSecurityTest {
   @Autowired private ObjectMapper objectMapper;
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private RestaurantService restaurantService;
+  @MockitoBean private RestaurantImportWorkflowService restaurantImportWorkflowService;
   @MockitoBean private WhatsForLunchSessionService whatsForLunchSessionService;
 
   @Test

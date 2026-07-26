@@ -26,8 +26,10 @@ Owns reusable Location reference data and APIs.
   Census ZCTA internal points, not USPS delivery-area geometry.
 - `POST /api/location/zip/import/census` is admin-only and refreshes Mongo rows
   from `location/2025_Gaz_zcta_national.txt`.
-- The refresh reports processed, created, updated, unchanged, and deleted rows.
-  Stale deletes only target persisted Census rows.
+- The refresh reports processed, created, updated, unchanged, and deleted rows,
+  plus source version, checksum, import time, and whether the run was a no-op.
+  An unchanged dataset checksum skips all coordinate reads and writes. Stale
+  deletes only target persisted Census rows.
 
 ## Consumers
 

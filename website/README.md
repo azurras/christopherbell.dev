@@ -68,21 +68,26 @@ chmod +x gradlew
 Post reports are stored in the database and visible in Back Office for admins.
 
 ### What's For Lunch Data
-Restaurants can be imported from OpenStreetMap through the Overpass API. This is an admin-only,
-manual import so the app does not repeatedly hit the public Overpass service.
+Restaurants are imported from OpenStreetMap through a leased workflow shared by
+the monthly scheduler and admin-only manual flow. Create and review a preview,
+then apply its operator-bound token before it expires:
 
 ```bash
 curl -X POST \
   -H "Authorization: Bearer <admin-token>" \
-  http://localhost:8080/api/whatsforlunch/restaurant/2026-05-17/import/openstreetmap
+  http://localhost:8080/api/whatsforlunch/restaurant/2026-07-26/import/openstreetmap/preview
 ```
 
-OpenStreetMap data is imported by OSM element id and skipped on later imports if it already exists.
-To clean up existing duplicate restaurant names, keeping the Austin record when one exists:
+The Back Office performs the matching apply call after confirmation. Duplicate
+cleanup likewise uses `GET .../2026-07-26/dedupe-names/preview` followed by a
+version-checked `POST .../2026-07-26/dedupe-names/apply`; it never deletes from
+the preview request itself.
+
+Public clients can read import time, source, current/stale state, and city
+coverage without authentication:
+
 ```bash
-curl -X POST \
-  -H "Authorization: Bearer <admin-token>" \
-  http://localhost:8080/api/whatsforlunch/restaurant/2026-05-17/dedupe-names
+curl http://localhost:8080/api/whatsforlunch/restaurant/2026-07-26/freshness
 ```
 
 ZIP-based WFL searches use imported Location Census ZCTA coordinates as their
