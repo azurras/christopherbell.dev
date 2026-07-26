@@ -21,6 +21,12 @@
     <section class="shared-folder-browser-shell">
       <div class="shared-folder-command-bar">
         <nav id="shared-breadcrumbs" class="shared-folder-breadcrumbs" aria-label="Shared folder path"></nav>
+        <form id="shared-folder-search-form" class="shared-folder-search" role="search" aria-label="Search shared folder">
+          <label for="shared-folder-search-query" class="visually-hidden">Search all shared files and folders</label>
+          <input id="shared-folder-search-query" class="form-control" type="search" name="query" maxlength="200" autocomplete="off" placeholder="Search all files" required />
+          <button class="btn btn-warning" type="submit">Search</button>
+          <button id="shared-folder-search-clear" class="btn btn-outline-light" type="button" disabled>Clear</button>
+        </form>
         <section id="shared-toolbar" class="shared-folder-toolbar" aria-label="Folder actions"></section>
       </div>
       <section id="shared-upload-panel" class="shared-folder-upload" aria-labelledby="shared-upload-title" hidden>

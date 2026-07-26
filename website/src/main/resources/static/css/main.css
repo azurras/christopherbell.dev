@@ -5957,6 +5957,29 @@ body {
   gap: 0.35rem;
 }
 
+.shared-folder-search {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  align-items: center;
+  min-width: min(100%, 440px);
+  gap: 0.45rem;
+}
+
+.shared-folder-search .form-control {
+  min-width: 0;
+  color: #f4f6f8;
+  border-color: rgba(255, 255, 255, 0.17);
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.shared-folder-search .form-control::placeholder {
+  color: #8c96a5;
+}
+
+.shared-folder-search .btn:disabled {
+  opacity: 0.55;
+}
+
 .shared-folder-breadcrumbs .btn-link {
   padding: 0.28rem 0.45rem;
   color: #f4f6f8;
@@ -6149,6 +6172,16 @@ body {
   text-transform: uppercase;
 }
 
+.shared-folder-entry-parent-path {
+  display: block;
+  margin-top: 0.18rem;
+  overflow: hidden;
+  color: #aeb8c6;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .shared-folder-entry-size,
 .shared-folder-entry-modified {
   overflow: hidden;
@@ -6307,6 +6340,12 @@ body {
   outline-offset: 2px;
 }
 
+.shared-folder-search .form-control:focus-visible,
+.shared-folder-search .btn:focus-visible {
+  outline: 2px solid #ffc107;
+  outline-offset: 2px;
+}
+
 @media (max-width: 1024px) {
   .shared-folder-list-header,
   .shared-folder-entry {
@@ -6333,8 +6372,13 @@ body {
   }
 
   .shared-folder-command-bar,
-  .shared-folder-toolbar {
+  .shared-folder-toolbar,
+  .shared-folder-search {
     width: 100%;
+  }
+
+  .shared-folder-search {
+    grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
   .shared-folder-upload form {

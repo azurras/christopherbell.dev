@@ -229,6 +229,56 @@ export function breadcrumbItems(path = '') {
   return items;
 }
 
+/** Validate and copy one untrusted recursive-search result before the browser renders it. */
+function validatedSharedFolderSearchEntry(entry) {
+  if (!entry || typeof entry.name !== 'string' || typeof entry.path !== 'string'
+      || !['DIRECTORY', 'FILE'].includes(entry.type) || typeof entry.size !== 'number'
+      || !Number.isFinite(entry.size) || entry.size < 0
+      || typeof entry.modifiedAt !== 'string' || typeof entry.previewKind !== 'string'
+      || !(entry.observedToken === undefined || entry.observedToken === null
+        || typeof entry.observedToken === 'string')) {
+    throw new Error('The shared folder returned an invalid search response.');
+  }
+  return Object.freeze({
+    name: entry.name,
+    path: entry.path,
+    type: entry.type,
+    size: entry.size,
+    modifiedAt: entry.modifiedAt,
+    previewKind: entry.previewKind,
+    observedToken: entry.observedToken ?? null,
+  });
+}
+
+/** Validate the shared-folder search boundary before recursive entries reach the page. */
+export function validateSharedFolderSearchResponse(response) {
+  if (!response || typeof response.query !== 'string' || !response.query.trim()
+      || !Array.isArray(response.entries) || typeof response.truncated !== 'boolean') {
+    throw new Error('The shared folder returned an invalid search response.');
+  }
+  return Object.freeze({
+    query: response.query,
+    entries: Object.freeze(response.entries.map(validatedSharedFolderSearchEntry)),
+    truncated: response.truncated,
+  });
+}
+
+/** Return the decoded relative directory that contains a recursive search entry. */
+export function sharedFolderEntryParentPath(entry) {
+  const path = String(entry?.path || '');
+  const separator = path.lastIndexOf('/');
+  return separator > 0 ? path.slice(0, separator) : '';
+}
+
+/** Build accessible search-result status text, including the server-owned result cap. */
+export function sharedFolderSearchResultDescription(response) {
+  const validated = validateSharedFolderSearchResponse(response);
+  const count = validated.entries.length;
+  const noun = count === 1 ? 'result' : 'results';
+  const truncated = validated.truncated ? ' Results are limited; refine your search.' : '';
+  return `${count} ${noun} for “${validated.query}”.${truncated}`;
+}
+
 /** Build a same-origin link that can be copied without exposing a filesystem path. */
 export function internalSharedFolderUrl(path = '') {
   const params = new URLSearchParams({ path: String(path || '') });

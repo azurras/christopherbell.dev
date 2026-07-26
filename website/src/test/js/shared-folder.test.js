@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import { API } from '../../main/resources/static/js/lib/api.js';
 import * as sharedFolder from '../../main/resources/static/js/lib/shared-folder.js';
+import * as sharedFolderPage from '../../main/resources/static/js/shared-folder.js';
 import {
   accountHasSharedFolderRead,
   accountHasSharedFolderWrite,
@@ -45,6 +46,73 @@ test('shared-folder API paths encode each decoded relative path once', () => {
     '/api/shared-folder/2026-07-17/media/jobs/job%2Fid');
   assert.equal(API.sharedFolder.media.stream('job/id'),
     '/api/shared-folder/2026-07-17/media/jobs/job%2Fid/stream');
+});
+
+test('shared-folder search encodes queries and presents validated recursive results', () => {
+  assert.equal(typeof API.sharedFolder.search, 'function');
+  assert.equal(API.sharedFolder.search('plans & notes'),
+    '/api/shared-folder/2026-07-17/search?query=plans+%26+notes');
+  assert.equal(typeof sharedFolder.validateSharedFolderSearchResponse, 'function');
+  assert.equal(typeof sharedFolder.sharedFolderSearchResultDescription, 'function');
+  assert.equal(typeof sharedFolder.sharedFolderEntryParentPath, 'function');
+
+  const response = sharedFolder.validateSharedFolderSearchResponse({
+    query: 'report',
+    entries: [{
+      name: 'report.txt', path: 'archive/2026/report.txt', type: 'FILE', size: 12,
+      modifiedAt: '2026-07-25T00:00:00Z', previewKind: 'TEXT', observedToken: 'proof',
+    }],
+    truncated: true,
+  });
+  assert.deepEqual(response.entries.map(entry => entry.name), ['report.txt']);
+  assert.equal(sharedFolder.sharedFolderEntryParentPath(response.entries[0]), 'archive/2026');
+  assert.equal(sharedFolder.sharedFolderSearchResultDescription(response),
+    '1 result for “report”. Results are limited; refine your search.');
+  assert.throws(() => sharedFolder.validateSharedFolderSearchResponse({
+    query: 'report', entries: [], truncated: 'false',
+  }), /invalid search response/i);
+});
+
+test('shared-folder search controller ignores stale results and clear restores the active folder', async () => {
+  assert.equal(typeof sharedFolderPage.createSharedFolderSearchController, 'function');
+  let resolveFirst;
+  const rendered = [];
+  let restores = 0;
+  const errors = [];
+  const controller = sharedFolderPage.createSharedFolderSearchController({
+    load: query => query === 'first'
+      ? new Promise(resolve => { resolveFirst = resolve; })
+      : Promise.resolve({ query, entries: [], truncated: false }),
+    render: response => rendered.push(response.query),
+    restore: async () => { restores += 1; return true; },
+    onError: error => errors.push(error.message),
+  });
+
+  const first = controller.search('first');
+  assert.equal(controller.active(), true);
+  await controller.clear();
+  assert.equal(restores, 1);
+  assert.equal(controller.active(), false);
+  resolveFirst({ query: 'first', entries: [], truncated: false });
+  assert.equal(await first, false);
+  assert.deepEqual(rendered, []);
+  assert.deepEqual(errors, []);
+
+  assert.equal(await controller.search('second'), true);
+  assert.deepEqual(rendered, ['second']);
+  assert.equal(controller.leave(), true);
+  assert.equal(controller.active(), false);
+});
+
+test('shared-folder search form is a labelled semantic search control', () => {
+  const template = fs.readFileSync('website/src/main/resources/templates/shared-folder.html', 'utf8');
+  const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
+  assert.match(template, /<form id="shared-folder-search-form"[^>]*role="search"[^>]*aria-label="Search shared folder"/);
+  assert.match(template, /<label for="shared-folder-search-query"[^>]*>Search all shared files and folders<\/label>/);
+  assert.match(template, /<input id="shared-folder-search-query"[^>]*type="search"[^>]*name="query"[^>]*maxlength="200"/);
+  assert.match(template, /<button id="shared-folder-search-clear"[^>]*type="button"[^>]*disabled>Clear<\/button>/);
+  assert.match(css, /\.shared-folder-search/);
+  assert.match(css, /@media[^{}]*\(max-width:\s*767px\)[\s\S]*\.shared-folder-search/);
 });
 
 test('media profiles and every public job state have clear browser text', () => {
