@@ -7,6 +7,7 @@ import static dev.christopherbell.libs.api.APIVersion.V20260717;
 import static dev.christopherbell.libs.api.APIVersion.V20260726;
 
 import dev.christopherbell.account.model.dto.AccountDetail;
+import dev.christopherbell.account.deletion.AccountDeletionResult;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
@@ -133,11 +134,11 @@ public class AccountController {
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
-  public ResponseEntity<Response<AccountDetail>> deleteAccount(
+  public ResponseEntity<Response<AccountDeletionResult>> deleteAccount(
       @PathVariable String accountId
   ) throws Exception {
     return new ResponseEntity<>(
-        Response.<AccountDetail>builder()
+        Response.<AccountDeletionResult>builder()
             .payload(accountService.deleteAccount(accountId))
             .success(true)
             .build(), HttpStatus.OK);

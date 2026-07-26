@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
@@ -131,6 +132,19 @@ class PermissionServiceTest {
     assertTrue(PermissionService.isAccountActive(AccountStatus.ACTIVE));
     assertFalse(PermissionService.isAccountActive(AccountStatus.INACTIVE));
     assertFalse(PermissionService.isAccountActive(AccountStatus.SUSPENDED));
+  }
+
+  @Test
+  @DisplayName("Credential-free tombstones always fail authentication")
+  void isAuthenticated_whenCredentialsAreAbsent_returnsFalse() throws Exception {
+    var tombstone = Account.builder()
+        .id("deleted-user")
+        .email("deleted-user@invalid.local")
+        .status(AccountStatus.INACTIVE)
+        .build();
+
+    assertFalse(PermissionService.isAuthenticated(
+        new AccountLoginRequest("deleted-user@invalid.local", "any-password"), tombstone));
   }
 
   private void setTokenForRole(Role role) {

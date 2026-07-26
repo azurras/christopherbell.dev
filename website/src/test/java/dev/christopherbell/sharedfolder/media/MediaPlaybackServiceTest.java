@@ -85,6 +85,20 @@ class MediaPlaybackServiceTest {
   }
 
   @Test
+  void accountDeletionCancelsOwnedMediaAndRemovesPrivateWorkerArtifacts() throws Exception {
+    var job = job("owned-job", "cache-key", MediaJobStatus.QUEUED);
+    job.setOwnerId("account-1");
+    when(jobs.findByOwnerId("account-1")).thenReturn(List.of(job));
+    when(jobs.cancelActive("owned-job", "account-1", NOW)).thenReturn(1L);
+
+    media.deleteOwnedPrivateState("account-1");
+
+    verify(jobs).cancelActive("owned-job", "account-1", NOW);
+    verify(jobs).deleteById("owned-job");
+    assertThat(storage.cancellationPath(job)).doesNotExist();
+  }
+
+  @Test
   void directPlaybackIsOnlyABrowserProbeAndNeverClaimsCodecEvidence() {
     when(sources.resolve("audio/song.flac"))
         .thenReturn(source("audio/song.flac", 20, NOW.minusSeconds(1)));

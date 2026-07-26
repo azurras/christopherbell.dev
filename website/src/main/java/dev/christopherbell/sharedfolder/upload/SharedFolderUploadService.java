@@ -206,6 +206,28 @@ public class SharedFolderUploadService {
     return expired;
   }
 
+  /** Reconciles and removes every private upload artifact owned by a deleted account. */
+  public void deleteOwnedPrivateState(String ownerId) {
+    if (ownerId == null || ownerId.isBlank()) throw unavailable();
+    for (var candidate : sessions.findByOwnerId(ownerId)) {
+      try {
+        var current = reconcileExpiredAppendLease(candidate);
+        if (current.getState() == SharedFolderUploadState.APPENDING) {
+          throw unavailable();
+        }
+        current = reconcilePending(current);
+        if (current.getState() == SharedFolderUploadState.FINALIZING
+            || current.getState() == SharedFolderUploadState.CANCEL_PENDING) {
+          throw unavailable();
+        }
+        deleteExpiredPrivatePayloads(current);
+        sessions.deleteById(current.getId());
+      } catch (IOException failure) {
+        throw unavailable();
+      }
+    }
+  }
+
   private void deferExpiredMaintenance(SharedFolderUploadSession session, Instant now) {
     int expectedAttempts = Math.max(0, session.getMaintenanceAttempts());
     int newAttempts = Math.min(MAX_MAINTENANCE_ATTEMPTS, expectedAttempts + 1);

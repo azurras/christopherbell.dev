@@ -19,6 +19,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.deletion.AccountDeletionResult;
+import dev.christopherbell.account.deletion.AccountDeletionStatus;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
@@ -415,8 +417,9 @@ public class AccountControllerTest {
   @DisplayName("testDeleteAccount_whenAuthorized_Returns200")
   @WithMockUser(authorities = {"ADMIN"})
   public void testDeleteAccount_whenAuthorized_Returns200() throws Exception {
-    var detail = AccountDetail.builder().id("to-del").build();
-    when(accountService.deleteAccount(eq("to-del"))).thenReturn(detail);
+    var deletion = new AccountDeletionResult(
+        "deleted:abcdef012345", AccountDeletionStatus.COMPLETE, 6);
+    when(accountService.deleteAccount(eq("to-del"))).thenReturn(deletion);
 
     mockMvc
         .perform(
@@ -425,7 +428,9 @@ public class AccountControllerTest {
                 .contentType(MediaType.APPLICATION_JSON_VALUE))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.payload.id").value("to-del"));
+        .andExpect(jsonPath("$.payload.pseudonym").value("deleted:abcdef012345"))
+        .andExpect(jsonPath("$.payload.status").value("COMPLETE"))
+        .andExpect(jsonPath("$.payload.completedSteps").value(6));
 
     verify(accountService).deleteAccount(eq("to-del"));
   }

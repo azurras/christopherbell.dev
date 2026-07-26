@@ -2,6 +2,7 @@ package dev.christopherbell.sharedfolder.upload;
 
 import java.time.Instant;
 import java.util.Collection;
+import java.util.List;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.mongodb.repository.MongoRepository;
@@ -14,6 +15,8 @@ public interface SharedFolderUploadSessionRepository
 
   long countByOwnerIdAndStateIn(
       String ownerId, Collection<SharedFolderUploadState> states);
+
+  List<SharedFolderUploadSession> findByOwnerId(String ownerId);
 
   /** Returns only expired ACTIVE work or EXPIRED cleanup whose durable retry is due. */
   @Query("{ '$or': ["

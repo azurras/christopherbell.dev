@@ -2,6 +2,8 @@ package dev.christopherbell.account;
 
 import com.mongodb.MongoWriteException;
 import dev.christopherbell.account.auth.AccountAuthenticationService;
+import dev.christopherbell.account.deletion.AccountDeletionResult;
+import dev.christopherbell.account.deletion.AccountDeletionService;
 import dev.christopherbell.account.follow.AccountFollowService;
 import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.account.model.dto.AccountDetail;
@@ -59,6 +61,7 @@ public class AccountService {
 
   private final AccountMapper accountMapper;
   private final AccountRepository accountRepository;
+  private final AccountDeletionService accountDeletionService;
   private final AccountAuthenticationService accountAuthenticationService;
   private final PasswordResetService passwordResetService;
   private final AccountProfileService accountProfileService;
@@ -134,18 +137,9 @@ public class AccountService {
    * @return the deleted account.
    * @throws ResourceNotFoundException if the account cannot be found.
    */
-  public AccountDetail deleteAccount(String accountId) throws ResourceNotFoundException {
-    log.info("Deleting account with id: {}", accountId);
-    var account =
-        accountRepository
-            .findById(accountId)
-            .orElseThrow(
-                () ->
-                    new ResourceNotFoundException(
-                        String.format("Account with id %s not found.", accountId)));
-    accountRepository.delete(account);
-    log.info("Successfully deleted account with id: {}", accountId);
-    return accountMapper.toAccount(account);
+  public AccountDeletionResult deleteAccount(String accountId)
+      throws InvalidRequestException, ResourceNotFoundException {
+    return accountDeletionService.delete(accountId);
   }
 
   /**

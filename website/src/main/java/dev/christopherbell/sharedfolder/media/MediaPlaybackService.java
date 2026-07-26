@@ -189,6 +189,23 @@ public class MediaPlaybackService {
     }
   }
 
+  /** Cancels and removes private worker metadata owned by a deleted account. */
+  public void deleteOwnedPrivateState(String ownerId) {
+    if (ownerId == null || ownerId.isBlank()) throw unavailable();
+    for (var job : jobs.findByOwnerId(ownerId)) {
+      try {
+        if (!job.getStatus().terminal()) {
+          jobs.cancelActive(job.getId(), ownerId, clock.instant());
+          storage.requestCancellation(job);
+        }
+        storage.deleteJobArtifacts(job);
+        jobs.deleteById(job.getId());
+      } catch (IOException | RuntimeException failure) {
+        throw unavailable(failure);
+      }
+    }
+  }
+
   public MediaJob requireVisibleJob(String id) {
     Account account = access.requireRead();
     return refreshWorkerState(visible(id, account.getId()));

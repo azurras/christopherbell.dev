@@ -15,6 +15,9 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.auth.AccountAuthenticationService;
+import dev.christopherbell.account.deletion.AccountDeletionResult;
+import dev.christopherbell.account.deletion.AccountDeletionService;
+import dev.christopherbell.account.deletion.AccountDeletionStatus;
 import dev.christopherbell.account.follow.AccountFollowService;
 import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.account.model.Account;
@@ -64,6 +67,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 public class AccountServiceTest {
   @Mock private AccountMapper accountMapper;
   @Mock private AccountRepository accountRepository;
+  @Mock private AccountDeletionService accountDeletionService;
   @Mock private PasswordResetNotificationService passwordResetNotificationService;
   @Mock private PostRepository postRepository;
   @Mock private SharedFolderAuditRecorder sharedFolderAudit;
@@ -80,6 +84,7 @@ public class AccountServiceTest {
     accountService = new AccountService(
         accountMapper,
         accountRepository,
+        accountDeletionService,
         authenticationService,
         passwordResetService,
         profileService,
@@ -459,33 +464,26 @@ public class AccountServiceTest {
   }
 
   @Test
-  @DisplayName("Delete: found -> deletes and returns mapped detail")
-  public void testDeleteAccount_whenFound_DeletesAndReturnsDetail() throws Exception {
-    var entity = AccountServiceStub.getAccountWhenExistsStub();
-    var detail = AccountDetail.builder().id(entity.getId()).build();
-
-    when(accountRepository.findById(eq(AccountServiceStub.ID)))
-        .thenReturn(Optional.of(entity));
-    when(accountMapper.toAccount(eq(entity))).thenReturn(detail);
+  @DisplayName("Delete delegates to the durable privacy deletion service")
+  public void testDeleteAccount_whenFound_ReturnsDeletionResult() throws Exception {
+    var deletion = new AccountDeletionResult(
+        "deleted:abcdef012345", AccountDeletionStatus.COMPLETE, 6);
+    when(accountDeletionService.delete(AccountServiceStub.ID)).thenReturn(deletion);
 
     var result = accountService.deleteAccount(AccountServiceStub.ID);
 
-    assertEquals(detail, result);
-    verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verify(accountRepository).delete(eq(entity));
-    verify(accountMapper).toAccount(eq(entity));
-    verifyNoMoreInteractions(accountRepository, accountMapper);
+    assertEquals(deletion, result);
+    verify(accountDeletionService).delete(AccountServiceStub.ID);
   }
 
   @Test
   @DisplayName("Delete: not found -> throws 404")
-  public void testDeleteAccount_whenNotFound_Throws404() {
-    when(accountRepository.findById(eq(AccountServiceStub.ID)))
-        .thenReturn(Optional.empty());
+  public void testDeleteAccount_whenNotFound_Throws404() throws Exception {
+    when(accountDeletionService.delete(AccountServiceStub.ID))
+        .thenThrow(new ResourceNotFoundException("Account was not found."));
 
     assertThrows(ResourceNotFoundException.class, () -> accountService.deleteAccount(AccountServiceStub.ID));
-    verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verifyNoMoreInteractions(accountRepository);
+    verify(accountDeletionService).delete(AccountServiceStub.ID);
   }
 
   @Test
