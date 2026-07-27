@@ -146,8 +146,9 @@ Owns browser-side behavior for server-rendered pages.
   secure source before attempting to continue playback. If autoplay policy blocks that attempt,
   the next page gesture resumes it without losing the saved playing intent. Audio tags provide an
   optional title, artist, album, embedded cover, and Media Session presentation; missing or invalid
-  tags leave the filename and music-note fallback intact. Close, completion, logout, malformed
-  state, and access loss clear the record. While media is active, ordinary
+  tags leave the filename and music-note fallback intact. Radio completion immediately syncs and
+  starts the server-selected next track; close, item completion, logout, malformed state, and
+  access loss clear the record. While media is active, ordinary
   same-origin link clicks load a full-page content frame above the original document, so existing
   server-rendered pages and their scripts keep working without replacing the player. The top URL,
   title, Back/Forward history, logout, and access-revocation behavior remain synchronized. External,
