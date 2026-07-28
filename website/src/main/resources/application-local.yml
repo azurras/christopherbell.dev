@@ -13,6 +13,8 @@ app:
   music:
     root: build/shared-folder/local/shared/Music
     artwork-cache-root: build/shared-folder/local/system/music-artwork
+    metadata:
+      private-root: build/shared-folder/local/system/music-metadata
 spring:
   mongodb:
     database: christopherbell

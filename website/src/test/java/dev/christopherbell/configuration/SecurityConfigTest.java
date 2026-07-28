@@ -135,6 +135,9 @@ class SecurityConfigTest {
     var preferences = request(
         "PATCH", "/api/music/2026-07-28/library/tracks/track-1/preferences");
     var history = request("GET", "/api/music/2026-07-28/library/history");
+    var metadata = request("PATCH", "/api/music/2026-07-28/tracks/track-1/metadata");
+    var metadataUndo = request(
+        "POST", "/api/music/2026-07-28/metadata-edits/edit-1/undo");
 
     assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(shell)));
     assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(access)));
@@ -149,6 +152,8 @@ class SecurityConfigTest {
     assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(playlistsWrite)));
     assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(preferences)));
     assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(history)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(metadata)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(metadataUndo)));
   }
 
   @Test

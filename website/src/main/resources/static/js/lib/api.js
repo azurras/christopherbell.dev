@@ -183,6 +183,8 @@ export const API = {
     radio: '/api/music/2026-07-28/radio',
     queue: '/api/music/2026-07-28/queue',
     queueItem: id => `/api/music/2026-07-28/queue/${encodeURIComponent(id)}`,
+    metadata: id => `/api/music/2026-07-28/tracks/${encodeURIComponent(id)}/metadata`,
+    metadataUndo: id => `/api/music/2026-07-28/metadata-edits/${encodeURIComponent(id)}/undo`,
     library: {
       playlists: '/api/music/2026-07-28/library/playlists',
       playlist: id => `/api/music/2026-07-28/library/playlists/${encodeURIComponent(id)}`,

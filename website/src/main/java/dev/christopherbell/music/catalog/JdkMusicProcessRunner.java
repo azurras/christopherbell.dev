@@ -11,12 +11,12 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /** JDK process boundary that drains both streams and caps retained output. */
-final class JdkMusicProcessRunner implements MusicProcessRunner {
+public final class JdkMusicProcessRunner implements MusicProcessRunner {
   private static final Duration TERMINATION_GRACE = Duration.ofSeconds(2);
   private final Duration timeout;
   private final int maxOutputBytes;
 
-  JdkMusicProcessRunner(Duration timeout, int maxOutputBytes) {
+  public JdkMusicProcessRunner(Duration timeout, int maxOutputBytes) {
     this.timeout = timeout;
     this.maxOutputBytes = maxOutputBytes;
   }

@@ -112,6 +112,16 @@ app:
     artwork-max-bytes: 5242880
     artwork-max-dimension: 2048
     enabled: false
+    metadata:
+      private-root: build/shared-folder/default/system/music-metadata
+      process-timeout: 2m
+      process-max-output-bytes: 1048576
+      max-source-bytes: 8589934592
+      artwork-max-bytes: 5242880
+      max-expansion-bytes: 20971520
+      backup-retention: 30d
+      lease-duration: 30m
+      cleanup-delay: 1h
     radio:
       track-cooldown: 50
       artist-cooldown: 10

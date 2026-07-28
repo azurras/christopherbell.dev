@@ -1,7 +1,15 @@
 package dev.christopherbell.music.catalog;
 
 import java.time.Clock;
+import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
+import dev.christopherbell.music.metadata.FfmpegMusicTagProcess;
+import dev.christopherbell.music.metadata.MusicMetadataEditRepository;
+import dev.christopherbell.music.metadata.MusicMetadataFileStore;
+import dev.christopherbell.music.metadata.MusicMetadataProperties;
+import dev.christopherbell.music.metadata.MusicMetadataService;
+import dev.christopherbell.music.metadata.MusicTagProcess;
 import dev.christopherbell.music.radio.MusicRadioProperties;
+import dev.christopherbell.music.security.MusicAccessService;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,7 +18,9 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 
 /** Wires the bounded Music indexing pipeline. */
 @Configuration
-@EnableConfigurationProperties({MusicProperties.class, MusicRadioProperties.class})
+@EnableConfigurationProperties({
+    MusicProperties.class, MusicRadioProperties.class, MusicMetadataProperties.class
+})
 public class MusicCatalogConfiguration {
 
   @Bean
@@ -47,5 +57,39 @@ public class MusicCatalogConfiguration {
   @Bean
   public MusicCatalog musicCatalog(MongoTemplate mongo, MusicTrackRepository tracks) {
     return new MusicCatalog(mongo, tracks);
+  }
+
+  @Bean
+  public MusicMetadataFileStore musicMetadataFileStore(
+      MusicMetadataProperties properties,
+      MusicProperties music) {
+    return new MusicMetadataFileStore(properties, music.root());
+  }
+
+  @Bean
+  public MusicTagProcess musicTagProcess(
+      MusicProperties music,
+      MusicMetadataProperties metadata) {
+    return new FfmpegMusicTagProcess(
+        music,
+        new JdkMusicProcessRunner(metadata.processTimeout(), metadata.processMaxOutputBytes()));
+  }
+
+  @Bean
+  public MusicMetadataService musicMetadataService(
+      MusicProperties music,
+      MusicMetadataProperties metadata,
+      MusicCatalog catalog,
+      MusicTrackRepository tracks,
+      MusicProbe probe,
+      MusicArtworkService artwork,
+      MusicTagProcess tagProcess,
+      MusicMetadataFileStore files,
+      MusicMetadataEditRepository edits,
+      MusicAccessService access,
+      MongoLeaseService leases) {
+    return new MusicMetadataService(
+        music, metadata, catalog, tracks, probe, artwork, tagProcess, files, edits, access,
+        leases, Clock.systemUTC());
   }
 }
