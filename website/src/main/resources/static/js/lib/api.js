@@ -168,6 +168,23 @@ export const API = {
       purge: (id) => `/api/shared-folder/2026-07-17/admin/recycle/${encodeURIComponent(id)}`,
     },
   },
+  music: {
+    access: '/api/music/2026-07-28/access',
+    catalog: ({ q = '', artist = '', album = '', genre = '', limit = 100 } = {}) => {
+      const params = new URLSearchParams({ limit: String(limit) });
+      if (q) params.set('q', String(q));
+      if (artist) params.set('artist', String(artist));
+      if (album) params.set('album', String(album));
+      if (genre) params.set('genre', String(genre));
+      return `/api/music/2026-07-28/catalog?${params}`;
+    },
+    stream: id => `/api/music/2026-07-28/tracks/${encodeURIComponent(id)}/stream`,
+    artwork: id => `/api/music/2026-07-28/tracks/${encodeURIComponent(id)}/artwork`,
+    admin: {
+      accessAttempts: (limit = 100) =>
+        `/api/music/2026-07-28/admin/access-attempts?limit=${encodeURIComponent(limit)}`,
+    },
+  },
   location: {
     zipCoordinate: (zipCode) => `/api/location/zip/${encodeURIComponent(zipCode)}`,
     importCensusZipCoordinates: '/api/location/zip/import/census',

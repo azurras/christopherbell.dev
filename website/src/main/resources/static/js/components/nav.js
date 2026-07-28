@@ -46,6 +46,7 @@ export function toolsMenuItems(hasSharedFolderRead = false) {
 export function topLevelNavItems(isAuthenticated) {
     return [
         { href: '/void', label: 'Feed' },
+        { href: '/music', label: 'Music' },
         { href: messagesNavHref(isAuthenticated), label: 'Messages' },
     ];
 }

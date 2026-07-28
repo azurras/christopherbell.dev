@@ -71,6 +71,17 @@ test('void nav uses Feed as the primary Void link', () => {
   );
 });
 
+test('Music is a primary nav destination for signed-in and signed-out visitors', () => {
+  assert.deepEqual(
+    topLevelNavItems(false).find((item) => item.href === '/music'),
+    { href: '/music', label: 'Music' }
+  );
+  assert.deepEqual(
+    topLevelNavItems(true).find((item) => item.href === '/music'),
+    { href: '/music', label: 'Music' }
+  );
+});
+
 test('tools menu includes What’s For Lunch instead of top-level WFL', () => {
   assert.deepEqual(
     toolsMenuItems(false).find((item) => item.href === '/wfl'),

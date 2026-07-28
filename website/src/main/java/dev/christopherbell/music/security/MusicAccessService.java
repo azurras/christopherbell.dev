@@ -29,6 +29,15 @@ public final class MusicAccessService {
     return require(AccountPermission.MUSIC_WRITE, "Music write access required");
   }
 
+  /** Requires a fresh active, approved administrator account for Music administration. */
+  public Account requireAdmin() {
+    Account account = currentActiveApprovedAccount();
+    if (account.getRole() != Role.ADMIN) {
+      throw new AccessDeniedException("Music administrator access required");
+    }
+    return account;
+  }
+
   /** Returns stored capabilities plus role and implication-derived Music capabilities. */
   public Set<AccountPermission> effectivePermissions(Account account) {
     if (account == null) {

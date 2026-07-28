@@ -31,6 +31,7 @@ import {
   moderationReasonValue,
   parseActivityPage,
 } from './lib/back-office-activity.js';
+import { musicAccessAttemptMarkup } from './lib/back-office-music.js';
 import { authHeaders, fetchJson, formatWhen, isLoggedIn, sanitize } from './lib/util.js';
 
 const content = document.getElementById('backOfficeContent');
@@ -71,6 +72,7 @@ const sharedRecycleList = document.getElementById('sharedRecycleList');
 const sharedRecyclePrevious = document.getElementById('sharedRecyclePrevious');
 const sharedRecycleNext = document.getElementById('sharedRecycleNext');
 const sharedRecyclePage = document.getElementById('sharedRecyclePage');
+const musicAccessAuditList = document.getElementById('musicAccessAuditList');
 
 let accounts = [];
 let accountQuery = {
@@ -142,6 +144,7 @@ function setLoading() {
   renderOperationResult(contentOperationStatus, 'Content data has not been loaded yet.');
   renderState(sharedAuditList, 'Loading shared-folder audit…');
   renderState(sharedRecycleList, 'Loading recycle items…');
+  renderState(musicAccessAuditList, 'Loading denied Music access…');
 }
 
 function renderState(container, message) {
@@ -620,9 +623,11 @@ async function refreshAccounts() {
 }
 
 async function refreshSharedAdministration(filters = sharedAuditFilters(sharedAuditForm)) {
-  const [auditEvents, recyclePage] = await Promise.all([
+  const [auditEvents, recyclePage, musicAttempts] = await Promise.all([
     fetchJson(API.sharedFolder.admin.audit(filters), { headers: authHeaders() }),
     fetchJson(API.sharedFolder.admin.recycle(sharedRecyclePageNumber), { headers: authHeaders() }),
+    fetchJson(API.music.admin.accessAttempts(), { headers: authHeaders() })
+        .catch(error => ({ error })),
   ]);
   sharedAuditEvents = auditEvents || [];
   sharedRecycleItems = Array.isArray(recyclePage?.items) ? recyclePage.items : [];
@@ -632,6 +637,12 @@ async function refreshSharedAdministration(filters = sharedAuditFilters(sharedAu
   }
   sharedAuditList.innerHTML = sharedAuditMarkup(sharedAuditEvents || []);
   sharedRecycleList.innerHTML = sharedRecycleMarkup(sharedRecycleItems || []);
+  if (musicAttempts?.error) {
+    if ([401, 403].includes(musicAttempts.error.status)) throw musicAttempts.error;
+    renderState(musicAccessAuditList, 'Denied Music access is temporarily unavailable.');
+  } else {
+    musicAccessAuditList.innerHTML = musicAccessAttemptMarkup(musicAttempts || []);
+  }
   const pagination = sharedRecyclePagination(sharedRecyclePageNumber, sharedRecycleHasNext);
   if (sharedRecyclePage) sharedRecyclePage.textContent = pagination.label;
   if (sharedRecyclePrevious) sharedRecyclePrevious.disabled = pagination.previousDisabled;

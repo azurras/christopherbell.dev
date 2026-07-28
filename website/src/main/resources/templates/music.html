@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Music', 'Private music on christopherbell.dev.', 'https://www.christopherbell.dev/music', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'Music on christopherbell.dev')}"></th:block>
+  <title>Music</title>
+  <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}" />
+</head>
+<body class="site-page void-shell-page music-page">
+  <div id="nav"></div>
+  <main class="site-main music-main" aria-labelledby="music-title">
+    <header class="shared-folder-hero">
+      <div class="shared-folder-heading">
+        <p class="thread-label">Your library</p>
+        <h1 id="music-title">Music</h1>
+        <p>Search the shared library, listen without downloads, and join the site radio.</p>
+      </div>
+    </header>
+    <section class="site-content">
+      <div class="container-fluid">
+        <section id="music-access" class="queue-panel" aria-live="polite">
+          <p>Checking Music access…</p>
+        </section>
+        <section id="music-library" class="d-none" aria-label="Music library">
+          <form id="music-search" class="shared-folder-search" role="search">
+            <label class="visually-hidden" for="music-search-query">Search music</label>
+            <input id="music-search-query" class="form-control" type="search" maxlength="100" placeholder="Search songs, artists, and albums" />
+            <button class="btn btn-warning" type="submit">Search</button>
+          </form>
+          <div id="music-results" class="queue-list mt-3" aria-live="polite"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+  <footer id="footer"></footer>
+  <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
+  <script type="module" src="/js/music.js" th:src="@{/js/music.js}"></script>
+</body>
+</html>

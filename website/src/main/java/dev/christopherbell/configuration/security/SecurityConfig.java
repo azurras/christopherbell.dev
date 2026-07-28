@@ -13,6 +13,7 @@ import dev.christopherbell.configuration.filter.ApiErrorResponseWriter;
 import dev.christopherbell.configuration.filter.RateLimitFilter;
 import dev.christopherbell.configuration.filter.RequestSizeLimitFilter;
 import dev.christopherbell.libs.api.APIVersion;
+import dev.christopherbell.music.web.MusicNoStoreFilter;
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import java.time.Clock;
@@ -76,7 +77,9 @@ public class SecurityConfig {
       "GET:/actuator/health/liveness",
       "GET:/actuator/health/readiness",
       "/shared",
+      "/music",
       "GET:/shared-folder-auth-sw.js",
+      "GET:/api/music" + APIVersion.V20260728 + "/access",
       "/api/accounts" + APIVersion.V20241215 + "/login",
       "/api/accounts" + APIVersion.V20241215 + "/logout",
       "/api/accounts" + APIVersion.V20241215 + "/create",
@@ -153,7 +156,8 @@ public class SecurityConfig {
       RateLimitFilter rateLimitFilter,
       JwtAuthenticationFilter jwtAuthenticationFilter,
       RequestSizeLimitFilter requestSizeLimitFilter,
-      SharedFolderNoStoreFilter sharedFolderNoStoreFilter) throws Exception {
+      SharedFolderNoStoreFilter sharedFolderNoStoreFilter,
+      MusicNoStoreFilter musicNoStoreFilter) throws Exception {
     return http
         .csrf(csrf -> csrf
             .spa()
@@ -184,6 +188,7 @@ public class SecurityConfig {
         .addFilterBefore(rateLimitFilter, JwtAuthenticationFilter.class)
         .addFilterBefore(requestSizeLimitFilter, RateLimitFilter.class)
         .addFilterBefore(sharedFolderNoStoreFilter, CsrfFilter.class)
+        .addFilterBefore(musicNoStoreFilter, CsrfFilter.class)
         
         // Build the SecurityFilterChain
         .build();
@@ -277,6 +282,12 @@ public class SecurityConfig {
     return recorder == null
         ? new SharedFolderNoStoreFilter()
         : new SharedFolderNoStoreFilter(recorder);
+  }
+
+  /** Applies private no-store headers before Music authentication can return an error. */
+  @Bean
+  public MusicNoStoreFilter musicNoStoreFilter() {
+    return new MusicNoStoreFilter();
   }
 
   /**

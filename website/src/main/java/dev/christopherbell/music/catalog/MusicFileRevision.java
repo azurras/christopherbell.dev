@@ -20,6 +20,15 @@ public record MusicFileRevision(long size, long modifiedMillis, String token) {
     }
     BasicFileAttributes attributes = Files.readAttributes(
         source, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+    return observe(attributes);
+  }
+
+  /** Creates the same revision from attributes obtained through a held, revalidating handle. */
+  public static MusicFileRevision observe(BasicFileAttributes attributes) {
+    if (attributes == null || !attributes.isRegularFile()
+        || attributes.isSymbolicLink() || attributes.isOther()) {
+      throw new IllegalArgumentException("Music source is not an ordinary file.");
+    }
     String material = String.valueOf(attributes.fileKey()) + ':' + attributes.size() + ':'
         + attributes.lastModifiedTime().toMillis();
     return new MusicFileRevision(
