@@ -53,6 +53,12 @@ public final class MusicLibraryService {
     return mongo.find(query, MusicPlaylist.class).stream().map(MusicPlaylistView::from).toList();
   }
 
+  /** Resolves one authorized global playlist for server-side catalog paging. */
+  public List<String> playlistTrackIds(String id) {
+    access.requireRead();
+    return playlist(id).trackIds();
+  }
+
   public MusicPlaylistView create(String name, List<String> trackIds) {
     var account = access.requireWrite();
     if (mongo.count(new Query(), MusicPlaylist.class) >= 100) {
@@ -121,12 +127,16 @@ public final class MusicLibraryService {
   }
 
   private MusicPlaylist exactPlaylist(String id, long expectedVersion) {
-    MusicPlaylist current = playlists.findById(id).orElseThrow(() ->
-        new ResponseStatusException(HttpStatus.NOT_FOUND, "Music playlist was not found."));
+    MusicPlaylist current = playlist(id);
     if (current.publicVersion() != expectedVersion) {
       throw conflict();
     }
     return current;
+  }
+
+  private MusicPlaylist playlist(String id) {
+    return playlists.findById(id).orElseThrow(() ->
+        new ResponseStatusException(HttpStatus.NOT_FOUND, "Music playlist was not found."));
   }
 
   private MusicPlaylist save(MusicPlaylist playlist) {

@@ -6,6 +6,7 @@ import dev.christopherbell.music.catalog.MusicArtworkService;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicProperties;
 import dev.christopherbell.music.catalog.MusicQuery;
+import dev.christopherbell.music.library.MusicLibraryService;
 import dev.christopherbell.music.playback.MusicPlaybackService;
 import dev.christopherbell.sharedfolder.service.SharedFolderRangeNotSatisfiableException;
 import java.io.IOException;
@@ -30,16 +31,19 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 @RequestMapping("/api/music" + V20260728)
 public final class MusicReadController {
   private final MusicCatalog catalog;
+  private final MusicLibraryService library;
   private final MusicPlaybackService playback;
   private final MusicArtworkService artwork;
   private final MusicProperties properties;
 
   public MusicReadController(
       MusicCatalog catalog,
+      MusicLibraryService library,
       MusicPlaybackService playback,
       MusicArtworkService artwork,
       MusicProperties properties) {
     this.catalog = catalog;
+    this.library = library;
     this.playback = playback;
     this.artwork = artwork;
     this.properties = properties;
@@ -51,9 +55,18 @@ public final class MusicReadController {
       @RequestParam(required = false) String artist,
       @RequestParam(required = false) String album,
       @RequestParam(required = false) String genre,
-      @RequestParam(defaultValue = "100") int limit) {
+      @RequestParam(required = false) Boolean favorite,
+      @RequestParam(required = false) String playlistId,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "50") int size,
+      @RequestParam(required = false) Integer limit) {
     playback.requireCatalogRead();
-    var result = catalog.search(new MusicQuery(q, artist, album, genre, limit));
+    int requestedSize = limit == null ? size : limit;
+    var trackIds = playlistId == null || playlistId.isBlank()
+        ? null
+        : library.playlistTrackIds(playlistId);
+    var result = catalog.search(new MusicQuery(
+        q, artist, album, genre, favorite, trackIds, page, requestedSize));
     return ResponseEntity.ok().headers(noStore()).body(MusicCatalogView.from(result));
   }
 
