@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -22,6 +23,7 @@ public class MusicAccessAuditRecorder {
   private final MongoTemplate mongo;
   private final Clock clock;
 
+  @Autowired
   public MusicAccessAuditRecorder(MongoTemplate mongo) {
     this(mongo, Clock.systemUTC());
   }
