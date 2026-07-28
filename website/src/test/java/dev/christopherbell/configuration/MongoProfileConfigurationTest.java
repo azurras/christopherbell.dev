@@ -28,6 +28,10 @@ class MongoProfileConfigurationTest {
     assertThat(source.getProperty("spring.data.mongodb.auto-index-creation")).isEqualTo(true);
     assertThat(source.getProperty("app.mail.enabled")).isEqualTo("${APP_MAIL_ENABLED:true}");
     assertThat(source.getProperty("spring.mail.password")).isEqualTo("${RESEND_API_KEY:}");
+    assertThat(source.getProperty("app.music.root")).isEqualTo("${APP_MUSIC_ROOT:A:/Shared/Music}");
+    assertThat(source.getProperty("app.music.media-tools.root"))
+        .isEqualTo("${APP_MUSIC_MEDIA_TOOLS_ROOT:A:/Shared-System/shared-folder-media-tools}");
+    assertThat(source.getProperty("app.music.enabled")).isEqualTo("${APP_MUSIC_ENABLED:true}");
   }
 
   @Test

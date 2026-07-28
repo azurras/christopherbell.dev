@@ -46,8 +46,9 @@ Owns application-wide Spring and web infrastructure.
   tune per-endpoint capacity and window settings, while `rate-limit.max-buckets`
   hard-bounds process-local client state. Inactive buckets expire after their
   matched rule window. Shared-folder upload, mutation, and transcode
-  rules are first-match groups at 240, 60, and 10 requests per minute respectively; GET, HEAD,
-  range, and progressive media reads do not consume those mutation buckets. Rejections use a
+  rules are first-match groups at 240, 60, and 10 requests per minute respectively. Music
+  library/queue mutations and metadata rewrites use separate 120 and 10 request-per-minute
+  groups. GET, HEAD, range, and progressive media reads do not consume mutation buckets. Rejections use a
   standard API-envelope `429` body with `Retry-After` and `X-RateLimit-*`
   guidance. The mutation
   rule covers deployed `/folders`, `/entries`, and `/admin/recycle/**` writes plus planned aliases;

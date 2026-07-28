@@ -15,10 +15,19 @@ public final class JdkMusicProcessRunner implements MusicProcessRunner {
   private static final Duration TERMINATION_GRACE = Duration.ofSeconds(2);
   private final Duration timeout;
   private final int maxOutputBytes;
+  private final MusicExecutableResolver executables;
 
   public JdkMusicProcessRunner(Duration timeout, int maxOutputBytes) {
+    this(timeout, maxOutputBytes, MusicExecutableResolver.identity());
+  }
+
+  public JdkMusicProcessRunner(
+      Duration timeout,
+      int maxOutputBytes,
+      MusicExecutableResolver executables) {
     this.timeout = timeout;
     this.maxOutputBytes = maxOutputBytes;
+    this.executables = executables;
   }
 
   @Override
@@ -28,7 +37,9 @@ public final class JdkMusicProcessRunner implements MusicProcessRunner {
     }
     Process process;
     try {
-      process = new ProcessBuilder(command).start();
+      var resolved = new java.util.ArrayList<>(command);
+      resolved.set(0, executables.resolve(command.getFirst()));
+      process = new ProcessBuilder(resolved).start();
     } catch (IOException failure) {
       throw new MusicProbeException("Media process could not start.", failure);
     }

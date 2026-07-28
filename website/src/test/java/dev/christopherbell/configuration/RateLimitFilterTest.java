@@ -206,6 +206,21 @@ public class RateLimitFilterTest {
   }
 
   @Test
+  void musicMutationsUseDedicatedLimitsWhilePlaybackReadsRemainOutsideThem() throws Exception {
+    var rules = new RateLimitProperties().getRules();
+    int apiMutations = indexOf(rules, "api-mutations");
+
+    assertTrue(indexOf(rules, "music-library-mutation") < apiMutations);
+    assertTrue(indexOf(rules, "music-metadata-mutation") < apiMutations);
+    assertUsesDedicatedBucket(
+        "POST", "/api/music/2026-07-28/library/playlists", "music-library-mutation");
+    assertUsesDedicatedBucket(
+        "PATCH", "/api/music/2026-07-28/tracks/id/metadata", "music-metadata-mutation");
+    assertReadDoesNotUseDedicatedBucket(
+        "GET", "/api/music/2026-07-28/tracks/id/stream", "music-metadata-mutation");
+  }
+
+  @Test
   public void sharedFolderUploadRequestsConsumeTheFirstMatchingDedicatedBucket()
       throws ServletException, IOException {
     RateLimitFilter filter = new RateLimitFilter(

@@ -19,14 +19,26 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 /** Wires the bounded Music indexing pipeline. */
 @Configuration
 @EnableConfigurationProperties({
-    MusicProperties.class, MusicRadioProperties.class, MusicMetadataProperties.class
+    MusicProperties.class, MusicMediaToolProperties.class, MusicRadioProperties.class,
+    MusicMetadataProperties.class
 })
 public class MusicCatalogConfiguration {
 
   @Bean
-  public MusicProcessRunner musicProcessRunner(MusicProperties properties) {
+  public MusicExecutableResolver musicExecutableResolver(
+      MusicProperties music,
+      MusicMediaToolProperties mediaTools,
+      ObjectMapper objectMapper) {
+    return new MusicExecutableResolver(
+        music.enabled(), music.ffmpegCommand(), music.ffprobeCommand(), mediaTools, objectMapper);
+  }
+
+  @Bean
+  public MusicProcessRunner musicProcessRunner(
+      MusicProperties properties,
+      MusicExecutableResolver executables) {
     return new JdkMusicProcessRunner(
-        properties.probeTimeout(), properties.probeMaxOutputBytes());
+        properties.probeTimeout(), properties.probeMaxOutputBytes(), executables);
   }
 
   @Bean
@@ -69,10 +81,12 @@ public class MusicCatalogConfiguration {
   @Bean
   public MusicTagProcess musicTagProcess(
       MusicProperties music,
-      MusicMetadataProperties metadata) {
+      MusicMetadataProperties metadata,
+      MusicExecutableResolver executables) {
     return new FfmpegMusicTagProcess(
         music,
-        new JdkMusicProcessRunner(metadata.processTimeout(), metadata.processMaxOutputBytes()));
+        new JdkMusicProcessRunner(
+            metadata.processTimeout(), metadata.processMaxOutputBytes(), executables));
   }
 
   @Bean

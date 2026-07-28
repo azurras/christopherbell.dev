@@ -103,6 +103,8 @@ app:
   music:
     root: build/shared-folder/default/shared/Music
     artwork-cache-root: build/shared-folder/default/system/music-artwork
+    media-tools:
+      root: ${APP_MUSIC_MEDIA_TOOLS_ROOT:build/shared-folder/default/system/shared-folder-media-tools}
     ffprobe-command: ${APP_MUSIC_FFPROBE_COMMAND:ffprobe}
     ffmpeg-command: ${APP_MUSIC_FFMPEG_COMMAND:ffmpeg}
     scan-batch-size: 100
