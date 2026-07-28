@@ -260,7 +260,7 @@ class SharedFolderRadioServiceTest {
   }
 
   @Test
-  void current_whenKnownTrackEndIsMoreThanThreeSecondsOld_startsReplacementAtNow() {
+  void current_whenKnownTrackEndIsMoreThanThreeSecondsOld_preservesTheStationTimeline() {
     SharedDirectoryEntry first = track("Music/first.mp3");
     SharedDirectoryEntry second = track("Music/second.mp3");
     MutableClock clock = new MutableClock(START);
@@ -274,8 +274,54 @@ class SharedFolderRadioServiceTest {
     SharedFolderRadioResponse advanced = service.current();
 
     assertThat(advanced.playback().entry()).isEqualTo(second);
-    assertThat(advanced.playback().startedAt()).isEqualTo(START.plusSeconds(34));
-    assertThat(advanced.playback().positionSeconds()).isZero();
+    assertThat(advanced.playback().startedAt()).isEqualTo(START.plusSeconds(30));
+    assertThat(advanced.playback().positionSeconds()).isEqualTo(4.0);
+  }
+
+  @Test
+  void current_afterIdleTime_rollsAcrossPreviouslyObservedTrackDurations() {
+    SharedDirectoryEntry first = track("Music/first.mp3");
+    SharedDirectoryEntry second = track("Music/second.mp3");
+    MutableClock clock = new MutableClock(START);
+    InMemoryRadioRepository repository = new InMemoryRadioRepository();
+    SharedFolderRadioService service = service(List.of(first, second), repository, clock, 0);
+    SharedFolderRadioResponse firstPlayback = service.current();
+    service.reportDuration(new SharedFolderRadioDurationRequest(
+        firstPlayback.playback().stationSequence(), first.path(), 30));
+    clock.advanceSeconds(31);
+    SharedFolderRadioResponse secondPlayback = service.current();
+    service.reportDuration(new SharedFolderRadioDurationRequest(
+        secondPlayback.playback().stationSequence(), second.path(), 30));
+    clock.advanceSeconds(69);
+
+    SharedFolderRadioResponse caughtUp =
+        service(List.of(first, second), repository, clock, 0).current();
+
+    assertThat(caughtUp.playback().entry()).isEqualTo(second);
+    assertThat(caughtUp.playback().stationSequence()).isEqualTo(4);
+    assertThat(caughtUp.playback().startedAt()).isEqualTo(START.plusSeconds(90));
+    assertThat(caughtUp.playback().positionSeconds()).isEqualTo(10.0);
+    assertThat(caughtUp.playback().durationSeconds()).isEqualTo(30.0);
+  }
+
+  @Test
+  void current_whenTrackRevisionChanges_doesNotReuseOrPersistTheOldDuration() {
+    SharedDirectoryEntry original = track("Music/song.mp3", "original-revision");
+    SharedDirectoryEntry replacement = track("Music/song.mp3", "replacement-revision");
+    AtomicReference<List<SharedDirectoryEntry>> tracks =
+        new AtomicReference<>(List.of(original));
+    InMemoryRadioRepository repository = new InMemoryRadioRepository();
+    SharedFolderRadioService service = service(
+        tracks, repository, new MutableClock(START), 0);
+    SharedFolderRadioResponse initial = service.current();
+    service.reportDuration(new SharedFolderRadioDurationRequest(
+        initial.playback().stationSequence(), original.path(), 30));
+    tracks.set(List.of(replacement));
+
+    SharedFolderRadioResponse refreshed = service.current();
+
+    assertThat(refreshed.playback().durationSeconds()).isNull();
+    assertThat(repository.saved().durationSeconds()).isNull();
   }
 
   @Test
@@ -332,7 +378,10 @@ class SharedFolderRadioServiceTest {
     AtomicInteger repositoryReads = new AtomicInteger();
     AtomicReference<SharedFolderRadioDocument> stored = new AtomicReference<>(
         new SharedFolderRadioDocument(
-            SharedFolderRadioDocument.ID, 1, firstTrack.path(), START, 30.0));
+            SharedFolderRadioDocument.ID, SharedFolderRadioDocument.State.PLAYING,
+            1, firstTrack.path(), START, 30.0,
+            List.of(new SharedFolderRadioDocument.TrackDuration(
+                firstTrack.path(), firstTrack.observedToken(), 30.0))));
     ThreadLocal<Boolean> repositoryReadCompleted =
         ThreadLocal.withInitial(() -> Boolean.FALSE);
     SharedFolderCatalogService catalog = mock(SharedFolderCatalogService.class);
@@ -387,7 +436,8 @@ class SharedFolderRadioServiceTest {
       SharedFolderRadioResponse waitingRequest = second.get(2, TimeUnit.SECONDS);
       assertThat(waitingRequest.playback().stationSequence()).isEqualTo(2);
       assertThat(waitingRequest.playback().entry()).isEqualTo(secondTrack);
-      assertThat(waitingRequest.playback().startedAt()).isEqualTo(START.plusSeconds(34));
+      assertThat(waitingRequest.playback().startedAt()).isEqualTo(START.plusSeconds(30));
+      assertThat(waitingRequest.playback().positionSeconds()).isEqualTo(4.0);
     } finally {
       releaseFirstRepositoryRead.countDown();
       executor.shutdownNow();
@@ -418,9 +468,13 @@ class SharedFolderRadioServiceTest {
   }
 
   private SharedDirectoryEntry track(String path) {
+    return track(path, "observed-" + path);
+  }
+
+  private SharedDirectoryEntry track(String path, String observedToken) {
     return new SharedDirectoryEntry(
         path.substring(path.lastIndexOf('/') + 1), path, SharedDirectoryEntryType.FILE, 128,
-        START.minusSeconds(60), SharedFolderPreviewKind.AUDIO, "observed-token");
+        START.minusSeconds(60), SharedFolderPreviewKind.AUDIO, observedToken);
   }
 
   private static Stream<Arguments> invalidDurations() {
