@@ -2,6 +2,9 @@ package dev.christopherbell.sharedfolder.radio;
 
 import dev.christopherbell.sharedfolder.model.SharedFolderRadioDurationRequest;
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -13,7 +16,8 @@ public record SharedFolderRadioDocument(
     long stationSequence,
     String path,
     Instant startedAt,
-    Double durationSeconds) {
+    Double durationSeconds,
+    List<TrackDuration> knownDurations) {
   public static final String ID = "shared-folder-radio";
 
   /** Rejects malformed persisted state before station transitions rely on it. */
@@ -39,6 +43,13 @@ public record SharedFolderRadioDocument(
         && !SharedFolderRadioDurationRequest.isValidDuration(durationSeconds)) {
       throw new IllegalArgumentException("Shared-folder radio duration is invalid");
     }
+    knownDurations = knownDurations == null ? List.of() : List.copyOf(knownDurations);
+    Set<String> observedTokens = new HashSet<>();
+    for (TrackDuration knownDuration : knownDurations) {
+      if (knownDuration == null || !observedTokens.add(knownDuration.observedToken())) {
+        throw new IllegalArgumentException("Shared-folder radio duration cache is invalid");
+      }
+    }
   }
 
   /** Preserves construction of the playing-only document shape used before empty tombstones. */
@@ -48,13 +59,32 @@ public record SharedFolderRadioDocument(
       String path,
       Instant startedAt,
       Double durationSeconds) {
-    this(id, State.PLAYING, stationSequence, path, startedAt, durationSeconds);
+    this(id, State.PLAYING, stationSequence, path, startedAt, durationSeconds, List.of());
+  }
+
+  /** Preserves construction of the stateful document shape used before duration caching. */
+  public SharedFolderRadioDocument(
+      String id,
+      State state,
+      long stationSequence,
+      String path,
+      Instant startedAt,
+      Double durationSeconds) {
+    this(id, state, stationSequence, path, startedAt, durationSeconds, List.of());
   }
 
   /** Creates a durable empty station identity with no playback fields. */
   public static SharedFolderRadioDocument empty(long stationSequence) {
     return new SharedFolderRadioDocument(
-        ID, State.EMPTY, stationSequence, null, null, null);
+        ID, State.EMPTY, stationSequence, null, null, null, List.of());
+  }
+
+  /** Creates an empty station identity without discarding safe revision-bound durations. */
+  public static SharedFolderRadioDocument empty(
+      long stationSequence,
+      List<TrackDuration> knownDurations) {
+    return new SharedFolderRadioDocument(
+        ID, State.EMPTY, stationSequence, null, null, null, knownDurations);
   }
 
   /** Creates a durable playing station identity. */
@@ -64,7 +94,28 @@ public record SharedFolderRadioDocument(
       Instant startedAt,
       Double durationSeconds) {
     return new SharedFolderRadioDocument(
-        ID, State.PLAYING, stationSequence, path, startedAt, durationSeconds);
+        ID, State.PLAYING, stationSequence, path, startedAt, durationSeconds, List.of());
+  }
+
+  /** Creates a playing station with its bounded, revision-bound duration knowledge. */
+  public static SharedFolderRadioDocument playing(
+      long stationSequence,
+      String path,
+      Instant startedAt,
+      Double durationSeconds,
+      List<TrackDuration> knownDurations) {
+    return new SharedFolderRadioDocument(
+        ID, State.PLAYING, stationSequence, path, startedAt, durationSeconds, knownDurations);
+  }
+
+  /** One trusted duration observation tied to an exact catalog entry revision. */
+  public record TrackDuration(String path, String observedToken, double durationSeconds) {
+    public TrackDuration {
+      if (path == null || path.isBlank() || observedToken == null || observedToken.isBlank()
+          || !SharedFolderRadioDurationRequest.isValidDuration(durationSeconds)) {
+        throw new IllegalArgumentException("Shared-folder radio track duration is invalid");
+      }
+    }
   }
 
   /** Closed set of durable station states. */
