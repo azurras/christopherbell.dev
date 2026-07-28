@@ -156,7 +156,10 @@ Owns browser-side behavior for server-rendered pages.
 - `music.js` and `lib/music.js` own the access-aware `/music` hub. They validate catalog, queue,
   and playlist responses before rendering; expose catalog playback, the global station and queue,
   favorites, radio exclusions, shared playlists/history, and writer-only metadata editing with
-  undo; and delegate every track to the existing top-document media owner. The player expands on
+  undo; fetch All Music, Favorites, and playlists as stable 50-track server pages with full-result
+  totals and facets; and delegate every track to the existing top-document media owner. Catalog
+  page changes replace only result DOM and never constrain the server-owned radio pool or replace
+  the active media node. The player expands on
   `/music` and compacts on other routes by changing presentation only, so the active media node is
   never replaced during navigation.
 

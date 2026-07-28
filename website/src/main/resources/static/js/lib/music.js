@@ -30,19 +30,74 @@ export function musicTrack(value) {
 }
 
 export function musicCatalog(value) {
-  if (!Array.isArray(value?.tracks) || typeof value?.facets !== 'object') {
+  const validPage = Number.isSafeInteger(value?.page) && value.page >= 0;
+  const validSize = Number.isSafeInteger(value?.size) && value.size >= 1 && value.size <= 100;
+  const validTotal = Number.isSafeInteger(value?.totalTracks) && value.totalTracks >= 0;
+  const validPages = Number.isSafeInteger(value?.totalPages) && value.totalPages >= 0;
+  const expectedPages = validSize && validTotal ? Math.ceil(value.totalTracks / value.size) : -1;
+  const pageInRange = value?.totalPages === 0
+    ? value?.page === 0 && value?.tracks?.length === 0
+    : value?.page < value?.totalPages;
+  if (!Array.isArray(value?.tracks) || typeof value?.facets !== 'object'
+      || !validPage || !validSize || !validTotal || !validPages
+      || value.totalPages !== expectedPages || !pageInRange || value.tracks.length > value.size) {
     throw new Error('Music returned an invalid catalog.');
   }
   return Object.freeze({
     tracks: Object.freeze(value.tracks.map(musicTrack)),
-    facets: Object.freeze({
-      artists: strings(value.facets.artists),
-      albums: strings(value.facets.albums),
-      genres: strings(value.facets.genres),
-      years: Object.freeze(Array.isArray(value.facets.years)
-        ? value.facets.years.filter(Number.isSafeInteger).slice(0, 500) : []),
-    }),
+    facets: musicFacets(value.facets),
+    page: value.page,
+    size: value.size,
+    totalTracks: value.totalTracks,
+    totalPages: value.totalPages,
   });
+}
+
+/** Return a compact set of zero-based page numbers for accessible pagination controls. */
+export function musicPageNumbers(page, totalPages) {
+  if (!Number.isSafeInteger(page) || !Number.isSafeInteger(totalPages) || totalPages < 1) return [];
+  const last = totalPages - 1;
+  const current = Math.max(0, Math.min(last, page));
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index);
+  if (current <= 1) return [0, 1, 2, last];
+  if (current >= last - 1) return [0, last - 2, last - 1, last];
+  return [0, current - 1, current, current + 1, last];
+}
+
+/** Translate a validated Music sidebar view into server-side catalog constraints. */
+export function musicViewFilter(view) {
+  if (view === 'all') return {};
+  if (view === 'favorites') return { favorite: true };
+  if (typeof view === 'string' && view.startsWith('playlist:')) {
+    const playlistId = view.substring('playlist:'.length);
+    if (/^[A-Za-z0-9_-]{1,100}$/u.test(playlistId)) return { playlistId };
+  }
+  throw new Error('Music view is invalid.');
+}
+
+/** Build one bounded catalog request from browser-owned view and filter state. */
+export function musicCatalogParameters({ view, page, q, artist, album, genre }) {
+  if (!Number.isSafeInteger(page) || page < 0) throw new Error('Music page is invalid.');
+  return {
+    q, artist, album, genre, page, size: 50, ...musicViewFilter(view),
+  };
+}
+
+/** Render accessible page controls from trusted, validated catalog metadata. */
+export function musicPaginationMarkup({ page, totalPages }) {
+  const pages = musicPageNumbers(page, totalPages);
+  if (pages.length <= 1) return '';
+  const previous = Math.max(0, page - 1);
+  const next = Math.min(totalPages - 1, page + 1);
+  const parts = [`<button type="button" data-page="${previous}"${page === 0 ? ' disabled' : ''}>Previous</button>`];
+  pages.forEach((value, index) => {
+    if (index > 0 && value - pages[index - 1] > 1) {
+      parts.push('<span class="music-page-gap" aria-hidden="true">…</span>');
+    }
+    parts.push(`<button type="button" data-page="${value}"${value === page ? ' aria-current="page"' : ''}>${value + 1}</button>`);
+  });
+  parts.push(`<button type="button" data-page="${next}"${page === totalPages - 1 ? ' disabled' : ''}>Next</button>`);
+  return parts.join('');
 }
 
 export function musicQueue(value) {
@@ -117,4 +172,14 @@ export function musicQueueMarkup(queue, { canManage = false } = {}) {
 function strings(value) {
   return Object.freeze(Array.isArray(value)
     ? value.filter(item => typeof item === 'string' && item.length <= TEXT_LIMIT).slice(0, 500) : []);
+}
+
+function musicFacets(value) {
+  return Object.freeze({
+    artists: strings(value.artists),
+    albums: strings(value.albums),
+    genres: strings(value.genres),
+    years: Object.freeze(Array.isArray(value.years)
+      ? value.years.filter(Number.isSafeInteger).slice(0, 500) : []),
+  });
 }

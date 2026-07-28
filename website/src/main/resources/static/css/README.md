@@ -7,7 +7,7 @@ Owns site styling for server-rendered pages and frontend components.
 - `main.css` is the primary stylesheet for the current site, Void, tools, auth,
   profile, messages, post cards, and responsive layout.
 - `music.css` owns the three-pane desktop and stacked mobile Music hub, including its track,
-  playlist, queue, filter, dialog, and notification surfaces.
+  playlist, queue, filter, numbered pagination, dialog, and notification surfaces.
 - `blog.css` contains older blog-specific styling.
 - `simple.css` contains legacy/simple page styling.
 - `thebell.css` styles the archived The Bell pages.

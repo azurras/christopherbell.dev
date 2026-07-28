@@ -2,9 +2,12 @@ import { API } from './lib/api.js';
 import {
   formatMusicDuration,
   musicCatalog,
+  musicCatalogParameters,
+  musicPaginationMarkup,
   musicPlaylists,
   musicQueue,
   musicQueueMarkup,
+  musicTrack,
   musicTrackMarkup,
 } from './lib/music.js';
 import { playMusicRadio, playMusicTrack } from './lib/site-media-player.js';
@@ -21,6 +24,7 @@ const elements = Object.freeze({
   album: document.getElementById('music-album-filter'),
   genre: document.getElementById('music-genre-filter'),
   count: document.getElementById('music-count'),
+  pagination: document.getElementById('music-pagination'),
   queue: document.getElementById('music-queue'),
   queueCount: document.getElementById('music-queue-count'),
   playlists: document.getElementById('music-playlists'),
@@ -34,12 +38,16 @@ const elements = Object.freeze({
 
 const state = {
   canManage: false,
-  catalog: { tracks: [], facets: { artists: [], albums: [], genres: [], years: [] } },
+  catalog: {
+    tracks: [], facets: { artists: [], albums: [], genres: [], years: [] },
+    page: 0, size: 50, totalTracks: 0, totalPages: 0,
+  },
   queue: { version: 0, items: [] },
   playlists: [],
   history: [],
   view: 'all',
 };
+let catalogRequestController = null;
 
 function deniedMarkup(status) {
   if (!status?.authenticated) {
@@ -63,17 +71,34 @@ async function loadWorkspace() {
   renderWorkspace();
 }
 
-async function loadCatalog() {
+async function loadCatalog(page = 0) {
+  catalogRequestController?.abort();
+  const requestController = new AbortController();
+  const requestedView = state.view;
+  catalogRequestController = requestController;
   elements.results.innerHTML = '<p class="music-empty">Searching the library…</p>';
-  const response = await fetchJson(API.music.catalog({
-    q: String(elements.query?.value || '').trim(),
-    artist: elements.artist?.value || '',
-    album: elements.album?.value || '',
-    genre: elements.genre?.value || '',
-  }), { redirectOnUnauthorized: false, cache: 'no-store' });
-  state.catalog = musicCatalog(response);
-  state.view = 'all';
-  renderWorkspace();
+  elements.pagination.hidden = true;
+  try {
+    const response = await fetchJson(API.music.catalog(musicCatalogParameters({
+      view: requestedView,
+      page,
+      q: String(elements.query?.value || '').trim(),
+      artist: elements.artist?.value || '',
+      album: elements.album?.value || '',
+      genre: elements.genre?.value || '',
+    })), {
+      redirectOnUnauthorized: false,
+      cache: 'no-store',
+      signal: requestController.signal,
+    });
+    if (catalogRequestController !== requestController || state.view !== requestedView) return;
+    state.catalog = musicCatalog(response);
+    renderWorkspace();
+  } catch (error) {
+    if (error?.name !== 'AbortError') throw error;
+  } finally {
+    if (catalogRequestController === requestController) catalogRequestController = null;
+  }
 }
 
 function renderWorkspace() {
@@ -81,6 +106,7 @@ function renderWorkspace() {
   renderPlaylists();
   renderQueue();
   renderResults();
+  renderPagination();
 }
 
 function renderFilters() {
@@ -105,18 +131,28 @@ function renderResults() {
     elements.results.innerHTML = historyMarkup();
     return;
   }
-  const playlist = state.view.startsWith('playlist:')
-    ? state.playlists.find(item => item.id === state.view.substring(9)) : null;
-  let tracks = state.catalog.tracks;
-  if (state.view === 'favorites') tracks = tracks.filter(track => track.favorite);
-  if (playlist) tracks = tracks.filter(track => playlist.trackIds.includes(track.id));
-  elements.count.textContent = `${tracks.length} track${tracks.length === 1 ? '' : 's'}`;
+  const tracks = state.catalog.tracks;
+  const count = state.catalog.totalTracks.toLocaleString();
+  const page = state.catalog.totalPages > 0
+    ? ` · Page ${state.catalog.page + 1} of ${state.catalog.totalPages}` : '';
+  elements.count.textContent = `${count} track${state.catalog.totalTracks === 1 ? '' : 's'}${page}`;
   elements.results.innerHTML = tracks.length
     ? tracks.map(track => musicTrackMarkup(track, {
       canManage: state.canManage,
       playlists: state.playlists,
     })).join('')
     : '<p class="music-empty">No tracks matched this view.</p>';
+}
+
+function renderPagination() {
+  if (state.view === 'history') {
+    elements.pagination.replaceChildren();
+    elements.pagination.hidden = true;
+    return;
+  }
+  const markup = musicPaginationMarkup(state.catalog);
+  elements.pagination.innerHTML = markup;
+  elements.pagination.hidden = markup.length === 0;
 }
 
 function renderQueue() {
@@ -161,7 +197,11 @@ async function trackAction(action, track) {
           ? !track.excludedFromRadio : track.excludedFromRadio,
       }),
     });
-    replaceTrack(updated);
+    if (action === 'favorite' && state.view === 'favorites') {
+      await loadCatalog(state.catalog.page);
+    } else {
+      replaceTrack(updated);
+    }
   } else if (action === 'queue') {
     state.queue = musicQueue(await fetchJson(API.music.queue, {
       method: 'POST', body: JSON.stringify({ trackId: track.id, expectedVersion: state.queue.version }),
@@ -173,7 +213,7 @@ async function trackAction(action, track) {
 }
 
 function replaceTrack(updated) {
-  const validated = musicCatalog({ tracks: [updated], facets: {} }).tracks[0];
+  const validated = musicTrack(updated);
   state.catalog = { ...state.catalog, tracks: state.catalog.tracks.map(
     track => track.id === validated.id ? validated : track) };
   renderResults();
@@ -273,10 +313,10 @@ function fileDataUrl(file) { return new Promise((resolve, reject) => {
 
 elements.search?.addEventListener('submit', event => {
   event.preventDefault();
-  void loadCatalog().catch(showError);
+  void loadCatalog(0).catch(showError);
 });
 for (const filter of [elements.artist, elements.album, elements.genre]) {
-  filter?.addEventListener('change', () => void loadCatalog().catch(showError));
+  filter?.addEventListener('change', () => void loadCatalog(0).catch(showError));
 }
 elements.radio?.addEventListener('click', async () => {
   elements.radio.disabled = true;
@@ -291,8 +331,18 @@ elements.radio?.addEventListener('click', async () => {
   }
 });
 elements.library?.addEventListener('click', event => {
+  const requestedPage = Number(event.target.closest('[data-page]')?.dataset.page);
+  if (Number.isSafeInteger(requestedPage) && requestedPage >= 0) {
+    void loadCatalog(requestedPage).catch(showError);
+    return;
+  }
   const view = event.target.closest('[data-view]')?.dataset.view;
-  if (view) { state.view = view; renderWorkspace(); return; }
+  if (view) {
+    state.view = view;
+    if (view === 'history') renderWorkspace();
+    else void loadCatalog(0).catch(showError);
+    return;
+  }
   const action = event.target.closest('[data-action]')?.dataset.action;
   const row = event.target.closest('[data-track-id]');
   const track = state.catalog.tracks.find(item => item.id === row?.dataset.trackId);

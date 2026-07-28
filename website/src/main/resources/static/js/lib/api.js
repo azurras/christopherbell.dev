@@ -170,12 +170,17 @@ export const API = {
   },
   music: {
     access: '/api/music/2026-07-28/access',
-    catalog: ({ q = '', artist = '', album = '', genre = '', limit = 100 } = {}) => {
-      const params = new URLSearchParams({ limit: String(limit) });
+    catalog: ({
+      q = '', artist = '', album = '', genre = '', page = 0, size = 50,
+      favorite = false, playlistId = '',
+    } = {}) => {
+      const params = new URLSearchParams({ page: String(page), size: String(size) });
       if (q) params.set('q', String(q));
       if (artist) params.set('artist', String(artist));
       if (album) params.set('album', String(album));
       if (genre) params.set('genre', String(genre));
+      if (favorite) params.set('favorite', 'true');
+      if (playlistId) params.set('playlistId', String(playlistId));
       return `/api/music/2026-07-28/catalog?${params}`;
     },
     stream: id => `/api/music/2026-07-28/tracks/${encodeURIComponent(id)}/stream`,
