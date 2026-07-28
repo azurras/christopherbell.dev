@@ -248,7 +248,7 @@ public class AccountServiceTest {
         .build();
     var token = dev.christopherbell.permission.PermissionService.generateToken(self);
     SecurityContextHolder.getContext()
-        .setAuthentication(new UsernamePasswordAuthenticationToken("self", token));
+        .setAuthentication(new UsernamePasswordAuthenticationToken("self", token, java.util.List.of()));
 
     try {
       when(accountRepository.findById(eq("self"))).thenReturn(Optional.of(self));
@@ -319,7 +319,7 @@ public class AccountServiceTest {
         .build();
     var token = dev.christopherbell.permission.PermissionService.generateToken(self);
     SecurityContextHolder.getContext()
-        .setAuthentication(new UsernamePasswordAuthenticationToken("self", token));
+        .setAuthentication(new UsernamePasswordAuthenticationToken("self", token, java.util.List.of()));
 
     try {
       when(accountRepository.findById(eq("self"))).thenReturn(Optional.of(self));
@@ -501,7 +501,7 @@ public class AccountServiceTest {
     var self = Account.builder().id("self-1").role(Role.ADMIN).build();
     var token = dev.christopherbell.permission.PermissionService.generateToken(self);
     SecurityContextHolder.getContext()
-        .setAuthentication(new UsernamePasswordAuthenticationToken("self-1", token));
+        .setAuthentication(new UsernamePasswordAuthenticationToken("self-1", token, java.util.List.of()));
     when(accountRepository.findById(eq(AccountServiceStub.ID))).thenReturn(Optional.of(entity));
     when(accountRepository.save(eq(entity))).thenReturn(entity);
     when(accountMapper.toAccount(eq(entity))).thenReturn(approved);

@@ -19,6 +19,10 @@ import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.configuration.security.SecurityConfig;
+import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
+import dev.christopherbell.configuration.security.browser.AuthenticatedBrowserSession;
+import dev.christopherbell.configuration.security.browser.BrowserSessionService;
+import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService;
@@ -73,6 +77,8 @@ import org.springframework.web.context.WebApplicationContext;
     SecurityConfig.class,
     ControllerExceptionHandler.class,
     PermissionService.class,
+    BrowserAuthenticationCookies.class,
+    InteractiveBrowserRequest.class,
     SharedFolderAccessService.class,
     SharedFolderAuditQueryService.class,
     SharedFolderSecurityIntegrationTest.SharedFolderTestConfiguration.class
@@ -94,6 +100,7 @@ class SharedFolderSecurityIntegrationTest {
   @MockitoBean private SharedFolderRecycleService recycle;
   @MockitoBean private SharedFolderAuditRecorder auditRecorder;
   @MockitoBean private MongoTemplate mongo;
+  @MockitoBean private BrowserSessionService browserSessions;
 
   private final AtomicReference<Account> persistedAccount = new AtomicReference<>();
   private MockMvc mockMvc;
@@ -123,6 +130,15 @@ class SharedFolderSecurityIntegrationTest {
     });
     when(mongo.find(any(), org.mockito.ArgumentMatchers.<Class<Object>>any()))
         .thenReturn(List.of());
+    when(browserSessions.authenticate(
+        org.mockito.ArgumentMatchers.eq("session-id.secret"),
+        org.mockito.ArgumentMatchers.anyBoolean())).thenAnswer(invocation -> {
+          Account account = persistedAccount.get();
+          return account == null
+              ? Optional.empty()
+              : Optional.of(new AuthenticatedBrowserSession(
+                  account.getId(), account.getRole(), Optional.empty()));
+        });
   }
 
   @AfterAll
@@ -158,8 +174,8 @@ class SharedFolderSecurityIntegrationTest {
 
   @Test
   void cookieAuthenticatedMutationRequiresCsrf() throws Exception {
-    String token = tokenFor(Role.USER).substring("Bearer ".length());
     persist(Role.USER, AccountStatus.ACTIVE, true, Set.of(SHARED_FOLDER_WRITE));
+    String token = "session-id.secret";
 
     mockMvc.perform(post(BASE + "/folders")
             .cookie(new Cookie("CBELL_AUTH", token))

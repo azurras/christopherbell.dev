@@ -3,15 +3,24 @@ package dev.christopherbell.configuration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.security.JwtAuthenticationFilter;
+import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
+import dev.christopherbell.configuration.security.BrowserSecurityProperties;
+import dev.christopherbell.configuration.security.browser.AuthenticatedBrowserSession;
+import dev.christopherbell.configuration.security.browser.BrowserSessionService;
+import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
 import dev.christopherbell.permission.PermissionService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
+import java.net.URI;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,12 +54,16 @@ class JwtAuthenticationFilterTest {
   }
 
   @Test
-  @DisplayName("Valid browser authentication cookie authenticates the request")
-  void doFilter_whenAuthenticationCookieValid_setsAuthentication()
+  @DisplayName("Valid opaque browser session authenticates the request")
+  void doFilter_whenOpaqueBrowserSessionValid_setsAuthentication()
       throws ServletException, IOException {
-    var filter = new JwtAuthenticationFilter(List.of());
+    var sessions = mock(BrowserSessionService.class);
+    when(sessions.authenticate("session-id.secret", false)).thenReturn(Optional.of(
+        new AuthenticatedBrowserSession("account-1", Role.USER, Optional.empty())));
+    var filter = new JwtAuthenticationFilter(
+        List.of(), sessions, new InteractiveBrowserRequest(), cookies());
     var request = new MockHttpServletRequest("GET", "/api/protected");
-    request.setCookies(new Cookie("CBELL_AUTH", token(Role.USER)));
+    request.setCookies(new Cookie("CBELL_AUTH", "session-id.secret"));
     var response = new MockHttpServletResponse();
 
     filter.doFilter(request, response, new MockFilterChain());
@@ -59,6 +72,25 @@ class JwtAuthenticationFilterTest {
     assertNotNull(authentication);
     assertEquals("account-1", authentication.getName());
     assertEquals(200, response.getStatus());
+  }
+
+  @Test
+  @DisplayName("A JWT in the browser cookie is rejected")
+  void doFilter_whenBrowserCookieContainsJwt_returnsUnauthorized()
+      throws ServletException, IOException {
+    var sessions = mock(BrowserSessionService.class);
+    when(sessions.authenticate(org.mockito.ArgumentMatchers.anyString(),
+        org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(Optional.empty());
+    var filter = new JwtAuthenticationFilter(
+        List.of(), sessions, new InteractiveBrowserRequest(), cookies());
+    var request = new MockHttpServletRequest("GET", "/api/protected");
+    request.setCookies(new Cookie("CBELL_AUTH", token(Role.USER)));
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(request, response, new MockFilterChain());
+
+    assertNull(SecurityContextHolder.getContext().getAuthentication());
+    assertEquals(401, response.getStatus());
   }
 
   @Test
@@ -125,5 +157,10 @@ class JwtAuthenticationFilterTest {
         .id("account-1")
         .role(role)
         .build());
+  }
+
+  private BrowserAuthenticationCookies cookies() {
+    return new BrowserAuthenticationCookies(
+        new BrowserSecurityProperties(URI.create("https://example.test"), true, true));
   }
 }

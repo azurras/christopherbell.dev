@@ -34,6 +34,7 @@ import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.configuration.security.ControllerSliceSecurityTestConfig;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
+import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
@@ -73,6 +74,7 @@ public class AccountControllerTest {
   @MockitoBean private AccountService accountService;
   @MockitoBean private AdminAccountQueryService adminAccountQueryService;
   @MockitoBean private BrowserSecurityProperties browserSecurityProperties;
+  @MockitoBean private BrowserSessionService browserSessions;
   @MockitoBean private SharedFolderAuditRecorder sharedFolderAudit;
 
   @BeforeEach
@@ -642,6 +644,7 @@ public class AccountControllerTest {
   public void testLoginAccount_whenValid_Returns200WithToken() throws Exception {
     when(accountService.loginAccount(eq(new dev.christopherbell.account.model.AccountLoginRequest("user@example.com", "pass"))))
         .thenReturn("jwt-token");
+    when(browserSessions.create("jwt-token")).thenReturn("opaque-session-token");
 
     var json = "{\"email\":\"user@example.com\",\"password\":\"pass\"}";
 
@@ -656,7 +659,7 @@ public class AccountControllerTest {
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload").doesNotExist())
         .andExpect(header().string(HttpHeaders.SET_COOKIE, allOf(
-            containsString("CBELL_AUTH=jwt-token"),
+            containsString("CBELL_AUTH=opaque-session-token"),
             containsString("HttpOnly"),
             containsString("SameSite=Lax"))));
   }
@@ -693,11 +696,14 @@ public class AccountControllerTest {
   @DisplayName("Logout clears the browser authentication cookie")
   @WithMockUser
   void logoutAccount_clearsBrowserAuthenticationCookie() throws Exception {
-    mockMvc.perform(post("/api/accounts" + APIVersion.V20241215 + "/logout").with(csrf()))
+    mockMvc.perform(post("/api/accounts" + APIVersion.V20241215 + "/logout")
+            .cookie(new jakarta.servlet.http.Cookie("CBELL_AUTH", "session-id.secret"))
+            .with(csrf()))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.SET_COOKIE, allOf(
             containsString("CBELL_AUTH="),
             containsString("Max-Age=0"))));
+    verify(browserSessions).revoke("session-id.secret");
   }
 
   @Test

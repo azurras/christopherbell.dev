@@ -5,6 +5,10 @@ import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.configuration.RateLimitProperties;
 import dev.christopherbell.configuration.RequestSizeProperties;
 import dev.christopherbell.configuration.SharedFolderProperties;
+import dev.christopherbell.configuration.security.browser.BrowserSessionRepository;
+import dev.christopherbell.configuration.security.browser.BrowserSessionService;
+import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
+import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.configuration.filter.ApiErrorResponseWriter;
 import dev.christopherbell.configuration.filter.RateLimitFilter;
 import dev.christopherbell.configuration.filter.RequestSizeLimitFilter;
@@ -213,8 +217,19 @@ public class SecurityConfig {
    * Configures the JWT authentication filter bean.
    */
   @Bean
-  public JwtAuthenticationFilter jwtAuthenticationFilter() {
-    return new JwtAuthenticationFilter(publicMatchersList());
+  public JwtAuthenticationFilter jwtAuthenticationFilter(
+      BrowserSessionService browserSessions,
+      InteractiveBrowserRequest interactiveRequests,
+      BrowserAuthenticationCookies browserCookies) {
+    return new JwtAuthenticationFilter(
+        publicMatchersList(), browserSessions, interactiveRequests, browserCookies);
+  }
+
+  @Bean
+  public BrowserSessionService browserSessionService(
+      BrowserSessionRepository browserSessions,
+      AccountRepository accounts) {
+    return new BrowserSessionService(browserSessions, accounts, Clock.systemUTC());
   }
 
   public static boolean hasExplicitBearerToken(jakarta.servlet.http.HttpServletRequest request) {

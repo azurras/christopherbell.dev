@@ -59,6 +59,20 @@ class PermissionServiceTest {
   }
 
   @Test
+  void opaqueBrowserAuthenticationUsesItsFreshPrincipalAndAuthorities() {
+    SecurityContextHolder.getContext().setAuthentication(
+        new UsernamePasswordAuthenticationToken(
+            "account-42",
+            null,
+            List.of(new SimpleGrantedAuthority(Role.MOD.name()))));
+
+    assertEquals("account-42", PermissionService.getSelf());
+    assertTrue(new PermissionService().hasAuthority("USER"));
+    assertTrue(new PermissionService().hasAuthority("MOD"));
+    assertFalse(new PermissionService().hasAuthority("ADMIN"));
+  }
+
+  @Test
   @DisplayName("Configured JWT secret signs and validates tokens")
   void configuredSecret_isUsedForTokenSigningAndValidation() {
     PermissionService.configureSigningKey("test-jwt-secret-that-is-long-enough-for-hs256");
