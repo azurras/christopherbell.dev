@@ -183,6 +183,14 @@ export const API = {
     radio: '/api/music/2026-07-28/radio',
     queue: '/api/music/2026-07-28/queue',
     queueItem: id => `/api/music/2026-07-28/queue/${encodeURIComponent(id)}`,
+    library: {
+      playlists: '/api/music/2026-07-28/library/playlists',
+      playlist: id => `/api/music/2026-07-28/library/playlists/${encodeURIComponent(id)}`,
+      preferences: id =>
+        `/api/music/2026-07-28/library/tracks/${encodeURIComponent(id)}/preferences`,
+      history: (limit = 50) =>
+        `/api/music/2026-07-28/library/history?limit=${encodeURIComponent(limit)}`,
+    },
     admin: {
       accessAttempts: (limit = 100) =>
         `/api/music/2026-07-28/admin/access-attempts?limit=${encodeURIComponent(limit)}`,

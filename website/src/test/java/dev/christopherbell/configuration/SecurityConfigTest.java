@@ -130,6 +130,11 @@ class SecurityConfigTest {
     var radio = request("GET", "/api/music/2026-07-28/radio");
     var queueRead = request("GET", "/api/music/2026-07-28/queue");
     var queueWrite = request("POST", "/api/music/2026-07-28/queue");
+    var playlistsRead = request("GET", "/api/music/2026-07-28/library/playlists");
+    var playlistsWrite = request("POST", "/api/music/2026-07-28/library/playlists");
+    var preferences = request(
+        "PATCH", "/api/music/2026-07-28/library/tracks/track-1/preferences");
+    var history = request("GET", "/api/music/2026-07-28/library/history");
 
     assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(shell)));
     assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(access)));
@@ -140,6 +145,10 @@ class SecurityConfigTest {
     assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(radio)));
     assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(queueRead)));
     assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(queueWrite)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(playlistsRead)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(playlistsWrite)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(preferences)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(history)));
   }
 
   @Test
