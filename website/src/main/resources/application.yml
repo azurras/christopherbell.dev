@@ -100,6 +100,18 @@ app:
       progressive-idle-timeout: 30s
       initial-buffer: 2MB
       max-output: 50GB
+  music:
+    root: build/shared-folder/default/shared/Music
+    artwork-cache-root: build/shared-folder/default/system/music-artwork
+    ffprobe-command: ${APP_MUSIC_FFPROBE_COMMAND:ffprobe}
+    ffmpeg-command: ${APP_MUSIC_FFMPEG_COMMAND:ffmpeg}
+    scan-batch-size: 100
+    scan-interval: 5m
+    probe-timeout: 20s
+    probe-max-output-bytes: 1048576
+    artwork-max-bytes: 5242880
+    artwork-max-dimension: 2048
+    enabled: false
 posts:
   edit-window: 15m
   edit-audit-limit: 10

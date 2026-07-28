@@ -10,6 +10,9 @@ app:
   shared-folder:
     root: build/shared-folder/local/shared
     system-root: build/shared-folder/local/system
+  music:
+    root: build/shared-folder/local/shared/Music
+    artwork-cache-root: build/shared-folder/local/system/music-artwork
 spring:
   mongodb:
     database: christopherbell

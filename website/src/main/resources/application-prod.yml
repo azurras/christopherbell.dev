@@ -34,6 +34,12 @@ app:
   shared-folder:
     root: ${APP_SHARED_FOLDER_ROOT:A:/Shared}
     system-root: ${APP_SHARED_FOLDER_SYSTEM_ROOT:A:/Shared-System}
+  music:
+    root: ${APP_MUSIC_ROOT:A:/Shared/Music}
+    artwork-cache-root: ${APP_MUSIC_ARTWORK_CACHE_ROOT:A:/Shared-System/music-artwork}
+    ffprobe-command: ${APP_MUSIC_FFPROBE_COMMAND:ffprobe}
+    ffmpeg-command: ${APP_MUSIC_FFMPEG_COMMAND:ffmpeg}
+    enabled: ${APP_MUSIC_ENABLED:true}
 command-center:
   enabled: true
   sensor-libraries-enabled: true
