@@ -55,6 +55,8 @@ export const API = {
     update: '/api/accounts/2025-09-14',
     updateSharedFolderPermissions: (id) =>
       `/api/accounts/2026-07-17/${encodeURIComponent(id)}/shared-folder-permissions`,
+    updateMusicPermissions: (id) =>
+      `/api/accounts/2026-07-28/${encodeURIComponent(id)}/music-permissions`,
     passwordResetRequest: '/api/accounts/2024-12-15/password-reset/request',
     passwordResetConfirm: '/api/accounts/2024-12-15/password-reset/confirm',
     me: '/api/accounts/2025-09-03/me',
@@ -164,6 +166,36 @@ export const API = {
       recycle: (page = 0) => `/api/shared-folder/2026-07-17/admin/recycle?page=${encodeURIComponent(page)}`,
       restore: (id) => `/api/shared-folder/2026-07-17/admin/recycle/${encodeURIComponent(id)}/restore`,
       purge: (id) => `/api/shared-folder/2026-07-17/admin/recycle/${encodeURIComponent(id)}`,
+    },
+  },
+  music: {
+    access: '/api/music/2026-07-28/access',
+    catalog: ({ q = '', artist = '', album = '', genre = '', limit = 100 } = {}) => {
+      const params = new URLSearchParams({ limit: String(limit) });
+      if (q) params.set('q', String(q));
+      if (artist) params.set('artist', String(artist));
+      if (album) params.set('album', String(album));
+      if (genre) params.set('genre', String(genre));
+      return `/api/music/2026-07-28/catalog?${params}`;
+    },
+    stream: id => `/api/music/2026-07-28/tracks/${encodeURIComponent(id)}/stream`,
+    artwork: id => `/api/music/2026-07-28/tracks/${encodeURIComponent(id)}/artwork`,
+    radio: '/api/music/2026-07-28/radio',
+    queue: '/api/music/2026-07-28/queue',
+    queueItem: id => `/api/music/2026-07-28/queue/${encodeURIComponent(id)}`,
+    metadata: id => `/api/music/2026-07-28/tracks/${encodeURIComponent(id)}/metadata`,
+    metadataUndo: id => `/api/music/2026-07-28/metadata-edits/${encodeURIComponent(id)}/undo`,
+    library: {
+      playlists: '/api/music/2026-07-28/library/playlists',
+      playlist: id => `/api/music/2026-07-28/library/playlists/${encodeURIComponent(id)}`,
+      preferences: id =>
+        `/api/music/2026-07-28/library/tracks/${encodeURIComponent(id)}/preferences`,
+      history: (limit = 50) =>
+        `/api/music/2026-07-28/library/history?limit=${encodeURIComponent(limit)}`,
+    },
+    admin: {
+      accessAttempts: (limit = 100) =>
+        `/api/music/2026-07-28/admin/access-attempts?limit=${encodeURIComponent(limit)}`,
     },
   },
   location: {

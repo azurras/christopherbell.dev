@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Music', 'Private music on christopherbell.dev.', 'https://www.christopherbell.dev/music', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'Music on christopherbell.dev')}"></th:block>
+  <title>Music</title>
+  <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}" />
+  <link rel="stylesheet" type="text/css" href="/css/music.css" th:href="@{/css/music.css}" />
+</head>
+<body class="site-page void-shell-page music-page">
+  <div id="nav"></div>
+  <main class="site-main music-main" aria-labelledby="music-title">
+    <header class="music-hero">
+      <div>
+        <p class="music-kicker">One shared library</p>
+        <h1 id="music-title">Music</h1>
+        <p>Browse the collection, shape the queue, or drop into the live station.</p>
+      </div>
+      <button id="music-radio" class="music-radio-button" type="button" disabled>
+        <span aria-hidden="true">◉</span><span>Join live radio</span>
+      </button>
+    </header>
+    <section id="music-access" class="music-access" aria-live="polite">
+      <p>Checking Music access…</p>
+    </section>
+    <section id="music-library" class="music-workspace d-none" aria-label="Music library">
+      <aside class="music-sidebar" aria-label="Music views">
+        <nav class="music-view-nav">
+          <button class="is-active" type="button" data-view="all">All music</button>
+          <button type="button" data-view="favorites">Favorites</button>
+          <button type="button" data-view="history">Radio history</button>
+        </nav>
+        <div class="music-sidebar-heading"><h2>Playlists</h2><button id="music-new-playlist" type="button" hidden>＋</button></div>
+        <div id="music-playlists" class="music-playlists"></div>
+      </aside>
+      <section class="music-browser">
+        <form id="music-search" class="music-search" role="search">
+          <label class="visually-hidden" for="music-search-query">Search music</label>
+          <span aria-hidden="true">⌕</span>
+          <input id="music-search-query" type="search" maxlength="100" placeholder="Search songs, artists, albums, genres…" />
+          <button type="submit">Search</button>
+        </form>
+        <div class="music-filters" aria-label="Library filters">
+          <select id="music-artist-filter" aria-label="Filter by artist"><option value="">All artists</option></select>
+          <select id="music-album-filter" aria-label="Filter by album"><option value="">All albums</option></select>
+          <select id="music-genre-filter" aria-label="Filter by genre"><option value="">All genres</option></select>
+          <span id="music-count"></span>
+        </div>
+        <div id="music-results" class="music-results" aria-live="polite"></div>
+      </section>
+      <aside class="music-activity" aria-label="Shared queue">
+        <div class="music-panel-heading"><div><span>Up next</span><h2>Shared queue</h2></div><span id="music-queue-count">0</span></div>
+        <div id="music-queue" class="music-queue"></div>
+      </aside>
+    </section>
+  </main>
+  <dialog id="music-playlist-dialog" class="music-dialog">
+    <form method="dialog" id="music-playlist-form">
+      <input type="hidden" id="music-playlist-id" />
+      <h2>Playlist</h2>
+      <label>Name<input id="music-playlist-name" maxlength="100" required /></label>
+      <p>Select tracks from the library after creating the playlist.</p>
+      <div><button value="cancel">Cancel</button><button id="music-save-playlist" value="default">Save</button></div>
+    </form>
+  </dialog>
+  <dialog id="music-metadata-dialog" class="music-dialog">
+    <form method="dialog" id="music-metadata-form">
+      <h2>Edit track details</h2>
+      <input type="hidden" id="music-edit-track-id" />
+      <div class="music-form-grid">
+        <label>Title<input id="music-edit-title" maxlength="300" /></label>
+        <label>Artist<input id="music-edit-artist" maxlength="300" /></label>
+        <label>Album artist<input id="music-edit-album-artist" maxlength="300" /></label>
+        <label>Album<input id="music-edit-album" maxlength="300" /></label>
+        <label>Track<input id="music-edit-track" type="number" min="1" max="9999" /></label>
+        <label>Disc<input id="music-edit-disc" type="number" min="1" max="999" /></label>
+        <label>Genre<input id="music-edit-genre" maxlength="300" /></label>
+        <label>Year<input id="music-edit-year" type="number" min="1000" max="9999" /></label>
+      </div>
+      <label>Replace artwork<input id="music-edit-artwork" type="file" accept="image/jpeg,image/png" /></label>
+      <label class="music-check"><input id="music-edit-remove-artwork" type="checkbox" /> Remove existing artwork</label>
+      <p id="music-edit-status" aria-live="polite"></p>
+      <div><button value="cancel">Cancel</button><button id="music-save-metadata" value="default">Save changes</button></div>
+    </form>
+  </dialog>
+  <div id="music-toast" class="music-toast" hidden aria-live="polite"></div>
+  <footer id="footer"></footer>
+  <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
+  <script type="module" src="/js/music.js" th:src="@{/js/music.js}"></script>
+</body>
+</html>

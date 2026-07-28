@@ -20,4 +20,5 @@ public final class APIVersion {
   public static final String V20260712 = "/2026-07-12";
   public static final String V20260717 = "/2026-07-17";
   public static final String V20260726 = "/2026-07-26";
+  public static final String V20260728 = "/2026-07-28";
 }

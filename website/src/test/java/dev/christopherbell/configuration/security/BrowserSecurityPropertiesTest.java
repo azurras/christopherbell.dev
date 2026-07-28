@@ -51,7 +51,7 @@ class BrowserSecurityPropertiesTest {
     assertFalse(localAuth.isSecure());
     assertEquals("Lax", localAuth.getSameSite());
     assertEquals("/", localAuth.getPath());
-    assertEquals(Duration.ofDays(1), localAuth.getMaxAge());
+    assertEquals(Duration.ofDays(30), localAuth.getMaxAge());
     assertFalse(localMarker.isHttpOnly());
     assertTrue(productionCookies.getFirst().isSecure());
     assertTrue(productionCookies.get(1).isSecure());

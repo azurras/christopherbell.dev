@@ -51,13 +51,11 @@ public class PermissionService {
 
   public static String getSelf() {
     var authentication = SecurityContextHolder.getContext().getAuthentication();
-    String token = (String) authentication.getCredentials();
-    return  Jwts.parser()
-        .setSigningKey(key)
-        .build()
-        .parseClaimsJws(token)
-        .getBody()
-        .getSubject();
+    if (authentication == null || !authentication.isAuthenticated()
+        || authentication.getName() == null || authentication.getName().isBlank()) {
+      throw new IllegalStateException("Authenticated account id is unavailable.");
+    }
+    return authentication.getName();
   }
 
   /** Instance wrapper for resolving the current user id (for testability). */
@@ -193,28 +191,35 @@ public class PermissionService {
         return false;
       }
 
-      String token = (String) authentication.getCredentials();
-      Claims claims = validateToken(token);
-      String roleValue  = claims.get(Account.PROPERTY_ROLE, String.class);
-      if (roleValue == null || requiredRole == null) {
+      if (requiredRole == null) {
         return false;
       }
 
-      Role actual;
       Role required;
       try {
-        actual = Role.valueOf(roleValue);
         required = Role.valueOf(requiredRole);
       } catch (IllegalArgumentException e) {
         // Unknown role value; deny access
         return false;
       }
 
-      return level(actual) >= level(required);
+      return authentication.getAuthorities().stream()
+          .map(authority -> authority.getAuthority())
+          .map(this::knownRole)
+          .flatMap(java.util.Optional::stream)
+          .anyMatch(actual -> level(actual) >= level(required));
     } catch (Exception e) {
 
       log.error("Error validating token or extracting claims: {}", e.getMessage(), e);
       return false; // Deny access on any error
+    }
+  }
+
+  private java.util.Optional<Role> knownRole(String value) {
+    try {
+      return java.util.Optional.of(Role.valueOf(value));
+    } catch (IllegalArgumentException | NullPointerException invalidRole) {
+      return java.util.Optional.empty();
     }
   }
 

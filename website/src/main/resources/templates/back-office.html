@@ -299,6 +299,16 @@
                       <button class="btn btn-sm btn-outline-secondary" id="sharedRecycleNext" type="button">Next</button>
                     </nav>
                   </section>
+                  <section class="operation-panel" aria-labelledby="musicAccessAuditTitle">
+                    <div class="queue-panel-header">
+                      <div>
+                        <p class="home-kicker mb-1">Music</p>
+                        <h2 id="musicAccessAuditTitle">Denied Access</h2>
+                      </div>
+                    </div>
+                    <p class="queue-age">Logged-in attempts identify the account. Anonymous attempts identify the trusted client IP. Entries expire after 30 days.</p>
+                    <div id="musicAccessAuditList" class="queue-list" aria-live="polite"></div>
+                  </section>
                 </div>
               </div>
             </div>
@@ -351,6 +361,20 @@
         <label class="form-check-label" for="sharedFolderWritePermission">Upload and manage shared files</label>
       </div>
       <p class="queue-age mb-0">Write access always includes read access.</p>
+    </section>
+  </template>
+  <template id="musicPermissionsTemplate">
+    <section class="detail-section" aria-labelledby="musicPermissionsTitle">
+      <span class="detail-label" id="musicPermissionsTitle">Music</span>
+      <div class="form-check">
+        <input class="form-check-input" id="musicReadPermission" type="checkbox" data-music-permission="read" />
+        <label class="form-check-label" for="musicReadPermission">Listen to Music</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" id="musicWritePermission" type="checkbox" data-music-permission="write" />
+        <label class="form-check-label" for="musicWritePermission">Manage Music</label>
+      </div>
+      <p class="queue-age mb-0">Manage access always includes listening. Music access never grants file downloads.</p>
     </section>
   </template>
   <aside id="backOfficeDrawer" class="back-office-drawer d-none" aria-hidden="true" aria-labelledby="drawerTitle">

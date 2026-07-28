@@ -82,6 +82,12 @@ public class ContentViewController {
     return "shared-folder.html";
   }
 
+  /** Serves the public Music page shell; its data APIs enforce fresh Music permissions. */
+  @GetMapping(value = "/music")
+  public String getMusicPage() {
+    return "music.html";
+  }
+
   /**
    * Serves the report page.
    *

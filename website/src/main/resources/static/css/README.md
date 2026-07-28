@@ -6,6 +6,8 @@ Owns site styling for server-rendered pages and frontend components.
 
 - `main.css` is the primary stylesheet for the current site, Void, tools, auth,
   profile, messages, post cards, and responsive layout.
+- `music.css` owns the three-pane desktop and stacked mobile Music hub, including its track,
+  playlist, queue, filter, dialog, and notification surfaces.
 - `blog.css` contains older blog-specific styling.
 - `simple.css` contains legacy/simple page styling.
 - `thebell.css` styles the archived The Bell pages.
@@ -71,6 +73,8 @@ Owns site styling for server-rendered pages and frontend components.
 - The site-wide media surface uses `.site-media-player-*` for its fixed audio/video controls and
   `.site-player-content-*` for the full-viewport navigation frame above it. A measured CSS custom
   property keeps framed pages clear of the player as audio/video height changes on desktop and mobile.
+  Its `data-presentation` state enlarges the same player on `/music` and returns it to the compact
+  site-wide bar elsewhere.
 - Responsive rules live near the related component styles when possible. Broad
   page-level breakpoints are kept at the end of `main.css`.
 

@@ -92,6 +92,23 @@ public class RateLimitProperties {
             "/api/shared-folder" + APIVersion.V20260717 + "/media/jobs",
             "/api/shared-folder" + APIVersion.V20260717 + "/media/fallback")));
     rules.add(new Rule(
+        "music-metadata-mutation",
+        10,
+        Duration.ofMinutes(1),
+        List.of("POST", "PATCH"),
+        List.of(
+            "/api/music" + APIVersion.V20260728 + "/tracks/*/metadata",
+            "/api/music" + APIVersion.V20260728 + "/metadata-edits/*/undo")));
+    rules.add(new Rule(
+        "music-library-mutation",
+        120,
+        Duration.ofMinutes(1),
+        List.of("POST", "PUT", "PATCH", "DELETE"),
+        List.of(
+            "/api/music" + APIVersion.V20260728 + "/library/**",
+            "/api/music" + APIVersion.V20260728 + "/queue",
+            "/api/music" + APIVersion.V20260728 + "/queue/**")));
+    rules.add(new Rule(
         "api-mutations",
         300,
         Duration.ofMinutes(1),

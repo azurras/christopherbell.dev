@@ -15,7 +15,6 @@ import {
   armSiteMediaGestureResume,
   clearSiteMediaResume,
   createPersistentSiteNavigator,
-  createSiteRadioDurationReporter,
   createSiteRadioScheduler,
   createSiteMediaSession,
   formatSiteMediaTime,
@@ -27,6 +26,7 @@ import {
   seekSiteMediaBy,
   siteAudioPresentation,
   siteMediaControlState,
+  siteMediaPresentation,
   siteRadioResumeState,
   siteRadioSyncDecision,
   SITE_MEDIA_PLAYER_TAG,
@@ -34,6 +34,7 @@ import {
   toggleSiteMediaPlayback,
   validateSiteRadioResponse,
 } from '../lib/site-media-player.js';
+import { musicTrack } from '../lib/music.js';
 import {
   authHeaders,
   clearAuthState,
@@ -108,6 +109,7 @@ export class SiteMediaPlayer extends HTMLElement {
       window.addEventListener('resize', () => this.updatePlayerHeight());
     }
     window.addEventListener('popstate', () => {
+      this.syncRoutePresentation(window.location.href);
       if (this.session.snapshot() && this.navigator.currentFrame()) {
         this.navigator.restore(window.location.href);
       }
@@ -308,7 +310,21 @@ export class SiteMediaPlayer extends HTMLElement {
     }
     try {
       if (resume.descriptor.mode === 'RADIO') {
-        await this.playSharedFolderRadio(resume);
+        await this.playMusicRadio(resume);
+      } else if (resume.descriptor.mode === 'MUSIC_ITEM') {
+        await this.playMusicTrack({
+          id: resume.descriptor.path,
+          observedToken: '0'.repeat(64),
+          title: resume.descriptor.title,
+          artist: resume.descriptor.artist,
+          albumArtist: resume.descriptor.artist,
+          album: resume.descriptor.album,
+          genre: null,
+          durationSeconds: 1,
+          artworkAvailable: resume.descriptor.artworkAvailable,
+          favorite: false,
+          excludedFromRadio: false,
+        }, resume);
       } else {
         await this.playSharedFolder({
           previewKind: resume.descriptor.kind,
@@ -330,7 +346,6 @@ export class SiteMediaPlayer extends HTMLElement {
     const eventOptions = { signal: playback.signal };
     playback.media.addEventListener('loadedmetadata', () => {
       sync();
-      if (playback.descriptor.mode === 'RADIO') this.reportRadioDuration(playback);
     }, eventOptions);
     playback.media.addEventListener('durationchange', sync, eventOptions);
     playback.media.addEventListener('timeupdate', () => {
@@ -519,19 +534,6 @@ export class SiteMediaPlayer extends HTMLElement {
     this.stopRadioSync();
     const generation = this.radioGeneration;
     this.radioController = new AbortController();
-    this.radioDurationReporter = createSiteRadioDurationReporter({
-      report: async request => {
-        const response = await fetchJson(API.sharedFolder.radio.duration, {
-          method: 'POST',
-          headers: authHeaders(),
-          redirectOnUnauthorized: false,
-          cache: 'no-store',
-          body: JSON.stringify(request),
-          signal: this.radioController.signal,
-        });
-        validateSiteRadioResponse(response);
-      },
-    });
     return generation;
   }
 
@@ -540,14 +542,13 @@ export class SiteMediaPlayer extends HTMLElement {
     this.radioScheduler?.stop();
     this.radioController?.abort();
     this.radioController = null;
-    this.radioDurationReporter = null;
     this.radioPlayback = null;
     this.radioPlayRequested = false;
     this.radioSyncPromise = null;
   }
 
   async fetchRadioSnapshot(signal) {
-    const response = await fetchJson(API.sharedFolder.radio.playback, {
+    const response = await fetchJson(API.music.radio, {
       headers: authHeaders(),
       redirectOnUnauthorized: false,
       cache: 'no-store',
@@ -558,6 +559,11 @@ export class SiteMediaPlayer extends HTMLElement {
 
   /** Join the server-owned station, using saved state only for intent and audio preferences. */
   async playSharedFolderRadio(resume = null) {
+    return this.playMusicRadio(resume);
+  }
+
+  /** Join the catalog-backed global Music station. */
+  async playMusicRadio(resume = null) {
     const replacingRadio = this.session?.snapshot()?.descriptor.mode === 'RADIO';
     const generation = this.beginRadioLifetime();
     let response;
@@ -589,7 +595,7 @@ export class SiteMediaPlayer extends HTMLElement {
     };
     const radioResume = siteRadioResumeState(saved, station);
     this.radioPlayback = station;
-    await this.playSharedFolderEntry(station.entry, radioResume, radioResume.descriptor);
+    await this.playMusicRadioEntry(station.entry, radioResume);
     if (generation === this.radioGeneration) this.radioScheduler.start();
     return response;
   }
@@ -645,7 +651,7 @@ export class SiteMediaPlayer extends HTMLElement {
         volume: current.media.volume,
       }, response.playback);
       this.radioPlayback = response.playback;
-      await this.playSharedFolderEntry(response.playback.entry, resume, resume.descriptor);
+      await this.playMusicRadioEntry(response.playback.entry, resume);
       return true;
     }
 
@@ -672,15 +678,6 @@ export class SiteMediaPlayer extends HTMLElement {
     }
   }
 
-  reportRadioDuration(playback) {
-    if (!this.radioDurationReporter || !this.radioPlayback
-        || this.session?.snapshot() !== playback || playback.signal.aborted) return;
-    const source = playback.media.currentSrc || playback.media.src;
-    void this.radioDurationReporter.loaded(
-      this.radioPlayback, source, Number(playback.media.duration),
-    ).catch(error => this.handleRadioSyncError(error));
-  }
-
   handleRadioSyncError(error) {
     if (error?.name === 'AbortError') return;
     if (isSharedFolderAccessDenied(error)) {
@@ -698,6 +695,117 @@ export class SiteMediaPlayer extends HTMLElement {
   async playSharedFolder(entry, resume = null) {
     this.stopRadioSync();
     return this.playSharedFolderEntry(entry, resume, { mode: 'ITEM' });
+  }
+
+  /** Begin one catalog item without exposing Shared Folder download semantics. */
+  async playMusicTrack(rawTrack, resume = null) {
+    const track = musicTrack(rawTrack);
+    this.stopRadioSync();
+    const media = document.createElement('audio');
+    media.controls = false;
+    media.preload = 'metadata';
+    media.playsInline = true;
+    media.title = track.title;
+    if (!resume) clearSiteMediaResume(sessionStorage);
+    this.cancelGestureResume();
+    this.releaseArtwork();
+    const playback = this.session.start({
+      mode: 'MUSIC_ITEM',
+      kind: 'AUDIO',
+      title: track.title,
+      path: track.id,
+      artist: track.artist || '',
+      album: track.album || '',
+      artworkAvailable: track.artworkAvailable,
+    }, media);
+    const initialResume = resume || {
+      descriptor: playback.descriptor,
+      positionSeconds: 0,
+      wasPlaying: true,
+      playbackRate: 1,
+      muted: false,
+      volume: 1,
+    };
+    this.resumeByMedia.set(media, initialResume);
+    this.playbackIntentByMedia.set(media, initialResume.wasPlaying);
+    if (initialResume.wasPlaying) this.pendingPlaybackStart.add(media);
+    this.bindPlaybackEvents(playback);
+    this.renderMusicRadioPresentation(playback, track);
+    this.resumePlaybackWhenReady(playback);
+    media.addEventListener('error', () => {
+      if (!playback.signal.aborted) this.setStatus('This track could not be streamed');
+    }, { once: true, signal: playback.signal });
+    media.src = API.music.stream(track.id);
+    media.load();
+    this.setStatus('Ready');
+    return playback;
+  }
+
+  async playMusicRadioEntry(entry, resume) {
+    const media = document.createElement('audio');
+    media.controls = false;
+    media.preload = 'metadata';
+    media.playsInline = true;
+    media.title = entry.name;
+    this.cancelGestureResume();
+    this.releaseArtwork();
+    const playback = this.session.start({
+      mode: 'RADIO',
+      kind: 'AUDIO',
+      title: entry.name,
+      path: entry.path,
+      stationSequence: resume.descriptor.stationSequence,
+    }, media);
+    this.resumeByMedia.set(media, resume);
+    this.playbackIntentByMedia.set(media, resume.wasPlaying);
+    if (resume.wasPlaying) this.pendingPlaybackStart.add(media);
+    saveSiteMediaResume(sessionStorage, playback.descriptor, {
+      currentTime: resume.positionSeconds,
+      paused: !resume.wasPlaying,
+      ended: false,
+      playbackRate: 1,
+      muted: resume.muted,
+      volume: resume.volume,
+    }, { wasPlaying: resume.wasPlaying });
+    this.bindPlaybackEvents(playback);
+    this.renderMusicRadioPresentation(playback, entry.track);
+    this.resumePlaybackWhenReady(playback);
+    media.src = API.music.stream(entry.path);
+    media.load();
+    this.setStatus('Live');
+    return playback;
+  }
+
+  renderMusicRadioPresentation(playback, track) {
+    if (this.session?.snapshot() !== playback) return;
+    this.querySelector('[data-site-player-title]').textContent = track.title;
+    const subtitle = [track.artist, track.album].filter(Boolean).join(' · ');
+    const trackMetadata = this.querySelector('[data-site-player-track-metadata]');
+    trackMetadata.textContent = subtitle;
+    trackMetadata.hidden = subtitle.length === 0;
+    const artwork = document.createElement(track.artworkAvailable ? 'img' : 'span');
+    artwork.className = 'site-media-player-artwork';
+    if (track.artworkAvailable) {
+      artwork.src = API.music.artwork(track.id);
+      artwork.alt = '';
+      artwork.addEventListener('error', () => {
+        const fallback = document.createElement('span');
+        fallback.className = 'site-media-player-artwork';
+        fallback.setAttribute('aria-hidden', 'true');
+        fallback.textContent = '♫';
+        artwork.replaceWith(fallback);
+      }, { once: true });
+    } else {
+      artwork.setAttribute('aria-hidden', 'true');
+      artwork.textContent = '♫';
+    }
+    this.querySelector('[data-site-player-media]').replaceChildren(artwork, playback.media);
+    this.setMediaSessionMetadata({
+      title: track.title,
+      artist: track.artist || '',
+      album: track.album || '',
+      picture: null,
+    });
   }
 
   async playSharedFolderEntry(entry, resume = null, descriptor = { mode: 'ITEM' }) {
@@ -890,6 +998,7 @@ export class SiteMediaPlayer extends HTMLElement {
     this.querySelector('.site-media-player-more').open = false;
     this.hidden = false;
     document.body.classList.add('site-media-player-active');
+    this.syncRoutePresentation(window.location.href);
     this.syncControls(playback);
     this.updatePlayerHeight();
   }
@@ -902,6 +1011,7 @@ export class SiteMediaPlayer extends HTMLElement {
     this.hidden = true;
     this.removeAttribute('data-kind');
     this.removeAttribute('data-mode');
+    this.removeAttribute('data-presentation');
     this.querySelector('.site-media-player-eyebrow').textContent = 'Now playing';
     this.querySelector('[data-site-player-media]').replaceChildren();
     this.querySelector('[data-site-player-retry]')?.remove();
@@ -997,6 +1107,11 @@ export class SiteMediaPlayer extends HTMLElement {
     });
   }
 
+  syncRoutePresentation(href) {
+    this.dataset.presentation = siteMediaPresentation(href, window.location.href);
+    this.updatePlayerHeight();
+  }
+
   navigateFromClick(anchor, event) {
     if (!this.session?.snapshot()) return false;
     const href = persistentNavigationTarget(anchor, event, window.location.href);
@@ -1028,7 +1143,10 @@ export class SiteMediaPlayer extends HTMLElement {
     iframe.addEventListener('load', () => {
       try {
         const href = iframe.contentWindow.location.href;
-        if (href !== 'about:blank') onLoad({ href, title: iframe.contentDocument.title });
+        if (href !== 'about:blank') {
+          this.syncRoutePresentation(href);
+          onLoad({ href, title: iframe.contentDocument.title });
+        }
       } catch (_) {
         // Navigation interception only admits same-origin pages; ignore an unexpected escape.
       }

@@ -8,6 +8,7 @@ import {
   parseAdminAccountPage,
   promotedRoleForAction,
   rolePromotionOptions,
+  musicPermissionState,
   sharedFolderPermissionState,
 } from './lib/back-office-users.js';
 import {
@@ -30,6 +31,7 @@ import {
   moderationReasonValue,
   parseActivityPage,
 } from './lib/back-office-activity.js';
+import { musicAccessAttemptMarkup } from './lib/back-office-music.js';
 import { authHeaders, fetchJson, formatWhen, isLoggedIn, sanitize } from './lib/util.js';
 
 const content = document.getElementById('backOfficeContent');
@@ -55,6 +57,7 @@ const drawerClose = document.getElementById('drawerClose');
 const drawerKicker = document.getElementById('drawerKicker');
 const drawerTitle = document.getElementById('drawerTitle');
 const sharedFolderPermissionsTemplate = document.getElementById('sharedFolderPermissionsTemplate');
+const musicPermissionsTemplate = document.getElementById('musicPermissionsTemplate');
 const wflOperationStatus = document.getElementById('wflOperationStatus');
 const canesBoxIndexOperationStatus = document.getElementById('canesBoxIndexOperationStatus');
 const canesBoxManualPriceForm = document.getElementById('canesBoxManualPriceForm');
@@ -69,6 +72,7 @@ const sharedRecycleList = document.getElementById('sharedRecycleList');
 const sharedRecyclePrevious = document.getElementById('sharedRecyclePrevious');
 const sharedRecycleNext = document.getElementById('sharedRecycleNext');
 const sharedRecyclePage = document.getElementById('sharedRecyclePage');
+const musicAccessAuditList = document.getElementById('musicAccessAuditList');
 
 let accounts = [];
 let accountQuery = {
@@ -140,6 +144,7 @@ function setLoading() {
   renderOperationResult(contentOperationStatus, 'Content data has not been loaded yet.');
   renderState(sharedAuditList, 'Loading shared-folder audit…');
   renderState(sharedRecycleList, 'Loading recycle items…');
+  renderState(musicAccessAuditList, 'Loading denied Music access…');
 }
 
 function renderState(container, message) {
@@ -427,6 +432,7 @@ function openDrawer(type, id) {
   drawerBody.innerHTML = type === 'report' ? reportDetails(item) : userDetails(item);
   if (type === 'user') {
     renderSharedFolderPermissions(item);
+    renderMusicPermissions(item);
   }
   drawer.classList.remove('d-none');
   drawer.setAttribute('aria-hidden', 'false');
@@ -487,6 +493,7 @@ function userDetails(account) {
       ${detailRow('ID', account.id)}
     </div>
     <div id="sharedFolderPermissions"></div>
+    <div id="musicPermissions"></div>
     <div class="detail-section">
       ${userActionSelect(account)}
       <button type="button" class="btn btn-outline-secondary btn-sm" data-user-posts="${sanitize(account.id || '')}">Load User Posts</button>
@@ -503,6 +510,23 @@ function renderSharedFolderPermissions(account) {
   const fragment = sharedFolderPermissionsTemplate.content.cloneNode(true);
   const read = fragment.querySelector('[data-shared-folder-permission="read"]');
   const write = fragment.querySelector('[data-shared-folder-permission="write"]');
+  [read, write].forEach(input => {
+    input.dataset.account = account.id || '';
+    input.disabled = state.disabled;
+  });
+  read.checked = state.read;
+  write.checked = state.write;
+  host.replaceChildren(fragment);
+}
+
+function renderMusicPermissions(account) {
+  const host = document.getElementById('musicPermissions');
+  if (!host || !musicPermissionsTemplate) return;
+
+  const state = musicPermissionState(account);
+  const fragment = musicPermissionsTemplate.content.cloneNode(true);
+  const read = fragment.querySelector('[data-music-permission="read"]');
+  const write = fragment.querySelector('[data-music-permission="write"]');
   [read, write].forEach(input => {
     input.dataset.account = account.id || '';
     input.disabled = state.disabled;
@@ -530,6 +554,14 @@ async function updateAccount(accountId, patch) {
 
 async function updateSharedFolderPermissions(accountId, { read, write }) {
   return fetchJson(API.accounts.updateSharedFolderPermissions(accountId), {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ read, write }),
+  });
+}
+
+async function updateMusicPermissions(accountId, { read, write }) {
+  return fetchJson(API.accounts.updateMusicPermissions(accountId), {
     method: 'PATCH',
     headers: authHeaders(),
     body: JSON.stringify({ read, write }),
@@ -591,9 +623,11 @@ async function refreshAccounts() {
 }
 
 async function refreshSharedAdministration(filters = sharedAuditFilters(sharedAuditForm)) {
-  const [auditEvents, recyclePage] = await Promise.all([
+  const [auditEvents, recyclePage, musicAttempts] = await Promise.all([
     fetchJson(API.sharedFolder.admin.audit(filters), { headers: authHeaders() }),
     fetchJson(API.sharedFolder.admin.recycle(sharedRecyclePageNumber), { headers: authHeaders() }),
+    fetchJson(API.music.admin.accessAttempts(), { headers: authHeaders() })
+        .catch(error => ({ error })),
   ]);
   sharedAuditEvents = auditEvents || [];
   sharedRecycleItems = Array.isArray(recyclePage?.items) ? recyclePage.items : [];
@@ -603,6 +637,12 @@ async function refreshSharedAdministration(filters = sharedAuditFilters(sharedAu
   }
   sharedAuditList.innerHTML = sharedAuditMarkup(sharedAuditEvents || []);
   sharedRecycleList.innerHTML = sharedRecycleMarkup(sharedRecycleItems || []);
+  if (musicAttempts?.error) {
+    if ([401, 403].includes(musicAttempts.error.status)) throw musicAttempts.error;
+    renderState(musicAccessAuditList, 'Denied Music access is temporarily unavailable.');
+  } else {
+    musicAccessAuditList.innerHTML = musicAccessAttemptMarkup(musicAttempts || []);
+  }
   const pagination = sharedRecyclePagination(sharedRecyclePageNumber, sharedRecycleHasNext);
   if (sharedRecyclePage) sharedRecyclePage.textContent = pagination.label;
   if (sharedRecyclePrevious) sharedRecyclePrevious.disabled = pagination.previousDisabled;
@@ -983,6 +1023,27 @@ async function handleSharedFolderPermissionChange(target) {
   }
 }
 
+async function handleMusicPermissionChange(target) {
+  const accountId = target.dataset.account;
+  const permission = target.dataset.musicPermission;
+  const account = accounts.find(candidate => candidate.id === accountId);
+  if (!account || !permission) return;
+
+  const state = musicPermissionState(account, { [permission]: target.checked });
+  const controls = drawerBody?.querySelectorAll('[data-music-permission]') || [];
+  controls.forEach(control => {
+    control.disabled = true;
+  });
+  try {
+    await updateMusicPermissions(accountId, state);
+    await refreshDashboard();
+    openDrawer('user', accountId);
+  } catch (err) {
+    showAlert(err.message || 'Failed to update Music permissions.');
+    renderMusicPermissions(account);
+  }
+}
+
 async function handleOperation(button) {
   const operation = button.getAttribute('data-operation');
   clearAlert();
@@ -1178,6 +1239,8 @@ function wireEvents() {
     const target = event.target;
     if (target instanceof HTMLInputElement && target.dataset.sharedFolderPermission) {
       await handleSharedFolderPermissionChange(target);
+    } else if (target instanceof HTMLInputElement && target.dataset.musicPermission) {
+      await handleMusicPermissionChange(target);
     } else if (target instanceof HTMLSelectElement && target.classList.contains('report-action')) {
       await handleReportAction(target);
     } else if (target instanceof HTMLSelectElement && target.classList.contains('user-action')) {

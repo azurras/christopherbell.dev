@@ -100,6 +100,37 @@ app:
       progressive-idle-timeout: 30s
       initial-buffer: 2MB
       max-output: 50GB
+  music:
+    root: build/shared-folder/default/shared/Music
+    artwork-cache-root: build/shared-folder/default/system/music-artwork
+    media-tools:
+      root: ${APP_MUSIC_MEDIA_TOOLS_ROOT:build/shared-folder/default/system/shared-folder-media-tools}
+    ffprobe-command: ${APP_MUSIC_FFPROBE_COMMAND:ffprobe}
+    ffmpeg-command: ${APP_MUSIC_FFMPEG_COMMAND:ffmpeg}
+    scan-batch-size: 100
+    scan-interval: 5m
+    probe-timeout: 20s
+    probe-max-output-bytes: 1048576
+    artwork-max-bytes: 5242880
+    artwork-max-dimension: 2048
+    enabled: false
+    metadata:
+      private-root: build/shared-folder/default/system/music-metadata
+      process-timeout: 2m
+      process-max-output-bytes: 1048576
+      max-source-bytes: 8589934592
+      artwork-max-bytes: 5242880
+      max-expansion-bytes: 20971520
+      backup-retention: 30d
+      lease-duration: 30m
+      cleanup-delay: 1h
+    radio:
+      track-cooldown: 50
+      artist-cooldown: 10
+      exploration-probability: 0.1
+      maximum-catch-up-transitions: 100
+      lease-duration: 10s
+      tick-delay: 15s
 posts:
   edit-window: 15m
   edit-audit-limit: 10

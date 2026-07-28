@@ -5,5 +5,7 @@ package dev.christopherbell.account.model;
  */
 public enum AccountPermission {
   SHARED_FOLDER_READ,
-  SHARED_FOLDER_WRITE
+  SHARED_FOLDER_WRITE,
+  MUSIC_READ,
+  MUSIC_WRITE
 }

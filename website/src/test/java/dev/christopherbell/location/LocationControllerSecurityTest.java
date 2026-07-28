@@ -1,6 +1,9 @@
 package dev.christopherbell.location;
 
 import dev.christopherbell.configuration.security.SecurityConfig;
+import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
+import dev.christopherbell.configuration.security.browser.BrowserSessionService;
+import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.location.zip.LocationController;
@@ -21,12 +24,18 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(LocationController.class)
-@Import({ControllerExceptionHandler.class, SecurityConfig.class})
+@Import({
+    ControllerExceptionHandler.class,
+    SecurityConfig.class,
+    BrowserAuthenticationCookies.class,
+    InteractiveBrowserRequest.class
+})
 @DisplayName("Location controller security")
 class LocationControllerSecurityTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
   @MockitoBean private ZipCoordinateService zipCoordinateService;
+  @MockitoBean private BrowserSessionService browserSessions;
 
   @Test
   void anonymousZipLookupIsPublic() throws Exception {

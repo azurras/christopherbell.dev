@@ -119,6 +119,44 @@ class SecurityConfigTest {
   }
 
   @Test
+  @DisplayName("Music shell and access probe are public while catalog and media stay protected")
+  void publicMatchers_whenMusicRequested_matchesOnlyShellAndExactAccessProbe() throws Exception {
+    var shell = request("GET", "/music");
+    var access = request("GET", "/api/music/2026-07-28/access");
+    var accessPost = request("POST", "/api/music/2026-07-28/access");
+    var catalog = request("GET", "/api/music/2026-07-28/catalog");
+    var stream = request("GET", "/api/music/2026-07-28/tracks/track-1/stream");
+    var download = request("GET", "/api/music/2026-07-28/tracks/track-1/download");
+    var radio = request("GET", "/api/music/2026-07-28/radio");
+    var queueRead = request("GET", "/api/music/2026-07-28/queue");
+    var queueWrite = request("POST", "/api/music/2026-07-28/queue");
+    var playlistsRead = request("GET", "/api/music/2026-07-28/library/playlists");
+    var playlistsWrite = request("POST", "/api/music/2026-07-28/library/playlists");
+    var preferences = request(
+        "PATCH", "/api/music/2026-07-28/library/tracks/track-1/preferences");
+    var history = request("GET", "/api/music/2026-07-28/library/history");
+    var metadata = request("PATCH", "/api/music/2026-07-28/tracks/track-1/metadata");
+    var metadataUndo = request(
+        "POST", "/api/music/2026-07-28/metadata-edits/edit-1/undo");
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(shell)));
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(access)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(accessPost)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(catalog)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(stream)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(download)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(radio)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(queueRead)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(queueWrite)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(playlistsRead)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(playlistsWrite)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(preferences)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(history)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(metadata)));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(metadataUndo)));
+  }
+
+  @Test
   @DisplayName("Shared-folder worker bootstrap is public only for its exact anonymous GET")
   void publicMatchers_whenSharedFolderWorkerRequested_matchesOnlyTheExactGet() throws Exception {
     var worker = request("GET", "/shared-folder-auth-sw.js");

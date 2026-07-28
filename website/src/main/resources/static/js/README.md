@@ -153,6 +153,12 @@ Owns browser-side behavior for server-rendered pages.
   server-rendered pages and their scripts keep working without replacing the player. The top URL,
   title, Back/Forward history, logout, and access-revocation behavior remain synchronized. External,
   download, new-tab, modifier, hash-only, and API links retain browser-owned behavior.
+- `music.js` and `lib/music.js` own the access-aware `/music` hub. They validate catalog, queue,
+  and playlist responses before rendering; expose catalog playback, the global station and queue,
+  favorites, radio exclusions, shared playlists/history, and writer-only metadata editing with
+  undo; and delegate every track to the existing top-document media owner. The player expands on
+  `/music` and compacts on other routes by changing presentation only, so the active media node is
+  never replaced during navigation.
 
 ## Design Notes
 

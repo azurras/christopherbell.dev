@@ -55,14 +55,24 @@ export function promotedRoleForAction(action) {
  * read access. ADMINs always retain the role-provided default and therefore cannot be edited.
  */
 export function sharedFolderPermissionState(account, change = {}) {
+  return capabilityPermissionState(
+      account, 'SHARED_FOLDER_READ', 'SHARED_FOLDER_WRITE', change);
+}
+
+/** Resolves Music checkbox state with the same write-implies-read invariant. */
+export function musicPermissionState(account, change = {}) {
+  return capabilityPermissionState(account, 'MUSIC_READ', 'MUSIC_WRITE', change);
+}
+
+function capabilityPermissionState(account, readCapability, writeCapability, change) {
   const isAdmin = String(account?.role || '').toUpperCase() === 'ADMIN';
   if (isAdmin) {
     return { read: true, write: true, disabled: true };
   }
 
   const permissions = new Set(account?.permissions || []);
-  const currentRead = permissions.has('SHARED_FOLDER_READ');
-  const currentWrite = permissions.has('SHARED_FOLDER_WRITE');
+  const currentRead = permissions.has(readCapability);
+  const currentWrite = permissions.has(writeCapability);
   if (change.read === false) {
     return { read: false, write: false, disabled: false };
   }

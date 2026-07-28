@@ -47,7 +47,9 @@ SHA-256
 `E2AAEAA0FDBC397D4794828086424D4AAA2102CEF1FB6874F6FFD29C0B88B673`
 before extracting `ffmpeg.exe` or `ffprobe.exe`. The installer then records and
 revalidates the individual executable hashes in the protected active-tool
-manifest.
+manifest. When Music is enabled, the website resolves those executables through
+that marker and verifies their hashes during startup; a missing, linked, malformed,
+or tampered tool installation prevents the candidate release from reaching cutover.
 
 ## ProgramData Layout and Security
 

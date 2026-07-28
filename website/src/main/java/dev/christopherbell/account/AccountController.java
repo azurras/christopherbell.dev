@@ -5,6 +5,7 @@ import static dev.christopherbell.libs.api.APIVersion.V20250903;
 import static dev.christopherbell.libs.api.APIVersion.V20250914;
 import static dev.christopherbell.libs.api.APIVersion.V20260717;
 import static dev.christopherbell.libs.api.APIVersion.V20260726;
+import static dev.christopherbell.libs.api.APIVersion.V20260728;
 
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.deletion.AccountDeletionResult;
@@ -13,15 +14,18 @@ import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.dto.AccountProfile;
+import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
+import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +46,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.util.WebUtils;
 
 /**
  * REST controller for account management endpoints under the base path
@@ -71,6 +76,7 @@ public class AccountController {
   private final PermissionService permissionService;
   private final BrowserAuthenticationCookies browserAuthenticationCookies;
   private final BrowserSecurityProperties browserSecurityProperties;
+  private final BrowserSessionService browserSessions;
 
     /**
    * Approves a pending or unapproved account.
@@ -391,7 +397,7 @@ public class AccountController {
    *
    * @param accountLoginRequest account credentials
    * @param sessionMode {@code cookie} for an HttpOnly browser session, otherwise legacy bearer mode
-   * @return a JWT payload for legacy clients or cookie headers with no payload for browser mode
+   * @return a JWT payload for API clients or an opaque cookie with no payload for browser mode
    * @throws Exception if there is an error logging in the account.
    */
   @PostMapping(
@@ -410,7 +416,7 @@ public class AccountController {
         .success(true)
         .build();
     var headers = browserSession
-        ? cookieHeaders(browserAuthenticationCookies.authenticated(token))
+        ? cookieHeaders(browserAuthenticationCookies.authenticated(browserSessions.create(token)))
         : new HttpHeaders();
     return new ResponseEntity<>(body, headers, HttpStatus.OK);
   }
@@ -420,7 +426,9 @@ public class AccountController {
       value = V20241215 + "/logout",
       produces = MediaType.APPLICATION_JSON_VALUE
   )
-  public ResponseEntity<Response<Void>> logoutAccount() {
+  public ResponseEntity<Response<Void>> logoutAccount(HttpServletRequest request) {
+    var cookie = WebUtils.getCookie(request, BrowserAuthenticationCookies.AUTH_COOKIE_NAME);
+    if (cookie != null) browserSessions.revoke(cookie.getValue());
     return new ResponseEntity<>(Response.<Void>builder()
         .success(true)
         .build(), cookieHeaders(browserAuthenticationCookies.cleared()), HttpStatus.OK);
@@ -517,6 +525,20 @@ public class AccountController {
       @RequestBody SharedFolderPermissionUpdate request) throws Exception {
     return ResponseEntity.ok(Response.<AccountDetail>builder()
         .payload(accountService.updateSharedFolderPermissions(accountId, request))
+        .success(true)
+        .build());
+  }
+
+  /** Replaces the target account's stored Music capabilities without changing its role. */
+  @PatchMapping(
+      value = V20260728 + "/{accountId}/music-permissions",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<Response<AccountDetail>> updateMusicPermissions(
+      @PathVariable String accountId,
+      @RequestBody MusicPermissionUpdate request) throws Exception {
+    return ResponseEntity.ok(Response.<AccountDetail>builder()
+        .payload(accountService.updateMusicPermissions(accountId, request))
         .success(true)
         .build());
   }

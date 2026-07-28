@@ -168,6 +168,16 @@ public class ViewControllerTest {
   }
 
   @Test
+  @DisplayName("Music renders a public access-aware library shell")
+  public void getMusicPage_rendersAccessAwareShell() throws Exception {
+    mockMvc
+        .perform(get("/music"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("id=\"music-access\"")))
+        .andExpect(content().string(containsString("/js/music.js")));
+  }
+
+  @Test
   @DisplayName("Public user page renders canonical username social URL")
   public void getPublicUserPage_rendersUsernameSocialUrl() throws Exception {
     mockMvc
