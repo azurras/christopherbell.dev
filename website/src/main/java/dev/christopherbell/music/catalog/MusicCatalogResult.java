@@ -6,5 +6,9 @@ import java.util.List;
 public record MusicCatalogResult(
     List<MusicTrack> tracks,
     List<MusicAlbumGroup> albums,
-    MusicFacets facets) {
+    MusicFacets facets,
+    int page,
+    int size,
+    long totalTracks,
+    int totalPages) {
 }

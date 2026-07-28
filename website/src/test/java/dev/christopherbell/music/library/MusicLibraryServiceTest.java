@@ -47,6 +47,21 @@ class MusicLibraryServiceTest {
   }
 
   @Test
+  void listenerResolvesOnePlaylistTrackSetForServerSideCatalogPaging() {
+    var repository = mock(MusicPlaylistRepository.class);
+    when(repository.findById("playlist-1")).thenReturn(Optional.of(new MusicPlaylist(
+        "playlist-1", "road-trip", "Road Trip", List.of("track-a", "track-b"),
+        3L, "writer", NOW)));
+    var access = mock(MusicAccessService.class);
+    var service = service(repository, mock(MusicCatalog.class),
+        mock(MusicRadioHistoryRepository.class), access, mock(MongoTemplate.class));
+
+    assertThat(service.playlistTrackIds("playlist-1"))
+        .containsExactly("track-a", "track-b");
+    verify(access).requireRead();
+  }
+
+  @Test
   void writerCreatesAGlobalPlaylistWithValidatedTracksAndPublicVersion() {
     MusicTrack song = track("song.mp3", false, false);
     var repository = mock(MusicPlaylistRepository.class);
