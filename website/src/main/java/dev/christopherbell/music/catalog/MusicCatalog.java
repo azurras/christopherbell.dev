@@ -58,6 +58,17 @@ public class MusicCatalog {
         .filter(track -> track.missingSince() == null);
   }
 
+  /** Returns a bounded pool of present, ready tracks eligible for smart-radio selection. */
+  public List<MusicTrack> radioCandidates(int requestedLimit) {
+    int limit = Math.max(1, Math.min(10_000, requestedLimit));
+    Query query = Query.query(Criteria.where("missingSince").is(null)
+            .and("indexStatus").is(MusicIndexStatus.READY)
+            .and("excludedFromRadio").is(false))
+        .with(Sort.by(Sort.Order.asc("id")))
+        .limit(limit);
+    return List.copyOf(mongo.find(query, MusicTrack.class));
+  }
+
   private void exact(Criteria criteria, String field, String value) {
     if (value != null) criteria.and(field).is(value);
   }

@@ -180,6 +180,9 @@ export const API = {
     },
     stream: id => `/api/music/2026-07-28/tracks/${encodeURIComponent(id)}/stream`,
     artwork: id => `/api/music/2026-07-28/tracks/${encodeURIComponent(id)}/artwork`,
+    radio: '/api/music/2026-07-28/radio',
+    queue: '/api/music/2026-07-28/queue',
+    queueItem: id => `/api/music/2026-07-28/queue/${encodeURIComponent(id)}`,
     admin: {
       accessAttempts: (limit = 100) =>
         `/api/music/2026-07-28/admin/access-attempts?limit=${encodeURIComponent(limit)}`,

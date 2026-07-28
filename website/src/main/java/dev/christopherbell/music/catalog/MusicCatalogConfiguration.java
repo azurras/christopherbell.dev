@@ -1,6 +1,7 @@
 package dev.christopherbell.music.catalog;
 
 import java.time.Clock;
+import dev.christopherbell.music.radio.MusicRadioProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -9,7 +10,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 
 /** Wires the bounded Music indexing pipeline. */
 @Configuration
-@EnableConfigurationProperties(MusicProperties.class)
+@EnableConfigurationProperties({MusicProperties.class, MusicRadioProperties.class})
 public class MusicCatalogConfiguration {
 
   @Bean

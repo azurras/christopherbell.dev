@@ -112,6 +112,13 @@ app:
     artwork-max-bytes: 5242880
     artwork-max-dimension: 2048
     enabled: false
+    radio:
+      track-cooldown: 50
+      artist-cooldown: 10
+      exploration-probability: 0.1
+      maximum-catch-up-transitions: 100
+      lease-duration: 10s
+      tick-delay: 15s
 posts:
   edit-window: 15m
   edit-audit-limit: 10

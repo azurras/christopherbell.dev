@@ -40,14 +40,58 @@ function validRadioEntry(entry) {
       || typeof entry.observedToken === 'string');
 }
 
+function validMusicRadioTrack(track) {
+  const optionalText = value => value === null || value === undefined
+    || (typeof value === 'string' && value.length <= 512);
+  return validString(track?.id) && validString(track?.title)
+    && optionalText(track.artist) && optionalText(track.albumArtist)
+    && optionalText(track.album) && optionalText(track.genre)
+    && typeof track.artworkAvailable === 'boolean';
+}
+
+function validatedMusicRadioPlayback(response) {
+  if (!Number.isSafeInteger(response?.stationSequence) || response.stationSequence < 1
+      || !validString(response.trackId) || response.trackId !== response.track?.id
+      || !validString(response.observedToken)
+      || typeof response.startedAt !== 'string' || !Number.isFinite(Date.parse(response.startedAt))
+      || !finiteInRange(response.positionSeconds, 0, Number.MAX_SAFE_INTEGER)
+      || !finiteInRange(response.durationSeconds,
+        SITE_RADIO_MIN_DURATION_SECONDS, SITE_RADIO_MAX_DURATION_SECONDS)
+      || !['RADIO', 'QUEUE'].includes(response.source)
+      || !validMusicRadioTrack(response.track)) {
+    throw new Error('Music returned an invalid radio response.');
+  }
+  return Object.freeze({
+    stationSequence: response.stationSequence,
+    startedAt: response.startedAt,
+    positionSeconds: response.positionSeconds,
+    durationSeconds: response.durationSeconds,
+    source: response.source,
+    entry: Object.freeze({
+      name: response.track.title,
+      path: response.trackId,
+      type: 'FILE',
+      size: 0,
+      modifiedAt: response.startedAt,
+      previewKind: 'AUDIO',
+      observedToken: response.observedToken,
+      track: Object.freeze({ ...response.track }),
+    }),
+  });
+}
+
 function validatedSiteRadioPlayback(playback) {
   const validDuration = playback?.durationSeconds === null
     || finiteInRange(playback?.durationSeconds,
       SITE_RADIO_MIN_DURATION_SECONDS, SITE_RADIO_MAX_DURATION_SECONDS);
+  const musicEntry = validMusicRadioTrack(playback?.entry?.track)
+    && playback.entry.path === playback.entry.track.id
+    && playback.entry.name === playback.entry.track.title
+    && validString(playback.entry.observedToken);
   if (!Number.isSafeInteger(playback?.stationSequence) || playback.stationSequence < 1
       || typeof playback.startedAt !== 'string' || !Number.isFinite(Date.parse(playback.startedAt))
       || !finiteInRange(playback.positionSeconds, 0, Number.MAX_SAFE_INTEGER)
-      || !validDuration || !validRadioEntry(playback.entry)) {
+      || !validDuration || (!musicEntry && !validRadioEntry(playback.entry))) {
     throw new Error('The shared folder returned an invalid radio response.');
   }
   return Object.freeze({
@@ -63,14 +107,18 @@ function validatedSiteRadioPlayback(playback) {
       modifiedAt: playback.entry.modifiedAt,
       previewKind: playback.entry.previewKind,
       observedToken: playback.entry.observedToken ?? null,
+      ...(musicEntry ? { track: Object.freeze({ ...playback.entry.track }) } : {}),
     }),
   });
 }
 
 /** Validate the complete untrusted radio response before media or URL effects use it. */
 export function validateSiteRadioResponse(response) {
-  if (response?.status === 'EMPTY' && response.playback === null) {
+  if (response?.status === 'EMPTY' && (response.playback === null || response.trackId === null)) {
     return Object.freeze({ status: 'EMPTY', playback: null });
+  }
+  if (response?.status === 'PLAYING' && response.trackId) {
+    return Object.freeze({ status: 'PLAYING', playback: validatedMusicRadioPlayback(response) });
   }
   if (response?.status !== 'PLAYING' || !response.playback) {
     throw new Error('The shared folder returned an invalid radio response.');
@@ -691,6 +739,15 @@ export function playSharedFolderRadio(browserWindow = window) {
     throw new Error('The site-wide media player is unavailable.');
   }
   return host.playSharedFolderRadio();
+}
+
+/** Join the global Music station through the top same-origin player. */
+export function playMusicRadio(browserWindow = window) {
+  const host = siteMediaPlayerHost(browserWindow);
+  if (typeof host?.playMusicRadio !== 'function') {
+    throw new Error('The site-wide media player is unavailable.');
+  }
+  return host.playMusicRadio();
 }
 
 /** Let every same-origin document delegate ordinary link clicks to the top player. */

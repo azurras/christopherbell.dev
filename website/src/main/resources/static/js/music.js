@@ -1,10 +1,12 @@
 import { API } from './lib/api.js';
 import { fetchJson, loginRedirectUrl, sanitize } from './lib/util.js';
+import { playMusicRadio } from './lib/site-media-player.js';
 
 const accessPanel = document.getElementById('music-access');
 const library = document.getElementById('music-library');
 const results = document.getElementById('music-results');
 const search = document.getElementById('music-search');
+const radio = document.getElementById('music-radio');
 
 function deniedMarkup(status) {
   if (!status?.authenticated) {
@@ -46,6 +48,7 @@ async function initialize() {
     }
     accessPanel.classList.add('d-none');
     library.classList.remove('d-none');
+    radio.disabled = false;
     await loadCatalog();
   } catch (_) {
     accessPanel.innerHTML = '<h2>Music is temporarily unavailable</h2><p>Please try again shortly.</p>';
@@ -55,6 +58,18 @@ async function initialize() {
 search?.addEventListener('submit', event => {
   event.preventDefault();
   void loadCatalog(String(document.getElementById('music-search-query')?.value || '').trim());
+});
+
+radio?.addEventListener('click', async () => {
+  radio.disabled = true;
+  try {
+    const response = await playMusicRadio();
+    radio.textContent = response?.status === 'EMPTY' ? 'Radio is empty' : 'Radio is live';
+  } catch (_) {
+    radio.textContent = 'Radio unavailable';
+  } finally {
+    radio.disabled = false;
+  }
 });
 
 void initialize();
