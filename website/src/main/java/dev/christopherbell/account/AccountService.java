@@ -16,6 +16,7 @@ import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.Role;
@@ -384,7 +385,11 @@ public class AccountService {
 
       var account = accountRepository.findById(accountId)
           .orElseThrow(() -> new ResourceNotFoundException("Account not found."));
-      var next = EnumSet.noneOf(AccountPermission.class);
+      var next = account.getPermissions() == null || account.getPermissions().isEmpty()
+          ? EnumSet.noneOf(AccountPermission.class)
+          : EnumSet.copyOf(account.getPermissions());
+      next.remove(AccountPermission.SHARED_FOLDER_READ);
+      next.remove(AccountPermission.SHARED_FOLDER_WRITE);
       if (request.read()) {
         next.add(AccountPermission.SHARED_FOLDER_READ);
       }
@@ -406,6 +411,52 @@ public class AccountService {
       throw failure;
     } catch (RuntimeException failure) {
       sharedFolderAudit.recordFailureOnce("PERMISSION_CHANGE", auditResource, failure);
+      throw failure;
+    }
+  }
+
+  /** Replaces an account's Music capabilities while preserving unrelated capability families. */
+  public AccountDetail updateMusicPermissions(
+      String accountId,
+      MusicPermissionUpdate request) throws InvalidRequestException, ResourceNotFoundException {
+    String auditResource = safeAuditAccountId(accountId);
+    try {
+      sharedFolderAccess.requireAdmin();
+      if (request == null || request.read() == null || request.write() == null) {
+        throw new InvalidRequestException("Music permissions are required.");
+      }
+      if (!request.read() && request.write()) {
+        throw new InvalidRequestException("Music write requires read.");
+      }
+
+      var account = accountRepository.findById(accountId)
+          .orElseThrow(() -> new ResourceNotFoundException("Account not found."));
+      var next = account.getPermissions() == null || account.getPermissions().isEmpty()
+          ? EnumSet.noneOf(AccountPermission.class)
+          : EnumSet.copyOf(account.getPermissions());
+      next.remove(AccountPermission.MUSIC_READ);
+      next.remove(AccountPermission.MUSIC_WRITE);
+      if (request.read()) {
+        next.add(AccountPermission.MUSIC_READ);
+      }
+      if (request.write()) {
+        next.add(AccountPermission.MUSIC_WRITE);
+      }
+      account.setPermissions(next);
+      AccountDetail saved = accountMapper.toAccount(accountRepository.save(account));
+      sharedFolderAudit.recordCurrent(
+          "MUSIC_PERMISSION_CHANGE", auditResource, null, "accepted", null);
+      return saved;
+    } catch (InvalidRequestException failure) {
+      sharedFolderAudit.recordRejectedOnce(
+          "MUSIC_PERMISSION_CHANGE", auditResource, "invalid_request");
+      throw failure;
+    } catch (ResourceNotFoundException failure) {
+      sharedFolderAudit.recordRejectedOnce(
+          "MUSIC_PERMISSION_CHANGE", auditResource, "not_found");
+      throw failure;
+    } catch (RuntimeException failure) {
+      sharedFolderAudit.recordFailureOnce("MUSIC_PERMISSION_CHANGE", auditResource, failure);
       throw failure;
     }
   }

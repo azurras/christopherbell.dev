@@ -30,6 +30,7 @@ import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.passwordreset.PasswordResetNotificationService;
 import dev.christopherbell.account.passwordreset.PasswordResetService;
@@ -819,6 +820,67 @@ public class AccountServiceTest {
         "PERMISSION_CHANGE", account.getId(), null, "accepted", null);
     verify(sharedFolderAudit).recordRejectedOnce(
         "PERMISSION_CHANGE", account.getId(), "invalid_request");
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: updating them preserves Music capabilities")
+  void sharedFolderPermissionUpdatePreservesMusicCapabilities() throws Exception {
+    var account = Account.builder()
+        .id("account-permission-families")
+        .role(Role.USER)
+        .permissions(java.util.Set.of(
+            AccountPermission.MUSIC_READ,
+            AccountPermission.MUSIC_WRITE))
+        .build();
+    when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+    when(accountRepository.save(account)).thenReturn(account);
+    when(accountMapper.toAccount(account)).thenReturn(
+        AccountDetail.builder().id(account.getId()).permissions(account.getPermissions()).build());
+
+    accountService.updateSharedFolderPermissions(
+        account.getId(), new SharedFolderPermissionUpdate(true, false));
+
+    assertEquals(
+        java.util.Set.of(
+            AccountPermission.MUSIC_READ,
+            AccountPermission.MUSIC_WRITE,
+            AccountPermission.SHARED_FOLDER_READ),
+        account.getPermissions());
+  }
+
+  @Test
+  @DisplayName("Music permissions: write implies read and Shared Folder capabilities are preserved")
+  void musicPermissionUpdatePreservesSharedFolderCapabilities() throws Exception {
+    var account = Account.builder()
+        .id("account-music-permissions")
+        .role(Role.USER)
+        .permissions(java.util.Set.of(
+            AccountPermission.SHARED_FOLDER_READ,
+            AccountPermission.SHARED_FOLDER_WRITE))
+        .build();
+    when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+    when(accountRepository.save(account)).thenReturn(account);
+    when(accountMapper.toAccount(account)).thenReturn(
+        AccountDetail.builder().id(account.getId()).permissions(account.getPermissions()).build());
+
+    accountService.updateMusicPermissions(
+        account.getId(), new MusicPermissionUpdate(true, true));
+
+    assertEquals(
+        java.util.Set.of(
+            AccountPermission.SHARED_FOLDER_READ,
+            AccountPermission.SHARED_FOLDER_WRITE,
+            AccountPermission.MUSIC_READ,
+            AccountPermission.MUSIC_WRITE),
+        account.getPermissions());
+    assertThrows(
+        InvalidRequestException.class,
+        () -> accountService.updateMusicPermissions(
+            account.getId(), new MusicPermissionUpdate(false, true)));
+    verify(sharedFolderAudit).recordCurrent(
+        "MUSIC_PERMISSION_CHANGE", account.getId(), null, "accepted", null);
+    verify(sharedFolderAudit).recordRejectedOnce(
+        "MUSIC_PERMISSION_CHANGE", account.getId(), "invalid_request");
   }
 
   @Test

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 const {
   accountPageNavigation,
+  musicPermissionState,
   parseAdminAccountPage,
   promotedRoleForAction,
   rolePromotionOptions,
@@ -94,6 +95,35 @@ test('shared-folder controls keep write dependent on read', () => {
 
 test('shared-folder controls preserve default ADMIN access as checked and disabled', () => {
   assert.deepEqual(sharedFolderPermissionState({ role: 'ADMIN', permissions: [] }), {
+    read: true,
+    write: true,
+    disabled: true,
+  });
+});
+
+test('music controls preserve unrelated grants and keep write dependent on read', () => {
+  const user = {
+    role: 'USER',
+    permissions: ['SHARED_FOLDER_READ', 'MUSIC_READ', 'MUSIC_WRITE'],
+  };
+
+  assert.deepEqual(musicPermissionState(user, { read: false }), {
+    read: false,
+    write: false,
+    disabled: false,
+  });
+  assert.deepEqual(musicPermissionState({ role: 'USER', permissions: [] }, { write: true }), {
+    read: true,
+    write: true,
+    disabled: false,
+  });
+  assert.equal(
+      API.accounts.updateMusicPermissions('account / 1'),
+      '/api/accounts/2026-07-28/account%20%2F%201/music-permissions');
+});
+
+test('music controls preserve default ADMIN access as checked and disabled', () => {
+  assert.deepEqual(musicPermissionState({ role: 'ADMIN', permissions: [] }), {
     read: true,
     write: true,
     disabled: true,

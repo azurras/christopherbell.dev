@@ -5,6 +5,7 @@ import static dev.christopherbell.libs.api.APIVersion.V20250903;
 import static dev.christopherbell.libs.api.APIVersion.V20250914;
 import static dev.christopherbell.libs.api.APIVersion.V20260717;
 import static dev.christopherbell.libs.api.APIVersion.V20260726;
+import static dev.christopherbell.libs.api.APIVersion.V20260728;
 
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.deletion.AccountDeletionResult;
@@ -13,6 +14,7 @@ import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.dto.AccountProfile;
+import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
@@ -517,6 +519,20 @@ public class AccountController {
       @RequestBody SharedFolderPermissionUpdate request) throws Exception {
     return ResponseEntity.ok(Response.<AccountDetail>builder()
         .payload(accountService.updateSharedFolderPermissions(accountId, request))
+        .success(true)
+        .build());
+  }
+
+  /** Replaces the target account's stored Music capabilities without changing its role. */
+  @PatchMapping(
+      value = V20260728 + "/{accountId}/music-permissions",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<Response<AccountDetail>> updateMusicPermissions(
+      @PathVariable String accountId,
+      @RequestBody MusicPermissionUpdate request) throws Exception {
+    return ResponseEntity.ok(Response.<AccountDetail>builder()
+        .payload(accountService.updateMusicPermissions(accountId, request))
         .success(true)
         .build());
   }

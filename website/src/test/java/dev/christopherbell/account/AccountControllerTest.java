@@ -29,6 +29,7 @@ import dev.christopherbell.account.model.AccountPasswordResetRequest;
 import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
+import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.configuration.security.ControllerSliceSecurityTestConfig;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
@@ -137,6 +138,32 @@ public class AccountControllerTest {
                 "SHARED_FOLDER_WRITE")));
 
     verify(accountService).updateSharedFolderPermissions(eq("acc-42"), eq(request));
+  }
+
+  @Test
+  @DisplayName("Music permissions: ADMIN can grant read and write")
+  @WithMockUser(authorities = {"ADMIN"})
+  void updateMusicPermissionsWhenAdminReturnsUpdatedDetail() throws Exception {
+    var request = new MusicPermissionUpdate(true, true);
+    var detail = AccountDetail.builder()
+        .id("acc-42")
+        .permissions(java.util.Set.of(
+            AccountPermission.MUSIC_READ,
+            AccountPermission.MUSIC_WRITE))
+        .build();
+    when(accountService.updateMusicPermissions(eq("acc-42"), eq(request))).thenReturn(detail);
+
+    mockMvc
+        .perform(patch("/api/accounts/2026-07-28/{accountId}/music-permissions", "acc-42")
+            .with(csrf())
+            .content("{\"read\":true,\"write\":true}")
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.permissions").value(
+            org.hamcrest.Matchers.containsInAnyOrder("MUSIC_READ", "MUSIC_WRITE")));
+
+    verify(accountService).updateMusicPermissions(eq("acc-42"), eq(request));
   }
 
   @Test

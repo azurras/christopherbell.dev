@@ -55,6 +55,8 @@ export const API = {
     update: '/api/accounts/2025-09-14',
     updateSharedFolderPermissions: (id) =>
       `/api/accounts/2026-07-17/${encodeURIComponent(id)}/shared-folder-permissions`,
+    updateMusicPermissions: (id) =>
+      `/api/accounts/2026-07-28/${encodeURIComponent(id)}/music-permissions`,
     passwordResetRequest: '/api/accounts/2024-12-15/password-reset/request',
     passwordResetConfirm: '/api/accounts/2024-12-15/password-reset/confirm',
     me: '/api/accounts/2025-09-03/me',

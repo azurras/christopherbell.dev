@@ -353,6 +353,20 @@
       <p class="queue-age mb-0">Write access always includes read access.</p>
     </section>
   </template>
+  <template id="musicPermissionsTemplate">
+    <section class="detail-section" aria-labelledby="musicPermissionsTitle">
+      <span class="detail-label" id="musicPermissionsTitle">Music</span>
+      <div class="form-check">
+        <input class="form-check-input" id="musicReadPermission" type="checkbox" data-music-permission="read" />
+        <label class="form-check-label" for="musicReadPermission">Listen to Music</label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" id="musicWritePermission" type="checkbox" data-music-permission="write" />
+        <label class="form-check-label" for="musicWritePermission">Manage Music</label>
+      </div>
+      <p class="queue-age mb-0">Manage access always includes listening. Music access never grants file downloads.</p>
+    </section>
+  </template>
   <aside id="backOfficeDrawer" class="back-office-drawer d-none" aria-hidden="true" aria-labelledby="drawerTitle">
     <div class="drawer-header">
       <div>

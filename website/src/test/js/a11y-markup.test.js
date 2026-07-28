@@ -49,3 +49,13 @@ test('back office links admins to the dedicated command center', () => {
 
   assert.match(html, /href="\/command-center"/);
 });
+
+test('back office Music permissions expose labelled read and write controls', () => {
+  const html = fs.readFileSync('website/src/main/resources/templates/back-office.html', 'utf8');
+
+  assert.match(html, /id="musicPermissionsTemplate"/);
+  assert.match(html, /id="musicReadPermission"[^>]+data-music-permission="read"/);
+  assert.match(html, /<label[^>]+for="musicReadPermission">Listen to Music<\/label>/);
+  assert.match(html, /id="musicWritePermission"[^>]+data-music-permission="write"/);
+  assert.match(html, /<label[^>]+for="musicWritePermission">Manage Music<\/label>/);
+});
