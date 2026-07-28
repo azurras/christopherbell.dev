@@ -6548,6 +6548,20 @@ body.site-player-shell-active {
   padding: 0.7rem 0;
 }
 
+.site-media-player-host[data-presentation="expanded"] .site-media-player-bar {
+  grid-template-columns: 120px minmax(180px, 1fr) auto minmax(280px, 1.5fr) auto;
+  min-height: 190px;
+}
+
+.site-media-player-host[data-presentation="expanded"] .site-media-player-artwork {
+  width: 112px;
+  height: 112px;
+}
+
+.site-media-player-host[data-presentation="expanded"] .site-media-player-title {
+  font-size: 1.2rem;
+}
+
 .site-media-player-media {
   display: flex;
   grid-area: media;
@@ -6807,6 +6821,15 @@ img.site-media-player-artwork {
     width: calc(100% - 1rem);
     min-height: 164px;
     padding: 0.55rem 0;
+  }
+
+  .site-media-player-host[data-presentation="expanded"] .site-media-player-bar {
+    min-height: 205px;
+  }
+
+  .site-media-player-host[data-presentation="expanded"] .site-media-player-artwork {
+    width: 56px;
+    height: 56px;
   }
 
   .site-media-player-artwork {

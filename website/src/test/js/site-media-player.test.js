@@ -135,6 +135,10 @@ test('framed pages delegate playback and navigation to the top document owner', 
       calls.push(['music-radio']);
       return Promise.resolve('music-live');
     },
+    playMusicTrack: track => {
+      calls.push(['music-track', track.id]);
+      return Promise.resolve('music-playing');
+    },
     navigateFromClick: (anchorValue, eventValue) => {
       calls.push(['navigate', anchorValue.href, eventValue.button]);
       return true;
@@ -158,12 +162,14 @@ test('framed pages delegate playback and navigation to the top document owner', 
     'playing');
   assert.equal(await siteMedia.playSharedFolderRadio(frameWindow), 'live');
   assert.equal(await siteMedia.playMusicRadio(frameWindow), 'music-live');
+  assert.equal(await siteMedia.playMusicTrack({ id: 'track-1' }, frameWindow), 'music-playing');
   assert.equal(siteMedia.handleSiteNavigationClick(event, frameWindow), true);
   siteMedia.stopSiteMediaPlayback(frameWindow);
   assert.deepEqual(calls, [
     ['play', 'music/song.flac'],
     ['radio'],
     ['music-radio'],
+    ['music-track', 'track-1'],
     ['navigate', '/void', 0],
     ['stop'],
   ]);
@@ -227,6 +233,17 @@ test('radio response boundary accepts only complete empty or playable audio stat
   for (const response of malformed) {
     assert.throws(() => siteMedia.validateSiteRadioResponse(response), /invalid radio response/i);
   }
+});
+
+test('Music route expands the same persistent player and every other route compacts it', () => {
+  assert.equal(siteMedia.siteMediaPresentation(
+    '/music', 'https://www.christopherbell.dev/void'), 'expanded');
+  assert.equal(siteMedia.siteMediaPresentation(
+    '/music?view=favorites', 'https://www.christopherbell.dev/void'), 'expanded');
+  assert.equal(siteMedia.siteMediaPresentation(
+    '/messages', 'https://www.christopherbell.dev/music'), 'compact');
+  assert.equal(siteMedia.siteMediaPresentation(
+    'not a valid url%', 'not a base'), 'compact');
 });
 
 test('Music radio response is normalized without exposing a filesystem path', () => {
@@ -457,6 +474,18 @@ test('same-tab resume treats legacy descriptors as items and preserves explicit 
     currentTime: 12.5, paused: true, ended: false, playbackRate: 1, muted: false, volume: 0.5,
   }), true);
   assert.equal(siteMedia.readSiteMediaResume(radioStorage).descriptor.mode, 'RADIO');
+
+  const musicStorage = memoryStorage();
+  assert.equal(siteMedia.saveSiteMediaResume(musicStorage, {
+    mode: 'MUSIC_ITEM', kind: 'AUDIO', title: 'Catalog Song', path: 'track-1',
+    artist: 'Artist', album: 'Album', artworkAvailable: true,
+  }, {
+    currentTime: 25, paused: false, ended: false, playbackRate: 1, muted: false, volume: 1,
+  }), true);
+  assert.deepEqual(siteMedia.readSiteMediaResume(musicStorage).descriptor, {
+    mode: 'MUSIC_ITEM', kind: 'AUDIO', title: 'Catalog Song', path: 'track-1',
+    artist: 'Artist', album: 'Album', artworkAvailable: true,
+  });
 });
 
 test('same-tab resume preserves explicit playing intent while restored media is paused', () => {

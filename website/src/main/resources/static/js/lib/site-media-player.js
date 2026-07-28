@@ -261,9 +261,17 @@ export function createSiteRadioScheduler({ poll, schedule, cancel, onError = () 
 function validatedSiteMediaResume(value) {
   const descriptor = value?.descriptor;
   const mode = descriptor?.mode ?? 'ITEM';
-  if (value?.version !== 1 || !['ITEM', 'RADIO'].includes(mode)
+  const musicItem = mode === 'MUSIC_ITEM';
+  const musicArtist = descriptor?.artist ?? '';
+  const musicAlbum = descriptor?.album ?? '';
+  if (value?.version !== 1 || !['ITEM', 'RADIO', 'MUSIC_ITEM'].includes(mode)
       || !['AUDIO', 'VIDEO'].includes(descriptor?.kind)
       || mode === 'RADIO' && descriptor.kind !== 'AUDIO'
+      || musicItem && (descriptor.kind !== 'AUDIO'
+        || !/^[A-Za-z0-9_-]{1,128}$/u.test(descriptor.path)
+        || typeof musicArtist !== 'string' || musicArtist.length > 512
+        || typeof musicAlbum !== 'string' || musicAlbum.length > 512
+        || typeof descriptor.artworkAvailable !== 'boolean')
       || !validString(descriptor?.title) || !validString(descriptor?.path)
       || !finiteInRange(value.positionSeconds, 0, Number.MAX_SAFE_INTEGER)
       || typeof value.wasPlaying !== 'boolean'
@@ -278,6 +286,11 @@ function validatedSiteMediaResume(value) {
       kind: descriptor.kind,
       title: descriptor.title,
       path: descriptor.path,
+      ...(musicItem ? {
+        artist: musicArtist,
+        album: musicAlbum,
+        artworkAvailable: descriptor.artworkAvailable,
+      } : {}),
     }),
     positionSeconds: value.positionSeconds,
     wasPlaying: value.wasPlaying,
@@ -741,6 +754,15 @@ export function playSharedFolderRadio(browserWindow = window) {
   return host.playSharedFolderRadio();
 }
 
+/** Expand the persistent player only for the first-class Music route. */
+export function siteMediaPresentation(href, currentHref) {
+  try {
+    return new URL(href, currentHref).pathname === '/music' ? 'expanded' : 'compact';
+  } catch (_) {
+    return 'compact';
+  }
+}
+
 /** Join the global Music station through the top same-origin player. */
 export function playMusicRadio(browserWindow = window) {
   const host = siteMediaPlayerHost(browserWindow);
@@ -748,6 +770,15 @@ export function playMusicRadio(browserWindow = window) {
     throw new Error('The site-wide media player is unavailable.');
   }
   return host.playMusicRadio();
+}
+
+/** Play one catalog track through the top same-origin player. */
+export function playMusicTrack(track, browserWindow = window) {
+  const host = siteMediaPlayerHost(browserWindow);
+  if (typeof host?.playMusicTrack !== 'function') {
+    throw new Error('The site-wide media player is unavailable.');
+  }
+  return host.playMusicTrack(track);
 }
 
 /** Let every same-origin document delegate ordinary link clicks to the top player. */

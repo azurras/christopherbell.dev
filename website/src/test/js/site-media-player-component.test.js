@@ -254,6 +254,27 @@ test('vendored metadata reader exposes the pinned range adapter interface', () =
   assert.equal(typeof context.jsmediatags.Reader.prototype.setFileReader, 'function');
 });
 
+test('expanded and compact Music presentation never replaces the active media node', () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { location: { href: 'https://www.christopherbell.dev/music' } };
+  try {
+    const media = fakeMedia();
+    const player = Object.create(SiteMediaPlayer.prototype);
+    player.dataset = {};
+    player.updatePlayerHeight = () => {};
+    player.session = { snapshot: () => ({ media }) };
+
+    player.syncRoutePresentation('/music');
+    assert.equal(player.dataset.presentation, 'expanded');
+    assert.equal(player.session.snapshot().media, media);
+    player.syncRoutePresentation('/messages');
+    assert.equal(player.dataset.presentation, 'compact');
+    assert.equal(player.session.snapshot().media, media);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});
+
 function fakeMedia() {
   const target = fakeEventTarget();
   return Object.assign(target, {

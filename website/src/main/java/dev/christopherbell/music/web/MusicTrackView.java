@@ -2,7 +2,7 @@ package dev.christopherbell.music.web;
 
 import dev.christopherbell.music.catalog.MusicTrack;
 
-/** Public Music metadata that intentionally omits disk paths and index revision internals. */
+/** Public Music metadata that omits disk paths and exposes only an opaque edit revision. */
 public record MusicTrackView(
     String id,
     String observedToken,
