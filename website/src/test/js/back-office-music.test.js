@@ -16,7 +16,7 @@ test('denied Music access markup escapes account and IP values', () => {
   assert.match(markup, /3 attempt\(s\)/);
   assert.match(markup, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(markup, /&lt;script&gt;alert\(2\)&lt;\/script&gt;/);
-  assert.doesNotMatch(markup, /<img|<script>/);
+  assert.doesNotMatch(markup, /<img|<script>/i);
 });
 
 test('denied Music access markup has a useful empty state', () => {
