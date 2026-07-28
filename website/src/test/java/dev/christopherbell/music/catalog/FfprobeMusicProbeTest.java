@@ -7,9 +7,11 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.ObjectMapper;
 
 class FfprobeMusicProbeTest {
+  @TempDir Path tempDir;
 
   @Test
   void parsesBoundedAudioMetadataAndUsesOnlyFixedProbeArguments() {
@@ -21,7 +23,7 @@ class FfprobeMusicProbeTest {
                     {"codec_type":"video","disposition":{"attached_pic":1}}]}
         """));
     var probe = new FfprobeMusicProbe(properties(), runner, new ObjectMapper());
-    Path source = Path.of("A:/Shared/Music/Artist/song.m4a");
+    Path source = tempDir.resolve("Artist/song.m4a").toAbsolutePath().normalize();
 
     var metadata = probe.probe(source);
 
@@ -53,7 +55,8 @@ class FfprobeMusicProbeTest {
 
   private void assertRejected(MusicProcessResult result) {
     var probe = new FfprobeMusicProbe(properties(), command -> result, new ObjectMapper());
-    assertThatThrownBy(() -> probe.probe(Path.of("A:/Shared/Music/song.flac")))
+    assertThatThrownBy(() -> probe.probe(
+        tempDir.resolve("song.flac").toAbsolutePath().normalize()))
         .isInstanceOf(MusicProbeException.class);
   }
 

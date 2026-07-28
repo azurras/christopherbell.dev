@@ -23,16 +23,18 @@ class FfmpegMusicTagProcessTest {
     var update = new MusicMetadataUpdate(
         "a".repeat(64), "Title", "Artist", "Album Artist", "Album", 2, 1,
         "Genre", 2026, "data:image/jpeg;base64,unused", false);
+    Path source = Path.of("trusted/source.mp3").toAbsolutePath().normalize();
+    Path destination = Path.of("private/stage.mp3").toAbsolutePath().normalize();
+    Path artwork = Path.of("private/artwork").toAbsolutePath().normalize();
 
-    process.rewrite(Path.of("C:/trusted/source.mp3"), Path.of("C:/private/stage.mp3"),
-        update, Path.of("C:/private/artwork"));
+    process.rewrite(source, destination, update, artwork);
 
     assertThat(command.get()).containsSubsequence(
-        "ffmpeg", "-nostdin", "-v", "error", "-y", "-i", "C:\\trusted\\source.mp3",
-        "-i", "C:\\private\\artwork", "-map", "0:a", "-map", "1:v:0",
+        "ffmpeg", "-nostdin", "-v", "error", "-y", "-i", source.toString(),
+        "-i", artwork.toString(), "-map", "0:a", "-map", "1:v:0",
         "-c:a", "copy", "-c:v", "copy", "-disposition:v:0", "attached_pic");
     assertThat(command.get()).doesNotContain("cmd", "/c", "powershell", "aac");
-    assertThat(command.get().get(command.get().size() - 1)).isEqualTo("C:\\private\\stage.mp3");
+    assertThat(command.get().get(command.get().size() - 1)).isEqualTo(destination.toString());
   }
 
   @Test
