@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -47,6 +48,10 @@ import dev.christopherbell.libs.test.TestUtil;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.util.List;
 import java.net.URI;
 import org.junit.jupiter.api.DisplayName;
@@ -62,6 +67,8 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver;
+import org.slf4j.LoggerFactory;
 
 @WebMvcTest(AccountController.class)
 @Import({
@@ -742,6 +749,38 @@ public class AccountControllerTest {
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload").value("api-jwt-token"))
         .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+  }
+
+  @Test
+  @DisplayName("Login rejects an unacceptable Accept header with a safe JSON error envelope")
+  void loginAccount_whenAcceptIsXml_returnsSafeJsonErrorWithoutResolverThrowable() throws Exception {
+    when(accountService.loginAccount(eq(new dev.christopherbell.account.model.AccountLoginRequest(
+        "api@example.com", "password")))).thenReturn("api-jwt-token");
+    var logger = (Logger) LoggerFactory.getLogger(ExceptionHandlerExceptionResolver.class);
+    Level originalLevel = logger.getLevel();
+    var appender = new ListAppender<ILoggingEvent>();
+    appender.start();
+    logger.setLevel(Level.TRACE);
+    logger.addAppender(appender);
+    try {
+      mockMvc.perform(post("/api/accounts" + APIVersion.V20241215 + "/login")
+              .content("{\"email\":\"api@example.com\",\"password\":\"password\"}")
+              .contentType(MediaType.APPLICATION_JSON_VALUE)
+              .accept(MediaType.APPLICATION_XML))
+          .andExpect(status().isNotAcceptable())
+          .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+          .andExpect(jsonPath("$.success").value(false))
+          .andExpect(jsonPath("$.messages[0].code").value("REQUEST_ERROR"))
+          .andExpect(jsonPath("$.messages[0].description")
+              .value("The requested response format is not available."));
+
+      assertFalse(appender.list.stream().anyMatch(event ->
+          event.getLevel().isGreaterOrEqual(Level.WARN) && event.getThrowableProxy() != null));
+    } finally {
+      logger.detachAppender(appender);
+      logger.setLevel(originalLevel);
+      appender.stop();
+    }
   }
 
   @Test
