@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Explore the Void', 'Find new, fading, and recently revived conversations in the Void.', 'https://www.christopherbell.dev/void/explore', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'Explore the Void on christopherbell.dev')}"></th:block>
+    <title>CB | Explore the Void</title>
+    <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}" />
+</head>
+<body class="site-page void-shell-page void-discovery-page">
+    <div id="nav"></div>
+    <main class="site-main" aria-labelledby="voidExploreTitle">
+        <section class="void-discovery-hero">
+            <div class="container">
+                <p class="home-kicker">Public signal map</p>
+                <h1 id="voidExploreTitle">Explore the signal</h1>
+                <p>Find conversations arriving now, running out of time, or pulled back from the edge.</p>
+            </div>
+        </section>
+        <section class="site-content">
+            <div class="container void-discovery-grid">
+                <article class="void-discovery-panel void-discovery-panel-posts" data-discovery-section="new">
+                    <header><p class="home-kicker">Just transmitted</p><h2>New arrivals</h2><p>The latest active threads.</p></header>
+                    <div class="void-discovery-status" data-discovery-status aria-live="polite"></div>
+                    <div class="void-discovery-items feed-list" data-discovery-items></div>
+                    <div class="void-discovery-actions"><button type="button" data-discovery-action="retry" hidden>Retry</button><button type="button" data-discovery-action="more" hidden>Load more</button></div>
+                </article>
+                <article class="void-discovery-panel void-discovery-panel-posts" data-discovery-section="fading">
+                    <header><p class="home-kicker">Time is thin</p><h2>Fading soon</h2><p>Active threads nearest to disappearing.</p></header>
+                    <div class="void-discovery-status" data-discovery-status aria-live="polite"></div>
+                    <div class="void-discovery-items feed-list" data-discovery-items></div>
+                    <div class="void-discovery-actions"><button type="button" data-discovery-action="retry" hidden>Retry</button><button type="button" data-discovery-action="more" hidden>Load more</button></div>
+                </article>
+                <article class="void-discovery-panel void-discovery-panel-posts" data-discovery-section="revived">
+                    <header><p class="home-kicker">Still resonating</p><h2>Recently revived</h2><p>Threads someone chose to keep alive.</p></header>
+                    <div class="void-discovery-status" data-discovery-status aria-live="polite"></div>
+                    <div class="void-discovery-items feed-list" data-discovery-items></div>
+                    <div class="void-discovery-actions"><button type="button" data-discovery-action="retry" hidden>Retry</button><button type="button" data-discovery-action="more" hidden>Load more</button></div>
+                </article>
+                <article class="void-discovery-panel" data-discovery-section="topics">
+                    <header><p class="home-kicker">Shared frequencies</p><h2>Topics</h2><p>What active conversations are about.</p></header>
+                    <div class="void-discovery-status" data-discovery-status aria-live="polite"></div>
+                    <div class="void-discovery-items void-topic-cloud" data-discovery-items></div>
+                    <div class="void-discovery-actions"><button type="button" data-discovery-action="retry" hidden>Retry</button><button type="button" data-discovery-action="more" hidden>Load more</button></div>
+                </article>
+                <article class="void-discovery-panel" data-discovery-section="people">
+                    <header><p class="home-kicker">Other transmitters</p><h2>People</h2><p>Shared interests when signed in; a rotating recent mix otherwise.</p></header>
+                    <div class="void-discovery-status" data-discovery-status aria-live="polite"></div>
+                    <div class="void-discovery-items void-people-list" data-discovery-items></div>
+                    <div class="void-discovery-actions"><button type="button" data-discovery-action="retry" hidden>Retry</button><button type="button" data-discovery-action="more" hidden>Load more</button></div>
+                </article>
+            </div>
+        </section>
+    </main>
+    <footer id="footer"></footer>
+    <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
+    <script type="module" src="/js/void-discovery.js" th:src="@{/js/void-discovery.js}"></script>
+</body>
+</html>

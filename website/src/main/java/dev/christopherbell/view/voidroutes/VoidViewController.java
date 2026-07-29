@@ -1,14 +1,17 @@
 package dev.christopherbell.view.voidroutes;
 
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.post.model.PostTopic;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Controller;
+import org.springframework.http.HttpStatus;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.UriUtils;
 
 /**
@@ -28,6 +31,26 @@ public class VoidViewController {
   @GetMapping(value = "/void")
   public String getVoidHomePage(HttpServletRequest request) {
     return "void/index.html";
+  }
+
+  /** Serves the public Void discovery shell. */
+  @GetMapping(value = "/void/explore")
+  public String getVoidExplorePage(HttpServletResponse response) {
+    response.setHeader("Cache-Control", "no-store, max-age=0");
+    return "void/explore.html";
+  }
+
+  /** Serves one normalized public topic shell without embedding post data. */
+  @GetMapping(value = "/void/topic/{topic}")
+  public String getVoidTopicPage(
+      @PathVariable String topic, HttpServletResponse response, Model model) {
+    try {
+      model.addAttribute("topic", PostTopic.canonicalizeRoute(topic));
+    } catch (IllegalArgumentException exception) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid topic.");
+    }
+    response.setHeader("Cache-Control", "no-store, max-age=0");
+    return "void/topic.html";
   }
 
   /**

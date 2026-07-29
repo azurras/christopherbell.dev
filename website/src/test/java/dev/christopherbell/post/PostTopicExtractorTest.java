@@ -46,4 +46,11 @@ class PostTopicExtractorTest {
 
     assertEquals(List.of(new PostTopic(fortyCodePoints, fortyCodePoints)), topics);
   }
+
+  @Test
+  void canonicalizesOneSafeRouteSegmentAndRejectsPunctuation() {
+    assertEquals("music", PostTopic.canonicalizeRoute("ＭＵＳＩＣ"));
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException.class, () -> PostTopic.canonicalizeRoute("bad.topic"));
+  }
 }

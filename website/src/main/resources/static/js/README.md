@@ -43,6 +43,10 @@ Owns browser-side behavior for server-rendered pages.
 - The Void feed toolbar keeps the primary feed filter surface to `All` and
   `Following`; its Newest and Expiring Soon sorts use time only, never keep-alive
   or reply totals. Profile and thread pages handle personal post and reply views.
+- `void-discovery.js` renders the public `/void/explore` and `/void/topic/{topic}`
+  surfaces. New, fading, revived, topic, and people panels load independently so
+  one failed request cannot blank the page; topic and account values are inserted
+  as text, and every panel owns its retry, empty, and pagination state.
 - Shared feed cards present the existing Like mutation as Keep alive, apply
   server-confirmed expiration/count state before showing `+24h`, and share a
   canonical post URL through the native share sheet or clipboard fallback.

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title th:text="${'CB | #' + topic}">CB | Void topic</title>
+    <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}" />
+</head>
+<body class="site-page void-shell-page void-discovery-page" data-topic="topic" th:attr="data-topic=${topic}">
+    <div id="nav"></div>
+    <main class="site-main" aria-labelledby="voidTopicTitle">
+        <section class="void-discovery-hero">
+            <div class="container">
+                <a class="void-discovery-back" href="/void/explore">← Explore</a>
+                <p class="home-kicker">Active topic</p>
+                <h1 id="voidTopicTitle" th:text="|#${topic}|">#topic</h1>
+                <p>Active threads carrying this signal, newest first.</p>
+            </div>
+        </section>
+        <section class="site-content">
+            <div class="container void-topic-page-shell">
+                <article class="void-discovery-panel void-discovery-panel-posts" data-discovery-section="topic">
+                    <div class="void-discovery-status" data-discovery-status aria-live="polite"></div>
+                    <div class="void-discovery-items feed-list" data-discovery-items></div>
+                    <div class="void-discovery-actions"><button type="button" data-discovery-action="retry" hidden>Retry</button><button type="button" data-discovery-action="more" hidden>Load more</button></div>
+                </article>
+            </div>
+        </section>
+    </main>
+    <footer id="footer"></footer>
+    <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
+    <script type="module" src="/js/void-discovery.js" th:src="@{/js/void-discovery.js}"></script>
+</body>
+</html>

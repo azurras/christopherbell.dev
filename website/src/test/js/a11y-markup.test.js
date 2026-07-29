@@ -59,3 +59,15 @@ test('back office Music permissions expose labelled read and write controls', ()
   assert.match(html, /id="musicWritePermission"[^>]+data-music-permission="write"/);
   assert.match(html, /<label[^>]+for="musicWritePermission">Manage Music<\/label>/);
 });
+
+test('Void Explore exposes five independently labelled live regions', () => {
+  const html = fs.readFileSync('website/src/main/resources/templates/void/explore.html', 'utf8');
+
+  for (const section of ['new', 'fading', 'revived', 'topics', 'people']) {
+    assert.match(html, new RegExp(`data-discovery-section="${section}"`));
+  }
+  assert.match(html, /aria-labelledby="voidExploreTitle"/);
+  assert.match(html, /aria-live="polite"/);
+  assert.match(html, /data-discovery-action="retry"/);
+  assert.match(html, /data-discovery-action="more"/);
+});

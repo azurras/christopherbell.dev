@@ -15,7 +15,9 @@ Owns server-side routing for HTML pages.
   visitors and obtains listing data only from the separately protected shared-folder read API after
   a fresh effective-read check.
 - `tools` serves Raising Canes Box Index, VIN Decoder, and ZIP Coordinates pages.
-- `voidroutes` serves Void, profile, messages, notifications, public user feeds, and post pages.
+- `voidroutes` serves Void, profile, messages, notifications, public user feeds,
+  post pages, the public `/void/explore` discovery page, and normalized public
+  `/void/topic/{topic}` pages.
 - `wfl` serves What's For Lunch, WFL restaurant profiles, favorites, and top-rated lists.
 - Route names used by the frontend navigation.
 - Dynamic public profile routes attach canonical social preview URLs for link unfurlers.

@@ -74,6 +74,28 @@ public class ViewControllerTest {
   }
 
   @Test
+  @DisplayName("Void Explore renders the public failure-isolated shell")
+  public void getVoidExplorePage_rendersDiscoveryShellWithoutCaching() throws Exception {
+    mockMvc.perform(get("/void/explore"))
+        .andExpect(status().isOk())
+        .andExpect(header().string("Cache-Control", containsString("no-store")))
+        .andExpect(content().string(containsString("Explore the signal")))
+        .andExpect(content().string(containsString("data-discovery-section=\"people\"")));
+  }
+
+  @Test
+  @DisplayName("Void topic renders a canonical topic shell")
+  public void getVoidTopicPage_normalizesTopicAndRejectsMalformedValues() throws Exception {
+    mockMvc.perform(get("/void/topic/MUSIC"))
+        .andExpect(status().isOk())
+        .andExpect(header().string("Cache-Control", containsString("no-store")))
+        .andExpect(content().string(containsString("data-topic=\"music\"")));
+
+    mockMvc.perform(get("/void/topic/bad.topic"))
+        .andExpect(status().isBadRequest());
+  }
+
+  @Test
   @DisplayName("What's For Lunch page renders social preview metadata")
   public void getWhatsForLunchPage_rendersSocialPreviewMetadata() throws Exception {
     mockMvc

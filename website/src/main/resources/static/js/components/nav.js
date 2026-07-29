@@ -46,6 +46,7 @@ export function toolsMenuItems(hasSharedFolderRead = false) {
 export function topLevelNavItems(isAuthenticated) {
     return [
         { href: '/void', label: 'Feed' },
+        { href: '/void/explore', label: 'Explore' },
         { href: '/music', label: 'Music' },
         { href: messagesNavHref(isAuthenticated), label: 'Messages' },
     ];
@@ -70,6 +71,9 @@ export function isActiveNavHref(href, pathname = window.location.pathname) {
     const targetPath = String(href || '').split('?')[0].replace(/\/+$/, '') || '/';
     if (targetPath === '/void') {
         return currentPath === '/void' || currentPath.startsWith('/p/');
+    }
+    if (targetPath === '/void/explore') {
+        return currentPath === '/void/explore' || currentPath.startsWith('/void/topic/');
     }
     if (targetPath === '/messages') {
         return currentPath === '/messages';
