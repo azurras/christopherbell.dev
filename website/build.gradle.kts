@@ -37,11 +37,11 @@ dependencies {
     implementation("io.projectreactor.netty:reactor-netty-http")
 
     // Host metrics; Windows sensor binaries are pinned generated resources below.
-    implementation("com.github.oshi:oshi-core:7.4.1")
+    implementation("com.github.oshi:oshi-core:7.4.2")
     implementation("net.java.dev.jna:jna-platform-jpms:5.19.1")
 
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
-    implementation("org.webjars:bootstrap:5.3.3")
+    implementation("org.webjars:bootstrap:5.3.8")
 
     // Rate Limiting
     implementation("com.github.vladimir-bukhtoyarov:bucket4j-core:8.0.1")
