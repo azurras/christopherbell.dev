@@ -97,10 +97,11 @@ public class VoidViewController {
       HttpServletRequest request,
       HttpServletResponse response,
       Model model) {
-    var encodedUsername = UriUtils.encodePathSegment(username, StandardCharsets.UTF_8);
-    model.addAttribute("socialUrl", PUBLIC_ROOT + "/u/" + encodedUsername);
     try {
       var preview = userPreviews.preview(username);
+      var encodedUsername = UriUtils.encodePathSegment(
+          preview.username(), StandardCharsets.UTF_8);
+      model.addAttribute("socialUrl", PUBLIC_ROOT + "/u/" + encodedUsername);
       model.addAttribute("socialTitle", preview.title());
       model.addAttribute("socialDescription", preview.description());
       model.addAttribute("profileUsername", preview.username());

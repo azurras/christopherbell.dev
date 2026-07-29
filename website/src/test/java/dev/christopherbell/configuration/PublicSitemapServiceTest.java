@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
@@ -36,15 +38,19 @@ class PublicSitemapServiceTest {
   @BeforeEach
   void setUp() {
     service = new PublicSitemapService(
-        accounts, posts, restaurants, Clock.fixed(now, ZoneOffset.UTC), 10);
-    when(accounts.findByStatus(eq(AccountStatus.ACTIVE), any(Pageable.class)))
-        .thenReturn(new PageImpl<>(List.of(
-            Account.builder().username("zebra").build(),
-            Account.builder().username("active_user").build())));
-    when(posts.findByExpiresOnAfter(eq(now), any(Pageable.class)))
-        .thenReturn(new PageImpl<>(List.of(Post.builder().id("post id").expiresOn(now.plusSeconds(1)).build())));
-    when(restaurants.findAll(any(Pageable.class)))
-        .thenReturn(new PageImpl<>(List.of(Restaurant.builder().id("rest/one").build())));
+        accounts, posts, restaurants, Clock.fixed(now, ZoneOffset.UTC), false, 10);
+    when(accounts.countByStatus(AccountStatus.ACTIVE)).thenReturn(2L);
+    org.mockito.Mockito.lenient().when(posts.count()).thenReturn(1L);
+    when(restaurants.count()).thenReturn(1L);
+  }
+
+  @Test
+  void invalidShardIsRejectedFromCountsWithoutScanningCollections() {
+    assertThat(service.renderShard(Integer.MAX_VALUE)).isEmpty();
+
+    verify(accounts, never()).findByStatus(any(), any(Pageable.class));
+    verify(posts, never()).findAll(any(Pageable.class));
+    verify(restaurants, never()).findAll(any(Pageable.class));
   }
 
   @Test
@@ -60,6 +66,7 @@ class PublicSitemapServiceTest {
 
   @Test
   void shardsContainStaticAndLiveDynamicCanonicalUrlsInDeterministicOrder() throws Exception {
+    stubPublicContentPages();
     var first = service.renderShard(1);
     var second = service.renderShard(2);
 
@@ -77,6 +84,37 @@ class PublicSitemapServiceTest {
     assertThat(service.renderShard(3)).isEmpty();
     assertXml(first.orElseThrow(), "urlset");
     assertXml(second.orElseThrow(), "urlset");
+  }
+
+  @Test
+  void expirationEnabledIncludesOnlyPostsWhoseExpirationIsInTheFuture() {
+    var expiringService = new PublicSitemapService(
+        accounts, posts, restaurants, Clock.fixed(now, ZoneOffset.UTC), true, 50_000);
+    when(posts.countByExpiresOnAfter(now)).thenReturn(1L);
+    when(accounts.findByStatus(eq(AccountStatus.ACTIVE), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(
+            Account.builder().id("account-1").username("active_user").build(),
+            Account.builder().id("account-2").username("zebra").build())));
+    when(posts.findByExpiresOnAfter(eq(now), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(
+            Post.builder().id("future-post").expiresOn(now.plusSeconds(60)).build())));
+    when(restaurants.findAll(any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(Restaurant.builder().id("rest/one").build())));
+
+    assertThat(expiringService.renderRoot())
+        .contains("https://www.christopherbell.dev/p/future-post");
+    verify(posts, never()).findAll(any(Pageable.class));
+  }
+
+  private void stubPublicContentPages() {
+    when(accounts.findByStatus(eq(AccountStatus.ACTIVE), any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(
+            Account.builder().id("account-1").username("active_user").build(),
+            Account.builder().id("account-2").username("zebra").build())));
+    when(posts.findAll(any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(Post.builder().id("post id").expiresOn(null).build())));
+    when(restaurants.findAll(any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(Restaurant.builder().id("rest/one").build())));
   }
 
   private static void assertXml(String xml, String rootName) throws Exception {

@@ -320,6 +320,22 @@ public class ViewControllerTest {
   }
 
   @Test
+  void getPublicUserPage_usesResolvedUsernameForCanonicalUrl() throws Exception {
+    when(userPreviews.preview("some!user")).thenReturn(new VoidUserSocialPreview(
+        "CB | @someuser in the Void",
+        "@someuser has 3 active posts and 4 replies in the Void.",
+        "someuser",
+        "3 posts · 4 replies"));
+
+    mockMvc.perform(get("/u/some!user"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString(
+            "rel=\"canonical\" href=\"https://www.christopherbell.dev/u/someuser\"")))
+        .andExpect(content().string(not(containsString(
+            "rel=\"canonical\" href=\"https://www.christopherbell.dev/u/some!user\""))));
+  }
+
+  @Test
   void getPublicUserPage_whenMissing_returnsNoIndex404() throws Exception {
     when(userPreviews.preview("missing-user"))
         .thenThrow(new ResourceNotFoundException("SECRET_ACCOUNT"));

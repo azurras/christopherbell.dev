@@ -72,7 +72,7 @@ test('Void Explore exposes five independently labelled live regions', () => {
   assert.match(html, /data-discovery-action="more"/);
 });
 
-test('every non-submit button declares its type explicitly', () => {
+test('every button declares its intended type explicitly', () => {
   const files = [
     'website/src/main/resources/templates/post.html',
     'website/src/main/resources/templates/messages.html',
@@ -88,6 +88,13 @@ test('every non-submit button declares its type explicitly', () => {
       .filter((button) => !/\btype=(?:"[^"]+"|'[^']+')/i.test(button));
     assert.deepEqual(ambiguousButtons, [], `${file} has buttons without an explicit type`);
   }
+
+  const music = fs.readFileSync('website/src/main/resources/templates/music.html', 'utf8');
+  assert.equal(
+    (music.match(/<button\b[^>]*value="cancel"[^>]*formnovalidate[^>]*>/g) || []).length,
+    2,
+    'dialog Cancel submitters must bypass unrelated required-field validation'
+  );
 });
 
 test('The Bell archive pages expose one main landmark and one page heading', () => {
@@ -120,6 +127,7 @@ test('authentication forms provide stable names and autocomplete purposes', () =
 
   for (const [name, attributes] of expectations) {
     const html = fs.readFileSync(`website/src/main/resources/templates/${name}`, 'utf8');
+    assert.match(html, /<form\b[^>]*method="post"/i);
     for (const attribute of attributes) {
       assert.match(html, new RegExp(attribute));
     }
