@@ -8,6 +8,7 @@
 import pubsub from './pubsub.js';
 import { API } from '../lib/api.js';
 import { authHeaders, fetchJson, formatWhen, isLoggedIn, loginRedirectUrl, sanitize } from '../lib/util.js';
+import { accountHasMusicRead } from '../lib/music.js';
 import { accountHasSharedFolderRead } from '../lib/shared-folder.js';
 import {
     browserNotificationsToShow,
@@ -31,15 +32,33 @@ export function messagesNavHref(isAuthenticated) {
     return isAuthenticated ? '/messages' : loginRedirectUrl('/messages');
 }
 
+/** Derive one fail-closed navigation access snapshot from the current-account API. */
+export function accountNavigationAccess(account) {
+    return Object.freeze({
+        isAdmin: account?.role === 'ADMIN',
+        hasMusicRead: accountHasMusicRead(account),
+        hasSharedFolderRead: accountHasSharedFolderRead(account),
+    });
+}
+
 /** Secondary tools shown under the Tools dropdown. */
-export function toolsMenuItems(hasSharedFolderRead = false) {
+export function toolsMenuItems({
+    hasMusicRead = false,
+    hasSharedFolderRead = false,
+    isAdmin = false,
+} = {}) {
     return [
+        ...(isAdmin ? [
+            { href: '/back-office', label: 'Back Office' },
+            { href: '/command-center', label: 'Command Center' },
+        ] : []),
+        ...(isAdmin || hasMusicRead ? [{ href: '/music', label: 'Music' }] : []),
         { href: '/canes-box-tracker', label: 'Raising Canes Box Index' },
         ...(hasSharedFolderRead ? [{ href: '/shared', label: 'Shared Folder' }] : []),
         { href: '/vin-decoder', label: 'VIN Decoder' },
         { href: '/wfl', label: "What's For Lunch" },
         { href: '/zip-coordinates', label: 'ZIP Coordinates' },
-    ];
+    ].sort((left, right) => left.label.localeCompare(right.label, 'en'));
 }
 
 /** Primary nav destinations shown directly in the console rail. */
@@ -47,22 +66,13 @@ export function topLevelNavItems(isAuthenticated) {
     return [
         { href: '/void', label: 'Feed' },
         { href: '/void/explore', label: 'Explore' },
-        { href: '/music', label: 'Music' },
         { href: messagesNavHref(isAuthenticated), label: 'Messages' },
     ];
 }
 
-/** Administrative destinations shown only for an exact stored ADMIN role. */
-export function adminMenuItems(isAdmin) {
-    return isAdmin ? [
-        { href: '/back-office', label: 'Back Office' },
-        { href: '/command-center', label: 'Command Center' },
-    ] : [];
-}
-
-/** Profile-menu destinations reserved for administrators. */
-export function profileMenuItems(isAdmin) {
-    return adminMenuItems(isAdmin);
+/** Destinations owned by the authenticated profile menu. */
+export function profileMenuItems() {
+    return [{ href: '/profile', label: 'Profile' }];
 }
 
 /** Determine whether a nav href represents the current browser route. */
@@ -108,7 +118,7 @@ class AppNav extends HTMLElement {
         this.notifications = this.notifications || [];
         this.notificationPreferences = this.notificationPreferences || null;
         this.unreadNotifications = this.unreadNotifications || 0;
-        this.sharedFolderRead = false;
+        this.navigationAccess = accountNavigationAccess(null);
         this.render();
         this.loadUserInfo();
         this.loadNotifications();
@@ -130,7 +140,7 @@ class AppNav extends HTMLElement {
             this.notifications = [];
             this.notificationPreferences = null;
             this.unreadNotifications = 0;
-            this.sharedFolderRead = false;
+            this.navigationAccess = accountNavigationAccess(null);
             this.render();
         });
     }
@@ -164,7 +174,7 @@ class AppNav extends HTMLElement {
 
     async loadUserInfo(force = false) {
         if (!isLoggedIn()) {
-            this.sharedFolderRead = false;
+            this.navigationAccess = accountNavigationAccess(null);
             return;
         }
         if (this.userLoadInFlight) return;
@@ -173,11 +183,11 @@ class AppNav extends HTMLElement {
             const account = await fetchJson(API.accounts.me);
             localStorage.setItem('cbellUsername', account.username || '');
             localStorage.setItem('cbellRole', account.role || '');
-            this.sharedFolderRead = accountHasSharedFolderRead(account);
+            this.navigationAccess = accountNavigationAccess(account);
             this.render();
         } catch (_) {
             // Ignore profile fetch errors to keep nav usable.
-            this.sharedFolderRead = false;
+            this.navigationAccess = accountNavigationAccess(null);
             this.render();
         } finally {
             this.userLoadInFlight = false;
@@ -302,13 +312,11 @@ class AppNav extends HTMLElement {
         const storedName = (localStorage.getItem('cbellUsername') || '').trim();
         const initials = storedName ? storedName[0].toUpperCase() : 'C';
         const loginHref = loginRedirectUrl();
-        const messagesHref = messagesNavHref(isAuthenticated);
-        const profileHref = isAuthenticated ? '/profile' : loginHref;
-        const isAdmin = (localStorage.getItem('cbellRole') || '') === 'ADMIN';
-        const hasSharedFolderRead = Boolean(this.sharedFolderRead);
+        const { isAdmin, hasMusicRead, hasSharedFolderRead } =
+            this.navigationAccess || accountNavigationAccess(null);
         const unread = Number(this.unreadNotifications || 0);
         const currentPath = window.location.pathname;
-        const toolsItems = toolsMenuItems(hasSharedFolderRead);
+        const toolsItems = toolsMenuItems({ hasMusicRead, hasSharedFolderRead, isAdmin });
         const toolsActive = toolsItems.some(item => isActiveNavHref(item.href, currentPath));
         this.innerHTML = `
 <nav class="navbar navbar-expand-lg navbar-dark void-console-nav">
@@ -361,8 +369,7 @@ class AppNav extends HTMLElement {
                         <span class="avatar-initials">${initials}</span>
                     </button>
                     <div class="dropdown-menu dropdown-menu-end profile-menu">
-                        ${profileMenuItems(isAdmin).map(item => `<a class="dropdown-item" href="${item.href}">${item.label}</a>`).join('')}
-                        <a class="dropdown-item" href="${profileHref}">Profile</a>
+                        ${profileMenuItems().map(item => `<a class="dropdown-item" href="${item.href}">${item.label}</a>`).join('')}
                         <button id="logout" type="button" class="dropdown-item">Logout</button>
                     </div>
                 </div>`}

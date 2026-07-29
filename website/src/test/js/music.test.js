@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import { API } from '../../main/resources/static/js/lib/api.js';
 import {
+  accountHasMusicRead,
   musicCatalog,
   musicCatalogParameters,
   musicPageNumbers,
@@ -12,6 +13,14 @@ import {
   musicTrackMarkup,
   musicViewFilter,
 } from '../../main/resources/static/js/lib/music.js';
+
+test('Music effective read access accepts admin read or write and rejects missing access', () => {
+  assert.equal(accountHasMusicRead({ role: 'ADMIN', permissions: [] }), true);
+  assert.equal(accountHasMusicRead({ role: 'USER', permissions: ['MUSIC_READ'] }), true);
+  assert.equal(accountHasMusicRead({ role: 'USER', permissions: ['MUSIC_WRITE'] }), true);
+  assert.equal(accountHasMusicRead({ role: 'USER', permissions: [] }), false);
+  assert.equal(accountHasMusicRead(null), false);
+});
 
 function track(overrides = {}) {
   return {

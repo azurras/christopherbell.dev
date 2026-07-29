@@ -3,6 +3,13 @@ import { sanitize } from './util.js';
 
 const TEXT_LIMIT = 512;
 
+/** Return the effective Music read capability reported by the current-account API. */
+export function accountHasMusicRead(account) {
+  if (account?.role === 'ADMIN') return true;
+  const permissions = new Set(Array.isArray(account?.permissions) ? account.permissions : []);
+  return permissions.has('MUSIC_READ') || permissions.has('MUSIC_WRITE');
+}
+
 function optionalText(value) {
   return value === null || value === undefined
     ? null
