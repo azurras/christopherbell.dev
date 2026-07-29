@@ -61,7 +61,7 @@ class AsyncDispatcherSecurityIntegrationTest {
 
   @Test
   void authenticatedStreamingRequestCompletesThroughAsyncRedispatch() throws Exception {
-    var result = mockMvc.perform(get("/test/protected-stream")
+    var result = mockMvc.perform(get("/api/test/protected-stream")
             .with(org.springframework.security.test.web.servlet.request
                 .SecurityMockMvcRequestPostProcessors.user("test-user")))
         .andExpect(request().asyncStarted())
@@ -74,8 +74,8 @@ class AsyncDispatcherSecurityIntegrationTest {
   }
 
   private boolean passesAuthorization(DispatcherType dispatcherType) throws Exception {
-    var request = new MockHttpServletRequest("GET", "/test/protected");
-    request.setServletPath("/test/protected");
+    var request = new MockHttpServletRequest("GET", "/api/test/protected");
+    request.setServletPath("/api/test/protected");
     request.setDispatcherType(dispatcherType);
     var continued = new AtomicBoolean();
     authorizationFilter().doFilter(
@@ -95,12 +95,12 @@ class AsyncDispatcherSecurityIntegrationTest {
 
   @RestController
   public static class ProtectedController {
-    @GetMapping("/test/protected")
+    @GetMapping("/api/test/protected")
     String protectedEndpoint() {
       return "protected";
     }
 
-    @GetMapping("/test/protected-stream")
+    @GetMapping("/api/test/protected-stream")
     ResponseEntity<StreamingResponseBody> protectedStream() {
       return ResponseEntity.ok(output ->
           output.write("ready".getBytes(StandardCharsets.UTF_8)));
