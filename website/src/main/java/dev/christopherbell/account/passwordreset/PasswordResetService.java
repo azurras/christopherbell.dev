@@ -1,6 +1,7 @@
 package dev.christopherbell.account.passwordreset;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
@@ -33,6 +34,7 @@ public class PasswordResetService {
 
   private final AccountRepository accountRepository;
   private final PasswordResetNotificationService passwordResetNotificationService;
+  private final AccountSessionRevoker sessionRevoker;
 
   /**
    * Requests a password reset without revealing whether the email exists.
@@ -93,6 +95,7 @@ public class PasswordResetService {
       clearPasswordResetToken(account);
       account.setLastUpdatedOn(Instant.now());
       accountRepository.save(account);
+      sessionRevoker.revokeAll(account.getId());
       log.info("Password reset completed for account id: {}", account.getId());
     } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
       throw new InvalidTokenException("Error resetting password: " + e.getMessage(), e);

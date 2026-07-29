@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.admin.activity.ModerationAuditCommand;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
@@ -35,11 +36,12 @@ class ReportModerationLifecycleTest {
   @Mock private AdminActivityService activity;
   @Mock private PermissionService permissions;
   @Mock private ReportRepository reports;
+  @Mock private AccountSessionRevoker sessionRevoker;
   private ReportModerationService service;
 
   @BeforeEach
   void setUp() {
-    service = new ReportModerationService(posts, accounts, activity, permissions, reports);
+    service = new ReportModerationService(posts, accounts, activity, permissions, reports, sessionRevoker);
   }
 
   @Test
@@ -64,6 +66,7 @@ class ReportModerationLifecycleTest {
     assertThat(audit.getValue().afterValues())
         .containsEntry("status", "RESOLVED")
         .containsEntry("resolution", "CLOSE_NO_ACTION");
+    verify(sessionRevoker, never()).revokeAll(any());
   }
 
   @Test

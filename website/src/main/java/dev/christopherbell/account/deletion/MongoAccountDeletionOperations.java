@@ -56,6 +56,7 @@ public class MongoAccountDeletionOperations implements AccountDeletionOperations
 
   @Override
   public void removePrivateData(String accountId) {
+    remove("browser_sessions", accountId, "accountId");
     remove("messages", accountId,
         "participantIds", "senderAccountId", "recipientAccountId");
     remove("notifications", accountId, "accountId", "actorAccountId");

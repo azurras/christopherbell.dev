@@ -2,6 +2,7 @@ package dev.christopherbell.configuration.security.browser;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.auth.AccountSecurityFingerprint;
+import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.permission.PermissionService;
@@ -18,7 +19,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** Creates, resolves, rotates, and revokes opaque browser sessions. */
-public class BrowserSessionService {
+public class BrowserSessionService implements AccountSessionRevoker {
   static final Duration IDLE_LIFETIME = Duration.ofDays(7);
   static final Duration ABSOLUTE_LIFETIME = Duration.ofDays(30);
   static final Duration ROTATION_INTERVAL = Duration.ofDays(1);
@@ -134,6 +135,7 @@ public class BrowserSessionService {
   }
 
   /** Revokes every browser session for an account. */
+  @Override
   public void revokeAll(String accountId) {
     if (accountId != null && !accountId.isBlank()) sessions.deleteByAccountId(accountId);
   }

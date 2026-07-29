@@ -56,6 +56,8 @@ subfeature services own the larger account workflows.
 - Admins can independently grant or revoke persisted shared-folder read/write
   capabilities through the dated account API. These capabilities do not change
   the USER/MOD/ADMIN hierarchy or JWT contents; write always requires read.
+- Successful password, role, status, and capability changes revoke every opaque
+  browser session for the account after the authoritative account write succeeds.
 - Account DTOs and persistence models under `model`.
 
 ## Update This Doc

@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountMapper;
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
@@ -34,11 +36,12 @@ class AccountModerationAuditTest {
   @Mock private AccountMapper mapper;
   @Mock private AdminActivityService activity;
   @Mock private PermissionService permissions;
+  @Mock private AccountSessionRevoker sessionRevoker;
   private AccountModerationService service;
 
   @BeforeEach
   void setUp() {
-    service = new AccountModerationService(accounts, mapper, activity, permissions);
+    service = new AccountModerationService(accounts, mapper, activity, permissions, sessionRevoker);
     org.mockito.Mockito.lenient().when(permissions.getSelfId()).thenReturn("admin-a");
     org.mockito.Mockito.lenient().when(accounts.findById("admin-a")).thenReturn(Optional.of(
         Account.builder().id("admin-a").username("original-admin").build()));
@@ -83,6 +86,26 @@ class AccountModerationAuditTest {
         .containsEntry("role", "MOD")
         .containsEntry("status", "SUSPENDED");
     assertThat(command.getValue().reason()).isEqualTo("Repeated abuse");
+    var order = inOrder(accounts, sessionRevoker);
+    order.verify(accounts).save(account);
+    order.verify(sessionRevoker).revokeAll("account-1");
+    order.verify(accounts).save(account);
+  }
+
+  @Test
+  @DisplayName("Profile-only update does not revoke browser sessions")
+  void updateAccount_whenOnlyProfileChanges_doesNotRevokeSessions() throws Exception {
+    var account = account();
+    when(accounts.findById("account-1")).thenReturn(Optional.of(account));
+    when(accounts.save(account)).thenReturn(account);
+    when(mapper.toAccount(account)).thenReturn(AccountDetail.builder().id("account-1").build());
+
+    service.updateAccount(AccountUpdateRequest.builder()
+        .id("account-1")
+        .firstName("Updated")
+        .build());
+
+    verify(sessionRevoker, never()).revokeAll("account-1");
   }
 
   @Test
