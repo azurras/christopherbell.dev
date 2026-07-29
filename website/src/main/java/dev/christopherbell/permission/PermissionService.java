@@ -70,7 +70,6 @@ public class PermissionService {
   ) throws NoSuchAlgorithmException, InvalidKeySpecException {
     if (accountLoginRequest == null || account == null
         || accountLoginRequest.password() == null
-        || account.getPasswordSalt() == null || account.getPasswordSalt().isBlank()
         || account.getPasswordHash() == null || account.getPasswordHash().isBlank()) {
       return false;
     }

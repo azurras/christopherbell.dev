@@ -11,6 +11,10 @@ subfeature services own the larger account workflows.
   canonical account resource. Synchronous updates and deletes return `200 OK`,
   and bodyless delete routes do not require a request `Content-Type` header.
 - `auth` owns login validation and JWT creation for active accounts.
+- Login returns one public rejection for unknown, invalid-password, and inactive
+  accounts. Legacy PBKDF2 verification is padded to the current work factor and
+  successful upgrades reuse the verified salt, so concurrent upgrades produce
+  the same self-describing `pbkdf2-sha256` hash.
 - Browser login opts into cookie mode with `X-CBELL-Browser-Session: cookie` and
   receives no JWT in the JSON body. The JWT is set in an HttpOnly, SameSite=Lax
   cookie plus a separate non-secret UI marker. Existing API login without that

@@ -23,6 +23,7 @@ public class PasswordUtil {
   private static final int CURRENT_ITERATIONS = 210_000;
   private static final int MAX_ACCEPTED_ITERATIONS = 1_000_000;
   private static final int HASH_KEY_LENGTH = 256;
+  private static final String VERIFICATION_PADDING_SALT = "AAAAAAAAAAAAAAAAAAAAAA==";
 
   /**
    * Generates a random salt.
@@ -37,12 +38,7 @@ public class PasswordUtil {
   public static String hashPassword(String password)
       throws NoSuchAlgorithmException, InvalidKeySpecException {
     var salt = generateSalt();
-    return String.join(
-        "$",
-        FORMAT,
-        Integer.toString(CURRENT_ITERATIONS),
-        salt,
-        derive(password, salt, CURRENT_ITERATIONS));
+    return encode(password, salt, CURRENT_ITERATIONS);
   }
 
   /**
@@ -69,6 +65,7 @@ public class PasswordUtil {
       var expected = encoded == null
           ? derive(password, salt, LEGACY_ITERATIONS)
           : derive(password, encoded.salt(), encoded.iterations());
+      padVerificationCost(password, encoded == null ? LEGACY_ITERATIONS : encoded.iterations());
       var actual = encoded == null ? storedHash : encoded.hash();
       return actual != null && MessageDigest.isEqual(
           expected.getBytes(StandardCharsets.US_ASCII),
@@ -84,6 +81,41 @@ public class PasswordUtil {
     return encoded == null
         || encoded.iterations() != CURRENT_ITERATIONS
         || (legacySalt != null && !legacySalt.isBlank());
+  }
+
+  /** Re-encodes a verified password deterministically so concurrent upgrades agree. */
+  public static String upgradePassword(String password, String legacySalt, String storedHash)
+      throws NoSuchAlgorithmException, InvalidKeySpecException {
+    var encoded = parse(storedHash);
+    var salt = encoded == null ? legacySalt : encoded.salt();
+    if (salt == null || salt.isBlank()) {
+      throw new IllegalArgumentException("Verified password hash has no reusable salt.");
+    }
+    return encode(password, salt, CURRENT_ITERATIONS);
+  }
+
+  static int verificationIterationsFor(String legacySalt, String storedHash) {
+    var encoded = parse(storedHash);
+    if (encoded != null) return Math.max(CURRENT_ITERATIONS, encoded.iterations());
+    return legacySalt == null || legacySalt.isBlank() ? 0 : CURRENT_ITERATIONS;
+  }
+
+  private static String encode(String password, String salt, int iterations)
+      throws NoSuchAlgorithmException, InvalidKeySpecException {
+    return String.join(
+        "$",
+        FORMAT,
+        Integer.toString(iterations),
+        salt,
+        derive(password, salt, iterations));
+  }
+
+  private static void padVerificationCost(String password, int completedIterations)
+      throws NoSuchAlgorithmException, InvalidKeySpecException {
+    var remainingIterations = CURRENT_ITERATIONS - completedIterations;
+    if (remainingIterations > 0) {
+      derive(password, VERIFICATION_PADDING_SALT, remainingIterations);
+    }
   }
 
   private static String derive(String password, String salt, int iterations)

@@ -138,6 +138,23 @@ public class PasswordUtilTest {
   }
 
   @Test
+  @DisplayName("legacy upgrades are deterministic and retain the current verification cost")
+  void legacyHash_upgradeIsStableAcrossConcurrentLogins() throws Exception {
+    var password = PasswordStub.getPasswordStub();
+    var salt = PasswordStub.getDeterministicSaltStub();
+    var legacyHash = PasswordUtil.hashPassword(password, salt);
+
+    var first = PasswordUtil.upgradePassword(password, salt, legacyHash);
+    var second = PasswordUtil.upgradePassword(password, salt, legacyHash);
+
+    assertEquals(first, second);
+    assertTrue(first.startsWith("pbkdf2-sha256$210000$"));
+    assertTrue(PasswordUtil.verifyPassword(password, null, first));
+    assertEquals(210_000, PasswordUtil.verificationIterationsFor(salt, legacyHash));
+    assertEquals(210_000, PasswordUtil.verificationIterationsFor(null, first));
+  }
+
+  @Test
   @DisplayName("malformed versioned hashes fail closed")
   void malformedVersionedHash_returnsFalse() throws Exception {
     assertFalse(PasswordUtil.verifyPassword(

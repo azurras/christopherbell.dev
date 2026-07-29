@@ -46,7 +46,8 @@ public class AccountAuthenticationService {
       }
 
       if (PasswordUtil.needsRehash(account.getPasswordSalt(), account.getPasswordHash())) {
-        account.setPasswordHash(PasswordUtil.hashPassword(password));
+        account.setPasswordHash(PasswordUtil.upgradePassword(
+            password, account.getPasswordSalt(), account.getPasswordHash()));
         account.setPasswordSalt(null);
       }
       account.setLastLoginOn(Instant.now());

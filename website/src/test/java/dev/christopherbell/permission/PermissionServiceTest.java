@@ -10,6 +10,7 @@ import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
+import dev.christopherbell.libs.security.PasswordUtil;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -150,6 +151,20 @@ class PermissionServiceTest {
 
     assertFalse(PermissionService.isAuthenticated(
         new AccountLoginRequest("deleted-user@invalid.local", "any-password"), tombstone));
+  }
+
+  @Test
+  @DisplayName("Current self-describing password hashes authenticate without a legacy salt")
+  void isAuthenticated_whenPasswordUsesCurrentFormat_returnsTrue() throws Exception {
+    var password = "current-password";
+    var account = Account.builder()
+        .id("current-user")
+        .passwordHash(PasswordUtil.hashPassword(password))
+        .passwordSalt(null)
+        .build();
+
+    assertTrue(PermissionService.isAuthenticated(
+        new AccountLoginRequest("current@example.com", password), account));
   }
 
   private void setTokenForRole(Role role) {
