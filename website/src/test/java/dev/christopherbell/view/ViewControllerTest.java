@@ -16,6 +16,7 @@ import dev.christopherbell.view.voidroutes.VoidPostSocialPreview;
 import dev.christopherbell.view.voidroutes.VoidPostSocialPreviewService;
 import dev.christopherbell.view.wfl.WhatsForLunchViewController;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.federation.consent.FederationConsentService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +36,31 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 public class ViewControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private VoidPostSocialPreviewService postPreviews;
+  @MockitoBean private FederationConsentService federationConsent;
+
+  @Test
+  @DisplayName("Signup defaults federation on only when enrollment is configured")
+  void getSignupPageWhenFederationAvailableRendersCheckedChoice() throws Exception {
+    when(federationConsent.enrollmentAvailable()).thenReturn(true);
+
+    mockMvc.perform(get("/signup"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("id=\"federatePublicVoidPosts\"")))
+        .andExpect(content().string(containsString("checked=\"checked\"")))
+        .andExpect(content().string(not(containsString("disabled=\"disabled\""))))
+        .andExpect(content().string(containsString("Messages, Music, and Shared Folder")));
+  }
+
+  @Test
+  @DisplayName("Signup shows a disabled federation choice when enrollment is unavailable")
+  void getSignupPageWhenFederationUnavailableRendersDisabledChoice() throws Exception {
+    when(federationConsent.enrollmentAvailable()).thenReturn(false);
+
+    mockMvc.perform(get("/signup"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("disabled=\"disabled\"")))
+        .andExpect(content().string(containsString("Federation enrollment is not available")));
+  }
 
   @Test
   @DisplayName("Home page renders social preview metadata")

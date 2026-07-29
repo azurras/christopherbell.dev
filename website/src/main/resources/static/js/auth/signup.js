@@ -15,7 +15,7 @@ function redirectTarget() {
 
 /**
  * Create a new account via API.
- * @param {{email:string,username:string,firstName?:string,lastName?:string,password:string}} payload
+ * @param {{email:string,username:string,firstName?:string,lastName?:string,password:string,federatePublicVoidPosts:boolean}} payload
  * @returns {Promise<object>} created account detail
  */
 async function signup(payload) {
@@ -37,6 +37,9 @@ export function signupPayload(fields) {
     firstName,
     lastName,
     password: String(fields.password || ''),
+    federatePublicVoidPosts: Boolean(
+      fields.federationControl?.checked && !fields.federationControl?.disabled
+    ),
   };
 }
 
@@ -56,7 +59,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       username: document.getElementById('username')?.value?.trim(),
       firstName: document.getElementById('firstName')?.value,
       lastName: document.getElementById('lastName')?.value,
-      password: document.getElementById('password')?.value || ''
+      password: document.getElementById('password')?.value || '',
+      federationControl: document.getElementById('federatePublicVoidPosts'),
     };
     const alert = alertBox();
     alert?.classList.add('d-none');

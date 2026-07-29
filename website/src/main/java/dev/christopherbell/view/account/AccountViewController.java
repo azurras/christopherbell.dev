@@ -1,7 +1,9 @@
 package dev.christopherbell.view.account;
 
+import dev.christopherbell.federation.consent.FederationConsentService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 
 /**
@@ -9,6 +11,11 @@ import org.springframework.web.bind.annotation.GetMapping;
  */
 @Controller
 public class AccountViewController {
+  private final FederationConsentService federationConsent;
+
+  public AccountViewController(FederationConsentService federationConsent) {
+    this.federationConsent = federationConsent;
+  }
 
   /**
    * Serves the login page.
@@ -46,7 +53,8 @@ public class AccountViewController {
    * @return {@code signup.html}
    */
   @GetMapping(value = "/signup")
-  public String getSignupPage(HttpServletRequest request) {
+  public String getSignupPage(HttpServletRequest request, Model model) {
+    model.addAttribute("federationEnrollmentAvailable", federationConsent.enrollmentAvailable());
     return "signup.html";
   }
 
