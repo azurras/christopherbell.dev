@@ -127,3 +127,43 @@ then passed.
 
 No open blocker. Mongo queries are verified through captured `MongoTemplate` requests rather
 than a live Mongo process; this matches the task's deterministic no-sleep test requirement.
+
+## Review Fix — Preserve the Full Rotation Overlap
+
+Review found that capping `previousTokenExpiresOn` to absolute expiry shortened the promised
+two-minute overlap if a due rotation occurred in the final two minutes. The service now rotates
+only when `absoluteExpiresOn >= now + ROTATION_OVERLAP`; equality deliberately remains eligible
+for exactly two minutes, while fewer than two minutes falls through to the existing due touch.
+
+The new fixed-clock test sets a live session to one nanosecond inside that final window, with
+both activity and rotation due. It proves that authentication succeeds without a replacement,
+uses `touch` with the absolute-capped idle expiry, and never calls `rotate`.
+
+RED command:
+
+```powershell
+$env:GRADLE_USER_HOME='A:\Projects\christopherbell.dev-gradle\performance-authentication-20260729-task3'
+.\gradlew.bat :website:test --tests dev.christopherbell.configuration.security.browser.BrowserSessionServiceTest --tests dev.christopherbell.configuration.security.browser.MongoBrowserSessionActivityStoreTest
+```
+
+RED result: `rotationWithLessThanFullOverlapRemainingTouchesWithoutIssuingReplacement` failed
+at `BrowserSessionServiceTest.java:128` because the prior implementation issued a replacement.
+The same run confirmed both Mongo-store tests passed before production correction.
+
+GREEN command: the same focused command above.
+
+GREEN result: `BUILD SUCCESSFUL`; all 15 focused tests passed, including the new boundary
+scenario. The directly related MVC wiring check also passed:
+
+```powershell
+$env:GRADLE_USER_HOME='A:\Projects\christopherbell.dev-gradle\performance-authentication-20260729-task3'
+.\gradlew.bat :website:test --tests dev.christopherbell.configuration.security.AsyncDispatcherSecurityIntegrationTest
+```
+
+Result: `BUILD SUCCESSFUL`; all 3 MVC-slice tests passed. No full check was run for this scoped
+review fix per controller instruction.
+
+The Mongo assertion improvement now reads BSON structurally without key-order dependence: it
+checks the separate `$and` clauses for `_id`, `idleExpiresOn: {$gt: now}`, and
+`absoluteExpiresOn: {$gte: requestedIdleExpiry}`, while each operation checks its observed CAS
+fields directly. This would reject swapped expiry operators or values.

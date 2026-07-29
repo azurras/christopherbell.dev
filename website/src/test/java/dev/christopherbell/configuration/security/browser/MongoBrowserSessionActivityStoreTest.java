@@ -38,8 +38,8 @@ class MongoBrowserSessionActivityStoreTest {
     var update = ArgumentCaptor.forClass(Update.class);
     verify(mongo).findAndModify(
         query.capture(), update.capture(), any(FindAndModifyOptions.class), eq(BrowserSession.class));
-    assertThat(query.getValue().getQueryObject().toString())
-        .contains("_id=session-1", "lastSeenOn", "idleExpiresOn", "absoluteExpiresOn", "$gt", "$gte");
+    assertThat(query.getValue().getQueryObject()).containsEntry("lastSeenOn", OBSERVED);
+    assertLiveSessionPredicate(query.getValue(), idleExpiresOn);
     assertThat(update.getValue().getUpdateObject())
         .isEqualTo(new Document("$set", new Document("lastSeenOn", NOW)
             .append("idleExpiresOn", idleExpiresOn)));
@@ -65,8 +65,10 @@ class MongoBrowserSessionActivityStoreTest {
     var update = ArgumentCaptor.forClass(Update.class);
     verify(mongo).findAndModify(
         query.capture(), update.capture(), any(FindAndModifyOptions.class), eq(BrowserSession.class));
-    assertThat(query.getValue().getQueryObject().toString())
-        .contains("_id=session-1", "tokenHash", "rotatedOn", "idleExpiresOn", "absoluteExpiresOn", "$gt", "$gte");
+    assertThat(query.getValue().getQueryObject())
+        .containsEntry("tokenHash", "old-token-hash")
+        .containsEntry("rotatedOn", OBSERVED);
+    assertLiveSessionPredicate(query.getValue(), idleExpiresOn);
     assertThat(update.getValue().getUpdateObject())
         .isEqualTo(new Document("$set", new Document("previousTokenHash", "old-token-hash")
             .append("previousTokenExpiresOn", previousTokenExpiresOn)
@@ -74,5 +76,13 @@ class MongoBrowserSessionActivityStoreTest {
             .append("rotatedOn", NOW)
             .append("lastSeenOn", NOW)
             .append("idleExpiresOn", idleExpiresOn)));
+  }
+
+  private static void assertLiveSessionPredicate(Query query, Instant idleExpiresOn) {
+    var clauses = query.getQueryObject().getList("$and", Document.class);
+    assertThat(clauses)
+        .contains(new Document("_id", "session-1"))
+        .contains(new Document("idleExpiresOn", new Document("$gt", NOW)))
+        .contains(new Document("absoluteExpiresOn", new Document("$gte", idleExpiresOn)));
   }
 }

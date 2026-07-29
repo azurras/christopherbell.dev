@@ -112,6 +112,29 @@ class BrowserSessionServiceTest {
   }
 
   @Test
+  void rotationWithLessThanFullOverlapRemainingTouchesWithoutIssuingReplacement() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    Instant now = START.plus(BrowserSessionService.ABSOLUTE_LIFETIME)
+        .minus(BrowserSessionService.ROTATION_OVERLAP)
+        .plusNanos(1);
+    fixture.session().setIdleExpiresOn(fixture.session().getAbsoluteExpiresOn());
+    fixture.session().setLastSeenOn(now.minus(BrowserSessionService.ACTIVITY_WRITE_INTERVAL));
+    fixture.session().setRotatedOn(now.minus(BrowserSessionService.ROTATION_INTERVAL));
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.activity);
+
+    var authenticated = fixture.at(now).authenticate(token, true).orElseThrow();
+
+    assertTrue(authenticated.rotatedToken().isEmpty());
+    verify(fixture.activity).touch(
+        fixture.session().getId(),
+        now.minus(BrowserSessionService.ACTIVITY_WRITE_INTERVAL),
+        now,
+        fixture.session().getAbsoluteExpiresOn());
+    verify(fixture.activity, never()).rotate(anyString(), anyString(), any(), anyString(), any(), any(), any());
+  }
+
+  @Test
   void lostRotationCompareAndSetRejectsAuthenticationWithoutSaving() {
     var fixture = new Fixture(START);
     String token = fixture.create();

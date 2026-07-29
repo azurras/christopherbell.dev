@@ -93,7 +93,9 @@ public class BrowserSessionService {
     if (interactive) {
       var idleExpiresOn = earlier(now.plus(IDLE_LIFETIME), session.getAbsoluteExpiresOn());
       if (!now.isBefore(session.getRotatedOn().plus(ROTATION_INTERVAL))
-          && constantTimeEquals(session.getTokenHash(), hash(parsed.get().secret()))) {
+          && constantTimeEquals(session.getTokenHash(), hash(parsed.get().secret()))
+          // Rotating with less time would shorten the fixed previous-token overlap.
+          && !session.getAbsoluteExpiresOn().isBefore(now.plus(ROTATION_OVERLAP))) {
         var rotated = credential(session.getId());
         var updated = activity.rotate(
             session.getId(),
