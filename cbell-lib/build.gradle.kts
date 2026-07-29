@@ -25,6 +25,7 @@ dependencies {
     testCompileOnly("org.projectlombok:lombok:1.18.46")
     testAnnotationProcessor("org.projectlombok:lombok:1.18.46")
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("jakarta.servlet:jakarta.servlet-api")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
