@@ -15,6 +15,7 @@ public final class FederationProperties {
   private final String softwareName;
   private final String softwareVersion;
   private final byte[] encryptionSecret;
+  private final FederationOutboundProperties outbound;
 
   public FederationProperties(
       boolean discoveryEnabled,
@@ -22,7 +23,8 @@ public final class FederationProperties {
       boolean outboundEnabled,
       String softwareName,
       String softwareVersion,
-      String keyEncryptionSecret
+      String keyEncryptionSecret,
+      FederationOutboundProperties outbound
   ) {
     if (!discoveryEnabled && (inboundEnabled || outboundEnabled)) {
       throw new IllegalArgumentException(
@@ -34,6 +36,12 @@ public final class FederationProperties {
     this.softwareName = requireMetadata(softwareName, "software name");
     this.softwareVersion = requireMetadata(softwareVersion, "software version");
     this.encryptionSecret = discoveryEnabled ? decodeRequiredSecret(keyEncryptionSecret) : null;
+    this.outbound = outbound == null ? FederationOutboundProperties.defaults() : outbound;
+    if (outboundEnabled
+        && (this.outbound.notBefore() == null || this.outbound.peers().isEmpty())) {
+      throw new IllegalArgumentException(
+          "Federation outbound requires a not-before time and at least one controlled peer");
+    }
   }
 
   public boolean discoveryEnabled() {
@@ -54,6 +62,10 @@ public final class FederationProperties {
 
   public String softwareVersion() {
     return softwareVersion;
+  }
+
+  public FederationOutboundProperties outbound() {
+    return outbound;
   }
 
   public byte[] requiredEncryptionSecret() {

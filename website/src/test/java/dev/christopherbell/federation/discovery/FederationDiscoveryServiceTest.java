@@ -120,7 +120,8 @@ class FederationDiscoveryServiceTest {
         false,
         "christopherbell.dev",
         "test-version",
-        enabled ? Base64.getEncoder().encodeToString(secret) : null);
+        enabled ? Base64.getEncoder().encodeToString(secret) : null,
+        null);
     return new FederationDiscoveryService(
         properties,
         new BrowserSecurityProperties(
