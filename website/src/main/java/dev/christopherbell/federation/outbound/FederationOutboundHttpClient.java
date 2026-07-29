@@ -51,6 +51,7 @@ final class FederationOutboundHttpClient {
   FederationDeliveryResult post(ValidatedPeerTarget target, SignedFederationRequest request) {
     Objects.requireNonNull(target, "target");
     Objects.requireNonNull(request, "request");
+    var requestTarget = new FederationRequestTarget(target.inbox());
     HttpClient client = baseClient.remoteAddress(target::remoteAddress);
     if ("https".equalsIgnoreCase(target.inbox().getScheme())) {
       client = client.secure(spec -> spec.sslContext(tlsContext)
@@ -62,10 +63,10 @@ final class FederationOutboundHttpClient {
       FederationDeliveryResult result = client
           .headers(headers -> {
             request.headers().forEach(headers::set);
-            headers.set(HttpHeaderNames.HOST, hostHeader(target));
+            headers.set(HttpHeaderNames.HOST, requestTarget.hostHeader());
           })
           .post()
-          .uri(target.inbox().getRawPath())
+          .uri(requestTarget.requestTarget())
           .send((ignored, outbound) -> outbound.sendByteArray(Mono.just(body)))
           .response((response, responseBody) -> responseBody
               .then(Mono.fromSupplier(() -> classify(
@@ -112,14 +113,6 @@ final class FederationOutboundHttpClient {
         return Optional.empty();
       }
     }
-  }
-
-  private static String hostHeader(ValidatedPeerTarget target) {
-    int port = target.inbox().getPort();
-    boolean defaultPort = port == -1
-        || ("https".equalsIgnoreCase(target.inbox().getScheme()) && port == 443)
-        || ("http".equalsIgnoreCase(target.inbox().getScheme()) && port == 80);
-    return defaultPort ? target.originalHost() : target.originalHost() + ":" + port;
   }
 
   private static Duration requirePositive(Duration value, String label) {

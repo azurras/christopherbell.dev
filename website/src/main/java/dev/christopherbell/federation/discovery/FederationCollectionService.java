@@ -3,14 +3,12 @@ package dev.christopherbell.federation.discovery;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
-import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.ActivityPubCreate;
-import dev.christopherbell.federation.discovery.FederationDiscoveryModels.ActivityPubNote;
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.ActivityPubOrderedCollection;
+import dev.christopherbell.federation.outbound.FederationActivityFactory;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.pagination.StableCursorCodec;
-import dev.christopherbell.post.model.Post;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Collection;
@@ -18,14 +16,12 @@ import java.util.List;
 import java.util.Objects;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.web.util.HtmlUtils;
 import org.springframework.web.util.UriComponentsBuilder;
 
 /** Builds bounded read-only outbox and local relationship collections. */
 @Service
 public class FederationCollectionService {
   private static final String CONTEXT = "https://www.w3.org/ns/activitystreams";
-  private static final String PUBLIC = "https://www.w3.org/ns/activitystreams#Public";
   private static final int MAX_PAGE_SIZE = 20;
 
   private final FederationDiscoveryService discovery;
@@ -33,7 +29,7 @@ public class FederationCollectionService {
   private final AccountRepository accounts;
   private final StableCursorCodec cursors;
   private final Clock clock;
-  private final String publicOrigin;
+  private final FederationActivityFactory activities;
 
   public FederationCollectionService(
       FederationDiscoveryService discovery,
@@ -41,16 +37,14 @@ public class FederationCollectionService {
       AccountRepository accounts,
       StableCursorCodec cursors,
       Clock clock,
-      BrowserSecurityProperties browserSecurity
+      FederationActivityFactory activities
   ) {
     this.discovery = Objects.requireNonNull(discovery, "discovery");
     this.outboxQueries = Objects.requireNonNull(outboxQueries, "outboxQueries");
     this.accounts = Objects.requireNonNull(accounts, "accounts");
     this.cursors = Objects.requireNonNull(cursors, "cursors");
     this.clock = Objects.requireNonNull(clock, "clock");
-    this.publicOrigin = Objects.requireNonNull(browserSecurity, "browserSecurity")
-        .publicBaseUrl()
-        .toString();
+    this.activities = Objects.requireNonNull(activities, "activities");
   }
 
   public ActivityPubOrderedCollection<ActivityPubCreate> outbox(
@@ -79,7 +73,7 @@ public class FederationCollectionService {
     int size = Math.max(1, Math.min(requestedSize, MAX_PAGE_SIZE));
     var loaded = outboxQueries.page(account.getId(), cursors.decode(cursor), size, now);
     var items = loaded.items().stream()
-        .map(post -> createActivity(actorId, post))
+        .map(post -> activities.create(actorId, post))
         .toList();
     String currentPage = pageUrl(collectionId, cursor == null || cursor.isBlank() ? null : cursor);
     String next = loaded.nextCursor() == null
@@ -145,35 +139,6 @@ public class FederationCollectionService {
     } catch (ResourceNotFoundException ignored) {
       return null;
     }
-  }
-
-  private ActivityPubCreate createActivity(String actorId, Post post) {
-    String objectId = publicOrigin + "/void/" + post.getId();
-    String followers = actorId + "/followers";
-    List<String> to = List.of(PUBLIC);
-    List<String> cc = List.of(followers);
-    String reply = post.getParentId() == null
-        ? null
-        : publicOrigin + "/void/" + post.getParentId();
-    var note = new ActivityPubNote(
-        objectId,
-        "Note",
-        actorId,
-        HtmlUtils.htmlEscape(String.valueOf(post.getText() == null ? "" : post.getText())),
-        post.getCreatedOn(),
-        post.getLastUpdatedOn(),
-        reply,
-        to,
-        cc,
-        objectId);
-    return new ActivityPubCreate(
-        objectId + "#activity",
-        "Create",
-        actorId,
-        post.getCreatedOn(),
-        to,
-        cc,
-        note);
   }
 
   private static String pageUrl(String collectionId, String cursor) {

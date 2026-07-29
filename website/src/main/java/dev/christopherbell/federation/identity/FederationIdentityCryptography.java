@@ -12,7 +12,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 /** Seals federation signing keys without exposing algorithm or nonce choices to callers. */
-public final class FederationIdentityCryptography {
+public final class FederationIdentityCryptography implements FederationPrivateKeyDecryptor {
   private static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
   private static final String KEY_ALGORITHM = "AES";
   private static final int SECRET_BYTES = 32;
@@ -57,6 +57,7 @@ public final class FederationIdentityCryptography {
     }
   }
 
+  @Override
   public byte[] decrypt(String accountId, FederationIdentity identity) {
     Objects.requireNonNull(identity, "identity");
     requireIdentityContext(
