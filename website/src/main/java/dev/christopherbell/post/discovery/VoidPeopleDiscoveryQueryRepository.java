@@ -19,7 +19,7 @@ import org.springframework.stereotype.Repository;
 /** Bounded active-post queries used to suggest people without popularity signals. */
 @Repository
 @RequiredArgsConstructor
-public final class VoidPeopleDiscoveryQueryRepository {
+public class VoidPeopleDiscoveryQueryRepository {
   private static final int MAX_INTEREST_POSTS = 256;
   private static final int MAX_CANDIDATES = 128;
 

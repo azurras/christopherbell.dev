@@ -22,7 +22,7 @@ import org.springframework.stereotype.Repository;
 /** Bounded MongoDB queries for anonymous Void discovery. */
 @Repository
 @RequiredArgsConstructor
-public final class VoidDiscoveryQueryRepository {
+public class VoidDiscoveryQueryRepository {
   private static final int MAX_PAGE_SIZE = 24;
   private static final String POSTS_COLLECTION = "posts";
 
