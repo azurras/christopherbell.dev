@@ -233,9 +233,10 @@ public class SecurityConfig {
   public JwtAuthenticationFilter jwtAuthenticationFilter(
       BrowserSessionService browserSessions,
       InteractiveBrowserRequest interactiveRequests,
-      BrowserAuthenticationCookies browserCookies) {
+      BrowserAuthenticationCookies browserCookies,
+      AccountRepository accounts) {
     return new JwtAuthenticationFilter(
-        publicMatchersList(), browserSessions, interactiveRequests, browserCookies);
+        publicMatchersList(), browserSessions, interactiveRequests, browserCookies, accounts);
   }
 
   @Bean

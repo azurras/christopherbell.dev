@@ -5,7 +5,6 @@
   "email": "chris@example.com",
   "username": "chrisbell",
   "role": "ADMIN",
-  "status": "ACTIVE",
-  "isApproved": true
+  "status": "ACTIVE"
 }
 

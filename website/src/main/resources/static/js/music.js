@@ -51,7 +51,7 @@ let catalogRequestController = null;
 
 function deniedMarkup(status) {
   if (!status?.authenticated) {
-    return `<h2>Sign in to Music</h2><p>Music is available to approved listeners.</p>
+    return `<h2>Sign in to Music</h2><p>Music is available to authorized listeners.</p>
       <a class="btn btn-warning" href="${sanitize(loginRedirectUrl('/music'))}">Sign in</a>`;
   }
   return '<h2>Music access required</h2><p>Your account does not currently have Music access. This attempt was recorded for an administrator.</p>';

@@ -8,7 +8,7 @@ Owns back-office administration views and cross-feature admin operations.
 - Admin-facing DTOs under `model`.
 - Cross-feature moderation/admin summaries, such as reports and recent operational state.
 - Back Office work queues for reports and users.
-- Back Office user moderation actions, including approval, suspension,
+- Back Office user moderation actions, including activation, suspension,
   activation, and role promotion through the account update API.
 - Back Office user details include independent shared-folder read/write controls.
   ADMIN accounts retain their role-based default access and the controls are
@@ -42,7 +42,7 @@ Owns back-office administration views and cross-feature admin operations.
   fail closed to explicit unavailable state without blocking other telemetry.
 - Computer restart and shutdown additionally require the environment-backed
   `COMMAND_CENTER_POWER_ACTIONS_ENABLED=true` switch.
-- Every challenged action requires a fresh active approved admin, immediate
+- Every challenged action requires a fresh active admin, immediate
   password verification, a single-use two-minute challenge, the exact
   confirmation phrase, throttling, and cooldown enforcement. Passwords are
   never persisted or logged. Challenge storage is bounded and expired entries
@@ -59,7 +59,7 @@ Owns back-office administration views and cross-feature admin operations.
 
 Every command-center API requires both valid ADMIN JWT authority and a fresh
 persisted-account check through `CommandCenterAccessService`; missing accounts,
-repository failures, and accounts that are no longer ADMIN, ACTIVE, and approved
+repository failures, and accounts that are no longer ADMIN and ACTIVE
 fail closed before metrics, logs, challenges, or actions are invoked. The action
 service repeats the persisted-account check at execution time as defense in
 depth. Command-center APIs never accept shell

@@ -235,9 +235,8 @@ public class CommandCenterActionService {
     var actor = accountRepository.findById(actorId)
         .orElseThrow(() -> new InvalidRequestException("Current account is unavailable."));
     if (actor.getRole() != Role.ADMIN
-        || actor.getStatus() != AccountStatus.ACTIVE
-        || !Boolean.TRUE.equals(actor.getIsApproved())) {
-      throw new InvalidRequestException("An active approved administrator account is required.");
+        || actor.getStatus() != AccountStatus.ACTIVE) {
+      throw new InvalidRequestException("An active administrator account is required.");
     }
     return actor;
   }

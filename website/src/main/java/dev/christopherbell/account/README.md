@@ -7,6 +7,9 @@ subfeature services own the larger account workflows.
 ## What Lives Here
 
 - Account CRUD and lookup facade methods.
+- Account creation returns `201 Created` with a `Location` header for the
+  canonical account resource. Synchronous updates and deletes return `200 OK`,
+  and bodyless delete routes do not require a request `Content-Type` header.
 - `auth` owns login validation and JWT creation for active accounts.
 - Browser login opts into cookie mode with `X-CBELL-Browser-Session: cookie` and
   receives no JWT in the JSON body. The JWT is set in an HttpOnly, SameSite=Lax
@@ -20,7 +23,9 @@ subfeature services own the larger account workflows.
   including safe activity and network stats for post count, reply count,
   followers, and following.
 - `follow` owns follow/unfollow graph updates.
-- `moderation` owns account approval, status changes, and role updates.
+- `moderation` owns account status changes and role updates. `AccountStatus` is
+  the single lifecycle authority; signup creates active accounts and there is no
+  separate approval flag or pending-approval queue.
 - `trust` owns signed-in user mute/block relationships. Muted and blocked
   account ids are hidden from personal feed reads, and blocks also prevent
   direct messages in either direction.

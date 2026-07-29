@@ -16,7 +16,7 @@ import org.springframework.stereotype.Service;
  * Authorizes shared-folder reads and writes from fresh persisted account state.
  *
  * <p>JWTs provide only the current identity. Every decision reloads that identity from the
- * account repository so permission revocation, deactivation, and approval changes take effect
+ * account repository so permission revocation and deactivation take effect
  * before the next shared-folder operation.
  */
 @RequiredArgsConstructor
@@ -35,9 +35,9 @@ public class SharedFolderAccessService {
     return require(AccountPermission.SHARED_FOLDER_WRITE, "Shared-folder write access required");
   }
 
-  /** Requires a fresh active, approved administrator account for shared-folder administration. */
+  /** Requires a fresh active administrator account for shared-folder administration. */
   public Account requireAdmin() {
-    Account account = currentActiveApprovedAccount();
+    Account account = currentActiveAccount();
     if (account.getRole() != Role.ADMIN) {
       throw new AccessDeniedException("Shared-folder administrator access required");
     }
@@ -76,14 +76,14 @@ public class SharedFolderAccessService {
   }
 
   private Account require(AccountPermission required, String denialMessage) {
-    Account account = currentActiveApprovedAccount();
+    Account account = currentActiveAccount();
     if (!effectivePermissions(account).contains(required)) {
       throw new AccessDeniedException(denialMessage);
     }
     return account;
   }
 
-  private Account currentActiveApprovedAccount() {
+  private Account currentActiveAccount() {
     try {
       String accountId = permissionService.getSelfId();
       if (accountId == null || accountId.isBlank()) {
@@ -92,7 +92,6 @@ public class SharedFolderAccessService {
       return accountRepository.findById(accountId)
           .filter(account -> accountId.equals(account.getId()))
           .filter(account -> account.getStatus() == AccountStatus.ACTIVE)
-          .filter(account -> Boolean.TRUE.equals(account.getIsApproved()))
           .orElseThrow(this::denied);
     } catch (AccessDeniedException exception) {
       throw exception;

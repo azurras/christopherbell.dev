@@ -14,7 +14,6 @@ import lombok.Builder;
  * @param username   Optional new username
  * @param role       Optional new role
  * @param status     Optional new status
- * @param isApproved Optional flag indicating approval status
  * @param moderationReason Required audit reason when role or status changes
  */
 @Builder
@@ -26,7 +25,6 @@ public record AccountUpdateRequest(
     String username,
     Role role,
     AccountStatus status,
-    Boolean isApproved,
     String moderationReason
 ) {}
 

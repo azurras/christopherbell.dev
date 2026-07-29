@@ -73,7 +73,6 @@ class MusicAccessServiceTest {
         .id("account-1")
         .role(role)
         .status(AccountStatus.ACTIVE)
-        .isApproved(true)
         .permissions(permissions)
         .build();
   }

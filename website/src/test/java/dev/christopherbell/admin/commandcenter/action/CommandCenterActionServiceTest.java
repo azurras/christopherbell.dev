@@ -61,7 +61,7 @@ class CommandCenterActionServiceTest {
 
   @BeforeEach
   void setUp() {
-    actor = account("admin-1", Role.ADMIN, AccountStatus.ACTIVE, true);
+    actor = account("admin-1", Role.ADMIN, AccountStatus.ACTIVE);
     when(permissions.getSelfId()).thenReturn(actor.getId());
     when(accounts.findById(actor.getId())).thenReturn(Optional.of(actor));
     when(clientIps.resolveClientIp(request)).thenReturn("203.0.113.9");
@@ -71,11 +71,10 @@ class CommandCenterActionServiceTest {
   }
 
   @Test
-  void challengeRequiresFreshActiveApprovedAdminAccount() {
+  void challengeRequiresFreshActiveAdminAccount() {
     for (var rejected : List.of(
-        account("user", Role.USER, AccountStatus.ACTIVE, true),
-        account("inactive", Role.ADMIN, AccountStatus.INACTIVE, true),
-        account("unapproved", Role.ADMIN, AccountStatus.ACTIVE, false))) {
+        account("user", Role.USER, AccountStatus.ACTIVE),
+        account("inactive", Role.ADMIN, AccountStatus.INACTIVE))) {
       when(permissions.getSelfId()).thenReturn(rejected.getId());
       when(accounts.findById(rejected.getId())).thenReturn(Optional.of(rejected));
       assertThatThrownBy(() -> service.createChallenge(RESTART_SITE))
@@ -110,7 +109,7 @@ class CommandCenterActionServiceTest {
     var owned = service.createChallenge(RESTART_SITE);
     when(permissions.getSelfId()).thenReturn("admin-2");
     when(accounts.findById("admin-2"))
-        .thenReturn(Optional.of(account("admin-2", Role.ADMIN, AccountStatus.ACTIVE, true)));
+        .thenReturn(Optional.of(account("admin-2", Role.ADMIN, AccountStatus.ACTIVE)));
     assertThatThrownBy(() -> execute(owned.id(), RESTART_SITE, PASSWORD, "RESTART SITE"))
         .isInstanceOf(InvalidRequestException.class);
 
@@ -256,7 +255,7 @@ class CommandCenterActionServiceTest {
     when(accounts.findById(any())).thenAnswer(invocation -> {
       String id = invocation.getArgument(0);
       return Optional.of(Account.builder()
-          .id(id).username(id).role(Role.ADMIN).status(AccountStatus.ACTIVE).isApproved(true)
+          .id(id).username(id).role(Role.ADMIN).status(AccountStatus.ACTIVE)
           .passwordSalt(actor.getPasswordSalt()).passwordHash(actor.getPasswordHash()).build());
     });
     var boundedService = new CommandCenterActionService(
@@ -779,7 +778,7 @@ class CommandCenterActionServiceTest {
     return (java.util.Map<String, ?>) field.get(target);
   }
 
-  private static Account account(String id, Role role, AccountStatus status, boolean approved) {
+  private static Account account(String id, Role role, AccountStatus status) {
     try {
       var salt = PasswordUtil.generateSalt();
       return Account.builder()
@@ -787,7 +786,6 @@ class CommandCenterActionServiceTest {
           .username(id.equals("admin-1") ? "admin" : id)
           .role(role)
           .status(status)
-          .isApproved(approved)
           .passwordSalt(salt)
           .passwordHash(PasswordUtil.hashPassword(PASSWORD, salt))
           .build();

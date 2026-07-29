@@ -99,7 +99,7 @@ Owns browser-side behavior for server-rendered pages.
 - `user-feed.js` renders public profiles and exposes signed-in mute/block
   actions for other users.
 - `back-office.js` gates the Back Office to admins, renders report/user queues
-  with repeat-report context, supports user approval/status changes/role
+  with repeat-report context, supports user status changes/role
   promotion and shared-folder capability controls, and exposes practical admin operations such as Location Census ZIP
   coordinate import, WFL import/dedupe, Raising Canes Box Index collection and
   datapoint review, and vehicle VIN maintenance.

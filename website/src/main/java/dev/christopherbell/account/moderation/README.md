@@ -4,8 +4,7 @@ Owns administrator-driven account changes.
 
 ## What Lives Here
 
-- Account approval.
-- Status and approval flag updates.
+- Account status and role updates.
 - Role promotion/update persistence.
 - Email and username uniqueness checks during admin account updates.
 - Required, bounded reasons and one append-only audit event for account role and

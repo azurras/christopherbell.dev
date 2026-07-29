@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -221,8 +222,7 @@ public class AccountServiceTest {
     var failure = new java.security.NoSuchAlgorithmException("provider-secret");
 
     try (MockedStatic<PasswordUtil> passwords = mockStatic(PasswordUtil.class)) {
-      passwords.when(PasswordUtil::generateSalt).thenReturn("salt");
-      passwords.when(() -> PasswordUtil.hashPassword("pass", "salt")).thenThrow(failure);
+      passwords.when(() -> PasswordUtil.hashPassword("pass")).thenThrow(failure);
 
       var exception = assertThrows(
           InternalServiceException.class,
@@ -253,14 +253,17 @@ public class AccountServiceTest {
     var token = accountService.loginAccount(new AccountLoginRequest("USER@example.com", password));
 
     assertNotNull(token);
+    assertNull(account.getPasswordSalt());
+    assertTrue(account.getPasswordHash().startsWith("pbkdf2-sha256$210000$"));
+    assertTrue(PasswordUtil.verifyPassword(password, null, account.getPasswordHash()));
     verify(accountRepository).findByEmailIgnoreCase(eq("user@example.com"));
     verify(accountRepository).save(eq(account));
     verifyNoMoreInteractions(accountRepository);
   }
 
   @Test
-  @DisplayName("Login: suspended account -> AccountNotActiveException")
-  public void testLoginAccount_whenAccountSuspended_throwsAccountNotActiveException() throws Exception {
+  @DisplayName("Login: suspended account uses the generic rejection")
+  public void testLoginAccount_whenAccountSuspended_throwsGenericInvalidToken() throws Exception {
     var password = "CorrectHorseBatteryStaple";
     var salt = PasswordUtil.generateSalt();
     var account = Account.builder()
@@ -275,13 +278,44 @@ public class AccountServiceTest {
     when(accountRepository.findByEmailIgnoreCase(eq("user@example.com")))
         .thenReturn(Optional.of(account));
 
-    assertThrows(
-        AccountNotActiveException.class,
+    var rejection = assertThrows(
+        InvalidTokenException.class,
         () -> accountService.loginAccount(new AccountLoginRequest("USER@example.com", password)));
+    assertEquals("Login failed.", rejection.getMessage());
 
     verify(accountRepository).findByEmailIgnoreCase(eq("user@example.com"));
     verify(accountRepository, never()).save(eq(account));
     verifyNoMoreInteractions(accountRepository);
+  }
+
+  @Test
+  @DisplayName("Login: unknown email and wrong password are externally indistinguishable")
+  void testLoginAccount_whenUnknownOrWrongPassword_usesSameRejection() throws Exception {
+    var password = "CorrectHorseBatteryStaple";
+    var salt = PasswordUtil.generateSalt();
+    var account = Account.builder()
+        .id("acc-login")
+        .email("user@example.com")
+        .passwordSalt(salt)
+        .passwordHash(PasswordUtil.hashPassword(password, salt))
+        .role(Role.USER)
+        .status(AccountStatus.ACTIVE)
+        .build();
+    when(accountRepository.findByEmailIgnoreCase(eq("missing@example.com")))
+        .thenReturn(Optional.empty());
+    when(accountRepository.findByEmailIgnoreCase(eq("user@example.com")))
+        .thenReturn(Optional.of(account));
+
+    var unknown = assertThrows(InvalidTokenException.class,
+        () -> accountService.loginAccount(
+            new AccountLoginRequest("missing@example.com", "WrongPassword123")));
+    var wrong = assertThrows(InvalidTokenException.class,
+        () -> accountService.loginAccount(
+            new AccountLoginRequest("user@example.com", "WrongPassword123")));
+
+    assertEquals("Login failed.", unknown.getMessage());
+    assertEquals(unknown.getMessage(), wrong.getMessage());
+    verify(accountRepository, never()).save(any(Account.class));
   }
 
   @Test
@@ -548,43 +582,6 @@ public class AccountServiceTest {
   }
 
   @Test
-  @DisplayName("Approve: found -> sets flags, saves, returns mapped detail")
-  public void testApproveAccount_whenFound_ApprovesAndReturnsDetail() throws Exception {
-    var entity = AccountServiceStub.getAccountWhenExistsStub();
-    var approved = AccountDetail.builder().id(entity.getId()).build();
-    var self = Account.builder().id("self-1").role(Role.ADMIN).build();
-    var token = dev.christopherbell.permission.PermissionService.generateToken(self);
-    SecurityContextHolder.getContext()
-        .setAuthentication(new UsernamePasswordAuthenticationToken("self-1", token, java.util.List.of()));
-    when(accountRepository.findById(eq(AccountServiceStub.ID))).thenReturn(Optional.of(entity));
-    when(accountRepository.save(eq(entity))).thenReturn(entity);
-    when(accountMapper.toAccount(eq(entity))).thenReturn(approved);
-
-    try {
-      var result = accountService.approveAccount(AccountServiceStub.ID);
-
-      assertEquals(approved, result);
-      assertEquals("self-1", entity.getApprovedBy());
-      verify(accountRepository).findById(eq(AccountServiceStub.ID));
-      verify(accountRepository, org.mockito.Mockito.times(2)).save(eq(entity));
-      verify(accountMapper).toAccount(eq(entity));
-    } finally {
-      SecurityContextHolder.clearContext();
-    }
-  }
-
-  @Test
-  @DisplayName("Approve: not found -> throws 404")
-  public void testApproveAccount_whenNotFound_Throws404() {
-    when(accountRepository.findById(eq(AccountServiceStub.ID))).thenReturn(Optional.empty());
-
-    assertThrows(ResourceNotFoundException.class, () -> accountService.approveAccount(AccountServiceStub.ID));
-
-    verify(accountRepository).findById(eq(AccountServiceStub.ID));
-    verifyNoMoreInteractions(accountRepository);
-  }
-
-  @Test
   @DisplayName("Update: blank id -> 400 InvalidRequestException")
   public void testUpdateAccount_whenBlankId_throwsInvalidRequestException() {
     var request = AccountServiceStub.getAccountUpdateRequestWhenBlankIdStub();
@@ -628,7 +625,6 @@ public class AccountServiceTest {
         .username("Chris.Bell")
         .role(Role.ADMIN)
         .status(AccountStatus.ACTIVE)
-        .isApproved(true)
         .build();
     when(accountMapper.toAccount(eq(existing))).thenReturn(detail);
 
@@ -670,7 +666,6 @@ public class AccountServiceTest {
         .username(existing.getUsername())
         .role(Role.ADMIN)
         .status(existing.getStatus())
-        .isApproved(existing.getIsApproved())
         .build();
     when(accountMapper.toAccount(eq(existing))).thenReturn(detail);
 
@@ -682,7 +677,6 @@ public class AccountServiceTest {
     assertEquals(existing.getFirstName(), result.getFirstName());
     assertEquals(existing.getLastName(), result.getLastName());
     assertEquals(existing.getStatus(), result.getStatus());
-    assertEquals(existing.getIsApproved(), result.getIsApproved());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
     verify(accountRepository).findById("admin-1");
@@ -692,10 +686,10 @@ public class AccountServiceTest {
   }
 
   @Test
-  @DisplayName("Update: flags only -> updates status and approval")
-  public void testUpdateAccount_whenFlagsOnly_updatesStatusAndApproval() throws Exception {
+  @DisplayName("Update: status only -> updates the account lifecycle")
+  public void testUpdateAccount_whenStatusOnly_updatesStatus() throws Exception {
     var existing = AccountServiceStub.getAccountWhenExistsStub();
-    var request = AccountServiceStub.getAccountUpdateRequestWhenFlagsOnlyStub();
+    var request = AccountServiceStub.getAccountUpdateRequestWhenStatusOnlyStub();
 
     when(accountRepository.findById(eq(AccountServiceStub.ID)))
         .thenReturn(Optional.of(existing));
@@ -709,14 +703,12 @@ public class AccountServiceTest {
         .username(existing.getUsername())
         .role(existing.getRole())
         .status(AccountStatus.ACTIVE)
-        .isApproved(true)
         .build();
     when(accountMapper.toAccount(eq(existing))).thenReturn(detail);
 
     AccountDetail result = accountService.updateAccount(request);
 
     assertEquals(AccountStatus.ACTIVE, result.getStatus());
-    assertEquals(true, result.getIsApproved());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
     verify(accountRepository).findById("admin-1");
@@ -743,7 +735,6 @@ public class AccountServiceTest {
         .username(existing.getUsername())
         .role(existing.getRole())
         .status(existing.getStatus())
-        .isApproved(existing.getIsApproved())
         .build();
     when(accountMapper.toAccount(eq(existing))).thenReturn(detail);
 
@@ -755,7 +746,6 @@ public class AccountServiceTest {
     assertEquals(existing.getLastName(), result.getLastName());
     assertEquals(existing.getRole(), result.getRole());
     assertEquals(existing.getStatus(), result.getStatus());
-    assertEquals(existing.getIsApproved(), result.getIsApproved());
 
     verify(accountRepository).findById(eq(AccountServiceStub.ID));
     verify(accountRepository).save(eq(existing));

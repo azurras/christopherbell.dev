@@ -1,19 +1,17 @@
 package dev.christopherbell.configuration.security;
 
+import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.auth.AccountSecurityFingerprint;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.configuration.security.browser.AuthenticatedBrowserSession;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
 import dev.christopherbell.permission.PermissionService;
-import io.jsonwebtoken.Claims;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
-import java.util.stream.Collectors;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import jakarta.servlet.FilterChain;
@@ -41,9 +39,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   private final BrowserSessionService browserSessions;
   private final InteractiveBrowserRequest interactiveRequests;
   private final BrowserAuthenticationCookies browserCookies;
+  private final AccountRepository accounts;
 
   public JwtAuthenticationFilter(List<RequestMatcher> skipMatchers) {
-    this(skipMatchers, null, null, null);
+    this(skipMatchers, null, null, null, null);
   }
 
   public JwtAuthenticationFilter(
@@ -51,10 +50,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       BrowserSessionService browserSessions,
       InteractiveBrowserRequest interactiveRequests,
       BrowserAuthenticationCookies browserCookies) {
+    this(skipMatchers, browserSessions, interactiveRequests, browserCookies, null);
+  }
+
+  public JwtAuthenticationFilter(
+      List<RequestMatcher> skipMatchers,
+      BrowserSessionService browserSessions,
+      InteractiveBrowserRequest interactiveRequests,
+      BrowserAuthenticationCookies browserCookies,
+      AccountRepository accounts) {
     this.skipMatchers.addAll(skipMatchers);
     this.browserSessions = browserSessions;
     this.interactiveRequests = interactiveRequests;
     this.browserCookies = browserCookies;
+    this.accounts = accounts;
   }
 
   /**
@@ -83,15 +92,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       return;
     }
     try {
-      if (bearerToken != null && Objects.nonNull(PermissionService.validateToken(bearerToken))) {
-        Authentication authenticationToken = getAuthentication(bearerToken);
-        SecurityContextHolder.getContext().setAuthentication(authenticationToken);
-        if (authenticationToken.isAuthenticated()) {
+      if (bearerToken != null && accounts != null) {
+        var claims = PermissionService.validateToken(bearerToken);
+        var account = accounts.findById(claims.getSubject())
+            .filter(candidate -> candidate.getStatus() == AccountStatus.ACTIVE)
+            .filter(candidate -> AccountSecurityFingerprint.matches(
+                claims.get(AccountSecurityFingerprint.CLAIM, String.class), candidate))
+            .orElse(null);
+        if (account != null) {
+          SecurityContextHolder.getContext().setAuthentication(
+              getAuthentication(account, bearerToken));
           chain.doFilter(request, response);
-        } else {
-          response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+          return;
         }
-        return;
       }
       if (cookieToken != null && browserSessions != null) {
         var resolved = browserSessions.authenticate(
@@ -147,14 +160,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
    * @param token the raw JWT token
    * @return a {@link UsernamePasswordAuthenticationToken} populated with subject and authorities
    */
-  private Authentication getAuthentication(String token) {
-    Claims claims = PermissionService.validateToken(token);
-    String username = claims.getSubject();
-    String roles = claims.get(Account.PROPERTY_ROLE, String.class);
-    List<GrantedAuthority> authorities = Arrays.stream(roles.split(","))
-        .map(SimpleGrantedAuthority::new)
-        .collect(Collectors.toList());
-    return new UsernamePasswordAuthenticationToken(username, token, authorities);
+  private Authentication getAuthentication(Account account, String token) {
+    return new UsernamePasswordAuthenticationToken(
+        account.getId(),
+        token,
+        List.of(new SimpleGrantedAuthority(account.getRole().name())));
   }
 
   private Authentication getAuthentication(AuthenticatedBrowserSession session) {

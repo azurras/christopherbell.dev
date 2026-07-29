@@ -132,15 +132,6 @@ class PermissionServiceTest {
   }
 
   @Test
-  @DisplayName("Approved accounts pass and unapproved accounts throw")
-  void isAccountApproved_validatesApprovalFlag() throws Exception {
-    assertTrue(PermissionService.isAccountApproved(Account.builder().isApproved(true).build()));
-    assertThrows(
-        InvalidTokenException.class,
-        () -> PermissionService.isAccountApproved(Account.builder().isApproved(false).build()));
-  }
-
-  @Test
   @DisplayName("Active status is required for active-account checks")
   void isAccountActive_requiresActiveStatus() throws Exception {
     assertTrue(PermissionService.isAccountActive(AccountStatus.ACTIVE));

@@ -83,7 +83,7 @@ class CommandCenterControllerTest {
             .anyMatch(authority -> authority.getAuthority().equals("ADMIN")));
     when(permissionService.getSelfId()).thenReturn("admin-1");
     when(accountRepository.findById("admin-1")).thenReturn(Optional.of(admin(
-        AccountStatus.ACTIVE, true)));
+        AccountStatus.ACTIVE)));
   }
 
   @ParameterizedTest(name = "{0}: anonymous -> 401")
@@ -111,20 +111,7 @@ class CommandCenterControllerTest {
   void everyRoute_whenPersistedAdminIsSuspended_returnsForbidden(
       String name, MockHttpServletRequestBuilder request) throws Exception {
     when(accountRepository.findById("admin-1")).thenReturn(Optional.of(admin(
-        AccountStatus.SUSPENDED, true)));
-
-    mockMvc.perform(request).andExpect(status().isForbidden());
-
-    verifyNoInteractions(metricsService, logService, actionService);
-  }
-
-  @ParameterizedTest(name = "{0}: unapproved persisted admin -> 403")
-  @MethodSource("routes")
-  @WithMockUser(authorities = "ADMIN")
-  void everyRoute_whenPersistedAdminIsUnapproved_returnsForbidden(
-      String name, MockHttpServletRequestBuilder request) throws Exception {
-    when(accountRepository.findById("admin-1")).thenReturn(Optional.of(admin(
-        AccountStatus.ACTIVE, false)));
+        AccountStatus.SUSPENDED)));
 
     mockMvc.perform(request).andExpect(status().isForbidden());
 
@@ -305,12 +292,11 @@ class CommandCenterControllerTest {
         Arguments.of("cancel", post(BASE + "/actions/cancel").with(csrf())));
   }
 
-  private Account admin(AccountStatus status, boolean approved) {
+  private Account admin(AccountStatus status) {
     return Account.builder()
         .id("admin-1")
         .role(Role.ADMIN)
         .status(status)
-        .isApproved(approved)
         .build();
   }
 

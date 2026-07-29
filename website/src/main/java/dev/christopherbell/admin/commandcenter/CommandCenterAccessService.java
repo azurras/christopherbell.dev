@@ -15,11 +15,11 @@ public class CommandCenterAccessService {
   private final AccountRepository accountRepository;
 
   /**
-   * Returns whether the current identity still belongs to an active approved administrator.
+   * Returns whether the current identity still belongs to an active administrator.
    *
    * <p>Identity and repository failures deny access so stale JWT authority cannot fail open.
    *
-   * @return {@code true} only for a currently persisted active approved admin
+   * @return {@code true} only for a currently persisted active admin
    */
   public boolean hasFreshAdminAccess() {
     try {
@@ -30,7 +30,6 @@ public class CommandCenterAccessService {
       return accountRepository.findById(accountId)
           .filter(account -> account.getRole() == Role.ADMIN)
           .filter(account -> account.getStatus() == AccountStatus.ACTIVE)
-          .filter(account -> Boolean.TRUE.equals(account.getIsApproved()))
           .isPresent();
     } catch (RuntimeException exception) {
       return false;

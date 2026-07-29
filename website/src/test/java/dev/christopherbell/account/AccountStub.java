@@ -10,7 +10,6 @@ import java.util.UUID;
  * A stub class for testing Account related functionality.
  */
 public class AccountStub {
-  public static final String APPROVED_BY = "afbcf77d-d5d8-4d89-b89f-c24d82b61b0f";
   public static final String EMAIL = "test@example.com";
   public static final String FIRST_NAME = "Jacob";
   public static final String INVITE_CODE = "392af584-8ca5-4531-ad09-9767168e1d91";
@@ -44,10 +43,8 @@ public class AccountStub {
    */
   public static Account getAccountStub() {
     return Account.builder()
-        .approvedBy(APPROVED_BY)
         .createdOn(Instant.now())
         .email(EMAIL)
-        .isApproved(false)
         .inviteCode(UUID.fromString(INVITE_CODE))
         .inviteCodeOwner(UUID.fromString(INVITE_CODE_OWNER))
         .firstName(FIRST_NAME)

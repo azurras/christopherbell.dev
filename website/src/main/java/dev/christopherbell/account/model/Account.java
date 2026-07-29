@@ -43,7 +43,6 @@ public class Account {
 
   @Id
   private String id;
-  private String approvedBy;
 
   @CreatedBy
   private String createdBy;
@@ -58,7 +57,6 @@ public class Account {
   private Instant federationEnabledOn;
   @JsonIgnore private FederationIdentity federationIdentity;
   private String firstName;
-  private Boolean isApproved;
   private UUID inviteCode;
   private UUID inviteCodeOwner;
 

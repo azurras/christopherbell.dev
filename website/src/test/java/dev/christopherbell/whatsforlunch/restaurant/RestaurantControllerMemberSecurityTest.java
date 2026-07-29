@@ -13,6 +13,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.security.ControllerSliceMethodSecurityTestConfig;
 import dev.christopherbell.libs.api.APIVersion;
@@ -29,6 +31,7 @@ import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSession
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportWorkflowService;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantDataFreshness;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +47,7 @@ class RestaurantControllerMemberSecurityTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
   @MockitoBean(name = "permissionService") private PermissionService permissionService;
+  @MockitoBean private AccountRepository accountRepository;
   @MockitoBean private RestaurantService restaurantService;
   @MockitoBean private RestaurantImportWorkflowService restaurantImportWorkflowService;
   @MockitoBean private WhatsForLunchSessionService whatsForLunchSessionService;
@@ -289,9 +293,12 @@ class RestaurantControllerMemberSecurityTest {
   }
 
   private String bearer(Role role) {
-    return "Bearer " + PermissionService.generateToken(Account.builder()
+    var account = Account.builder()
         .id("account-1")
         .role(role)
-        .build());
+        .status(AccountStatus.ACTIVE)
+        .build();
+    when(accountRepository.findById("account-1")).thenReturn(Optional.of(account));
+    return "Bearer " + PermissionService.generateToken(account);
   }
 }

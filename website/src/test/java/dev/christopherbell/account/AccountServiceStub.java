@@ -23,7 +23,6 @@ public final class AccountServiceStub {
         .username("old_user")
         .role(Role.USER)
         .status(AccountStatus.INACTIVE)
-        .isApproved(false)
         .createdOn(Instant.now())
         .lastUpdatedOn(Instant.now().minusSeconds(300))
         .build();
@@ -38,7 +37,6 @@ public final class AccountServiceStub {
         .username("Chris.Bell  ")
         .role(Role.ADMIN)
         .status(AccountStatus.ACTIVE)
-        .isApproved(true)
         .moderationReason("Account review")
         .build();
   }
@@ -51,11 +49,10 @@ public final class AccountServiceStub {
         .build();
   }
 
-  public static AccountUpdateRequest getAccountUpdateRequestWhenFlagsOnlyStub() {
+  public static AccountUpdateRequest getAccountUpdateRequestWhenStatusOnlyStub() {
     return AccountUpdateRequest.builder()
         .id(ID)
         .status(AccountStatus.ACTIVE)
-        .isApproved(true)
         .moderationReason("Account activation")
         .build();
   }

@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountPermission;
+import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.security.JwtAuthenticationFilter;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
@@ -20,6 +23,7 @@ import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.net.URI;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -39,9 +43,12 @@ class JwtAuthenticationFilterTest {
   @Test
   @DisplayName("Valid bearer token authenticates the request")
   void doFilter_whenBearerTokenValid_setsAuthentication() throws ServletException, IOException {
-    var filter = new JwtAuthenticationFilter(List.of());
+    var account = account(Role.USER);
+    var accounts = mock(AccountRepository.class);
+    when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
+    var filter = new JwtAuthenticationFilter(List.of(), null, null, null, accounts);
     var request = new MockHttpServletRequest("GET", "/api/protected");
-    request.addHeader("Authorization", "Bearer " + token(Role.USER));
+    request.addHeader("Authorization", "Bearer " + PermissionService.generateToken(account));
     var response = new MockHttpServletResponse();
 
     filter.doFilter(request, response, new MockFilterChain());
@@ -51,6 +58,26 @@ class JwtAuthenticationFilterTest {
     assertEquals("account-1", authentication.getName());
     assertEquals("USER", authentication.getAuthorities().iterator().next().getAuthority());
     assertEquals(200, response.getStatus());
+  }
+
+  @Test
+  @DisplayName("Bearer token is rejected after account security state changes")
+  void doFilter_whenAccountSecurityStateChanges_returnsUnauthorized()
+      throws ServletException, IOException {
+    var account = account(Role.USER);
+    var token = PermissionService.generateToken(account);
+    account.setPermissions(Set.of(AccountPermission.SHARED_FOLDER_READ));
+    var accounts = mock(AccountRepository.class);
+    when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
+    var filter = new JwtAuthenticationFilter(List.of(), null, null, null, accounts);
+    var request = new MockHttpServletRequest("GET", "/api/protected");
+    request.addHeader("Authorization", "Bearer " + token);
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(request, response, new MockFilterChain());
+
+    assertNull(SecurityContextHolder.getContext().getAuthentication());
+    assertEquals(401, response.getStatus());
   }
 
   @Test
@@ -153,10 +180,17 @@ class JwtAuthenticationFilterTest {
   }
 
   private String token(Role role) {
-    return PermissionService.generateToken(Account.builder()
+    return PermissionService.generateToken(account(role));
+  }
+
+  private Account account(Role role) {
+    return Account.builder()
         .id("account-1")
+        .passwordHash("password-hash")
         .role(role)
-        .build());
+        .status(AccountStatus.ACTIVE)
+        .permissions(Set.of())
+        .build();
   }
 
   private BrowserAuthenticationCookies cookies() {

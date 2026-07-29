@@ -1,6 +1,7 @@
 package dev.christopherbell.configuration.security.browser;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.auth.AccountSecurityFingerprint;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.permission.PermissionService;
@@ -12,7 +13,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
-import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
@@ -51,7 +51,7 @@ public class BrowserSessionService {
         .id(credential.sessionId())
         .accountId(account.getId())
         .tokenHash(hash(credential.secret()))
-        .accountSecurityFingerprint(fingerprint(account))
+        .accountSecurityFingerprint(AccountSecurityFingerprint.from(account))
         .createdOn(now)
         .lastSeenOn(now)
         .rotatedOn(now)
@@ -78,7 +78,7 @@ public class BrowserSessionService {
     var account = accounts.findById(session.getAccountId()).orElse(null);
     if (account == null || !isActive(account)
         || !constantTimeEquals(
-            session.getAccountSecurityFingerprint(), fingerprint(account))) {
+            session.getAccountSecurityFingerprint(), AccountSecurityFingerprint.from(account))) {
       sessions.delete(session);
       return Optional.empty();
     }
@@ -128,21 +128,6 @@ public class BrowserSessionService {
         && session.getPreviousTokenExpiresOn() != null
         && now.isBefore(session.getPreviousTokenExpiresOn())
         && constantTimeEquals(session.getPreviousTokenHash(), candidateHash);
-  }
-
-  private String fingerprint(Account account) {
-    var source = new StringBuilder()
-        .append(account.getId()).append('\n')
-        .append(account.getPasswordHash()).append('\n')
-        .append(account.getRole()).append('\n')
-        .append(account.getStatus()).append('\n');
-    source.append(account.getIsApproved()).append('\n');
-    if (account.getPermissions() != null) {
-      account.getPermissions().stream()
-          .sorted(Comparator.comparing(Enum::name))
-          .forEach(permission -> source.append(permission.name()).append('\n'));
-    }
-    return hash(source.toString());
   }
 
   private Credential credential(String sessionId) {

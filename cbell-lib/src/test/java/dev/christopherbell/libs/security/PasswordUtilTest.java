@@ -104,13 +104,43 @@ public class PasswordUtilTest {
   }
 
   @Test
-  @DisplayName("verifyPassword: throws IllegalArgumentException when salt is invalid Base64")
-  public void testVerifyPassword_whenSaltInvalidBase64_throwsIllegalArgumentException() {
+  @DisplayName("verifyPassword: malformed legacy credentials fail closed")
+  public void testVerifyPassword_whenSaltInvalidBase64_returnsFalse() throws Exception {
     String pwd = PasswordStub.getPasswordStub();
     String badSalt = PasswordStub.getInvalidBase64SaltStub();
     String bogusStoredHash = "ignoredIfSaltInvalid";
 
-    assertThrows(IllegalArgumentException.class,
-        () -> PasswordUtil.verifyPassword(pwd, badSalt, bogusStoredHash));
+    assertFalse(PasswordUtil.verifyPassword(pwd, badSalt, bogusStoredHash));
+  }
+
+  @Test
+  @DisplayName("current password hashes carry algorithm, work factor, salt, and hash")
+  void currentHash_roundTripsWithoutSeparateSalt() throws Exception {
+    var password = PasswordStub.getPasswordStub();
+
+    var encoded = PasswordUtil.hashPassword(password);
+
+    assertTrue(encoded.startsWith("pbkdf2-sha256$210000$"));
+    assertTrue(PasswordUtil.verifyPassword(password, null, encoded));
+    assertFalse(PasswordUtil.verifyPassword(PasswordStub.getAnotherPasswordStub(), null, encoded));
+    assertFalse(PasswordUtil.needsRehash(null, encoded));
+  }
+
+  @Test
+  @DisplayName("legacy hashes verify but are marked for upgrade")
+  void legacyHash_verifiesAndNeedsRehash() throws Exception {
+    var password = PasswordStub.getPasswordStub();
+    var salt = PasswordStub.getDeterministicSaltStub();
+    var hash = PasswordUtil.hashPassword(password, salt);
+
+    assertTrue(PasswordUtil.verifyPassword(password, salt, hash));
+    assertTrue(PasswordUtil.needsRehash(salt, hash));
+  }
+
+  @Test
+  @DisplayName("malformed versioned hashes fail closed")
+  void malformedVersionedHash_returnsFalse() throws Exception {
+    assertFalse(PasswordUtil.verifyPassword(
+        PasswordStub.getPasswordStub(), null, "pbkdf2-sha256$not-a-number$salt$hash"));
   }
 }

@@ -21,7 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
- * Owns administrator-driven account approval, status, and role changes.
+ * Owns administrator-driven account status and role changes.
  */
 @RequiredArgsConstructor
 @Slf4j
@@ -31,37 +31,6 @@ public class AccountModerationService {
   private final AccountMapper accountMapper;
   private final AdminActivityService adminActivityService;
   private final PermissionService permissionService;
-
-  /**
-   * Approves an account and records the current admin id.
-   */
-  public AccountDetail approveAccount(String accountId)
-      throws InvalidRequestException, ResourceNotFoundException {
-    log.info("Approving account with id {}", accountId);
-    var account = getExistingOrThrow(accountId);
-    completePendingAudit(account);
-    var before = ModerationAccountSnapshot.from(account);
-    var after = new ModerationAccountSnapshot(account.getRole(), AccountStatus.ACTIVE);
-    var actor = currentActor();
-    var auditCommand = ModerationAuditCommand.create(
-        actor.id(), actor.username(),
-        "ACCOUNT_STATUS_CHANGED",
-        "ACCOUNT",
-        account.getId(),
-        "@" + (account.getUsername() == null ? account.getId() : account.getUsername()),
-        "Account approved through the admin approval endpoint.",
-        "%s approved an account.",
-        before.values(),
-        after.values(),
-        Map.of("source", "admin-approval", "accountId", account.getId()));
-    account.setApprovedBy(PermissionService.getSelf());
-    account.setIsApproved(true);
-    account.setStatus(AccountStatus.ACTIVE);
-    account.setLastUpdatedOn(Instant.now());
-    account.setPendingModerationAudit(auditCommand);
-    var saved = accountRepository.save(account);
-    return accountMapper.toAccount(completePendingAudit(saved));
-  }
 
   /**
    * Applies admin account updates while preserving unique email and username constraints.
@@ -159,7 +128,6 @@ public class AccountModerationService {
     if (request.lastName() != null) existing.setLastName(request.lastName());
     if (request.role() != null) existing.setRole(request.role());
     if (request.status() != null) existing.setStatus(request.status());
-    if (request.isApproved() != null) existing.setIsApproved(request.isApproved());
   }
 
   private void updateEmailIfProvided(Account existing, String email) throws ResourceExistsException {
