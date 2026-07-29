@@ -19,7 +19,7 @@ import org.springframework.stereotype.Repository;
 
 /** Mongo owner of idempotent enqueue, scan cursor, due claim, and exact-owner transitions. */
 @Repository
-final class FederationDeliveryJobRepository implements FederationDeliveryStore {
+class FederationDeliveryJobRepository implements FederationDeliveryStore {
   private final MongoTemplate mongo;
 
   FederationDeliveryJobRepository(MongoTemplate mongo) {

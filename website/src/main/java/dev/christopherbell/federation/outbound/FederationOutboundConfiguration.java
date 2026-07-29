@@ -1,6 +1,5 @@
 package dev.christopherbell.federation.outbound;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.federation.configuration.FederationProperties;
 import dev.christopherbell.federation.identity.FederationRequestSigner;
@@ -8,6 +7,7 @@ import java.time.Clock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import tools.jackson.databind.ObjectMapper;
 
 /** Wires remote federation effects only when outbound delivery is explicitly enabled. */
 @Configuration(proxyBeanMethods = false)
