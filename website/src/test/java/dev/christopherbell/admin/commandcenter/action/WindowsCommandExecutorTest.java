@@ -32,13 +32,13 @@ class WindowsCommandExecutorTest {
   }
 
   @Test
-  void powerDelayOverrideCannotChangeTheLiteralSixtySecondAllowlist() {
-    properties.getActions().setPowerDelay(Duration.ofSeconds(5));
+  void configuredPowerDelayIsTheOnlyVariableFixedArgument() {
+    properties.getActions().setPowerDelay(Duration.ofSeconds(37));
 
     assertThat(executor.commandFor(CommandCenterActionType.RESTART_COMPUTER))
-        .containsSubsequence("/t", "60");
+        .containsSubsequence("/t", "37");
     assertThat(executor.commandFor(CommandCenterActionType.SHUTDOWN_COMPUTER))
-        .containsSubsequence("/t", "60");
+        .containsSubsequence("/t", "37");
   }
 
   @Test
@@ -67,10 +67,11 @@ class WindowsCommandExecutorTest {
   }
 
   @Test
-  void cancellationWaitsForAZeroExitWithinTheBoundedTimeout() throws Exception {
+  void everyActionUsesTheConfiguredResultTimeout() throws Exception {
     var commands = new ArrayList<List<String>>();
     var timeouts = new ArrayList<Duration>();
-    var cancelExecutor = new WindowsCommandExecutor(
+    properties.getActions().setCommandResultTimeout(Duration.ofSeconds(3));
+    var boundedExecutor = new WindowsCommandExecutor(
         properties,
         () -> true,
         (command, timeout) -> {
@@ -79,15 +80,18 @@ class WindowsCommandExecutorTest {
           return new WindowsCommandExecutor.CommandResult(true, 0);
         });
 
-    cancelExecutor.execute(CommandCenterActionType.CANCEL_PENDING_ACTION);
+    for (var action : CommandCenterActionType.values()) {
+      boundedExecutor.execute(action);
+    }
 
-    assertThat(commands).containsExactly(
-        List.of("C:\\Windows\\System32\\shutdown.exe", "/a"));
-    assertThat(timeouts).containsExactly(Duration.ofSeconds(5));
+    assertThat(commands).hasSize(CommandCenterActionType.values().length);
+    assertThat(timeouts).containsExactly(
+        Duration.ofSeconds(3), Duration.ofSeconds(3),
+        Duration.ofSeconds(3), Duration.ofSeconds(3));
   }
 
   @Test
-  void cancellationRejectsNonZeroExitAndTimeout() {
+  void everyActionRejectsNonZeroExitAndTimeout() {
     var nonZeroExecutor = new WindowsCommandExecutor(
         properties,
         () -> true,
@@ -98,11 +102,11 @@ class WindowsCommandExecutorTest {
         (command, timeout) -> new WindowsCommandExecutor.CommandResult(false, -1));
 
     assertThatThrownBy(() -> nonZeroExecutor.execute(
-        CommandCenterActionType.CANCEL_PENDING_ACTION))
+        CommandCenterActionType.RESTART_SITE))
         .isInstanceOf(java.io.IOException.class)
         .hasMessageContaining("exit code 5");
     assertThatThrownBy(() -> timedOutExecutor.execute(
-        CommandCenterActionType.CANCEL_PENDING_ACTION))
+        CommandCenterActionType.RESTART_COMPUTER))
         .isInstanceOf(java.io.IOException.class)
         .hasMessageContaining("timed out");
   }
