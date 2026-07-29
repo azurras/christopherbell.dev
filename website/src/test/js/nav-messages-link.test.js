@@ -32,14 +32,34 @@ globalThis.document = {
 };
 
 const {
+  accountNavigationAccess,
   hideNavPanel,
   isActiveNavHref,
   messagesNavHref,
+  profileMenuItems,
   topLevelNavItems,
   toolsMenuItems
 } = await import('../../main/resources/static/js/components/nav.js');
 
-const { adminMenuItems, profileMenuItems } = await import('../../main/resources/static/js/components/nav.js');
+test('navigation access defaults closed and derives every capability from one account snapshot', () => {
+  assert.deepEqual(accountNavigationAccess(null), {
+    isAdmin: false,
+    hasMusicRead: false,
+    hasSharedFolderRead: false,
+  });
+  assert.deepEqual(accountNavigationAccess({ role: 'ADMIN', permissions: [] }), {
+    isAdmin: true,
+    hasMusicRead: true,
+    hasSharedFolderRead: true,
+  });
+  assert.deepEqual(accountNavigationAccess({
+    role: 'USER', permissions: ['MUSIC_WRITE', 'SHARED_FOLDER_READ'],
+  }), {
+    isAdmin: false,
+    hasMusicRead: true,
+    hasSharedFolderRead: true,
+  });
+});
 
 test('messages nav link sends signed-out users to login and back to messages', () => {
   assert.equal(messagesNavHref(false), '/login?redirect=%2Fmessages');
@@ -51,16 +71,29 @@ test('messages nav link sends signed-in users directly to messages', () => {
 
 test('tools menu exposes ZIP coordinate lookup', () => {
   assert.deepEqual(
-    toolsMenuItems(false).find((item) => item.href === '/zip-coordinates'),
+    toolsMenuItems().find((item) => item.href === '/zip-coordinates'),
     { href: '/zip-coordinates', label: 'ZIP Coordinates' }
   );
 });
 
-test('tools menu adds Shared Folder alphabetically only with effective read access', () => {
-  assert.equal(toolsMenuItems(false).some((item) => item.href === '/shared'), false);
+test('Tools keeps public entries and Shared Folder effective-read gating', () => {
+  assert.equal(toolsMenuItems().some((item) => item.href === '/shared'), false);
   assert.deepEqual(
-    toolsMenuItems(true).map((item) => item.label),
+    toolsMenuItems({ hasSharedFolderRead: true }).map((item) => item.label),
     ['Raising Canes Box Index', 'Shared Folder', 'VIN Decoder', "What's For Lunch", 'ZIP Coordinates']
+  );
+});
+
+test('Tools gates moved destinations and sorts every visible item alphabetically', () => {
+  assert.equal(toolsMenuItems().some((item) => item.href === '/music'), false);
+  assert.deepEqual(
+    toolsMenuItems({ hasMusicRead: true }).map((item) => item.label),
+    ['Music', 'Raising Canes Box Index', 'VIN Decoder', "What's For Lunch", 'ZIP Coordinates']
+  );
+  assert.deepEqual(
+    toolsMenuItems({ isAdmin: true, hasSharedFolderRead: true }).map((item) => item.label),
+    ['Back Office', 'Command Center', 'Music', 'Raising Canes Box Index', 'Shared Folder',
+      'VIN Decoder', "What's For Lunch", 'ZIP Coordinates']
   );
 });
 
@@ -81,20 +114,15 @@ test('Explore is public and owns Explore and topic route highlighting', () => {
   assert.equal(isActiveNavHref('/void', '/void/topic/music'), false);
 });
 
-test('Music is a primary nav destination for signed-in and signed-out visitors', () => {
-  assert.deepEqual(
-    topLevelNavItems(false).find((item) => item.href === '/music'),
-    { href: '/music', label: 'Music' }
-  );
-  assert.deepEqual(
-    topLevelNavItems(true).find((item) => item.href === '/music'),
-    { href: '/music', label: 'Music' }
-  );
+test('moved destinations no longer appear in the top-level or profile menus', () => {
+  assert.equal(topLevelNavItems(false).some((item) => item.href === '/music'), false);
+  assert.equal(topLevelNavItems(true).some((item) => item.href === '/music'), false);
+  assert.deepEqual(profileMenuItems(), [{ href: '/profile', label: 'Profile' }]);
 });
 
 test('tools menu includes What’s For Lunch instead of top-level WFL', () => {
   assert.deepEqual(
-    toolsMenuItems(false).find((item) => item.href === '/wfl'),
+    toolsMenuItems().find((item) => item.href === '/wfl'),
     { href: '/wfl', label: "What's For Lunch" }
   );
   assert.equal(topLevelNavItems(true).some((item) => item.href === '/wfl'), false);
@@ -137,20 +165,4 @@ test('hideNavPanel closes a nav panel and resets the trigger state', () => {
 
   assert.equal(classes.has('show'), false);
   assert.equal(triggerAttributes['aria-expanded'], 'false');
-});
-
-test('admin menu alone exposes back office and command center', () => {
-  assert.deepEqual(adminMenuItems(false), []);
-  assert.deepEqual(adminMenuItems(true), [
-    { href: '/back-office', label: 'Back Office' },
-    { href: '/command-center', label: 'Command Center' },
-  ]);
-});
-
-test('profile menu keeps administrative links but no longer contains Shared Folder', () => {
-  assert.deepEqual(profileMenuItems(false, true), []);
-  assert.deepEqual(profileMenuItems(true, true), [
-    { href: '/back-office', label: 'Back Office' },
-    { href: '/command-center', label: 'Command Center' },
-  ]);
 });
