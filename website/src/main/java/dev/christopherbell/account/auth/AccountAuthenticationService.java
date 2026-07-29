@@ -24,6 +24,7 @@ public class AccountAuthenticationService {
   private static final String PUBLIC_REJECTION = "Login failed.";
   private static final String DUMMY_CURRENT_HASH = createDummyCurrentHash();
   private final AccountRepository accountRepository;
+  private final AccountLoginStore accountLoginStore;
 
   /**
    * Validates login information and returns a signed JWT for active accounts.
@@ -45,15 +46,16 @@ public class AccountAuthenticationService {
         throw rejectedLogin();
       }
 
-      if (PasswordUtil.needsRehash(account.getPasswordSalt(), account.getPasswordHash())) {
-        account.setPasswordHash(PasswordUtil.upgradePassword(
-            password, account.getPasswordSalt(), account.getPasswordHash()));
-        account.setPasswordSalt(null);
-      }
-      account.setLastLoginOn(Instant.now());
-      accountRepository.save(account);
-      log.info("Successful login for account with id: {}", account.getId());
-      return PermissionService.generateToken(account);
+      var currentHash = PasswordUtil.needsRehash(
+          account.getPasswordSalt(), account.getPasswordHash())
+              ? PasswordUtil.upgradePassword(
+                  password, account.getPasswordSalt(), account.getPasswordHash())
+              : account.getPasswordHash();
+      var current = accountLoginStore.completeLogin(account, currentHash, Instant.now())
+          .filter(updated -> updated.getStatus() == AccountStatus.ACTIVE)
+          .orElseThrow(this::rejectedLogin);
+      log.info("Successful login for account with id: {}", current.getId());
+      return PermissionService.generateToken(current);
     } catch (NoSuchAlgorithmException | InvalidKeySpecException | IllegalArgumentException failure) {
       log.warn("Rejected account login because credential verification failed safely.");
       throw rejectedLogin(failure);
