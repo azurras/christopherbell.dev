@@ -5,6 +5,7 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.dto.AccountDetail;
+import dev.christopherbell.account.model.dto.FederationConsentStatus;
 import dev.christopherbell.federation.configuration.FederationProperties;
 import dev.christopherbell.federation.identity.FederationIdentityFactory;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
@@ -74,6 +75,15 @@ public class FederationConsentService {
 
   public boolean enrollmentAvailable() {
     return properties.discoveryEnabled() && identityFactory.isPresent();
+  }
+
+  public FederationConsentStatus status(String accountId) throws ResourceNotFoundException {
+    if (accountId == null || accountId.isBlank()) {
+      throw new ResourceNotFoundException("Account not found.");
+    }
+    Account account = accounts.findById(accountId)
+        .orElseThrow(() -> new ResourceNotFoundException("Account not found."));
+    return new FederationConsentStatus(account.isFederationEnabled(), enrollmentAvailable());
   }
 
   private void enable(Account account) throws InvalidRequestException {

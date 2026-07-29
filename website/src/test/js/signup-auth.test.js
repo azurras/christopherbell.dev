@@ -38,6 +38,26 @@ test('signup requires and trims both names before creating an account', () => {
     firstName: 'Chris',
     lastName: 'Bell',
     password: 'password',
+    federatePublicVoidPosts: false,
   });
+});
+
+test('signup federation choice is true only for a checked enabled control', () => {
+  assert.equal(signupPayload({
+    email: 'a@example.test',
+    username: 'alpha',
+    firstName: 'Chris',
+    lastName: 'Bell',
+    password: 'password',
+    federationControl: { checked: true, disabled: false },
+  }).federatePublicVoidPosts, true);
+  assert.equal(signupPayload({
+    email: 'a@example.test',
+    username: 'alpha',
+    firstName: 'Chris',
+    lastName: 'Bell',
+    password: 'password',
+    federationControl: { checked: true, disabled: true },
+  }).federatePublicVoidPosts, false);
 });
 

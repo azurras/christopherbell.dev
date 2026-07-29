@@ -19,6 +19,7 @@ import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
 import dev.christopherbell.account.model.dto.FederationConsentUpdate;
+import dev.christopherbell.account.model.dto.FederationConsentStatus;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
@@ -315,6 +316,19 @@ public class AccountController {
     return ResponseEntity.ok(Response.<AccountDetail>builder()
         .payload(accountService.setFederationEnabled(
             permissionService.getSelfId(), request.requestedState()))
+        .success(true)
+        .build());
+  }
+
+  /** Returns the authenticated account's authoritative federation state. */
+  @GetMapping(
+      value = V20260728 + "/self/federation",
+      produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<FederationConsentStatus>> getFederationConsent()
+      throws Exception {
+    return ResponseEntity.ok(Response.<FederationConsentStatus>builder()
+        .payload(accountService.getFederationConsent(permissionService.getSelfId()))
         .success(true)
         .build());
   }

@@ -43,6 +43,28 @@
                 <label for="password" class="form-label">Password</label>
                 <input type="password" class="form-control" id="password" placeholder="••••••••" required />
               </div>
+              <fieldset class="federation-consent mb-3" aria-describedby="federationConsentDetail federationConsentStatus">
+                <div class="form-check form-switch">
+                  <input
+                    class="form-check-input"
+                    id="federatePublicVoidPosts"
+                    type="checkbox"
+                    th:checked="${federationEnrollmentAvailable}"
+                    th:disabled="${!federationEnrollmentAvailable}" />
+                  <label class="form-check-label" for="federatePublicVoidPosts">
+                    Make my public Void identity discoverable on compatible social servers
+                  </label>
+                </div>
+                <p id="federationConsentDetail" class="form-text">
+                  Only your public Void identity and public Void posts are included. Messages, Music, and Shared Folder are never included. Turning this off stops new discovery but cannot erase copies another server already received.
+                </p>
+                <p
+                  id="federationConsentStatus"
+                  class="form-text federation-consent-status"
+                  th:text="${federationEnrollmentAvailable} ? 'This choice is on by default. You can turn it off now or later from Profile.' : 'Federation enrollment is not available on this server right now.'">
+                  Federation enrollment status
+                </p>
+              </fieldset>
               <div class="d-grid gap-2">
                 <button id="signupBtn" type="submit" class="btn btn-success">Create account</button>
                 <a class="btn btn-outline-secondary" href="/login">Back to login</a>

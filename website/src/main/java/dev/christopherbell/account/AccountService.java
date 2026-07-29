@@ -7,6 +7,7 @@ import dev.christopherbell.account.deletion.AccountDeletionService;
 import dev.christopherbell.account.follow.AccountFollowService;
 import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.account.model.dto.AccountDetail;
+import dev.christopherbell.account.model.dto.FederationConsentStatus;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountPasswordResetConfirmRequest;
 import dev.christopherbell.account.model.AccountPasswordResetRequest;
@@ -272,6 +273,12 @@ public class AccountService {
   public AccountDetail setFederationEnabled(String accountId, boolean enabled)
       throws InvalidRequestException, ResourceNotFoundException {
     return federationConsent.setEnabled(accountId, enabled);
+  }
+
+  /** Returns authoritative consent and whether this deployment can enroll identities. */
+  public FederationConsentStatus getFederationConsent(String accountId)
+      throws ResourceNotFoundException {
+    return federationConsent.status(accountId);
   }
 
   /**

@@ -148,6 +148,18 @@ class FederationConsentServiceTest {
     verify(identityFactory, never()).create(account.getId(), account.getUsername());
   }
 
+  @Test
+  void statusCombinesAuthoritativeAccountConsentWithEnrollmentAvailability() throws Exception {
+    var account = account();
+    account.setFederationEnabled(true);
+    when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
+
+    var status = service.status(account.getId());
+
+    assertTrue(status.enabled());
+    assertTrue(status.enrollmentAvailable());
+  }
+
   private static Account account() {
     return Account.builder()
         .id("account-123")

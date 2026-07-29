@@ -5,10 +5,15 @@ import { canEditFor, makeRendererContext } from './lib/feed-context.js';
 import { initPostImageLightbox } from './lib/image-lightbox.js';
 import { initLazyMedia } from './lib/lazy-media.js';
 import { profileActivityStats } from './lib/profile-stats.js';
+import {
+  federationConsentControlModel,
+  normalizeFederationConsentStatus,
+} from './lib/federation-consent.js';
 
 /** Get the alert element for error display. */
 const alertBox = () => document.getElementById('profileAlert');
 const displayValue = (value) => value || '-';
+let federationStatus = null;
 
 function initialsFor(detail) {
   const source = [detail.firstName, detail.lastName].filter(Boolean).join(' ') || detail.username || '?';
@@ -79,6 +84,65 @@ function renderStats(profile, posts) {
   set('profileFollowingCount', stats.followingCount);
 }
 
+function renderFederationConsent(status, busy = false, overrideMessage = '') {
+  federationStatus = normalizeFederationConsentStatus(status);
+  const model = federationConsentControlModel(federationStatus, busy);
+  const control = document.getElementById('profileFederationEnabled');
+  const statusText = document.getElementById('profileFederationStatus');
+  if (control) {
+    control.checked = model.checked;
+    control.disabled = model.disabled;
+  }
+  if (statusText) statusText.textContent = overrideMessage || model.message;
+}
+
+async function fetchFederationConsent() {
+  const status = await fetchJson(API.accounts.federation, {
+    headers: authHeaders(),
+    redirectOnUnauthorized: true,
+  });
+  return normalizeFederationConsentStatus(status);
+}
+
+async function initializeFederationConsent() {
+  const control = document.getElementById('profileFederationEnabled');
+  if (!control) return;
+  try {
+    renderFederationConsent(await fetchFederationConsent());
+  } catch (error) {
+    control.disabled = true;
+    const statusText = document.getElementById('profileFederationStatus');
+    if (statusText) statusText.textContent = error.message || 'Could not load federation status.';
+    return;
+  }
+
+  control.addEventListener('change', async () => {
+    const previous = federationStatus;
+    const requested = control.checked;
+    renderFederationConsent(previous, true);
+    try {
+      await fetchJson(API.accounts.federation, {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ enabled: requested }),
+      });
+      renderFederationConsent(await fetchFederationConsent());
+    } catch (error) {
+      let authoritative = previous;
+      try {
+        authoritative = await fetchFederationConsent();
+      } catch (_) {
+        // The last confirmed state is safer than leaving the optimistic choice rendered.
+      }
+      renderFederationConsent(
+        authoritative,
+        false,
+        error.message || 'Could not update federation. Your confirmed choice was restored.',
+      );
+    }
+  });
+}
+
 const ROOT_CACHE = {};
 
 /**
@@ -139,6 +203,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       redirectOnUnauthorized: true,
     });
     renderAccount(me);
+    await initializeFederationConsent();
     const posts = await fetchJson(`${API.posts.meFeed}?limit=20`, {
       headers: authHeaders(),
       redirectOnUnauthorized: true,

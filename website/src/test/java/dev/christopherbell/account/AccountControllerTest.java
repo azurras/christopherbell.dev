@@ -32,6 +32,7 @@ import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.dto.FederationConsentUpdate;
+import dev.christopherbell.account.model.dto.FederationConsentStatus;
 import dev.christopherbell.configuration.security.ControllerSliceSecurityTestConfig;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
@@ -560,6 +561,21 @@ public class AccountControllerTest {
             .contentType(MediaType.APPLICATION_JSON)
             .content("{}"))
         .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  @DisplayName("Federation consent: authenticated user gets authoritative state and availability")
+  @WithMockUser(authorities = {"USER"})
+  void getFederationConsentWhenAuthenticatedReturnsStatus() throws Exception {
+    when(permissionService.getSelfId()).thenReturn("account-123");
+    when(accountService.getFederationConsent("account-123"))
+        .thenReturn(new FederationConsentStatus(true, true));
+
+    mockMvc.perform(get("/api/accounts/2026-07-28/self/federation"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.enabled").value(true))
+        .andExpect(jsonPath("$.payload.enrollmentAvailable").value(true));
   }
 
   @Test

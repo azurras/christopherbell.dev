@@ -4368,6 +4368,38 @@ body {
     min-width: 0;
 }
 
+.profile-federation-card {
+    gap: 0.65rem;
+}
+
+.profile-federation-card h2 {
+    color: #17202a;
+    font-size: 1.05rem;
+    font-weight: 900;
+    margin: 0;
+}
+
+.profile-federation-card .form-check {
+    margin: 0;
+}
+
+.profile-federation-card .form-check-label {
+    color: #17202a;
+    font-weight: 800;
+}
+
+.profile-federation-detail,
+.profile-federation-status {
+    color: #46515f;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    margin: 0;
+}
+
+.profile-federation-status {
+    font-weight: 800;
+}
+
 .profile-avatar-lg {
     width: 86px;
     height: 86px;

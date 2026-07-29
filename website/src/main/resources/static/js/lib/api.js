@@ -66,6 +66,7 @@ export const API = {
     passwordResetRequest: '/api/accounts/2024-12-15/password-reset/request',
     passwordResetConfirm: '/api/accounts/2024-12-15/password-reset/confirm',
     me: '/api/accounts/2025-09-03/me',
+    federation: '/api/accounts/2026-07-28/self/federation',
     profile: (username) => `/api/accounts/2025-09-14/profile/${encodeURIComponent(username)}`,
     follow: (username) => `/api/accounts/2025-09-14/profile/${encodeURIComponent(username)}/follow`,
     setTrust: (username) => `/api/accounts/2026-06-02/trust/${encodeURIComponent(username)}`,

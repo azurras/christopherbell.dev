@@ -56,6 +56,22 @@
                 </div>
               </dl>
             </div>
+            <section class="profile-card profile-federation-card" aria-labelledby="profileFederationTitle">
+              <p class="profile-label">Social web</p>
+              <h2 id="profileFederationTitle">Federation</h2>
+              <div class="form-check form-switch">
+                <input class="form-check-input" id="profileFederationEnabled" type="checkbox" disabled />
+                <label class="form-check-label" for="profileFederationEnabled">
+                  Make my public Void identity discoverable
+                </label>
+              </div>
+              <p class="profile-federation-detail">
+                This includes only your public Void identity and public Void posts. Messages, Music, and Shared Folder stay private.
+              </p>
+              <p id="profileFederationStatus" class="profile-federation-status" role="status" aria-live="polite">
+                Loading federation status…
+              </p>
+            </section>
             <div class="profile-stat-grid" aria-label="Profile activity">
               <div class="profile-stat">
                 <span id="profilePostCount">0</span>
