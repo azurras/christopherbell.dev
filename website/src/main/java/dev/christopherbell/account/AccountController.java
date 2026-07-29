@@ -18,6 +18,7 @@ import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
 import dev.christopherbell.account.model.dto.AccountUsernameSuggestion;
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.model.dto.FederationConsentUpdate;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
@@ -301,6 +302,21 @@ public class AccountController {
             .payload(accountService.getSelfAccount())
             .success(true)
             .build(), HttpStatus.OK);
+  }
+
+  /** Replaces the authenticated account's explicit ActivityPub federation consent. */
+  @PatchMapping(
+      value = V20260728 + "/self/federation",
+      consumes = MediaType.APPLICATION_JSON_VALUE,
+      produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<AccountDetail>> updateFederationConsent(
+      @Valid @RequestBody FederationConsentUpdate request) throws Exception {
+    return ResponseEntity.ok(Response.<AccountDetail>builder()
+        .payload(accountService.setFederationEnabled(
+            permissionService.getSelfId(), request.requestedState()))
+        .success(true)
+        .build());
   }
 
   /**

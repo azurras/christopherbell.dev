@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -48,6 +49,7 @@ import dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter;
 import dev.christopherbell.post.abuse.VoidMutationKind;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
+import dev.christopherbell.federation.consent.FederationConsentService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -82,6 +84,7 @@ public class AccountServiceTest {
   @Mock private AdminActivityService adminActivityService;
   @Mock private PermissionService permissionService;
   @Mock private NewAccountVoidMutationLimiter mutationLimiter;
+  @Mock private FederationConsentService federationConsent;
   private AccountService accountService;
 
   @BeforeEach
@@ -106,7 +109,8 @@ public class AccountServiceTest {
         followService,
         moderationService,
         sharedFolderAudit,
-        sharedFolderAccess);
+        sharedFolderAccess,
+        federationConsent);
     org.mockito.Mockito.lenient().when(sharedFolderAccess.requireAdmin()).thenReturn(
         Account.builder().id("admin-1").role(Role.ADMIN).build());
     org.mockito.Mockito.lenient().when(permissionService.getSelfId()).thenReturn("admin-1");
@@ -162,6 +166,46 @@ public class AccountServiceTest {
 
     assertEquals("chris@example.com", account.getEmail());
     assertEquals("Chris.Bell", account.getUsername());
+  }
+
+  @Test
+  @DisplayName("Create account: federation identity is prepared before the only account write")
+  void createAccountPreparesFederationBeforeSave() throws Exception {
+    var request = AccountCreateRequest.builder()
+        .email("user@example.com")
+        .firstName("User")
+        .lastName("Example")
+        .password("correct-horse-battery-staple")
+        .username("user")
+        .federatePublicVoidPosts(true)
+        .build();
+
+    accountService.createAccount(request);
+
+    var account = ArgumentCaptor.forClass(Account.class);
+    var order = org.mockito.Mockito.inOrder(federationConsent, accountRepository);
+    order.verify(federationConsent).prepareNewAccount(account.capture(), eq(true));
+    order.verify(accountRepository).save(account.getValue());
+  }
+
+  @Test
+  @DisplayName("Create account: rejected federation enrollment performs no account write")
+  void createAccountWhenFederationEnrollmentFailsDoesNotSave() throws Exception {
+    var request = AccountCreateRequest.builder()
+        .email("user@example.com")
+        .firstName("User")
+        .lastName("Example")
+        .password("correct-horse-battery-staple")
+        .username("user")
+        .federatePublicVoidPosts(true)
+        .build();
+    doThrow(new InvalidRequestException("Federation enrollment is unavailable."))
+        .when(federationConsent)
+        .prepareNewAccount(any(Account.class), eq(true));
+
+    assertThrows(InvalidRequestException.class, () -> accountService.createAccount(request));
+
+    verify(accountRepository, never()).save(any(Account.class));
   }
 
   @Test

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import dev.christopherbell.admin.activity.ModerationAuditCommand;
+import dev.christopherbell.federation.identity.FederationIdentity;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
@@ -53,6 +54,9 @@ public class Account {
 
   @Indexed(unique = true)
   private String email;
+  private Boolean federationEnabled;
+  private Instant federationEnabledOn;
+  @JsonIgnore private FederationIdentity federationIdentity;
   private String firstName;
   private Boolean isApproved;
   private UUID inviteCode;
@@ -84,4 +88,9 @@ public class Account {
 
   @Indexed(unique = true)
   private String username;
+
+  /** Treats historical null values as explicitly disabled. */
+  public boolean isFederationEnabled() {
+    return Boolean.TRUE.equals(federationEnabled);
+  }
 }

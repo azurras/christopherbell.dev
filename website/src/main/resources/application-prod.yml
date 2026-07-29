@@ -26,6 +26,13 @@ app:
     public-base-url: ${APP_PUBLIC_BASE_URL:https://www.christopherbell.dev}
     authentication-cookie-secure: true
     hsts-enabled: true
+  federation:
+    discovery-enabled: ${APP_FEDERATION_DISCOVERY_ENABLED:false}
+    inbound-enabled: ${APP_FEDERATION_INBOUND_ENABLED:false}
+    outbound-enabled: ${APP_FEDERATION_OUTBOUND_ENABLED:false}
+    software-name: christopherbell.dev
+    software-version: ${GIT_COMMIT:unknown}
+    key-encryption-secret: ${APP_FEDERATION_KEY_ENCRYPTION_SECRET:}
   jwt:
     secret: ${APP_JWT_SECRET:}
   mail:
