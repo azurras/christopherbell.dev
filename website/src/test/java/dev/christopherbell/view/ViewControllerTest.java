@@ -14,11 +14,17 @@ import dev.christopherbell.view.tools.ToolsViewController;
 import dev.christopherbell.view.voidroutes.VoidViewController;
 import dev.christopherbell.view.voidroutes.VoidPostSocialPreview;
 import dev.christopherbell.view.voidroutes.VoidPostSocialPreviewService;
+import dev.christopherbell.view.voidroutes.VoidUserSocialPreview;
+import dev.christopherbell.view.voidroutes.VoidUserSocialPreviewService;
+import dev.christopherbell.view.wfl.RestaurantSocialPreview;
+import dev.christopherbell.view.wfl.RestaurantSocialPreviewService;
 import dev.christopherbell.view.wfl.WhatsForLunchViewController;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.federation.consent.FederationConsentService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -36,7 +42,22 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 public class ViewControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private VoidPostSocialPreviewService postPreviews;
+  @MockitoBean private VoidUserSocialPreviewService userPreviews;
+  @MockitoBean private RestaurantSocialPreviewService restaurantPreviews;
   @MockitoBean private FederationConsentService federationConsent;
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "/login", "/signup", "/forgot-password", "/reset-password",
+      "/profile", "/messages", "/notifications", "/report", "/shared", "/music",
+      "/back-office", "/command-center", "/void/login", "/void/signup"
+  })
+  void privateAuthenticationAndAdministrativeShellsRenderNoIndex(String route) throws Exception {
+    mockMvc.perform(get(route))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString(
+            "name=\"robots\" content=\"noindex,nofollow\"")));
+  }
 
   @Test
   @DisplayName("Signup defaults federation on only when enrollment is configured")
@@ -134,11 +155,49 @@ public class ViewControllerTest {
   @Test
   @DisplayName("WFL restaurant page renders social preview metadata")
   public void getWhatsForLunchRestaurantPage_rendersSocialPreviewMetadata() throws Exception {
+    when(restaurantPreviews.preview("restaurant-123")).thenReturn(new RestaurantSocialPreview(
+        "CB | Taco Place",
+        "Mexican restaurant in Austin, Texas. Details and ratings from What's For Lunch.",
+        "Taco Place",
+        "Mexican restaurant in Austin, Texas."));
+
     mockMvc
         .perform(get("/wfl/restaurants/restaurant-123"))
         .andExpect(status().isOk())
-        .andExpect(content().string(containsString("CB | Restaurant")))
+        .andExpect(content().string(containsString("CB | Taco Place")))
+        .andExpect(content().string(containsString("Mexican restaurant in Austin, Texas")))
+        .andExpect(content().string(containsString("<h1 id=\"restaurantTitle\">Taco Place</h1>")))
         .andExpect(content().string(containsString("https://www.christopherbell.dev/wfl/restaurants/restaurant-123")));
+  }
+
+  @Test
+  void unknownPublicRouteReturnsAContentFreeNoIndex404() throws Exception {
+    mockMvc.perform(get("/definitely-not-a-real-page"))
+        .andExpect(status().isNotFound())
+        .andExpect(content().string(containsString("Page not found")))
+        .andExpect(content().string(containsString("noindex,nofollow")))
+        .andExpect(content().string(not(containsString("Whitelabel Error Page"))));
+  }
+
+  @Test
+  void unknownApiRouteReturnsStructured404() throws Exception {
+    mockMvc.perform(get("/api/definitely-not-a-real-resource"))
+        .andExpect(status().isNotFound())
+        .andExpect(content().contentTypeCompatibleWith("application/json"))
+        .andExpect(content().string(containsString("RESOURCE_NOT_FOUND")))
+        .andExpect(content().string(not(containsString("No static resource"))));
+  }
+
+  @Test
+  void getWhatsForLunchRestaurantPage_whenMissing_returnsNoIndex404() throws Exception {
+    when(restaurantPreviews.preview("missing-restaurant"))
+        .thenThrow(new ResourceNotFoundException("SECRET_RESTAURANT"));
+
+    mockMvc.perform(get("/wfl/restaurants/missing-restaurant"))
+        .andExpect(status().isNotFound())
+        .andExpect(content().string(containsString("Page not found")))
+        .andExpect(content().string(containsString("noindex,nofollow")))
+        .andExpect(content().string(not(containsString("SECRET_RESTAURANT"))));
   }
 
   @Test
@@ -148,6 +207,10 @@ public class ViewControllerTest {
         .perform(get("/wfl/favorites"))
         .andExpect(status().isOk())
         .andExpect(content().string(containsString("CB | Favorite Restaurants")))
+        .andExpect(content().string(containsString(
+            "name=\"robots\" content=\"noindex,nofollow\"")))
+        .andExpect(content().string(containsString(
+            "rel=\"canonical\" href=\"https://www.christopherbell.dev/wfl/favorites\"")))
         .andExpect(content().string(containsString("data-list-mode=\"favorites\"")));
   }
 
@@ -158,6 +221,9 @@ public class ViewControllerTest {
         .perform(get("/wfl/top-rated"))
         .andExpect(status().isOk())
         .andExpect(content().string(containsString("CB | Top Rated Restaurants")))
+        .andExpect(content().string(not(containsString("noindex,nofollow"))))
+        .andExpect(content().string(containsString(
+            "rel=\"canonical\" href=\"https://www.christopherbell.dev/wfl/top-rated\"")))
         .andExpect(content().string(containsString("data-list-mode=\"top-rated\"")));
   }
 
@@ -238,10 +304,47 @@ public class ViewControllerTest {
   @Test
   @DisplayName("Public user page renders canonical username social URL")
   public void getPublicUserPage_rendersUsernameSocialUrl() throws Exception {
+    when(userPreviews.preview("some_user")).thenReturn(new VoidUserSocialPreview(
+        "CB | @some_user in the Void",
+        "@some_user has 3 active posts and 4 replies in the Void.",
+        "some_user",
+        "3 posts · 4 replies"));
+
     mockMvc
         .perform(get("/u/some_user"))
         .andExpect(status().isOk())
+        .andExpect(content().string(containsString("CB | @some_user in the Void")))
+        .andExpect(content().string(containsString("3 active posts and 4 replies")))
+        .andExpect(content().string(containsString("<h1 id=\"userHeroTitle\">@some_user</h1>")))
         .andExpect(content().string(containsString("https://www.christopherbell.dev/u/some_user")));
+  }
+
+  @Test
+  void getPublicUserPage_usesResolvedUsernameForCanonicalUrl() throws Exception {
+    when(userPreviews.preview("some!user")).thenReturn(new VoidUserSocialPreview(
+        "CB | @someuser in the Void",
+        "@someuser has 3 active posts and 4 replies in the Void.",
+        "someuser",
+        "3 posts · 4 replies"));
+
+    mockMvc.perform(get("/u/some!user"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString(
+            "rel=\"canonical\" href=\"https://www.christopherbell.dev/u/someuser\"")))
+        .andExpect(content().string(not(containsString(
+            "rel=\"canonical\" href=\"https://www.christopherbell.dev/u/some!user\""))));
+  }
+
+  @Test
+  void getPublicUserPage_whenMissing_returnsNoIndex404() throws Exception {
+    when(userPreviews.preview("missing-user"))
+        .thenThrow(new ResourceNotFoundException("SECRET_ACCOUNT"));
+
+    mockMvc.perform(get("/u/missing-user"))
+        .andExpect(status().isNotFound())
+        .andExpect(content().string(containsString("Page not found")))
+        .andExpect(content().string(containsString("noindex,nofollow")))
+        .andExpect(content().string(not(containsString("SECRET_ACCOUNT"))));
   }
 
   @Test
@@ -286,6 +389,8 @@ public class ViewControllerTest {
         .andExpect(status().isNotFound())
         .andExpect(header().string("Cache-Control", containsString("no-store")))
         .andExpect(content().string(containsString("This post vanished into the Void")))
+        .andExpect(content().string(containsString(
+            "name=\"robots\" content=\"noindex,nofollow\"")))
         .andExpect(content().string(containsString("href=\"/void\"")))
         .andExpect(content().string(not(containsString("SECRET_SENTINEL_POST_BODY"))))
         .andExpect(content().string(not(containsString("/api/posts/"))));

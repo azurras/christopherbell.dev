@@ -2,12 +2,13 @@ package dev.christopherbell.view.voidroutes;
 
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.post.model.PostTopic;
+import dev.christopherbell.view.ViewIndexingPolicy;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Controller;
 import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,6 +23,7 @@ import org.springframework.web.util.UriUtils;
 public class VoidViewController {
   private static final String PUBLIC_ROOT = "https://www.christopherbell.dev";
   private final VoidPostSocialPreviewService postPreviews;
+  private final VoidUserSocialPreviewService userPreviews;
 
   /**
    * Serves the Void home page.
@@ -59,7 +61,8 @@ public class VoidViewController {
    * @return {@code profile.html}
    */
   @GetMapping(value = "/profile")
-  public String getProfilePage(HttpServletRequest request) {
+  public String getProfilePage(HttpServletRequest request, Model model) {
+    ViewIndexingPolicy.noIndex(model);
     return "profile.html";
   }
 
@@ -69,7 +72,8 @@ public class VoidViewController {
    * @return {@code messages.html}
    */
   @GetMapping(value = "/messages")
-  public String getMessagesPage(HttpServletRequest request) {
+  public String getMessagesPage(HttpServletRequest request, Model model) {
+    ViewIndexingPolicy.noIndex(model);
     return "messages.html";
   }
 
@@ -79,7 +83,8 @@ public class VoidViewController {
    * @return {@code notifications.html}
    */
   @GetMapping(value = "/notifications")
-  public String getNotificationsPage(HttpServletRequest request) {
+  public String getNotificationsPage(HttpServletRequest request, Model model) {
+    ViewIndexingPolicy.noIndex(model);
     return "notifications.html";
   }
 
@@ -88,9 +93,24 @@ public class VoidViewController {
    */
   @GetMapping(value = "/u/{username}")
   public String getPublicUserPage(
-      @PathVariable String username, HttpServletRequest request, Model model) {
-    model.addAttribute("socialUrl", "https://www.christopherbell.dev/u/" + username);
-    return "user.html";
+      @PathVariable String username,
+      HttpServletRequest request,
+      HttpServletResponse response,
+      Model model) {
+    try {
+      var preview = userPreviews.preview(username);
+      var encodedUsername = UriUtils.encodePathSegment(
+          preview.username(), StandardCharsets.UTF_8);
+      model.addAttribute("socialUrl", PUBLIC_ROOT + "/u/" + encodedUsername);
+      model.addAttribute("socialTitle", preview.title());
+      model.addAttribute("socialDescription", preview.description());
+      model.addAttribute("profileUsername", preview.username());
+      model.addAttribute("profileHeroMetadata", preview.heroMetadata());
+      return "user.html";
+    } catch (ResourceNotFoundException | IllegalArgumentException exception) {
+      response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+      return "error/404";
+    }
   }
 
   /**

@@ -378,7 +378,8 @@ public class AccountServiceTest {
 
     try {
       when(accountRepository.findById(eq("self"))).thenReturn(Optional.of(self));
-      when(accountRepository.findByUsername(eq("target"))).thenReturn(Optional.of(target));
+      when(accountRepository.findByUsernameAndStatus(eq("target"), eq(AccountStatus.ACTIVE)))
+          .thenReturn(Optional.of(target));
       when(accountRepository.countByFollowingIdsContaining(eq("target"))).thenReturn(1L);
       when(accountRepository.save(eq(self))).thenReturn(self);
 
@@ -389,7 +390,7 @@ public class AccountServiceTest {
       assertEquals(1L, profile.followerCount());
       org.junit.jupiter.api.Assertions.assertTrue(profile.followedByMe());
       verify(accountRepository).findById(eq("self"));
-      verify(accountRepository).findByUsername(eq("target"));
+      verify(accountRepository).findByUsernameAndStatus(eq("target"), eq(AccountStatus.ACTIVE));
       verify(mutationLimiter).require(eq(self), eq(VoidMutationKind.FOLLOW));
       verify(accountRepository).save(eq(self));
       verify(accountRepository).countByFollowingIdsContaining(eq("target"));
@@ -411,7 +412,8 @@ public class AccountServiceTest {
         .followingIds(new java.util.HashSet<>())
         .build();
 
-    when(accountRepository.findByUsername(eq("target"))).thenReturn(Optional.of(account));
+    when(accountRepository.findByUsernameAndStatus(eq("target"), eq(AccountStatus.ACTIVE)))
+        .thenReturn(Optional.of(account));
     when(accountRepository.countByFollowingIdsContaining(eq("target"))).thenReturn(2L);
     when(postRepository.countByAccountIdAndParentIdIsNull(eq("target"))).thenReturn(3L);
     when(postRepository.countByAccountIdAndParentIdIsNotNull(eq("target"))).thenReturn(5L);
@@ -421,6 +423,17 @@ public class AccountServiceTest {
     assertEquals(3, profile.postCount());
     assertEquals(5, profile.replyCount());
     assertEquals(2, profile.followerCount());
+  }
+
+  @Test
+  @DisplayName("Public profile excludes accounts outside the active lifecycle")
+  public void testGetPublicProfile_whenAccountIsNotActive_returnsNotFound() {
+    when(accountRepository.findByUsernameAndStatus(eq("retired"), eq(AccountStatus.ACTIVE)))
+        .thenReturn(Optional.empty());
+
+    assertThrows(ResourceNotFoundException.class,
+        () -> accountService.getPublicProfile("retired"));
+    verify(accountRepository).findByUsernameAndStatus(eq("retired"), eq(AccountStatus.ACTIVE));
   }
 
   @Test

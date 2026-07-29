@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Void Profile', 'A public Void profile and post feed on christopherbell.dev.', ${socialUrl}, 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
-  <title>User</title>
+  <th:block th:replace="~{fragments/social-preview :: socialPreview(${socialTitle}, ${socialDescription}, ${socialUrl}, 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
+  <title th:text="${socialTitle}">CB | Void Profile</title>
   <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}"/>
 </head>
 <body class="site-page void-shell-page user-page">
@@ -13,8 +13,8 @@
     <section class="site-hero site-hero-user" aria-label="User profile">
       <div class="container">
         <p class="home-kicker">Profile</p>
-        <h1 id="userHeroTitle">User Feed</h1>
-        <p id="userHeroMeta">Posts from one corner of the Void.</p>
+        <h1 id="userHeroTitle" th:text="'@' + ${profileUsername}">User Feed</h1>
+        <p id="userHeroMeta" th:text="${profileHeroMetadata}">Posts from one corner of the Void.</p>
       </div>
     </section>
     <section class="site-content">

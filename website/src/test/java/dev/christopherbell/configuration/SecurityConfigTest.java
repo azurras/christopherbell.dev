@@ -205,6 +205,45 @@ class SecurityConfigTest {
   }
 
   @Test
+  @DisplayName("Unknown HTML GETs reach the 404 renderer without opening protected namespaces")
+  void unknownHtmlFallbackExcludesProtectedNamespacesAndMutations() throws Exception {
+    var matchers = publicMatchers();
+
+    assertTrue(matchers.stream().anyMatch(matcher ->
+        matcher.matches(request("GET", "/definitely-not-a-real-page"))));
+    assertTrue(matchers.stream().anyMatch(matcher ->
+        matcher.matches(request("GET", "/not-a-real/page"))));
+    assertFalse(matchers.stream().anyMatch(matcher ->
+        matcher.matches(request("POST", "/definitely-not-a-real-page"))));
+    for (var path : List.of(
+        "/api/admin/secret",
+        "/actuator/health",
+        "/v3/api-docs",
+        "/swagger-ui/index.html",
+        "/ap/private",
+        "/.well-known/private",
+        "/nodeinfo/private")) {
+      assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("GET", path))));
+    }
+
+    var encodedApi = request("GET", "/%61pi/admin/secret");
+    encodedApi.setServletPath("/api/admin/secret");
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(encodedApi)));
+
+    var encodedActuator = request("GET", "/%61ctuator/health");
+    encodedActuator.setServletPath("/actuator/health");
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(encodedActuator)));
+
+    assertFalse(matchers.stream().anyMatch(matcher ->
+        matcher.matches(request("GET", "/some%20unknown/page"))));
+
+    var contextPathApi = request("GET", "/site/api/admin/secret");
+    contextPathApi.setContextPath("/site");
+    contextPathApi.setServletPath("/api/admin/secret");
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(contextPathApi)));
+  }
+
+  @Test
   @DisplayName("Federation exposes only exact read-only discovery routes")
   void federationMatchersAreReadOnlyAndDoNotExposeInboxMutation() throws Exception {
     var paths = List.of(

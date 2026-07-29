@@ -71,3 +71,65 @@ test('Void Explore exposes five independently labelled live regions', () => {
   assert.match(html, /data-discovery-action="retry"/);
   assert.match(html, /data-discovery-action="more"/);
 });
+
+test('every button declares its intended type explicitly', () => {
+  const files = [
+    'website/src/main/resources/templates/post.html',
+    'website/src/main/resources/templates/messages.html',
+    'website/src/main/resources/templates/music.html',
+    'website/src/main/resources/templates/void/index.html',
+    'website/src/main/resources/static/js/lib/feed-render.js',
+  ];
+
+  for (const file of files) {
+    const source = fs.readFileSync(file, 'utf8');
+    const ambiguousButtons = [...source.matchAll(/<button\b[^>]*>/gi)]
+      .map((match) => match[0])
+      .filter((button) => !/\btype=(?:"[^"]+"|'[^']+')/i.test(button));
+    assert.deepEqual(ambiguousButtons, [], `${file} has buttons without an explicit type`);
+  }
+
+  const music = fs.readFileSync('website/src/main/resources/templates/music.html', 'utf8');
+  assert.equal(
+    (music.match(/<button\b[^>]*value="cancel"[^>]*formnovalidate[^>]*>/g) || []).length,
+    2,
+    'dialog Cancel submitters must bypass unrelated required-field validation'
+  );
+});
+
+test('The Bell archive pages expose one main landmark and one page heading', () => {
+  for (const name of ['index', 'tony']) {
+    const html = fs.readFileSync(`website/src/main/resources/templates/thebell/${name}.html`, 'utf8');
+    assert.equal((html.match(/<main\b/g) || []).length, 1);
+    assert.equal((html.match(/<h1\b/g) || []).length, 1);
+    for (const link of html.matchAll(/<a\b[^>]*target="_blank"[^>]*>/g)) {
+      assert.match(link[0], /rel="noopener noreferrer"/);
+    }
+  }
+});
+
+test('authentication forms provide stable names and autocomplete purposes', () => {
+  const expectations = new Map([
+    ['login.html', ['name="email" autocomplete="username"', 'name="password" autocomplete="current-password"']],
+    ['signup.html', [
+      'name="email" autocomplete="email"',
+      'name="username" autocomplete="username"',
+      'name="firstName" autocomplete="given-name"',
+      'name="lastName" autocomplete="family-name"',
+      'name="password" autocomplete="new-password"',
+    ]],
+    ['forgot-password.html', ['name="email" autocomplete="email"']],
+    ['reset-password.html', [
+      'name="password" autocomplete="new-password"',
+      'name="confirmPassword" autocomplete="new-password"',
+    ]],
+  ]);
+
+  for (const [name, attributes] of expectations) {
+    const html = fs.readFileSync(`website/src/main/resources/templates/${name}`, 'utf8');
+    assert.match(html, /<form\b[^>]*method="post"/i);
+    for (const attribute of attributes) {
+      assert.match(html, new RegExp(attribute));
+    }
+  }
+});

@@ -13,7 +13,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
-import javax.xml.parsers.DocumentBuilderFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -33,27 +32,18 @@ class PublicDeliveryConfigurationTest {
         .contains("User-agent: *", "Allow: /")
         .contains("Sitemap: https://www.christopherbell.dev/sitemap.xml");
 
-    var sitemap = RESOURCES.resolve("static/sitemap.xml").toFile();
-    var document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(sitemap);
-    assertThat(document.getDocumentElement().getNodeName()).isEqualTo("urlset");
-    assertThat(document.getElementsByTagName("loc").getLength()).isGreaterThanOrEqualTo(8);
-    assertThat(Files.readString(sitemap.toPath()))
-        .contains("https://www.christopherbell.dev/")
-        .contains("https://www.christopherbell.dev/blog")
-        .contains("https://www.christopherbell.dev/photos")
-        .contains("https://www.christopherbell.dev/void")
-        .contains("https://www.christopherbell.dev/wfl")
-        .contains("https://www.christopherbell.dev/canes-box-tracker")
-        .contains("https://www.christopherbell.dev/vin-decoder")
-        .contains("https://www.christopherbell.dev/zip-coordinates");
+    assertThat(RESOURCES.resolve("static/sitemap.xml")).doesNotExist();
   }
 
   @Test
   void publicMetadataOverridesTheLongLivedAssetCache() {
-    var controller = new PublicMetadataController();
+    var sitemaps = org.mockito.Mockito.mock(PublicSitemapService.class);
+    org.mockito.Mockito.when(sitemaps.renderRoot()).thenReturn("<urlset/>");
+    var controller = new PublicMetadataController(sitemaps);
 
     assertThat(controller.robots().getHeaders().getCacheControl()).isEqualTo("no-cache");
     assertThat(controller.sitemap().getHeaders().getCacheControl()).isEqualTo("no-cache");
+    assertThat(isPublic("GET", "/sitemap-2.xml")).isTrue();
   }
 
   @Test

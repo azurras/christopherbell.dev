@@ -62,7 +62,7 @@
       <h2>Playlist</h2>
       <label>Name<input id="music-playlist-name" maxlength="100" required /></label>
       <p>Select tracks from the library after creating the playlist.</p>
-      <div><button value="cancel">Cancel</button><button id="music-save-playlist" value="default">Save</button></div>
+      <div><button type="submit" value="cancel" formnovalidate>Cancel</button><button id="music-save-playlist" type="submit" value="default">Save</button></div>
     </form>
   </dialog>
   <dialog id="music-metadata-dialog" class="music-dialog">
@@ -82,7 +82,7 @@
       <label>Replace artwork<input id="music-edit-artwork" type="file" accept="image/jpeg,image/png" /></label>
       <label class="music-check"><input id="music-edit-remove-artwork" type="checkbox" /> Remove existing artwork</label>
       <p id="music-edit-status" aria-live="polite"></p>
-      <div><button value="cancel">Cancel</button><button id="music-save-metadata" value="default">Save changes</button></div>
+      <div><button type="submit" value="cancel" formnovalidate>Cancel</button><button id="music-save-metadata" type="submit" value="default">Save changes</button></div>
     </form>
   </dialog>
   <div id="music-toast" class="music-toast" hidden aria-live="polite"></div>

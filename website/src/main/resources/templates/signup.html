@@ -20,34 +20,35 @@
         <div class="card shadow-sm">
           <div class="card-body p-4">
             <div id="signupAlert" class="alert alert-danger d-none" role="alert"></div>
-            <form id="signupForm" novalidate>
+            <form id="signupForm" method="post" novalidate>
               <div class="mb-3">
                 <label for="email" class="form-label">Email address</label>
-                <input type="email" class="form-control" id="email" placeholder="name@example.com" required />
+                <input type="email" class="form-control" id="email" name="email" autocomplete="email" placeholder="name@example.com" required />
               </div>
               <div class="mb-3">
                 <label for="username" class="form-label">Username</label>
-                <input type="text" class="form-control" id="username" placeholder="your_username" required />
+                <input type="text" class="form-control" id="username" name="username" autocomplete="username" placeholder="your_username" required />
               </div>
               <div class="row g-3">
                 <div class="col-md-6">
                   <label for="firstName" class="form-label">First name</label>
-                  <input type="text" class="form-control" id="firstName" maxlength="100" required />
+                  <input type="text" class="form-control" id="firstName" name="firstName" autocomplete="given-name" maxlength="100" required />
                 </div>
                 <div class="col-md-6">
                   <label for="lastName" class="form-label">Last name</label>
-                  <input type="text" class="form-control" id="lastName" maxlength="100" required />
+                  <input type="text" class="form-control" id="lastName" name="lastName" autocomplete="family-name" maxlength="100" required />
                 </div>
               </div>
               <div class="mb-3 mt-3">
                 <label for="password" class="form-label">Password</label>
-                <input type="password" class="form-control" id="password" placeholder="••••••••" required />
+                <input type="password" class="form-control" id="password" name="password" autocomplete="new-password" placeholder="••••••••" required />
               </div>
               <fieldset class="federation-consent mb-3" aria-describedby="federationConsentDetail federationConsentStatus">
                 <div class="form-check form-switch">
                   <input
                     class="form-check-input"
                     id="federatePublicVoidPosts"
+                    name="federatePublicVoidPosts"
                     type="checkbox"
                     th:checked="${federationEnrollmentAvailable}"
                     th:disabled="${!federationEnrollmentAvailable}" />

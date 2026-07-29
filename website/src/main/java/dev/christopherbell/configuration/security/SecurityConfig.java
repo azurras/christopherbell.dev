@@ -75,6 +75,7 @@ public class SecurityConfig {
       "/",
       "GET:/robots.txt",
       "GET:/sitemap.xml",
+      "GET:/sitemap-*.xml",
       "GET:/actuator/health/liveness",
       "GET:/actuator/health/readiness",
       "GET:/.well-known/webfinger",
@@ -334,7 +335,43 @@ public class SecurityConfig {
       if (tail.startsWith("account")) return false;
       return true; // treat as public single-post GET
     });
+    // Let unknown browser-page GETs reach MVC's content-free 404 renderer without
+    // weakening protected API, management, documentation, or federation namespaces.
+    matchers.add(SecurityConfig::isPublicHtmlFallback);
     return matchers;
+  }
+
+  static boolean isPublicHtmlFallback(jakarta.servlet.http.HttpServletRequest request) {
+    if (!"GET".equalsIgnoreCase(request.getMethod())) {
+      return false;
+    }
+    // Require both request representations to be safe. Mock and default-servlet
+    // mappings can have an empty servlet path, while the firewalled servlet path
+    // is the decoded representation needed to catch encoded namespace aliases.
+    var requestPath = request.getRequestURI();
+    var servletPath = request.getServletPath();
+    return requestPath != null
+        && !requestPath.contains("%")
+        && isSafePublicHtmlPath(requestPath)
+        && (servletPath == null || servletPath.isEmpty() || isSafePublicHtmlPath(servletPath));
+  }
+
+  private static boolean isSafePublicHtmlPath(String path) {
+    return !path.contains(".")
+        && !path.equals("/api")
+        && !path.startsWith("/api/")
+        && !path.equals("/actuator")
+        && !path.startsWith("/actuator/")
+        && !path.equals("/v3")
+        && !path.startsWith("/v3/")
+        && !path.equals("/swagger-ui")
+        && !path.startsWith("/swagger-ui/")
+        && !path.equals("/ap")
+        && !path.startsWith("/ap/")
+        && !path.equals("/.well-known")
+        && !path.startsWith("/.well-known/")
+        && !path.equals("/nodeinfo")
+        && !path.startsWith("/nodeinfo/");
   }
 
   public static RequestMatcher[] publicMatchers() {

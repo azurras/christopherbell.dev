@@ -1,7 +1,9 @@
 package dev.christopherbell.view.content;
 
+import dev.christopherbell.view.ViewIndexingPolicy;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 
@@ -58,7 +60,8 @@ public class ContentViewController {
    * @return {@code back-office.html}
    */
   @GetMapping(value = "/back-office")
-  public String getBackOfficePage() {
+  public String getBackOfficePage(Model model) {
+    ViewIndexingPolicy.noIndex(model);
     return "back-office.html";
   }
 
@@ -68,7 +71,8 @@ public class ContentViewController {
    * @return {@code command-center.html}
    */
   @GetMapping(value = "/command-center")
-  public String getCommandCenterPage() {
+  public String getCommandCenterPage(Model model) {
+    ViewIndexingPolicy.noIndex(model);
     return "command-center.html";
   }
 
@@ -78,13 +82,15 @@ public class ContentViewController {
    * @return {@code shared-folder.html}
    */
   @GetMapping(value = "/shared")
-  public String getSharedFolderPage() {
+  public String getSharedFolderPage(Model model) {
+    ViewIndexingPolicy.noIndex(model);
     return "shared-folder.html";
   }
 
   /** Serves the public Music page shell; its data APIs enforce fresh Music permissions. */
   @GetMapping(value = "/music")
-  public String getMusicPage() {
+  public String getMusicPage(Model model) {
+    ViewIndexingPolicy.noIndex(model);
     return "music.html";
   }
 
@@ -94,7 +100,8 @@ public class ContentViewController {
    * @return {@code report.html}
    */
   @GetMapping(value = "/report")
-  public String getReportPage() {
+  public String getReportPage(Model model) {
+    ViewIndexingPolicy.noIndex(model);
     return "report.html";
   }
 
