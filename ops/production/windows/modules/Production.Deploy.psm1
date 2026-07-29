@@ -33,7 +33,11 @@ function New-ReleaseFromOriginMain {
     try {
         $addArguments = Get-TrustedGitArguments $Config.repositoryPath @('worktree','add','--detach',$worktree,$Sha)
         Invoke-CheckedProcess 'git.exe' $addArguments $Config.repositoryPath | Out-Null
-        $environment = @{ GRADLE_USER_HOME=(Join-Path $Config.programDataRoot 'gradle-home'); NODE_EXE=$Config.nodeExe }
+        $environment = @{
+            GRADLE_USER_HOME = Join-Path $Config.programDataRoot 'gradle-home'
+            NODE_EXE = $Config.nodeExe
+            CHRISTOPHERBELL_PRODUCTION_DEPLOYMENT = '1'
+        }
         Invoke-CheckedProcess (Join-Path $worktree 'gradlew.bat') @('--no-daemon',':website:build') $worktree $environment | Out-Null
         $jars = @(Get-ChildItem (Join-Path $worktree 'website\build\libs') -Filter '*.jar' | Where-Object Name -NotLike '*-plain.jar')
         if ($jars.Count -ne 1) { throw "Expected one executable boot JAR, found $($jars.Count)." }

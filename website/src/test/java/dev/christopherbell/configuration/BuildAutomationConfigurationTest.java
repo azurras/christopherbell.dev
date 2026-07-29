@@ -32,6 +32,23 @@ class BuildAutomationConfigurationTest {
     assertThat(script).doesNotContain(".toURL().openStream()");
   }
 
+  @Test
+  void productionPackagingExemptsOnlyTheProtectedWindowsDeploymentContext() throws IOException {
+    var build = Files.readString(REPOSITORY_ROOT.resolve("website/build.gradle.kts"));
+    var deploy =
+        Files.readString(
+            REPOSITORY_ROOT.resolve(
+                "ops/production/windows/modules/Production.Deploy.psm1"));
+
+    assertThat(build)
+        .contains(
+            "CHRISTOPHERBELL_PRODUCTION_DEPLOYMENT",
+            "SYSTEM",
+            "christopherbell.dev\\\\gradle-home",
+            "verifyProductionDeploymentBuildContext");
+    assertThat(deploy).contains("CHRISTOPHERBELL_PRODUCTION_DEPLOYMENT = '1'");
+  }
+
   private static Path locateRepositoryRoot() {
     var current = Path.of("").toAbsolutePath().normalize();
     if (Files.isDirectory(current.resolve(".github"))) {
