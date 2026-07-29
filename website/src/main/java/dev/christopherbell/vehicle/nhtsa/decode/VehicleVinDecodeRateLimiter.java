@@ -37,11 +37,12 @@ public class VehicleVinDecodeRateLimiter {
 
   public void check(String key, long tokens) {
     var properties = vehicleProperties.getVinDecoder();
-    Bucket bucket = buckets.getOrCreate(
+    boolean consumed = buckets.tryConsume(
         key,
         properties.getRateLimitWindow().multipliedBy(2),
-        this::newBucket);
-    if (tokens < 1 || !bucket.tryConsume(tokens)) {
+        this::newBucket,
+        tokens);
+    if (!consumed) {
       throw new VehicleVinDecodeRateLimitException(
           "Too many VIN decode requests. Please try again later.");
     }
