@@ -60,15 +60,18 @@ public class ViewControllerTest {
   }
 
   @Test
-  @DisplayName("Signup defaults federation on only when enrollment is configured")
-  void getSignupPageWhenFederationAvailableRendersCheckedChoice() throws Exception {
+  @DisplayName("Signup offers available federation enrollment as an affirmative opt-in")
+  void getSignupPageWhenFederationAvailableRendersEnabledUncheckedChoice() throws Exception {
     when(federationConsent.enrollmentAvailable()).thenReturn(true);
 
     mockMvc.perform(get("/signup"))
         .andExpect(status().isOk())
         .andExpect(content().string(containsString("id=\"federatePublicVoidPosts\"")))
-        .andExpect(content().string(containsString("checked=\"checked\"")))
+        .andExpect(content().string(not(containsString("checked=\"checked\""))))
         .andExpect(content().string(not(containsString("disabled=\"disabled\""))))
+        .andExpect(content().string(containsString(
+            "This choice is off until you explicitly enable it. "
+                + "You can change it later from Profile.")))
         .andExpect(content().string(containsString("Messages, Music, and Shared Folder")));
   }
 

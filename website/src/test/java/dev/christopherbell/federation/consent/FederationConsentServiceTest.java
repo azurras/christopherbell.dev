@@ -85,6 +85,19 @@ class FederationConsentServiceTest {
   }
 
   @Test
+  void inactiveAccountCannotOptInDuringSignup() {
+    var account = account();
+    account.setStatus(AccountStatus.SUSPENDED);
+
+    assertThrows(InvalidRequestException.class,
+        () -> service.prepareNewAccount(account, true));
+
+    assertFalse(account.isFederationEnabled());
+    assertNull(account.getFederationIdentity());
+    verify(identityFactory, never()).create(account.getId(), account.getUsername());
+  }
+
+  @Test
   void enabledSignupFailsClosedWhenDiscoveryEnrollmentIsUnavailable() {
     var disabled = new FederationProperties(
         false, false, false, "christopherbell.dev", "1.0", null, null);

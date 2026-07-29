@@ -99,6 +99,16 @@ class FederationDiscoveryServiceTest {
   }
 
   @Test
+  void inactiveAccountReturnedByTheRepositoryStillUsesTheNotFoundBoundary() {
+    var account = account();
+    account.setStatus(AccountStatus.SUSPENDED);
+    when(accounts.findByUsernameIgnoreCaseAndStatusAndFederationEnabledTrue(
+        "Chris", AccountStatus.ACTIVE)).thenReturn(Optional.of(account));
+
+    assertThrows(ResourceNotFoundException.class, () -> discovery.actor("Chris"));
+  }
+
+  @Test
   void nodeInfoUsesBoundedAggregateCountsAndConfiguredSoftwareMetadata() throws Exception {
     when(accounts.countByStatus(AccountStatus.ACTIVE)).thenReturn(12L);
     when(posts.count()).thenReturn(34L);

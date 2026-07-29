@@ -73,6 +73,21 @@ class FederationOutboundCoordinatorTest {
   }
 
   @Test
+  void inactiveAuthorCancelsClaimWithoutCallingRemotePeer() {
+    var store = new InMemoryStore();
+    store.claimed = job(1);
+    var gateway = new RecordingGateway(new FederationDeliveryResult.Delivered(202));
+    var account = account(true);
+    account.setStatus(AccountStatus.SUSPENDED);
+    var coordinator = coordinator(properties(true), store, gateway, account);
+
+    coordinator.deliver();
+
+    assertThat(store.terminal).isEqualTo("cancelled:AUTHOR_INELIGIBLE");
+    assertThat(gateway.calls).isZero();
+  }
+
+  @Test
   void successfulDeliveryCompletesTheExactClaim() {
     var store = new InMemoryStore();
     store.claimed = job(1);
