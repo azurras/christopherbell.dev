@@ -55,8 +55,11 @@ command-center:
     challenge-ttl: 2m
     cooldown: 2m
     power-delay: 60s
+    command-result-timeout: 5s
     failed-attempts: 3
     failed-attempt-window: 15m
+    max-challenges-per-actor: 8
+    max-challenges-total: 64
   thresholds:
     cpu-warning-percent: 90
     cpu-temperature-warning-celsius: 85
