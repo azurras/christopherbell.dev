@@ -111,6 +111,7 @@ public class SecurityConfig {
       "GET:/api/posts" + APIVersion.V20250914 + "/user/**",
       "GET:/api/posts" + APIVersion.V20260726 + "/feed",
       "GET:/api/posts" + APIVersion.V20260726 + "/user/**",
+      "GET:/api/posts" + APIVersion.V20260728 + "/discovery/**",
       "GET:/api/posts" + APIVersion.V20250914 + "/*/thread",
       "/u/**",
       "/p/**",
