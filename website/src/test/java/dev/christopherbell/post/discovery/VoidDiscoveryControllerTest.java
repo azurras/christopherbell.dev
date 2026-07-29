@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class VoidDiscoveryControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private VoidDiscoveryService discovery;
+  @MockitoBean private VoidPeopleDiscoveryService peopleDiscovery;
 
   @Test
   void anonymousNewArrivalsAreNoStore() throws Exception {
@@ -49,5 +50,17 @@ class VoidDiscoveryControllerTest {
     mockMvc.perform(get("/api/posts" + APIVersion.V20260728 + "/discovery/topic/music"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"));
+  }
+
+  @Test
+  void peopleSuggestionsArePublicAndNoStore() throws Exception {
+    when(peopleDiscovery.suggestions()).thenReturn(List.of(
+        new VoidPersonSuggestion("a1", "artist", List.of("Music"), null, false)));
+
+    mockMvc.perform(get("/api/posts" + APIVersion.V20260728 + "/discovery/people"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+        .andExpect(jsonPath("$.payload[0].username").value("artist"))
+        .andExpect(jsonPath("$.payload[0].sharedTopics[0]").value("Music"));
   }
 }

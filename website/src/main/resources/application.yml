@@ -150,6 +150,14 @@ posts:
   expiration:
     enabled: true
     cleanup-interval: 600000
+  new-account-limits:
+    account-age: 7d
+    window: 1h
+    max-tracked-keys: 10000
+    root-post-capacity: 10
+    reply-capacity: 30
+    keep-alive-capacity: 60
+    follow-capacity: 30
 canes-box-tracker:
   enabled: true
   item-name: The Box Combo

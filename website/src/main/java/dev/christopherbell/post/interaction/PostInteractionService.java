@@ -1,11 +1,14 @@
 package dev.christopherbell.post.interaction;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.model.Account;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.post.PostMapper;
 import dev.christopherbell.post.PostRepository;
+import dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter;
+import dev.christopherbell.post.abuse.VoidMutationKind;
 import dev.christopherbell.post.expiration.PostExpirationService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostDetail;
@@ -24,6 +27,7 @@ public class PostInteractionService {
   private final PostMapper postMapper;
   private final NotificationDeliveryService notificationDeliveryService;
   private final PostExpirationService postExpirationService;
+  private final NewAccountVoidMutationLimiter mutationLimiter;
   private final Clock clock;
 
   public PostFeedItem toggleLike(String postId, String selfId)
@@ -36,15 +40,18 @@ public class PostInteractionService {
     if (post.getLikedBy() == null) {
       post.setLikedBy(new HashSet<>());
     }
-    boolean liked;
-    if (post.getLikedBy().contains(selfId)) {
-      post.getLikedBy().remove(selfId);
-      post.setLikesCount(Math.max(0, (post.getLikesCount() == null ? 0 : post.getLikesCount()) - 1));
-      liked = false;
-    } else {
+    boolean liked = !post.getLikedBy().contains(selfId);
+    Account actor = null;
+    if (liked) {
+      actor = accountRepository.findById(selfId)
+          .orElseThrow(() -> new ResourceNotFoundException(
+              String.format("Account with id %s not found.", selfId)));
+      mutationLimiter.require(actor, VoidMutationKind.KEEP_ALIVE);
       post.getLikedBy().add(selfId);
       post.setLikesCount((post.getLikesCount() == null ? 0 : post.getLikesCount()) + 1);
-      liked = true;
+    } else {
+      post.getLikedBy().remove(selfId);
+      post.setLikesCount(Math.max(0, (post.getLikesCount() == null ? 0 : post.getLikesCount()) - 1));
     }
     post.setLastUpdatedOn(now);
     if (liked && threadRoot == null) {
@@ -57,8 +64,7 @@ public class PostInteractionService {
     var author = accountRepository.findById(post.getAccountId())
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", post.getAccountId())));
     if (liked && !selfId.equals(author.getId())) {
-      accountRepository.findById(selfId)
-          .ifPresent(actor -> notificationDeliveryService.createPostLikeNotification(post, actor, author));
+      notificationDeliveryService.createPostLikeNotification(post, actor, author);
     }
     return toFeedItem(post, author.getUsername(), liked ? selfId : null);
   }

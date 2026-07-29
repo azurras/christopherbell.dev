@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.atLeastOnce;
@@ -23,6 +24,8 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.post.creation.PostCreationService;
+import dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter;
+import dev.christopherbell.post.abuse.VoidMutationKind;
 import dev.christopherbell.post.expiration.PostExpirationService;
 import dev.christopherbell.post.feed.PostFeedService;
 import dev.christopherbell.post.feed.PostFeedQueryRepository;
@@ -55,6 +58,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 public class PostServiceTest {
@@ -68,6 +73,7 @@ public class PostServiceTest {
   @Mock private AccountTrustService accountTrustService;
   @Mock private HiddenPostThreadService hiddenPostThreadService;
   @Mock private PostFeedQueryRepository postFeedQueryRepository;
+  @Mock private NewAccountVoidMutationLimiter mutationLimiter;
   private PostService postService;
   private PostExpirationService postExpirationService;
   private Clock clock;
@@ -87,6 +93,7 @@ public class PostServiceTest {
             notificationDeliveryService,
             postLinkPreviewService,
             postExpirationService,
+            mutationLimiter,
             new PostTopicExtractor(),
             clock),
         new PostFeedService(
@@ -105,6 +112,7 @@ public class PostServiceTest {
             postMapper,
             notificationDeliveryService,
             postExpirationService,
+            mutationLimiter,
             clock));
   }
 
@@ -151,6 +159,7 @@ public class PostServiceTest {
 
     var savedPost = ArgumentCaptor.forClass(Post.class);
     verify(postRepository).save(savedPost.capture());
+    verify(mutationLimiter).require(eq(existing), eq(VoidMutationKind.ROOT_POST));
     assertEquals(
         savedPost.getValue().getCreatedOn().plus(Duration.ofHours(24)),
         savedPost.getValue().getExpiresOn());
@@ -247,6 +256,25 @@ public class PostServiceTest {
   }
 
   @Test
+  @DisplayName("Create: new-account limit rejects before persistence")
+  public void testCreatePost_whenNewAccountLimitReached_DoesNotPersist() throws Exception {
+    var existing = AccountServiceStub.getAccountWhenExistsStub();
+    var service = spy(postService);
+    doReturn(existing.getId()).when(service).getSelfId();
+    when(accountRepository.findById(eq(existing.getId()))).thenReturn(Optional.of(existing));
+    doThrow(new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Try again later."))
+        .when(mutationLimiter).require(existing, VoidMutationKind.ROOT_POST);
+
+    assertThrows(
+        ResponseStatusException.class,
+        () -> service.createPost(PostCreateRequest.builder().text("too fast").build()));
+
+    verify(postRepository, never()).save(any(Post.class));
+    verify(notificationDeliveryService, never())
+        .createMentionNotifications(any(Post.class), any(Account.class));
+  }
+
+  @Test
   @DisplayName("Create reply: parent expired -> 404 and cleanup")
   public void testCreatePost_whenParentExpired_Throws404() throws Exception {
     var existing = AccountServiceStub.getAccountWhenExistsStub();
@@ -318,6 +346,7 @@ public class PostServiceTest {
 
     service.createPost(PostCreateRequest.builder().text("reply").parentId("root").build());
 
+    verify(mutationLimiter).require(eq(existing), eq(VoidMutationKind.REPLY));
     var reply = savedPosts.stream().filter(this::isReply).findFirst().orElseThrow();
     var expectedExpiration = rootCreated.plus(Duration.ofHours(48));
     assertEquals(expectedExpiration, root.getExpiresOn());
@@ -518,6 +547,7 @@ public class PostServiceTest {
     assertNotNull(unlikedItem);
     assertEquals(false, unlikedItem.liked());
     assertEquals(NOW, post.getLastExtendedOn());
+    verify(mutationLimiter).require(eq(liker), eq(VoidMutationKind.KEEP_ALIVE));
     verify(notificationDeliveryService).createPostLikeNotification(eq(post), eq(liker), eq(author));
   }
 
@@ -554,6 +584,8 @@ public class PostServiceTest {
     when(postRepository.findById(eq("root"))).thenReturn(Optional.of(root));
     when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
     when(accountRepository.findById(eq(author.getId()))).thenReturn(Optional.of(author));
+    when(accountRepository.findById(eq("liker")))
+        .thenReturn(Optional.of(Account.builder().id("liker").username("liker").build()));
     when(postRepository.countByParentId(eq("reply"))).thenReturn(0L);
     when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root"))).thenReturn(List.of(root, reply));
 
@@ -603,6 +635,8 @@ public class PostServiceTest {
     when(postRepository.findById(eq("root"))).thenReturn(Optional.of(root));
     when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
     when(accountRepository.findById(eq(author.getId()))).thenReturn(Optional.of(author));
+    when(accountRepository.findById(eq("liker")))
+        .thenReturn(Optional.of(Account.builder().id("liker").username("liker").build()));
     when(postRepository.countByParentId(eq("root"))).thenReturn(1L);
     when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root"))).thenReturn(List.of(root, child, grandchild));
 

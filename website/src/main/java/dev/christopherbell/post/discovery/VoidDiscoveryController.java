@@ -5,6 +5,7 @@ import static dev.christopherbell.libs.api.APIVersion.V20260728;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.post.model.PostFeedItem;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/posts" + V20260728 + "/discovery")
 public class VoidDiscoveryController {
   private final VoidDiscoveryService discovery;
+  private final VoidPeopleDiscoveryService peopleDiscovery;
 
   @GetMapping(value = "/new", produces = MediaType.APPLICATION_JSON_VALUE)
   public ResponseEntity<Response<VoidDiscoveryPage<PostFeedItem>>> newArrivals(
@@ -52,6 +54,11 @@ public class VoidDiscoveryController {
       @RequestParam(defaultValue = "12") int size
   ) throws InvalidRequestException {
     return noStore(discovery.topics(cursor, size));
+  }
+
+  @GetMapping(value = "/people", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<Response<List<VoidPersonSuggestion>>> people() {
+    return noStore(peopleDiscovery.suggestions());
   }
 
   @GetMapping(value = "/topic/{topic}", produces = MediaType.APPLICATION_JSON_VALUE)

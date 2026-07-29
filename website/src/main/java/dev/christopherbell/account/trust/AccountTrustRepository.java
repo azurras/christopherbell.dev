@@ -17,6 +17,16 @@ public interface AccountTrustRepository extends MongoRepository<AccountTrustRela
       String ownerAccountId,
       Collection<AccountTrustType> types);
 
+  List<AccountTrustRelationship> findByTargetAccountIdAndOwnerAccountIdInAndType(
+      String targetAccountId,
+      Collection<String> ownerAccountIds,
+      AccountTrustType type);
+
+  List<AccountTrustRelationship> findByOwnerAccountIdAndTargetAccountIdInAndTypeIn(
+      String ownerAccountId,
+      Collection<String> targetAccountIds,
+      Collection<AccountTrustType> types);
+
   boolean existsByOwnerAccountIdAndTargetAccountIdAndType(
       String ownerAccountId,
       String targetAccountId,
