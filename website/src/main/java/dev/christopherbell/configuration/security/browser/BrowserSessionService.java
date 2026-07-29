@@ -118,7 +118,27 @@ public class BrowserSessionService implements AccountSessionRevoker {
             now,
             earlier(now.plus(ROTATION_OVERLAP), session.getAbsoluteExpiresOn()),
             idleExpiresOn);
-        if (updated.isEmpty()) return Optional.empty();
+        if (updated.isEmpty()) {
+          var reloadedSession = sessions.findById(session.getId()).orElse(null);
+          if (reloadedSession == null) return Optional.empty();
+          if (!validCredential(reloadedSession, parsed.get().secret(), now)
+              || expired(reloadedSession, now)
+              || !completeSnapshot(reloadedSession)) {
+            sessions.delete(reloadedSession);
+            return Optional.empty();
+          }
+          account = accounts.findById(reloadedSession.getAccountId())
+              .filter(this::isActive)
+              .filter(current -> AccountSecurityFingerprint.matches(
+                  reloadedSession.getAccountSecurityFingerprint(), current))
+              .orElse(null);
+          if (account == null) {
+            sessions.delete(reloadedSession);
+            return Optional.empty();
+          }
+          return Optional.of(new AuthenticatedBrowserSession(
+              account.getId(), account.getRole(), Optional.empty()));
+        }
         session = updated.orElseThrow();
         if (!validCredential(session, parsed.get().secret(), now)
             || expired(session, now)

@@ -1,5 +1,6 @@
 package dev.christopherbell.configuration.security.browser;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -142,19 +143,30 @@ class BrowserSessionServiceTest {
   }
 
   @Test
-  void lostRotationCompareAndSetRejectsAuthenticationWithoutSaving() {
+  void concurrentRotationLoserReloadsWinnerAndAuthenticatesWithoutReplacement() {
     var fixture = new Fixture(START);
     String token = fixture.create();
+    Instant rotationTime = START.plus(BrowserSessionService.ROTATION_INTERVAL);
+    var staleSnapshot = copy(fixture.session());
+
+    var winner = fixture.at(rotationTime).authenticate(token, true).orElseThrow();
+    String winnerToken = winner.rotatedToken().orElseThrow();
+    var winnerSnapshot = copy(fixture.session());
     fixture.rejectRotation = true;
-    org.mockito.Mockito.clearInvocations(fixture.sessions);
+    when(fixture.sessions.findById(fixture.session().getId()))
+        .thenReturn(Optional.of(staleSnapshot), Optional.of(winnerSnapshot));
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.activity, fixture.accounts);
 
-    var authenticated = fixture.at(START.plus(BrowserSessionService.ROTATION_INTERVAL))
-        .authenticate(token, true);
+    var loser = fixture.authenticate(token, true).orElseThrow();
 
-    assertFalse(authenticated.isPresent());
+    assertNotEquals(token, winnerToken);
+    assertTrue(loser.rotatedToken().isEmpty());
+    assertEquals(winnerSnapshot.getTokenHash(), fixture.session().getTokenHash());
     verify(fixture.activity).rotate(
-        eq(fixture.session().getId()), anyString(), eq(START), anyString(),
-        eq(START.plus(BrowserSessionService.ROTATION_INTERVAL)), any(), any());
+        eq(fixture.session().getId()), eq(staleSnapshot.getTokenHash()), eq(START), anyString(),
+        eq(rotationTime), any(), any());
+    verify(fixture.sessions, org.mockito.Mockito.times(2)).findById(fixture.session().getId());
+    verify(fixture.accounts, org.mockito.Mockito.times(2)).findById(fixture.account.getId());
     verify(fixture.sessions, never()).save(any(BrowserSession.class));
   }
 
@@ -169,6 +181,86 @@ class BrowserSessionServiceTest {
         .authenticate(token, true);
 
     assertFalse(authenticated.isPresent());
+    verify(fixture.sessions, org.mockito.Mockito.times(2)).findById(fixture.session().getId());
+    verify(fixture.sessions, never()).save(any(BrowserSession.class));
+  }
+
+  @Test
+  void rotationCasLoserRejectsAnExpiredReloadedSession() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    Instant rotationTime = START.plus(BrowserSessionService.ROTATION_INTERVAL);
+    var staleSnapshot = copy(fixture.session());
+    var expiredSnapshot = copy(staleSnapshot);
+    expiredSnapshot.setIdleExpiresOn(rotationTime);
+    fixture.rejectRotation = true;
+    when(fixture.sessions.findById(fixture.session().getId()))
+        .thenReturn(Optional.of(staleSnapshot), Optional.of(expiredSnapshot));
+
+    var authenticated = fixture.at(rotationTime).authenticate(token, true);
+
+    assertFalse(authenticated.isPresent());
+    verify(fixture.sessions).delete(expiredSnapshot);
+  }
+
+  @Test
+  void rotationCasLoserRejectsAReloadedSessionWithoutThePresentedCredential() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    Instant rotationTime = START.plus(BrowserSessionService.ROTATION_INTERVAL);
+    var staleSnapshot = copy(fixture.session());
+    var invalidSnapshot = copy(staleSnapshot);
+    invalidSnapshot.setTokenHash("unrelated-current-token");
+    invalidSnapshot.setPreviousTokenHash("unrelated-previous-token");
+    invalidSnapshot.setPreviousTokenExpiresOn(rotationTime.plus(BrowserSessionService.ROTATION_OVERLAP));
+    fixture.rejectRotation = true;
+    when(fixture.sessions.findById(fixture.session().getId()))
+        .thenReturn(Optional.of(staleSnapshot), Optional.of(invalidSnapshot));
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.accounts);
+
+    var authenticated = fixture.at(rotationTime).authenticate(token, true);
+
+    assertFalse(authenticated.isPresent());
+    verify(fixture.sessions).delete(invalidSnapshot);
+  }
+
+  @Test
+  void rotationCasLoserRevalidatesTheReloadedAccountFingerprint() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    Instant rotationTime = START.plus(BrowserSessionService.ROTATION_INTERVAL);
+    var staleSnapshot = copy(fixture.session());
+    var invalidSnapshot = copy(staleSnapshot);
+    invalidSnapshot.setAccountSecurityFingerprint("stale-account-fingerprint");
+    fixture.rejectRotation = true;
+    when(fixture.sessions.findById(fixture.session().getId()))
+        .thenReturn(Optional.of(staleSnapshot), Optional.of(invalidSnapshot));
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.accounts);
+
+    var authenticated = fixture.at(rotationTime).authenticate(token, true);
+
+    assertFalse(authenticated.isPresent());
+    verify(fixture.accounts, org.mockito.Mockito.times(2)).findById(fixture.account.getId());
+    verify(fixture.sessions).delete(invalidSnapshot);
+  }
+
+  @Test
+  void rotationCasLoserPropagatesReloadFailure() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    Instant rotationTime = START.plus(BrowserSessionService.ROTATION_INTERVAL);
+    var staleSnapshot = copy(fixture.session());
+    var reloadFailure = new DataAccessResourceFailureException("mongo");
+    fixture.rejectRotation = true;
+    when(fixture.sessions.findById(fixture.session().getId()))
+        .thenReturn(Optional.of(staleSnapshot))
+        .thenThrow(reloadFailure);
+    org.mockito.Mockito.clearInvocations(fixture.sessions);
+
+    var thrown = assertThrows(DataAccessResourceFailureException.class,
+        () -> fixture.at(rotationTime).authenticate(token, true));
+
+    assertEquals(reloadFailure, thrown);
     verify(fixture.sessions, never()).save(any(BrowserSession.class));
   }
 
@@ -261,6 +353,23 @@ class BrowserSessionServiceTest {
     assertThrows(IllegalArgumentException.class, () -> fixture.service().create(staleLoginJwt));
 
     assertTrue(fixture.saved.getAllValues().isEmpty());
+  }
+
+  private static BrowserSession copy(BrowserSession session) {
+    return BrowserSession.builder()
+        .id(session.getId())
+        .accountId(session.getAccountId())
+        .role(session.getRole())
+        .tokenHash(session.getTokenHash())
+        .previousTokenHash(session.getPreviousTokenHash())
+        .previousTokenExpiresOn(session.getPreviousTokenExpiresOn())
+        .accountSecurityFingerprint(session.getAccountSecurityFingerprint())
+        .createdOn(session.getCreatedOn())
+        .lastSeenOn(session.getLastSeenOn())
+        .rotatedOn(session.getRotatedOn())
+        .idleExpiresOn(session.getIdleExpiresOn())
+        .absoluteExpiresOn(session.getAbsoluteExpiresOn())
+        .build();
   }
 
   private static final class Fixture {

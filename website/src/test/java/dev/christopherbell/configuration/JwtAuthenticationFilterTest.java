@@ -25,9 +25,15 @@ import dev.christopherbell.permission.PermissionService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.ServletException;
 import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.net.URI;
 import java.time.Clock;
 import org.junit.jupiter.api.AfterEach;
@@ -106,6 +112,45 @@ class JwtAuthenticationFilterTest {
     assertNotNull(authentication);
     assertEquals("account-1", authentication.getName());
     assertEquals(200, response.getStatus());
+  }
+
+  @Test
+  @DisplayName("A concurrent rotation loser response cannot erase the winner cookie")
+  void doFilter_whenConcurrentRotationLoserRespondsLast_preservesWinnerCookie()
+      throws ServletException, IOException {
+    var fixture = new ConcurrentRotationFixture();
+    var browserCookies = new HashMap<String, String>();
+
+    var winnerResponse = fixture.authenticateOriginalToken();
+    applySetCookies(browserCookies, winnerResponse);
+    String winnerToken = browserCookies.get(BrowserAuthenticationCookies.AUTH_COOKIE_NAME);
+    SecurityContextHolder.clearContext();
+    var loserResponse = fixture.authenticateOriginalToken();
+    applySetCookies(browserCookies, loserResponse);
+
+    assertNotNull(winnerToken);
+    assertEquals(200, winnerResponse.getStatus());
+    assertEquals(200, loserResponse.getStatus());
+    assertEquals(winnerToken, browserCookies.get(BrowserAuthenticationCookies.AUTH_COOKIE_NAME));
+    assertTrue(loserResponse.getHeaders("Set-Cookie").isEmpty());
+  }
+
+  @Test
+  @DisplayName("Revocation winning a concurrent rotation rejects and clears browser cookies")
+  void doFilter_whenRevocationWinsConcurrentRotation_clearsCookies()
+      throws ServletException, IOException {
+    var fixture = new ConcurrentRotationFixture(true);
+    var browserCookies = new HashMap<String, String>();
+    applySetCookies(browserCookies, fixture.authenticateOriginalToken());
+    SecurityContextHolder.clearContext();
+
+    var revokedResponse = fixture.authenticateOriginalToken();
+    applySetCookies(browserCookies, revokedResponse);
+
+    assertEquals(401, revokedResponse.getStatus());
+    assertNull(browserCookies.get(BrowserAuthenticationCookies.AUTH_COOKIE_NAME));
+    assertTrue(revokedResponse.getHeaders("Set-Cookie").stream()
+        .anyMatch(header -> header.contains("CBELL_AUTH=") && header.contains("Max-Age=0")));
   }
 
   @Test
@@ -272,5 +317,115 @@ class JwtAuthenticationFilterTest {
   private BrowserAuthenticationCookies cookies() {
     return new BrowserAuthenticationCookies(
         new BrowserSecurityProperties(URI.create("https://example.test"), true, true));
+  }
+
+  private void applySetCookies(
+      Map<String, String> browserCookies, MockHttpServletResponse response) {
+    for (String header : response.getHeaders("Set-Cookie")) {
+      String nameValue = header.substring(0, header.indexOf(';'));
+      int separator = nameValue.indexOf('=');
+      String name = nameValue.substring(0, separator);
+      String value = nameValue.substring(separator + 1);
+      if (header.contains("Max-Age=0")) {
+        browserCookies.remove(name);
+      } else {
+        browserCookies.put(name, value);
+      }
+    }
+  }
+
+  private static BrowserSession copy(BrowserSession session) {
+    return BrowserSession.builder()
+        .id(session.getId())
+        .accountId(session.getAccountId())
+        .role(session.getRole())
+        .tokenHash(session.getTokenHash())
+        .previousTokenHash(session.getPreviousTokenHash())
+        .previousTokenExpiresOn(session.getPreviousTokenExpiresOn())
+        .accountSecurityFingerprint(session.getAccountSecurityFingerprint())
+        .createdOn(session.getCreatedOn())
+        .lastSeenOn(session.getLastSeenOn())
+        .rotatedOn(session.getRotatedOn())
+        .idleExpiresOn(session.getIdleExpiresOn())
+        .absoluteExpiresOn(session.getAbsoluteExpiresOn())
+        .build();
+  }
+
+  private final class ConcurrentRotationFixture {
+    private static final Instant CREATED_ON = Instant.parse("2026-07-28T12:00:00Z");
+    private static final Instant ROTATED_ON = CREATED_ON.plus(Duration.ofDays(1));
+
+    private final Account account = account(Role.USER);
+    private final AccountRepository accounts = mock(AccountRepository.class);
+    private final BrowserSessionRepository sessions = mock(BrowserSessionRepository.class);
+    private final BrowserSessionActivityStore activity = mock(BrowserSessionActivityStore.class);
+    private final AtomicInteger reads = new AtomicInteger();
+    private final AtomicInteger rotations = new AtomicInteger();
+    private final boolean revokeOnLostRotation;
+    private final JwtAuthenticationFilter filter;
+    private final String originalToken;
+    private final BrowserSession staleSnapshot;
+    private BrowserSession persisted;
+    private boolean revoked;
+
+    private ConcurrentRotationFixture() {
+      this(false);
+    }
+
+    private ConcurrentRotationFixture(boolean revokeOnLostRotation) {
+      this.revokeOnLostRotation = revokeOnLostRotation;
+      when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
+      when(sessions.save(org.mockito.ArgumentMatchers.any(BrowserSession.class)))
+          .thenAnswer(invocation -> {
+            persisted = copy(invocation.getArgument(0));
+            return invocation.getArgument(0);
+          });
+      var creator = new BrowserSessionService(
+          sessions, activity, accounts, Clock.fixed(CREATED_ON, ZoneOffset.UTC));
+      originalToken = creator.create(PermissionService.generateToken(account));
+      staleSnapshot = copy(persisted);
+      when(sessions.findById(org.mockito.ArgumentMatchers.anyString()))
+          .thenAnswer(invocation -> {
+            if (reads.getAndIncrement() < 2) return Optional.of(copy(staleSnapshot));
+            return revoked ? Optional.empty() : Optional.of(copy(persisted));
+          });
+      when(activity.rotate(
+          org.mockito.ArgumentMatchers.anyString(),
+          org.mockito.ArgumentMatchers.anyString(),
+          org.mockito.ArgumentMatchers.any(),
+          org.mockito.ArgumentMatchers.anyString(),
+          org.mockito.ArgumentMatchers.any(),
+          org.mockito.ArgumentMatchers.any(),
+          org.mockito.ArgumentMatchers.any()))
+          .thenAnswer(invocation -> {
+            if (rotations.getAndIncrement() > 0) {
+              revoked = revokeOnLostRotation;
+              return Optional.empty();
+            }
+            persisted.setPreviousTokenHash(invocation.getArgument(1));
+            persisted.setPreviousTokenExpiresOn(invocation.getArgument(5));
+            persisted.setTokenHash(invocation.getArgument(3));
+            persisted.setRotatedOn(invocation.getArgument(4));
+            persisted.setLastSeenOn(invocation.getArgument(4));
+            persisted.setIdleExpiresOn(invocation.getArgument(6));
+            return Optional.of(copy(persisted));
+          });
+      var browserSessions = new BrowserSessionService(
+          sessions, activity, accounts, Clock.fixed(ROTATED_ON, ZoneOffset.UTC));
+      filter = new JwtAuthenticationFilter(
+          List.of(), browserSessions, new InteractiveBrowserRequest(), cookies());
+    }
+
+    private MockHttpServletResponse authenticateOriginalToken()
+        throws ServletException, IOException {
+      var request = new MockHttpServletRequest("GET", "/account");
+      request.addHeader("Accept", "text/html");
+      request.setCookies(new Cookie(BrowserAuthenticationCookies.AUTH_COOKIE_NAME, originalToken));
+      var response = new MockHttpServletResponse();
+
+      filter.doFilter(request, response, new MockFilterChain());
+
+      return response;
+    }
   }
 }

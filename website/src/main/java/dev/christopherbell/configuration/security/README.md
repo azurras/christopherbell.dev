@@ -7,8 +7,11 @@ Owns Spring Security wiring and request authentication infrastructure.
 - `SecurityConfig` defines public routes, method security, the filter chain, and security-related beans.
 - `JwtAuthenticationFilter` reads bearer tokens, validates them, and populates the Spring Security context.
 - Browser-session activity is coalesced to at most one conditional Mongo update per five-minute
-  window. Due credential rotation is an atomic compare-and-set; a race loser or persistence
-  failure is rejected rather than reloading a session into a successful authentication.
+  window. Due credential rotation is an atomic compare-and-set. A rare race loser reloads once
+  and authenticates without another replacement token only when the presented credential is the
+  winner's unexpired previous token and the reloaded session and ACTIVE account still pass every
+  validity and fingerprint check. Revocation, invalid reloaded state, and persistence failures
+  remain fail-closed; ordinary requests do not pay for the extra read.
 - Ordinary cookie authentication validates each structurally valid browser session against the
   current persisted ACTIVE account and its security fingerprint. Missing, inactive, or stale
   accounts delete and reject the session; account lookup failures fail closed at the filter.
