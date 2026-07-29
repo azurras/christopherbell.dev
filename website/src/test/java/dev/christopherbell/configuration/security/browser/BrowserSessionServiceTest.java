@@ -2,6 +2,7 @@ package dev.christopherbell.configuration.security.browser;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -83,6 +84,17 @@ class BrowserSessionServiceTest {
     fixture.account.setPermissions(Set.of(AccountPermission.MUSIC_READ));
 
     assertFalse(fixture.authenticate(token, true).isPresent());
+  }
+
+  @Test
+  void passwordResetBetweenJwtMintAndSessionExchangeIsRejected() {
+    var fixture = new Fixture(START);
+    String staleLoginJwt = PermissionService.generateToken(fixture.account);
+    fixture.account.setPasswordHash("reset-password-hash");
+
+    assertThrows(IllegalArgumentException.class, () -> fixture.service().create(staleLoginJwt));
+
+    assertTrue(fixture.saved.getAllValues().isEmpty());
   }
 
   private static final class Fixture {

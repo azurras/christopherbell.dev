@@ -41,9 +41,12 @@ public class BrowserSessionService {
 
   /** Exchanges a short-lived login JWT for a persisted opaque browser session. */
   public String create(String loginJwt) {
-    var accountId = PermissionService.validateToken(loginJwt).getSubject();
+    var claims = PermissionService.validateToken(loginJwt);
+    var accountId = claims.getSubject();
+    var presentedFingerprint = claims.get(AccountSecurityFingerprint.CLAIM, String.class);
     var account = accounts.findById(accountId)
         .filter(this::isActive)
+        .filter(current -> AccountSecurityFingerprint.matches(presentedFingerprint, current))
         .orElseThrow(() -> new IllegalArgumentException("Browser session account is unavailable."));
     var now = clock.instant();
     var credential = credential(UUID.randomUUID().toString());
