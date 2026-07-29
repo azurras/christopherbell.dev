@@ -33,7 +33,7 @@ public class PermissionService {
 
   private static final String LOCAL_DEV_SECRET =
       "local-development-jwt-secret-change-me-at-least-32-bytes";
-  private static final long EXPIRATION_TIME = Duration.ofDays(1).toMillis();
+  private static final long EXPIRATION_TIME = Duration.ofDays(7).toMillis();
   private static volatile Key key = buildKey(resolveSecret(null, false, System.getenv()));
 
   /**
