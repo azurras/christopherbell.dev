@@ -817,13 +817,13 @@ Describe 'shared-folder runtime isolation' {
     It 'uses the exact default visible and private roots' {
         $existingDrive = Get-PSDrive -Name A -ErrorAction SilentlyContinue
         if (-not $existingDrive) {
-            New-PSDrive -Name A -PSProvider FileSystem -Root $TestDrive | Out-Null
+            New-PSDrive -Name A -PSProvider FileSystem -Root $TestDrive -Scope Global | Out-Null
         }
         try {
             $paths = Get-SharedFolderRuntimePaths
         } finally {
             if (-not $existingDrive) {
-                Remove-PSDrive -Name A
+                Remove-PSDrive -Name A -Scope Global
             }
         }
 
