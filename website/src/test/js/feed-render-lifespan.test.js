@@ -124,6 +124,27 @@ test('link preview markup keeps rich metadata outside post text', () => {
   assert.match(markup, /lunch\.jpg/);
 });
 
+test('link preview markup never activates non-HTTP image values', () => {
+  for (const imageUrl of [
+    'javascript:alert(1)',
+    'data:image/png;base64,AAAA',
+    '/relative.jpg',
+    '//cdn.example.com/protocol-relative.jpg',
+    'http://[malformed'
+  ]) {
+    const markup = linkPreviewCardMarkup({
+      url: 'https://example.com/post',
+      domain: 'example.com',
+      title: 'Safe title',
+      imageUrl
+    }, String);
+
+    assert.doesNotMatch(markup, /post-link-preview-image/);
+    assert.doesNotMatch(markup, /<img/);
+    assert.match(markup, /post-link-preview-no-image/);
+  }
+});
+
 test('youtubeEmbedUrl supports common YouTube URL formats', () => {
   assert.equal(
     youtubeEmbedUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s'),

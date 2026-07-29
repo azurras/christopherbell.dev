@@ -91,7 +91,9 @@ Owns browser-side behavior for server-rendered pages.
   composer, and renders replies as a timeline.
 - Feed-rendering pages initialize `lib/image-lightbox.js` so direct image and
   animated GIF links open in a shared preview dialog and broken external images
-  fall back to a source link instead of leaving empty space.
+  fall back to a source link instead of leaving empty space. Preview images and
+  fallback source links activate only for absolute HTTP(S) values; malformed,
+  relative, protocol-relative, and other-scheme values stay non-clickable.
 - Feed-rendering pages initialize `lib/lazy-media.js` after rendering post
   cards so rich iframes defer their `src` until they are near the viewport.
 - `wfl-list.js` renders the WFL secondary pages for favorites and the public top

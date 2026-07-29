@@ -3,6 +3,7 @@ package dev.christopherbell.post.preview;
 import dev.christopherbell.post.model.PostLinkPreview;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Optional;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -63,14 +64,7 @@ public class JsoupPostLinkPreviewClient implements PostLinkPreviewClient {
     var imageUrl = firstText(document,
         "meta[property=og:image]",
         "meta[name=twitter:image]");
-    if (imageUrl != null && !imageUrl.isBlank()) {
-      imageUrl = document.baseUri().isBlank()
-          ? uri.resolve(imageUrl).toString()
-          : document.selectFirst("meta[property=og:image], meta[name=twitter:image]").absUrl("content");
-      if (imageUrl == null || imageUrl.isBlank()) {
-        imageUrl = null;
-      }
-    }
+    imageUrl = boundedAbsoluteHttpUrl(imageUrl, properties.getMaxImageUrlLength());
 
     var domain = uri.getHost();
     if ((title == null || title.isBlank()) && (domain == null || domain.isBlank())) {
@@ -82,7 +76,7 @@ public class JsoupPostLinkPreviewClient implements PostLinkPreviewClient {
         .domain(domain)
         .title(bounded(title, properties.getMaxTitleLength()))
         .description(bounded(description, properties.getMaxDescriptionLength()))
-        .imageUrl(bounded(imageUrl, properties.getMaxImageUrlLength()))
+        .imageUrl(imageUrl)
         .build());
   }
 
@@ -106,5 +100,27 @@ public class JsoupPostLinkPreviewClient implements PostLinkPreviewClient {
     }
     var stripped = value.strip();
     return stripped.length() <= maxLength ? stripped : stripped.substring(0, maxLength);
+  }
+
+  private String boundedAbsoluteHttpUrl(String value, int maxLength) {
+    var bounded = bounded(value, maxLength);
+    if (bounded == null) {
+      return null;
+    }
+    try {
+      var parsed = URI.create(bounded);
+      var scheme = parsed.getScheme();
+      if (!parsed.isAbsolute()
+          || scheme == null
+          || !("http".equals(scheme.toLowerCase(Locale.ROOT))
+              || "https".equals(scheme.toLowerCase(Locale.ROOT)))
+          || parsed.getHost() == null
+          || parsed.getHost().isBlank()) {
+        return null;
+      }
+      return bounded;
+    } catch (IllegalArgumentException ignored) {
+      return null;
+    }
   }
 }

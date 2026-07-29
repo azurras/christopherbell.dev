@@ -21,3 +21,19 @@ test('imageFallbackMarkup keeps the source link available', () => {
   assert.match(markup, /Image unavailable/);
   assert.match(markup, /href="https:\/\/example.com\/a.jpg"/);
 });
+
+test('image helpers never activate non-HTTP image values', () => {
+  for (const src of [
+    'javascript:alert(1)',
+    'data:image/png;base64,AAAA',
+    '/relative.jpg',
+    '//cdn.example.com/protocol-relative.jpg',
+    'http://[malformed'
+  ]) {
+    assert.equal(imageLightboxMarkup(src), '');
+    const fallback = imageFallbackMarkup(src);
+    assert.match(fallback, /Image unavailable/);
+    assert.doesNotMatch(fallback, /<a\b/);
+    assert.doesNotMatch(fallback, /href=/);
+  }
+});
