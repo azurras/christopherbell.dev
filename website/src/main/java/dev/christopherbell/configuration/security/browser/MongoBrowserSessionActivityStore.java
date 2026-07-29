@@ -10,10 +10,14 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
-/** Mongo-backed atomic activity transitions for browser sessions. */
+/**
+ * Mongo-backed atomic activity transitions for browser sessions.
+ *
+ * <p>Intentionally non-final so Spring can apply class-based persistence exception translation.
+ */
 @Repository
 @RequiredArgsConstructor
-public final class MongoBrowserSessionActivityStore implements BrowserSessionActivityStore {
+public class MongoBrowserSessionActivityStore implements BrowserSessionActivityStore {
   private final MongoTemplate mongo;
 
   @Override

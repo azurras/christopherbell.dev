@@ -12,6 +12,8 @@ import java.util.Optional;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.dao.annotation.PersistenceExceptionTranslationPostProcessor;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
@@ -20,6 +22,23 @@ import org.springframework.data.mongodb.core.query.Update;
 class MongoBrowserSessionActivityStoreTest {
   private static final Instant OBSERVED = Instant.parse("2026-07-29T12:00:00Z");
   private static final Instant NOW = OBSERVED.plusSeconds(300);
+
+  @Test
+  void repositoryCanBeProxiedUsingTheApplicationClassProxyMode() {
+    try (var context = new AnnotationConfigApplicationContext()) {
+      context.registerBean(MongoTemplate.class, () -> mock(MongoTemplate.class));
+      context.registerBean(PersistenceExceptionTranslationPostProcessor.class, () -> {
+        var postProcessor = new PersistenceExceptionTranslationPostProcessor();
+        postProcessor.setProxyTargetClass(true);
+        return postProcessor;
+      });
+      context.register(MongoBrowserSessionActivityStore.class);
+
+      context.refresh();
+
+      assertThat(context.getBean(BrowserSessionActivityStore.class)).isNotNull();
+    }
+  }
 
   @Test
   void touchUpdatesOnlyActivityFieldsWhenTheObservedLiveSessionStillMatches() {

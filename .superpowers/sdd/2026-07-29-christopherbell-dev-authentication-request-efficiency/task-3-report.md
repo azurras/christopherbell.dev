@@ -167,3 +167,48 @@ The Mongo assertion improvement now reads BSON structurally without key-order de
 checks the separate `$and` clauses for `_id`, `idleExpiresOn: {$gt: now}`, and
 `absoluteExpiresOn: {$gte: requestedIdleExpiry}`, while each operation checks its observed CAS
 fields directly. This would reject swapped expiry operators or values.
+
+## Runtime Fix Round 2
+
+Task 5's alternate-port candidate startup failed before binding its listener. Spring 7 applied
+repository persistence exception translation using the application's class-based proxy mode,
+but `MongoBrowserSessionActivityStore` was `final`. The resulting failure chain was
+`BeanCreationException` to `AopConfigException` to `IllegalArgumentException: Cannot subclass
+final class ...MongoBrowserSessionActivityStore`.
+
+The regression uses a real `AnnotationConfigApplicationContext`, a mocked `MongoTemplate`, and
+`PersistenceExceptionTranslationPostProcessor` configured for class proxies. It registers the
+actual repository bean and resolves it through `BrowserSessionActivityStore`, exercising the
+same framework boundary that prevented application startup rather than checking Java modifiers.
+
+RED command:
+
+```powershell
+$env:GRADLE_USER_HOME='A:\Projects\christopherbell.dev-gradle\performance-authentication-20260729-task3-runtimefix'
+.\gradlew.bat :website:test --tests dev.christopherbell.configuration.security.browser.MongoBrowserSessionActivityStoreTest
+```
+
+RED result: `BUILD FAILED`; 3 tests completed and
+`repositoryCanBeProxiedUsingTheApplicationClassProxyMode` failed at context refresh with the
+same `BeanCreationException` / `AopConfigException` / final-class cause observed during startup.
+
+The minimal fix removes `final` only from the repository adapter and documents why this class is
+an intentional exception to the usual final-class default. No global AOP or proxy configuration
+changed.
+
+GREEN command: the same focused command above.
+
+GREEN result: `BUILD SUCCESSFUL`; all 3 store tests passed, including real class-proxy bean
+creation.
+
+Focused Task 3 and MVC regression command:
+
+```powershell
+$env:GRADLE_USER_HOME='A:\Projects\christopherbell.dev-gradle\performance-authentication-20260729-task3-runtimefix'
+.\gradlew.bat :website:test --tests dev.christopherbell.configuration.security.browser.BrowserSessionServiceTest --tests dev.christopherbell.configuration.security.browser.MongoBrowserSessionActivityStoreTest --tests dev.christopherbell.configuration.security.AsyncDispatcherSecurityIntegrationTest
+```
+
+Result: `BUILD SUCCESSFUL`; all 19 selected tests passed. A separate application startup was not
+needed because the new regression executes the exact Spring proxy-creation failure boundary;
+this also left port 8080 and all Task 5 measurement databases untouched. Task 5's uncommitted
+diagnostic configuration remained unmodified and is excluded from this fix commit.
