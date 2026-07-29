@@ -6,6 +6,248 @@ body {
     /*padding-top: 3.5rem;*/
 }
 
+/* Public Void discovery: independent signal panels that reuse the feed language. */
+.void-discovery-hero {
+  padding: clamp(3rem, 8vw, 6rem) 0 2.75rem;
+  border-bottom: 1px solid rgba(128, 190, 185, 0.2);
+  background:
+    radial-gradient(circle at 18% 15%, rgba(117, 202, 185, 0.16), transparent 24rem),
+    radial-gradient(circle at 84% 0, rgba(222, 177, 95, 0.12), transparent 26rem);
+}
+
+.void-discovery-hero h1 {
+  max-width: 15ch;
+  margin: 0 0 0.75rem;
+  color: #f5fbfc;
+  font-size: clamp(2.4rem, 7vw, 5.5rem);
+  font-weight: 900;
+  letter-spacing: -0.055em;
+  line-height: 0.94;
+}
+
+.void-discovery-hero p:last-child {
+  max-width: 48rem;
+  margin: 0;
+  color: rgba(220, 233, 235, 0.72);
+  font-size: clamp(1rem, 2vw, 1.2rem);
+}
+
+.void-discovery-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.15rem;
+  padding-top: 1.6rem;
+  padding-bottom: 3rem;
+}
+
+.void-discovery-panel {
+  min-width: 0;
+  padding: clamp(1rem, 2.5vw, 1.4rem);
+  overflow: hidden;
+  border: 1px solid rgba(128, 190, 185, 0.22);
+  border-radius: 1rem;
+  background:
+    linear-gradient(145deg, rgba(20, 39, 45, 0.22), transparent 44%),
+    rgba(8, 16, 22, 0.9);
+  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.32);
+}
+
+.void-discovery-panel-posts {
+  grid-column: span 2;
+}
+
+.void-discovery-panel > header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.15rem 1rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid rgba(128, 190, 185, 0.16);
+}
+
+.void-discovery-panel > header .home-kicker {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.void-discovery-panel > header h2 {
+  margin: 0;
+  color: #f3f8fa;
+  font-size: clamp(1.25rem, 2vw, 1.65rem);
+  font-weight: 900;
+}
+
+.void-discovery-panel > header p:last-child {
+  margin: 0;
+  color: rgba(201, 216, 221, 0.64);
+  font-size: 0.84rem;
+  text-align: right;
+}
+
+.void-discovery-items.feed-list {
+  gap: 0.8rem;
+}
+
+.void-discovery-items.feed-list::before {
+  display: none;
+}
+
+.void-discovery-status {
+  min-height: 1.5rem;
+  color: #f0c89e;
+  font-size: 0.86rem;
+}
+
+.void-discovery-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.void-discovery-actions button,
+.void-discovery-back {
+  padding: 0.58rem 0.9rem;
+  border: 1px solid rgba(117, 202, 185, 0.35);
+  border-radius: 999px;
+  background: rgba(117, 202, 185, 0.1);
+  color: #b8ebe0;
+  font: 800 0.78rem/1.1 system-ui, sans-serif;
+  text-decoration: none;
+}
+
+.void-discovery-actions button:hover,
+.void-discovery-actions button:focus-visible,
+.void-discovery-back:hover,
+.void-discovery-back:focus-visible {
+  border-color: #75cab9;
+  background: rgba(117, 202, 185, 0.2);
+  color: #ffffff;
+  outline: 2px solid transparent;
+}
+
+.void-topic-cloud,
+.void-post-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.void-post-topics {
+  margin: 0.1rem 1rem 1rem 4.75rem;
+}
+
+.void-topic-chip {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 0.28rem 0.58rem;
+  overflow: hidden;
+  border: 1px solid rgba(117, 202, 185, 0.25);
+  border-radius: 999px;
+  background: rgba(117, 202, 185, 0.09);
+  color: #9ee1d2;
+  font: 800 0.74rem/1.2 ui-monospace, monospace;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.void-topic-chip-large {
+  padding: 0.52rem 0.78rem;
+  font-size: 0.86rem;
+}
+
+.void-topic-chip:hover,
+.void-topic-chip:focus-visible {
+  border-color: #75cab9;
+  background: rgba(117, 202, 185, 0.18);
+  color: #ffffff;
+}
+
+.void-people-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.void-person-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.72rem;
+  border: 1px solid rgba(128, 190, 185, 0.14);
+  border-radius: 0.8rem;
+  background: rgba(4, 9, 14, 0.52);
+}
+
+.void-person-avatar {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1d383e, #6c4e36);
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.void-person-name {
+  color: #c8f2e9;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.void-person-card p {
+  margin: 0.12rem 0 0;
+  overflow: hidden;
+  color: rgba(201, 216, 221, 0.62);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.void-topic-page-shell {
+  max-width: 62rem;
+  padding-top: 1.5rem;
+  padding-bottom: 3rem;
+}
+
+.void-discovery-back {
+  display: inline-flex;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 767.98px) {
+  .void-discovery-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.8rem;
+    padding-inline: 0.65rem;
+  }
+
+  .void-discovery-panel-posts {
+    grid-column: auto;
+  }
+
+  .void-discovery-panel {
+    padding: 0.85rem;
+    border-radius: 0.8rem;
+  }
+
+  .void-discovery-panel > header {
+    display: block;
+  }
+
+  .void-discovery-panel > header p:last-child {
+    margin-top: 0.3rem;
+    text-align: left;
+  }
+
+  .void-post-topics {
+    margin-left: 1rem;
+  }
+}
+
 /* Mission Control: private, phone-first operational console. */
 .command-center-page {
     background: #070b0d;

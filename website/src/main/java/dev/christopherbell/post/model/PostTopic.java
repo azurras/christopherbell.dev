@@ -15,6 +15,17 @@ public record PostTopic(String canonical, String display) {
     }
   }
 
+  /** Normalizes and validates one topic route segment without accepting punctuation. */
+  public static String canonicalizeRoute(String rawTopic) {
+    if (rawTopic == null || rawTopic.isBlank()) {
+      throw new IllegalArgumentException("Topic cannot be blank.");
+    }
+    var normalized = Normalizer.normalize(rawTopic.strip(), Normalizer.Form.NFKC)
+        .toLowerCase(Locale.ROOT);
+    normalized = Normalizer.normalize(normalized, Normalizer.Form.NFKC);
+    return new PostTopic(normalized, normalized).canonical();
+  }
+
   private static void requireValid(String value, String field) {
     if (value == null || value.isBlank()) {
       throw new IllegalArgumentException("Topic " + field + " form cannot be blank.");

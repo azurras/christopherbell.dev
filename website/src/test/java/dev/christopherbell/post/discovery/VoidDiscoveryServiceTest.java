@@ -11,6 +11,7 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.pagination.StableCursorCodec;
 import dev.christopherbell.post.PostRepository;
+import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.model.Post;
 import java.time.Clock;
 import java.time.Instant;
@@ -30,6 +31,7 @@ class VoidDiscoveryServiceTest {
   @Mock private VoidDiscoveryQueryRepository queries;
   @Mock private AccountRepository accounts;
   @Mock private PostRepository posts;
+  @Mock private PermissionService permissions;
   private VoidDiscoveryService service;
 
   @BeforeEach
@@ -39,7 +41,8 @@ class VoidDiscoveryServiceTest {
         accounts,
         posts,
         new StableCursorCodec(),
-        Clock.fixed(NOW, ZoneOffset.UTC));
+        Clock.fixed(NOW, ZoneOffset.UTC),
+        permissions);
   }
 
   @Test

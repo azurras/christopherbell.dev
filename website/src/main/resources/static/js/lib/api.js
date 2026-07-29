@@ -1,3 +1,9 @@
+function discoveryPageUrl(path, cursor, size) {
+  const params = new URLSearchParams({ size: String(size) });
+  if (cursor) params.set('cursor', String(cursor));
+  return `/api/posts/2026-07-28/discovery/${path}?${params}`;
+}
+
 /**
  * Centralized API routes (versioned URLs).
  *
@@ -104,6 +110,15 @@ export const API = {
     byAccount: (accountId) => `/api/posts/2025-09-14/account/${encodeURIComponent(accountId)}`,
     hideThread: (id) => `/api/posts/2026-06-02/${encodeURIComponent(id)}/hide-thread`,
     unhideThread: (rootId) => `/api/posts/2026-06-02/${encodeURIComponent(rootId)}/hide-thread`,
+    discovery: {
+      new: (cursor = '', size = 12) => discoveryPageUrl('new', cursor, size),
+      fading: (cursor = '', size = 12) => discoveryPageUrl('fading', cursor, size),
+      revived: (cursor = '', size = 12) => discoveryPageUrl('revived', cursor, size),
+      topics: (cursor = '', size = 12) => discoveryPageUrl('topics', cursor, size),
+      people: '/api/posts/2026-07-28/discovery/people',
+      topic: (topic, cursor = '', size = 12) => discoveryPageUrl(
+        `topic/${encodeURIComponent(String(topic || ''))}`, cursor, size),
+    },
   },
   notifications: {
     base: '/api/notifications/2025-09-14',

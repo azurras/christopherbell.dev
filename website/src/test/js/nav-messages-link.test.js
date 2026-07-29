@@ -71,6 +71,16 @@ test('void nav uses Feed as the primary Void link', () => {
   );
 });
 
+test('Explore is public and owns Explore and topic route highlighting', () => {
+  assert.deepEqual(
+    topLevelNavItems(false).find((item) => item.href === '/void/explore'),
+    { href: '/void/explore', label: 'Explore' }
+  );
+  assert.equal(isActiveNavHref('/void/explore', '/void/explore'), true);
+  assert.equal(isActiveNavHref('/void/explore', '/void/topic/music'), true);
+  assert.equal(isActiveNavHref('/void', '/void/topic/music'), false);
+});
+
 test('Music is a primary nav destination for signed-in and signed-out visitors', () => {
   assert.deepEqual(
     topLevelNavItems(false).find((item) => item.href === '/music'),

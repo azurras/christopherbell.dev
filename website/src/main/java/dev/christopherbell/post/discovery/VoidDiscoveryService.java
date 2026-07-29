@@ -3,14 +3,13 @@ package dev.christopherbell.post.discovery;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.pagination.StableCursorCodec;
+import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostFeedItem;
 import dev.christopherbell.post.model.PostTopic;
-import java.text.Normalizer;
 import java.time.Clock;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -26,6 +25,7 @@ public class VoidDiscoveryService {
   private final PostRepository posts;
   private final StableCursorCodec cursors;
   private final Clock clock;
+  private final PermissionService permissions;
 
   public VoidDiscoveryPage<PostFeedItem> newArrivals(String cursor, int size)
       throws InvalidRequestException {
@@ -54,6 +54,7 @@ public class VoidDiscoveryService {
   }
 
   private VoidDiscoveryPage<PostFeedItem> mapPosts(VoidDiscoveryPage<Post> page) {
+    String currentUserId = permissions.hasAuthority("USER") ? permissions.getSelfId() : null;
     var accountIds = page.items().stream()
         .map(Post::getAccountId)
         .filter(Objects::nonNull)
@@ -63,12 +64,12 @@ public class VoidDiscoveryService {
     accounts.findAllById(accountIds)
         .forEach(account -> usernames.put(account.getId(), account.getUsername()));
     var items = page.items().stream()
-        .map(post -> toFeedItem(post, usernames.get(post.getAccountId())))
+        .map(post -> toFeedItem(post, usernames.get(post.getAccountId()), currentUserId))
         .toList();
     return new VoidDiscoveryPage<>(items, page.nextCursor());
   }
 
-  private PostFeedItem toFeedItem(Post post, String username) {
+  private PostFeedItem toFeedItem(Post post, String username, String currentUserId) {
     return PostFeedItem.builder()
         .id(post.getId())
         .accountId(post.getAccountId())
@@ -79,7 +80,9 @@ public class VoidDiscoveryService {
         .parentId(post.getParentId())
         .level(post.getLevel())
         .likesCount(post.getLikesCount())
-        .liked(false)
+        .liked(currentUserId != null
+            && post.getLikedBy() != null
+            && post.getLikedBy().contains(currentUserId))
         .replyCount((int) posts.countByParentId(post.getId()))
         .createdOn(post.getCreatedOn())
         .lastUpdatedOn(post.getLastUpdatedOn())
@@ -94,11 +97,8 @@ public class VoidDiscoveryService {
     if (rawTopic == null || rawTopic.isBlank()) {
       throw new InvalidRequestException(INVALID_TOPIC_MESSAGE);
     }
-    var normalized = Normalizer.normalize(rawTopic.strip(), Normalizer.Form.NFKC)
-        .toLowerCase(Locale.ROOT);
-    normalized = Normalizer.normalize(normalized, Normalizer.Form.NFKC);
     try {
-      return new PostTopic(normalized, normalized).canonical();
+      return PostTopic.canonicalizeRoute(rawTopic);
     } catch (IllegalArgumentException exception) {
       throw new InvalidRequestException(INVALID_TOPIC_MESSAGE, exception);
     }
