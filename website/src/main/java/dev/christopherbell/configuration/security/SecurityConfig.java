@@ -345,7 +345,18 @@ public class SecurityConfig {
     if (!"GET".equalsIgnoreCase(request.getMethod())) {
       return false;
     }
-    var path = request.getRequestURI();
+    // Require both request representations to be safe. Mock and default-servlet
+    // mappings can have an empty servlet path, while the firewalled servlet path
+    // is the decoded representation needed to catch encoded namespace aliases.
+    var requestPath = request.getRequestURI();
+    var servletPath = request.getServletPath();
+    return requestPath != null
+        && !requestPath.contains("%")
+        && isSafePublicHtmlPath(requestPath)
+        && (servletPath == null || servletPath.isEmpty() || isSafePublicHtmlPath(servletPath));
+  }
+
+  private static boolean isSafePublicHtmlPath(String path) {
     return !path.contains(".")
         && !path.equals("/api")
         && !path.startsWith("/api/")

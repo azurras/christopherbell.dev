@@ -225,6 +225,22 @@ class SecurityConfigTest {
         "/nodeinfo/private")) {
       assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("GET", path))));
     }
+
+    var encodedApi = request("GET", "/%61pi/admin/secret");
+    encodedApi.setServletPath("/api/admin/secret");
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(encodedApi)));
+
+    var encodedActuator = request("GET", "/%61ctuator/health");
+    encodedActuator.setServletPath("/actuator/health");
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(encodedActuator)));
+
+    assertFalse(matchers.stream().anyMatch(matcher ->
+        matcher.matches(request("GET", "/some%20unknown/page"))));
+
+    var contextPathApi = request("GET", "/site/api/admin/secret");
+    contextPathApi.setContextPath("/site");
+    contextPathApi.setServletPath("/api/admin/secret");
+    assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(contextPathApi)));
   }
 
   @Test
