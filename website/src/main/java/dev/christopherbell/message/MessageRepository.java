@@ -11,6 +11,4 @@ public interface MessageRepository extends MongoRepository<Message, String> {
   List<Message> findByConversationKeyOrderByCreatedOnAsc(String conversationKey, Pageable pageable);
 
   List<Message> findByParticipantIdsContainingOrderByCreatedOnDesc(String accountId, Pageable pageable);
-
-  long countByRecipientAccountIdAndSenderAccountIdAndReadFalse(String recipientAccountId, String senderAccountId);
 }
