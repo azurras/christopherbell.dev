@@ -3,6 +3,7 @@ package dev.christopherbell.configuration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -176,6 +177,43 @@ class JwtAuthenticationFilterTest {
     filter.doFilter(request, response, new MockFilterChain());
 
     assertNull(SecurityContextHolder.getContext().getAuthentication());
+    assertEquals(200, response.getStatus());
+  }
+
+  @Test
+  @DisplayName("Static assets skip cookie authentication unconditionally")
+  void doFilter_whenStaticAssetHasBrowserCookie_skipsSessionLookup()
+      throws ServletException, IOException {
+    var sessions = mock(BrowserSessionService.class);
+    var filter = new JwtAuthenticationFilter(
+        List.of(request -> true), sessions, new InteractiveBrowserRequest(), cookies());
+    var request = new MockHttpServletRequest("GET", "/js/app.js");
+    request.setCookies(new Cookie("CBELL_AUTH", "session-id.secret"));
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(request, response, new MockFilterChain());
+
+    org.mockito.Mockito.verifyNoInteractions(sessions);
+    assertTrue(response.getHeaders("Set-Cookie").isEmpty());
+    assertEquals(200, response.getStatus());
+  }
+
+  @Test
+  @DisplayName("Versioned static assets skip bearer authentication unconditionally")
+  void doFilter_whenVersionedStaticAssetHasBearer_skipsAccountLookup()
+      throws ServletException, IOException {
+    var accounts = mock(AccountRepository.class);
+    var account = account(Role.USER);
+    var filter = new JwtAuthenticationFilter(
+        List.of(request -> true), null, null, null, accounts);
+    var request = new MockHttpServletRequest(
+        "GET", "/0123456789abcdef0123456789abcdef01234567/css/main.css");
+    request.addHeader("Authorization", "Bearer " + PermissionService.generateToken(account));
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(request, response, new MockFilterChain());
+
+    org.mockito.Mockito.verifyNoInteractions(accounts);
     assertEquals(200, response.getStatus());
   }
 

@@ -6,6 +6,9 @@ Owns Spring Security wiring and request authentication infrastructure.
 
 - `SecurityConfig` defines public routes, method security, the filter chain, and security-related beans.
 - `JwtAuthenticationFilter` reads bearer tokens, validates them, and populates the Spring Security context.
+- `StaticAssetRequestMatcher` bypasses credential handling only for the listed GET favicon, CSS,
+  image, JavaScript, vendor, pinned Bootstrap WebJar, and release-versioned asset namespaces.
+  Shared-folder worker and media routes remain authentication boundaries.
 - `SharedFolderNoStoreFilter` runs before shared-folder authentication and applies
   `Cache-Control: private, no-store` only to the exact versioned shared-folder API prefix,
   including authentication and authorization failures.
@@ -22,4 +25,3 @@ Keep public URL changes here and pair them with security tests. Browser-callable
 `/shared` is a deliberately data-free public shell. Do not add `/api/shared-folder/**` to the
 public list: those routes require JWT authentication and their controller refreshes effective
 shared-folder read access independently.
-
