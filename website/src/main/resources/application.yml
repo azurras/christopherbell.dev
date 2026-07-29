@@ -692,6 +692,7 @@ vehicles:
   vin-decoder:
     rate-limit-capacity: 20
     rate-limit-window: 1m
+    maximum-buckets: 10000
     decoder-version: vpic-2026-07
     cache-ttl: 30d
     max-batch-size: 20

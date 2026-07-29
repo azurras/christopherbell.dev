@@ -64,7 +64,9 @@ public final class RateLimitBucketStore {
     return entries.containsKey(key);
   }
 
-  synchronized int size() {
+  /** Returns active bucket cardinality after removing expired entries. */
+  public synchronized int size() {
+    removeExpired(nanoTime.getAsLong());
     return entries.size();
   }
 

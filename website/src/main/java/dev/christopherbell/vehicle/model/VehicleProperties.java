@@ -115,6 +115,8 @@ public class VehicleProperties {
     private int rateLimitCapacity = 20;
     @NotNull @DurationMin(seconds = 1)
     private Duration rateLimitWindow;
+    @Min(100) @Max(100_000)
+    private int maximumBuckets = 10_000;
     @NotBlank
     private String decoderVersion = "vpic-2026-07";
     @NotNull @DurationMin(seconds = 1)
