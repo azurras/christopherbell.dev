@@ -154,6 +154,20 @@ class JwtAuthenticationFilterTest {
   }
 
   @Test
+  @DisplayName("An unexplained rotation miss rejects and clears the still-current cookie")
+  void doFilter_whenRotationMissReloadsCurrentCredential_clearsCookies()
+      throws ServletException, IOException {
+    var fixture = new ConcurrentRotationFixture(false, true);
+
+    var response = fixture.authenticateOriginalToken();
+
+    assertEquals(401, response.getStatus());
+    assertNull(SecurityContextHolder.getContext().getAuthentication());
+    assertTrue(response.getHeaders("Set-Cookie").stream()
+        .anyMatch(header -> header.contains("CBELL_AUTH=") && header.contains("Max-Age=0")));
+  }
+
+  @Test
   @DisplayName("Browser account lookup failure rejects and clears the cookie")
   void doFilter_whenBrowserAccountLookupFails_returnsUnauthorized()
       throws ServletException, IOException {
@@ -362,6 +376,7 @@ class JwtAuthenticationFilterTest {
     private final AtomicInteger reads = new AtomicInteger();
     private final AtomicInteger rotations = new AtomicInteger();
     private final boolean revokeOnLostRotation;
+    private final boolean rejectInitialRotation;
     private final JwtAuthenticationFilter filter;
     private final String originalToken;
     private final BrowserSession staleSnapshot;
@@ -369,11 +384,17 @@ class JwtAuthenticationFilterTest {
     private boolean revoked;
 
     private ConcurrentRotationFixture() {
-      this(false);
+      this(false, false);
     }
 
     private ConcurrentRotationFixture(boolean revokeOnLostRotation) {
+      this(revokeOnLostRotation, false);
+    }
+
+    private ConcurrentRotationFixture(
+        boolean revokeOnLostRotation, boolean rejectInitialRotation) {
       this.revokeOnLostRotation = revokeOnLostRotation;
+      this.rejectInitialRotation = rejectInitialRotation;
       when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
       when(sessions.save(org.mockito.ArgumentMatchers.any(BrowserSession.class)))
           .thenAnswer(invocation -> {
@@ -398,7 +419,9 @@ class JwtAuthenticationFilterTest {
           org.mockito.ArgumentMatchers.any(),
           org.mockito.ArgumentMatchers.any()))
           .thenAnswer(invocation -> {
-            if (rotations.getAndIncrement() > 0) {
+            int rotation = rotations.getAndIncrement();
+            if (rotation == 0 && rejectInitialRotation) return Optional.empty();
+            if (rotation > 0) {
               revoked = revokeOnLostRotation;
               return Optional.empty();
             }

@@ -171,6 +171,26 @@ class BrowserSessionServiceTest {
   }
 
   @Test
+  void rotationCasMissRejectsWhenThePresentedCredentialRemainsCurrent() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    Instant rotationTime = START.plus(BrowserSessionService.ROTATION_INTERVAL);
+    var staleSnapshot = copy(fixture.session());
+    var unchangedSnapshot = copy(staleSnapshot);
+    fixture.rejectRotation = true;
+    when(fixture.sessions.findById(fixture.session().getId()))
+        .thenReturn(Optional.of(staleSnapshot), Optional.of(unchangedSnapshot));
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.activity, fixture.accounts);
+
+    var authenticated = fixture.at(rotationTime).authenticate(token, true);
+
+    assertFalse(authenticated.isPresent());
+    verify(fixture.sessions).delete(unchangedSnapshot);
+    verify(fixture.accounts).findById(fixture.account.getId());
+    verify(fixture.sessions, never()).save(any(BrowserSession.class));
+  }
+
+  @Test
   void revocationThatWinsBeforeRotationRejectsAuthentication() {
     var fixture = new Fixture(START);
     String token = fixture.create();
@@ -192,6 +212,10 @@ class BrowserSessionServiceTest {
     Instant rotationTime = START.plus(BrowserSessionService.ROTATION_INTERVAL);
     var staleSnapshot = copy(fixture.session());
     var expiredSnapshot = copy(staleSnapshot);
+    expiredSnapshot.setPreviousTokenHash(staleSnapshot.getTokenHash());
+    expiredSnapshot.setPreviousTokenExpiresOn(
+        rotationTime.plus(BrowserSessionService.ROTATION_OVERLAP));
+    expiredSnapshot.setTokenHash("winner-current-token");
     expiredSnapshot.setIdleExpiresOn(rotationTime);
     fixture.rejectRotation = true;
     when(fixture.sessions.findById(fixture.session().getId()))
@@ -231,6 +255,10 @@ class BrowserSessionServiceTest {
     Instant rotationTime = START.plus(BrowserSessionService.ROTATION_INTERVAL);
     var staleSnapshot = copy(fixture.session());
     var invalidSnapshot = copy(staleSnapshot);
+    invalidSnapshot.setPreviousTokenHash(staleSnapshot.getTokenHash());
+    invalidSnapshot.setPreviousTokenExpiresOn(
+        rotationTime.plus(BrowserSessionService.ROTATION_OVERLAP));
+    invalidSnapshot.setTokenHash("winner-current-token");
     invalidSnapshot.setAccountSecurityFingerprint("stale-account-fingerprint");
     fixture.rejectRotation = true;
     when(fixture.sessions.findById(fixture.session().getId()))

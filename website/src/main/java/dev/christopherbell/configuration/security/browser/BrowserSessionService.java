@@ -121,7 +121,7 @@ public class BrowserSessionService implements AccountSessionRevoker {
         if (updated.isEmpty()) {
           var reloadedSession = sessions.findById(session.getId()).orElse(null);
           if (reloadedSession == null) return Optional.empty();
-          if (!validCredential(reloadedSession, parsed.get().secret(), now)
+          if (!validPreviousCredential(reloadedSession, hash(parsed.get().secret()), now)
               || expired(reloadedSession, now)
               || !completeSnapshot(reloadedSession)) {
             sessions.delete(reloadedSession);
@@ -192,6 +192,11 @@ public class BrowserSessionService implements AccountSessionRevoker {
   private boolean validCredential(BrowserSession session, String secret, Instant now) {
     String candidateHash = hash(secret);
     if (constantTimeEquals(session.getTokenHash(), candidateHash)) return true;
+    return validPreviousCredential(session, candidateHash, now);
+  }
+
+  private boolean validPreviousCredential(
+      BrowserSession session, String candidateHash, Instant now) {
     return session.getPreviousTokenHash() != null
         && session.getPreviousTokenExpiresOn() != null
         && now.isBefore(session.getPreviousTokenExpiresOn())
