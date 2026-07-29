@@ -9,56 +9,74 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || format('{0}-{1}', github.ref, github.run_id) }}"
+  cancel-in-progress: "${{ github.event_name == 'pull_request' }}"
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         java-version: [ 25 ]
         os: [ ubuntu-latest, macos-latest, windows-latest ]
 
     steps:
       - name: Checkout code
+        timeout-minutes: 5
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up JDK
+        timeout-minutes: 5
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: 'temurin'
           java-version: ${{ matrix.java-version }}
 
       - name: Set up Node.js
+        timeout-minutes: 5
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
 
       - name: Set up Gradle
+        timeout-minutes: 5
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
-      - name: Set BUILD_NUMBER env
-        if: runner.os != 'Windows'
-        run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
-
-      - name: Set BUILD_NUMBER env on Windows
+      - name: Install Pester 5.9.0
         if: runner.os == 'Windows'
-        run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $env:GITHUB_ENV
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Install-Module Pester -RequiredVersion 5.9.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -RequiredVersion 5.9.0 -Force -ErrorAction Stop
+          if ((Get-Module Pester).Version -ne [version]'5.9.0') {
+            throw 'Required Pester 5.9.0 module failed to load.'
+          }
 
       - name: Grant execute permission for Gradle
         if: runner.os != 'Windows'
+        timeout-minutes: 5
         run: chmod +x gradlew
 
       - name: Build and Test
         if: runner.os != 'Windows'
+        timeout-minutes: 20
         run: ./gradlew build
 
       - name: Build and Test on Windows
         if: runner.os == 'Windows'
+        timeout-minutes: 20
         run: .\gradlew.bat build
 
       - name: Upload failed test reports
         if: failure()
+        timeout-minutes: 5
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: test-reports-${{ matrix.os }}-java-${{ matrix.java-version }}
@@ -67,4 +85,5 @@ jobs:
           path: |
             **/build/reports/tests/**
             **/build/test-results/**
+            **/build/test-results/shared-folder-pester/*.xml
             **/build/reports/problems/**

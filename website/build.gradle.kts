@@ -1,7 +1,12 @@
+import java.io.IOException
+import java.net.HttpURLConnection
 import java.net.URI
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.time.Duration
 import java.util.HexFormat
 import java.util.zip.ZipFile
 import org.gradle.api.GradleException
@@ -100,18 +105,117 @@ fun sha256(path: java.nio.file.Path): String = Files.newInputStream(path).use { 
 }
 
 val sensorResourceDirectory = layout.buildDirectory.dir("generated/sensor-resources")
-val prepareSensorResources by tasks.registering {
-    val archive = layout.buildDirectory.file("sensor-downloads/LibreHardwareMonitor-0.9.6.zip")
-    outputs.dir(sensorResourceDirectory)
-    doLast {
-        val archivePath = archive.get().asFile.toPath()
-        Files.createDirectories(archivePath.parent)
-        libreHardwareMonitorUri.toURL().openStream().use { input ->
-            Files.copy(input, archivePath, StandardCopyOption.REPLACE_EXISTING)
+val sensorConnectTimeout = Duration.ofSeconds(10)
+val sensorReadTimeout = Duration.ofSeconds(30)
+val sensorArchiveCache = providers.gradleProperty("sensorArchiveCache")
+    .map { file(it) }
+    .orElse(providers.provider {
+        File(
+            gradle.gradleUserHomeDir,
+            "caches/christopherbell.dev/sensors/LibreHardwareMonitor-0.9.6.zip")
+    })
+
+fun moveAtomically(source: java.nio.file.Path, target: java.nio.file.Path) {
+    try {
+        Files.move(source, target, StandardCopyOption.ATOMIC_MOVE)
+    } catch (_: AtomicMoveNotSupportedException) {
+        Files.move(source, target)
+    }
+}
+
+fun resolvePinnedArchive(
+    cache: java.nio.file.Path,
+    expectedSha256: String,
+    offline: Boolean,
+    downloadTo: (java.nio.file.Path) -> Unit
+): java.nio.file.Path {
+    if (Files.exists(cache)) {
+        if (sha256(cache) != expectedSha256) {
+            throw GradleException(
+                "Cached LibreHardwareMonitor archive SHA-256 verification failed: $cache")
         }
-        if (sha256(archivePath) != libreHardwareMonitorArchiveSha256) {
-            Files.deleteIfExists(archivePath)
-            throw GradleException("LibreHardwareMonitor archive SHA-256 verification failed.")
+        return cache
+    }
+    if (offline) {
+        throw GradleException(
+            "LibreHardwareMonitor archive is not cached; run prepareSensorResources online once.")
+    }
+
+    Files.createDirectories(cache.parent)
+    val partial = Files.createTempFile(cache.parent, "${cache.fileName}.", ".part")
+    try {
+        downloadTo(partial)
+        if (sha256(partial) != expectedSha256) {
+            throw GradleException(
+                "Downloaded LibreHardwareMonitor archive SHA-256 verification failed.")
+        }
+        moveAtomically(partial, cache)
+        return cache
+    } catch (_: FileAlreadyExistsException) {
+        Files.deleteIfExists(partial)
+        if (Files.exists(cache) && sha256(cache) == expectedSha256) {
+            return cache
+        }
+        throw GradleException(
+            "Concurrent LibreHardwareMonitor cache publication failed verification: $cache")
+    } catch (failure: Exception) {
+        Files.deleteIfExists(partial)
+        if (failure is GradleException) {
+            throw failure
+        }
+        throw GradleException(
+            "LibreHardwareMonitor upstream was unavailable within configured timeouts.", failure)
+    }
+}
+
+fun downloadPinnedArchive(uri: URI, target: java.nio.file.Path) {
+    val connection = uri.toURL().openConnection()
+    connection.connectTimeout = sensorConnectTimeout.toMillis().toInt()
+    connection.readTimeout = sensorReadTimeout.toMillis().toInt()
+    val http = connection as? HttpURLConnection
+    try {
+        if (http != null) {
+            http.instanceFollowRedirects = true
+            http.requestMethod = "GET"
+            val status = http.responseCode
+            if (status !in 200..299) {
+                throw IOException("LibreHardwareMonitor upstream returned HTTP $status.")
+            }
+        }
+        connection.getInputStream().use { input ->
+            Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING)
+        }
+    } finally {
+        http?.disconnect()
+    }
+}
+
+fun hasSensorPartial(directory: java.nio.file.Path, prefix: String): Boolean =
+    Files.list(directory).use { paths ->
+        paths.anyMatch { path ->
+            val name = path.fileName.toString()
+            name.startsWith(prefix) && name.endsWith(".part")
+        }
+    }
+
+val offlineMode = gradle.startParameter.isOffline
+val prepareSensorResources = tasks.register("prepareSensorResources") {
+    inputs.property("archiveUri", libreHardwareMonitorUri.toString())
+    inputs.property("archiveSha256", libreHardwareMonitorArchiveSha256)
+    inputs.property("memberSha256", libreHardwareMonitorFiles)
+    inputs.property("offline", offlineMode)
+    inputs.property("connectTimeoutMillis", sensorConnectTimeout.toMillis())
+    inputs.property("readTimeoutMillis", sensorReadTimeout.toMillis())
+    outputs.file(sensorArchiveCache)
+    outputs.dir(sensorResourceDirectory)
+    outputs.upToDateWhen { false }
+
+    doLast {
+        val archivePath = resolvePinnedArchive(
+            sensorArchiveCache.get().toPath(),
+            libreHardwareMonitorArchiveSha256,
+            offlineMode) { target ->
+            downloadPinnedArchive(libreHardwareMonitorUri, target)
         }
         val output = sensorResourceDirectory.get().dir("lib").asFile.toPath()
         Files.createDirectories(output)
@@ -131,6 +235,104 @@ val prepareSensorResources by tasks.registering {
             }
         }
     }
+}
+
+val verifySensorArchiveResolution = tasks.register("verifySensorArchiveResolution") {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Verifies clean, cached-offline, checksum, and unavailable sensor paths."
+    outputs.upToDateWhen { false }
+
+    doLast {
+        val verificationDirectory = temporaryDir
+        verificationDirectory.deleteRecursively()
+        Files.createDirectories(verificationDirectory.toPath())
+        val root = verificationDirectory.toPath()
+        val payload = "trusted-sensor-archive".toByteArray()
+        val fixture = root.resolve("fixture.zip")
+        Files.write(fixture, payload)
+        val expected = sha256(fixture)
+
+        var downloads = 0
+        val cache = root.resolve("clean-online.zip")
+        val resolved = resolvePinnedArchive(cache, expected, false) { target ->
+            downloads++
+            Files.write(target, payload)
+        }
+        check(resolved == cache && downloads == 1 && sha256(cache) == expected) {
+            "Clean online sensor resolution did not publish one verified cache file."
+        }
+        resolvePinnedArchive(cache, expected, true) {
+            error("Cached offline resolution attempted a download.")
+        }
+        check(downloads == 1) { "Cached offline resolution performed a second download." }
+
+        val offlineMissing = root.resolve("offline-missing.zip")
+        try {
+            resolvePinnedArchive(offlineMissing, expected, true) {
+                error("Offline missing-cache resolution attempted a download.")
+            }
+            error("Offline missing-cache resolution was accepted.")
+        } catch (failure: GradleException) {
+            check(failure.message?.contains("is not cached") == true)
+        }
+        check(Files.notExists(offlineMissing)) {
+            "Offline missing-cache resolution published an archive."
+        }
+
+        val corruptCache = root.resolve("corrupt-cache.zip")
+        Files.write(corruptCache, "corrupt-cache".toByteArray())
+        try {
+            resolvePinnedArchive(corruptCache, expected, false) {
+                error("Corrupt existing cache attempted a replacement download.")
+            }
+            error("Corrupt existing sensor cache was accepted.")
+        } catch (failure: GradleException) {
+            check(failure.message?.contains("Cached LibreHardwareMonitor") == true)
+        }
+        check(Files.exists(corruptCache)) {
+            "Corrupt existing cache was silently deleted instead of reported."
+        }
+
+        val concurrent = root.resolve("concurrent.zip")
+        val concurrentResult = resolvePinnedArchive(concurrent, expected, false) { target ->
+            Files.write(target, payload)
+            Files.write(concurrent, payload)
+        }
+        check(concurrentResult == concurrent && sha256(concurrent) == expected &&
+            !hasSensorPartial(root, "concurrent.zip.")) {
+            "Concurrent publication did not retain the independently verified cache."
+        }
+
+        val corrupt = root.resolve("corrupt-download.zip")
+        try {
+            resolvePinnedArchive(corrupt, expected, false) { target ->
+                Files.write(target, "corrupt".toByteArray())
+            }
+            error("Corrupt sensor download was accepted.")
+        } catch (failure: GradleException) {
+            check(failure.message?.contains("Downloaded LibreHardwareMonitor") == true)
+        }
+        check(Files.notExists(corrupt) && !hasSensorPartial(root, "corrupt-download.zip.")) {
+            "Corrupt sensor download left a published or partial cache file."
+        }
+
+        val unavailable = root.resolve("unavailable.zip")
+        try {
+            resolvePinnedArchive(unavailable, expected, false) {
+                throw IOException("simulated unavailable upstream")
+            }
+            error("Unavailable sensor upstream was accepted.")
+        } catch (failure: GradleException) {
+            check(failure.message?.contains("unavailable within configured timeouts") == true)
+        }
+        check(Files.notExists(unavailable) && !hasSensorPartial(root, "unavailable.zip.")) {
+            "Unavailable sensor resolution left a published or partial cache file."
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifySensorArchiveResolution)
 }
 
 sourceSets.named("main") { resources.srcDir(sensorResourceDirectory) }
@@ -347,19 +549,23 @@ val sharedFolderOperationsWindowsPowerShellPester =
         }
     }
 
+val windowsPesterVerification = listOf(
+    sharedFolderWorkerPester,
+    sharedFolderOperationsPwshPester,
+    sharedFolderOperationsWindowsPowerShellPester)
+
 tasks.register("sharedFolderVerification") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     description = "Runs shared-folder Java, browser, worker, and operations regression coverage."
-    dependsOn(
-        tasks.named("test"),
-        tasks.named("jsTest"),
-        sharedFolderWorkerPester,
-        sharedFolderOperationsPwshPester,
-        sharedFolderOperationsWindowsPowerShellPester)
+    dependsOn(tasks.named("test"), tasks.named("jsTest"))
+    dependsOn(windowsPesterVerification)
 }
 
 tasks.named("check") {
     dependsOn("jsTest")
+    if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+        dependsOn(windowsPesterVerification)
+    }
 }
 
 val verifySensorRuntime by tasks.registering {
