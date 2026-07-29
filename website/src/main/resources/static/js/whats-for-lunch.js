@@ -641,7 +641,7 @@ async function loadStoredMemberSession() {
 async function loadStoredAnonymousSession() {
   const stored = readAnonymousWflSession();
   if (!stored) return false;
-  currentZipCode = stored.zipCode || '';
+  currentZipCode = '';
   currentLocation = null;
   activeSession = null;
   stopSessionPolling();

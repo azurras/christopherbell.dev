@@ -17,7 +17,7 @@ function memoryStorage(initial = {}) {
   };
 }
 
-test('stores only three IDs, ZIP, version, and a thirty-minute expiry', () => {
+test('stores only three IDs, version, and a thirty-minute expiry', () => {
   const storage = memoryStorage();
   writeAnonymousWflSession([
     { id: 'one', website: 'https://example.com', address: { latitude: 1, longitude: 2 } },
@@ -29,11 +29,11 @@ test('stores only three IDs, ZIP, version, and a thirty-minute expiry', () => {
   const stored = JSON.parse(raw);
 
   assert.deepEqual(stored, {
-    version: 2,
+    version: 3,
     restaurantIds: ['one', 'two', 'three'],
-    zipCode: '78701',
     expiresAt: 1000 + WFL_ANONYMOUS_SESSION_TTL_MS,
   });
+  assert.equal(raw.includes('78701'), false);
   assert.equal(raw.includes('latitude'), false);
   assert.equal(raw.includes('website'), false);
 });
@@ -68,11 +68,11 @@ test('canonicalizes version two records so unknown payload fields cannot persist
   });
 
   assert.deepEqual(readAnonymousWflSession(storage, 1000), {
-    version: 2,
+    version: 3,
     restaurantIds: ['one'],
-    zipCode: '78701',
     expiresAt: 2000,
   });
+  assert.equal(storage.getItem(WFL_ANONYMOUS_SESSION_KEY).includes('78701'), false);
   assert.equal(storage.getItem(WFL_ANONYMOUS_SESSION_KEY).includes('latitude'), false);
   assert.equal(storage.getItem(WFL_ANONYMOUS_SESSION_KEY).includes('Full payload'), false);
 });
@@ -87,11 +87,11 @@ test('migrates legacy full objects while discarding coordinates and payload fiel
   });
 
   assert.deepEqual(readAnonymousWflSession(storage, 2000), {
-    version: 2,
+    version: 3,
     restaurantIds: ['one', 'two'],
-    zipCode: '78701',
     expiresAt: 2000 + WFL_ANONYMOUS_SESSION_TTL_MS,
   });
+  assert.equal(storage.getItem(WFL_ANONYMOUS_SESSION_KEY).includes('78701'), false);
   assert.equal(storage.getItem(WFL_ANONYMOUS_SESSION_KEY).includes('latitude'), false);
   assert.equal(storage.getItem(WFL_ANONYMOUS_SESSION_KEY).includes('name'), false);
 });
