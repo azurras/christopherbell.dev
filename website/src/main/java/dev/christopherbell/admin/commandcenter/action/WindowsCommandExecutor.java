@@ -7,7 +7,6 @@ import java.util.function.BooleanSupplier;
 
 /** Launches fixed Windows commands selected exclusively by an allowlisted enum. */
 public class WindowsCommandExecutor implements CommandExecutor {
-  private static final java.time.Duration CANCEL_TIMEOUT = java.time.Duration.ofSeconds(5);
   private final CommandCenterProperties properties;
   private final BooleanSupplier windowsHost;
   private final CommandRunner commandRunner;
@@ -34,17 +33,14 @@ public class WindowsCommandExecutor implements CommandExecutor {
     if (!windowsHost.getAsBoolean()) {
       throw new IOException("Fixed host actions require a Windows host.");
     }
-    var timeout = action == CommandCenterActionType.CANCEL_PENDING_ACTION
-        ? CANCEL_TIMEOUT : java.time.Duration.ZERO;
+    var timeout = properties.getActions().getCommandResultTimeout();
     var result = commandRunner.run(commandFor(action), timeout);
-    if (action == CommandCenterActionType.CANCEL_PENDING_ACTION) {
-      if (!result.completed()) {
-        throw new IOException("Fixed Windows cancellation timed out.");
-      }
-      if (result.exitCode() != 0) {
-        throw new IOException(
-            "Fixed Windows cancellation failed with exit code " + result.exitCode() + ".");
-      }
+    if (!result.completed()) {
+      throw new IOException("Fixed Windows action timed out.");
+    }
+    if (result.exitCode() != 0) {
+      throw new IOException(
+          "Fixed Windows action failed with exit code " + result.exitCode() + ".");
     }
   }
 
@@ -54,14 +50,18 @@ public class WindowsCommandExecutor implements CommandExecutor {
     return switch (action) {
       case RESTART_SITE -> List.of(actions.getWinSwExecutable().toString(), "restart");
       case RESTART_COMPUTER -> List.of(
-          actions.getShutdownExecutable().toString(), "/r", "/t", "60",
+          actions.getShutdownExecutable().toString(), "/r", "/t", powerDelaySeconds(actions),
           "/d", "p:0:0", "/c", "christopherbell.dev admin command center");
       case SHUTDOWN_COMPUTER -> List.of(
-          actions.getShutdownExecutable().toString(), "/s", "/t", "60",
+          actions.getShutdownExecutable().toString(), "/s", "/t", powerDelaySeconds(actions),
           "/d", "p:0:0", "/c", "christopherbell.dev admin command center");
       case CANCEL_PENDING_ACTION ->
           List.of(actions.getShutdownExecutable().toString(), "/a");
     };
+  }
+
+  private static String powerDelaySeconds(CommandCenterProperties.Actions actions) {
+    return Long.toString(actions.getPowerDelay().toSeconds());
   }
 
   private static boolean isWindowsHost() {
@@ -72,9 +72,6 @@ public class WindowsCommandExecutor implements CommandExecutor {
   private static CommandResult runCommand(List<String> command, java.time.Duration timeout)
       throws IOException {
     var process = new ProcessBuilder(command).start();
-    if (timeout.isZero()) {
-      return new CommandResult(true, 0);
-    }
     try {
       if (!process.waitFor(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS)) {
         process.destroyForcibly();
@@ -83,7 +80,7 @@ public class WindowsCommandExecutor implements CommandExecutor {
       return new CommandResult(true, process.exitValue());
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
-      throw new IOException("Interrupted while waiting for fixed Windows cancellation.", exception);
+      throw new IOException("Interrupted while waiting for fixed Windows action.", exception);
     }
   }
 

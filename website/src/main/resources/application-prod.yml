@@ -69,3 +69,4 @@ command-center:
     win-sw-executable: C:/ProgramData/christopherbell.dev/service/ChristopherBellDev.exe
     shutdown-executable: C:/Windows/System32/shutdown.exe
     power-delay: 60s
+    command-result-timeout: 5s

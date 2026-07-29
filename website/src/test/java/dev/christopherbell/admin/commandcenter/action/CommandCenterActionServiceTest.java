@@ -56,6 +56,7 @@ class CommandCenterActionServiceTest {
   private final List<CommandCenterActionType> executed = new ArrayList<>();
   private final CommandExecutor executor = executed::add;
   private final CommandCenterProperties properties = properties();
+  private final InMemoryPendingActionStore pendingActions = new InMemoryPendingActionStore();
   private CommandCenterActionService service;
   private Account actor;
 
@@ -67,7 +68,7 @@ class CommandCenterActionServiceTest {
     when(clientIps.resolveClientIp(request)).thenReturn("203.0.113.9");
     service = new CommandCenterActionService(
         properties, accounts, permissions, activities, clientIps, executor, scheduler,
-        clock, new SecureRandom());
+        pendingActions, clock, new SecureRandom());
   }
 
   @Test
@@ -153,7 +154,7 @@ class CommandCenterActionServiceTest {
         new ArrayList<CommandCenterActionType>());
     var concurrentService = new CommandCenterActionService(
         properties, accounts, permissions, activities, clientIps, concurrentExecutions::add,
-        scheduler, clock, new SecureRandom());
+        scheduler, pendingActions, clock, new SecureRandom());
     var first = concurrentService.createChallenge(RESTART_COMPUTER);
     var second = concurrentService.createChallenge(RESTART_COMPUTER);
     var confirmations = List.of(
@@ -240,15 +241,17 @@ class CommandCenterActionServiceTest {
 
   @Test
   void challengeStorePrunesExpiredEntriesAndCapsPerActorAndTotalSize() throws Exception {
+    properties.getActions().setMaxChallengesPerActor(2);
+    properties.getActions().setMaxChallengesTotal(3);
     service.createChallenge(RESTART_SITE);
     clock.advance(Duration.ofMinutes(2).plusMillis(1));
     service.createChallenge(RESTART_SITE);
     assertThat(storedChallenges(service)).hasSize(1);
 
-    for (int challenge = 0; challenge < 20; challenge++) {
+    for (int challenge = 0; challenge < 4; challenge++) {
       service.createChallenge(RESTART_SITE);
     }
-    assertThat(storedChallenges(service).size()).isLessThanOrEqualTo(8);
+    assertThat(storedChallenges(service).size()).isLessThanOrEqualTo(2);
 
     var currentActor = new java.util.concurrent.atomic.AtomicReference<>("bounded-admin-0");
     when(permissions.getSelfId()).thenAnswer(ignored -> currentActor.get());
@@ -260,12 +263,12 @@ class CommandCenterActionServiceTest {
     });
     var boundedService = new CommandCenterActionService(
         properties, accounts, permissions, activities, clientIps, executor, scheduler,
-        clock, new SecureRandom());
-    for (int accountIndex = 0; accountIndex < 65; accountIndex++) {
+        pendingActions, clock, new SecureRandom());
+    for (int accountIndex = 0; accountIndex < 4; accountIndex++) {
       currentActor.set("bounded-admin-" + accountIndex);
       boundedService.createChallenge(RESTART_SITE);
     }
-    assertThat(storedChallenges(boundedService).size()).isLessThanOrEqualTo(64);
+    assertThat(storedChallenges(boundedService).size()).isLessThanOrEqualTo(3);
   }
 
   @Test
@@ -404,25 +407,24 @@ class CommandCenterActionServiceTest {
   }
 
   @Test
-  void invalidChallengeTypeAndCancelWithoutPendingActionAreAudited() throws Exception {
+  void invalidChallengeTypeAndIdempotentCancelWithoutPendingActionAreAudited() throws Exception {
     assertThatThrownBy(() -> service.createChallenge(
         CommandCenterActionType.CANCEL_PENDING_ACTION, request))
         .isInstanceOf(InvalidRequestException.class);
-    assertThatThrownBy(() -> service.cancel(request))
-        .isInstanceOf(InvalidRequestException.class);
+    assertThat(service.cancel(request).accepted()).isTrue();
 
     verify(activities).recordForActor(
         eq("admin-1"), eq("admin"), eq("COMMAND_CENTER_CHALLENGE_REJECTED"),
         eq("command-center"), eq("CANCEL_PENDING_ACTION"), eq("CANCEL_PENDING_ACTION"),
         any(), any());
     verify(activities).recordForActor(
-        eq("admin-1"), eq("admin"), eq("COMMAND_CENTER_ACTION_REJECTED"),
+        eq("admin-1"), eq("admin"), eq("COMMAND_CENTER_ACTION_ALREADY_CLEAR"),
         eq("command-center"), eq("CANCEL_PENDING_ACTION"), eq("CANCEL_PENDING_ACTION"),
         any(), any());
   }
 
   @Test
-  void powerActionExecuteAtRemainsExactlySixtySecondsDespitePropertyOverride() throws Exception {
+  void powerActionExecuteAtUsesTheConfiguredDelay() throws Exception {
     properties.getActions().setPowerActionsEnabled(true);
     properties.getActions().setPowerDelay(Duration.ofSeconds(5));
     var challenge = service.createChallenge(RESTART_COMPUTER);
@@ -430,7 +432,7 @@ class CommandCenterActionServiceTest {
     var result = execute(
         challenge.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER");
 
-    assertThat(result.executeAt()).isEqualTo(NOW.plusSeconds(60));
+    assertThat(result.executeAt()).isEqualTo(NOW.plusSeconds(5));
   }
 
   @Test
@@ -515,6 +517,14 @@ class CommandCenterActionServiceTest {
     assertThat(service.pendingAction()).isEmpty();
     assertThat(executed).containsExactly(
         SHUTDOWN_COMPUTER, CommandCenterActionType.CANCEL_PENDING_ACTION);
+
+    assertThat(service.cancel(request).accepted()).isTrue();
+    assertThat(executed).containsExactly(
+        SHUTDOWN_COMPUTER, CommandCenterActionType.CANCEL_PENDING_ACTION);
+    verify(activities).recordForActor(
+        eq("admin-1"), eq("admin"), eq("COMMAND_CENTER_ACTION_ALREADY_CLEAR"),
+        eq("command-center"), eq("CANCEL_PENDING_ACTION"), eq("CANCEL_PENDING_ACTION"),
+        any(), any());
   }
 
   @Test
@@ -529,7 +539,7 @@ class CommandCenterActionServiceTest {
     };
     var retryableService = new CommandCenterActionService(
         properties, accounts, permissions, activities, clientIps, retryableExecutor, scheduler,
-        clock, new SecureRandom());
+        pendingActions, clock, new SecureRandom());
     var challenge = retryableService.createChallenge(SHUTDOWN_COMPUTER);
     retryableService.execute(
         new ActionConfirmation(
@@ -550,7 +560,7 @@ class CommandCenterActionServiceTest {
     var orderedExecutor = mock(CommandExecutor.class);
     var orderedService = new CommandCenterActionService(
         properties, accounts, permissions, activities, clientIps, orderedExecutor, scheduler,
-        clock, new SecureRandom());
+        pendingActions, clock, new SecureRandom());
     var challenge = orderedService.createChallenge(SHUTDOWN_COMPUTER);
     orderedService.execute(new ActionConfirmation(
         challenge.id(), SHUTDOWN_COMPUTER, PASSWORD, "SHUTDOWN COMPUTER"), request);
@@ -570,7 +580,7 @@ class CommandCenterActionServiceTest {
     var orderedExecutor = mock(CommandExecutor.class);
     var orderedService = new CommandCenterActionService(
         properties, accounts, permissions, activities, clientIps, orderedExecutor, scheduler,
-        clock, new SecureRandom());
+        pendingActions, clock, new SecureRandom());
     var challenge = orderedService.createChallenge(SHUTDOWN_COMPUTER);
     orderedService.execute(new ActionConfirmation(
         challenge.id(), SHUTDOWN_COMPUTER, PASSWORD, "SHUTDOWN COMPUTER"), request);
@@ -618,7 +628,7 @@ class CommandCenterActionServiceTest {
     };
     var serializedService = new CommandCenterActionService(
         properties, accounts, permissions, activities, clientIps, blockingExecutor, scheduler,
-        clock, new SecureRandom());
+        pendingActions, clock, new SecureRandom());
     var challenge = serializedService.createChallenge(RESTART_COMPUTER);
 
     Thread.startVirtualThread(() -> {
@@ -659,7 +669,7 @@ class CommandCenterActionServiceTest {
     };
     var failingService = new CommandCenterActionService(
         properties, accounts, permissions, activities, clientIps, failingExecutor, scheduler,
-        clock, new SecureRandom());
+        pendingActions, clock, new SecureRandom());
     var challenge = failingService.createChallenge(RESTART_COMPUTER);
 
     assertThatThrownBy(() -> failingService.execute(
@@ -703,6 +713,23 @@ class CommandCenterActionServiceTest {
     assertThat(service.pendingAction()).get()
         .extracting("action")
         .isEqualTo("RESTART_COMPUTER");
+  }
+
+  @Test
+  void pendingPowerActionSurvivesServiceRestartUntilItsDeadline() throws Exception {
+    properties.getActions().setPowerDelay(Duration.ofSeconds(5));
+    var challenge = service.createChallenge(RESTART_COMPUTER);
+    execute(challenge.id(), RESTART_COMPUTER, PASSWORD, "RESTART COMPUTER");
+
+    var restartedService = new CommandCenterActionService(
+        properties, accounts, permissions, activities, clientIps, executor, scheduler,
+        pendingActions, clock, new SecureRandom());
+
+    assertThat(restartedService.pendingAction()).get()
+        .extracting("action", "executeAt")
+        .containsExactly("RESTART_COMPUTER", NOW.plusSeconds(5));
+    clock.advance(Duration.ofSeconds(5));
+    assertThat(restartedService.pendingAction()).isEmpty();
   }
 
   @Test
@@ -805,6 +832,42 @@ class CommandCenterActionServiceTest {
     properties.getActions().setPowerDelay(Duration.ofSeconds(60));
     properties.getActions().setPowerActionsEnabled(true);
     return properties;
+  }
+
+  private static final class InMemoryPendingActionStore implements PendingActionStore {
+    private Reservation reservation;
+
+    @Override
+    public synchronized boolean reserve(Reservation candidate, Instant now) {
+      reconcile(now);
+      if (reservation != null) {
+        return false;
+      }
+      reservation = candidate;
+      return true;
+    }
+
+    @Override
+    public synchronized Optional<Reservation> active(Instant now) {
+      reconcile(now);
+      return Optional.ofNullable(reservation);
+    }
+
+    @Override
+    public synchronized boolean clear(Reservation expected) {
+      if (!expected.equals(reservation)) {
+        return false;
+      }
+      reservation = null;
+      return true;
+    }
+
+    @Override
+    public synchronized void reconcile(Instant now) {
+      if (reservation != null && !now.isBefore(reservation.executeAt())) {
+        reservation = null;
+      }
+    }
   }
 
   private static final class MutableClock extends Clock {

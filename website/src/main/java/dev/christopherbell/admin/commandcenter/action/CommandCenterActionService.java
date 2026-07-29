@@ -7,6 +7,7 @@ import dev.christopherbell.account.model.Role;
 import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.admin.commandcenter.CommandCenterProperties;
 import dev.christopherbell.admin.commandcenter.model.CommandCenterSnapshot.PendingAction;
+import dev.christopherbell.admin.commandcenter.action.PendingActionStore.Reservation;
 import dev.christopherbell.configuration.ClientIpResolver;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.security.PasswordUtil;
@@ -24,7 +25,6 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -36,9 +36,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class CommandCenterActionService {
   private static final Duration WEBSITE_RESTART_RESPONSE_GRACE = Duration.ofSeconds(2);
-  private static final Duration MACHINE_POWER_DELAY = Duration.ofSeconds(60);
-  private static final int MAX_CHALLENGES_PER_ACTOR = 8;
-  private static final int MAX_CHALLENGES_TOTAL = 64;
 
   private final CommandCenterProperties properties;
   private final AccountRepository accountRepository;
@@ -47,12 +44,12 @@ public class CommandCenterActionService {
   private final ClientIpResolver clientIpResolver;
   private final CommandExecutor commandExecutor;
   private final TaskScheduler scheduler;
+  private final PendingActionStore pendingActions;
   private final Clock clock;
   private final SecureRandom secureRandom;
   private final ConcurrentHashMap<String, StoredChallenge> challenges = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<String, ArrayDeque<Instant>> failedAttempts = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<ActionKey, Instant> acceptedActions = new ConcurrentHashMap<>();
-  private final AtomicReference<PendingAction> pendingAction = new AtomicReference<>();
   private final Object actionStateLock = new Object();
   private final Object challengeStoreLock = new Object();
 
@@ -65,9 +62,10 @@ public class CommandCenterActionService {
       ClientIpResolver clientIpResolver,
       CommandExecutor commandExecutor,
       @Qualifier("commandCenterActionScheduler") TaskScheduler scheduler,
+      PendingActionStore pendingActions,
       Clock clock) {
     this(properties, accountRepository, permissionService, adminActivityService, clientIpResolver,
-        commandExecutor, scheduler, clock, new SecureRandom());
+        commandExecutor, scheduler, pendingActions, clock, new SecureRandom());
   }
 
   CommandCenterActionService(
@@ -78,6 +76,7 @@ public class CommandCenterActionService {
       ClientIpResolver clientIpResolver,
       CommandExecutor commandExecutor,
       TaskScheduler scheduler,
+      PendingActionStore pendingActions,
       Clock clock,
       SecureRandom secureRandom) {
     this.properties = properties;
@@ -87,6 +86,7 @@ public class CommandCenterActionService {
     this.clientIpResolver = clientIpResolver;
     this.commandExecutor = commandExecutor;
     this.scheduler = scheduler;
+    this.pendingActions = pendingActions;
     this.clock = clock;
     this.secureRandom = secureRandom;
   }
@@ -152,7 +152,7 @@ public class CommandCenterActionService {
 
     if (isPowerAction(confirmation.action())) {
       synchronized (actionStateLock) {
-        PendingAction acceptedPendingAction;
+        Reservation acceptedPendingAction;
         try {
           acceptedPendingAction = acceptActionState(
               actor.getId(), confirmation.action(), now, executeAt);
@@ -198,16 +198,16 @@ public class CommandCenterActionService {
     var actor = requireCurrentAdmin();
     var clientIp = clientIpResolver.resolveClientIp(servletRequest);
     synchronized (actionStateLock) {
-      var current = pendingAction.get();
-      if (current == null || !current.cancellable()
-          || !clock.instant().isBefore(current.executeAt())) {
-        auditRejection(
-            actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp, "no-pending-action");
-        throw new InvalidRequestException("There is no cancellable pending action.");
+      var current = pendingActions.active(clock.instant()).orElse(null);
+      if (current == null) {
+        var acceptedAt = clock.instant();
+        audit(actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp, "already-clear");
+        return new ActionResult(
+            CommandCenterActionType.CANCEL_PENDING_ACTION, true, acceptedAt, acceptedAt);
       }
       audit(actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp, "accepted");
       executeNow(actor, CommandCenterActionType.CANCEL_PENDING_ACTION, clientIp);
-      pendingAction.compareAndSet(current, null);
+      pendingActions.clear(current);
       var acceptedAt = clock.instant();
       return new ActionResult(
           CommandCenterActionType.CANCEL_PENDING_ACTION, true, acceptedAt, acceptedAt);
@@ -216,12 +216,7 @@ public class CommandCenterActionService {
 
   /** Returns only the immutable pending power-action snapshot. */
   public Optional<PendingAction> pendingAction() {
-    var current = pendingAction.get();
-    if (current != null && !clock.instant().isBefore(current.executeAt())) {
-      pendingAction.compareAndSet(current, null);
-      current = pendingAction.get();
-    }
-    return Optional.ofNullable(current);
+    return pendingActions.active(clock.instant()).map(Reservation::snapshot);
   }
 
   private void requireEnabled() throws InvalidRequestException {
@@ -310,16 +305,10 @@ public class CommandCenterActionService {
     }
   }
 
-  private PendingAction acceptActionState(
+  private Reservation acceptActionState(
       String actorId, CommandCenterActionType action, Instant acceptedAt, Instant executeAt)
       throws InvalidRequestException {
     synchronized (actionStateLock) {
-      if (isPowerAction(action)) {
-        var current = pendingAction.get();
-        if (current != null && acceptedAt.isBefore(current.executeAt())) {
-          throw new InvalidRequestException("A machine power action is already pending.");
-        }
-      }
       var actionKey = new ActionKey(actorId, action);
       var previousAcceptance = acceptedActions.get(actionKey);
       if (previousAcceptance != null
@@ -327,13 +316,16 @@ public class CommandCenterActionService {
               previousAcceptance.plus(properties.getActions().getCooldown()))) {
         throw new InvalidRequestException("Action is in cooldown.");
       }
-      acceptedActions.put(actionKey, acceptedAt);
       if (!isPowerAction(action)) {
+        acceptedActions.put(actionKey, acceptedAt);
         return null;
       }
-      var acceptedPendingAction = new PendingAction(action.name(), executeAt, true);
-      pendingAction.set(acceptedPendingAction);
-      return acceptedPendingAction;
+      var reservation = new Reservation(action, acceptedAt, executeAt);
+      if (!pendingActions.reserve(reservation, acceptedAt)) {
+        throw new InvalidRequestException("A machine power action is already pending.");
+      }
+      acceptedActions.put(actionKey, acceptedAt);
+      return reservation;
     }
   }
 
@@ -341,14 +333,16 @@ public class CommandCenterActionService {
       String actorId,
       CommandCenterActionType action,
       Instant acceptedAt,
-      PendingAction acceptedPendingAction) {
+      Reservation acceptedPendingAction) {
     acceptedActions.remove(new ActionKey(actorId, action), acceptedAt);
-    pendingAction.compareAndSet(acceptedPendingAction, null);
+    if (acceptedPendingAction != null) {
+      pendingActions.clear(acceptedPendingAction);
+    }
   }
 
   private Instant executionTime(CommandCenterActionType action, Instant now) {
     if (isPowerAction(action)) {
-      return now.plus(MACHINE_POWER_DELAY);
+      return now.plus(properties.getActions().getPowerDelay());
     }
     return now.plus(WEBSITE_RESTART_RESPONSE_GRACE);
   }
@@ -452,13 +446,13 @@ public class CommandCenterActionService {
   private void evictOldestChallengesForActor(String actorId) {
     while (challenges.values().stream()
         .filter(challenge -> challenge.actorId().equals(actorId))
-        .count() >= MAX_CHALLENGES_PER_ACTOR) {
+        .count() >= properties.getActions().getMaxChallengesPerActor()) {
       removeOldestChallenge(actorId);
     }
   }
 
   private void evictOldestChallengesToTotalBound() {
-    while (challenges.size() >= MAX_CHALLENGES_TOTAL) {
+    while (challenges.size() >= properties.getActions().getMaxChallengesTotal()) {
       removeOldestChallenge(null);
     }
   }

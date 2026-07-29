@@ -8,8 +8,14 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.env.MutablePropertySources;
@@ -23,6 +29,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 class CommandCenterPropertiesTest {
 
   private static final YamlPropertySourceLoader YAML_LOADER = new YamlPropertySourceLoader();
+  private static final Validator VALIDATOR = Validation.buildDefaultValidatorFactory()
+      .getValidator();
 
   @Test
   void createsOneSharedSystemInfoProvider() {
@@ -133,6 +141,122 @@ class CommandCenterPropertiesTest {
         Path.of("C:/ProgramData/christopherbell.dev/config/command-center-sensors"));
   }
 
+  @Test
+  void invalidPortFailsConfigurationBindingAtStartup() {
+    new ApplicationContextRunner()
+        .withUserConfiguration(PropertiesConfiguration.class)
+        .withPropertyValues("command-center.production-port=0")
+        .run(context -> {
+          assertThat(context).hasFailed();
+          assertThat(context.getStartupFailure())
+              .rootCause()
+              .hasMessageContaining("productionPort")
+              .hasMessageContaining("command-center.production-port");
+        });
+  }
+
+  @Test
+  void validatesEveryScalarConfigurationCategory() {
+    assertViolation(properties -> properties.setSampleInterval(Duration.ZERO),
+        "sampleInterval");
+    assertViolation(properties -> properties.setHistoryDuration(Duration.ofDays(2)),
+        "historyDuration");
+    assertViolation(properties -> properties.setProviderTimeout(Duration.ofMillis(99)),
+        "providerTimeout");
+    assertViolation(properties -> properties.setCpuTemperatureRefreshInterval(Duration.ZERO),
+        "cpuTemperatureRefreshInterval");
+    assertViolation(properties -> properties.setCpuTemperatureProcessTimeout(Duration.ZERO),
+        "cpuTemperatureProcessTimeout");
+    assertViolation(properties -> properties.setLogPath(null), "logPath");
+    assertViolation(properties -> properties.setMaxLogLines(0), "maxLogLines");
+    assertViolation(properties -> properties.setMaxLogBytes(1023), "maxLogBytes");
+    assertViolation(properties -> properties.setProductionPort(65_536), "productionPort");
+    assertViolation(properties -> properties.setProductionServiceName(" "),
+        "productionServiceName");
+    assertViolation(properties -> properties.setCommitIdentifier(" "), "commitIdentifier");
+    assertViolation(properties -> properties.setSensorLibraryDirectory(null),
+        "sensorLibraryDirectory");
+  }
+
+  @Test
+  void cascadesActionAndThresholdValidation() {
+    assertViolation(properties -> properties.getActions().setMode(null), "actions.mode");
+    assertViolation(properties -> properties.getActions().setChallengeTtl(Duration.ofSeconds(4)),
+        "actions.challengeTtl");
+    assertViolation(properties -> properties.getActions().setCooldown(Duration.ZERO),
+        "actions.cooldown");
+    assertViolation(properties -> properties.getActions().setPowerDelay(Duration.ofSeconds(601)),
+        "actions.powerDelay");
+    assertViolation(properties -> properties.getActions().setCommandResultTimeout(
+        Duration.ofSeconds(31)), "actions.commandResultTimeout");
+    assertViolation(properties -> properties.getActions().setFailedAttempts(11),
+        "actions.failedAttempts");
+    assertViolation(properties -> properties.getActions().setFailedAttemptWindow(
+        Duration.ofSeconds(59)), "actions.failedAttemptWindow");
+    assertViolation(properties -> properties.getActions().setMaxChallengesPerActor(0),
+        "actions.maxChallengesPerActor");
+    assertViolation(properties -> properties.getActions().setMaxChallengesTotal(1025),
+        "actions.maxChallengesTotal");
+    assertViolation(properties -> properties.getThresholds().setCpuWarningPercent(101),
+        "thresholds.cpuWarningPercent");
+    assertViolation(properties -> properties.getThresholds()
+        .setCpuTemperatureWarningCelsius(151), "thresholds.cpuTemperatureWarningCelsius");
+    assertViolation(properties -> properties.getThresholds()
+        .setGpuTemperatureWarningCelsius(0), "thresholds.gpuTemperatureWarningCelsius");
+    assertViolation(properties -> properties.getThresholds().setDiskFreeWarningPercent(-1),
+        "thresholds.diskFreeWarningPercent");
+  }
+
+  @Test
+  void rejectsInvalidCrossFieldRelationshipsAndWindowsPaths() {
+    assertViolation(properties -> properties.setHistoryDuration(Duration.ofSeconds(4)),
+        "historyWindowValid");
+    assertViolation(properties -> properties.setProviderTimeout(Duration.ofSeconds(6)),
+        "providerTimeoutWithinSampleInterval");
+    assertViolation(properties -> properties.setCpuTemperatureProcessTimeout(
+        Duration.ofSeconds(31)), "cpuProcessTimeoutWithinRefreshInterval");
+    assertViolation(properties -> properties.getActions().setPowerDelay(
+        Duration.ofMillis(1500)), "actions.powerDelayUsesWholeSeconds");
+    assertViolation(properties -> {
+      properties.getActions().setMaxChallengesPerActor(9);
+      properties.getActions().setMaxChallengesTotal(8);
+    }, "actions.challengeLimitsOrdered");
+    assertViolation(properties -> {
+      properties.getActions().setMode(CommandCenterProperties.ActionMode.WINDOWS);
+      properties.getActions().setWinSwExecutable(Path.of("service.exe"));
+      properties.getActions().setShutdownExecutable(Path.of("shutdown.exe"));
+    }, "actions.windowsExecutablePathsAbsolute");
+  }
+
+  @Test
+  void shippedProfilesAndSimulatedRelativeDefaultsAreValid() throws IOException {
+    assertThat(VALIDATOR.validate(new CommandCenterProperties())).isEmpty();
+    assertThat(VALIDATOR.validate(bindProfile("local"))).isEmpty();
+    assertThat(VALIDATOR.validate(bindProfile("prod"))).isEmpty();
+  }
+
+  @Test
+  void recognizesFixedWindowsDrivePathsIndependentlyOfTheBuildHost() {
+    assertThat(CommandCenterProperties.Actions.isAbsoluteExecutablePath(
+        "C:/ProgramData/christopherbell.dev/service/ChristopherBellDev.exe")).isTrue();
+    assertThat(CommandCenterProperties.Actions.isAbsoluteExecutablePath(
+        "C:\\Windows\\System32\\shutdown.exe")).isTrue();
+    assertThat(CommandCenterProperties.Actions.isAbsoluteExecutablePath("shutdown.exe")).isFalse();
+    assertThat(CommandCenterProperties.Actions.isAbsoluteExecutablePath("C:shutdown.exe")).isFalse();
+  }
+
+  private static void assertViolation(
+      Consumer<CommandCenterProperties> mutation, String expectedPath) {
+    var properties = new CommandCenterProperties();
+    mutation.accept(properties);
+
+    Set<ConstraintViolation<CommandCenterProperties>> violations = VALIDATOR.validate(properties);
+
+    assertThat(violations)
+        .extracting(violation -> violation.getPropertyPath().toString())
+        .contains(expectedPath);
+  }
+
   private CommandCenterProperties bindProfile(String profile) throws IOException {
     StandardEnvironment environment = new StandardEnvironment();
     MutablePropertySources sources = environment.getPropertySources();
@@ -153,4 +277,8 @@ class CommandCenterPropertiesTest {
       sources.addFirst(propertySources.get(index));
     }
   }
+
+  @Configuration(proxyBeanMethods = false)
+  @EnableConfigurationProperties(CommandCenterProperties.class)
+  static class PropertiesConfiguration {}
 }
