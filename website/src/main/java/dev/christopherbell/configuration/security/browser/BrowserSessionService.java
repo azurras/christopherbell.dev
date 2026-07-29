@@ -23,18 +23,22 @@ public class BrowserSessionService {
   static final Duration ABSOLUTE_LIFETIME = Duration.ofDays(30);
   static final Duration ROTATION_INTERVAL = Duration.ofDays(1);
   static final Duration ROTATION_OVERLAP = Duration.ofMinutes(2);
+  static final Duration ACTIVITY_WRITE_INTERVAL = Duration.ofMinutes(5);
   private static final int TOKEN_BYTES = 32;
 
   private final BrowserSessionRepository sessions;
+  private final BrowserSessionActivityStore activity;
   private final AccountRepository accounts;
   private final Clock clock;
   private final SecureRandom random = new SecureRandom();
 
   public BrowserSessionService(
       BrowserSessionRepository sessions,
+      BrowserSessionActivityStore activity,
       AccountRepository accounts,
       Clock clock) {
     this.sessions = sessions;
+    this.activity = activity;
     this.accounts = accounts;
     this.clock = clock;
   }
@@ -80,28 +84,43 @@ public class BrowserSessionService {
       return Optional.empty();
     }
 
-    if (session.getAccountId() == null || session.getAccountId().isBlank()
-        || session.getRole() == null
-        || session.getAccountSecurityFingerprint() == null
-        || session.getAccountSecurityFingerprint().isBlank()) {
+    if (!completeSnapshot(session)) {
       sessions.delete(session);
       return Optional.empty();
     }
 
     Optional<String> rotatedToken = Optional.empty();
     if (interactive) {
-      session.setLastSeenOn(now);
-      session.setIdleExpiresOn(earlier(now.plus(IDLE_LIFETIME), session.getAbsoluteExpiresOn()));
-      if (!now.isBefore(session.getRotatedOn().plus(ROTATION_INTERVAL))) {
+      var idleExpiresOn = earlier(now.plus(IDLE_LIFETIME), session.getAbsoluteExpiresOn());
+      if (!now.isBefore(session.getRotatedOn().plus(ROTATION_INTERVAL))
+          && constantTimeEquals(session.getTokenHash(), hash(parsed.get().secret()))) {
         var rotated = credential(session.getId());
-        session.setPreviousTokenHash(session.getTokenHash());
-        session.setPreviousTokenExpiresOn(earlier(
-            now.plus(ROTATION_OVERLAP), session.getAbsoluteExpiresOn()));
-        session.setTokenHash(hash(rotated.secret()));
-        session.setRotatedOn(now);
+        var updated = activity.rotate(
+            session.getId(),
+            session.getTokenHash(),
+            session.getRotatedOn(),
+            hash(rotated.secret()),
+            now,
+            earlier(now.plus(ROTATION_OVERLAP), session.getAbsoluteExpiresOn()),
+            idleExpiresOn);
+        if (updated.isEmpty()) return Optional.empty();
+        session = updated.orElseThrow();
+        if (!validCredential(session, parsed.get().secret(), now)
+            || expired(session, now)
+            || !completeSnapshot(session)) {
+          return Optional.empty();
+        }
         rotatedToken = Optional.of(rotated.raw());
+      } else if (!now.isBefore(session.getLastSeenOn().plus(ACTIVITY_WRITE_INTERVAL))) {
+        var updated = activity.touch(session.getId(), session.getLastSeenOn(), now, idleExpiresOn);
+        if (updated.isEmpty()) return Optional.empty();
+        session = updated.orElseThrow();
+        if (!validCredential(session, parsed.get().secret(), now)
+            || expired(session, now)
+            || !completeSnapshot(session)) {
+          return Optional.empty();
+        }
       }
-      sessions.save(session);
     }
     return Optional.of(new AuthenticatedBrowserSession(
         session.getAccountId(), session.getRole(), rotatedToken));
@@ -119,6 +138,14 @@ public class BrowserSessionService {
 
   private boolean isActive(Account account) {
     return AccountStatus.ACTIVE.equals(account.getStatus());
+  }
+
+  private boolean completeSnapshot(BrowserSession session) {
+    return session.getAccountId() != null
+        && !session.getAccountId().isBlank()
+        && session.getRole() != null
+        && session.getAccountSecurityFingerprint() != null
+        && !session.getAccountSecurityFingerprint().isBlank();
   }
 
   private boolean expired(BrowserSession session, Instant now) {

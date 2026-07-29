@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.configuration.security.browser.BrowserSessionActivityStore;
 import dev.christopherbell.configuration.security.browser.BrowserSessionRepository;
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
 import jakarta.servlet.DispatcherType;
@@ -44,6 +45,7 @@ class AsyncDispatcherSecurityIntegrationTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private AccountRepository accounts;
   @MockitoBean private BrowserSessionRepository browserSessions;
+  @MockitoBean private BrowserSessionActivityStore browserSessionActivity;
 
   @Test
   @WithAnonymousUser

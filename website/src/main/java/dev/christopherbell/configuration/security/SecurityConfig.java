@@ -7,6 +7,7 @@ import dev.christopherbell.configuration.RequestSizeProperties;
 import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.configuration.security.browser.BrowserSessionRepository;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
+import dev.christopherbell.configuration.security.browser.BrowserSessionActivityStore;
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.configuration.filter.ApiErrorResponseWriter;
@@ -245,8 +246,9 @@ public class SecurityConfig {
   @Bean
   public BrowserSessionService browserSessionService(
       BrowserSessionRepository browserSessions,
+      BrowserSessionActivityStore activity,
       AccountRepository accounts) {
-    return new BrowserSessionService(browserSessions, accounts, Clock.systemUTC());
+    return new BrowserSessionService(browserSessions, activity, accounts, Clock.systemUTC());
   }
 
   public static boolean hasExplicitBearerToken(jakarta.servlet.http.HttpServletRequest request) {

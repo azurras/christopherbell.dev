@@ -6,6 +6,9 @@ Owns Spring Security wiring and request authentication infrastructure.
 
 - `SecurityConfig` defines public routes, method security, the filter chain, and security-related beans.
 - `JwtAuthenticationFilter` reads bearer tokens, validates them, and populates the Spring Security context.
+- Browser-session activity is coalesced to at most one conditional Mongo update per five-minute
+  window. Due credential rotation is an atomic compare-and-set; a race loser or persistence
+  failure is rejected rather than reloading a session into a successful authentication.
 - `StaticAssetRequestMatcher` bypasses credential handling only for the listed GET favicon, CSS,
   image, JavaScript, vendor, pinned Bootstrap WebJar, and release-versioned asset namespaces.
   Shared-folder worker and media routes remain authentication boundaries.

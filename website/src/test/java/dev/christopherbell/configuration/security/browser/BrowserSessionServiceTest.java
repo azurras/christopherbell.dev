@@ -4,8 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
@@ -40,6 +45,35 @@ class BrowserSessionServiceTest {
   }
 
   @Test
+  void interactiveUseInsideActivityWindowDoesNotWrite() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.activity);
+
+    var authenticated = fixture.at(START.plus(Duration.ofMinutes(4)).plusSeconds(59))
+        .authenticate(token, true);
+
+    assertTrue(authenticated.isPresent());
+    verifyNoInteractions(fixture.activity);
+    verify(fixture.sessions, never()).save(any(BrowserSession.class));
+  }
+
+  @Test
+  void dueInteractiveUseTouchesObservedSessionWithoutSavingTheDocument() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.activity);
+    Instant touchTime = START.plus(Duration.ofMinutes(5));
+
+    var authenticated = fixture.at(touchTime).authenticate(token, true);
+
+    assertTrue(authenticated.isPresent());
+    verify(fixture.activity).touch(
+        fixture.session().getId(), START, touchTime, touchTime.plus(BrowserSessionService.IDLE_LIFETIME));
+    verify(fixture.sessions, never()).save(any(BrowserSession.class));
+  }
+
+  @Test
   void backgroundUseDoesNotRenewAndSessionExpiresAtSevenIdleDays() {
     var fixture = new Fixture(START);
     String token = fixture.create();
@@ -70,10 +104,42 @@ class BrowserSessionServiceTest {
 
     assertTrue(rotated.rotatedToken().isPresent());
     assertNotEquals(original, rotated.rotatedToken().orElseThrow());
-    assertTrue(fixture.at(START.plus(Duration.ofDays(2)).plusSeconds(30))
+    assertTrue(fixture.at(START.plus(Duration.ofDays(2)).plus(BrowserSessionService.ROTATION_OVERLAP)
+            .minusNanos(1))
         .authenticate(original, false).isPresent());
-    assertFalse(fixture.at(START.plus(Duration.ofDays(2)).plus(Duration.ofMinutes(3)))
+    assertFalse(fixture.at(START.plus(Duration.ofDays(2)).plus(BrowserSessionService.ROTATION_OVERLAP))
         .authenticate(original, false).isPresent());
+  }
+
+  @Test
+  void lostRotationCompareAndSetRejectsAuthenticationWithoutSaving() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    fixture.rejectRotation = true;
+    org.mockito.Mockito.clearInvocations(fixture.sessions);
+
+    var authenticated = fixture.at(START.plus(BrowserSessionService.ROTATION_INTERVAL))
+        .authenticate(token, true);
+
+    assertFalse(authenticated.isPresent());
+    verify(fixture.activity).rotate(
+        eq(fixture.session().getId()), anyString(), eq(START), anyString(),
+        eq(START.plus(BrowserSessionService.ROTATION_INTERVAL)), any(), any());
+    verify(fixture.sessions, never()).save(any(BrowserSession.class));
+  }
+
+  @Test
+  void revocationThatWinsBeforeRotationRejectsAuthentication() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    fixture.revokeDuringRotation = true;
+    org.mockito.Mockito.clearInvocations(fixture.sessions);
+
+    var authenticated = fixture.at(START.plus(BrowserSessionService.ROTATION_INTERVAL))
+        .authenticate(token, true);
+
+    assertFalse(authenticated.isPresent());
+    verify(fixture.sessions, never()).save(any(BrowserSession.class));
   }
 
   @Test
@@ -123,6 +189,7 @@ class BrowserSessionServiceTest {
 
   private static final class Fixture {
     private final BrowserSessionRepository sessions = mock(BrowserSessionRepository.class);
+    private final BrowserSessionActivityStore activity = mock(BrowserSessionActivityStore.class);
     private final AccountRepository accounts = mock(AccountRepository.class);
     private final ArgumentCaptor<BrowserSession> saved = ArgumentCaptor.forClass(BrowserSession.class);
     private final Account account = Account.builder()
@@ -133,18 +200,43 @@ class BrowserSessionServiceTest {
         .status(AccountStatus.ACTIVE)
         .build();
     private Instant now;
+    private boolean revoked;
+    private boolean rejectRotation;
+    private boolean revokeDuringRotation;
 
     private Fixture(Instant now) {
       this.now = now;
       when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
       when(sessions.save(saved.capture())).thenAnswer(invocation -> invocation.getArgument(0));
       when(sessions.findById(anyString())).thenAnswer(invocation -> {
-        if (saved.getAllValues().isEmpty()) return Optional.empty();
+        if (revoked || saved.getAllValues().isEmpty()) return Optional.empty();
         var current = session();
         return current.getId().equals(invocation.getArgument(0))
             ? Optional.of(current)
             : Optional.empty();
       });
+      when(activity.touch(anyString(), any(), any(), any())).thenAnswer(invocation -> {
+        var current = session();
+        current.setLastSeenOn(invocation.getArgument(2));
+        current.setIdleExpiresOn(invocation.getArgument(3));
+        return Optional.of(current);
+      });
+      when(activity.rotate(anyString(), anyString(), any(), anyString(), any(), any(), any()))
+          .thenAnswer(invocation -> {
+            if (revokeDuringRotation) {
+              revoked = true;
+              return Optional.empty();
+            }
+            if (rejectRotation) return Optional.empty();
+            var current = session();
+            current.setPreviousTokenHash(invocation.getArgument(1));
+            current.setPreviousTokenExpiresOn(invocation.getArgument(5));
+            current.setTokenHash(invocation.getArgument(3));
+            current.setRotatedOn(invocation.getArgument(4));
+            current.setLastSeenOn(invocation.getArgument(4));
+            current.setIdleExpiresOn(invocation.getArgument(6));
+            return Optional.of(current);
+          });
     }
 
     private String create() {
@@ -166,7 +258,7 @@ class BrowserSessionServiceTest {
 
     private BrowserSessionService service() {
       return new BrowserSessionService(
-          sessions, accounts, Clock.fixed(now, ZoneOffset.UTC));
+          sessions, activity, accounts, Clock.fixed(now, ZoneOffset.UTC));
     }
   }
 }
