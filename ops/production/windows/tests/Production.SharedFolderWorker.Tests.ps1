@@ -458,7 +458,8 @@ Describe 'retained source and private publication ownership' {
         try {
             { Move-Item -LiteralPath $job.sourcePath -Destination "$($job.sourcePath).old" -ErrorAction Stop } |
                 Should -Throw
-            $staged = Copy-ValidatedMediaSourceToStage -Job $job -OwnedSource $owned
+            $staged = Copy-ValidatedMediaSourceToStage -Job $job -OwnedSource $owned `
+                -GetAvailableFreeSpace { param($path) 200GB }
             try {
                 [IO.File]::ReadAllBytes($staged.Path) | Should -Be ([byte[]](1..32))
                 { Assert-StagedMediaSourceUnchanged -Job $job -StagedSource $staged } |
@@ -814,7 +815,17 @@ while (-not (Test-Path -LiteralPath '$($release.Replace("'", "''"))')) {
 
 Describe 'shared-folder runtime isolation' {
     It 'uses the exact default visible and private roots' {
-        $paths = Get-SharedFolderRuntimePaths
+        $existingDrive = Get-PSDrive -Name A -ErrorAction SilentlyContinue
+        if (-not $existingDrive) {
+            New-PSDrive -Name A -PSProvider FileSystem -Root $TestDrive | Out-Null
+        }
+        try {
+            $paths = Get-SharedFolderRuntimePaths
+        } finally {
+            if (-not $existingDrive) {
+                Remove-PSDrive -Name A
+            }
+        }
 
         $paths.SharedRoot | Should -Be 'A:\Shared'
         $paths.SystemRoot | Should -Be 'A:\Shared-System'
