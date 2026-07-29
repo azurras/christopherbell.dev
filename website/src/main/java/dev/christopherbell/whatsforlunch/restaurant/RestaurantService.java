@@ -21,13 +21,13 @@ import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeCandid
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeGroupPreview;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupePreview;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantInventoryPage;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRating;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantWebsite;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreference;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
@@ -47,6 +47,7 @@ import java.util.Comparator;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -59,6 +60,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -79,6 +82,8 @@ public class RestaurantService {
   private final PermissionService permissionService;
   private final RestaurantMapper restaurantMapper;
   private final RestaurantFavoriteRepository restaurantFavoriteRepository;
+  private final RestaurantDuplicateQueryRepository restaurantDuplicateQueries;
+  private final RestaurantInventoryQueryRepository restaurantInventoryQueries;
   private final RestaurantRatingRepository restaurantRatingRepository;
   private final RestaurantRatingQueryRepository restaurantRatingQueryRepository;
   private final RestaurantRepository restaurantRepository;
@@ -95,7 +100,7 @@ public class RestaurantService {
    */
   public RestaurantDetail createRestaurant(RestaurantCreateRequest request) throws Exception {
     var restaurant = restaurantMapper.toRestaurant(request);
-    restaurant.setWebsite(RestaurantWebsite.validateForWrite(restaurant.getWebsite()));
+    restaurant.setWebsite(RestaurantWebsiteUrlPolicy.requireSafe(restaurant.getWebsite()));
     applyNormalizedName(restaurant);
     ensureRestaurantNameUnique(restaurant.getNormalizedName(), null);
 
@@ -142,9 +147,24 @@ public class RestaurantService {
    * @return a WhatsForLunchResponse containing a list of all existing restaurants
    */
   public List<RestaurantDetail> getRestaurants() {
-    var restaurants = Optional.of(restaurantRepository.findAll())
-        .orElseGet(List::of);
+    var restaurants = restaurantRepository.findAll(PageRequest.of(
+        0,
+        100,
+        Sort.by(Sort.Order.asc("normalizedName"), Sort.Order.asc("_id")))).getContent();
     return toRatedDetails(restaurants);
+  }
+
+  /** Returns one stable searchable admin inventory page. */
+  public RestaurantInventoryPage getRestaurantInventory(
+      String name,
+      String city,
+      String state,
+      String cursor,
+      int size
+  ) {
+    var page = restaurantInventoryQueries.find(name, city, state, cursor, size);
+    return new RestaurantInventoryPage(
+        toRatedDetails(page.items()), page.nextCursor(), page.total());
   }
 
   /**
@@ -493,48 +513,38 @@ public class RestaurantService {
    */
   public RestaurantDedupeResult removeDuplicateNamedRestaurants() {
     log.info("Restaurant duplicate-name cleanup started.");
-    var restaurants = Optional.ofNullable(restaurantRepository.findAll()).orElseGet(List::of);
-    var duplicateGroups = restaurants.stream()
-        .filter(restaurant -> restaurant.getName() != null && !restaurant.getName().isBlank())
-        .collect(Collectors.groupingBy(restaurant -> normalizeRestaurantName(restaurant.getName())))
-        .entrySet()
-        .stream()
-        .filter(entry -> entry.getValue().size() > 1)
-        .toList();
-
     var keptIds = new ArrayList<String>();
     var deletedIds = new ArrayList<String>();
     var updatedSurvivors = 0;
-
-    for (var duplicateGroup : duplicateGroups) {
-      var normalizedName = duplicateGroup.getKey();
-      var group = duplicateGroup.getValue();
-      var survivor = chooseDuplicateSurvivor(group);
-      var duplicates = group.stream()
-          .filter(restaurant -> !restaurant.getId().equals(survivor.getId()))
-          .toList();
-
-      restaurantRepository.deleteAll(duplicates);
-      duplicates.forEach(restaurant -> {
-        deletedIds.add(restaurant.getId());
-        log.info("Deleted duplicate restaurant id: {}, name: {}, city: {}",
-            restaurant.getId(), restaurant.getName(), restaurantCity(restaurant));
-      });
-
-      if (!normalizedName.equals(survivor.getNormalizedName())) {
-        survivor.setNormalizedName(normalizedName);
-        restaurantRepository.save(survivor);
-        updatedSurvivors++;
+    var groupCount = 0;
+    String cursor = null;
+    do {
+      var page = restaurantDuplicateQueries.find(cursor, 100);
+      var groups = groupsFor(page.keys(), page.members());
+      for (var duplicateGroup : groups) {
+        var normalizedName = duplicateGroup.getKey();
+        var group = duplicateGroup.getValue();
+        var survivor = chooseDuplicateSurvivor(group);
+        var duplicates = group.stream()
+            .filter(restaurant -> !restaurant.getId().equals(survivor.getId()))
+            .toList();
+        restaurantRepository.deleteAll(duplicates);
+        duplicates.forEach(restaurant -> deletedIds.add(restaurant.getId()));
+        if (!normalizedName.equals(survivor.getNormalizedName())) {
+          survivor.setNormalizedName(normalizedName);
+          restaurantRepository.save(survivor);
+          updatedSurvivors++;
+        }
+        keptIds.add(survivor.getId());
+        groupCount++;
       }
-      keptIds.add(survivor.getId());
-      log.info("Kept restaurant id: {}, name: {}, city: {}",
-          survivor.getId(), survivor.getName(), restaurantCity(survivor));
-    }
+      cursor = page.nextCursor();
+    } while (cursor != null);
 
     log.info("Restaurant duplicate-name cleanup completed. Duplicate groups: {}, deleted: {}, updated survivors: {}.",
-        duplicateGroups.size(), deletedIds.size(), updatedSurvivors);
+        groupCount, deletedIds.size(), updatedSurvivors);
     return RestaurantDedupeResult.builder()
-        .duplicateGroups(duplicateGroups.size())
+        .duplicateGroups(groupCount)
         .deleted(deletedIds.size())
         .updatedSurvivors(updatedSurvivors)
         .keptRestaurantIds(List.copyOf(keptIds))
@@ -554,11 +564,16 @@ public class RestaurantService {
 
   /** Calculates duplicate groups and stable survivors without mutating data. */
   public RestaurantDedupePreview previewDuplicateNamedRestaurants() {
-    var groups = duplicateRestaurantGroups().stream()
+    return previewDuplicateNamedRestaurants(null, 25);
+  }
+
+  /** Calculates one indexed page of duplicate groups without mutating data. */
+  public RestaurantDedupePreview previewDuplicateNamedRestaurants(String cursor, int size) {
+    var page = restaurantDuplicateQueries.find(cursor, size);
+    var groups = groupsFor(page.keys(), page.members()).stream()
         .map(entry -> toDedupeGroupPreview(entry.getKey(), entry.getValue()))
-        .sorted(Comparator.comparing(RestaurantDedupeGroupPreview::normalizedName))
         .toList();
-    return new RestaurantDedupePreview(groups);
+    return new RestaurantDedupePreview(groups, page.nextCursor());
   }
 
   /** Applies only exact, version-matched duplicate groups after validating every confirmation. */
@@ -566,7 +581,14 @@ public class RestaurantService {
     if (request == null || request.groups().isEmpty()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Duplicate group confirmation is required");
     }
-    var currentGroups = duplicateRestaurantGroups().stream()
+    var confirmedKeys = request.groups().stream()
+        .map(dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeConfirmation::normalizedName)
+        .filter(java.util.Objects::nonNull)
+        .distinct()
+        .toList();
+    var currentGroups = groupsFor(
+        confirmedKeys,
+        restaurantRepository.findByDedupeKeyIn(confirmedKeys)).stream()
         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     var confirmedNames = new java.util.HashSet<String>();
     for (var confirmation : request.groups()) {
@@ -607,12 +629,18 @@ public class RestaurantService {
         .build();
   }
 
-  private List<Map.Entry<String, List<Restaurant>>> duplicateRestaurantGroups() {
-    return Optional.ofNullable(restaurantRepository.findAll()).orElseGet(List::of).stream()
-        .filter(restaurant -> restaurant.getName() != null && !restaurant.getName().isBlank())
-        .collect(Collectors.groupingBy(restaurant -> normalizeRestaurantName(restaurant.getName())))
-        .entrySet()
-        .stream()
+  private List<Map.Entry<String, List<Restaurant>>> groupsFor(
+      List<String> keys,
+      List<Restaurant> members
+  ) {
+    var byKey = Optional.ofNullable(members).orElseGet(List::of).stream()
+        .filter(restaurant -> restaurant.getDedupeKey() != null)
+        .collect(Collectors.groupingBy(
+            Restaurant::getDedupeKey,
+            LinkedHashMap::new,
+            Collectors.toList()));
+    return keys.stream()
+        .map(key -> Map.entry(key, List.copyOf(byKey.getOrDefault(key, List.of()))))
         .filter(entry -> entry.getValue().size() > 1)
         .toList();
   }
@@ -865,7 +893,8 @@ public class RestaurantService {
         .orElseThrow(() -> new ResourceNotFoundException("Restaurant not found: " + request.id()));
 
     var restaurantToUpdate = restaurantMapper.toRestaurant(request);
-    restaurantToUpdate.setWebsite(RestaurantWebsite.validateForWrite(restaurantToUpdate.getWebsite()));
+    restaurantToUpdate.setWebsite(RestaurantWebsiteUrlPolicy.requireSafe(
+        restaurantToUpdate.getWebsite()));
     restaurantToUpdate.setId(existing.getId());
     restaurantToUpdate.setCreatedBy(existing.getCreatedBy());
     restaurantToUpdate.setCreatedOn(existing.getCreatedOn());
@@ -982,8 +1011,9 @@ public class RestaurantService {
     var safeRestaurants = Optional.ofNullable(restaurants).orElseGet(List::of);
     var details = safeRestaurants.stream()
         .map(restaurantMapper::toRestaurantDetail)
-        .map(this::suppressUnsafeWebsite)
         .toList();
+    details.forEach(detail -> detail.setWebsite(
+        RestaurantWebsiteUrlPolicy.safeOrNull(detail.getWebsite())));
     applyRatingSummaries(details);
     return details;
   }
@@ -1240,14 +1270,7 @@ public class RestaurantService {
         && restaurant.getAddress() != null
         && (restaurant.getWebsite() == null
             || restaurant.getWebsite().isBlank()
-            || RestaurantWebsite.safeForDisplay(restaurant.getWebsite()) != null);
-  }
-
-  private RestaurantDetail suppressUnsafeWebsite(RestaurantDetail detail) {
-    if (detail != null) {
-      detail.setWebsite(RestaurantWebsite.safeForDisplay(detail.getWebsite()));
-    }
-    return detail;
+            || RestaurantWebsiteUrlPolicy.safeOrNull(restaurant.getWebsite()) != null);
   }
 
   private boolean mergeImportedRestaurant(
@@ -1488,7 +1511,16 @@ public class RestaurantService {
     if (restaurant == null || restaurant.getName() == null || restaurant.getName().isBlank()) {
       throw new InvalidRequestException("Restaurant name cannot be null or blank.");
     }
-    restaurant.setNormalizedName(normalizeRestaurantName(restaurant.getName()));
+    var normalizedName = normalizeRestaurantName(restaurant.getName());
+    restaurant.setNormalizedName(normalizedName);
+    restaurant.setDedupeKey(normalizedName);
+    var address = restaurant.getAddress();
+    restaurant.setSearchCity(address == null ? "" : normalizeFilterValue(address.getCity()));
+    restaurant.setSearchState(address == null ? "" : normalizeFilterValue(address.getState()));
+  }
+
+  private String normalizeFilterValue(String value) {
+    return nullSafe(value).strip().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
   }
 
   private void ensureRestaurantNameUnique(String normalizedName, String selfId)

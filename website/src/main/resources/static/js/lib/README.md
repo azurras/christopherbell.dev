@@ -10,6 +10,11 @@ Owns reusable browser-side modules that are not tied to one page.
   Box Index history.
 - `util.js` owns auth storage helpers, request headers, JSON response handling,
   formatting, sanitizing, shared mention/URL linking, and small DOM utilities.
+- `safe-http-link.js` validates absolute credential-free HTTP(S) URLs and creates
+  external anchors through DOM properties.
+- `wfl-anonymous-session.js` owns the 30-minute versioned anonymous WFL record.
+  It stores only up to three restaurant IDs and an optional ZIP, migrates the
+  legacy full-payload key, and clears expired or malformed values.
 - `shared-folder-streaming.js` defines the exact shared-folder API scope, request cloning that
   preserves `Range` while attaching the per-client JWT in the service worker, worker readiness,
   logout/401 token cleanup, and actionable 401/403 streaming states. Worker forwarding uses

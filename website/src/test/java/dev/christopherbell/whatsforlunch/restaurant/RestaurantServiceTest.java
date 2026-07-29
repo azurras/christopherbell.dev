@@ -45,6 +45,8 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -75,6 +77,8 @@ public class RestaurantServiceTest {
   @Mock private PermissionService permissionService;
   @Mock private RestaurantMapper restaurantMapper;
   @Mock private RestaurantFavoriteRepository restaurantFavoriteRepository;
+  @Mock private RestaurantDuplicateQueryRepository restaurantDuplicateQueries;
+  @Mock private RestaurantInventoryQueryRepository restaurantInventoryQueries;
   @Mock private RestaurantRatingRepository restaurantRatingRepository;
   @Mock private RestaurantRatingQueryRepository restaurantRatingQueryRepository;
   @Mock private RestaurantRepository restaurantRepository;
@@ -130,7 +134,8 @@ public class RestaurantServiceTest {
     var restaurant = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
     var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
     detail.setWebsite("javascript:alert(1)");
-    when(restaurantRepository.findAll()).thenReturn(List.of(restaurant));
+    when(restaurantRepository.findAll(any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(restaurant)));
     when(restaurantMapper.toRestaurantDetail(restaurant)).thenReturn(detail);
 
     var result = restaurantService.getRestaurants();
@@ -287,7 +292,8 @@ public class RestaurantServiceTest {
     var restaurantDetail1 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
     var restaurantDetail2 = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID_2);
 
-    when(restaurantRepository.findAll()).thenReturn(List.of(restaurant1, restaurant2));
+    when(restaurantRepository.findAll(any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of(restaurant1, restaurant2)));
     when(restaurantMapper.toRestaurantDetail(eq(restaurant1))).thenReturn(restaurantDetail1);
     when(restaurantMapper.toRestaurantDetail(eq(restaurant2))).thenReturn(restaurantDetail2);
 
@@ -296,7 +302,7 @@ public class RestaurantServiceTest {
     assertEquals(2, result.size());
     assertTrue(result.containsAll(List.of(restaurantDetail1, restaurantDetail2)));
 
-    verify(restaurantRepository).findAll();
+    verify(restaurantRepository).findAll(argThat((Pageable page) -> page.getPageSize() == 100));
     verify(restaurantMapper).toRestaurantDetail(eq(restaurant1));
     verify(restaurantMapper).toRestaurantDetail(eq(restaurant2));
     verifyNoMoreInteractions(restaurantMapper, restaurantRepository);
@@ -305,14 +311,15 @@ public class RestaurantServiceTest {
   @Test
   @DisplayName("Returns empty list when repository returns empty list")
   public void testGetRestaurants_whenNoneExist_ReturnsEmptyList() {
-    when(restaurantRepository.findAll()).thenReturn(List.of());
+    when(restaurantRepository.findAll(any(Pageable.class)))
+        .thenReturn(new PageImpl<>(List.of()));
 
     var result = restaurantService.getRestaurants();
 
     assertNotNull(result);
     assertTrue(result.isEmpty());
 
-    verify(restaurantRepository).findAll();
+    verify(restaurantRepository).findAll(argThat((Pageable page) -> page.getPageSize() == 100));
     verifyNoMoreInteractions(restaurantMapper, restaurantRepository);
   }
 
@@ -1052,7 +1059,11 @@ public class RestaurantServiceTest {
   public void testPreviewDuplicateNamedRestaurants_selectsStableSurvivorWithoutDeleting() {
     var laterId = RestaurantStub.getRestaurantStub("b-id");
     var stableId = RestaurantStub.getRestaurantStub("a-id");
-    when(restaurantRepository.findAll()).thenReturn(List.of(laterId, stableId));
+    laterId.setDedupeKey("pflugerville taco house");
+    stableId.setDedupeKey("pflugerville taco house");
+    when(restaurantDuplicateQueries.find(null, 25)).thenReturn(
+        new RestaurantDuplicateQueryRepository.Page(
+            List.of("pflugerville taco house"), null, List.of(laterId, stableId)));
 
     var preview = restaurantService.previewDuplicateNamedRestaurants();
 
@@ -1068,7 +1079,10 @@ public class RestaurantServiceTest {
   public void testApplyDuplicateNamedRestaurants_whenAnyGroupIsStale_DeletesNothing() {
     var first = RestaurantStub.getRestaurantStub("a-id");
     var second = RestaurantStub.getRestaurantStub("b-id");
-    when(restaurantRepository.findAll()).thenReturn(List.of(first, second));
+    first.setDedupeKey("pflugerville taco house");
+    second.setDedupeKey("pflugerville taco house");
+    when(restaurantRepository.findByDedupeKeyIn(List.of("pflugerville taco house")))
+        .thenReturn(List.of(first, second));
     var request = new RestaurantDedupeApplyRequest(List.of(
         new RestaurantDedupeConfirmation(
             "pflugerville taco house", "stale-version", "a-id", List.of("a-id", "b-id"))));
@@ -1092,8 +1106,14 @@ public class RestaurantServiceTest {
     newOrleans.getAddress().setCity("New Orleans");
     var unique = RestaurantStub.getRestaurantStub("unique-id");
     unique.setName("Unique Lunch");
-
-    when(restaurantRepository.findAll()).thenReturn(List.of(dallas, sanFrancisco, newOrleans, unique));
+    for (var duplicate : List.of(dallas, sanFrancisco, newOrleans)) {
+      duplicate.setDedupeKey("pflugerville taco house");
+    }
+    unique.setDedupeKey("unique lunch");
+    when(restaurantDuplicateQueries.find(null, 100)).thenReturn(
+        new RestaurantDuplicateQueryRepository.Page(
+            List.of("pflugerville taco house"), null,
+            List.of(dallas, sanFrancisco, newOrleans)));
     when(restaurantRepository.save(eq(sanFrancisco))).thenReturn(sanFrancisco);
 
     var result = restaurantService.removeDuplicateNamedRestaurants();
@@ -1104,7 +1124,7 @@ public class RestaurantServiceTest {
     assertEquals(List.of("a-san-francisco-id"), result.keptRestaurantIds());
     assertTrue(result.deletedRestaurantIds().containsAll(List.of("b-dallas-id", "c-new-orleans-id")));
     assertEquals("pflugerville taco house", sanFrancisco.getNormalizedName());
-    verify(restaurantRepository).findAll();
+    verify(restaurantDuplicateQueries).find(null, 100);
     verify(restaurantRepository).deleteAll(eq(List.of(dallas, newOrleans)));
     verify(restaurantRepository).save(eq(sanFrancisco));
   }
@@ -1117,15 +1137,16 @@ public class RestaurantServiceTest {
     var two = RestaurantStub.getRestaurantStub("two");
     two.setName("Two Lunch");
 
-    when(restaurantRepository.findAll()).thenReturn(List.of(one, two));
+    when(restaurantDuplicateQueries.find(null, 100)).thenReturn(
+        new RestaurantDuplicateQueryRepository.Page(List.of(), null, List.of()));
 
     var result = restaurantService.removeDuplicateNamedRestaurants();
 
     assertEquals(0, result.duplicateGroups());
     assertEquals(0, result.deleted());
     assertEquals(0, result.updatedSurvivors());
-    verify(restaurantRepository).findAll();
-    verifyNoMoreInteractions(restaurantRepository);
+    verify(restaurantDuplicateQueries).find(null, 100);
+    verifyNoInteractions(restaurantRepository);
   }
 
   @Test

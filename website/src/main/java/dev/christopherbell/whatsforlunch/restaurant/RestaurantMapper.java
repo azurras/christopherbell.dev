@@ -47,6 +47,9 @@ public interface RestaurantMapper {
    *         or {@code null} if the input is {@code null}
    */
   @Mapping(target = "normalizedName", ignore = true)
+  @Mapping(target = "dedupeKey", ignore = true)
+  @Mapping(target = "searchCity", ignore = true)
+  @Mapping(target = "searchState", ignore = true)
   Restaurant toRestaurant(RestaurantDetail restaurantDetail);
 
   /**
@@ -68,6 +71,9 @@ public interface RestaurantMapper {
   @Mapping(target = "lastModifiedBy", ignore = true)
   @Mapping(target = "lastUpdatedOn", ignore = true)
   @Mapping(target = "normalizedName", ignore = true)
+  @Mapping(target = "dedupeKey", ignore = true)
+  @Mapping(target = "searchCity", ignore = true)
+  @Mapping(target = "searchState", ignore = true)
   @Mapping(target = "cuisine", ignore = true)
   @Mapping(target = "sourceAmenity", ignore = true)
   Restaurant toRestaurant(RestaurantCreateRequest request);
@@ -89,6 +95,9 @@ public interface RestaurantMapper {
   @Mapping(target = "lastModifiedBy", ignore = true)
   @Mapping(target = "lastUpdatedOn", ignore = true)
   @Mapping(target = "normalizedName", ignore = true)
+  @Mapping(target = "dedupeKey", ignore = true)
+  @Mapping(target = "searchCity", ignore = true)
+  @Mapping(target = "searchState", ignore = true)
   @Mapping(target = "cuisine", ignore = true)
   @Mapping(target = "sourceAmenity", ignore = true)
   Restaurant toRestaurant(RestaurantUpdateRequest request);

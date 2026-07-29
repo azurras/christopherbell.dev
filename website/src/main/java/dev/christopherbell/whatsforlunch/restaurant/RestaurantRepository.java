@@ -12,6 +12,8 @@ import org.springframework.data.mongodb.repository.Query;
 public interface RestaurantRepository extends MongoRepository<Restaurant, String> {
   Optional<Restaurant> findByNormalizedName(String normalizedName);
 
+  List<Restaurant> findByDedupeKeyIn(List<String> dedupeKeys);
+
   /**
    * Finds restaurants whose saved coordinates fall inside a coarse candidate bounding box.
    *

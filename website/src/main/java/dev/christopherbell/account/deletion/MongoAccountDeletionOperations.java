@@ -4,6 +4,7 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import java.util.Set;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class MongoAccountDeletionOperations implements AccountDeletionOperations {
   private static final String TOMBSTONE = AccountDeletionService.TOMBSTONE_ID;
+  private static final Pattern SAFE_MAP_KEY = Pattern.compile("[A-Za-z0-9_-]{1,128}");
   private final MongoTemplate mongo;
   private final AccountDeletionResourceCleaner resources;
 
@@ -69,8 +71,7 @@ public class MongoAccountDeletionOperations implements AccountDeletionOperations
     remove("whatsforlunch_preferences", accountId, "accountId");
     remove("whatsforlunch_favorites", accountId, "accountId");
     remove("whatsforlunch_ratings", accountId, "accountId");
-    remove("whatsforlunch_sessions", accountId,
-        "createdByAccountId", "participantAccountIds");
+    removeAccountFromWhatsForLunchSessions(accountId);
     remove("conversation_archive_states", accountId,
         "ownerAccountId", "participantIds");
   }
@@ -139,6 +140,27 @@ public class MongoAccountDeletionOperations implements AccountDeletionOperations
         .map(field -> Criteria.where(field).is(accountId))
         .toArray(Criteria[]::new);
     mongo.remove(new Query(new Criteria().orOperator(matches)), collection);
+  }
+
+  private void removeAccountFromWhatsForLunchSessions(String accountId) {
+    var safeAccountId = safeMapKey(accountId);
+    mongo.remove(exact("createdByAccountId", safeAccountId), "whatsforlunch_sessions");
+    mongo.updateMulti(
+        exact("participantAccountIds", safeAccountId),
+        new Update()
+            .pull("participantAccountIds", safeAccountId)
+            .unset("participantUsernamesByAccountId." + safeAccountId)
+            .unset("votesByAccountId." + safeAccountId)
+            .inc("revision", 1)
+            .currentDate("lastUpdatedOn"),
+        "whatsforlunch_sessions");
+  }
+
+  private String safeMapKey(String accountId) {
+    if (accountId == null || !SAFE_MAP_KEY.matcher(accountId).matches()) {
+      throw new IllegalArgumentException("Account id cannot be used as a Mongo map key.");
+    }
+    return accountId;
   }
 
   private Query exact(String field, String value) {

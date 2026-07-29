@@ -1,6 +1,6 @@
 import { API } from './lib/api.js';
-import { restaurantWebsiteUrl } from './lib/restaurant-website.js';
 import { authHeaders, fetchJson, getAuthClaims, loginRedirectUrl, sanitize } from './lib/util.js';
+import { appendSafeHttpLink } from './lib/safe-http-link.js';
 
 const mount = document.getElementById('restaurant-profile');
 const title = document.getElementById('restaurantTitle');
@@ -69,7 +69,6 @@ function mapsUrl(restaurant) {
 function renderRestaurant(restaurant) {
   currentRestaurant = restaurant;
   const address = addressLine(restaurant.address);
-  const websiteUrl = restaurantWebsiteUrl(restaurant.website);
   const favoriteAction = isLoggedIn
     ? `<button type="button" class="btn ${restaurant.myFavorite ? 'btn-success' : 'btn-outline-success'} restaurant-favorite-toggle" aria-pressed="${restaurant.myFavorite ? 'true' : 'false'}">
         <span aria-hidden="true">&hearts;</span> ${restaurant.myFavorite ? 'Favorited' : 'Favorite'}
@@ -93,7 +92,7 @@ function renderRestaurant(restaurant) {
         </div>
         <div>
           <dt>Website</dt>
-          <dd>${websiteUrl ? `<a href="${sanitize(websiteUrl)}" target="_blank" rel="noopener">${sanitize(websiteUrl)}</a>` : 'Not listed'}</dd>
+          <dd class="restaurant-website">${restaurant.website ? '' : 'Not listed'}</dd>
         </div>
         <div>
           <dt>Source type</dt>
@@ -107,6 +106,9 @@ function renderRestaurant(restaurant) {
       </div>
     </article>
   `;
+  appendSafeHttpLink(mount.querySelector('.restaurant-website'), restaurant.website, {
+    label: restaurant.website,
+  });
 }
 
 async function loadRestaurant() {

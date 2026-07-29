@@ -9,18 +9,20 @@ import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantMapper;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantRepository;
+import dev.christopherbell.whatsforlunch.restaurant.RestaurantWebsiteUrlPolicy;
+import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRating;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantWebsite;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionVoteRequest;
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -33,24 +35,28 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.security.access.AccessDeniedException;
 
 /** Coordinates shared WFL sessions, invitations, and votes. */
 @RequiredArgsConstructor
 @Service
 public class WhatsForLunchSessionService {
   private static final int SESSION_PICK_COUNT = 3;
-  private static final int MAX_INVITEES = 20;
-  private static final int MAX_PARTICIPANTS = MAX_INVITEES + 1;
+  private static final String SESSION_CHANGED = "WFL_SESSION_CHANGED";
+  private static final String SESSION_EXPIRED = "WFL_SESSION_EXPIRED";
+  private static final String SESSION_FULL = "WFL_SESSION_FULL";
 
   private final AccountRepository accountRepository;
+  private final Clock clock;
   private final NotificationDeliveryService notificationDeliveryService;
   private final PermissionService permissionService;
   private final RestaurantMapper restaurantMapper;
   private final RestaurantFavoriteRepository restaurantFavoriteRepository;
   private final RestaurantRatingRepository restaurantRatingRepository;
   private final RestaurantRepository restaurantRepository;
-  private final WhatsForLunchSessionMemberships sessionMemberships;
+  private final WhatsForLunchSessionMutationStore mutations;
   private final WhatsForLunchSessionRepository sessionRepository;
+  private final WflProperties wflProperties;
 
   /**
    * Creates a session from exactly three current WFL picks and invites existing users.
@@ -61,7 +67,8 @@ public class WhatsForLunchSessionService {
     var restaurantIds = normalizeRestaurantIds(request == null ? null : request.restaurantIds());
     var restaurants = getRestaurantsInRequestedOrder(restaurantIds);
     var participants = resolveParticipants(creator, request == null ? null : request.invitedUsernames());
-    var now = Instant.now();
+    var now = clock.instant();
+    var activeUntil = now.plus(wflProperties.getSessions().getActiveLifetime());
     var session = WhatsForLunchSession.builder()
         .id(UUID.randomUUID().toString())
         .createdByAccountId(creator.getId())
@@ -70,6 +77,11 @@ public class WhatsForLunchSessionService {
         .participantUsernamesByAccountId(usernamesByAccountId(participants))
         .restaurantIds(restaurantIds)
         .votesByAccountId(new LinkedHashMap<>())
+        .revision(0)
+        .activeUntil(activeUntil)
+        .deleteOn(activeUntil.plus(wflProperties.getSessions().getArchiveLifetime()))
+        .restaurantResetCount(0)
+        .restaurantResetAudit(List.of())
         .createdOn(now)
         .lastUpdatedOn(now)
         .build();
@@ -88,11 +100,10 @@ public class WhatsForLunchSessionService {
       throws ResourceNotFoundException {
     var self = getSelfAccount();
     var pageSize = Math.max(1, Math.min(limit, 25));
-    return sessionRepository
-        .findByParticipantAccountIdsContainingOrderByCreatedOnDesc(self.getId(), PageRequest.of(0, pageSize))
-        .stream()
-        .map(session -> toDetail(session, self.getId()))
-        .toList();
+    var sessions = sessionRepository
+        .findByParticipantAccountIdsContainingAndDeleteOnAfterOrderByCreatedOnDesc(
+            self.getId(), clock.instant(), PageRequest.of(0, pageSize));
+    return toDetails(sessions, self.getId());
   }
 
   /**
@@ -111,12 +122,13 @@ public class WhatsForLunchSessionService {
   public WhatsForLunchSessionDetail joinSession(String sessionId)
       throws InvalidRequestException, ResourceNotFoundException {
     var self = getSelfAccount();
-    var outcome = sessionMemberships.joinIfCapacityRemains(
-        sessionId, self.getId(), self.getUsername(), MAX_PARTICIPANTS);
-    if (outcome == SessionJoinOutcome.FULL) {
-      throw new InvalidRequestException("This WFL session has reached its member limit.");
-    }
-    return toDetail(getSessionForParticipant(sessionId, self.getId()), self.getId());
+    var result = mutations.join(
+        sessionId,
+        self.getId(),
+        self.getUsername(),
+        clock.instant(),
+        wflProperties.getSessions().getMaxMembers());
+    return toDetail(requireJoin(result, sessionId), self.getId());
   }
 
   /**
@@ -128,18 +140,9 @@ public class WhatsForLunchSessionService {
       throw new InvalidRequestException("Restaurant id cannot be null or blank.");
     }
     var self = getSelfAccount();
-    var session = getSessionForParticipant(sessionId, self.getId());
-    if (session.getRestaurantIds() == null || !session.getRestaurantIds().contains(request.restaurantId())) {
-      throw new InvalidRequestException("Vote must be for one of this session's restaurants.");
-    }
-
-    var votes = new LinkedHashMap<>(session.getVotesByAccountId() == null
-        ? Map.of()
-        : session.getVotesByAccountId());
-    votes.put(self.getId(), request.restaurantId());
-    session.setVotesByAccountId(votes);
-    session.setLastUpdatedOn(Instant.now());
-    return toDetail(sessionRepository.save(session), self.getId());
+    var result = mutations.vote(
+        sessionId, self.getId(), request.restaurantId().strip(), clock.instant());
+    return toDetail(requireVote(result, sessionId), self.getId());
   }
 
   /**
@@ -150,14 +153,13 @@ public class WhatsForLunchSessionService {
       WhatsForLunchSessionRestaurantsRequest request
   ) throws InvalidRequestException, ResourceNotFoundException {
     var self = getSelfAccount();
-    var session = getSessionForParticipant(sessionId, self.getId());
-    requireCreator(session, self.getId());
     var restaurantIds = normalizeRestaurantIds(request == null ? null : request.restaurantIds());
     var restaurants = getRestaurantsInRequestedOrder(restaurantIds);
-    session.setRestaurantIds(restaurantIds);
-    session.setVotesByAccountId(new LinkedHashMap<>());
-    session.setLastUpdatedOn(Instant.now());
-    return toDetail(sessionRepository.save(session), self.getId(), restaurants);
+    var normalizedRequest = new WhatsForLunchSessionRestaurantsRequest(
+        restaurantIds, request.expectedRevision());
+    var result = mutations.resetRestaurants(
+        sessionId, self.getId(), self.getUsername(), normalizedRequest, clock.instant());
+    return toDetail(requireReset(result, sessionId), self.getId(), restaurants);
   }
 
   private Account getSelfAccount() throws ResourceNotFoundException {
@@ -173,13 +175,6 @@ public class WhatsForLunchSessionService {
       throw new ResourceNotFoundException("WFL session not found: " + sessionId);
     }
     return session;
-  }
-
-  private void requireCreator(WhatsForLunchSession session, String accountId)
-      throws InvalidRequestException {
-    if (!accountId.equals(session.getCreatedByAccountId())) {
-      throw new InvalidRequestException("Only the session creator can replace restaurants or clear votes.");
-    }
   }
 
   private List<String> normalizeRestaurantIds(List<String> restaurantIds)
@@ -229,8 +224,12 @@ public class WhatsForLunchSessionService {
     if (sessionId == null || sessionId.isBlank()) {
       throw new InvalidRequestException("Session id cannot be null or blank.");
     }
-    return sessionRepository.findById(sessionId)
+    var session = sessionRepository.findById(sessionId)
         .orElseThrow(() -> new ResourceNotFoundException("WFL session not found: " + sessionId));
+    if (session.getDeleteOn() != null && !session.getDeleteOn().isAfter(clock.instant())) {
+      throw new ResourceNotFoundException("WFL session not found: " + sessionId);
+    }
+    return session;
   }
 
   private List<String> normalizeInvitees(List<String> invitedUsernames)
@@ -249,8 +248,9 @@ public class WhatsForLunchSessionService {
         throw new InvalidRequestException("Invited usernames must be valid usernames.");
       }
     }
-    if (usernames.size() > MAX_INVITEES) {
-      throw new InvalidRequestException("No more than 20 members can be invited at once.");
+    var maxInvitees = Math.max(0, wflProperties.getSessions().getMaxMembers() - 1);
+    if (usernames.size() > maxInvitees) {
+      throw new InvalidRequestException("A WFL session cannot have more than 20 total members.");
     }
     return List.copyOf(usernames);
   }
@@ -262,13 +262,57 @@ public class WhatsForLunchSessionService {
   }
 
   private WhatsForLunchSessionDetail toDetail(WhatsForLunchSession session, String selfId) {
-    return toDetail(session, selfId, getRestaurantsInRequestedOrderUnchecked(session.getRestaurantIds()));
+    return toDetails(List.of(session), selfId).getFirst();
   }
 
   private WhatsForLunchSessionDetail toDetail(
       WhatsForLunchSession session,
       String selfId,
       List<Restaurant> restaurants
+  ) {
+    return toDetailFromHydratedRestaurants(session, selfId, toRatedDetails(restaurants, selfId));
+  }
+
+  private List<WhatsForLunchSessionDetail> toDetails(
+      List<WhatsForLunchSession> sessions,
+      String selfId
+  ) {
+    if (sessions == null || sessions.isEmpty()) {
+      return List.of();
+    }
+    var restaurantIds = sessions.stream()
+        .flatMap(session -> Optional.ofNullable(session.getRestaurantIds())
+            .orElseGet(List::of).stream())
+        .filter(id -> id != null && !id.isBlank())
+        .distinct()
+        .toList();
+    var restaurantsById = new LinkedHashMap<String, Restaurant>();
+    restaurantRepository.findAllById(restaurantIds)
+        .forEach(restaurant -> restaurantsById.put(restaurant.getId(), restaurant));
+    var detailsById = toRatedDetails(restaurantIds.stream()
+        .map(restaurantsById::get)
+        .filter(java.util.Objects::nonNull)
+        .toList(), selfId).stream()
+        .collect(Collectors.toMap(
+            RestaurantDetail::getId,
+            java.util.function.Function.identity(),
+            (left, right) -> left,
+            LinkedHashMap::new));
+    return sessions.stream()
+        .map(session -> toDetailFromHydratedRestaurants(
+            session,
+            selfId,
+            Optional.ofNullable(session.getRestaurantIds()).orElseGet(List::of).stream()
+                .map(detailsById::get)
+                .filter(java.util.Objects::nonNull)
+                .toList()))
+        .toList();
+  }
+
+  private WhatsForLunchSessionDetail toDetailFromHydratedRestaurants(
+      WhatsForLunchSession session,
+      String selfId,
+      List<RestaurantDetail> restaurants
   ) {
     var votes = session.getVotesByAccountId() == null ? Map.<String, String>of() : session.getVotesByAccountId();
     var usernames = session.getParticipantUsernamesByAccountId() == null
@@ -286,11 +330,22 @@ public class WhatsForLunchSessionService {
     return WhatsForLunchSessionDetail.builder()
         .id(session.getId())
         .createdByUsername(session.getCreatedByUsername())
-        .canManage(selfId.equals(session.getCreatedByAccountId()))
-        .participantUsernames(new ArrayList<>(usernames.values()))
-        .restaurants(toRatedDetails(restaurants, selfId))
+        .canManage(isActive(session, clock.instant())
+            && selfId.equals(session.getCreatedByAccountId()))
+        .participantUsernames(Optional.ofNullable(session.getParticipantAccountIds())
+            .orElseGet(List::of)
+            .stream()
+            .map(usernames::get)
+            .filter(java.util.Objects::nonNull)
+            .toList())
+        .restaurants(restaurants)
         .votesByRestaurant(votesByRestaurant)
         .myVoteRestaurantId(votes.get(selfId))
+        .revision(session.getRevision())
+        .active(isActive(session, clock.instant()))
+        .canChangeRestaurants(isActive(session, clock.instant())
+            && selfId.equals(session.getCreatedByAccountId()))
+        .activeUntil(session.getActiveUntil())
         .createdOn(session.getCreatedOn())
         .lastUpdatedOn(session.getLastUpdatedOn())
         .build();
@@ -299,8 +354,9 @@ public class WhatsForLunchSessionService {
   private List<RestaurantDetail> toRatedDetails(List<Restaurant> restaurants, String selfId) {
     var details = restaurants.stream()
         .map(restaurantMapper::toRestaurantDetail)
-        .map(this::suppressUnsafeWebsite)
         .toList();
+    details.forEach(detail -> detail.setWebsite(
+        RestaurantWebsiteUrlPolicy.safeOrNull(detail.getWebsite())));
     var restaurantIds = details.stream()
         .map(RestaurantDetail::getId)
         .filter(id -> id != null && !id.isBlank())
@@ -342,13 +398,6 @@ public class WhatsForLunchSessionService {
     return details;
   }
 
-  private RestaurantDetail suppressUnsafeWebsite(RestaurantDetail detail) {
-    if (detail != null) {
-      detail.setWebsite(RestaurantWebsite.safeForDisplay(detail.getWebsite()));
-    }
-    return detail;
-  }
-
   private List<Restaurant> getRestaurantsInRequestedOrderUnchecked(List<String> restaurantIds) {
     if (restaurantIds == null || restaurantIds.isEmpty()) {
       return List.of();
@@ -360,5 +409,50 @@ public class WhatsForLunchSessionService {
         .map(restaurantsById::get)
         .filter(restaurant -> restaurant != null)
         .toList();
+  }
+
+  private WhatsForLunchSession requireJoin(
+      WhatsForLunchSessionMutationStore.Result result,
+      String sessionId
+  ) throws ResourceNotFoundException {
+    return switch (result.status()) {
+      case UPDATED, UNCHANGED -> result.session();
+      case FULL -> throw new WflSessionConflictException(SESSION_FULL);
+      case EXPIRED -> throw new WflSessionConflictException(SESSION_EXPIRED);
+      case MISSING -> throw new ResourceNotFoundException("WFL session not found: " + sessionId);
+      default -> throw new WflSessionConflictException(SESSION_CHANGED);
+    };
+  }
+
+  private WhatsForLunchSession requireVote(
+      WhatsForLunchSessionMutationStore.Result result,
+      String sessionId
+  ) throws InvalidRequestException, ResourceNotFoundException {
+    return switch (result.status()) {
+      case UPDATED, UNCHANGED -> result.session();
+      case EXPIRED -> throw new WflSessionConflictException(SESSION_EXPIRED);
+      case MISSING, NOT_PARTICIPANT ->
+          throw new ResourceNotFoundException("WFL session not found: " + sessionId);
+      case INVALID_RESTAURANT ->
+          throw new InvalidRequestException("Vote must be for one of this session's restaurants.");
+      default -> throw new WflSessionConflictException(SESSION_CHANGED);
+    };
+  }
+
+  private WhatsForLunchSession requireReset(
+      WhatsForLunchSessionMutationStore.Result result,
+      String sessionId
+  ) throws ResourceNotFoundException {
+    return switch (result.status()) {
+      case UPDATED -> result.session();
+      case EXPIRED -> throw new WflSessionConflictException(SESSION_EXPIRED);
+      case MISSING -> throw new ResourceNotFoundException("WFL session not found: " + sessionId);
+      case NOT_HOST -> throw new AccessDeniedException("Only the WFL session creator can change restaurants.");
+      default -> throw new WflSessionConflictException(SESSION_CHANGED);
+    };
+  }
+
+  private boolean isActive(WhatsForLunchSession session, Instant now) {
+    return session.getActiveUntil() == null || now.isBefore(session.getActiveUntil());
   }
 }

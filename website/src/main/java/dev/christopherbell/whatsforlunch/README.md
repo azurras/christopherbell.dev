@@ -12,7 +12,10 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
   browser location or entered ZIP code. ZIP searches resolve their radius origin
   from imported Location Census ZCTA coordinates before loading restaurant
   candidates.
-- Logged-in shared sessions where invited members see the same three restaurants, receive session updates, and vote.
+- Logged-in shared sessions where up to 20 members see the same three restaurants,
+  receive atomic session updates, and vote. The creator alone can reset picks.
+  Sessions are active for 24 hours, remain as a read-only archive for 30 more
+  days, and carry a TTL deletion deadline.
 - Logged-in restaurant ratings with public whole-number rating totals.
 - Restaurant websites are persisted and rendered only as absolute HTTP(S) URLs; unsafe legacy values are omitted.
 - Legacy daily lunch picks persisted per day and refreshed at midnight Central.
@@ -22,8 +25,10 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
   require a short-lived operator-bound preview token, re-fetch the source, and
   reject changed checksums before writing. Durable admin status records bounded
   error categories and public pages receive only source freshness and coverage.
-- Duplicate-name cleanup previews every candidate and stable survivor, then
-  validates every confirmed group version before deleting anything.
+- Restaurant inventory and duplicate-name previews use bounded indexed pages.
+  Duplicate apply validates every confirmed group version before deleting anything.
+- Restaurant website fields accept only absolute HTTP(S) URLs without credentials;
+  response mapping repeats that check before public rendering.
 - Workflow scaffolding under `workflow`.
 
 ## Update This Doc

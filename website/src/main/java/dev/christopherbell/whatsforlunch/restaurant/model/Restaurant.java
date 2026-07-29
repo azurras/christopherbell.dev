@@ -26,7 +26,19 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @CompoundIndexes({
     @CompoundIndex(
         name = "restaurant_coordinate_bounds",
-        def = "{'address.latitude': 1, 'address.longitude': 1}")
+        def = "{'address.latitude': 1, 'address.longitude': 1}"),
+    @CompoundIndex(
+        name = "restaurant_inventory_location_name",
+        def = "{'searchState': 1, 'searchCity': 1, 'dedupeKey': 1, '_id': 1}"),
+    @CompoundIndex(
+        name = "restaurant_inventory_city_name",
+        def = "{'searchCity': 1, 'dedupeKey': 1, '_id': 1}"),
+    @CompoundIndex(
+        name = "restaurant_inventory_state_name",
+        def = "{'searchState': 1, 'dedupeKey': 1, '_id': 1}"),
+    @CompoundIndex(
+        name = "restaurant_dedupe_key_member",
+        def = "{'dedupeKey': 1, '_id': 1}")
 })
 @Document("whatsforlunch")
 public class Restaurant {
@@ -55,6 +67,9 @@ public class Restaurant {
 
   @Indexed(unique = true, sparse = true)
   private String normalizedName;
+  private String dedupeKey;
+  private String searchCity;
+  private String searchState;
   private String cuisine;
   private String phoneNumber;
   private String sourceAmenity;
