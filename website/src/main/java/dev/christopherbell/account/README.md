@@ -59,7 +59,8 @@ subfeature services own the larger account workflows.
 - Successful password, role, status, and capability changes revoke every opaque
   browser session for the account after the authoritative account write succeeds.
   As a safety fallback for split-write failures, ordinary cookie authentication
-  also validates the session fingerprint against the current persisted account.
+  also validates the session fingerprint against minimal current account security
+  state joined in the session lookup.
 - Account DTOs and persistence models under `model`.
 
 ## Update This Doc

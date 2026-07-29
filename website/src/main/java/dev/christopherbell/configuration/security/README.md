@@ -12,9 +12,10 @@ Owns Spring Security wiring and request authentication infrastructure.
   winner's unexpired previous token and the reloaded session and ACTIVE account still pass every
   validity and fingerprint check. Revocation, invalid reloaded state, and persistence failures
   remain fail-closed; ordinary requests do not pay for the extra read.
-- Ordinary cookie authentication validates each structurally valid browser session against the
-  current persisted ACTIVE account and its security fingerprint. Missing, inactive, or stale
-  accounts delete and reject the session; account lookup failures fail closed at the filter.
+- Ordinary cookie authentication joins each structurally valid browser session to only the
+  current account security fields in one Mongo command. Missing accounts are rejected by the
+  join; inactive or stale accounts delete and reject the session. Persistence failures fail
+  closed at the filter without a separate account-repository fallback.
 - `StaticAssetRequestMatcher` bypasses credential handling only for the listed GET favicon, CSS,
   image, JavaScript, vendor, pinned Bootstrap WebJar, and release-versioned asset namespaces.
   Shared-folder worker and media routes remain authentication boundaries.

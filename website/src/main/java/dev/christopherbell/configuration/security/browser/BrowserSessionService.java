@@ -29,6 +29,7 @@ public class BrowserSessionService implements AccountSessionRevoker {
 
   private final BrowserSessionRepository sessions;
   private final BrowserSessionActivityStore activity;
+  private final BrowserSessionAuthenticationStore authentications;
   private final AccountRepository accounts;
   private final Clock clock;
   private final SecureRandom random = new SecureRandom();
@@ -36,10 +37,12 @@ public class BrowserSessionService implements AccountSessionRevoker {
   public BrowserSessionService(
       BrowserSessionRepository sessions,
       BrowserSessionActivityStore activity,
+      BrowserSessionAuthenticationStore authentications,
       AccountRepository accounts,
       Clock clock) {
     this.sessions = sessions;
     this.activity = activity;
+    this.authentications = authentications;
     this.accounts = accounts;
     this.clock = clock;
   }
@@ -76,8 +79,9 @@ public class BrowserSessionService implements AccountSessionRevoker {
     var parsed = parse(rawToken);
     if (parsed.isEmpty()) return Optional.empty();
 
-    var session = sessions.findById(parsed.get().sessionId()).orElse(null);
-    if (session == null) return Optional.empty();
+    var authentication = authentications.findById(parsed.get().sessionId()).orElse(null);
+    if (authentication == null) return Optional.empty();
+    var session = authentication.session();
     var now = clock.instant();
     if (!validCredential(session, parsed.get().secret(), now)
         || expired(session, now)) {
@@ -90,14 +94,9 @@ public class BrowserSessionService implements AccountSessionRevoker {
       return Optional.empty();
     }
 
-    var accountId = session.getAccountId();
     var accountSecurityFingerprint = session.getAccountSecurityFingerprint();
-    var account = accounts.findById(accountId)
-        .filter(this::isActive)
-        .filter(current -> AccountSecurityFingerprint.matches(
-            accountSecurityFingerprint, current))
-        .orElse(null);
-    if (account == null) {
+    var account = authentication.account();
+    if (!account.validates(accountSecurityFingerprint)) {
       sessions.delete(session);
       return Optional.empty();
     }
@@ -119,25 +118,22 @@ public class BrowserSessionService implements AccountSessionRevoker {
             earlier(now.plus(ROTATION_OVERLAP), session.getAbsoluteExpiresOn()),
             idleExpiresOn);
         if (updated.isEmpty()) {
-          var reloadedSession = sessions.findById(session.getId()).orElse(null);
-          if (reloadedSession == null) return Optional.empty();
+          var reloaded = authentications.findById(session.getId()).orElse(null);
+          if (reloaded == null) return Optional.empty();
+          var reloadedSession = reloaded.session();
           if (!validPreviousCredential(reloadedSession, hash(parsed.get().secret()), now)
               || expired(reloadedSession, now)
               || !completeSnapshot(reloadedSession)) {
             sessions.delete(reloadedSession);
             return Optional.empty();
           }
-          account = accounts.findById(reloadedSession.getAccountId())
-              .filter(this::isActive)
-              .filter(current -> AccountSecurityFingerprint.matches(
-                  reloadedSession.getAccountSecurityFingerprint(), current))
-              .orElse(null);
-          if (account == null) {
+          account = reloaded.account();
+          if (!account.validates(reloadedSession.getAccountSecurityFingerprint())) {
             sessions.delete(reloadedSession);
             return Optional.empty();
           }
           return Optional.of(new AuthenticatedBrowserSession(
-              account.getId(), account.getRole(), Optional.empty()));
+              account.id(), account.role(), Optional.empty()));
         }
         session = updated.orElseThrow();
         if (!validCredential(session, parsed.get().secret(), now)
@@ -158,7 +154,7 @@ public class BrowserSessionService implements AccountSessionRevoker {
       }
     }
     return Optional.of(new AuthenticatedBrowserSession(
-        account.getId(), account.getRole(), rotatedToken));
+        account.id(), account.role(), rotatedToken));
   }
 
   /** Revokes the session named by a cookie without revealing whether it existed. */

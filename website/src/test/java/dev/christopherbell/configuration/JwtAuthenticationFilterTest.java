@@ -17,7 +17,10 @@ import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.configuration.security.browser.AuthenticatedBrowserSession;
 import dev.christopherbell.configuration.security.browser.BrowserSession;
+import dev.christopherbell.configuration.security.browser.BrowserSessionAccount;
 import dev.christopherbell.configuration.security.browser.BrowserSessionActivityStore;
+import dev.christopherbell.configuration.security.browser.BrowserSessionAuthentication;
+import dev.christopherbell.configuration.security.browser.BrowserSessionAuthenticationStore;
 import dev.christopherbell.configuration.security.browser.BrowserSessionRepository;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
@@ -175,15 +178,14 @@ class JwtAuthenticationFilterTest {
     var accounts = mock(AccountRepository.class);
     var sessionRepository = mock(BrowserSessionRepository.class);
     var activity = mock(BrowserSessionActivityStore.class);
+    var authentications = mock(BrowserSessionAuthenticationStore.class);
     var saved = ArgumentCaptor.forClass(BrowserSession.class);
-    when(accounts.findById(account.getId()))
-        .thenReturn(Optional.of(account))
-        .thenThrow(new DataAccessResourceFailureException("mongo"));
+    when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
     when(sessionRepository.save(saved.capture())).thenAnswer(invocation -> invocation.getArgument(0));
-    when(sessionRepository.findById(org.mockito.ArgumentMatchers.anyString()))
-        .thenAnswer(invocation -> Optional.of(saved.getValue()));
+    when(authentications.findById(org.mockito.ArgumentMatchers.anyString()))
+        .thenThrow(new DataAccessResourceFailureException("mongo"));
     var sessions = new BrowserSessionService(
-        sessionRepository, activity, accounts, Clock.systemUTC());
+        sessionRepository, activity, authentications, accounts, Clock.systemUTC());
     String token = sessions.create(PermissionService.generateToken(account));
     var filter = new JwtAuthenticationFilter(
         List.of(), sessions, new InteractiveBrowserRequest(), cookies());
@@ -365,6 +367,18 @@ class JwtAuthenticationFilterTest {
         .build();
   }
 
+  private static BrowserSessionAuthentication authentication(
+      BrowserSession session, Account account) {
+    return new BrowserSessionAuthentication(
+        session,
+        new BrowserSessionAccount(
+            account.getId(),
+            account.getPasswordHash(),
+            account.getRole(),
+            account.getPermissions(),
+            account.getStatus()));
+  }
+
   private final class ConcurrentRotationFixture {
     private static final Instant CREATED_ON = Instant.parse("2026-07-28T12:00:00Z");
     private static final Instant ROTATED_ON = CREATED_ON.plus(Duration.ofDays(1));
@@ -373,6 +387,8 @@ class JwtAuthenticationFilterTest {
     private final AccountRepository accounts = mock(AccountRepository.class);
     private final BrowserSessionRepository sessions = mock(BrowserSessionRepository.class);
     private final BrowserSessionActivityStore activity = mock(BrowserSessionActivityStore.class);
+    private final BrowserSessionAuthenticationStore authentications =
+        mock(BrowserSessionAuthenticationStore.class);
     private final AtomicInteger reads = new AtomicInteger();
     private final AtomicInteger rotations = new AtomicInteger();
     private final boolean revokeOnLostRotation;
@@ -402,13 +418,17 @@ class JwtAuthenticationFilterTest {
             return invocation.getArgument(0);
           });
       var creator = new BrowserSessionService(
-          sessions, activity, accounts, Clock.fixed(CREATED_ON, ZoneOffset.UTC));
+          sessions, activity, authentications, accounts, Clock.fixed(CREATED_ON, ZoneOffset.UTC));
       originalToken = creator.create(PermissionService.generateToken(account));
       staleSnapshot = copy(persisted);
-      when(sessions.findById(org.mockito.ArgumentMatchers.anyString()))
+      when(authentications.findById(org.mockito.ArgumentMatchers.anyString()))
           .thenAnswer(invocation -> {
-            if (reads.getAndIncrement() < 2) return Optional.of(copy(staleSnapshot));
-            return revoked ? Optional.empty() : Optional.of(copy(persisted));
+            if (reads.getAndIncrement() < 2) {
+              return Optional.of(authentication(copy(staleSnapshot), account));
+            }
+            return revoked
+                ? Optional.empty()
+                : Optional.of(authentication(copy(persisted), account));
           });
       when(activity.rotate(
           org.mockito.ArgumentMatchers.anyString(),
@@ -434,7 +454,7 @@ class JwtAuthenticationFilterTest {
             return Optional.of(copy(persisted));
           });
       var browserSessions = new BrowserSessionService(
-          sessions, activity, accounts, Clock.fixed(ROTATED_ON, ZoneOffset.UTC));
+          sessions, activity, authentications, accounts, Clock.fixed(ROTATED_ON, ZoneOffset.UTC));
       filter = new JwtAuthenticationFilter(
           List.of(), browserSessions, new InteractiveBrowserRequest(), cookies());
     }

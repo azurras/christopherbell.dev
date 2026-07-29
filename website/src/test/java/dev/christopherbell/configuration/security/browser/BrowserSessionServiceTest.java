@@ -153,9 +153,12 @@ class BrowserSessionServiceTest {
     String winnerToken = winner.rotatedToken().orElseThrow();
     var winnerSnapshot = copy(fixture.session());
     fixture.rejectRotation = true;
-    when(fixture.sessions.findById(fixture.session().getId()))
-        .thenReturn(Optional.of(staleSnapshot), Optional.of(winnerSnapshot));
-    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.activity, fixture.accounts);
+    when(fixture.authentications.findById(fixture.session().getId()))
+        .thenReturn(
+            Optional.of(authentication(staleSnapshot, fixture.account)),
+            Optional.of(authentication(winnerSnapshot, fixture.account)));
+    org.mockito.Mockito.clearInvocations(
+        fixture.sessions, fixture.activity, fixture.authentications, fixture.accounts);
 
     var loser = fixture.authenticate(token, true).orElseThrow();
 
@@ -165,8 +168,9 @@ class BrowserSessionServiceTest {
     verify(fixture.activity).rotate(
         eq(fixture.session().getId()), eq(staleSnapshot.getTokenHash()), eq(START), anyString(),
         eq(rotationTime), any(), any());
-    verify(fixture.sessions, org.mockito.Mockito.times(2)).findById(fixture.session().getId());
-    verify(fixture.accounts, org.mockito.Mockito.times(2)).findById(fixture.account.getId());
+    verify(fixture.authentications, org.mockito.Mockito.times(2))
+        .findById(fixture.session().getId());
+    verifyNoInteractions(fixture.accounts);
     verify(fixture.sessions, never()).save(any(BrowserSession.class));
   }
 
@@ -178,15 +182,20 @@ class BrowserSessionServiceTest {
     var staleSnapshot = copy(fixture.session());
     var unchangedSnapshot = copy(staleSnapshot);
     fixture.rejectRotation = true;
-    when(fixture.sessions.findById(fixture.session().getId()))
-        .thenReturn(Optional.of(staleSnapshot), Optional.of(unchangedSnapshot));
-    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.activity, fixture.accounts);
+    when(fixture.authentications.findById(fixture.session().getId()))
+        .thenReturn(
+            Optional.of(authentication(staleSnapshot, fixture.account)),
+            Optional.of(authentication(unchangedSnapshot, fixture.account)));
+    org.mockito.Mockito.clearInvocations(
+        fixture.sessions, fixture.activity, fixture.authentications, fixture.accounts);
 
     var authenticated = fixture.at(rotationTime).authenticate(token, true);
 
     assertFalse(authenticated.isPresent());
     verify(fixture.sessions).delete(unchangedSnapshot);
-    verify(fixture.accounts).findById(fixture.account.getId());
+    verify(fixture.authentications, org.mockito.Mockito.times(2))
+        .findById(fixture.session().getId());
+    verifyNoInteractions(fixture.accounts);
     verify(fixture.sessions, never()).save(any(BrowserSession.class));
   }
 
@@ -195,13 +204,14 @@ class BrowserSessionServiceTest {
     var fixture = new Fixture(START);
     String token = fixture.create();
     fixture.revokeDuringRotation = true;
-    org.mockito.Mockito.clearInvocations(fixture.sessions);
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.authentications);
 
     var authenticated = fixture.at(START.plus(BrowserSessionService.ROTATION_INTERVAL))
         .authenticate(token, true);
 
     assertFalse(authenticated.isPresent());
-    verify(fixture.sessions, org.mockito.Mockito.times(2)).findById(fixture.session().getId());
+    verify(fixture.authentications, org.mockito.Mockito.times(2))
+        .findById(fixture.session().getId());
     verify(fixture.sessions, never()).save(any(BrowserSession.class));
   }
 
@@ -218,8 +228,10 @@ class BrowserSessionServiceTest {
     expiredSnapshot.setTokenHash("winner-current-token");
     expiredSnapshot.setIdleExpiresOn(rotationTime);
     fixture.rejectRotation = true;
-    when(fixture.sessions.findById(fixture.session().getId()))
-        .thenReturn(Optional.of(staleSnapshot), Optional.of(expiredSnapshot));
+    when(fixture.authentications.findById(fixture.session().getId()))
+        .thenReturn(
+            Optional.of(authentication(staleSnapshot, fixture.account)),
+            Optional.of(authentication(expiredSnapshot, fixture.account)));
 
     var authenticated = fixture.at(rotationTime).authenticate(token, true);
 
@@ -238,9 +250,11 @@ class BrowserSessionServiceTest {
     invalidSnapshot.setPreviousTokenHash("unrelated-previous-token");
     invalidSnapshot.setPreviousTokenExpiresOn(rotationTime.plus(BrowserSessionService.ROTATION_OVERLAP));
     fixture.rejectRotation = true;
-    when(fixture.sessions.findById(fixture.session().getId()))
-        .thenReturn(Optional.of(staleSnapshot), Optional.of(invalidSnapshot));
-    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.accounts);
+    when(fixture.authentications.findById(fixture.session().getId()))
+        .thenReturn(
+            Optional.of(authentication(staleSnapshot, fixture.account)),
+            Optional.of(authentication(invalidSnapshot, fixture.account)));
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.authentications, fixture.accounts);
 
     var authenticated = fixture.at(rotationTime).authenticate(token, true);
 
@@ -261,14 +275,18 @@ class BrowserSessionServiceTest {
     invalidSnapshot.setTokenHash("winner-current-token");
     invalidSnapshot.setAccountSecurityFingerprint("stale-account-fingerprint");
     fixture.rejectRotation = true;
-    when(fixture.sessions.findById(fixture.session().getId()))
-        .thenReturn(Optional.of(staleSnapshot), Optional.of(invalidSnapshot));
-    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.accounts);
+    when(fixture.authentications.findById(fixture.session().getId()))
+        .thenReturn(
+            Optional.of(authentication(staleSnapshot, fixture.account)),
+            Optional.of(authentication(invalidSnapshot, fixture.account)));
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.authentications, fixture.accounts);
 
     var authenticated = fixture.at(rotationTime).authenticate(token, true);
 
     assertFalse(authenticated.isPresent());
-    verify(fixture.accounts, org.mockito.Mockito.times(2)).findById(fixture.account.getId());
+    verify(fixture.authentications, org.mockito.Mockito.times(2))
+        .findById(fixture.session().getId());
+    verifyNoInteractions(fixture.accounts);
     verify(fixture.sessions).delete(invalidSnapshot);
   }
 
@@ -280,10 +298,10 @@ class BrowserSessionServiceTest {
     var staleSnapshot = copy(fixture.session());
     var reloadFailure = new DataAccessResourceFailureException("mongo");
     fixture.rejectRotation = true;
-    when(fixture.sessions.findById(fixture.session().getId()))
-        .thenReturn(Optional.of(staleSnapshot))
+    when(fixture.authentications.findById(fixture.session().getId()))
+        .thenReturn(Optional.of(authentication(staleSnapshot, fixture.account)))
         .thenThrow(reloadFailure);
-    org.mockito.Mockito.clearInvocations(fixture.sessions);
+    org.mockito.Mockito.clearInvocations(fixture.sessions, fixture.authentications);
 
     var thrown = assertThrows(DataAccessResourceFailureException.class,
         () -> fixture.at(rotationTime).authenticate(token, true));
@@ -297,23 +315,79 @@ class BrowserSessionServiceTest {
     var fixture = new Fixture(START);
     String token = fixture.create();
     fixture.session().setRole(Role.ADMIN);
-    org.mockito.Mockito.clearInvocations(fixture.accounts);
+    org.mockito.Mockito.clearInvocations(fixture.authentications, fixture.accounts);
 
     var authenticated = fixture.authenticate(token, false).orElseThrow();
 
     org.assertj.core.api.Assertions.assertThat(authenticated.role()).isEqualTo(Role.USER);
-    verify(fixture.accounts).findById("account-1");
+    verify(fixture.authentications).findById(fixture.session().getId());
+    verifyNoInteractions(fixture.accounts);
   }
 
   @Test
-  void missingCurrentAccountDeletesAndRejectsTheBrowserSession() {
+  void missingCurrentAccountIsRejectedWithoutAccountRepositoryFallback() {
     var fixture = new Fixture(START);
     String token = fixture.create();
-    when(fixture.accounts.findById(fixture.account.getId())).thenReturn(Optional.empty());
+    when(fixture.authentications.findById(fixture.session().getId())).thenReturn(Optional.empty());
+    org.mockito.Mockito.clearInvocations(fixture.accounts);
+
+    assertFalse(fixture.authenticate(token, false).isPresent());
+
+    verifyNoInteractions(fixture.accounts);
+  }
+
+  @Test
+  void ordinaryAuthenticationUsesOneJoinedResolutionAndNoAccountRepositoryRead() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    org.mockito.Mockito.clearInvocations(fixture.authentications, fixture.accounts);
+
+    assertTrue(fixture.authenticate(token, false).isPresent());
+
+    verify(fixture.authentications).findById(fixture.session().getId());
+    verifyNoInteractions(fixture.accounts);
+  }
+
+  @Test
+  void inactiveCurrentAccountIsDeletedAndRejectedFromJoinedResolution() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    fixture.account.setStatus(AccountStatus.SUSPENDED);
+    org.mockito.Mockito.clearInvocations(fixture.accounts);
 
     assertFalse(fixture.authenticate(token, false).isPresent());
 
     verify(fixture.sessions).delete(fixture.session());
+    verifyNoInteractions(fixture.accounts);
+  }
+
+  @Test
+  void mismatchedCurrentAccountFingerprintIsDeletedAndRejectedFromJoinedResolution() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    fixture.account.setPasswordHash("changed-password-hash");
+    org.mockito.Mockito.clearInvocations(fixture.accounts);
+
+    assertFalse(fixture.authenticate(token, false).isPresent());
+
+    verify(fixture.sessions).delete(fixture.session());
+    verifyNoInteractions(fixture.accounts);
+  }
+
+  @Test
+  void joinedResolutionFailurePropagatesWithoutFallingBackToAccountRepository() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    var failure = new DataAccessResourceFailureException("mongo");
+    when(fixture.authentications.findById(fixture.session().getId())).thenThrow(failure);
+    org.mockito.Mockito.clearInvocations(fixture.accounts);
+
+    var thrown = assertThrows(
+        DataAccessResourceFailureException.class,
+        () -> fixture.authenticate(token, false));
+
+    assertEquals(failure, thrown);
+    verifyNoInteractions(fixture.accounts);
   }
 
   @Test
@@ -400,9 +474,23 @@ class BrowserSessionServiceTest {
         .build();
   }
 
+  private static BrowserSessionAuthentication authentication(
+      BrowserSession session, Account account) {
+    return new BrowserSessionAuthentication(
+        session,
+        new BrowserSessionAccount(
+            account.getId(),
+            account.getPasswordHash(),
+            account.getRole(),
+            account.getPermissions(),
+            account.getStatus()));
+  }
+
   private static final class Fixture {
     private final BrowserSessionRepository sessions = mock(BrowserSessionRepository.class);
     private final BrowserSessionActivityStore activity = mock(BrowserSessionActivityStore.class);
+    private final BrowserSessionAuthenticationStore authentications =
+        mock(BrowserSessionAuthenticationStore.class);
     private final AccountRepository accounts = mock(AccountRepository.class);
     private final ArgumentCaptor<BrowserSession> saved = ArgumentCaptor.forClass(BrowserSession.class);
     private final Account account = Account.builder()
@@ -421,11 +509,11 @@ class BrowserSessionServiceTest {
       this.now = now;
       when(accounts.findById(account.getId())).thenReturn(Optional.of(account));
       when(sessions.save(saved.capture())).thenAnswer(invocation -> invocation.getArgument(0));
-      when(sessions.findById(anyString())).thenAnswer(invocation -> {
+      when(authentications.findById(anyString())).thenAnswer(invocation -> {
         if (revoked || saved.getAllValues().isEmpty()) return Optional.empty();
         var current = session();
         return current.getId().equals(invocation.getArgument(0))
-            ? Optional.of(current)
+            ? Optional.of(authentication(current, account))
             : Optional.empty();
       });
       when(activity.touch(anyString(), any(), any(), any())).thenAnswer(invocation -> {
@@ -471,7 +559,7 @@ class BrowserSessionServiceTest {
 
     private BrowserSessionService service() {
       return new BrowserSessionService(
-          sessions, activity, accounts, Clock.fixed(now, ZoneOffset.UTC));
+          sessions, activity, authentications, accounts, Clock.fixed(now, ZoneOffset.UTC));
     }
   }
 }
