@@ -8,15 +8,21 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.account.AccountMapper;
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
+import dev.christopherbell.account.model.dto.AccountDetail;
+import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.admin.activity.AdminActivityService;
 import dev.christopherbell.permission.PermissionService;
 import java.time.Clock;
 import java.time.Duration;
@@ -26,6 +32,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 class BrowserSessionServiceTest {
   private static final Instant START = Instant.parse("2026-07-28T12:00:00Z");
@@ -166,15 +173,61 @@ class BrowserSessionServiceTest {
   }
 
   @Test
-  void authenticationUsesTheStoredRoleWithoutLoadingTheAccount() {
+  void authenticationUsesTheCurrentPersistedRoleAfterValidation() {
     var fixture = new Fixture(START);
     String token = fixture.create();
+    fixture.session().setRole(Role.ADMIN);
     org.mockito.Mockito.clearInvocations(fixture.accounts);
 
     var authenticated = fixture.authenticate(token, false).orElseThrow();
 
     org.assertj.core.api.Assertions.assertThat(authenticated.role()).isEqualTo(Role.USER);
-    org.mockito.Mockito.verifyNoInteractions(fixture.accounts);
+    verify(fixture.accounts).findById("account-1");
+  }
+
+  @Test
+  void missingCurrentAccountDeletesAndRejectsTheBrowserSession() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    when(fixture.accounts.findById(fixture.account.getId())).thenReturn(Optional.empty());
+
+    assertFalse(fixture.authenticate(token, false).isPresent());
+
+    verify(fixture.sessions).delete(fixture.session());
+  }
+
+  @Test
+  void staleSessionIsRejectedAfterRoleSaveAndFailedRevocationRetry() throws Exception {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    var mapper = mock(AccountMapper.class);
+    var activity = mock(AdminActivityService.class);
+    var permissions = mock(PermissionService.class);
+    var moderation = new AccountModerationService(
+        fixture.accounts, mapper, activity, permissions, fixture.service());
+    var request = AccountUpdateRequest.builder()
+        .id(fixture.account.getId())
+        .role(Role.MOD)
+        .moderationReason("Approved promotion")
+        .build();
+    var revocationFailure = new DataAccessResourceFailureException("mongo");
+    when(permissions.getSelfId()).thenReturn("admin-1");
+    when(fixture.accounts.findById("admin-1")).thenReturn(Optional.of(
+        Account.builder().id("admin-1").username("admin").build()));
+    when(fixture.accounts.save(fixture.account)).thenReturn(fixture.account);
+    when(mapper.toAccount(fixture.account)).thenReturn(
+        AccountDetail.builder().id(fixture.account.getId()).role(Role.MOD).build());
+    doThrow(revocationFailure)
+        .when(fixture.sessions).deleteByAccountId(fixture.account.getId());
+
+    assertThrows(DataAccessResourceFailureException.class,
+        () -> moderation.updateAccount(request));
+    moderation.updateAccount(request);
+
+    assertFalse(fixture.authenticate(token, false).isPresent());
+    verify(fixture.sessions).delete(fixture.session());
+    verify(fixture.sessions, org.mockito.Mockito.times(1))
+        .deleteByAccountId(fixture.account.getId());
   }
 
   @Test

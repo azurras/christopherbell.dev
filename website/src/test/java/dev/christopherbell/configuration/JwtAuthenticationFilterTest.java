@@ -16,6 +16,9 @@ import dev.christopherbell.configuration.security.JwtAuthenticationFilter;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.configuration.security.browser.AuthenticatedBrowserSession;
+import dev.christopherbell.configuration.security.browser.BrowserSession;
+import dev.christopherbell.configuration.security.browser.BrowserSessionActivityStore;
+import dev.christopherbell.configuration.security.browser.BrowserSessionRepository;
 import dev.christopherbell.configuration.security.browser.BrowserSessionService;
 import dev.christopherbell.configuration.security.browser.InteractiveBrowserRequest;
 import dev.christopherbell.permission.PermissionService;
@@ -26,9 +29,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.net.URI;
+import java.time.Clock;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -100,6 +106,38 @@ class JwtAuthenticationFilterTest {
     assertNotNull(authentication);
     assertEquals("account-1", authentication.getName());
     assertEquals(200, response.getStatus());
+  }
+
+  @Test
+  @DisplayName("Browser account lookup failure rejects and clears the cookie")
+  void doFilter_whenBrowserAccountLookupFails_returnsUnauthorized()
+      throws ServletException, IOException {
+    var account = account(Role.USER);
+    var accounts = mock(AccountRepository.class);
+    var sessionRepository = mock(BrowserSessionRepository.class);
+    var activity = mock(BrowserSessionActivityStore.class);
+    var saved = ArgumentCaptor.forClass(BrowserSession.class);
+    when(accounts.findById(account.getId()))
+        .thenReturn(Optional.of(account))
+        .thenThrow(new DataAccessResourceFailureException("mongo"));
+    when(sessionRepository.save(saved.capture())).thenAnswer(invocation -> invocation.getArgument(0));
+    when(sessionRepository.findById(org.mockito.ArgumentMatchers.anyString()))
+        .thenAnswer(invocation -> Optional.of(saved.getValue()));
+    var sessions = new BrowserSessionService(
+        sessionRepository, activity, accounts, Clock.systemUTC());
+    String token = sessions.create(PermissionService.generateToken(account));
+    var filter = new JwtAuthenticationFilter(
+        List.of(), sessions, new InteractiveBrowserRequest(), cookies());
+    var request = new MockHttpServletRequest("GET", "/api/protected");
+    request.setCookies(new Cookie("CBELL_AUTH", token));
+    var response = new MockHttpServletResponse();
+
+    filter.doFilter(request, response, new MockFilterChain());
+
+    assertNull(SecurityContextHolder.getContext().getAuthentication());
+    assertEquals(401, response.getStatus());
+    assertTrue(response.getHeaders("Set-Cookie").stream()
+        .anyMatch(header -> header.contains("CBELL_AUTH=") && header.contains("Max-Age=0")));
   }
 
   @Test

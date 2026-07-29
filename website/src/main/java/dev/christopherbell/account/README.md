@@ -58,6 +58,8 @@ subfeature services own the larger account workflows.
   the USER/MOD/ADMIN hierarchy or JWT contents; write always requires read.
 - Successful password, role, status, and capability changes revoke every opaque
   browser session for the account after the authoritative account write succeeds.
+  As a safety fallback for split-write failures, ordinary cookie authentication
+  also validates the session fingerprint against the current persisted account.
 - Account DTOs and persistence models under `model`.
 
 ## Update This Doc

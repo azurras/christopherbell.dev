@@ -90,6 +90,18 @@ public class BrowserSessionService implements AccountSessionRevoker {
       return Optional.empty();
     }
 
+    var accountId = session.getAccountId();
+    var accountSecurityFingerprint = session.getAccountSecurityFingerprint();
+    var account = accounts.findById(accountId)
+        .filter(this::isActive)
+        .filter(current -> AccountSecurityFingerprint.matches(
+            accountSecurityFingerprint, current))
+        .orElse(null);
+    if (account == null) {
+      sessions.delete(session);
+      return Optional.empty();
+    }
+
     Optional<String> rotatedToken = Optional.empty();
     if (interactive) {
       var idleExpiresOn = earlier(now.plus(IDLE_LIFETIME), session.getAbsoluteExpiresOn());
@@ -126,7 +138,7 @@ public class BrowserSessionService implements AccountSessionRevoker {
       }
     }
     return Optional.of(new AuthenticatedBrowserSession(
-        session.getAccountId(), session.getRole(), rotatedToken));
+        account.getId(), account.getRole(), rotatedToken));
   }
 
   /** Revokes the session named by a cookie without revealing whether it existed. */

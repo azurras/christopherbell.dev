@@ -24,9 +24,9 @@ Owns application-wide Spring and web infrastructure.
   take precedence for API clients; browser requests otherwise authenticate from
   the HttpOnly `CBELL_AUTH` cookie. Exact GET static-resource namespaces bypass
   credential processing so cacheable browser assets never renew or invalidate a
-  browser session. Valid browser sessions provide their persisted account-id and
-  role snapshot without an account lookup; legacy sessions missing the required
-  identity snapshot are deleted and rejected.
+  browser session. Ordinary cookie authentication validates the session snapshot
+  against the current persisted ACTIVE account before using its account id and
+  role. Legacy or stale sessions are deleted and rejected.
 - Stable JWT signing through `APP_JWT_SECRET`.
 - Production settings validation runs before context refresh and reports only
   invalid setting names, never their values.

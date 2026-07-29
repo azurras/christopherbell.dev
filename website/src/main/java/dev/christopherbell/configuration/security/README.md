@@ -9,6 +9,9 @@ Owns Spring Security wiring and request authentication infrastructure.
 - Browser-session activity is coalesced to at most one conditional Mongo update per five-minute
   window. Due credential rotation is an atomic compare-and-set; a race loser or persistence
   failure is rejected rather than reloading a session into a successful authentication.
+- Ordinary cookie authentication validates each structurally valid browser session against the
+  current persisted ACTIVE account and its security fingerprint. Missing, inactive, or stale
+  accounts delete and reject the session; account lookup failures fail closed at the filter.
 - `StaticAssetRequestMatcher` bypasses credential handling only for the listed GET favicon, CSS,
   image, JavaScript, vendor, pinned Bootstrap WebJar, and release-versioned asset namespaces.
   Shared-folder worker and media routes remain authentication boundaries.
