@@ -28,6 +28,10 @@ test('image helpers never activate non-HTTP image values', () => {
     'data:image/png;base64,AAAA',
     '/relative.jpg',
     '//cdn.example.com/protocol-relative.jpg',
+    'https:example.com/image.jpg',
+    'https:/example.com/image.jpg',
+    'https:\\example.com\\image.jpg',
+    'https:\\\\example.com\\image.jpg',
     'http://[malformed'
   ]) {
     assert.equal(imageLightboxMarkup(src), '');

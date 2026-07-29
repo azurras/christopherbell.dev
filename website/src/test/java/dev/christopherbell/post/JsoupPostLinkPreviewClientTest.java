@@ -57,6 +57,25 @@ class JsoupPostLinkPreviewClientTest {
     assertEquals(30, preview.imageUrl().length());
   }
 
+  @Test
+  void rejectsMalformedImageMetadataEvenWhenTheMalformedSuffixExceedsTheStorageLimit() {
+    var validPrefix = "https://example.com/image.jpg";
+    var properties = new PostLinkPreviewProperties();
+    properties.setMaxImageUrlLength(validPrefix.length());
+    var document = Jsoup.parse("""
+        <html><head>
+          <title>Safe title</title>
+          <meta property="og:image" content="%s[malformed">
+        </head></html>
+        """.formatted(validPrefix), "https://example.com/page");
+
+    var preview = new JsoupPostLinkPreviewClient(null, properties)
+        .toPreview(URI.create("https://example.com/page"), document)
+        .orElseThrow();
+
+    assertNull(preview.imageUrl());
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {
       "javascript:alert(1)",

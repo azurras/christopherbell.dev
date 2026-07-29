@@ -9,6 +9,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class PostLinkPreviewDestinationPolicyTest {
@@ -42,7 +43,9 @@ class PostLinkPreviewDestinationPolicyTest {
         "0.0.0.0", "10.0.0.1", "100.64.0.1", "127.0.0.1", "169.254.1.1",
         "172.16.0.1", "192.0.0.1", "192.0.2.1", "192.168.1.1", "198.18.0.1",
         "198.51.100.1", "203.0.113.1", "224.0.0.1", "240.0.0.1",
-        "::", "::1", "fc00::1", "fe80::1", "ff00::1", "2001:db8::1");
+        "::", "::1", "fc00::1", "fe80::1", "ff00::1",
+        "2001::1", "2001:1::4", "2001:2::1", "2001:10::1", "2001:40::1",
+        "2001:db8::1", "2002::1", "3fff::1");
     for (var address : blocked) {
       var policy = new PostLinkPreviewDestinationPolicy(
           host -> List.of(InetAddress.getByName(address)));
@@ -50,6 +53,36 @@ class PostLinkPreviewDestinationPolicyTest {
           "https://blocked.example/" + address.replace(':', '-'))))
           .isInstanceOf(IllegalArgumentException.class);
     }
+  }
+
+  @Test
+  void permitsOnlyGloballyReachableExceptionsWithinIetfProtocolAssignments() throws Exception {
+    for (var address : List.of(
+        "2001:1::1", "2001:1::2", "2001:1::3", "2001:3::1",
+        "2001:4:112::1", "2001:20::1", "2001:30::1", "2606:4700:4700::1111")) {
+      var policy = new PostLinkPreviewDestinationPolicy(
+          host -> List.of(InetAddress.getByName(address)));
+
+      assertThatCode(() -> policy.requirePublic(URI.create("https://public.example/")))
+          .doesNotThrowAnyException();
+    }
+  }
+
+  @Test
+  void rejectsHostIdentitiesThatCannotBeSafelyAppliedToTlsBeforeResolution() {
+    var resolutions = new AtomicInteger();
+    var policy = new PostLinkPreviewDestinationPolicy(host -> {
+      resolutions.incrementAndGet();
+      return List.of(InetAddress.getByName("1.1.1.1"));
+    });
+
+    for (var uri : List.of(
+        URI.create("https://public.example./"),
+        URI.create("https://[2606:4700:4700::1111]/"))) {
+      assertThatThrownBy(() -> policy.requirePublic(uri))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+    org.assertj.core.api.Assertions.assertThat(resolutions).hasValue(0);
   }
 
   @Test

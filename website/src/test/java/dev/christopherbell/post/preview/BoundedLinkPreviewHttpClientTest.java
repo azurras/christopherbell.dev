@@ -18,6 +18,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.ExtendedSSLSession;
@@ -152,6 +155,25 @@ class BoundedLinkPreviewHttpClientTest {
   }
 
   @Test
+  void categorizesUnsupportedTlsHostIdentitiesAsDestinationRejections() throws Exception {
+    var policy = new PostLinkPreviewDestinationPolicy(
+        host -> List.of(InetAddress.getByName("1.1.1.1")));
+    var client = new BoundedLinkPreviewHttpClient(
+        new LinkPreviewHttpTransport(Duration.ofSeconds(2)),
+        policy::resolveApproved,
+        properties(1024));
+
+    for (var uri : List.of(
+        URI.create("https://public.example./"),
+        URI.create("https://[2606:4700:4700::1111]/"))) {
+      assertThatThrownBy(() -> client.fetch(uri))
+          .isInstanceOf(LinkPreviewFetchException.class)
+          .extracting("category")
+          .isEqualTo("DESTINATION_REJECTED");
+    }
+  }
+
+  @Test
   void revalidatesAndPinsEveryManualRedirect() throws Exception {
     var secondHost = new AtomicReference<String>();
     var destination = remember(HttpServer.create()
@@ -269,6 +291,46 @@ class BoundedLinkPreviewHttpClientTest {
         .extracting("category")
         .isEqualTo("TIMEOUT");
     assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(1));
+  }
+
+  @Test
+  void categorizesWrappedInterruptionAndRestoresTheWorkerInterruptFlag() throws Exception {
+    var requestStarted = new CountDownLatch(1);
+    var server = remember(HttpServer.create()
+        .host("127.0.0.1")
+        .port(0)
+        .handle((request, response) -> {
+          requestStarted.countDown();
+          response.status(200).header("Content-Type", "text/html");
+          return response.sendHeaders().then(Mono.never());
+        })
+        .bindNow());
+    var uri = URI.create("http://interrupted.invalid:" + server.port() + "/page");
+    var client = new BoundedLinkPreviewHttpClient(
+        new LinkPreviewHttpTransport(Duration.ofSeconds(2)),
+        resolver((requested, timeout) -> approved(requested, server.port())),
+        properties(1024));
+    var failure = new AtomicReference<Throwable>();
+    var interrupted = new AtomicBoolean();
+    var worker = Thread.ofVirtual().start(() -> {
+      try {
+        client.fetch(uri);
+      } catch (Throwable caught) {
+        failure.set(caught);
+        interrupted.set(Thread.currentThread().isInterrupted());
+      }
+    });
+
+    assertThat(requestStarted.await(1, TimeUnit.SECONDS)).isTrue();
+    worker.interrupt();
+    worker.join(1_000);
+
+    assertThat(worker.isAlive()).isFalse();
+    assertThat(failure.get())
+        .isInstanceOf(LinkPreviewFetchException.class)
+        .extracting("category")
+        .isEqualTo("INTERRUPTED");
+    assertThat(interrupted).isTrue();
   }
 
   @Test

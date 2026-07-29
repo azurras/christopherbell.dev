@@ -74,6 +74,7 @@ public class PostLinkPreviewDestinationPolicy {
             || "https".equalsIgnoreCase(uri.getScheme()))
         || uri.getHost() == null
         || uri.getHost().isBlank()
+        || isUnsupportedHostIdentity(uri.getHost())
         || uri.getUserInfo() != null
         || "localhost".equalsIgnoreCase(uri.getHost())) {
       throw new IllegalArgumentException("Link preview destination must be a public HTTP(S) URL.");
@@ -145,17 +146,53 @@ public class PostLinkPreviewDestinationPolicy {
   }
 
   private boolean isBlockedIpv6(byte[] address) {
-    var first = Byte.toUnsignedInt(address[0]);
-    var second = Byte.toUnsignedInt(address[1]);
-    var third = Byte.toUnsignedInt(address[2]);
-    var fourth = Byte.toUnsignedInt(address[3]);
-    var globallyRoutable = (first & 0xe0) == 0x20;
-    var documentation = first == 0x20 && second == 0x01 && third == 0x0d && fourth == 0xb8;
-    return !globallyRoutable || documentation;
+    var first = hextet(address, 0);
+    var second = hextet(address, 1);
+    var globallyRoutable = (first & 0xe000) == 0x2000;
+    var ietfProtocolAssignment = first == 0x2001 && second <= 0x01ff;
+    var documentation = first == 0x2001 && second == 0x0db8;
+    var sixToFour = first == 0x2002;
+    var documentationV2 = first == 0x3fff && (second & 0xf000) == 0;
+    return !globallyRoutable
+        || (ietfProtocolAssignment && !isGloballyReachableIetfException(address))
+        || documentation
+        || sixToFour
+        || documentationV2;
+  }
+
+  private boolean isGloballyReachableIetfException(byte[] address) {
+    var second = hextet(address, 1);
+    var third = hextet(address, 2);
+    if (second == 0x0003 || (second == 0x0004 && third == 0x0112)) {
+      return true;
+    }
+    if ((second & 0xfff0) == 0x0020 || (second & 0xfff0) == 0x0030) {
+      return true;
+    }
+    if (second != 0x0001) {
+      return false;
+    }
+    for (var index = 4; index < address.length - 1; index++) {
+      if (address[index] != 0) {
+        return false;
+      }
+    }
+    var finalByte = Byte.toUnsignedInt(address[address.length - 1]);
+    return finalByte >= 1 && finalByte <= 3;
+  }
+
+  private static int hextet(byte[] address, int index) {
+    var offset = index * 2;
+    return Byte.toUnsignedInt(address[offset]) << 8
+        | Byte.toUnsignedInt(address[offset + 1]);
   }
 
   private static String addressKey(InetAddress address) {
     return HexFormat.of().formatHex(address.getAddress());
+  }
+
+  private static boolean isUnsupportedHostIdentity(String host) {
+    return host.endsWith(".") || host.contains(":");
   }
 
   /** A destination whose remote address is provably one member of its validated DNS answers. */

@@ -5,8 +5,10 @@ const initializedRoots = new WeakSet();
 /** Return a normalized absolute HTTP(S) image URL or an empty rejection. */
 export function activeImageUrl(src) {
   if (typeof src !== 'string' || !src.trim()) return '';
+  const raw = src.trim();
+  if (!/^https?:\/\/[^\\/\s?#]+(?:[/?#]|$)/i.test(raw)) return '';
   try {
-    const parsed = new URL(src);
+    const parsed = new URL(raw);
     return ['http:', 'https:'].includes(parsed.protocol) && parsed.hostname
       ? parsed.href
       : '';

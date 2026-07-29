@@ -103,12 +103,20 @@ public class JsoupPostLinkPreviewClient implements PostLinkPreviewClient {
   }
 
   private String boundedAbsoluteHttpUrl(String value, int maxLength) {
-    var bounded = bounded(value, maxLength);
-    if (bounded == null) {
+    if (value == null || value.isBlank()) {
       return null;
     }
+    var stripped = value.strip();
+    if (!isAbsoluteHttpUrl(stripped)) {
+      return null;
+    }
+    var bounded = bounded(stripped, maxLength);
+    return bounded != null && isAbsoluteHttpUrl(bounded) ? bounded : null;
+  }
+
+  private boolean isAbsoluteHttpUrl(String value) {
     try {
-      var parsed = URI.create(bounded);
+      var parsed = URI.create(value);
       var scheme = parsed.getScheme();
       if (!parsed.isAbsolute()
           || scheme == null
@@ -116,11 +124,11 @@ public class JsoupPostLinkPreviewClient implements PostLinkPreviewClient {
               || "https".equals(scheme.toLowerCase(Locale.ROOT)))
           || parsed.getHost() == null
           || parsed.getHost().isBlank()) {
-        return null;
+        return false;
       }
-      return bounded;
+      return true;
     } catch (IllegalArgumentException ignored) {
-      return null;
+      return false;
     }
   }
 }

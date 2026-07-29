@@ -104,6 +104,11 @@ final class LinkPreviewHttpTransport {
       }
       return response;
     } catch (RuntimeException failure) {
+      var interruptedFailure = findCause(failure, InterruptedException.class);
+      if (interruptedFailure != null) {
+        Thread.currentThread().interrupt();
+        throw new LinkPreviewFetchException("INTERRUPTED", interruptedFailure);
+      }
       var fetchFailure = findCause(failure, LinkPreviewFetchException.class);
       if (fetchFailure != null) {
         throw fetchFailure;
