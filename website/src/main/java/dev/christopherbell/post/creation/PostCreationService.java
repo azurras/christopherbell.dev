@@ -8,6 +8,8 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.post.PostMapper;
 import dev.christopherbell.post.PostRepository;
+import dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter;
+import dev.christopherbell.post.abuse.VoidMutationKind;
 import dev.christopherbell.post.expiration.PostExpirationService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostCreateRequest;
@@ -34,6 +36,7 @@ public class PostCreationService {
   private final NotificationDeliveryService notificationDeliveryService;
   private final PostLinkPreviewService postLinkPreviewService;
   private final PostExpirationService postExpirationService;
+  private final NewAccountVoidMutationLimiter mutationLimiter;
   private final PostTopicExtractor postTopicExtractor;
   private final Clock clock;
 
@@ -80,6 +83,11 @@ public class PostCreationService {
     if (rootId == null) {
       rootId = newId;
     }
+    mutationLimiter.require(
+        account,
+        parentId == null || parentId.isBlank()
+            ? VoidMutationKind.ROOT_POST
+            : VoidMutationKind.REPLY);
 
     var post = Post.builder()
         .id(newId)

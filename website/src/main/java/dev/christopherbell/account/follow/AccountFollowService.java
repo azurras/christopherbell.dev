@@ -5,7 +5,9 @@ import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.profile.AccountProfileService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
-import java.time.Instant;
+import dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter;
+import dev.christopherbell.post.abuse.VoidMutationKind;
+import java.time.Clock;
 import java.util.HashSet;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,8 @@ import org.springframework.stereotype.Service;
 public class AccountFollowService {
   private final AccountRepository accountRepository;
   private final AccountProfileService accountProfileService;
+  private final NewAccountVoidMutationLimiter mutationLimiter;
+  private final Clock clock;
 
   /**
    * Follows the account identified by username for the current user.
@@ -33,8 +37,11 @@ public class AccountFollowService {
     if (self.getFollowingIds() == null) {
       self.setFollowingIds(new HashSet<>());
     }
-    self.getFollowingIds().add(target.getId());
-    self.setLastUpdatedOn(Instant.now());
+    if (!self.getFollowingIds().contains(target.getId())) {
+      mutationLimiter.require(self, VoidMutationKind.FOLLOW);
+      self.getFollowingIds().add(target.getId());
+    }
+    self.setLastUpdatedOn(clock.instant());
     accountRepository.save(self);
     return accountProfileService.toPublicProfile(target, Optional.of(self));
   }
@@ -50,7 +57,7 @@ public class AccountFollowService {
     } else {
       self.getFollowingIds().remove(target.getId());
     }
-    self.setLastUpdatedOn(Instant.now());
+    self.setLastUpdatedOn(clock.instant());
     accountRepository.save(self);
     return accountProfileService.toPublicProfile(target, Optional.of(self));
   }

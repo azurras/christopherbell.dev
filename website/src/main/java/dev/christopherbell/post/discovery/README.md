@@ -7,6 +7,11 @@ Fading soon, Recently revived, active Topics, and the active root conversations 
 topic. Every query uses an opaque timestamp-and-id cursor, clamps page output to 24 items,
 excludes expired documents, and returns `Cache-Control: no-store`.
 
+People suggestions share one recent-active candidate pool. Signed-in ranking uses distinct
+shared topics and then recency while excluding self, existing follows, mutes, blocks in both
+directions, suspended accounts, and missing accounts. Anonymous results rotate the same pool
+once per UTC day. Popularity and lifespan totals are never ranking inputs.
+
 Topic discovery is based only on normalized hashtags persisted with posts. New sorts by
 creation time, Fading sorts by expiration time, and Revived sorts by the most recent
 confirmed keep-alive or reply. Engagement totals never influence discovery ordering.

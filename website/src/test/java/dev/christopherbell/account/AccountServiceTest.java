@@ -44,11 +44,15 @@ import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.PasswordUtil;
 import dev.christopherbell.post.PostRepository;
+import dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter;
+import dev.christopherbell.post.abuse.VoidMutationKind;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
@@ -77,6 +81,7 @@ public class AccountServiceTest {
   @Mock private SharedFolderAccessService sharedFolderAccess;
   @Mock private AdminActivityService adminActivityService;
   @Mock private PermissionService permissionService;
+  @Mock private NewAccountVoidMutationLimiter mutationLimiter;
   private AccountService accountService;
 
   @BeforeEach
@@ -84,7 +89,11 @@ public class AccountServiceTest {
     var authenticationService = new AccountAuthenticationService(accountRepository);
     var passwordResetService = new PasswordResetService(accountRepository, passwordResetNotificationService);
     var profileService = new AccountProfileService(accountRepository, accountMapper, postRepository);
-    var followService = new AccountFollowService(accountRepository, profileService);
+    var followService = new AccountFollowService(
+        accountRepository,
+        profileService,
+        mutationLimiter,
+        Clock.fixed(Instant.parse("2026-07-29T04:00:00Z"), ZoneOffset.UTC));
     var moderationService = new AccountModerationService(
         accountRepository, accountMapper, adminActivityService, permissionService);
     accountService = new AccountService(
@@ -264,6 +273,7 @@ public class AccountServiceTest {
       org.junit.jupiter.api.Assertions.assertTrue(profile.followedByMe());
       verify(accountRepository).findById(eq("self"));
       verify(accountRepository).findByUsername(eq("target"));
+      verify(mutationLimiter).require(eq(self), eq(VoidMutationKind.FOLLOW));
       verify(accountRepository).save(eq(self));
       verify(accountRepository).countByFollowingIdsContaining(eq("target"));
       verify(postRepository).countByAccountIdAndParentIdIsNull(eq("target"));
