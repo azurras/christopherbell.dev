@@ -1,16 +1,62 @@
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-
 plugins {
     id("org.springframework.boot") version "4.1.0" apply false
     id("io.spring.dependency-management") version "1.1.7" apply false
     java
 }
 
+fun validatedReleaseVersion(raw: String): String {
+    val value = raw.trim()
+    if (raw != value || !value.matches(Regex("[0-9A-Za-z][0-9A-Za-z._+-]{0,127}"))) {
+        throw GradleException(
+            "releaseVersion must be 1-128 letters, digits, dots, underscores, pluses, or hyphens.")
+    }
+    return value
+}
+
+fun developmentVersion(commit: String): String {
+    val normalized = commit.trim().lowercase()
+    if (!normalized.matches(Regex("[0-9a-f]{40}"))) {
+        throw GradleException("Git HEAD must resolve to a full 40-character commit SHA.")
+    }
+    return "0.0.0-dev.$normalized"
+}
+
+val sourceGitCommit = providers.exec {
+    commandLine("git", "rev-parse", "HEAD")
+    workingDir(rootProject.projectDir)
+}.standardOutput.asText.map(String::trim)
+val explicitReleaseVersion = providers.gradleProperty("releaseVersion")
+    .orElse(providers.environmentVariable("RELEASE_VERSION"))
+val resolvedVersion = explicitReleaseVersion.map(::validatedReleaseVersion)
+    .orElse(sourceGitCommit.map(::developmentVersion))
+
 group = "dev.christopherbell"
-val buildNumber = System.getenv("BUILD_NUMBER") ?: "0"
-val dateVersion = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy.MM.dd"))
-version = "$dateVersion.$buildNumber"
+version = resolvedVersion.get()
+
+tasks.register("verifyDeterministicVersion") {
+    group = "verification"
+    description = "Verifies that artifact versioning is independent of clock and build order."
+    inputs.property("resolvedVersion", resolvedVersion)
+    inputs.property("sourceGitCommit", sourceGitCommit)
+
+    doLast {
+        val commit = sourceGitCommit.get()
+        val firstResolution = developmentVersion(commit)
+        val repeatedResolution = developmentVersion(commit)
+        check(firstResolution == repeatedResolution) {
+            "Repeated development-version resolution changed for one commit."
+        }
+        if (!explicitReleaseVersion.isPresent) {
+            check(project.version.toString() == firstResolution) {
+                "Development version must contain the exact source commit."
+            }
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn("verifyDeterministicVersion")
+}
 
 subprojects {
     repositories {
