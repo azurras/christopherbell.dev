@@ -223,7 +223,8 @@ Describe 'native Windows deployment' {
 
             $expectedPaths = @(
                 '/', '/blog', '/wfl', '/canes-box-tracker', '/robots.txt', '/sitemap.xml',
-                '/favicon.ico', '/actuator/health/liveness', '/actuator/health/readiness'
+                '/favicon.ico', '/actuator/health/liveness', '/actuator/health/readiness',
+                '/.well-known/nodeinfo', '/nodeinfo/2.1'
             )
             Should -Invoke Wait-HttpStatus -Times $expectedPaths.Count -Exactly -ParameterFilter {
                 ([uri]$Uri).AbsolutePath -in $expectedPaths -and
@@ -250,8 +251,8 @@ Describe 'native Windows deployment' {
 
             $count = Test-ProductionPublicEndpoints -Config $configuration
 
-            $count | Should -Be 18
-            Should -Invoke Wait-HttpStatus -Times 18 -Exactly -ParameterFilter {
+            $count | Should -Be 22
+            Should -Invoke Wait-HttpStatus -Times 22 -Exactly -ParameterFilter {
                 ([uri]$Uri).Scheme -eq 'https' -and
                     ([uri]$Uri).Host -in @('christopherbell.dev','www.christopherbell.dev') -and
                     $ExpectedStatus -eq 200 -and

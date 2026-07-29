@@ -324,6 +324,23 @@ if ($workerService.Status -ne 'Running' -or
 }
 ```
 
+## ActivityPub Discovery Operations
+
+Production read-only ActivityPub discovery is enabled by default. On the first
+production-profile start, the SYSTEM-owned application atomically creates a
+32-byte secret at
+`C:\ProgramData\christopherbell.dev\config\federation-key-encryption-secret.bin`.
+The same file is reused across candidates, deployments, restarts, and rollbacks.
+Never print, replace, or delete it: losing the file makes stored federation
+private keys unreadable.
+
+For emergency discovery shutdown, set
+`APP_FEDERATION_DISCOVERY_ENABLED=false` in the protected `app.env` and use the
+normal restart workflow. Inbound and outbound federation remain disabled. The
+candidate and public deployment checks require both `/.well-known/nodeinfo` and
+`/nodeinfo/2.1` to return HTTP 200, so malformed or inaccessible secret storage
+fails before a release becomes current.
+
 `A:\Shared` contains user-visible originals. `A:\Shared-System` is private
 runtime state with these checked-in layouts:
 

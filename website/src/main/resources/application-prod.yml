@@ -27,12 +27,13 @@ app:
     authentication-cookie-secure: true
     hsts-enabled: true
   federation:
-    discovery-enabled: ${APP_FEDERATION_DISCOVERY_ENABLED:false}
+    discovery-enabled: ${APP_FEDERATION_DISCOVERY_ENABLED:true}
     inbound-enabled: ${APP_FEDERATION_INBOUND_ENABLED:false}
     outbound-enabled: ${APP_FEDERATION_OUTBOUND_ENABLED:false}
     software-name: christopherbell.dev
     software-version: ${GIT_COMMIT:unknown}
     key-encryption-secret: ${APP_FEDERATION_KEY_ENCRYPTION_SECRET:}
+    key-encryption-secret-file: ${APP_FEDERATION_KEY_ENCRYPTION_SECRET_FILE:C:/ProgramData/christopherbell.dev/config/federation-key-encryption-secret.bin}
     outbound:
       not-before: ${APP_FEDERATION_OUTBOUND_NOT_BEFORE:}
       peers: []
