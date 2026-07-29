@@ -1,6 +1,7 @@
 package dev.christopherbell.report.moderation;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.admin.activity.AdminActivityService;
@@ -36,6 +37,7 @@ public class ReportModerationService {
   private final AdminActivityService adminActivityService;
   private final PermissionService permissionService;
   private final ReportRepository reportRepository;
+  private final AccountSessionRevoker sessionRevoker;
 
   /**
    * Returns reports in the order admins need to review them.
@@ -209,6 +211,7 @@ public class ReportModerationService {
     suspendedAccount.ifPresent(account -> {
       account.setStatus(AccountStatus.SUSPENDED);
       accountRepository.save(account);
+      sessionRevoker.revokeAll(account.getId());
     });
     return suspendedUsername;
   }

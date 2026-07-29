@@ -2,6 +2,7 @@ package dev.christopherbell.configuration.security.browser;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.auth.AccountSecurityFingerprint;
+import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.permission.PermissionService;
@@ -18,23 +19,30 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** Creates, resolves, rotates, and revokes opaque browser sessions. */
-public class BrowserSessionService {
+public class BrowserSessionService implements AccountSessionRevoker {
   static final Duration IDLE_LIFETIME = Duration.ofDays(7);
   static final Duration ABSOLUTE_LIFETIME = Duration.ofDays(30);
   static final Duration ROTATION_INTERVAL = Duration.ofDays(1);
   static final Duration ROTATION_OVERLAP = Duration.ofMinutes(2);
+  static final Duration ACTIVITY_WRITE_INTERVAL = Duration.ofMinutes(5);
   private static final int TOKEN_BYTES = 32;
 
   private final BrowserSessionRepository sessions;
+  private final BrowserSessionActivityStore activity;
+  private final BrowserSessionAuthenticationStore authentications;
   private final AccountRepository accounts;
   private final Clock clock;
   private final SecureRandom random = new SecureRandom();
 
   public BrowserSessionService(
       BrowserSessionRepository sessions,
+      BrowserSessionActivityStore activity,
+      BrowserSessionAuthenticationStore authentications,
       AccountRepository accounts,
       Clock clock) {
     this.sessions = sessions;
+    this.activity = activity;
+    this.authentications = authentications;
     this.accounts = accounts;
     this.clock = clock;
   }
@@ -46,6 +54,7 @@ public class BrowserSessionService {
     var presentedFingerprint = claims.get(AccountSecurityFingerprint.CLAIM, String.class);
     var account = accounts.findById(accountId)
         .filter(this::isActive)
+        .filter(current -> current.getRole() != null)
         .filter(current -> AccountSecurityFingerprint.matches(presentedFingerprint, current))
         .orElseThrow(() -> new IllegalArgumentException("Browser session account is unavailable."));
     var now = clock.instant();
@@ -53,6 +62,7 @@ public class BrowserSessionService {
     sessions.save(BrowserSession.builder()
         .id(credential.sessionId())
         .accountId(account.getId())
+        .role(account.getRole())
         .tokenHash(hash(credential.secret()))
         .accountSecurityFingerprint(AccountSecurityFingerprint.from(account))
         .createdOn(now)
@@ -69,8 +79,9 @@ public class BrowserSessionService {
     var parsed = parse(rawToken);
     if (parsed.isEmpty()) return Optional.empty();
 
-    var session = sessions.findById(parsed.get().sessionId()).orElse(null);
-    if (session == null) return Optional.empty();
+    var authentication = authentications.findById(parsed.get().sessionId()).orElse(null);
+    if (authentication == null) return Optional.empty();
+    var session = authentication.session();
     var now = clock.instant();
     if (!validCredential(session, parsed.get().secret(), now)
         || expired(session, now)) {
@@ -78,31 +89,72 @@ public class BrowserSessionService {
       return Optional.empty();
     }
 
-    var account = accounts.findById(session.getAccountId()).orElse(null);
-    if (account == null || !isActive(account)
-        || !constantTimeEquals(
-            session.getAccountSecurityFingerprint(), AccountSecurityFingerprint.from(account))) {
+    if (!completeSnapshot(session)) {
+      sessions.delete(session);
+      return Optional.empty();
+    }
+
+    var accountSecurityFingerprint = session.getAccountSecurityFingerprint();
+    var account = authentication.account();
+    if (!account.validates(accountSecurityFingerprint)) {
       sessions.delete(session);
       return Optional.empty();
     }
 
     Optional<String> rotatedToken = Optional.empty();
     if (interactive) {
-      session.setLastSeenOn(now);
-      session.setIdleExpiresOn(earlier(now.plus(IDLE_LIFETIME), session.getAbsoluteExpiresOn()));
-      if (!now.isBefore(session.getRotatedOn().plus(ROTATION_INTERVAL))) {
+      var idleExpiresOn = earlier(now.plus(IDLE_LIFETIME), session.getAbsoluteExpiresOn());
+      if (!now.isBefore(session.getRotatedOn().plus(ROTATION_INTERVAL))
+          && constantTimeEquals(session.getTokenHash(), hash(parsed.get().secret()))
+          // Rotating with less time would shorten the fixed previous-token overlap.
+          && !session.getAbsoluteExpiresOn().isBefore(now.plus(ROTATION_OVERLAP))) {
         var rotated = credential(session.getId());
-        session.setPreviousTokenHash(session.getTokenHash());
-        session.setPreviousTokenExpiresOn(earlier(
-            now.plus(ROTATION_OVERLAP), session.getAbsoluteExpiresOn()));
-        session.setTokenHash(hash(rotated.secret()));
-        session.setRotatedOn(now);
+        var updated = activity.rotate(
+            session.getId(),
+            session.getTokenHash(),
+            session.getRotatedOn(),
+            hash(rotated.secret()),
+            now,
+            earlier(now.plus(ROTATION_OVERLAP), session.getAbsoluteExpiresOn()),
+            idleExpiresOn);
+        if (updated.isEmpty()) {
+          var reloaded = authentications.findById(session.getId()).orElse(null);
+          if (reloaded == null) return Optional.empty();
+          var reloadedSession = reloaded.session();
+          if (!validPreviousCredential(reloadedSession, hash(parsed.get().secret()), now)
+              || expired(reloadedSession, now)
+              || !completeSnapshot(reloadedSession)) {
+            sessions.delete(reloadedSession);
+            return Optional.empty();
+          }
+          account = reloaded.account();
+          if (!account.validates(reloadedSession.getAccountSecurityFingerprint())) {
+            sessions.delete(reloadedSession);
+            return Optional.empty();
+          }
+          return Optional.of(new AuthenticatedBrowserSession(
+              account.id(), account.role(), Optional.empty()));
+        }
+        session = updated.orElseThrow();
+        if (!validCredential(session, parsed.get().secret(), now)
+            || expired(session, now)
+            || !completeSnapshot(session)) {
+          return Optional.empty();
+        }
         rotatedToken = Optional.of(rotated.raw());
+      } else if (!now.isBefore(session.getLastSeenOn().plus(ACTIVITY_WRITE_INTERVAL))) {
+        var updated = activity.touch(session.getId(), session.getLastSeenOn(), now, idleExpiresOn);
+        if (updated.isEmpty()) return Optional.empty();
+        session = updated.orElseThrow();
+        if (!validCredential(session, parsed.get().secret(), now)
+            || expired(session, now)
+            || !completeSnapshot(session)) {
+          return Optional.empty();
+        }
       }
-      sessions.save(session);
     }
     return Optional.of(new AuthenticatedBrowserSession(
-        account.getId(), account.getRole(), rotatedToken));
+        account.id(), account.role(), rotatedToken));
   }
 
   /** Revokes the session named by a cookie without revealing whether it existed. */
@@ -111,12 +163,21 @@ public class BrowserSessionService {
   }
 
   /** Revokes every browser session for an account. */
+  @Override
   public void revokeAll(String accountId) {
     if (accountId != null && !accountId.isBlank()) sessions.deleteByAccountId(accountId);
   }
 
   private boolean isActive(Account account) {
     return AccountStatus.ACTIVE.equals(account.getStatus());
+  }
+
+  private boolean completeSnapshot(BrowserSession session) {
+    return session.getAccountId() != null
+        && !session.getAccountId().isBlank()
+        && session.getRole() != null
+        && session.getAccountSecurityFingerprint() != null
+        && !session.getAccountSecurityFingerprint().isBlank();
   }
 
   private boolean expired(BrowserSession session, Instant now) {
@@ -127,6 +188,11 @@ public class BrowserSessionService {
   private boolean validCredential(BrowserSession session, String secret, Instant now) {
     String candidateHash = hash(secret);
     if (constantTimeEquals(session.getTokenHash(), candidateHash)) return true;
+    return validPreviousCredential(session, candidateHash, now);
+  }
+
+  private boolean validPreviousCredential(
+      BrowserSession session, String candidateHash, Instant now) {
     return session.getPreviousTokenHash() != null
         && session.getPreviousTokenExpiresOn() != null
         && now.isBefore(session.getPreviousTokenExpiresOn())

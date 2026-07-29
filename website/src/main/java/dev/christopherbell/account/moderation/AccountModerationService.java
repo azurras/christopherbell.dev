@@ -2,6 +2,7 @@ package dev.christopherbell.account.moderation;
 
 import dev.christopherbell.account.AccountMapper;
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.dto.AccountDetail;
@@ -31,6 +32,7 @@ public class AccountModerationService {
   private final AccountMapper accountMapper;
   private final AdminActivityService adminActivityService;
   private final PermissionService permissionService;
+  private final AccountSessionRevoker sessionRevoker;
 
   /**
    * Applies admin account updates while preserving unique email and username constraints.
@@ -63,6 +65,7 @@ public class AccountModerationService {
     existing.setPendingModerationAudit(auditCommand);
     var saved = accountRepository.save(existing);
     if (moderated) {
+      sessionRevoker.revokeAll(saved.getId());
       saved = completePendingAudit(saved);
     }
     return accountMapper.toAccount(saved);

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
@@ -41,6 +42,7 @@ class ReportServiceTest {
     AdminActivityService adminActivityService = Mockito.mock(AdminActivityService.class);
     PermissionService permissionService = Mockito.mock(PermissionService.class);
     ReportRepository reportRepository = Mockito.mock(ReportRepository.class);
+    AccountSessionRevoker sessionRevoker = Mockito.mock(AccountSessionRevoker.class);
 
     ReportService service = new ReportService(
         new ReportSubmissionService(
@@ -53,7 +55,8 @@ class ReportServiceTest {
             accountRepository,
             adminActivityService,
             permissionService,
-            reportRepository));
+            reportRepository,
+            sessionRevoker));
 
     ReportCreateRequest request = new ReportCreateRequest("post-1", "spam", "details");
     Post post = Post.builder()
@@ -121,7 +124,8 @@ class ReportServiceTest {
             Mockito.mock(AccountRepository.class),
             Mockito.mock(AdminActivityService.class),
             Mockito.mock(PermissionService.class),
-            reportRepository));
+            reportRepository,
+            Mockito.mock(AccountSessionRevoker.class)));
     var report = dev.christopherbell.report.model.PostReport.builder()
         .id("r1")
         .reportedAccountId("reported-1")
@@ -146,6 +150,7 @@ class ReportServiceTest {
     AdminActivityService adminActivityService = Mockito.mock(AdminActivityService.class);
     PermissionService permissionService = Mockito.mock(PermissionService.class);
     ReportRepository reportRepository = Mockito.mock(ReportRepository.class);
+    AccountSessionRevoker sessionRevoker = Mockito.mock(AccountSessionRevoker.class);
 
     ReportService service = new ReportService(
         Mockito.mock(ReportSubmissionService.class),
@@ -154,7 +159,8 @@ class ReportServiceTest {
             accountRepository,
             adminActivityService,
             permissionService,
-            reportRepository));
+            reportRepository,
+            sessionRevoker));
 
     var report = dev.christopherbell.report.model.PostReport.builder()
         .id("r1")
@@ -181,6 +187,9 @@ class ReportServiceTest {
 
     verify(postRepository).findById("p1");
     verify(accountRepository).save(account);
+    var order = Mockito.inOrder(accountRepository, sessionRevoker);
+    order.verify(accountRepository).save(account);
+    order.verify(sessionRevoker).revokeAll("u1");
     verify(adminActivityService).recordModeration(any());
     verify(adminActivityService).record(
         eq("POST_DELETED"),

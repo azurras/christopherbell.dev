@@ -25,6 +25,7 @@ public class AccountAuthenticationService {
   private static final String DUMMY_CURRENT_HASH = createDummyCurrentHash();
   private final AccountRepository accountRepository;
   private final AccountLoginStore accountLoginStore;
+  private final AccountSessionRevoker sessionRevoker;
 
   /**
    * Validates login information and returns a signed JWT for active accounts.
@@ -46,14 +47,18 @@ public class AccountAuthenticationService {
         throw rejectedLogin();
       }
 
-      var currentHash = PasswordUtil.needsRehash(
-          account.getPasswordSalt(), account.getPasswordHash())
-              ? PasswordUtil.upgradePassword(
-                  password, account.getPasswordSalt(), account.getPasswordHash())
-              : account.getPasswordHash();
+      boolean rehashRequired = PasswordUtil.needsRehash(
+          account.getPasswordSalt(), account.getPasswordHash());
+      var currentHash = rehashRequired
+          ? PasswordUtil.upgradePassword(
+              password, account.getPasswordSalt(), account.getPasswordHash())
+          : account.getPasswordHash();
       var current = accountLoginStore.completeLogin(account, currentHash, Instant.now())
           .filter(updated -> updated.getStatus() == AccountStatus.ACTIVE)
           .orElseThrow(this::rejectedLogin);
+      if (rehashRequired) {
+        sessionRevoker.revokeAll(current.getId());
+      }
       log.info("Successful login for account with id: {}", current.getId());
       return PermissionService.generateToken(current);
     } catch (NoSuchAlgorithmException | InvalidKeySpecException | IllegalArgumentException failure) {

@@ -36,6 +36,7 @@ import org.springframework.web.util.WebUtils;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
   private final List<RequestMatcher> skipMatchers = new ArrayList<>();
+  private final RequestMatcher staticAssets = new StaticAssetRequestMatcher();
   private final BrowserSessionService browserSessions;
   private final InteractiveBrowserRequest interactiveRequests;
   private final BrowserAuthenticationCookies browserCookies;
@@ -74,6 +75,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
    */
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
+    if (staticAssets.matches(request)) {
+      return true;
+    }
     return isPublicRequest(request)
         && resolveBearerToken(request) == null
         && resolveCookieToken(request) == null;

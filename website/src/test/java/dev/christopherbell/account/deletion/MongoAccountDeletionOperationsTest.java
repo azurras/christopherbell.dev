@@ -36,6 +36,7 @@ class MongoAccountDeletionOperationsTest {
     operations.removePrivateData("account-1");
 
     for (var collection : List.of(
+        "browser_sessions",
         "messages",
         "notifications",
         "notification_preferences",

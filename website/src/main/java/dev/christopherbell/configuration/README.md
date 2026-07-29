@@ -22,7 +22,11 @@ Owns application-wide Spring and web infrastructure.
   coordinates or ZIP code.
 - JWT authentication filter wiring under `security`. Explicit bearer headers
   take precedence for API clients; browser requests otherwise authenticate from
-  the HttpOnly `CBELL_AUTH` cookie.
+  the HttpOnly `CBELL_AUTH` cookie. Exact GET static-resource namespaces bypass
+  credential processing so cacheable browser assets never renew or invalidate a
+  browser session. Ordinary cookie authentication joins the session snapshot to
+  the minimal current ACTIVE account security state in one Mongo command before
+  using its account id and role. Legacy or stale sessions are deleted and rejected.
 - Stable JWT signing through `APP_JWT_SECRET`.
 - Production settings validation runs before context refresh and reports only
   invalid setting names, never their values.

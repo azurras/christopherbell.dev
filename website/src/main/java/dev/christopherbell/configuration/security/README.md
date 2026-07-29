@@ -6,6 +6,19 @@ Owns Spring Security wiring and request authentication infrastructure.
 
 - `SecurityConfig` defines public routes, method security, the filter chain, and security-related beans.
 - `JwtAuthenticationFilter` reads bearer tokens, validates them, and populates the Spring Security context.
+- Browser-session activity is coalesced to at most one conditional Mongo update per five-minute
+  window. Due credential rotation is an atomic compare-and-set. A rare race loser reloads once
+  and authenticates without another replacement token only when the presented credential is the
+  winner's unexpired previous token and the reloaded session and ACTIVE account still pass every
+  validity and fingerprint check. Revocation, invalid reloaded state, and persistence failures
+  remain fail-closed; ordinary requests do not pay for the extra read.
+- Ordinary cookie authentication joins each structurally valid browser session to only the
+  current account security fields in one Mongo command. Missing accounts are rejected by the
+  join; inactive or stale accounts delete and reject the session. Persistence failures fail
+  closed at the filter without a separate account-repository fallback.
+- `StaticAssetRequestMatcher` bypasses credential handling only for the listed GET favicon, CSS,
+  image, JavaScript, vendor, pinned Bootstrap WebJar, and release-versioned asset namespaces.
+  Shared-folder worker and media routes remain authentication boundaries.
 - `SharedFolderNoStoreFilter` runs before shared-folder authentication and applies
   `Cache-Control: private, no-store` only to the exact versioned shared-folder API prefix,
   including authentication and authorization failures.
@@ -22,4 +35,3 @@ Keep public URL changes here and pair them with security tests. Browser-callable
 `/shared` is a deliberately data-free public shell. Do not add `/api/shared-folder/**` to the
 public list: those routes require JWT authentication and their controller refreshes effective
 shared-folder read access independently.
-

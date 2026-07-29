@@ -2,6 +2,7 @@ package dev.christopherbell.account;
 
 import com.mongodb.MongoWriteException;
 import dev.christopherbell.account.auth.AccountAuthenticationService;
+import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.deletion.AccountDeletionResult;
 import dev.christopherbell.account.deletion.AccountDeletionService;
 import dev.christopherbell.account.follow.AccountFollowService;
@@ -73,6 +74,7 @@ public class AccountService {
   private final SharedFolderAuditRecorder sharedFolderAudit;
   private final SharedFolderAccessService sharedFolderAccess;
   private final FederationConsentService federationConsent;
+  private final AccountSessionRevoker sessionRevoker;
 
   /**
    * Creates a new account.
@@ -394,8 +396,14 @@ public class AccountService {
       if (request.write()) {
         next.add(AccountPermission.SHARED_FOLDER_WRITE);
       }
+      boolean permissionsChanged = !next.equals(
+          account.getPermissions() == null ? java.util.Set.of() : account.getPermissions());
       account.setPermissions(next);
-      AccountDetail saved = accountMapper.toAccount(accountRepository.save(account));
+      var persisted = accountRepository.save(account);
+      if (permissionsChanged) {
+        sessionRevoker.revokeAll(persisted.getId());
+      }
+      AccountDetail saved = accountMapper.toAccount(persisted);
       sharedFolderAudit.recordCurrent(
           "PERMISSION_CHANGE", auditResource, null, "accepted", null);
       return saved;
@@ -440,8 +448,14 @@ public class AccountService {
       if (request.write()) {
         next.add(AccountPermission.MUSIC_WRITE);
       }
+      boolean permissionsChanged = !next.equals(
+          account.getPermissions() == null ? java.util.Set.of() : account.getPermissions());
       account.setPermissions(next);
-      AccountDetail saved = accountMapper.toAccount(accountRepository.save(account));
+      var persisted = accountRepository.save(account);
+      if (permissionsChanged) {
+        sessionRevoker.revokeAll(persisted.getId());
+      }
+      AccountDetail saved = accountMapper.toAccount(persisted);
       sharedFolderAudit.recordCurrent(
           "MUSIC_PERMISSION_CHANGE", auditResource, null, "accepted", null);
       return saved;

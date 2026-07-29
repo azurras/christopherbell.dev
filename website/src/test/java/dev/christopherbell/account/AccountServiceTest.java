@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -18,6 +19,7 @@ import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.auth.AccountAuthenticationService;
 import dev.christopherbell.account.auth.AccountLoginStore;
+import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.deletion.AccountDeletionResult;
 import dev.christopherbell.account.deletion.AccountDeletionService;
 import dev.christopherbell.account.deletion.AccountDeletionStatus;
@@ -90,12 +92,15 @@ public class AccountServiceTest {
   @Mock private NewAccountVoidMutationLimiter mutationLimiter;
   @Mock private FederationConsentService federationConsent;
   @Mock private AccountFollowStore follows;
+  @Mock private AccountSessionRevoker sessionRevoker;
   private AccountService accountService;
 
   @BeforeEach
   void setUp() {
-    var authenticationService = new AccountAuthenticationService(accountRepository, accountLoginStore);
-    var passwordResetService = new PasswordResetService(accountRepository, passwordResetNotificationService);
+    var authenticationService = new AccountAuthenticationService(
+        accountRepository, accountLoginStore, sessionRevoker);
+    var passwordResetService = new PasswordResetService(
+        accountRepository, passwordResetNotificationService, sessionRevoker);
     var profileService = new AccountProfileService(accountRepository, accountMapper, postRepository, follows);
     var followService = new AccountFollowService(
         profileService,
@@ -103,7 +108,7 @@ public class AccountServiceTest {
         mutationLimiter,
         Clock.fixed(Instant.parse("2026-07-29T04:00:00Z"), ZoneOffset.UTC));
     var moderationService = new AccountModerationService(
-        accountRepository, accountMapper, adminActivityService, permissionService);
+        accountRepository, accountMapper, adminActivityService, permissionService, sessionRevoker);
     accountService = new AccountService(
         accountMapper,
         accountRepository,
@@ -115,7 +120,8 @@ public class AccountServiceTest {
         moderationService,
         sharedFolderAudit,
         sharedFolderAccess,
-        federationConsent);
+        federationConsent,
+        sessionRevoker);
     org.mockito.Mockito.lenient().when(sharedFolderAccess.requireAdmin()).thenReturn(
         Account.builder().id("admin-1").role(Role.ADMIN).build());
     org.mockito.Mockito.lenient().when(permissionService.getSelfId()).thenReturn("admin-1");
@@ -268,6 +274,9 @@ public class AccountServiceTest {
     assertTrue(PasswordUtil.verifyPassword(password, null, account.getPasswordHash()));
     verify(accountRepository).findByEmailIgnoreCase(eq("user@example.com"));
     verify(accountLoginStore).completeLogin(eq(account), anyString(), any(Instant.class));
+    var order = inOrder(accountLoginStore, sessionRevoker);
+    order.verify(accountLoginStore).completeLogin(eq(account), anyString(), any(Instant.class));
+    order.verify(sessionRevoker).revokeAll("acc-login");
     verifyNoMoreInteractions(accountRepository);
   }
 
@@ -300,6 +309,7 @@ public class AccountServiceTest {
     assertEquals("USER", PermissionService.validateToken(token).get(Account.PROPERTY_ROLE));
     assertEquals(Role.ADMIN, observed.getRole());
     verify(accountRepository, never()).save(any(Account.class));
+    verify(sessionRevoker, never()).revokeAll(anyString());
   }
 
   @Test
@@ -548,7 +558,9 @@ public class AccountServiceTest {
     org.junit.jupiter.api.Assertions.assertTrue(
         PasswordUtil.verifyPassword("new-password", account.getPasswordSalt(), account.getPasswordHash()));
     verify(accountRepository).findByPasswordResetTokenHash(eq(tokenHash));
-    verify(accountRepository).save(eq(account));
+    var order = inOrder(accountRepository, sessionRevoker);
+    order.verify(accountRepository).save(eq(account));
+    order.verify(sessionRevoker).revokeAll(account.getId());
     verifyNoMoreInteractions(accountRepository);
   }
 
@@ -914,6 +926,7 @@ public class AccountServiceTest {
             account.getId(), new SharedFolderPermissionUpdate(false, true)));
     verify(sharedFolderAudit, org.mockito.Mockito.times(2)).recordCurrent(
         "PERMISSION_CHANGE", account.getId(), null, "accepted", null);
+    verify(sessionRevoker, org.mockito.Mockito.times(2)).revokeAll(account.getId());
     verify(sharedFolderAudit).recordRejectedOnce(
         "PERMISSION_CHANGE", account.getId(), "invalid_request");
   }
@@ -942,6 +955,9 @@ public class AccountServiceTest {
             AccountPermission.MUSIC_WRITE,
             AccountPermission.SHARED_FOLDER_READ),
         account.getPermissions());
+    var order = inOrder(accountRepository, sessionRevoker);
+    order.verify(accountRepository).save(account);
+    order.verify(sessionRevoker).revokeAll(account.getId());
   }
 
   @Test
@@ -977,6 +993,47 @@ public class AccountServiceTest {
         "MUSIC_PERMISSION_CHANGE", account.getId(), null, "accepted", null);
     verify(sharedFolderAudit).recordRejectedOnce(
         "MUSIC_PERMISSION_CHANGE", account.getId(), "invalid_request");
+    var order = inOrder(accountRepository, sessionRevoker);
+    order.verify(accountRepository).save(account);
+    order.verify(sessionRevoker).revokeAll(account.getId());
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: unchanged submission does not revoke sessions")
+  void sharedFolderPermissionUpdate_whenUnchanged_doesNotRevokeSessions() throws Exception {
+    var account = Account.builder()
+        .id("account-unchanged-permissions")
+        .role(Role.USER)
+        .permissions(java.util.Set.of(AccountPermission.SHARED_FOLDER_READ))
+        .build();
+    when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+    when(accountRepository.save(account)).thenReturn(account);
+    when(accountMapper.toAccount(account)).thenReturn(AccountDetail.builder().id(account.getId()).build());
+
+    accountService.updateSharedFolderPermissions(
+        account.getId(), new SharedFolderPermissionUpdate(true, false));
+
+    verify(sessionRevoker, never()).revokeAll(anyString());
+  }
+
+  @Test
+  @DisplayName("Shared folder permissions: revocation failure is surfaced after persistence")
+  void sharedFolderPermissionUpdate_whenRevocationFails_surfacesFailure() throws Exception {
+    var account = Account.builder().id("account-revocation-failure").role(Role.USER).build();
+    var failure = new org.springframework.dao.DataAccessResourceFailureException("mongo");
+    when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+    when(accountRepository.save(account)).thenReturn(account);
+    doThrow(failure).when(sessionRevoker).revokeAll(account.getId());
+
+    assertSame(failure, assertThrows(
+        org.springframework.dao.DataAccessResourceFailureException.class,
+        () -> accountService.updateSharedFolderPermissions(
+            account.getId(), new SharedFolderPermissionUpdate(true, false))));
+
+    var order = inOrder(accountRepository, sessionRevoker);
+    order.verify(accountRepository).save(account);
+    order.verify(sessionRevoker).revokeAll(account.getId());
+    verify(sharedFolderAudit).recordFailureOnce("PERMISSION_CHANGE", account.getId(), failure);
   }
 
   @Test
@@ -1016,6 +1073,7 @@ public class AccountServiceTest {
             account.getId(), new SharedFolderPermissionUpdate(true, false)));
     verify(sharedFolderAudit).recordFailureOnce(
         "PERMISSION_CHANGE", account.getId(), persistenceFailure);
+    verify(sessionRevoker, never()).revokeAll(anyString());
   }
 
   @Test
