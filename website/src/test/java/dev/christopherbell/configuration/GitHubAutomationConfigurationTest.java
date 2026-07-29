@@ -67,6 +67,45 @@ class GitHubAutomationConfigurationTest {
   }
 
   @Test
+  void ciRunsPinnedWindowsPesterAndRetainsItsNunitResults() throws IOException {
+    var workflow = readYaml(".github/workflows/ci.yml");
+    var steps = workflow.at("/jobs/build/steps");
+    var install = stepNamed(steps, "Install Pester 5.9.0");
+
+    assertThat(install.path("if").asText()).isEqualTo("runner.os == 'Windows'");
+    assertThat(install.path("timeout-minutes").asInt()).isEqualTo(5);
+    assertThat(install.path("run").asText())
+        .contains("Install-Module", "-RequiredVersion 5.9.0", "Import-Module Pester");
+    assertThat(stepNamed(steps, "Build and Test on Windows").path("run").asText())
+        .contains("gradlew.bat build");
+    assertThat(stepUsing(steps, UPLOAD_ARTIFACT).at("/with/path").asText())
+        .contains("**/build/test-results/shared-folder-pester/*.xml");
+  }
+
+  @Test
+  void ciCancelsOnlySupersededPullRequestsAndBoundsWork() throws IOException {
+    var workflow = readYaml(".github/workflows/ci.yml");
+    var build = workflow.at("/jobs/build");
+    var steps = build.path("steps");
+
+    assertThat(workflow.at("/concurrency/group").asText())
+        .isEqualTo("${{ github.workflow }}-${{ github.event_name == 'pull_request' && "
+            + "github.event.pull_request.number || format('{0}-{1}', github.ref, github.run_id) }}");
+    assertThat(workflow.at("/concurrency/cancel-in-progress").asText())
+        .isEqualTo("${{ github.event_name == 'pull_request' }}");
+    assertThat(build.path("timeout-minutes").asInt()).isEqualTo(30);
+    assertThat(build.at("/strategy/fail-fast").asBoolean()).isFalse();
+    assertThat(stepNamed(steps, "Build and Test").path("timeout-minutes").asInt()).isEqualTo(20);
+    assertThat(stepNamed(steps, "Build and Test on Windows")
+        .path("timeout-minutes").asInt()).isEqualTo(20);
+    assertThat(stepNamed(steps, "Upload failed test reports")
+        .path("timeout-minutes").asInt()).isEqualTo(5);
+    assertThat(List.of("Checkout code", "Set up JDK", "Set up Node.js", "Set up Gradle"))
+        .allSatisfy(name -> assertThat(stepNamed(steps, name).path("timeout-minutes").asInt())
+            .isEqualTo(5));
+  }
+
+  @Test
   void codeQlPreservesAllDefaultSetupLanguagesAndBuildsJava() throws IOException {
     var workflow = readYaml(".github/workflows/codeql.yml");
     assertThat(workflow.at("/permissions/contents").asText()).isEqualTo("read");
@@ -165,6 +204,13 @@ class GitHubAutomationConfigurationTest {
   private static JsonNode stepUsing(JsonNode steps, String action) {
     return StreamSupport.stream(steps.spliterator(), false)
         .filter(step -> action.equals(step.path("uses").asText()))
+        .findFirst()
+        .orElse(MissingNode.getInstance());
+  }
+
+  private static JsonNode stepNamed(JsonNode steps, String name) {
+    return StreamSupport.stream(steps.spliterator(), false)
+        .filter(step -> name.equals(step.path("name").asText()))
         .findFirst()
         .orElse(MissingNode.getInstance());
   }

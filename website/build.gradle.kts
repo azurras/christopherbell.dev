@@ -549,19 +549,23 @@ val sharedFolderOperationsWindowsPowerShellPester =
         }
     }
 
+val windowsPesterVerification = listOf(
+    sharedFolderWorkerPester,
+    sharedFolderOperationsPwshPester,
+    sharedFolderOperationsWindowsPowerShellPester)
+
 tasks.register("sharedFolderVerification") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     description = "Runs shared-folder Java, browser, worker, and operations regression coverage."
-    dependsOn(
-        tasks.named("test"),
-        tasks.named("jsTest"),
-        sharedFolderWorkerPester,
-        sharedFolderOperationsPwshPester,
-        sharedFolderOperationsWindowsPowerShellPester)
+    dependsOn(tasks.named("test"), tasks.named("jsTest"))
+    dependsOn(windowsPesterVerification)
 }
 
 tasks.named("check") {
     dependsOn("jsTest")
+    if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+        dependsOn(windowsPesterVerification)
+    }
 }
 
 val verifySensorRuntime by tasks.registering {
