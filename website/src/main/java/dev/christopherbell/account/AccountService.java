@@ -32,6 +32,7 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.security.EmailSanitizer;
 import dev.christopherbell.libs.security.PasswordUtil;
 import dev.christopherbell.libs.security.UsernameSanitizer;
+import dev.christopherbell.federation.consent.FederationConsentService;
 import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
 import java.time.Instant;
@@ -70,6 +71,7 @@ public class AccountService {
   private final AccountModerationService accountModerationService;
   private final SharedFolderAuditRecorder sharedFolderAudit;
   private final SharedFolderAccessService sharedFolderAccess;
+  private final FederationConsentService federationConsent;
 
   /**
    * Approves an account by setting its approvedBy field to the current user's ID and changing its
@@ -91,7 +93,7 @@ public class AccountService {
    * @return back an account object if creation was successful.
    */
   public AccountDetail createAccount(AccountCreateRequest accountCreateRequest)
-      throws ResourceExistsException {
+      throws ResourceExistsException, InvalidRequestException {
     log.info("Creating account for username {}", accountCreateRequest.username());
     var account = createAccountEntity(accountCreateRequest);
     try {
@@ -99,6 +101,7 @@ public class AccountService {
       var hash = PasswordUtil.hashPassword(accountCreateRequest.password(), salt);
       account.setPasswordSalt(salt);
       account.setPasswordHash(hash);
+      federationConsent.prepareNewAccount(account, accountCreateRequest.federationRequested());
       accountRepository.save(account);
       log.info("Successfully created account for username {}", accountCreateRequest.username());
     } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
@@ -263,6 +266,12 @@ public class AccountService {
    */
   public AccountDetail getSelfAccount() throws ResourceNotFoundException {
     return accountProfileService.getSelfAccount();
+  }
+
+  /** Applies the current account's explicit federation consent choice. */
+  public AccountDetail setFederationEnabled(String accountId, boolean enabled)
+      throws InvalidRequestException, ResourceNotFoundException {
+    return federationConsent.setEnabled(accountId, enabled);
   }
 
   /**

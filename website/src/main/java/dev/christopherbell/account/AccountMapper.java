@@ -27,6 +27,9 @@ public interface AccountMapper {
   @Mapping(target = "passwordResetTokenExpiresOn", ignore = true)
   @Mapping(target = "followingIds", ignore = true)
   @Mapping(target = "pendingModerationAudit", ignore = true)
+  @Mapping(target = "federationEnabled", ignore = true)
+  @Mapping(target = "federationEnabledOn", ignore = true)
+  @Mapping(target = "federationIdentity", ignore = true)
   Account toAccountEntity(AccountDetail accountDetail);
 
   /**

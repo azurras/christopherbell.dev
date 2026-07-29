@@ -31,6 +31,7 @@ import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.MusicPermissionUpdate;
 import dev.christopherbell.account.model.dto.SharedFolderPermissionUpdate;
+import dev.christopherbell.account.model.dto.FederationConsentUpdate;
 import dev.christopherbell.configuration.security.ControllerSliceSecurityTestConfig;
 import dev.christopherbell.configuration.security.BrowserAuthenticationCookies;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
@@ -525,6 +526,40 @@ public class AccountControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.id").value("me"));
+  }
+
+  @Test
+  @DisplayName("Federation consent: authenticated user can explicitly enable their account")
+  @WithMockUser(authorities = {"USER"})
+  void updateFederationConsentWhenAuthenticatedReturnsAuthoritativeState() throws Exception {
+    var detail = AccountDetail.builder()
+        .id("account-123")
+        .federationEnabled(true)
+        .build();
+    when(permissionService.getSelfId()).thenReturn("account-123");
+    when(accountService.setFederationEnabled("account-123", true)).thenReturn(detail);
+
+    mockMvc.perform(patch("/api/accounts/2026-07-28/self/federation")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"enabled\":true}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.id").value("account-123"))
+        .andExpect(jsonPath("$.payload.federationEnabled").value(true));
+
+    verify(accountService).setFederationEnabled("account-123", true);
+  }
+
+  @Test
+  @DisplayName("Federation consent: missing choice is rejected instead of interpreted as false")
+  @WithMockUser(authorities = {"USER"})
+  void updateFederationConsentWithoutChoiceReturnsBadRequest() throws Exception {
+    mockMvc.perform(patch("/api/accounts/2026-07-28/self/federation")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{}"))
+        .andExpect(status().isBadRequest());
   }
 
   @Test

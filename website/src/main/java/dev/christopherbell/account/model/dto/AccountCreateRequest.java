@@ -14,6 +14,7 @@ import lombok.Builder;
  * @param email     The email address of the account holder.
  * @param password  The password for the account.
  * @param username  The desired username for the account.
+ * @param federatePublicVoidPosts Whether public Void posts should be federated.
  */
 @Builder
 public record AccountCreateRequest(
@@ -33,5 +34,11 @@ public record AccountCreateRequest(
     @NotBlank
     @Size(min = 3, max = 50)
     @Pattern(regexp = "^[A-Za-z0-9._-]+$")
-    String username
-) {}
+    String username,
+    Boolean federatePublicVoidPosts
+) {
+
+  public boolean federationRequested() {
+    return Boolean.TRUE.equals(federatePublicVoidPosts);
+  }
+}

@@ -28,6 +28,7 @@ public class AccountDetail {
   private Instant createdOn;
 
   private String email;
+  private Boolean federationEnabled;
   private String firstName;
   private Boolean isApproved;
   private String lastName;
