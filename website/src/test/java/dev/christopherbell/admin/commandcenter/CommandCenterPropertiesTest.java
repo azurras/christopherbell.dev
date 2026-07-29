@@ -235,6 +235,16 @@ class CommandCenterPropertiesTest {
     assertThat(VALIDATOR.validate(bindProfile("prod"))).isEmpty();
   }
 
+  @Test
+  void recognizesFixedWindowsDrivePathsIndependentlyOfTheBuildHost() {
+    assertThat(CommandCenterProperties.Actions.isAbsoluteExecutablePath(
+        "C:/ProgramData/christopherbell.dev/service/ChristopherBellDev.exe")).isTrue();
+    assertThat(CommandCenterProperties.Actions.isAbsoluteExecutablePath(
+        "C:\\Windows\\System32\\shutdown.exe")).isTrue();
+    assertThat(CommandCenterProperties.Actions.isAbsoluteExecutablePath("shutdown.exe")).isFalse();
+    assertThat(CommandCenterProperties.Actions.isAbsoluteExecutablePath("C:shutdown.exe")).isFalse();
+  }
+
   private static void assertViolation(
       Consumer<CommandCenterProperties> mutation, String expectedPath) {
     var properties = new CommandCenterProperties();

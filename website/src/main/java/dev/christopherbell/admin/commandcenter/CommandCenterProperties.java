@@ -160,7 +160,15 @@ public class CommandCenterProperties {
     }
 
     private static boolean isAbsoluteNonEmpty(Path path) {
-      return path != null && path.isAbsolute() && !path.toString().isBlank();
+      return path != null && isAbsoluteExecutablePath(path.toString());
+    }
+
+    static boolean isAbsoluteExecutablePath(String value) {
+      if (value == null || value.isBlank()) {
+        return false;
+      }
+      return value.matches("(?i)^[a-z]:[\\\\/].+")
+          || value.matches("^\\\\\\\\[^\\\\/]+[\\\\/][^\\\\/]+(?:[\\\\/].*)?");
     }
   }
 
