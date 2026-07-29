@@ -46,6 +46,7 @@ public class BrowserSessionService {
     var presentedFingerprint = claims.get(AccountSecurityFingerprint.CLAIM, String.class);
     var account = accounts.findById(accountId)
         .filter(this::isActive)
+        .filter(current -> current.getRole() != null)
         .filter(current -> AccountSecurityFingerprint.matches(presentedFingerprint, current))
         .orElseThrow(() -> new IllegalArgumentException("Browser session account is unavailable."));
     var now = clock.instant();

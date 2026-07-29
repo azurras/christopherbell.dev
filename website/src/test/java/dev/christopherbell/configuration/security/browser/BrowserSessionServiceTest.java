@@ -89,6 +89,17 @@ class BrowserSessionServiceTest {
   }
 
   @Test
+  void rolelessAccountCannotCreateAnIncompleteBrowserSession() {
+    var fixture = new Fixture(START);
+    fixture.account.setRole(null);
+    String loginJwt = PermissionService.generateToken(fixture.account);
+
+    assertThrows(IllegalArgumentException.class, () -> fixture.service().create(loginJwt));
+
+    assertTrue(fixture.saved.getAllValues().isEmpty());
+  }
+
+  @Test
   void legacySessionWithoutRoleIsDeletedAndRejected() {
     var fixture = new Fixture(START);
     String token = fixture.create();
