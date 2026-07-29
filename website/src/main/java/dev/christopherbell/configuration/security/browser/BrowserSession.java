@@ -1,5 +1,6 @@
 package dev.christopherbell.configuration.security.browser;
 
+import dev.christopherbell.account.model.Role;
 import java.time.Instant;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -18,6 +19,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 public class BrowserSession {
   @Id private String id;
   @Indexed private String accountId;
+  private Role role;
   private String tokenHash;
   private String previousTokenHash;
   private Instant previousTokenExpiresOn;

@@ -53,6 +53,7 @@ public class BrowserSessionService {
     sessions.save(BrowserSession.builder()
         .id(credential.sessionId())
         .accountId(account.getId())
+        .role(account.getRole())
         .tokenHash(hash(credential.secret()))
         .accountSecurityFingerprint(AccountSecurityFingerprint.from(account))
         .createdOn(now)
@@ -78,10 +79,10 @@ public class BrowserSessionService {
       return Optional.empty();
     }
 
-    var account = accounts.findById(session.getAccountId()).orElse(null);
-    if (account == null || !isActive(account)
-        || !constantTimeEquals(
-            session.getAccountSecurityFingerprint(), AccountSecurityFingerprint.from(account))) {
+    if (session.getAccountId() == null || session.getAccountId().isBlank()
+        || session.getRole() == null
+        || session.getAccountSecurityFingerprint() == null
+        || session.getAccountSecurityFingerprint().isBlank()) {
       sessions.delete(session);
       return Optional.empty();
     }
@@ -102,7 +103,7 @@ public class BrowserSessionService {
       sessions.save(session);
     }
     return Optional.of(new AuthenticatedBrowserSession(
-        account.getId(), account.getRole(), rotatedToken));
+        session.getAccountId(), session.getRole(), rotatedToken));
   }
 
   /** Revokes the session named by a cookie without revealing whether it existed. */

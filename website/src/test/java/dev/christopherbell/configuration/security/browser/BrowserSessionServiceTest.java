@@ -10,7 +10,6 @@ import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
-import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.permission.PermissionService;
@@ -78,12 +77,26 @@ class BrowserSessionServiceTest {
   }
 
   @Test
-  void passwordRolePermissionOrStatusChangeInvalidatesTheSession() {
+  void authenticationUsesTheStoredRoleWithoutLoadingTheAccount() {
     var fixture = new Fixture(START);
     String token = fixture.create();
-    fixture.account.setPermissions(Set.of(AccountPermission.MUSIC_READ));
+    org.mockito.Mockito.clearInvocations(fixture.accounts);
 
-    assertFalse(fixture.authenticate(token, true).isPresent());
+    var authenticated = fixture.authenticate(token, false).orElseThrow();
+
+    org.assertj.core.api.Assertions.assertThat(authenticated.role()).isEqualTo(Role.USER);
+    org.mockito.Mockito.verifyNoInteractions(fixture.accounts);
+  }
+
+  @Test
+  void legacySessionWithoutRoleIsDeletedAndRejected() {
+    var fixture = new Fixture(START);
+    String token = fixture.create();
+    fixture.session().setRole(null);
+
+    assertFalse(fixture.authenticate(token, false).isPresent());
+
+    org.mockito.Mockito.verify(fixture.sessions).delete(fixture.session());
   }
 
   @Test
