@@ -16,6 +16,7 @@ import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.music.web.MusicNoStoreFilter;
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import dev.christopherbell.federation.discovery.FederationNoStoreFilter;
 import java.time.Clock;
 import java.util.Arrays;
 import java.util.List;
@@ -76,6 +77,10 @@ public class SecurityConfig {
       "GET:/sitemap.xml",
       "GET:/actuator/health/liveness",
       "GET:/actuator/health/readiness",
+      "GET:/.well-known/webfinger",
+      "GET:/.well-known/nodeinfo",
+      "GET:/nodeinfo/2.1",
+      "GET:/ap/users/**",
       "/shared",
       "/music",
       "GET:/shared-folder-auth-sw.js",
@@ -158,7 +163,8 @@ public class SecurityConfig {
       JwtAuthenticationFilter jwtAuthenticationFilter,
       RequestSizeLimitFilter requestSizeLimitFilter,
       SharedFolderNoStoreFilter sharedFolderNoStoreFilter,
-      MusicNoStoreFilter musicNoStoreFilter) throws Exception {
+      MusicNoStoreFilter musicNoStoreFilter,
+      FederationNoStoreFilter federationNoStoreFilter) throws Exception {
     return http
         .csrf(csrf -> csrf
             .spa()
@@ -190,6 +196,7 @@ public class SecurityConfig {
         .addFilterBefore(requestSizeLimitFilter, RateLimitFilter.class)
         .addFilterBefore(sharedFolderNoStoreFilter, CsrfFilter.class)
         .addFilterBefore(musicNoStoreFilter, CsrfFilter.class)
+        .addFilterBefore(federationNoStoreFilter, CsrfFilter.class)
         
         // Build the SecurityFilterChain
         .build();
@@ -289,6 +296,12 @@ public class SecurityConfig {
   @Bean
   public MusicNoStoreFilter musicNoStoreFilter() {
     return new MusicNoStoreFilter();
+  }
+
+  /** Applies public no-store headers before federation discovery can return any response. */
+  @Bean
+  public FederationNoStoreFilter federationNoStoreFilter() {
+    return new FederationNoStoreFilter();
   }
 
   /**

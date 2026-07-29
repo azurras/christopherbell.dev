@@ -204,6 +204,30 @@ class SecurityConfigTest {
     }
   }
 
+  @Test
+  @DisplayName("Federation exposes only exact read-only discovery routes")
+  void federationMatchersAreReadOnlyAndDoNotExposeInboxMutation() throws Exception {
+    var paths = List.of(
+        "/.well-known/webfinger",
+        "/.well-known/nodeinfo",
+        "/nodeinfo/2.1",
+        "/ap/users/chris",
+        "/ap/users/chris/outbox",
+        "/ap/users/chris/followers",
+        "/ap/users/chris/following");
+
+    for (var path : paths) {
+      assertTrue(publicMatchers().stream().anyMatch(
+          matcher -> matcher.matches(request("GET", path))));
+      assertFalse(publicMatchers().stream().anyMatch(
+          matcher -> matcher.matches(request("POST", path))));
+    }
+    assertFalse(publicMatchers().stream().anyMatch(
+        matcher -> matcher.matches(request("POST", "/ap/users/chris/inbox"))));
+    assertFalse(publicMatchers().stream().anyMatch(
+        matcher -> matcher.matches(request("POST", "/ap/inbox"))));
+  }
+
   private MockHttpServletRequest request(String method, String path) {
     var request = new MockHttpServletRequest(method, path);
     request.setServletPath(path);
