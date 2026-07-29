@@ -7,14 +7,14 @@ import java.util.Objects;
 import java.util.Set;
 
 /** Immutable headers and exact serialized bytes for one signed ActivityPub request. */
-final class SignedFederationRequest {
+public final class SignedFederationRequest {
   private static final Set<String> TRANSPORT_HEADERS = Set.of(
       "connection", "content-length", "host", "proxy-authorization", "transfer-encoding");
 
   private final Map<String, String> headers;
   private final byte[] body;
 
-  SignedFederationRequest(Map<String, String> headers, byte[] body) {
+  public SignedFederationRequest(Map<String, String> headers, byte[] body) {
     Objects.requireNonNull(headers, "headers");
     var copiedHeaders = new LinkedHashMap<String, String>();
     headers.forEach((name, value) -> {
@@ -25,11 +25,11 @@ final class SignedFederationRequest {
     this.body = Objects.requireNonNull(body, "body").clone();
   }
 
-  Map<String, String> headers() {
+  public Map<String, String> headers() {
     return headers;
   }
 
-  byte[] body() {
+  public byte[] body() {
     return body.clone();
   }
 

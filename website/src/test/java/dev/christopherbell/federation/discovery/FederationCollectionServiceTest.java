@@ -11,6 +11,7 @@ import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.ActivityPubActor;
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.ActivityPubPublicKey;
+import dev.christopherbell.federation.outbound.FederationActivityFactory;
 import dev.christopherbell.pagination.StableCursorCodec;
 import dev.christopherbell.post.model.Post;
 import java.time.Clock;
@@ -45,8 +46,8 @@ class FederationCollectionServiceTest {
         accounts,
         new StableCursorCodec(),
         Clock.fixed(NOW, ZoneOffset.UTC),
-        new BrowserSecurityProperties(
-            URI.create("https://www.christopherbell.dev"), true, true));
+        new FederationActivityFactory(new BrowserSecurityProperties(
+            URI.create("https://www.christopherbell.dev"), true, true)));
   }
 
   @Test
