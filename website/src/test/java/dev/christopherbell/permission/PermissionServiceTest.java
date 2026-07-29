@@ -118,8 +118,8 @@ class PermissionServiceTest {
   }
 
   @Test
-  @DisplayName("Generated login tokens expire after one day")
-  void generateToken_setsOneDayExpiration() {
+  @DisplayName("Generated login tokens expire after seven days")
+  void generateToken_setsSevenDayExpiration() {
     var token = PermissionService.generateToken(Account.builder()
         .id("account-1")
         .role(Role.USER)
@@ -128,7 +128,7 @@ class PermissionServiceTest {
     var claims = PermissionService.validateToken(token);
     var tokenLifetimeMillis = claims.getExpiration().getTime() - claims.getIssuedAt().getTime();
 
-    assertEquals(86_400_000L, tokenLifetimeMillis);
+    assertEquals(604_800_000L, tokenLifetimeMillis);
   }
 
   @Test
