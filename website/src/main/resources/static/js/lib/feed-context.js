@@ -49,7 +49,10 @@ export function canEditFor(currentUser, now = Date.now()) {
  * @returns {(postId:string)=>Promise<{likesCount:number, liked:boolean, expiresOn?:string}>}
  */
 export function onLikeAction(fetchJson, authHeaders) {
-  return (postId) => fetchJson(API.posts.like(postId), { method: 'POST', headers: authHeaders() });
+  return (postId, currentlyLiked) => fetchJson(API.posts.like(postId), {
+    method: currentlyLiked ? 'DELETE' : 'PUT',
+    headers: authHeaders()
+  });
 }
 
 /**

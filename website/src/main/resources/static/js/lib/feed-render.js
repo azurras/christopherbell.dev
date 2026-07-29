@@ -651,7 +651,7 @@ export function createFeedItem(post, ctx) {
     keepAliveBtn.addEventListener('click', async () => {
       if (!ctx.isLoggedIn()) { window.location.href = loginRedirectUrl(); return; }
       try {
-        const updated = await ctx.onLike(post.id);
+        const updated = await ctx.onLike(post.id, keepAliveBtn.dataset.keptAlive === 'true');
         const presentation = keepAlivePresentation(!!updated.liked, updated.likesCount);
         renderKeepAlivePresentation(keepAliveBtn, presentation);
         keepAliveBtn.classList.add('keep-alive-pulse');

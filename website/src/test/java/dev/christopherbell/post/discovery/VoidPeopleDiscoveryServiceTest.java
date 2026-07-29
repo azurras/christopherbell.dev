@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.follow.AccountFollowStore;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.trust.AccountTrustRelationship;
@@ -13,7 +14,6 @@ import dev.christopherbell.account.trust.AccountTrustRepository;
 import dev.christopherbell.account.trust.model.AccountTrustType;
 import dev.christopherbell.post.model.PostTopic;
 import java.time.Instant;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -29,12 +29,12 @@ class VoidPeopleDiscoveryServiceTest {
   @Mock private VoidPeopleDiscoveryQueryRepository queries;
   @Mock private AccountRepository accounts;
   @Mock private AccountTrustRepository trust;
+  @Mock private AccountFollowStore follows;
 
   @Test
   void signedInSuggestionsRankDistinctOverlapAndApplyEveryPrivacyExclusion() {
-    var service = new VoidPeopleDiscoveryService(queries, accounts, trust, null, null);
+    var service = new VoidPeopleDiscoveryService(queries, accounts, trust, follows, null, null);
     var self = account("self", "self", AccountStatus.ACTIVE);
-    self.setFollowingIds(new HashSet<>(Set.of("followed")));
     var candidates = List.of(
         candidate("best", NOW.minusSeconds(30), "music", "java"),
         candidate("recent", NOW.minusSeconds(1), "music"),
@@ -43,6 +43,7 @@ class VoidPeopleDiscoveryServiceTest {
         candidate("incoming-block", NOW.minusSeconds(4), "music", "java"),
         candidate("suspended", NOW.minusSeconds(5), "music", "java"));
     when(accounts.findById("self")).thenReturn(Optional.of(self));
+    when(follows.followedAccountIds(eq("self"), any())).thenReturn(List.of("followed"));
     when(queries.interestsFor("self", NOW)).thenReturn(Set.of("music", "java"));
     when(queries.recentActiveCandidates(NOW, 128)).thenReturn(candidates);
     when(accounts.findAllById(any())).thenReturn(List.of(
@@ -68,7 +69,7 @@ class VoidPeopleDiscoveryServiceTest {
 
   @Test
   void anonymousRotationIsStableWithinOneUtcDayAndChangesAcrossDays() {
-    var service = new VoidPeopleDiscoveryService(queries, accounts, trust, null, null);
+    var service = new VoidPeopleDiscoveryService(queries, accounts, trust, follows, null, null);
     var candidates = java.util.stream.IntStream.range(0, 10)
         .mapToObj(index -> candidate("a" + index, NOW.minusSeconds(index), "music"))
         .toList();

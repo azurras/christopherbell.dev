@@ -19,7 +19,6 @@ import dev.christopherbell.post.preview.PostLinkPreviewService;
 import dev.christopherbell.post.topic.PostTopicExtractor;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.HashSet;
 import java.util.UUID;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
@@ -98,8 +97,9 @@ public class PostCreationService {
         .rootId(rootId)
         .parentId(parentId)
         .level(level)
-        .likedBy(new HashSet<>())
         .likesCount(0)
+        .threadReplyLikesCount(0)
+        .threadReplyCount(0)
         .createdOn(now)
         .lastUpdatedOn(now)
         .expiresOn(postExpirationService.expirationForNewPost(now, inheritedReplyExpiration))

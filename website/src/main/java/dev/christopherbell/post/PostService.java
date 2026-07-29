@@ -6,6 +6,7 @@ import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.creation.PostCreationService;
 import dev.christopherbell.post.feed.PostFeedService;
 import dev.christopherbell.post.feed.PostFeedPage;
+import dev.christopherbell.post.feed.PostDetailPage;
 import dev.christopherbell.post.interaction.PostInteractionService;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
@@ -37,6 +38,12 @@ public class PostService {
     return postFeedService.getMyPosts(getSelfId());
   }
 
+  /** Returns one stable page of posts authored by the current account. */
+  public PostDetailPage getMyPostsPage(String cursor, int size)
+      throws InvalidRequestException, ResourceNotFoundException {
+    return postFeedService.getMyPostsPage(getSelfId(), cursor, size);
+  }
+
   /** Returns the current user's feed. */
   public List<PostFeedItem> getMyFeed(Instant before, int limit) throws ResourceNotFoundException {
     return postFeedService.getMyFeed(getSelfId(), before, limit);
@@ -64,6 +71,12 @@ public class PostService {
   public List<PostDetail> getPostsByAccountId(String accountId)
       throws InvalidRequestException, ResourceNotFoundException {
     return postFeedService.getPostsByAccountId(accountId);
+  }
+
+  /** Returns one stable page of posts for a specific account id. */
+  public PostDetailPage getPostsByAccountPage(String accountId, String cursor, int size)
+      throws InvalidRequestException, ResourceNotFoundException {
+    return postFeedService.getPostsByAccountPage(accountId, cursor, size);
   }
 
   /** Resolves the id of the authenticated account. Separated for tests. */
@@ -107,6 +120,12 @@ public class PostService {
   public PostFeedItem toggleLike(String postId)
       throws ResourceNotFoundException, InvalidRequestException {
     return postInteractionService.toggleLike(postId, getSelfId());
+  }
+
+  /** Sets the current user's desired like state idempotently. */
+  public PostFeedItem setLiked(String postId, boolean liked)
+      throws ResourceNotFoundException, InvalidRequestException {
+    return postInteractionService.setLiked(postId, getSelfId(), liked);
   }
 
   /** Deletes a post when the current user is the author or an admin. */

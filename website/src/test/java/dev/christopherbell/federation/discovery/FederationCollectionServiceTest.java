@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.follow.AccountFollowStore;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
@@ -19,7 +20,6 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.net.URI;
 import java.util.List;
-import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,6 +35,7 @@ class FederationCollectionServiceTest {
   @Mock private FederationDiscoveryService discovery;
   @Mock private FederationOutboxQueryRepository outboxQueries;
   @Mock private AccountRepository accounts;
+  @Mock private AccountFollowStore follows;
 
   private FederationCollectionService collections;
 
@@ -44,6 +45,7 @@ class FederationCollectionServiceTest {
         discovery,
         outboxQueries,
         accounts,
+        follows,
         new StableCursorCodec(),
         Clock.fixed(NOW, ZoneOffset.UTC),
         new FederationActivityFactory(new BrowserSecurityProperties(
@@ -102,12 +104,13 @@ class FederationCollectionServiceTest {
   @Test
   void relationshipCollectionsContainOnlyValidatedLocalActorIds() throws Exception {
     var owner = account("account-123", "chris");
-    owner.setFollowingIds(Set.of("account-456"));
     var related = account("account-456", "alex");
     when(discovery.actorAccount("chris")).thenReturn(owner);
     when(discovery.actorForAccount(owner)).thenReturn(actor("chris"));
+    when(follows.followedAccountIds(eq(owner.getId()), any(Pageable.class)))
+        .thenReturn(List.of("account-456"));
     when(accounts.findByIdInAndStatusAndFederationEnabledTrueOrderByUsernameAsc(
-        eq(owner.getFollowingIds()), eq(AccountStatus.ACTIVE), any(Pageable.class)))
+        eq(List.of("account-456")), eq(AccountStatus.ACTIVE), any(Pageable.class)))
         .thenReturn(List.of(related));
     when(discovery.actorForAccount(related)).thenReturn(actor("alex"));
 

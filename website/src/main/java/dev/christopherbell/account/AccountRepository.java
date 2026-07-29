@@ -120,23 +120,10 @@ public interface AccountRepository extends MongoRepository<Account, String> {
       AccountStatus status,
       Pageable pageable);
 
-  /**
-   * Counts accounts that are following the provided account id.
-   *
-   * @param accountId the followed account id
-   * @return number of follower accounts
-   */
-  long countByFollowingIdsContaining(String accountId);
-
   /** Loads a bounded local-only following projection. */
   List<Account> findByIdInAndStatusAndFederationEnabledTrueOrderByUsernameAsc(
       Collection<String> accountIds,
       AccountStatus status,
       Pageable pageable);
 
-  /** Loads a bounded local-only follower projection. */
-  List<Account> findByFollowingIdsContainingAndStatusAndFederationEnabledTrueOrderByUsernameAsc(
-      String accountId,
-      AccountStatus status,
-      Pageable pageable);
 }

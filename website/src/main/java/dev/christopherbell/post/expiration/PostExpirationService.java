@@ -1,15 +1,30 @@
 package dev.christopherbell.post.expiration;
 
+import com.mongodb.client.model.FindOneAndUpdateOptions;
+import com.mongodb.client.model.ReturnDocument;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.post.PostRepository;
+import dev.christopherbell.post.like.PostLike;
 import dev.christopherbell.post.model.Post;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.Objects;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
+import org.bson.Document;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -19,20 +34,33 @@ import org.springframework.stereotype.Service;
 public class PostExpirationService {
   private static final Duration BASE_LIFESPAN = Duration.ofHours(24);
   private static final Duration EXTENSION_PER_LIKE = Duration.ofHours(24);
+  private static final int MAINTENANCE_BATCH_SIZE = 250;
 
   private final PostRepository postRepository;
+  private final MongoTemplate mongo;
+  private final Clock clock;
   private final boolean expirationEnabled;
 
+  @Autowired
   public PostExpirationService(
       PostRepository postRepository,
+      MongoTemplate mongo,
+      Clock clock,
       @Value("${posts.expiration.enabled:false}") boolean expirationEnabled) {
     this.postRepository = postRepository;
+    this.mongo = mongo;
+    this.clock = clock;
     this.expirationEnabled = expirationEnabled;
+  }
+
+  /** Test-only compatibility constructor for focused calculation tests. */
+  public PostExpirationService(PostRepository postRepository, boolean expirationEnabled) {
+    this(postRepository, null, Clock.systemUTC(), expirationEnabled);
   }
 
   /** Calculates a root post expiration from creation time and extension count. */
   public Instant calculateExpiration(Instant createdOn, int extensionCount) {
-    Instant base = createdOn != null ? createdOn : Instant.now();
+    Instant base = createdOn != null ? createdOn : clock.instant();
     long count = Math.max(0, extensionCount);
     return base.plus(BASE_LIFESPAN).plus(EXTENSION_PER_LIKE.multipliedBy(count));
   }
@@ -60,40 +88,22 @@ public class PostExpirationService {
     post.setExpiresOn(calculateExpiration(post.getCreatedOn(), likes + replyLikes + replies));
   }
 
-  /** Repairs missing or stale expiration data and persists the repair when needed. */
-  public void ensureExpirationSet(Post post) {
-    if (!expirationEnabled || post == null) {
-      return;
-    }
-    if (isReply(post)) {
-      if (setReplyExpirationFromRoot(post)) {
-        postRepository.save(post);
-      }
-      return;
-    }
-    var previousExpiration = post.getExpiresOn();
-    refreshExpiration(post);
-    if (!Objects.equals(previousExpiration, post.getExpiresOn())) {
-      postRepository.save(post);
-      synchronizeReplyExpirations(post);
-    }
-  }
-
   /** Returns whether a post has reached its expiration timestamp. */
   public boolean isExpired(Post post) {
     if (!expirationEnabled || post == null) {
       return false;
     }
     Instant expiresOn = post.getExpiresOn();
-    return expiresOn != null && !expiresOn.isAfter(Instant.now());
+    return expiresOn != null && !expiresOn.isAfter(clock.instant());
+  }
+
+  /** Returns the active-feed cutoff when expiration is enabled. */
+  public Optional<Instant> activeCutoff() {
+    return expirationEnabled ? Optional.of(clock.instant()) : Optional.empty();
   }
 
   /** Ensures a post is not expired, deleting expired subtrees before returning 404. */
   public void ensureActive(Post post) throws ResourceNotFoundException {
-    ensureExpirationSet(post);
-    if (isReply(post)) {
-      setReplyExpirationFromRoot(post);
-    }
     if (isExpired(post)) {
       deletePostTree(post);
       throw new ResourceNotFoundException(String.format("Post with id %s not found.", post.getId()));
@@ -121,15 +131,10 @@ public class PostExpirationService {
     if (!expirationEnabled || threadRoot == null || replyLikeDelta == 0) {
       return;
     }
-    var count = threadRoot.getThreadReplyLikesCount() != null ? threadRoot.getThreadReplyLikesCount() : 0;
-    threadRoot.setThreadReplyLikesCount(Math.max(0, count + replyLikeDelta));
-    threadRoot.setLastUpdatedOn(extendedOn != null ? extendedOn : Instant.now());
-    if (replyLikeDelta > 0) {
-      threadRoot.setLastExtendedOn(Objects.requireNonNull(extendedOn, "extendedOn"));
-    }
-    refreshExpiration(threadRoot);
-    postRepository.save(threadRoot);
-    synchronizeReplyExpirations(threadRoot);
+    var now = extendedOn != null ? extendedOn : clock.instant();
+    var updated = incrementCounter(
+        threadRoot, "threadReplyLikesCount", replyLikeDelta, now, replyLikeDelta > 0);
+    refreshAndPersistExpiration(updated);
   }
 
   /** Refreshes the thread root after a new reply has been saved. */
@@ -139,10 +144,9 @@ public class PostExpirationService {
       return;
     }
     var threadRoot = activeThreadRootForReply(reply);
-    threadRoot.setLastExtendedOn(Objects.requireNonNull(extendedOn, "extendedOn"));
-    threadRoot.setLastUpdatedOn(extendedOn);
-    postRepository.save(threadRoot);
-    synchronizeReplyExpirations(threadRoot);
+    var updated = incrementCounter(
+        threadRoot, "threadReplyCount", 1, Objects.requireNonNull(extendedOn), true);
+    refreshAndPersistExpiration(updated);
   }
 
   /** Returns the root expiration a new reply should inherit. */
@@ -185,6 +189,16 @@ public class PostExpirationService {
         ? post.getRootId()
         : post.getId();
     var rootExpiration = post.getExpiresOn();
+    if (mongo != null) {
+      mongo.updateMulti(
+          new Query(new Criteria().andOperator(
+              Criteria.where("rootId").is(rootId),
+              Criteria.where("_id").ne(post.getId()),
+              Criteria.where("parentId").ne(null))),
+          new Update().set("expiresOn", rootExpiration),
+          Post.class);
+      return;
+    }
     postRepository.findByRootIdOrderByCreatedOnAsc(rootId).stream()
         .filter(this::isReply)
         .filter(reply -> rootExpiration != null && !rootExpiration.equals(reply.getExpiresOn()))
@@ -194,7 +208,19 @@ public class PostExpirationService {
         });
   }
 
-  /** Deletes a post and all of its descendants. */
+  /** Atomically applies a real like-edge transition and returns current post state. */
+  public Post applyLikeTransition(
+      Post post, Post threadRoot, int delta, Instant changedOn) {
+    if (post == null || delta == 0) {
+      return post;
+    }
+    var updated = incrementCounter(post, "likesCount", delta, changedOn, delta > 0);
+    refreshAndPersistExpiration(updated);
+    refreshThreadRootExpiration(threadRoot, delta, delta > 0 ? changedOn : null);
+    return updated;
+  }
+
+  /** Deletes a post and all descendants, then reconciles relationship and root metrics. */
   public void deletePostTree(Post post) {
     if (post == null) {
       return;
@@ -220,7 +246,22 @@ public class PostExpirationService {
     if (subtree.isEmpty()) {
       subtree.add(post);
     }
-    postRepository.deleteAll(subtree);
+    long removedCount;
+    if (mongo == null) {
+      postRepository.deleteAll(subtree);
+      removedCount = subtree.size();
+    } else {
+      var postIds = subtree.stream().map(Post::getId).toList();
+      mongo.remove(new Query(Criteria.where("postId").in(postIds)), PostLike.class);
+      removedCount = mongo.remove(
+          new Query(Criteria.where("_id").in(postIds)), Post.class).getDeletedCount();
+    }
+    if (isReply(post) && removedCount > 0) {
+      thread.stream()
+          .filter(candidate -> rootId.equals(candidate.getId()))
+          .findFirst()
+          .ifPresent(root -> decrementReplyCount(root, removedCount));
+    }
   }
 
   /** Scheduled cleanup for expired post trees and older documents missing expiration data. */
@@ -229,7 +270,11 @@ public class PostExpirationService {
     if (!expirationEnabled) {
       return;
     }
-    var missing = postRepository.findByExpiresOnIsNull();
+    var page = PageRequest.of(
+        0,
+        MAINTENANCE_BATCH_SIZE,
+        Sort.by(Sort.Direction.ASC, "_id"));
+    var missing = postRepository.findByExpiresOnIsNull(page);
     if (!missing.isEmpty()) {
       missing.forEach(p -> {
         refreshExpiration(p);
@@ -238,7 +283,7 @@ public class PostExpirationService {
       log.info("Post expiration cleanup repaired {} posts missing expiration timestamps.", missing.size());
     }
 
-    var expired = postRepository.findByExpiresOnLessThanEqual(Instant.now());
+    var expired = postRepository.findByExpiresOnLessThanEqual(clock.instant(), page);
     if (!expired.isEmpty()) {
       expired.forEach(this::deletePostTree);
       log.info("Post expiration cleanup deleted {} expired post trees.", expired.size());
@@ -259,8 +304,75 @@ public class PostExpirationService {
     if (rootId == null || rootId.isBlank()) {
       return 0;
     }
-    return (int) postRepository.findByRootIdOrderByCreatedOnAsc(rootId).stream()
-        .filter(this::isReply)
-        .count();
+    return post.getThreadReplyCount() == null ? 0 : Math.max(0, post.getThreadReplyCount());
+  }
+
+  private Post incrementCounter(
+      Post fallback, String field, int delta, Instant changedOn, boolean extended) {
+    if (mongo == null) {
+      int current = switch (field) {
+        case "likesCount" -> fallback.getLikesCount() == null ? 0 : fallback.getLikesCount();
+        case "threadReplyLikesCount" -> fallback.getThreadReplyLikesCount() == null
+            ? 0 : fallback.getThreadReplyLikesCount();
+        case "threadReplyCount" -> fallback.getThreadReplyCount() == null
+            ? 0 : fallback.getThreadReplyCount();
+        default -> throw new IllegalArgumentException("Unsupported post counter.");
+      };
+      int next = Math.max(0, current + delta);
+      if (field.equals("likesCount")) fallback.setLikesCount(next);
+      if (field.equals("threadReplyLikesCount")) fallback.setThreadReplyLikesCount(next);
+      if (field.equals("threadReplyCount")) fallback.setThreadReplyCount(next);
+      fallback.setLastUpdatedOn(changedOn);
+      if (extended) fallback.setLastExtendedOn(changedOn);
+      postRepository.save(fallback);
+      return fallback;
+    }
+    var criteria = Criteria.where("_id").is(fallback.getId());
+    if (delta < 0) {
+      criteria = new Criteria().andOperator(criteria, Criteria.where(field).gt(0));
+    }
+    var update = new Update().inc(field, delta).set("lastUpdatedOn", changedOn);
+    if (extended) {
+      update.set("lastExtendedOn", changedOn);
+    }
+    var updated = mongo.findAndModify(
+        new Query(criteria), update, FindAndModifyOptions.options().returnNew(true), Post.class);
+    return updated != null ? updated : mongo.findById(fallback.getId(), Post.class);
+  }
+
+  private void decrementReplyCount(Post root, long removedCount) {
+    int delta = Math.toIntExact(Math.min(removedCount, Integer.MAX_VALUE));
+    var changedOn = clock.instant();
+    if (mongo == null) {
+      var updated = incrementCounter(root, "threadReplyCount", -delta, changedOn, false);
+      refreshAndPersistExpiration(updated);
+      return;
+    }
+    var current = new Document("$ifNull", java.util.List.of("$threadReplyCount", 0));
+    var next = new Document("$max", java.util.List.of(
+        0,
+        new Document("$subtract", java.util.List.of(current, delta))));
+    mongo.getCollection("posts").findOneAndUpdate(
+        new Document("_id", root.getId()),
+        java.util.List.of(new Document("$set", new Document("threadReplyCount", next)
+            .append("lastUpdatedOn", Date.from(changedOn)))),
+        new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+    refreshAndPersistExpiration(mongo.findById(root.getId(), Post.class));
+  }
+
+  private void refreshAndPersistExpiration(Post post) {
+    if (post == null) {
+      return;
+    }
+    refreshExpiration(post);
+    if (mongo != null) {
+      mongo.updateFirst(
+          new Query(Criteria.where("_id").is(post.getId())),
+          new Update().set("expiresOn", post.getExpiresOn()),
+          Post.class);
+    } else {
+      postRepository.save(post);
+    }
+    synchronizeReplyExpirations(post);
   }
 }

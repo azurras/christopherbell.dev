@@ -922,7 +922,8 @@ async function loadUserPosts(accountId) {
   const target = document.getElementById('drawerUserPosts');
   if (!target) return;
   renderOperationResult(target, 'Loading posts…');
-  const posts = await fetchJson(API.posts.byAccount(accountId), { headers: authHeaders() }) || [];
+  const page = await fetchJson(API.posts.byAccount(accountId), { headers: authHeaders() }) || {};
+  const posts = page.items || [];
   const postList = posts.slice(0, 8).map(post => `
     <li>
       <strong>${sanitize(post.content || post.text || post.id || 'Post')}</strong>

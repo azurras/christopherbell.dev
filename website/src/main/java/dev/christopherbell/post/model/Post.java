@@ -6,7 +6,6 @@ import dev.christopherbell.post.editing.PostEditAuditEvent;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -105,13 +104,12 @@ public class Post {
   @Builder.Default
   private List<PostTopic> topics = new ArrayList<>();
 
-  // Likes
-  /** Set of account IDs that liked this post. */
-  private Set<String> likedBy;
-  /** Precomputed number of likes for display (kept in sync with {@link #likedBy}). */
+  // Expiration extension counters. Display engagement is derived from edge collections.
   private Integer likesCount;
   /** Reply likes that extend this thread root without changing its own like count. */
   private Integer threadReplyLikesCount;
+  /** Number of replies in this root thread. */
+  private Integer threadReplyCount;
   /** Rich previews resolved from web links in {@link #text}. */
   private List<PostLinkPreview> linkPreviews;
 }

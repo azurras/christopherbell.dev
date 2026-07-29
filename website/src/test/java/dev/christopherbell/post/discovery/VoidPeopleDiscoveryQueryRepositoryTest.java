@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostTopic;
+import dev.christopherbell.post.like.PostLikeStore;
 import java.time.Instant;
 import java.util.List;
 import org.bson.Document;
@@ -25,6 +26,7 @@ import org.springframework.data.mongodb.core.query.Query;
 class VoidPeopleDiscoveryQueryRepositoryTest {
   private static final Instant NOW = Instant.parse("2026-07-29T04:00:00Z");
   @Mock private MongoTemplate mongo;
+  @Mock private PostLikeStore likes;
 
   @Test
   void interestsUseOnlyBoundedActiveParticipationAndKeepAlives() {
@@ -33,13 +35,15 @@ class VoidPeopleDiscoveryQueryRepositoryTest {
         .build();
     when(mongo.find(any(Query.class), eq(Post.class))).thenReturn(List.of(post));
 
-    var interests = new VoidPeopleDiscoveryQueryRepository(mongo).interestsFor("self", NOW);
+    when(likes.recentLikedPostIds("self")).thenReturn(List.of("liked-post"));
+    var interests = new VoidPeopleDiscoveryQueryRepository(mongo, likes).interestsFor("self", NOW);
 
     var query = ArgumentCaptor.forClass(Query.class);
     verify(mongo).find(query.capture(), eq(Post.class));
     assertThat(query.getValue().getLimit()).isEqualTo(256);
     assertThat(query.getValue().getQueryObject().toString())
-        .contains("expiresOn", "accountId", "likedBy", "self");
+        .contains("expiresOn", "accountId", "liked-post", "self")
+        .doesNotContain("likedBy");
     assertThat(interests).containsExactly("music");
   }
 
@@ -48,7 +52,7 @@ class VoidPeopleDiscoveryQueryRepositoryTest {
     when(mongo.aggregate(any(Aggregation.class), eq("posts"), eq(VoidPersonCandidate.class)))
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
-    new VoidPeopleDiscoveryQueryRepository(mongo).recentActiveCandidates(NOW, 500);
+    new VoidPeopleDiscoveryQueryRepository(mongo, likes).recentActiveCandidates(NOW, 500);
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
     verify(mongo).aggregate(aggregation.capture(), eq("posts"), eq(VoidPersonCandidate.class));

@@ -43,6 +43,8 @@ class MongoAccountDeletionOperationsTest {
         "notification_rate_limits",
         "account_trust_relationships",
         "hidden_post_threads",
+        "post_likes",
+        "account_follows",
         "whatsforlunch_preferences",
         "whatsforlunch_favorites",
         "whatsforlunch_ratings",
@@ -59,11 +61,11 @@ class MongoAccountDeletionOperationsTest {
     operations.pseudonymizeRetainedRecords("account-1", "deleted:abcdef012345");
 
     var postUpdates = ArgumentCaptor.forClass(UpdateDefinition.class);
-    verify(mongo, org.mockito.Mockito.times(3)).updateMulti(
+    verify(mongo, org.mockito.Mockito.times(2)).updateMulti(
         any(Query.class), postUpdates.capture(), eq("posts"));
     assertThat(postUpdates.getAllValues().toString())
         .contains("accountId", "deleted-user")
-        .contains("likedBy", "account-1", "likesCount")
+        .doesNotContain("likedBy", "likesCount")
         .contains("editAudit", "editorAccountId", "deleted:abcdef012345");
     verify(mongo, org.mockito.Mockito.times(3)).updateMulti(
         any(Query.class), any(UpdateDefinition.class), eq("post_reports"));
@@ -76,15 +78,11 @@ class MongoAccountDeletionOperationsTest {
   }
 
   @Test
-  @DisplayName("Account removal pulls follower references and deletes the credential record last")
-  void removeReferencesAndAccount_pullsReferencesThenDeletesTarget() {
+  @DisplayName("Account removal deletes the credential after relationship cleanup")
+  void removeReferencesAndAccount_deletesTarget() {
     operations.removeReferencesAndAccount("account-1");
 
-    var query = ArgumentCaptor.forClass(Query.class);
-    var update = ArgumentCaptor.forClass(UpdateDefinition.class);
-    verify(mongo).updateMulti(query.capture(), update.capture(), eq("accounts"));
     verify(mongo).remove(any(Query.class), eq("accounts"));
-    assertThat(update.getValue().getUpdateObject().toString()).contains("followingIds", "account-1");
   }
 
   @Test

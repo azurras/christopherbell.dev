@@ -10,11 +10,12 @@ import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter;
 import dev.christopherbell.post.abuse.VoidMutationKind;
 import dev.christopherbell.post.expiration.PostExpirationService;
+import dev.christopherbell.post.feed.PostFeedItemAssembler;
+import dev.christopherbell.post.like.PostLikeStore;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
 import java.time.Clock;
-import java.util.HashSet;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -27,46 +28,48 @@ public class PostInteractionService {
   private final PostMapper postMapper;
   private final NotificationDeliveryService notificationDeliveryService;
   private final PostExpirationService postExpirationService;
+  private final PostLikeStore postLikes;
+  private final PostFeedItemAssembler feedItems;
   private final NewAccountVoidMutationLimiter mutationLimiter;
   private final Clock clock;
 
   public PostFeedItem toggleLike(String postId, String selfId)
+      throws ResourceNotFoundException {
+    return setLiked(postId, selfId, !postLikes.exists(postId, selfId));
+  }
+
+  /** Applies one retry-safe desired like state. */
+  public PostFeedItem setLiked(String postId, String selfId, boolean desiredLiked)
       throws ResourceNotFoundException {
     var post = postRepository.findById(postId)
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Post with id %s not found.", postId)));
     var now = clock.instant();
     postExpirationService.ensureActive(post);
     var threadRoot = postExpirationService.activeThreadRootForReply(post);
-    if (post.getLikedBy() == null) {
-      post.setLikedBy(new HashSet<>());
-    }
-    boolean liked = !post.getLikedBy().contains(selfId);
-    Account actor = null;
-    if (liked) {
-      actor = accountRepository.findById(selfId)
-          .orElseThrow(() -> new ResourceNotFoundException(
-              String.format("Account with id %s not found.", selfId)));
-      mutationLimiter.require(actor, VoidMutationKind.KEEP_ALIVE);
-      post.getLikedBy().add(selfId);
-      post.setLikesCount((post.getLikesCount() == null ? 0 : post.getLikesCount()) + 1);
-    } else {
-      post.getLikedBy().remove(selfId);
-      post.setLikesCount(Math.max(0, (post.getLikesCount() == null ? 0 : post.getLikesCount()) - 1));
-    }
-    post.setLastUpdatedOn(now);
-    if (liked && threadRoot == null) {
-      post.setLastExtendedOn(now);
-    }
-    postExpirationService.refreshExpiration(post);
-    postRepository.save(post);
-    postExpirationService.synchronizeReplyExpirations(post);
-    postExpirationService.refreshThreadRootExpiration(threadRoot, liked ? 1 : -1, liked ? now : null);
     var author = accountRepository.findById(post.getAccountId())
-        .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", post.getAccountId())));
-    if (liked && !selfId.equals(author.getId())) {
-      notificationDeliveryService.createPostLikeNotification(post, actor, author);
+        .orElseThrow(() -> new ResourceNotFoundException(
+            String.format("Account with id %s not found.", post.getAccountId())));
+    Account actor = desiredLiked
+        ? accountRepository.findById(selfId)
+            .orElseThrow(() -> new ResourceNotFoundException(
+                String.format("Account with id %s not found.", selfId)))
+        : null;
+    var transition = desiredLiked
+        ? postLikes.like(postId, selfId, now)
+        : postLikes.unlike(postId, selfId);
+    if (transition.created()) {
+      try {
+        mutationLimiter.require(actor, VoidMutationKind.KEEP_ALIVE);
+      } catch (RuntimeException exception) {
+        postLikes.unlike(postId, selfId);
+        throw exception;
+      }
     }
-    return toFeedItem(post, author.getUsername(), liked ? selfId : null);
+    var updated = postExpirationService.applyLikeTransition(post, threadRoot, transition.delta(), now);
+    if (transition.created() && !selfId.equals(author.getId())) {
+      notificationDeliveryService.createPostLikeNotification(updated, actor, author);
+    }
+    return feedItems.single(updated, author.getUsername(), selfId);
   }
 
   public PostDetail deletePost(String postId, String selfId, boolean isAdmin)
@@ -85,26 +88,4 @@ public class PostInteractionService {
     return postMapper.toDetail(post);
   }
 
-  private PostFeedItem toFeedItem(Post post, String username, String currentUserId) {
-    return PostFeedItem.builder()
-        .id(post.getId())
-        .accountId(post.getAccountId())
-        .username(username)
-        .text(post.getText())
-        .linkPreviews(post.getLinkPreviews())
-        .rootId(post.getRootId())
-        .parentId(post.getParentId())
-        .level(post.getLevel())
-        .likesCount(post.getLikesCount())
-        .liked(currentUserId != null
-            && post.getLikedBy() != null
-            && post.getLikedBy().contains(currentUserId))
-        .replyCount((int) postRepository.countByParentId(post.getId()))
-        .createdOn(post.getCreatedOn())
-        .lastUpdatedOn(post.getLastUpdatedOn())
-        .lastExtendedOn(post.getLastExtendedOn())
-        .topics(post.getTopics())
-        .expiresOn(post.getExpiresOn())
-        .build();
-  }
 }

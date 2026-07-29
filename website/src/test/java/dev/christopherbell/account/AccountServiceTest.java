@@ -22,6 +22,7 @@ import dev.christopherbell.account.deletion.AccountDeletionResult;
 import dev.christopherbell.account.deletion.AccountDeletionService;
 import dev.christopherbell.account.deletion.AccountDeletionStatus;
 import dev.christopherbell.account.follow.AccountFollowService;
+import dev.christopherbell.account.follow.AccountFollowStore;
 import dev.christopherbell.account.moderation.AccountModerationService;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountLoginRequest;
@@ -88,16 +89,17 @@ public class AccountServiceTest {
   @Mock private PermissionService permissionService;
   @Mock private NewAccountVoidMutationLimiter mutationLimiter;
   @Mock private FederationConsentService federationConsent;
+  @Mock private AccountFollowStore follows;
   private AccountService accountService;
 
   @BeforeEach
   void setUp() {
     var authenticationService = new AccountAuthenticationService(accountRepository, accountLoginStore);
     var passwordResetService = new PasswordResetService(accountRepository, passwordResetNotificationService);
-    var profileService = new AccountProfileService(accountRepository, accountMapper, postRepository);
+    var profileService = new AccountProfileService(accountRepository, accountMapper, postRepository, follows);
     var followService = new AccountFollowService(
-        accountRepository,
         profileService,
+        follows,
         mutationLimiter,
         Clock.fixed(Instant.parse("2026-07-29T04:00:00Z"), ZoneOffset.UTC));
     var moderationService = new AccountModerationService(
@@ -364,13 +366,11 @@ public class AccountServiceTest {
         .id("self")
         .username("self")
         .role(Role.USER)
-        .followingIds(new java.util.HashSet<>())
         .build();
     var target = Account.builder()
         .id("target")
         .username("target")
         .role(Role.USER)
-        .followingIds(new java.util.HashSet<>())
         .build();
     var token = dev.christopherbell.permission.PermissionService.generateToken(self);
     SecurityContextHolder.getContext()
@@ -380,20 +380,21 @@ public class AccountServiceTest {
       when(accountRepository.findById(eq("self"))).thenReturn(Optional.of(self));
       when(accountRepository.findByUsernameAndStatus(eq("target"), eq(AccountStatus.ACTIVE)))
           .thenReturn(Optional.of(target));
-      when(accountRepository.countByFollowingIdsContaining(eq("target"))).thenReturn(1L);
-      when(accountRepository.save(eq(self))).thenReturn(self);
+      when(follows.follow(eq("self"), eq("target"), any(Instant.class)))
+          .thenReturn(new AccountFollowStore.FollowTransition(true, false));
+      when(follows.countFollowers(eq("target"))).thenReturn(1L);
+      when(follows.exists(eq("self"), eq("target"))).thenReturn(true);
 
       var profile = accountService.followAccount("target");
 
-      org.junit.jupiter.api.Assertions.assertTrue(self.getFollowingIds().contains("target"));
       assertEquals("target", profile.username());
       assertEquals(1L, profile.followerCount());
       org.junit.jupiter.api.Assertions.assertTrue(profile.followedByMe());
       verify(accountRepository).findById(eq("self"));
       verify(accountRepository).findByUsernameAndStatus(eq("target"), eq(AccountStatus.ACTIVE));
       verify(mutationLimiter).require(eq(self), eq(VoidMutationKind.FOLLOW));
-      verify(accountRepository).save(eq(self));
-      verify(accountRepository).countByFollowingIdsContaining(eq("target"));
+      verify(follows).follow(eq("self"), eq("target"), any(Instant.class));
+      verify(follows).countFollowers(eq("target"));
       verify(postRepository).countByAccountIdAndParentIdIsNull(eq("target"));
       verify(postRepository).countByAccountIdAndParentIdIsNotNull(eq("target"));
       verifyNoMoreInteractions(accountRepository);
@@ -409,12 +410,11 @@ public class AccountServiceTest {
         .id("target")
         .username("target")
         .role(Role.USER)
-        .followingIds(new java.util.HashSet<>())
         .build();
 
     when(accountRepository.findByUsernameAndStatus(eq("target"), eq(AccountStatus.ACTIVE)))
         .thenReturn(Optional.of(account));
-    when(accountRepository.countByFollowingIdsContaining(eq("target"))).thenReturn(2L);
+    when(follows.countFollowers(eq("target"))).thenReturn(2L);
     when(postRepository.countByAccountIdAndParentIdIsNull(eq("target"))).thenReturn(3L);
     when(postRepository.countByAccountIdAndParentIdIsNotNull(eq("target"))).thenReturn(5L);
 

@@ -106,9 +106,9 @@ export const API = {
     create: '/api/posts/2025-09-14/create',
     byId: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}`,
     edit: (id) => `/api/posts/2026-07-26/${encodeURIComponent(id)}`,
-    like: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}/like`,
+    like: (id) => `/api/posts/2026-07-29/${encodeURIComponent(id)}/like`,
     thread: (id) => `/api/posts/2025-09-14/${encodeURIComponent(id)}/thread`,
-    byAccount: (accountId) => `/api/posts/2025-09-14/account/${encodeURIComponent(accountId)}`,
+    byAccount: (accountId) => `/api/posts/2026-07-29/account/${encodeURIComponent(accountId)}`,
     hideThread: (id) => `/api/posts/2026-06-02/${encodeURIComponent(id)}/hide-thread`,
     unhideThread: (rootId) => `/api/posts/2026-06-02/${encodeURIComponent(rootId)}/hide-thread`,
     discovery: {

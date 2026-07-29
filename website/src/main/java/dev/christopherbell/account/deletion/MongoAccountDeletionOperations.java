@@ -34,8 +34,7 @@ public class MongoAccountDeletionOperations implements AccountDeletionOperations
         .setOnInsert("lastName", "User")
         .setOnInsert("role", Role.USER)
         .setOnInsert("status", AccountStatus.INACTIVE)
-        .setOnInsert("permissions", Set.of())
-        .setOnInsert("followingIds", Set.of());
+        .setOnInsert("permissions", Set.of());
     mongo.upsert(exact("_id", TOMBSTONE), tombstone, Account.class);
   }
 
@@ -44,10 +43,6 @@ public class MongoAccountDeletionOperations implements AccountDeletionOperations
     mongo.updateMulti(
         exact("accountId", accountId),
         new Update().set("accountId", TOMBSTONE),
-        "posts");
-    mongo.updateMulti(
-        exact("likedBy", accountId),
-        new Update().pull("likedBy", accountId).inc("likesCount", -1),
         "posts");
     mongo.updateMulti(
         exact("editAudit.editorAccountId", accountId),
@@ -69,6 +64,8 @@ public class MongoAccountDeletionOperations implements AccountDeletionOperations
     remove("account_trust_relationships", accountId,
         "ownerAccountId", "targetAccountId");
     remove("hidden_post_threads", accountId, "accountId");
+    remove("post_likes", accountId, "accountId");
+    remove("account_follows", accountId, "followerAccountId", "followedAccountId");
     remove("whatsforlunch_preferences", accountId, "accountId");
     remove("whatsforlunch_favorites", accountId, "accountId");
     remove("whatsforlunch_ratings", accountId, "accountId");
@@ -134,10 +131,6 @@ public class MongoAccountDeletionOperations implements AccountDeletionOperations
 
   @Override
   public void removeReferencesAndAccount(String accountId) {
-    mongo.updateMulti(
-        new Query(Criteria.where("followingIds").is(accountId)),
-        new Update().pull("followingIds", accountId),
-        "accounts");
     mongo.remove(exact("_id", accountId), "accounts");
   }
 

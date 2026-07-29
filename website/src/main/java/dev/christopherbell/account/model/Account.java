@@ -82,8 +82,6 @@ public class Account {
   private Set<AccountPermission> permissions = new HashSet<>();
   private AccountStatus status;
   @JsonIgnore private ModerationAuditCommand pendingModerationAudit;
-  private Set<String> followingIds;
-
   @Indexed(unique = true)
   private String username;
 

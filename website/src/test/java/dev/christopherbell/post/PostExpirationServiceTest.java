@@ -3,14 +3,18 @@ package dev.christopherbell.post;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.post.expiration.PostExpirationService;
 import dev.christopherbell.post.model.Post;
 import java.time.Duration;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,16 +22,22 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.UpdateDefinition;
 
 @ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class PostExpirationServiceTest {
   @Mock private PostRepository postRepository;
+  @Mock private MongoTemplate mongo;
 
   @Test
   void purgeExpiredPosts_whenNoPostsNeedWork_doesNotLogStartOrCompletion(CapturedOutput output) {
     var service = new PostExpirationService(postRepository, true);
-    when(postRepository.findByExpiresOnIsNull()).thenReturn(List.of());
-    when(postRepository.findByExpiresOnLessThanEqual(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+    when(postRepository.findByExpiresOnIsNull(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+    when(postRepository.findByExpiresOnLessThanEqual(
+        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
 
     service.purgeExpiredPosts();
 
@@ -63,5 +73,49 @@ class PostExpirationServiceTest {
     assertEquals(root.getExpiresOn(), reply.getExpiresOn());
     verify(postRepository, atLeastOnce()).save(eq(root));
     verify(postRepository, atLeastOnce()).save(eq(reply));
+  }
+
+  @Test
+  void likeTransitionUsesOneAtomicCounterWriteAndOneBulkReplySynchronization() {
+    var changedOn = Instant.parse("2026-07-29T03:00:00Z");
+    var root = Post.builder()
+        .id("root")
+        .rootId("root")
+        .createdOn(Instant.parse("2026-07-29T01:00:00Z"))
+        .likesCount(0)
+        .threadReplyLikesCount(0)
+        .threadReplyCount(10_000)
+        .build();
+    var updated = Post.builder()
+        .id("root")
+        .rootId("root")
+        .createdOn(root.getCreatedOn())
+        .likesCount(1)
+        .threadReplyLikesCount(0)
+        .threadReplyCount(10_000)
+        .build();
+    when(mongo.findAndModify(
+        any(Query.class),
+        any(UpdateDefinition.class),
+        any(FindAndModifyOptions.class),
+        eq(Post.class))).thenReturn(updated);
+    var service = new PostExpirationService(
+        postRepository,
+        mongo,
+        Clock.fixed(changedOn, ZoneOffset.UTC),
+        true);
+
+    service.applyLikeTransition(root, null, 1, changedOn);
+
+    var counterUpdate = org.mockito.ArgumentCaptor.forClass(UpdateDefinition.class);
+    verify(mongo).findAndModify(
+        any(Query.class),
+        counterUpdate.capture(),
+        any(FindAndModifyOptions.class),
+        eq(Post.class));
+    assertEquals(1, counterUpdate.getValue().getUpdateObject()
+        .get("$inc", org.bson.Document.class).getInteger("likesCount"));
+    verify(mongo).updateMulti(any(Query.class), any(UpdateDefinition.class), eq(Post.class));
+    verify(postRepository, never()).findByRootIdOrderByCreatedOnAsc(any());
   }
 }
