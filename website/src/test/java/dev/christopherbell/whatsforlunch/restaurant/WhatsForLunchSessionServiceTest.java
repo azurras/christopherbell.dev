@@ -1,7 +1,9 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -10,6 +12,7 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository;
@@ -20,8 +23,11 @@ import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRe
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionVoteRequest;
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionRepository;
+import dev.christopherbell.whatsforlunch.restaurant.session.SessionJoinOutcome;
+import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionMemberships;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionService;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -42,6 +48,7 @@ class WhatsForLunchSessionServiceTest {
   @Mock private RestaurantRatingRepository restaurantRatingRepository;
   @Mock private RestaurantRepository restaurantRepository;
   @Mock private WhatsForLunchSessionRepository sessionRepository;
+  @Mock private WhatsForLunchSessionMemberships sessionMemberships;
   @InjectMocks private WhatsForLunchSessionService service;
 
   @Test
@@ -111,8 +118,16 @@ class WhatsForLunchSessionServiceTest {
 
     when(permissionService.getSelfId()).thenReturn("friend-id");
     when(accountRepository.findById("friend-id")).thenReturn(Optional.of(friend));
+    when(sessionMemberships.joinIfCapacityRemains("session-1", "friend-id", "friend", 21))
+        .thenAnswer(invocation -> {
+          session.setParticipantAccountIds(List.of("owner-id", "friend-id"));
+          var usernames = new LinkedHashMap<String, String>();
+          usernames.put("owner-id", "owner");
+          usernames.put("friend-id", "friend");
+          session.setParticipantUsernamesByAccountId(usernames);
+          return SessionJoinOutcome.JOINED;
+        });
     when(sessionRepository.findById("session-1")).thenReturn(Optional.of(session));
-    when(sessionRepository.save(any(WhatsForLunchSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
     when(restaurantRepository.findAllById(eq(List.of("restaurant-1", "restaurant-2", "restaurant-3"))))
         .thenReturn(List.of(restaurant("restaurant-1"), restaurant("restaurant-2"), restaurant("restaurant-3")));
     when(restaurantMapper.toRestaurantDetail(any(Restaurant.class)))
@@ -121,10 +136,21 @@ class WhatsForLunchSessionServiceTest {
     var result = service.joinSession("session-1");
 
     assertEquals(List.of("owner", "friend"), result.participantUsernames());
-    var captor = ArgumentCaptor.forClass(WhatsForLunchSession.class);
-    verify(sessionRepository).save(captor.capture());
-    assertEquals(List.of("owner-id", "friend-id"), captor.getValue().getParticipantAccountIds());
-    assertEquals("friend", captor.getValue().getParticipantUsernamesByAccountId().get("friend-id"));
+    verify(sessionMemberships).joinIfCapacityRemains("session-1", "friend-id", "friend", 21);
+  }
+
+  @Test
+  @DisplayName("Join rejects a new participant after the twenty-one-member capacity is reached")
+  void joinSession_whenCapacityIsFull_rejectsNewParticipant() throws Exception {
+    var friend = account("friend-id", "friend");
+    when(permissionService.getSelfId()).thenReturn("friend-id");
+    when(accountRepository.findById("friend-id")).thenReturn(Optional.of(friend));
+    when(sessionMemberships.joinIfCapacityRemains("session-1", "friend-id", "friend", 21))
+        .thenReturn(SessionJoinOutcome.FULL);
+
+    var exception = assertThrows(InvalidRequestException.class, () -> service.joinSession("session-1"));
+
+    assertEquals("This WFL session has reached its member limit.", exception.getMessage());
   }
 
   @Test
@@ -191,6 +217,54 @@ class WhatsForLunchSessionServiceTest {
     verify(sessionRepository).save(captor.capture());
     assertEquals(List.of("restaurant-4", "restaurant-5", "restaurant-6"), captor.getValue().getRestaurantIds());
     assertEquals(Map.of(), captor.getValue().getVotesByAccountId());
+  }
+
+  @Test
+  @DisplayName("Update restaurants rejects a participant who did not create the session")
+  void updateRestaurants_whenParticipantIsNotCreator_rejectsBeforeChangingVotes() throws Exception {
+    var participant = account("friend-id", "friend");
+    var session = WhatsForLunchSession.builder()
+        .id("session-1")
+        .createdByAccountId("owner-id")
+        .participantAccountIds(List.of("owner-id", "friend-id"))
+        .restaurantIds(List.of("restaurant-1", "restaurant-2", "restaurant-3"))
+        .votesByAccountId(Map.of("friend-id", "restaurant-1"))
+        .build();
+    when(permissionService.getSelfId()).thenReturn("friend-id");
+    when(accountRepository.findById("friend-id")).thenReturn(Optional.of(participant));
+    when(sessionRepository.findById("session-1")).thenReturn(Optional.of(session));
+
+    var exception = assertThrows(InvalidRequestException.class, () -> service.updateRestaurants(
+        "session-1", new WhatsForLunchSessionRestaurantsRequest(List.of("restaurant-4", "restaurant-5", "restaurant-6"))));
+
+    assertEquals("Only the session creator can replace restaurants or clear votes.", exception.getMessage());
+    assertEquals(Map.of("friend-id", "restaurant-1"), session.getVotesByAccountId());
+  }
+
+  @Test
+  @DisplayName("Session detail exposes restaurant-management capability only to its creator")
+  void getSession_whenCreatorOrParticipant_returnsCreatorCapability() throws Exception {
+    var session = WhatsForLunchSession.builder()
+        .id("session-1")
+        .createdByAccountId("owner-id")
+        .createdByUsername("owner")
+        .participantAccountIds(List.of("owner-id", "friend-id"))
+        .participantUsernamesByAccountId(Map.of("owner-id", "owner", "friend-id", "friend"))
+        .restaurantIds(List.of("restaurant-1", "restaurant-2", "restaurant-3"))
+        .build();
+    when(sessionRepository.findById("session-1")).thenReturn(Optional.of(session));
+    when(restaurantRepository.findAllById(eq(List.of("restaurant-1", "restaurant-2", "restaurant-3"))))
+        .thenReturn(List.of(restaurant("restaurant-1"), restaurant("restaurant-2"), restaurant("restaurant-3")));
+    when(restaurantMapper.toRestaurantDetail(any(Restaurant.class)))
+        .thenAnswer(invocation -> RestaurantStub.getRestaurantDetailStub(invocation.<Restaurant>getArgument(0).getId()));
+
+    when(permissionService.getSelfId()).thenReturn("owner-id");
+    when(accountRepository.findById("owner-id")).thenReturn(Optional.of(account("owner-id", "owner")));
+    assertTrue(service.getSession("session-1").canManage());
+
+    when(permissionService.getSelfId()).thenReturn("friend-id");
+    when(accountRepository.findById("friend-id")).thenReturn(Optional.of(account("friend-id", "friend")));
+    assertFalse(service.getSession("session-1").canManage());
   }
 
   @Test

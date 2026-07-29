@@ -14,6 +14,7 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
   candidates.
 - Logged-in shared sessions where invited members see the same three restaurants, receive session updates, and vote.
 - Logged-in restaurant ratings with public whole-number rating totals.
+- Restaurant websites are persisted and rendered only as absolute HTTP(S) URLs; unsafe legacy values are omitted.
 - Legacy daily lunch picks persisted per day and refreshed at midnight Central.
 - Startup-validated OpenStreetMap metro configuration, with Austin, the San
   Francisco Bay Area, New Orleans, and Dallas enabled by default.

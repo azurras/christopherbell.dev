@@ -27,6 +27,7 @@ import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportResult
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRating;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantWebsite;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreference;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
@@ -94,6 +95,7 @@ public class RestaurantService {
    */
   public RestaurantDetail createRestaurant(RestaurantCreateRequest request) throws Exception {
     var restaurant = restaurantMapper.toRestaurant(request);
+    restaurant.setWebsite(RestaurantWebsite.validateForWrite(restaurant.getWebsite()));
     applyNormalizedName(restaurant);
     ensureRestaurantNameUnique(restaurant.getNormalizedName(), null);
 
@@ -863,6 +865,7 @@ public class RestaurantService {
         .orElseThrow(() -> new ResourceNotFoundException("Restaurant not found: " + request.id()));
 
     var restaurantToUpdate = restaurantMapper.toRestaurant(request);
+    restaurantToUpdate.setWebsite(RestaurantWebsite.validateForWrite(restaurantToUpdate.getWebsite()));
     restaurantToUpdate.setId(existing.getId());
     restaurantToUpdate.setCreatedBy(existing.getCreatedBy());
     restaurantToUpdate.setCreatedOn(existing.getCreatedOn());
@@ -979,6 +982,7 @@ public class RestaurantService {
     var safeRestaurants = Optional.ofNullable(restaurants).orElseGet(List::of);
     var details = safeRestaurants.stream()
         .map(restaurantMapper::toRestaurantDetail)
+        .map(this::suppressUnsafeWebsite)
         .toList();
     applyRatingSummaries(details);
     return details;
@@ -1233,7 +1237,17 @@ public class RestaurantService {
         && !restaurant.getId().isBlank()
         && restaurant.getName() != null
         && !restaurant.getName().isBlank()
-        && restaurant.getAddress() != null;
+        && restaurant.getAddress() != null
+        && (restaurant.getWebsite() == null
+            || restaurant.getWebsite().isBlank()
+            || RestaurantWebsite.safeForDisplay(restaurant.getWebsite()) != null);
+  }
+
+  private RestaurantDetail suppressUnsafeWebsite(RestaurantDetail detail) {
+    if (detail != null) {
+      detail.setWebsite(RestaurantWebsite.safeForDisplay(detail.getWebsite()));
+    }
+    return detail;
   }
 
   private boolean mergeImportedRestaurant(
