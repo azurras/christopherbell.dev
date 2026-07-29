@@ -205,6 +205,29 @@ class SecurityConfigTest {
   }
 
   @Test
+  @DisplayName("Unknown HTML GETs reach the 404 renderer without opening protected namespaces")
+  void unknownHtmlFallbackExcludesProtectedNamespacesAndMutations() throws Exception {
+    var matchers = publicMatchers();
+
+    assertTrue(matchers.stream().anyMatch(matcher ->
+        matcher.matches(request("GET", "/definitely-not-a-real-page"))));
+    assertTrue(matchers.stream().anyMatch(matcher ->
+        matcher.matches(request("GET", "/not-a-real/page"))));
+    assertFalse(matchers.stream().anyMatch(matcher ->
+        matcher.matches(request("POST", "/definitely-not-a-real-page"))));
+    for (var path : List.of(
+        "/api/admin/secret",
+        "/actuator/health",
+        "/v3/api-docs",
+        "/swagger-ui/index.html",
+        "/ap/private",
+        "/.well-known/private",
+        "/nodeinfo/private")) {
+      assertFalse(matchers.stream().anyMatch(matcher -> matcher.matches(request("GET", path))));
+    }
+  }
+
+  @Test
   @DisplayName("Federation exposes only exact read-only discovery routes")
   void federationMatchersAreReadOnlyAndDoNotExposeInboxMutation() throws Exception {
     var paths = List.of(

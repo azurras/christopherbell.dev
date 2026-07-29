@@ -335,7 +335,32 @@ public class SecurityConfig {
       if (tail.startsWith("account")) return false;
       return true; // treat as public single-post GET
     });
+    // Let unknown browser-page GETs reach MVC's content-free 404 renderer without
+    // weakening protected API, management, documentation, or federation namespaces.
+    matchers.add(SecurityConfig::isPublicHtmlFallback);
     return matchers;
+  }
+
+  static boolean isPublicHtmlFallback(jakarta.servlet.http.HttpServletRequest request) {
+    if (!"GET".equalsIgnoreCase(request.getMethod())) {
+      return false;
+    }
+    var path = request.getRequestURI();
+    return !path.contains(".")
+        && !path.equals("/api")
+        && !path.startsWith("/api/")
+        && !path.equals("/actuator")
+        && !path.startsWith("/actuator/")
+        && !path.equals("/v3")
+        && !path.startsWith("/v3/")
+        && !path.equals("/swagger-ui")
+        && !path.startsWith("/swagger-ui/")
+        && !path.equals("/ap")
+        && !path.startsWith("/ap/")
+        && !path.equals("/.well-known")
+        && !path.startsWith("/.well-known/")
+        && !path.equals("/nodeinfo")
+        && !path.startsWith("/nodeinfo/");
   }
 
   public static RequestMatcher[] publicMatchers() {
