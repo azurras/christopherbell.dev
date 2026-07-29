@@ -27,6 +27,20 @@ class BuildSupplyChainConfigurationTest {
     assertThat(Files.readString(metadata)).contains("<component ");
   }
 
+  @Test
+  void dependencyMetadataUpdatesDoNotExecuteUnreviewedArtifacts() throws IOException {
+    var guide = Files.readString(
+        REPOSITORY_ROOT.resolve("docs/operations/dependency-verification.md"));
+
+    assertThat(guide)
+        .doesNotContain("--refresh-dependencies build")
+        .contains("help --dry-run")
+        .contains("disposable")
+        .contains("no credentials, tokens, signing keys, or production access")
+        .contains("review that diff before")
+        .contains("running any normal Gradle build");
+  }
+
   private static Properties wrapperProperties() throws IOException {
     var properties = new Properties();
     try (InputStream input = Files.newInputStream(
