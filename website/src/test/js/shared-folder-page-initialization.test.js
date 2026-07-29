@@ -14,6 +14,142 @@ function pageRoot() {
   };
 }
 
+class RecordingStorage {
+  #values = new Map();
+  operations = [];
+
+  getItem(key) {
+    this.operations.push(['get', key]);
+    return this.#values.get(key) ?? null;
+  }
+
+  setItem(key, value) {
+    this.operations.push(['set', key]);
+    this.#values.set(key, String(value));
+  }
+
+  removeItem(key) {
+    this.operations.push(['remove', key]);
+    this.#values.delete(key);
+  }
+
+  value(key) {
+    return this.#values.get(key) ?? null;
+  }
+
+  resetOperations() {
+    this.operations = [];
+  }
+}
+
+const upload = {
+  id: 'upload-1', parentPath: 'docs', name: 'report.pdf', expectedBytes: 42,
+};
+
+test('account-scoped resume storage isolates two accounts, removes legacy state unread, and resumes same-account work', () => {
+  assert.equal(typeof sharedFolderPage.createUploadResumeStore, 'function');
+  const storage = new RecordingStorage();
+  const legacyKey = 'shared-folder-upload-resume-v1';
+  const aliceKey = 'shared-folder-upload-resume-v2:account-alice';
+  const bobKey = 'shared-folder-upload-resume-v2:account-bob';
+  storage.setItem(legacyKey, JSON.stringify({ ...upload, id: 'legacy-upload' }));
+  storage.resetOperations();
+
+  const alice = sharedFolderPage.createUploadResumeStore({
+    accountId: 'account-alice', storage,
+  });
+  assert.equal(storage.value(legacyKey), null);
+  assert.equal(storage.operations.some(([operation, key]) =>
+    operation === 'get' && key === legacyKey), false);
+
+  alice.store(upload, true);
+  const bob = sharedFolderPage.createUploadResumeStore({
+    accountId: 'account-bob', storage,
+  });
+  assert.deepEqual(bob.load(), null);
+  assert.deepEqual(alice.load(), { ...upload, replace: true });
+  bob.store({ ...upload, id: 'upload-2' });
+
+  assert.equal(storage.value(aliceKey), JSON.stringify({ ...upload, replace: true }));
+  assert.equal(storage.value(bobKey), JSON.stringify({ ...upload, id: 'upload-2', replace: false }));
+  assert.deepEqual(alice.load(), { ...upload, replace: true });
+});
+
+test('resume storage does not access browser state without an authenticated account identity', () => {
+  assert.equal(typeof sharedFolderPage.createUploadResumeStore, 'function');
+  const storage = new RecordingStorage();
+  const anonymous = sharedFolderPage.createUploadResumeStore({ accountId: '', storage });
+
+  assert.equal(anonymous.load(), null);
+  anonymous.store(upload);
+  anonymous.clear();
+
+  assert.deepEqual(storage.operations, []);
+});
+
+function replaceGlobal(name, value) {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+  Object.defineProperty(globalThis, name, { configurable: true, value });
+  return () => {
+    if (previous) Object.defineProperty(globalThis, name, previous);
+    else delete globalThis[name];
+  };
+}
+
+function uploadPanelDocument() {
+  const node = () => ({
+    addEventListener() {},
+    classList: { add() {}, remove() {} },
+  });
+  const nodes = new Map([
+    ['shared-upload-panel', node()],
+    ['shared-upload-form', node()],
+    ['shared-upload-file', node()],
+    ['shared-upload-cancel', node()],
+    ['shared-upload-pause', node()],
+    ['shared-upload-progress', node()],
+    ['shared-upload-detail', node()],
+    ['shared-folder-status', node()],
+  ]);
+  return {
+    cookie: '',
+    getElementById: id => nodes.get(id) ?? null,
+    querySelector: () => ({ setAttribute() {} }),
+  };
+}
+
+test('terminal upload cleanup clears only the current account resume record', async () => {
+  assert.equal(typeof sharedFolderPage.createUploadResumeStore, 'function');
+  assert.equal(typeof sharedFolderPage.configureUploadPanel, 'function');
+  const storage = new RecordingStorage();
+  const alice = sharedFolderPage.createUploadResumeStore({
+    accountId: 'account-alice', storage,
+  });
+  const bob = sharedFolderPage.createUploadResumeStore({
+    accountId: 'account-bob', storage,
+  });
+  alice.store(upload);
+  bob.store({ ...upload, id: 'upload-2' });
+  const restoreDocument = replaceGlobal('document', uploadPanelDocument());
+  const restoreFetch = replaceGlobal('fetch', async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ payload: { ...upload, state: 'COMPLETED' } }),
+  }));
+
+  try {
+    await sharedFolderPage.configureUploadPanel({
+      role: 'USER', permissions: ['SHARED_FOLDER_WRITE'],
+    }, () => '', alice);
+  } finally {
+    restoreFetch();
+    restoreDocument();
+  }
+
+  assert.equal(alice.load(), null);
+  assert.deepEqual(bob.load(), { ...upload, id: 'upload-2', replace: false });
+});
+
 test('page initialization unwraps the account DTO and renders entries for shared-folder READ', async () => {
   const root = pageRoot();
   const requests = [];
