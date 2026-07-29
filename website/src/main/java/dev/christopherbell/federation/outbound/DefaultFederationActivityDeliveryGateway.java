@@ -1,13 +1,13 @@
 package dev.christopherbell.federation.outbound;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
 import dev.christopherbell.federation.configuration.FederationProperties;
 import dev.christopherbell.federation.identity.FederationRequestSigner;
 import dev.christopherbell.post.model.Post;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /** Serializes, signs, re-resolves, and sends one canonical activity. */
 final class DefaultFederationActivityDeliveryGateway implements FederationActivityDeliveryGateway {
@@ -43,7 +43,7 @@ final class DefaultFederationActivityDeliveryGateway implements FederationActivi
     try {
       body = objectMapper.writeValueAsBytes(
           activities.create(account.getFederationIdentity().actorId(), post));
-    } catch (JsonProcessingException failure) {
+    } catch (JacksonException failure) {
       throw new IllegalStateException("Federation activity serialization failed", failure);
     }
     var signed = signer.sign(account, peer.inbox(), body);

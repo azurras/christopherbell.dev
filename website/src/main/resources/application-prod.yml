@@ -33,6 +33,10 @@ app:
     software-name: christopherbell.dev
     software-version: ${GIT_COMMIT:unknown}
     key-encryption-secret: ${APP_FEDERATION_KEY_ENCRYPTION_SECRET:}
+    outbound:
+      not-before: ${APP_FEDERATION_OUTBOUND_NOT_BEFORE:}
+      peers: []
+      development-loopback-enabled: false
   jwt:
     secret: ${APP_JWT_SECRET:}
   mail:
