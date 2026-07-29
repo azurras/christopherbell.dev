@@ -237,6 +237,14 @@ export const API = {
   },
   whatsForLunch: {
     restaurants: '/api/whatsforlunch/restaurant/2025-09-12',
+    inventory: ({ name = '', city = '', state = '', cursor = '', size = 25 } = {}) => {
+      const params = new URLSearchParams({ size: String(size) });
+      if (name.trim()) params.set('name', name.trim());
+      if (city.trim()) params.set('city', city.trim());
+      if (state.trim()) params.set('state', state.trim());
+      if (cursor) params.set('cursor', cursor);
+      return `/api/whatsforlunch/restaurant/2026-07-29/inventory?${params}`;
+    },
     today: '/api/whatsforlunch/restaurant/2026-05-17/today',
     nearby: ({ latitude, longitude }, cuisines = [], radiusMiles = 15, useSavedPreferences = false) => {
       const params = new URLSearchParams({
@@ -277,6 +285,11 @@ export const API = {
     importOpenStreetMapApply: '/api/whatsforlunch/restaurant/2026-07-26/import/openstreetmap/apply',
     importOpenStreetMapStatus: '/api/whatsforlunch/restaurant/2026-07-26/import/openstreetmap/status',
     dedupeNamesPreview: '/api/whatsforlunch/restaurant/2026-07-26/dedupe-names/preview',
+    dedupeNamesPreviewPage: (cursor = '', size = 25) => {
+      const params = new URLSearchParams({ size: String(size) });
+      if (cursor) params.set('cursor', cursor);
+      return `/api/whatsforlunch/restaurant/2026-07-26/dedupe-names/preview?${params}`;
+    },
     dedupeNamesApply: '/api/whatsforlunch/restaurant/2026-07-26/dedupe-names/apply',
     freshness: '/api/whatsforlunch/restaurant/2026-07-26/freshness',
   },

@@ -121,7 +121,8 @@ public class OpenStreetMapRestaurantClient {
         .cuisine(text(tags, "cuisine"))
         .phoneNumber(firstText(tags, "contact:phone", "phone"))
         .sourceAmenity(text(tags, "amenity"))
-        .website(firstText(tags, "contact:website", "website"))
+        .website(RestaurantWebsiteUrlPolicy.safeOrNull(
+            firstText(tags, "contact:website", "website")))
         .build());
   }
 

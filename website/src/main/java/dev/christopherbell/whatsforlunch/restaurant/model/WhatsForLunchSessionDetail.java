@@ -16,6 +16,11 @@ public record WhatsForLunchSessionDetail(
     List<RestaurantDetail> restaurants,
     Map<String, List<String>> votesByRestaurant,
     String myVoteRestaurantId,
+    long revision,
+    boolean active,
+    boolean canChangeRestaurants,
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "uuuu-MM-dd'T'HH:mm:ss.SSS'Z'", timezone = "UTC")
+    Instant activeUntil,
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "uuuu-MM-dd'T'HH:mm:ss.SSS'Z'", timezone = "UTC")
     Instant createdOn,
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "uuuu-MM-dd'T'HH:mm:ss.SSS'Z'", timezone = "UTC")

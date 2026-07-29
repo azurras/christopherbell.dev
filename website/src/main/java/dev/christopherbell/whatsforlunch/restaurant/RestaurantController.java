@@ -24,6 +24,7 @@ import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeResult
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeApplyRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupePreview;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantInventoryPage;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingSetRequest;
@@ -135,6 +136,23 @@ public class RestaurantController {
             .payload(response)
             .success(true)
             .build(), HttpStatus.OK);
+  }
+
+  /** Returns one bounded searchable admin inventory page. */
+  @GetMapping(value = APIVersion.V20260729 + "/inventory", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  public ResponseEntity<Response<RestaurantInventoryPage>> getRestaurantInventory(
+      @RequestParam(required = false) String name,
+      @RequestParam(required = false) String city,
+      @RequestParam(required = false) String state,
+      @RequestParam(required = false) String cursor,
+      @RequestParam(defaultValue = "25") int size
+  ) {
+    var response = restaurantService.getRestaurantInventory(name, city, state, cursor, size);
+    return ResponseEntity.ok(Response.<RestaurantInventoryPage>builder()
+        .payload(response)
+        .success(true)
+        .build());
   }
 
   /**
@@ -603,8 +621,13 @@ public class RestaurantController {
    */
   @GetMapping(value = APIVersion.V20260726 + "/dedupe-names/preview", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
-  public ResponseEntity<Response<RestaurantDedupePreview>> previewDuplicateNamedRestaurants() {
-    var response = restaurantService.previewDuplicateNamedRestaurants();
+  public ResponseEntity<Response<RestaurantDedupePreview>> previewDuplicateNamedRestaurants(
+      @RequestParam(required = false) String cursor,
+      @RequestParam(defaultValue = "25") int size
+  ) {
+    var response = cursor == null && size == 25
+        ? restaurantService.previewDuplicateNamedRestaurants()
+        : restaurantService.previewDuplicateNamedRestaurants(cursor, size);
     return new ResponseEntity<>(
         Response.<RestaurantDedupePreview>builder()
             .payload(response)

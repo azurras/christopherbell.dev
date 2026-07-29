@@ -31,7 +31,7 @@ class MongoAccountDeletionOperationsTest {
   }
 
   @Test
-  @DisplayName("Private-data cleanup removes every owner or participant collection")
+  @DisplayName("Private-data cleanup deletes owned WFL sessions but preserves shared sessions")
   void removePrivateData_coversCompleteCollectionInventory() {
     operations.removePrivateData("account-1");
 
@@ -48,10 +48,22 @@ class MongoAccountDeletionOperationsTest {
         "whatsforlunch_preferences",
         "whatsforlunch_favorites",
         "whatsforlunch_ratings",
-        "whatsforlunch_sessions",
         "conversation_archive_states")) {
       verify(mongo).remove(any(Query.class), eq(collection));
     }
+
+    var ownedSessionQuery = ArgumentCaptor.forClass(Query.class);
+    verify(mongo).remove(ownedSessionQuery.capture(), eq("whatsforlunch_sessions"));
+    assertThat(ownedSessionQuery.getValue().getQueryObject().toString())
+        .contains("createdByAccountId=account-1")
+        .doesNotContain("participantAccountIds");
+
+    var sharedSessionUpdate = ArgumentCaptor.forClass(UpdateDefinition.class);
+    verify(mongo).updateMulti(
+        any(Query.class), sharedSessionUpdate.capture(), eq("whatsforlunch_sessions"));
+    assertThat(sharedSessionUpdate.getValue().getUpdateObject().toString())
+        .contains("participantAccountIds", "participantUsernamesByAccountId.account-1",
+            "votesByAccountId.account-1", "revision");
   }
 
   @Test

@@ -59,6 +59,9 @@ const drawerTitle = document.getElementById('drawerTitle');
 const sharedFolderPermissionsTemplate = document.getElementById('sharedFolderPermissionsTemplate');
 const musicPermissionsTemplate = document.getElementById('musicPermissionsTemplate');
 const wflOperationStatus = document.getElementById('wflOperationStatus');
+const wflInventoryFilters = document.getElementById('wflInventoryFilters');
+const wflInventory = document.getElementById('wflInventory');
+const wflInventoryMore = document.getElementById('wflInventoryMore');
 const canesBoxIndexOperationStatus = document.getElementById('canesBoxIndexOperationStatus');
 const canesBoxManualPriceForm = document.getElementById('canesBoxManualPriceForm');
 const locationOperationStatus = document.getElementById('locationOperationStatus');
@@ -116,6 +119,10 @@ let activityQuery = {
 };
 let activityPageState = { page: 0, size: 25, totalElements: 0, totalPages: 0 };
 let restaurants = [];
+let restaurantInventoryQuery = { name: '', city: '', state: '', cursor: '', size: 25 };
+let restaurantInventoryNextCursor = '';
+let restaurantInventoryTotal = 0;
+let duplicatePreviewCursor = '';
 let vehicles = [];
 let blogPosts = [];
 let sharedAuditEvents = [];
@@ -665,11 +672,41 @@ function wflCountsMarkup() {
   const withoutCoordinates = Math.max(0, restaurants.length - withCoordinates);
   return `
     <div class="operation-stat-grid">
-      <span><strong>${restaurants.length}</strong>Total restaurants</span>
-      <span><strong>${withCoordinates}</strong>With coordinates</span>
-      <span><strong>${withoutCoordinates}</strong>Missing coordinates</span>
+      <span><strong>${restaurantInventoryTotal}</strong>Matching restaurants</span>
+      <span><strong>${withCoordinates}</strong>With coordinates on this page</span>
+      <span><strong>${withoutCoordinates}</strong>Missing coordinates on this page</span>
     </div>
   `;
+}
+
+function wflInventoryMarkup(items, total, append) {
+  const summary = append ? '' : `<p><strong>${sanitize(total)}</strong> matching restaurants</p>`;
+  const cards = items.map((restaurant) => {
+    const address = restaurant.address || {};
+    const location = [address.city, address.state].filter(Boolean).join(', ') || 'Location unavailable';
+    return `<article class="queue-card">
+      <strong>${sanitize(restaurant.name || 'Unnamed restaurant')}</strong>
+      <span>${sanitize(location)}</span>
+    </article>`;
+  }).join('');
+  return `${summary}${cards || (append ? '' : '<p>No restaurants matched.</p>')}`;
+}
+
+async function loadRestaurantInventory({ append = false } = {}) {
+  const page = await fetchJson(API.whatsForLunch.inventory(restaurantInventoryQuery), {
+    headers: authHeaders(),
+  }) || { items: [], nextCursor: null, total: 0 };
+  const items = Array.isArray(page.items) ? page.items : [];
+  if (wflInventory) {
+    const markup = wflInventoryMarkup(items, page.total ?? 0, append);
+    if (append) wflInventory.insertAdjacentHTML('beforeend', markup);
+    else wflInventory.innerHTML = markup;
+  }
+  restaurantInventoryNextCursor = String(page.nextCursor || '');
+  restaurantInventoryTotal = Number(page.total || 0);
+  wflInventoryMore?.classList.toggle('d-none', !restaurantInventoryNextCursor);
+  restaurants = items;
+  return page;
 }
 
 function resultSummary(result, labels) {
@@ -681,12 +718,12 @@ function resultSummary(result, labels) {
 }
 
 async function loadWflCounts() {
-  restaurants = await fetchJson(API.whatsForLunch.restaurants, { headers: authHeaders() }) || [];
+  await loadRestaurantInventory();
   renderOperationResult(wflOperationStatus, wflCountsMarkup(), 'success');
 }
 
 async function getWflCountsMarkup() {
-  restaurants = await fetchJson(API.whatsForLunch.restaurants, { headers: authHeaders() }) || [];
+  await loadRestaurantInventory();
   return wflCountsMarkup();
 }
 
@@ -739,15 +776,25 @@ async function dedupeRestaurants(button) {
   button.disabled = true;
   renderOperationResult(wflOperationStatus, 'Preparing a duplicate-name preview…');
   try {
-    const preview = await fetchJson(API.whatsForLunch.dedupeNamesPreview, {
+    const preview = await fetchJson(API.whatsForLunch.dedupeNamesPreviewPage(duplicatePreviewCursor, 25), {
       headers: authHeaders(),
     });
     const groups = Array.isArray(preview?.groups) ? preview.groups : [];
     renderOperationResult(wflOperationStatus, `
-      <p class="operation-message">Review ${groups.length} duplicate group${groups.length === 1 ? '' : 's'}.</p>
+      <p class="operation-message">Review this bounded page of ${groups.length} duplicate group${groups.length === 1 ? '' : 's'}${preview?.nextCursor ? '; more groups remain' : ''}.</p>
       ${groups.map(group => `<p><strong>${sanitize(group.normalizedName)}</strong>: keep ${sanitize(group.survivorId)}, remove ${Math.max(0, (group.memberIds || []).length - 1)}</p>`).join('') || '<p>No duplicate groups found.</p>'}
     `);
-    if (groups.length === 0 || !window.confirm('Delete the previewed duplicate records?')) return;
+    if (groups.length === 0) {
+      duplicatePreviewCursor = '';
+      return;
+    }
+    if (!window.confirm('Delete the previewed duplicate records?')) {
+      duplicatePreviewCursor = String(preview?.nextCursor || '');
+      button.textContent = duplicatePreviewCursor
+        ? 'Preview Next Duplicate Page'
+        : 'Remove Duplicate Names';
+      return;
+    }
     const result = await fetchJson(API.whatsForLunch.dedupeNamesApply, {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -760,6 +807,8 @@ async function dedupeRestaurants(button) {
         })),
       }),
     });
+    duplicatePreviewCursor = '';
+    button.textContent = 'Remove Duplicate Names';
     renderOperationResult(wflOperationStatus, `
       <p class="operation-message">Duplicate cleanup complete.</p>
       ${resultSummary(result, [
@@ -1068,6 +1117,36 @@ async function handleOperation(button) {
 }
 
 function wireEvents() {
+  wflInventoryFilters?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const values = new FormData(wflInventoryFilters);
+    restaurantInventoryQuery = {
+      ...restaurantInventoryQuery,
+      name: String(values.get('name') || '').trim(),
+      city: String(values.get('city') || '').trim(),
+      state: String(values.get('state') || '').trim(),
+      cursor: '',
+    };
+    try {
+      await loadRestaurantInventory();
+    } catch (err) {
+      showAlert(err.message || 'Failed to search restaurant inventory.');
+    }
+  });
+
+  wflInventoryMore?.addEventListener('click', async () => {
+    if (!restaurantInventoryNextCursor) return;
+    restaurantInventoryQuery = { ...restaurantInventoryQuery, cursor: restaurantInventoryNextCursor };
+    wflInventoryMore.disabled = true;
+    try {
+      await loadRestaurantInventory({ append: true });
+    } catch (err) {
+      showAlert(err.message || 'Failed to load more restaurants.');
+    } finally {
+      wflInventoryMore.disabled = false;
+    }
+  });
+
   reportFilters?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const filters = reportFilterValue(reportFilters);

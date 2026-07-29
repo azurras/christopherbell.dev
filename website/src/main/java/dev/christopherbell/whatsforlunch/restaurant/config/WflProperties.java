@@ -33,6 +33,26 @@ public class WflProperties {
   @NotNull
   private RestaurantImport restaurantImport = new RestaurantImport();
 
+  @Valid
+  @NotNull
+  private Sessions sessions = new Sessions();
+
+  /** Bounded shared-session lifecycle settings. */
+  @Data
+  public static class Sessions {
+    @Min(1)
+    @Max(100)
+    private int maxMembers = 20;
+
+    @NotNull
+    @DurationMin(hours = 1)
+    private Duration activeLifetime = Duration.ofHours(24);
+
+    @NotNull
+    @DurationMin(hours = 1)
+    private Duration archiveLifetime = Duration.ofDays(30);
+  }
+
   /** Daily-pick scheduler and coverage settings. */
   @Data
   public static class RestaurantOfTheDay {

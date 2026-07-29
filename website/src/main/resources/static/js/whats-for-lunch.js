@@ -1,6 +1,12 @@
 import { API } from './lib/api.js';
-import { restaurantWebsiteUrl } from './lib/restaurant-website.js';
 import { authHeaders, fetchJson, getAuthClaims, linkMentions, loginRedirectUrl, sanitize } from './lib/util.js';
+import pubsub from './components/pubsub.js';
+import { appendSafeHttpLink } from './lib/safe-http-link.js';
+import {
+  clearAnonymousWflSession,
+  readAnonymousWflSession,
+  writeAnonymousWflSession,
+} from './lib/wfl-anonymous-session.js';
 import { wflFreshnessMarkup } from './lib/wfl-freshness.js';
 
 const mount = document.getElementById('whats-for-lunch');
@@ -13,7 +19,6 @@ const DEFAULT_RADIUS_MILES = 15;
 const RADIUS_OPTIONS = [1, 5, 10, 15, 20];
 const RATING_OPTIONS = [1, 2, 3, 4, 5];
 const SESSION_POLL_INTERVAL_MS = 5000;
-const ANONYMOUS_SESSION_KEY = 'cbellWflAnonymousSession';
 const MEMBER_SESSION_KEY_PREFIX = 'cbellWflMemberSession';
 const CUISINE_FILTERS = [
   { label: 'Mexican', value: 'mexican' },
@@ -82,36 +87,12 @@ function clearStoredMemberSession() {
   localStorage.removeItem(memberSessionKey());
 }
 
-function getStoredAnonymousSession() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(ANONYMOUS_SESSION_KEY) || '{}');
-    const restaurants = Array.isArray(stored.restaurants) ? stored.restaurants : [];
-    if (restaurants.length === 0) return null;
-    return {
-      restaurants,
-      location: hasCoordinate(stored.location?.latitude) && hasCoordinate(stored.location?.longitude)
-        ? stored.location
-        : null,
-      zipCode: normalizeZipCode(stored.zipCode),
-    };
-  } catch (_) {
-    localStorage.removeItem(ANONYMOUS_SESSION_KEY);
-    return null;
-  }
-}
-
 function storeAnonymousSession(restaurants) {
-  if (!Array.isArray(restaurants) || restaurants.length === 0) return;
-  localStorage.setItem(ANONYMOUS_SESSION_KEY, JSON.stringify({
-    restaurants,
-    location: currentLocation,
-    zipCode: currentZipCode,
-    createdOn: new Date().toISOString(),
-  }));
+  writeAnonymousWflSession(restaurants, currentZipCode);
 }
 
 function clearStoredAnonymousSession() {
-  localStorage.removeItem(ANONYMOUS_SESSION_KEY);
+  clearAnonymousWflSession();
 }
 
 function addressLine(address = {}) {
@@ -211,9 +192,8 @@ function restaurantCard(restaurant, index) {
         </div>
       </div>`
     : '';
-  const websiteUrl = restaurantWebsiteUrl(restaurant.website);
-  const website = websiteUrl
-    ? `<a class="btn btn-outline-primary btn-sm" href="${sanitize(websiteUrl)}" target="_blank" rel="noopener">Website</a>`
+  const website = restaurant.website
+    ? `<span class="lunch-website-link" data-restaurant-index="${index}"></span>`
     : '';
   const phone = restaurant.phoneNumber
     ? `<a class="btn btn-outline-secondary btn-sm" href="tel:${sanitize(restaurant.phoneNumber)}">${sanitize(restaurant.phoneNumber)}</a>`
@@ -225,7 +205,7 @@ function restaurantCard(restaurant, index) {
     ? `<button type="button" class="btn btn-outline-danger btn-sm lunch-pick-delete" data-restaurant-id="${sanitize(id)}">Delete</button>`
     : '';
   const voteButton = activeSession && id
-    ? `<button type="button" class="btn ${myVote ? 'btn-success' : 'btn-outline-success'} btn-sm lunch-session-vote" data-restaurant-id="${sanitize(id)}">${myVote ? 'Voted' : 'Vote'}</button>`
+    ? `<button type="button" class="btn ${myVote ? 'btn-success' : 'btn-outline-success'} btn-sm lunch-session-vote" data-restaurant-id="${sanitize(id)}" ${activeSession.active === false ? 'disabled' : ''}>${myVote ? 'Voted' : 'Vote'}</button>`
     : '';
   const voterText = activeSession
     ? `<p class="lunch-session-voters">${sessionVoters.length > 0
@@ -252,6 +232,16 @@ function restaurantCard(restaurant, index) {
       </div>
     </article>
   `;
+}
+
+function attachRestaurantWebsiteLinks(restaurants) {
+  (Array.isArray(restaurants) ? restaurants : []).forEach((restaurant, index) => {
+    const container = mount?.querySelector(`[data-restaurant-index="${index}"]`);
+    appendSafeHttpLink(container, restaurant?.website, {
+      className: 'btn btn-outline-primary btn-sm',
+      label: 'Website',
+    });
+  });
 }
 
 function ratingSummaryMarkup(restaurant) {
@@ -290,11 +280,14 @@ function sessionMarkup() {
     const participants = Array.isArray(activeSession.participantUsernames)
       ? activeSession.participantUsernames.map((username) => `@${username}`).join(', ')
       : '';
+    const stateText = activeSession.active === false
+      ? 'This session is archived. Its picks and votes are read-only until automatic deletion.'
+      : `${linkMentions(participants || 'Session members')} can vote on these same three picks.`;
     return `
       <section class="lunch-session-panel" aria-label="Shared lunch session">
         <div>
-          <h2>Shared lunch session</h2>
-          <p>${linkMentions(participants || 'Session members')} can vote on these same three picks.</p>
+          <h2>${activeSession.active === false ? 'Archived lunch session' : 'Shared lunch session'}</h2>
+          <p>${stateText}</p>
           <input class="form-control form-control-sm lunch-session-link" value="${sanitize(shareUrl)}" readonly aria-label="Session link">
         </div>
         <button type="button" class="btn btn-outline-primary btn-sm lunch-session-copy">Copy link</button>
@@ -418,11 +411,12 @@ function renderPicks(picks) {
       <div>
         <p>${toolbarText}</p>
       </div>
-      <button type="button" class="btn btn-primary lunch-location-refresh lunch-primary-refresh">Try 3 more</button>
+      <button type="button" class="btn btn-primary lunch-location-refresh lunch-primary-refresh" ${activeSession && !activeSession.canChangeRestaurants ? 'disabled title="Only the active session host can change the picks"' : ''}>Try 3 more</button>
     </div>
     ${controlsMarkup()}
     <div class="lunch-picks">${picks.map(restaurantCard).join('')}</div>
   `;
+  attachRestaurantWebsiteLinks(currentPicks);
 }
 
 function renderPicksLoading(message = 'Picking lunch...') {
@@ -627,6 +621,7 @@ async function updateSessionRestaurants(picks) {
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       restaurantIds: picks.map((pick) => pick.id).filter(Boolean),
+      expectedRevision: activeSession.revision,
     }),
   });
 }
@@ -643,15 +638,22 @@ async function loadStoredMemberSession() {
   }
 }
 
-function loadStoredAnonymousSession() {
-  const stored = getStoredAnonymousSession();
+async function loadStoredAnonymousSession() {
+  const stored = readAnonymousWflSession();
   if (!stored) return false;
-  if (stored.location) currentLocation = stored.location;
-  currentZipCode = stored.zipCode || '';
+  currentZipCode = '';
+  currentLocation = null;
   activeSession = null;
   stopSessionPolling();
-  renderPicks(stored.restaurants);
-  return true;
+  try {
+    const restaurants = await Promise.all(stored.restaurantIds.map((id) =>
+      fetchJson(API.whatsForLunch.restaurant(id), { headers: authHeaders() })));
+    renderPicks(restaurants);
+    return true;
+  } catch (_) {
+    clearStoredAnonymousSession();
+    return false;
+  }
 }
 
 async function loadSoloSession({ forceNew = false } = {}) {
@@ -664,7 +666,7 @@ async function loadSoloSession({ forceNew = false } = {}) {
   if (forceNew) {
     clearStoredMemberSession();
     clearStoredAnonymousSession();
-  } else if (isLoggedIn ? await loadStoredMemberSession() : loadStoredAnonymousSession()) {
+  } else if (isLoggedIn ? await loadStoredMemberSession() : await loadStoredAnonymousSession()) {
     return;
   } else if (!currentLocation && !currentZipCode) {
     renderLocationPrompt();
@@ -834,6 +836,7 @@ async function loadLunchPicks() {
     dataFreshness = null;
   }
   isAdmin = await loadAdminState();
+  if (isLoggedIn) clearStoredAnonymousSession();
   await loadPreferences();
   const sessionId = new URLSearchParams(window.location.search).get('session');
   if (sessionId) {
@@ -1128,4 +1131,6 @@ function titleCaseCuisine(value) {
     .join(' ');
 }
 
+pubsub.subscribe('auth:login', clearStoredAnonymousSession);
+pubsub.subscribe('auth:logout', clearStoredAnonymousSession);
 loadLunchPicks();

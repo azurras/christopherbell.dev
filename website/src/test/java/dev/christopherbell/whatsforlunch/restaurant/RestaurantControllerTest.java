@@ -25,6 +25,7 @@ import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantCreateReques
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeGroupPreview;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupePreview;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantInventoryPage;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewResponse;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportWorkflowService;
@@ -45,9 +46,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
 
 @WebMvcTest(RestaurantController.class)
 @Import({ControllerExceptionHandler.class, ControllerSliceSecurityTestConfig.class})
@@ -58,6 +61,37 @@ public class RestaurantControllerTest {
   @MockitoBean private RestaurantService restaurantService;
   @MockitoBean private RestaurantImportWorkflowService restaurantImportWorkflowService;
   @MockitoBean private WhatsForLunchSessionService whatsForLunchSessionService;
+
+  @Test
+  @DisplayName("Should return a bounded filtered restaurant inventory page for ADMIN.")
+  @WithMockUser(authorities = {"ADMIN"})
+  void getRestaurantInventory() throws Exception {
+    var page = new RestaurantInventoryPage(
+        List.of(RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID)), "next", 26);
+    when(restaurantService.getRestaurantInventory("cafe", "Austin", "TX", null, 25))
+        .thenReturn(page);
+
+    mockMvc.perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260729 + "/inventory")
+            .queryParam("name", "cafe")
+            .queryParam("city", "Austin")
+            .queryParam("state", "TX"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.items.length()").value(1))
+        .andExpect(jsonPath("$.payload.nextCursor").value("next"))
+        .andExpect(jsonPath("$.payload.total").value(26));
+  }
+
+  @Test
+  @DisplayName("Should reject an unbounded restaurant inventory page size.")
+  @WithMockUser(authorities = {"ADMIN"})
+  void rejectsUnboundedRestaurantInventoryPageSize() throws Exception {
+    when(restaurantService.getRestaurantInventory(null, null, null, null, 101))
+        .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "size"));
+
+    mockMvc.perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260729 + "/inventory")
+            .queryParam("size", "101"))
+        .andExpect(status().isBadRequest());
+  }
 
   @Test
   @DisplayName("Should create a restaurant when caller has ADMIN role.")

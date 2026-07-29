@@ -175,6 +175,23 @@
                       <button type="button" class="btn btn-outline-secondary operation-button" data-operation="wfl-dedupe">Remove Duplicate Names</button>
                       <button type="button" class="btn btn-outline-secondary operation-button" data-operation="wfl-load">Refresh Counts</button>
                     </div>
+                    <form id="wflInventoryFilters" class="operation-form mt-3">
+                      <label>
+                        <span>Name</span>
+                        <input class="form-control" name="name" placeholder="Restaurant name">
+                      </label>
+                      <label>
+                        <span>City</span>
+                        <input class="form-control" name="city" placeholder="City">
+                      </label>
+                      <label>
+                        <span>State</span>
+                        <input class="form-control" name="state" maxlength="32" placeholder="State">
+                      </label>
+                      <button class="btn btn-outline-primary align-self-end" type="submit">Search inventory</button>
+                    </form>
+                    <div id="wflInventory" class="queue-list mt-3" aria-live="polite"></div>
+                    <button id="wflInventoryMore" class="btn btn-outline-secondary mt-2 d-none" type="button">Load more</button>
                     <div id="wflOperationStatus" class="operation-result">Restaurant counts have not been loaded yet.</div>
                   </section>
 

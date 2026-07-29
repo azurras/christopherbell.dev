@@ -61,18 +61,21 @@ Owns browser-side behavior for server-rendered pages.
   keeps cuisine and radius filters hidden behind an obvious toggle by default,
   keeps "Try 3 more" as the primary page action, groups filters, location, and
   Lunch with Friends tools into a secondary tabbed control area, loads three restaurants
-  from the WFL nearby API, preserves the current three picks across page
-  refreshes as a solo session, saves filters for signed-in users, creates
+  from the WFL nearby API, preserves anonymous picks for at most 30 minutes as
+  restaurant IDs plus an optional ZIP (never coordinates or full restaurant
+  payloads), saves filters for signed-in users, creates
   shareable voting sessions for logged-in users, polls active sessions for
   restaurant/vote changes, links vote usernames to public profiles, lets session-link visitors join after authentication,
   lets signed-in users rate restaurants with whole-number buttons, lets signed-in
   users favorite restaurants, links cards to restaurant profile pages, replaces
   the card list with a loading wheel while "Try 3 more" fetches new picks, and
-  only re-queries when the user clicks "Try 3 more", applies filters, changes
+  shows archived shared sessions as read-only, permits only the host to request
+  new shared picks, and only re-queries when the user clicks "Try 3 more", applies filters, changes
   ZIP/location, or an admin deletes a restaurant.
 - `restaurant-profile.js` renders the public WFL restaurant profile page from
   the restaurant detail API, including aggregate rating, personal rating, and
-  favorite state when the visitor is signed in.
+  favorite state when the visitor is signed in. It and the WFL cards construct
+  validated HTTP(S) website anchors through DOM properties rather than HTML interpolation.
 - `zip-coordinates.js` renders the Tools ZIP coordinate lookup page around
   `GET /api/location/zip/{zipCode}`, including ZIP normalization, inline errors,
   result fields, and copyable API/curl output.
@@ -103,7 +106,8 @@ Owns browser-side behavior for server-rendered pages.
 - `back-office.js` gates the Back Office to admins, renders report/user queues
   with repeat-report context, supports user status changes/role
   promotion and shared-folder capability controls, and exposes practical admin operations such as Location Census ZIP
-  coordinate import, WFL import/dedupe, Raising Canes Box Index collection and
+  coordinate import, paged/searchable WFL inventory and duplicate previews,
+  WFL import, Raising Canes Box Index collection and
   datapoint review, and vehicle VIN maintenance.
 - `command-center.js` gates the public data-free `/command-center` shell with a
   fresh account-role check, then renders protected host metrics, explicit
