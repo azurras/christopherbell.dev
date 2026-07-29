@@ -12,6 +12,7 @@ import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,7 +37,8 @@ class FederationOutboxQueryRepositoryTest {
   }
 
   @Test
-  void pageLoadsOnlyActiveOwnedPostsWithStableDescendingCursor() throws Exception {
+  void pageLoadsOnlyExplicitlyFederationEligibleActiveOwnedPostsWithStableDescendingCursor()
+      throws Exception {
     var boundary = post("post-2", NOW.minusSeconds(20));
     var extra = post("post-1", NOW.minusSeconds(30));
     when(mongo.find(any(Query.class), eq(Post.class))).thenReturn(List.of(boundary, extra));
@@ -49,14 +51,32 @@ class FederationOutboxQueryRepositoryTest {
 
     var query = ArgumentCaptor.forClass(Query.class);
     verify(mongo).find(query.capture(), eq(Post.class));
-    assertThat(query.getValue().getQueryObject().toString())
-        .contains("accountId", "account-123", "expiresOn", "$gt", "createdOn", "$lt", "_id");
-    assertThat(query.getValue().getSortObject().toString())
-        .contains("createdOn=-1", "_id=-1");
+    var cursor = NOW.minusSeconds(10);
+    assertThat(query.getValue().getQueryObject()).isEqualTo(new Document("$and", List.of(
+        activeOwned("account-123"),
+        new Document("$or", List.of(
+            new Document("createdOn", new Document("$lt", cursor)),
+            new Document("$and", List.of(
+                new Document("createdOn", cursor),
+                new Document("_id", new Document("$lt", "post-3")))))))));
+    assertThat(query.getValue().getSortObject())
+        .isEqualTo(new Document("createdOn", -1).append("_id", -1));
     assertThat(query.getValue().getLimit()).isEqualTo(2);
     assertThat(page.items()).containsExactly(boundary);
     assertThat(cursors.decode(page.nextCursor()))
         .contains(new StableCursor(boundary.getCreatedOn(), boundary.getId()));
+  }
+
+  @Test
+  void countUsesMongoTrueEqualitySoFalseNullAndMissingHistoricalValuesStayExcluded() {
+    when(mongo.count(any(Query.class), eq(Post.class))).thenReturn(7L);
+
+    long count = repository.count("account-123", NOW);
+
+    var query = ArgumentCaptor.forClass(Query.class);
+    verify(mongo).count(query.capture(), eq(Post.class));
+    assertThat(query.getValue().getQueryObject()).isEqualTo(activeOwned("account-123"));
+    assertThat(count).isEqualTo(7L);
   }
 
   @Test
@@ -78,5 +98,13 @@ class FederationOutboxQueryRepositoryTest {
         .createdOn(createdOn)
         .expiresOn(NOW.plusSeconds(60))
         .build();
+  }
+
+  private static Document activeOwned(String accountId) {
+    // Mongo equality with true excludes false, null, and documents missing the field.
+    return new Document("accountId", accountId)
+        .append("federationOutboundEligible", true)
+        .append("expiresOn", new Document("$gt", NOW))
+        .append("createdOn", new Document("$ne", null));
   }
 }

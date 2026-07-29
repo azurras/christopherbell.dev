@@ -1,4 +1,5 @@
 import { API } from './lib/api.js';
+import { restaurantWebsiteUrl } from './lib/restaurant-website.js';
 import { authHeaders, fetchJson, getAuthClaims, linkMentions, loginRedirectUrl, sanitize } from './lib/util.js';
 import { wflFreshnessMarkup } from './lib/wfl-freshness.js';
 
@@ -210,8 +211,9 @@ function restaurantCard(restaurant, index) {
         </div>
       </div>`
     : '';
-  const website = restaurant.website
-    ? `<a class="btn btn-outline-primary btn-sm" href="${sanitize(restaurant.website)}" target="_blank" rel="noopener">Website</a>`
+  const websiteUrl = restaurantWebsiteUrl(restaurant.website);
+  const website = websiteUrl
+    ? `<a class="btn btn-outline-primary btn-sm" href="${sanitize(websiteUrl)}" target="_blank" rel="noopener">Website</a>`
     : '';
   const phone = restaurant.phoneNumber
     ? `<a class="btn btn-outline-secondary btn-sm" href="tel:${sanitize(restaurant.phoneNumber)}">${sanitize(restaurant.phoneNumber)}</a>`

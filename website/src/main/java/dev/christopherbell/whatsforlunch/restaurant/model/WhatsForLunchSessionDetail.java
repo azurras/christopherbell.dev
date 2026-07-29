@@ -11,6 +11,7 @@ import lombok.Builder;
 public record WhatsForLunchSessionDetail(
     String id,
     String createdByUsername,
+    boolean canManage,
     List<String> participantUsernames,
     List<RestaurantDetail> restaurants,
     Map<String, List<String>> votesByRestaurant,

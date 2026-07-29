@@ -57,6 +57,14 @@ test('signup federation choice is true only for a checked enabled control', () =
     firstName: 'Chris',
     lastName: 'Bell',
     password: 'password',
+    federationControl: { checked: false, disabled: false },
+  }).federatePublicVoidPosts, false);
+  assert.equal(signupPayload({
+    email: 'a@example.test',
+    username: 'alpha',
+    firstName: 'Chris',
+    lastName: 'Bell',
+    password: 'password',
     federationControl: { checked: true, disabled: true },
   }).federatePublicVoidPosts, false);
 });

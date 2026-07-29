@@ -44,7 +44,9 @@ import {
 
 const root = typeof document === 'undefined' ? null : document.getElementById('shared-folder-app');
 let currentPreviewLostAccess = false;
-const UPLOAD_RESUME_KEY = 'shared-folder-upload-resume-v1';
+const LEGACY_UPLOAD_RESUME_KEY = 'shared-folder-upload-resume-v1';
+const UPLOAD_RESUME_KEY_PREFIX = 'shared-folder-upload-resume-v2:';
+let uploadResumeStore = createUploadResumeStore();
 const uploadOperationGate = createUploadOperationGate();
 
 function clear(node) {
@@ -255,27 +257,83 @@ function renderToolbar(path, canWrite = false) {
   host.append(copy);
 }
 
-function storedUpload() {
-  try {
-    return JSON.parse(localStorage.getItem(UPLOAD_RESUME_KEY) || 'null');
-  } catch (_) {
-    localStorage.removeItem(UPLOAD_RESUME_KEY);
-    return null;
+/** Scope browser resume metadata to one authenticated account without storing credentials. */
+export function createUploadResumeStore({ accountId, storage } = {}) {
+  const normalizedAccountId = String(accountId ?? '').trim();
+  if (!normalizedAccountId) {
+    return Object.freeze({
+      load: () => null,
+      store: () => false,
+      clear: () => false,
+    });
   }
+
+  let browserStorage = storage;
+  if (!browserStorage) {
+    try {
+      browserStorage = globalThis.localStorage;
+    } catch (_) {
+      return Object.freeze({
+        load: () => null,
+        store: () => false,
+        clear: () => false,
+      });
+    }
+  }
+  const key = `${UPLOAD_RESUME_KEY_PREFIX}${normalizedAccountId}`;
+
+  try {
+    browserStorage.removeItem(LEGACY_UPLOAD_RESUME_KEY);
+  } catch (_) {
+    // Browser storage is optional UI state; unavailable storage cannot block uploads.
+  }
+
+  const clear = () => {
+    try {
+      browserStorage.removeItem(key);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  return Object.freeze({
+    load: () => {
+      try {
+        return JSON.parse(browserStorage.getItem(key) || 'null');
+      } catch (_) {
+        clear();
+        return null;
+      }
+    },
+    store: (upload, replace = false) => {
+      try {
+        browserStorage.setItem(key, JSON.stringify({
+          id: upload.id,
+          parentPath: upload.parentPath,
+          name: upload.name,
+          expectedBytes: upload.expectedBytes,
+          replace,
+        }));
+        return true;
+      } catch (_) {
+        return false;
+      }
+    },
+    clear,
+  });
 }
 
-function storeUpload(upload, replace = false) {
-  localStorage.setItem(UPLOAD_RESUME_KEY, JSON.stringify({
-    id: upload.id,
-    parentPath: upload.parentPath,
-    name: upload.name,
-    expectedBytes: upload.expectedBytes,
-    replace,
-  }));
+function storedUpload(resumeStore = uploadResumeStore) {
+  return resumeStore.load();
 }
 
-function clearStoredUpload() {
-  localStorage.removeItem(UPLOAD_RESUME_KEY);
+function storeUpload(upload, replace = false, resumeStore = uploadResumeStore) {
+  resumeStore.store(upload, replace);
+}
+
+function clearStoredUpload(resumeStore = uploadResumeStore) {
+  resumeStore.clear();
 }
 
 function renderUploadProgress(upload, detailText) {
@@ -322,11 +380,11 @@ async function putUploadChunk(upload, offset, chunk, signal) {
   return data.payload ?? data;
 }
 
-async function uploadFile(parentPath, file, signal) {
+async function uploadFile(parentPath, file, signal, resumeStore = uploadResumeStore) {
   const upload = await runUploadWorkflow({
     parentPath,
     file,
-    resume: storedUpload(),
+    resume: storedUpload(resumeStore),
     signal,
     digest: chunkDigest,
     loadStatus: (id, requestSignal) => fetchJson(API.sharedFolder.uploadStatus(id), {
@@ -347,19 +405,19 @@ async function uploadFile(parentPath, file, signal) {
         method: 'POST', headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
         body: JSON.stringify({ replace }), signal: requestSignal,
       }),
-    onCreated: storeUpload,
+    onCreated: (createdUpload, replace) => storeUpload(createdUpload, replace, resumeStore),
     onProgress: current => renderUploadProgress(current, `Uploading ${file.name}`),
   });
-  clearStoredUpload();
+  clearStoredUpload(resumeStore);
   renderUploadProgress(upload, `${file.name} uploaded.`);
   return upload;
 }
 
-async function configureUploadPanel(account, currentPath) {
+export async function configureUploadPanel(account, currentPath, resumeStore = uploadResumeStore) {
   if (typeof document === 'undefined') return;
   const panel = document.getElementById('shared-upload-panel');
   if (!panel || !accountHasSharedFolderWrite(account)) return;
-  const resume = storedUpload();
+  const resume = storedUpload(resumeStore);
   panel.hidden = !resume;
   document.querySelector('[data-shared-upload-toggle]')
     ?.setAttribute('aria-expanded', String(!panel.hidden));
@@ -373,18 +431,18 @@ async function configureUploadPanel(account, currentPath) {
         headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
       });
       if (uploadIsTerminal(upload)) {
-        clearStoredUpload();
+        clearStoredUpload(resumeStore);
         renderUploadProgress(upload, `${upload.name} is ${String(upload.state).toLowerCase()}.`);
       } else {
         renderUploadProgress(upload, `Resume ${upload.name} by choosing the same local file.`);
       }
     } catch (error) {
-      if (error?.status === 409 || error?.status === 404) clearStoredUpload();
+      if (error?.status === 409 || error?.status === 404) clearStoredUpload(resumeStore);
       else throw error;
     }
   }
   const startUpload = file => {
-    const operation = uploadOperationGate.start(signal => uploadFile(currentPath(), file, signal));
+    const operation = uploadOperationGate.start(signal => uploadFile(currentPath(), file, signal, resumeStore));
     if (!operation) {
       status('An upload is already in progress. Pause it before choosing another file.');
       return;
@@ -422,12 +480,12 @@ async function configureUploadPanel(account, currentPath) {
     if (uploadOperationGate.pause()) status('Pausing upload…');
   });
   cancel?.addEventListener('click', () => {
-    const saved = storedUpload();
+    const saved = storedUpload(resumeStore);
     if (!saved) return;
     void cancelUploadWorkflow(uploadOperationGate, () => fetchJson(API.sharedFolder.uploadCancel(saved.id), {
       method: 'DELETE', headers: authHeaders(), redirectOnUnauthorized: false, cache: 'no-store',
     })).then(upload => {
-      clearStoredUpload();
+      clearStoredUpload(resumeStore);
       renderUploadProgress(upload, `${upload.name} upload cancelled.`);
       status('Upload cancelled.');
     }).catch(error => {
@@ -764,6 +822,7 @@ export async function initializeSharedFolderPage({
   addPopstateListener = listener => globalThis.window?.addEventListener('popstate', listener),
 } = {}) {
   if (!pageRoot) return;
+  uploadResumeStore = createUploadResumeStore();
   if (!getAuthTokenFn()) {
     redirectToLogin();
     return;
@@ -780,6 +839,7 @@ export async function initializeSharedFolderPage({
     }
     configureSharedFolderRadioControl();
     const canWrite = accountHasSharedFolderWrite(account);
+    if (canWrite) uploadResumeStore = createUploadResumeStore({ accountId: account.id });
     let activePath = '';
     let navigator;
     let searchController;
@@ -826,7 +886,7 @@ export async function initializeSharedFolderPage({
       invalidateNavigation: navigator.invalidate,
     });
     configureSharedFolderSearchForm({ controller: searchController, statusFn });
-    await configureUploadPanelFn(account, () => activePath);
+    await configureUploadPanelFn(account, () => activePath, uploadResumeStore);
     addPopstateListener(() => {
       searchController.leave();
       void navigator.restore(requestedPath());

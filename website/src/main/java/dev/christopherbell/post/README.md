@@ -63,7 +63,9 @@ Owns Void posts and feed behavior.
   do not survive a missing parent.
 - Post creation extracts each distinct HTTP or HTTPS URL from text and stores
   bounded, SSRF-checked link preview metadata on the post. Every initial and
-  redirected destination is resolved and revalidated; network deadlines,
+  redirected destination is resolved once and connected through an address
+  pinned to that hop's exact all-public DNS answer set while the original Host,
+  SNI, and TLS hostname identity remain intact; network deadlines,
   redirect count, bytes, content types, URL count, and metadata lengths are
   configured under `posts.link-previews`. Successes and safe failure categories
   use separate Mongo TTLs. The server does not execute JavaScript or proxy
@@ -85,7 +87,8 @@ Owns Void posts and feed behavior.
   succeeds; the API route and persistence vocabulary remain compatible.
 - Post detail pages reuse the shared feed renderer so actions, author links,
   link previews, expiration state, and delete permissions stay consistent with
-  feed cards. Page-specific JavaScript adds quieter root/parent "context echoes"
+  feed cards. Stored preview images render only when their values are absolute
+  HTTP(S) URLs. Page-specific JavaScript adds quieter root/parent "context echoes"
   above the selected post, highlights the selected post, renders a nested Signal
   Rail from the existing full-thread payload, adds previous/next thread
   navigation, lets readers jump to the newest reply, and lets readers collapse

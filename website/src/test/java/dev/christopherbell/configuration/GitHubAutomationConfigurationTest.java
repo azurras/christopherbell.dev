@@ -9,23 +9,57 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.StreamSupport;
 import org.junit.jupiter.api.Test;
 
 class GitHubAutomationConfigurationTest {
+  private static final Pattern IMMUTABLE_ACTION = Pattern.compile("^[^@\\s]+@[0-9a-f]{40}$");
+  private static final String CHECKOUT =
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1";
+  private static final String SETUP_GRADLE =
+      "gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92";
+  private static final String UPLOAD_ARTIFACT =
+      "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a";
+  private static final String CODEQL_INIT =
+      "github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81";
+  private static final String CODEQL_ANALYZE =
+      "github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81";
+  private static final String DEPENDENCY_REVIEW =
+      "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294";
+  private static final String STALE =
+      "actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629";
   private static final ObjectMapper YAML = new ObjectMapper(new YAMLFactory());
   private static final Path REPOSITORY_ROOT = locateRepositoryRoot();
+
+  @Test
+  void everyWorkflowActionUsesAFullCommitSha() throws IOException {
+    var actionReferences = new ArrayList<String>();
+    try (var workflows = Files.list(REPOSITORY_ROOT.resolve(".github/workflows"))) {
+      for (var workflow : workflows
+          .filter(GitHubAutomationConfigurationTest::isYaml)
+          .sorted()
+          .toList()) {
+        actionReferences.addAll(YAML.readTree(workflow.toFile()).findValuesAsText("uses"));
+      }
+    }
+
+    assertThat(actionReferences)
+        .isNotEmpty()
+        .allMatch(reference -> IMMUTABLE_ACTION.matcher(reference).matches());
+  }
 
   @Test
   void ciCachesGradleAndRetainsFailedReports() throws IOException {
     var workflow = readYaml(".github/workflows/ci.yml");
     var steps = workflow.at("/jobs/build/steps");
-    var setupGradle = stepUsing(steps, "gradle/actions/setup-gradle@v6");
+    var setupGradle = stepUsing(steps, SETUP_GRADLE);
     assertThat(setupGradle.at("/with/cache-read-only").asText())
         .isEqualTo("${{ github.ref != 'refs/heads/main' }}");
 
-    var upload = stepUsing(steps, "actions/upload-artifact@v7");
+    var upload = stepUsing(steps, UPLOAD_ARTIFACT);
     assertThat(upload.path("if").asText()).isEqualTo("failure()");
     assertThat(upload.at("/with/retention-days").asInt()).isEqualTo(14);
     assertThat(upload.at("/with/path").asText())
@@ -52,11 +86,11 @@ class GitHubAutomationConfigurationTest {
         .isEqualTo("none");
 
     var steps = workflow.at("/jobs/analyze/steps");
-    assertThat(stepUsing(steps, "github/codeql-action/init@v4")
+    assertThat(stepUsing(steps, CODEQL_INIT)
         .at("/with/languages").asText()).isEqualTo("${{ matrix.language }}");
     assertThat(stepRunning(steps, "./gradlew :website:classes").path("if").asText())
         .isEqualTo("matrix.language == 'java-kotlin'");
-    assertThat(stepUsing(steps, "github/codeql-action/analyze@v4").isMissingNode()).isFalse();
+    assertThat(stepUsing(steps, CODEQL_ANALYZE).isMissingNode()).isFalse();
   }
 
   @Test
@@ -67,10 +101,10 @@ class GitHubAutomationConfigurationTest {
     assertThat(workflow.at("/on/pull_request/branches/0").asText()).isEqualTo("main");
     var review = stepUsing(
         workflow.at("/jobs/dependency-review/steps"),
-        "actions/dependency-review-action@v5");
+        DEPENDENCY_REVIEW);
     assertThat(stepUsing(
         workflow.at("/jobs/dependency-review/steps"),
-        "actions/checkout@v7").isMissingNode()).isFalse();
+        CHECKOUT).isMissingNode()).isFalse();
     assertThat(review.at("/with/fail-on-severity").asText()).isEqualTo("high");
   }
 
@@ -101,7 +135,7 @@ class GitHubAutomationConfigurationTest {
     assertThat(job.at("/permissions/pull-requests").asText()).isEqualTo("write");
     assertThat(job.path("permissions").has("contents")).isFalse();
 
-    var options = stepUsing(job.path("steps"), "actions/stale@v10").path("with");
+    var options = stepUsing(job.path("steps"), STALE).path("with");
     assertThat(options.path("days-before-issue-stale").asInt()).isEqualTo(60);
     assertThat(options.path("days-before-issue-close").asInt()).isEqualTo(14);
     assertThat(options.path("days-before-pr-stale").asInt()).isEqualTo(30);
@@ -121,6 +155,11 @@ class GitHubAutomationConfigurationTest {
   private static JsonNode readYaml(String repositoryRelativePath) throws IOException {
     var path = REPOSITORY_ROOT.resolve(repositoryRelativePath);
     return Files.exists(path) ? YAML.readTree(path.toFile()) : MissingNode.getInstance();
+  }
+
+  private static boolean isYaml(Path path) {
+    var name = path.getFileName().toString();
+    return name.endsWith(".yml") || name.endsWith(".yaml");
   }
 
   private static JsonNode stepUsing(JsonNode steps, String action) {

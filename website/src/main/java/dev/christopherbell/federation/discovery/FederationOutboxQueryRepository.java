@@ -54,6 +54,7 @@ public class FederationOutboxQueryRepository {
 
   private static Criteria activeOwned(String accountId, Instant now) {
     return Criteria.where("accountId").is(accountId)
+        .and("federationOutboundEligible").is(true)
         .and("expiresOn").gt(now)
         .and("createdOn").ne(null);
   }

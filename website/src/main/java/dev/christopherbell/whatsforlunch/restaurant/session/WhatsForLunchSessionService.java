@@ -14,6 +14,7 @@ import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRating;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantWebsite;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
@@ -39,6 +40,7 @@ import org.springframework.stereotype.Service;
 public class WhatsForLunchSessionService {
   private static final int SESSION_PICK_COUNT = 3;
   private static final int MAX_INVITEES = 20;
+  private static final int MAX_PARTICIPANTS = MAX_INVITEES + 1;
 
   private final AccountRepository accountRepository;
   private final NotificationDeliveryService notificationDeliveryService;
@@ -47,6 +49,7 @@ public class WhatsForLunchSessionService {
   private final RestaurantFavoriteRepository restaurantFavoriteRepository;
   private final RestaurantRatingRepository restaurantRatingRepository;
   private final RestaurantRepository restaurantRepository;
+  private final WhatsForLunchSessionMemberships sessionMemberships;
   private final WhatsForLunchSessionRepository sessionRepository;
 
   /**
@@ -108,23 +111,12 @@ public class WhatsForLunchSessionService {
   public WhatsForLunchSessionDetail joinSession(String sessionId)
       throws InvalidRequestException, ResourceNotFoundException {
     var self = getSelfAccount();
-    var session = getSessionById(sessionId);
-    var participantIds = new ArrayList<>(session.getParticipantAccountIds() == null
-        ? List.of()
-        : session.getParticipantAccountIds());
-    var usernamesByAccountId = new LinkedHashMap<>(session.getParticipantUsernamesByAccountId() == null
-        ? Map.<String, String>of()
-        : session.getParticipantUsernamesByAccountId());
-
-    if (!participantIds.contains(self.getId())) {
-      participantIds.add(self.getId());
-      usernamesByAccountId.put(self.getId(), self.getUsername());
-      session.setParticipantAccountIds(List.copyOf(participantIds));
-      session.setParticipantUsernamesByAccountId(usernamesByAccountId);
-      session.setLastUpdatedOn(Instant.now());
-      session = sessionRepository.save(session);
+    var outcome = sessionMemberships.joinIfCapacityRemains(
+        sessionId, self.getId(), self.getUsername(), MAX_PARTICIPANTS);
+    if (outcome == SessionJoinOutcome.FULL) {
+      throw new InvalidRequestException("This WFL session has reached its member limit.");
     }
-    return toDetail(session, self.getId());
+    return toDetail(getSessionForParticipant(sessionId, self.getId()), self.getId());
   }
 
   /**
@@ -158,9 +150,10 @@ public class WhatsForLunchSessionService {
       WhatsForLunchSessionRestaurantsRequest request
   ) throws InvalidRequestException, ResourceNotFoundException {
     var self = getSelfAccount();
+    var session = getSessionForParticipant(sessionId, self.getId());
+    requireCreator(session, self.getId());
     var restaurantIds = normalizeRestaurantIds(request == null ? null : request.restaurantIds());
     var restaurants = getRestaurantsInRequestedOrder(restaurantIds);
-    var session = getSessionForParticipant(sessionId, self.getId());
     session.setRestaurantIds(restaurantIds);
     session.setVotesByAccountId(new LinkedHashMap<>());
     session.setLastUpdatedOn(Instant.now());
@@ -180,6 +173,13 @@ public class WhatsForLunchSessionService {
       throw new ResourceNotFoundException("WFL session not found: " + sessionId);
     }
     return session;
+  }
+
+  private void requireCreator(WhatsForLunchSession session, String accountId)
+      throws InvalidRequestException {
+    if (!accountId.equals(session.getCreatedByAccountId())) {
+      throw new InvalidRequestException("Only the session creator can replace restaurants or clear votes.");
+    }
   }
 
   private List<String> normalizeRestaurantIds(List<String> restaurantIds)
@@ -286,6 +286,7 @@ public class WhatsForLunchSessionService {
     return WhatsForLunchSessionDetail.builder()
         .id(session.getId())
         .createdByUsername(session.getCreatedByUsername())
+        .canManage(selfId.equals(session.getCreatedByAccountId()))
         .participantUsernames(new ArrayList<>(usernames.values()))
         .restaurants(toRatedDetails(restaurants, selfId))
         .votesByRestaurant(votesByRestaurant)
@@ -298,6 +299,7 @@ public class WhatsForLunchSessionService {
   private List<RestaurantDetail> toRatedDetails(List<Restaurant> restaurants, String selfId) {
     var details = restaurants.stream()
         .map(restaurantMapper::toRestaurantDetail)
+        .map(this::suppressUnsafeWebsite)
         .toList();
     var restaurantIds = details.stream()
         .map(RestaurantDetail::getId)
@@ -338,6 +340,13 @@ public class WhatsForLunchSessionService {
       detail.setMyFavorite(favoriteIds.contains(detail.getId()));
     });
     return details;
+  }
+
+  private RestaurantDetail suppressUnsafeWebsite(RestaurantDetail detail) {
+    if (detail != null) {
+      detail.setWebsite(RestaurantWebsite.safeForDisplay(detail.getWebsite()));
+    }
+    return detail;
   }
 
   private List<Restaurant> getRestaurantsInRequestedOrderUnchecked(List<String> restaurantIds) {

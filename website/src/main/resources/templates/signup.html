@@ -50,7 +50,6 @@
                     id="federatePublicVoidPosts"
                     name="federatePublicVoidPosts"
                     type="checkbox"
-                    th:checked="${federationEnrollmentAvailable}"
                     th:disabled="${!federationEnrollmentAvailable}" />
                   <label class="form-check-label" for="federatePublicVoidPosts">
                     Make my public Void identity discoverable on compatible social servers
@@ -62,7 +61,7 @@
                 <p
                   id="federationConsentStatus"
                   class="form-text federation-consent-status"
-                  th:text="${federationEnrollmentAvailable} ? 'This choice is on by default. You can turn it off now or later from Profile.' : 'Federation enrollment is not available on this server right now.'">
+                  th:text="${federationEnrollmentAvailable} ? 'This choice is off until you explicitly enable it. You can change it later from Profile.' : 'Federation enrollment is not available on this server right now.'">
                   Federation enrollment status
                 </p>
               </fieldset>

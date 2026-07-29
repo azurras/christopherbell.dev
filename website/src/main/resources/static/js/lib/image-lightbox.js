@@ -2,19 +2,39 @@ import { sanitize } from './util.js';
 
 const initializedRoots = new WeakSet();
 
+/** Return a normalized absolute HTTP(S) image URL or an empty rejection. */
+export function activeImageUrl(src) {
+  if (typeof src !== 'string' || !src.trim()) return '';
+  const raw = src.trim();
+  if (!/^https?:\/\/[^\\/\s?#]+(?:[/?#]|$)/i.test(raw)) return '';
+  try {
+    const parsed = new URL(raw);
+    return ['http:', 'https:'].includes(parsed.protocol) && parsed.hostname
+      ? parsed.href
+      : '';
+  } catch (_) {
+    return '';
+  }
+}
+
 /** Render the modal shell used for expanded post images. */
 export function imageLightboxMarkup(src) {
+  const safeSrc = activeImageUrl(src);
+  if (!safeSrc) return '';
   return `<div class="post-image-lightbox" role="dialog" aria-modal="true" aria-label="Post image preview" tabindex="-1">
     <button type="button" class="post-image-lightbox-close" aria-label="Close image preview">&times;</button>
-    <img src="${sanitize(src)}" alt="Expanded post image">
+    <img src="${sanitize(safeSrc)}" alt="Expanded post image">
   </div>`;
 }
 
 /** Render a stable fallback that keeps the original image URL reachable. */
 export function imageFallbackMarkup(src) {
+  const safeSrc = activeImageUrl(src);
   return `<div class="post-image-fallback">
     <span>Image unavailable</span>
-    <a href="${sanitize(src)}" target="_blank" rel="noopener noreferrer">Open source</a>
+    ${safeSrc
+      ? `<a href="${sanitize(safeSrc)}" target="_blank" rel="noopener noreferrer">Open source</a>`
+      : ''}
   </div>`;
 }
 

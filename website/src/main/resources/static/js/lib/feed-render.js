@@ -1,4 +1,4 @@
-import { imageFallbackMarkup } from './image-lightbox.js';
+import { activeImageUrl, imageFallbackMarkup } from './image-lightbox.js';
 import { lazyIframeMarkup } from './lazy-media.js';
 import { appendTextWithMentionLinks, loginRedirectUrl } from './util.js';
 
@@ -49,8 +49,9 @@ export function linkPreviewCardMarkup(preview, sanitize) {
   const title = preview.title || domain;
   if (!title) return '';
 
-  const image = preview.imageUrl
-    ? `<span class="post-link-preview-image"><img src="${sanitize(preview.imageUrl)}" alt=""></span>`
+  const imageUrl = activeImageUrl(preview.imageUrl);
+  const image = imageUrl
+    ? `<span class="post-link-preview-image"><img src="${sanitize(imageUrl)}" alt=""></span>`
     : '';
   const description = preview.description
     ? `<span class="post-link-preview-description">${sanitize(preview.description)}</span>`

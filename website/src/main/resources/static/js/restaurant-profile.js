@@ -1,4 +1,5 @@
 import { API } from './lib/api.js';
+import { restaurantWebsiteUrl } from './lib/restaurant-website.js';
 import { authHeaders, fetchJson, getAuthClaims, loginRedirectUrl, sanitize } from './lib/util.js';
 
 const mount = document.getElementById('restaurant-profile');
@@ -68,6 +69,7 @@ function mapsUrl(restaurant) {
 function renderRestaurant(restaurant) {
   currentRestaurant = restaurant;
   const address = addressLine(restaurant.address);
+  const websiteUrl = restaurantWebsiteUrl(restaurant.website);
   const favoriteAction = isLoggedIn
     ? `<button type="button" class="btn ${restaurant.myFavorite ? 'btn-success' : 'btn-outline-success'} restaurant-favorite-toggle" aria-pressed="${restaurant.myFavorite ? 'true' : 'false'}">
         <span aria-hidden="true">&hearts;</span> ${restaurant.myFavorite ? 'Favorited' : 'Favorite'}
@@ -91,7 +93,7 @@ function renderRestaurant(restaurant) {
         </div>
         <div>
           <dt>Website</dt>
-          <dd>${restaurant.website ? `<a href="${sanitize(restaurant.website)}" target="_blank" rel="noopener">${sanitize(restaurant.website)}</a>` : 'Not listed'}</dd>
+          <dd>${websiteUrl ? `<a href="${sanitize(websiteUrl)}" target="_blank" rel="noopener">${sanitize(websiteUrl)}</a>` : 'Not listed'}</dd>
         </div>
         <div>
           <dt>Source type</dt>

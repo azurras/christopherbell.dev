@@ -82,3 +82,13 @@ test('Bootstrap is self-hosted and no CDN include remains', () => {
     );
   }
 });
+
+test('restaurant website links allow only absolute HTTP(S) URLs', async () => {
+  const { restaurantWebsiteUrl } = await import('../../main/resources/static/js/lib/restaurant-website.js');
+
+  assert.equal(restaurantWebsiteUrl('https://example.com/menu'), 'https://example.com/menu');
+  assert.equal(restaurantWebsiteUrl('http://example.com'), 'http://example.com');
+  assert.equal(restaurantWebsiteUrl('javascript:alert(1)'), null);
+  assert.equal(restaurantWebsiteUrl('data:text/html,unsafe'), null);
+  assert.equal(restaurantWebsiteUrl('/relative-path'), null);
+});

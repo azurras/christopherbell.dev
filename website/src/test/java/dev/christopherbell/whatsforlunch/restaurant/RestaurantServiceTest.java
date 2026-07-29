@@ -48,6 +48,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -106,6 +107,54 @@ public class RestaurantServiceTest {
     verify(restaurantRepository).save(eq(restaurant));
     verify(restaurantMapper).toRestaurantDetail(eq(saved));
     verifyNoMoreInteractions(restaurantMapper, restaurantRepository);
+  }
+
+  @Test
+  @DisplayName("Create rejects a non-HTTP(S) restaurant website before persistence")
+  void createRestaurant_whenWebsiteIsUnsafe_rejectsWithoutSaving() {
+    var request = RestaurantStub.getRestaurantCreateRequestStub();
+    var restaurant = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
+    restaurant.setWebsite("javascript:alert(1)");
+    when(restaurantMapper.toRestaurant(eq(request))).thenReturn(restaurant);
+
+    var exception = assertThrows(InvalidRequestException.class, () -> restaurantService.createRestaurant(request));
+
+    assertEquals("Restaurant website must be an absolute HTTP(S) URL.", exception.getMessage());
+    verify(restaurantMapper).toRestaurant(request);
+    verifyNoInteractions(restaurantRepository);
+  }
+
+  @Test
+  @DisplayName("Restaurant reads suppress unsafe websites persisted before URL validation")
+  void getRestaurants_whenLegacyWebsiteIsUnsafe_omitsTheWebsite() {
+    var restaurant = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
+    var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    detail.setWebsite("javascript:alert(1)");
+    when(restaurantRepository.findAll()).thenReturn(List.of(restaurant));
+    when(restaurantMapper.toRestaurantDetail(restaurant)).thenReturn(detail);
+
+    var result = restaurantService.getRestaurants();
+
+    assertEquals(1, result.size());
+    assertNull(result.getFirst().getWebsite());
+  }
+
+  @Test
+  @DisplayName("Prepared imports skip unsafe websites without persisting the candidate")
+  void applyPreparedImport_whenWebsiteIsUnsafe_skipsCandidateWithoutSaving() throws Exception {
+    var imported = RestaurantStub.getRestaurantStub("osm:node:unsafe-website");
+    imported.setWebsite("javascript:alert(1)");
+    var snapshot = new RestaurantImportSnapshot(
+        "checksum",
+        List.of(imported),
+        new RestaurantImportPreviewCounts(1, 0, 0, 0, 0, 1),
+        List.of());
+    var guard = org.mockito.Mockito.mock(RestaurantImportLeaseGuard.class);
+
+    var result = restaurantService.applyPreparedImport(snapshot, guard);
+
+    assertEquals(1, result.skippedInvalid());
+    verify(restaurantRepository, never()).save(imported);
   }
 
   @Test
