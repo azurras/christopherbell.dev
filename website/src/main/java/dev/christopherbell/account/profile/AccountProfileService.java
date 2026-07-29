@@ -2,6 +2,7 @@ package dev.christopherbell.account.profile;
 
 import dev.christopherbell.account.AccountMapper;
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.follow.AccountFollowStore;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.dto.AccountDetail;
@@ -23,6 +24,7 @@ public class AccountProfileService {
   private final AccountRepository accountRepository;
   private final AccountMapper accountMapper;
   private final PostRepository postRepository;
+  private final AccountFollowStore follows;
 
   /**
    * Returns public profile metadata for a username.
@@ -59,11 +61,9 @@ public class AccountProfileService {
 
   public AccountProfile toPublicProfile(Account account, Optional<Account> selfAccount) {
     var self = selfAccount.orElse(null);
-    var following = account.getFollowingIds() != null ? account.getFollowingIds().size() : 0;
-    var followerCount = accountRepository.countByFollowingIdsContaining(account.getId());
-    var followedByMe = self != null
-        && self.getFollowingIds() != null
-        && self.getFollowingIds().contains(account.getId());
+    var following = follows.countFollowing(account.getId());
+    var followerCount = follows.countFollowers(account.getId());
+    var followedByMe = self != null && follows.exists(self.getId(), account.getId());
     var isSelf = self != null && self.getId().equals(account.getId());
     return AccountProfile.builder()
         .id(account.getId())

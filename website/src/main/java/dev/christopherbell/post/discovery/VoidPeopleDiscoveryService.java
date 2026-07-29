@@ -1,6 +1,7 @@
 package dev.christopherbell.post.discovery;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.follow.AccountFollowStore;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.trust.AccountTrustRepository;
@@ -29,6 +30,7 @@ public final class VoidPeopleDiscoveryService {
   private final VoidPeopleDiscoveryQueryRepository queries;
   private final AccountRepository accounts;
   private final AccountTrustRepository trust;
+  private final AccountFollowStore follows;
   private final PermissionService permissions;
   private final Clock clock;
 
@@ -36,12 +38,14 @@ public final class VoidPeopleDiscoveryService {
       VoidPeopleDiscoveryQueryRepository queries,
       AccountRepository accounts,
       AccountTrustRepository trust,
+      AccountFollowStore follows,
       PermissionService permissions,
       Clock clock
   ) {
     this.queries = queries;
     this.accounts = accounts;
     this.trust = trust;
+    this.follows = follows;
     this.permissions = permissions;
     this.clock = clock;
   }
@@ -127,9 +131,8 @@ public final class VoidPeopleDiscoveryService {
     var excluded = new HashSet<String>();
     var candidateIds = candidates.stream().map(VoidPersonCandidate::accountId).distinct().toList();
     excluded.add(self.getId());
-    if (self.getFollowingIds() != null) {
-      excluded.addAll(self.getFollowingIds());
-    }
+    excluded.addAll(follows.followedAccountIds(
+        self.getId(), org.springframework.data.domain.PageRequest.of(0, CANDIDATE_POOL_SIZE)));
     trust.findByOwnerAccountIdAndTargetAccountIdInAndTypeIn(
             self.getId(), candidateIds, List.of(AccountTrustType.MUTE, AccountTrustType.BLOCK))
         .forEach(relationship -> excluded.add(relationship.getTargetAccountId()));

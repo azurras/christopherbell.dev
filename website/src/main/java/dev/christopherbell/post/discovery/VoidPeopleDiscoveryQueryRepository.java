@@ -1,6 +1,7 @@
 package dev.christopherbell.post.discovery;
 
 import dev.christopherbell.post.model.Post;
+import dev.christopherbell.post.like.PostLikeStore;
 import java.time.Instant;
 import java.util.Date;
 import java.util.LinkedHashSet;
@@ -24,11 +25,12 @@ public class VoidPeopleDiscoveryQueryRepository {
   private static final int MAX_CANDIDATES = 128;
 
   private final MongoTemplate mongo;
+  private final PostLikeStore likes;
 
   public Set<String> interestsFor(String accountId, Instant now) {
     var participation = new Criteria().orOperator(
         Criteria.where("accountId").is(accountId),
-        Criteria.where("likedBy").is(accountId));
+        Criteria.where("_id").in(likes.recentLikedPostIds(accountId)));
     var query = new Query(new Criteria().andOperator(
         Criteria.where("expiresOn").gt(now), participation))
         .with(Sort.by(Sort.Direction.DESC, "createdOn", "_id"))

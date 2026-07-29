@@ -1,6 +1,7 @@
 package dev.christopherbell.federation.discovery;
 
 import dev.christopherbell.account.AccountRepository;
+import dev.christopherbell.account.follow.AccountFollowStore;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.ActivityPubCreate;
@@ -27,6 +28,7 @@ public class FederationCollectionService {
   private final FederationDiscoveryService discovery;
   private final FederationOutboxQueryRepository outboxQueries;
   private final AccountRepository accounts;
+  private final AccountFollowStore follows;
   private final StableCursorCodec cursors;
   private final Clock clock;
   private final FederationActivityFactory activities;
@@ -35,6 +37,7 @@ public class FederationCollectionService {
       FederationDiscoveryService discovery,
       FederationOutboxQueryRepository outboxQueries,
       AccountRepository accounts,
+      AccountFollowStore follows,
       StableCursorCodec cursors,
       Clock clock,
       FederationActivityFactory activities
@@ -42,6 +45,7 @@ public class FederationCollectionService {
     this.discovery = Objects.requireNonNull(discovery, "discovery");
     this.outboxQueries = Objects.requireNonNull(outboxQueries, "outboxQueries");
     this.accounts = Objects.requireNonNull(accounts, "accounts");
+    this.follows = Objects.requireNonNull(follows, "follows");
     this.cursors = Objects.requireNonNull(cursors, "cursors");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.activities = Objects.requireNonNull(activities, "activities");
@@ -93,9 +97,8 @@ public class FederationCollectionService {
   public ActivityPubOrderedCollection<String> following(String username)
       throws ResourceNotFoundException {
     Account owner = discovery.actorAccount(username);
-    Collection<String> followingIds = owner.getFollowingIds() == null
-        ? List.of()
-        : owner.getFollowingIds();
+    Collection<String> followingIds = follows.followedAccountIds(
+        owner.getId(), PageRequest.of(0, MAX_PAGE_SIZE));
     List<Account> related = followingIds.isEmpty()
         ? List.of()
         : accounts.findByIdInAndStatusAndFederationEnabledTrueOrderByUsernameAsc(
@@ -106,9 +109,12 @@ public class FederationCollectionService {
   public ActivityPubOrderedCollection<String> followers(String username)
       throws ResourceNotFoundException {
     Account owner = discovery.actorAccount(username);
-    List<Account> related = accounts
-        .findByFollowingIdsContainingAndStatusAndFederationEnabledTrueOrderByUsernameAsc(
-            owner.getId(), AccountStatus.ACTIVE, PageRequest.of(0, MAX_PAGE_SIZE));
+    var followerIds = follows.followerAccountIds(
+        owner.getId(), PageRequest.of(0, MAX_PAGE_SIZE));
+    List<Account> related = followerIds.isEmpty()
+        ? List.of()
+        : accounts.findByIdInAndStatusAndFederationEnabledTrueOrderByUsernameAsc(
+            followerIds, AccountStatus.ACTIVE, PageRequest.of(0, MAX_PAGE_SIZE));
     return relationship(owner, "followers", related);
   }
 

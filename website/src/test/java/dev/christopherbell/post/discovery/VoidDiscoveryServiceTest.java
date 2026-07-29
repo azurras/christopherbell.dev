@@ -10,13 +10,16 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.pagination.StableCursorCodec;
-import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.permission.PermissionService;
+import dev.christopherbell.post.feed.PostEngagementQueryRepository;
+import dev.christopherbell.post.feed.PostFeedItemAssembler;
+import dev.christopherbell.post.like.PostLikeStore;
 import dev.christopherbell.post.model.Post;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,7 +33,8 @@ class VoidDiscoveryServiceTest {
 
   @Mock private VoidDiscoveryQueryRepository queries;
   @Mock private AccountRepository accounts;
-  @Mock private PostRepository posts;
+  @Mock private PostEngagementQueryRepository engagement;
+  @Mock private PostLikeStore likes;
   @Mock private PermissionService permissions;
   private VoidDiscoveryService service;
 
@@ -39,10 +43,10 @@ class VoidDiscoveryServiceTest {
     service = new VoidDiscoveryService(
         queries,
         accounts,
-        posts,
         new StableCursorCodec(),
         Clock.fixed(NOW, ZoneOffset.UTC),
-        permissions);
+        permissions,
+        new PostFeedItemAssembler(engagement, likes));
   }
 
   @Test
@@ -52,7 +56,9 @@ class VoidDiscoveryServiceTest {
         .thenReturn(new VoidDiscoveryPage<>(List.of(post), "next"));
     when(accounts.findAllById(eq(List.of("a1"))))
         .thenReturn(List.of(Account.builder().id("a1").username("artist").build()));
-    when(posts.countByParentId("p1")).thenReturn(2L);
+    when(engagement.replyCounts(List.of("p1"))).thenReturn(Map.of("p1", 2));
+    when(likes.counts(List.of("p1"))).thenReturn(Map.of());
+    when(likes.likedPostIds(null, List.of("p1"))).thenReturn(java.util.Set.of());
 
     var page = service.newArrivals("", 12);
 

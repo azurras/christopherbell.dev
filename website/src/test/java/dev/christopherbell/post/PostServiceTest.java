@@ -17,6 +17,7 @@ import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.AccountServiceStub;
+import dev.christopherbell.account.follow.AccountFollowStore;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.trust.AccountTrustService;
@@ -30,9 +31,14 @@ import dev.christopherbell.post.abuse.VoidMutationKind;
 import dev.christopherbell.post.expiration.PostExpirationService;
 import dev.christopherbell.post.feed.PostFeedService;
 import dev.christopherbell.post.feed.PostFeedQueryRepository;
+import dev.christopherbell.post.feed.PostEngagementQueryRepository;
+import dev.christopherbell.post.feed.PostFeedItemAssembler;
+import dev.christopherbell.post.feed.PostFeedSlice;
+import dev.christopherbell.post.feed.PostFeedVisibility;
 import dev.christopherbell.pagination.StableCursorCodec;
 import dev.christopherbell.post.hide.HiddenPostThreadService;
 import dev.christopherbell.post.interaction.PostInteractionService;
+import dev.christopherbell.post.like.PostLikeStore;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
@@ -45,14 +51,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -76,6 +79,9 @@ public class PostServiceTest {
   @Mock private PostFeedQueryRepository postFeedQueryRepository;
   @Mock private NewAccountVoidMutationLimiter mutationLimiter;
   @Mock private FederationPublicationPolicy federationPublicationPolicy;
+  @Mock private AccountFollowStore follows;
+  @Mock private PostEngagementQueryRepository engagement;
+  @Mock private PostLikeStore postLikes;
   private PostService postService;
   private PostExpirationService postExpirationService;
   private Clock clock;
@@ -86,6 +92,10 @@ public class PostServiceTest {
     postExpirationService = new PostExpirationService(postRepository, true);
     lenient().when(accountTrustService.hiddenAccountIdsForSelf()).thenReturn(Set.of());
     lenient().when(hiddenPostThreadService.hiddenRootIdsForSelf()).thenReturn(Set.of());
+    lenient().when(engagement.replyCounts(any())).thenReturn(Map.of());
+    lenient().when(postLikes.counts(any())).thenReturn(Map.of());
+    lenient().when(postLikes.likedPostIds(any(), any())).thenReturn(Set.of());
+    var feedItems = new PostFeedItemAssembler(engagement, postLikes);
     postService = new PostService(
         permissionService,
         new PostCreationService(
@@ -102,19 +112,23 @@ public class PostServiceTest {
         new PostFeedService(
             postRepository,
             accountRepository,
+            follows,
             postMapper,
             postExpirationService,
             accountTrustService,
             hiddenPostThreadService,
             postFeedQueryRepository,
-            new StableCursorCodec()),
-        new PostThreadService(postRepository, accountRepository, postExpirationService),
+            new StableCursorCodec(),
+            feedItems),
+        new PostThreadService(postRepository, accountRepository, postExpirationService, feedItems),
         new PostInteractionService(
             postRepository,
             accountRepository,
             postMapper,
             notificationDeliveryService,
             postExpirationService,
+            postLikes,
+            feedItems,
             mutationLimiter,
             clock));
   }
@@ -405,6 +419,7 @@ public class PostServiceTest {
         .text("root")
         .createdOn(rootCreated)
         .lastUpdatedOn(rootCreated)
+        .threadReplyCount(1)
         .expiresOn(rootCreated.plus(Duration.ofHours(48)))
         .build();
     var child = Post.builder()
@@ -453,13 +468,18 @@ public class PostServiceTest {
 
     var p1 = Post.builder().id("p1").accountId(existing.getId()).text("a").build();
     var d1 = PostDetail.builder().id("p1").text("a").build();
-    when(postRepository.findByAccountIdOrderByCreatedOnDesc(eq(existing.getId())))
+    when(postRepository.findByAccountIdOrderByCreatedOnDesc(
+        eq(existing.getId()), any(org.springframework.data.domain.Pageable.class)))
         .thenReturn(List.of(p1));
     when(postMapper.toDetail(eq(p1))).thenReturn(d1);
 
     var list = service.getMyPosts();
     assertEquals(1, list.size());
     assertEquals("p1", list.get(0).id());
+    var page = ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
+    verify(postRepository).findByAccountIdOrderByCreatedOnDesc(
+        eq(existing.getId()), page.capture());
+    assertEquals(100, page.getValue().getPageSize());
   }
 
   @Test
@@ -494,7 +514,8 @@ public class PostServiceTest {
     var d1 = PostDetail.builder().id("p1").text("t").build();
 
     when(accountRepository.findById(eq(existing.getId()))).thenReturn(Optional.of(existing));
-    when(postRepository.findByAccountIdOrderByCreatedOnDesc(eq(existing.getId())))
+    when(postRepository.findByAccountIdOrderByCreatedOnDesc(
+        eq(existing.getId()), any(org.springframework.data.domain.Pageable.class)))
         .thenReturn(List.of(p1));
     when(postMapper.toDetail(eq(p1))).thenReturn(d1);
 
@@ -503,9 +524,8 @@ public class PostServiceTest {
     assertEquals("p1", list.get(0).id());
 
     verify(accountRepository).findById(eq(existing.getId()));
-    verify(postRepository).findByAccountIdOrderByCreatedOnDesc(eq(existing.getId()));
-    verify(postRepository, atLeastOnce()).findByRootIdOrderByCreatedOnAsc(eq("p1"));
-    verify(postRepository).save(eq(p1));
+    verify(postRepository).findByAccountIdOrderByCreatedOnDesc(
+        eq(existing.getId()), any(org.springframework.data.domain.Pageable.class));
     verify(postMapper).toDetail(eq(p1));
     verifyNoMoreInteractions(accountRepository, postRepository, postMapper);
   }
@@ -527,7 +547,6 @@ public class PostServiceTest {
         .createdOn(created)
         .lastUpdatedOn(created)
         .likesCount(0)
-        .likedBy(new HashSet<>())
         .expiresOn(created.plus(Duration.ofHours(24)))
         .build();
 
@@ -535,7 +554,13 @@ public class PostServiceTest {
     when(accountRepository.findById(eq(author.getId()))).thenReturn(Optional.of(author));
     when(accountRepository.findById(eq(liker.getId()))).thenReturn(Optional.of(liker));
     when(postRepository.save(org.mockito.ArgumentMatchers.any(Post.class))).thenReturn(post);
-    when(postRepository.countByParentId(eq("p1"))).thenReturn(0L);
+    when(postLikes.exists("p1", "liker")).thenReturn(false, true);
+    when(postLikes.like("p1", "liker", NOW))
+        .thenReturn(new PostLikeStore.LikeTransition(true, false));
+    when(postLikes.unlike("p1", "liker"))
+        .thenReturn(new PostLikeStore.LikeTransition(false, true));
+    when(postLikes.likedPostIds("liker", List.of("p1")))
+        .thenReturn(Set.of("p1"), Set.of());
 
     var likedItem = service.toggleLike("p1");
     assertEquals(1, post.getLikesCount());
@@ -568,7 +593,7 @@ public class PostServiceTest {
         .accountId(author.getId())
         .createdOn(rootCreated)
         .lastUpdatedOn(rootCreated)
-        .likedBy(new HashSet<>())
+        .threadReplyCount(1)
         .likesCount(0)
         .expiresOn(rootCreated.plus(Duration.ofHours(24)))
         .build();
@@ -579,7 +604,6 @@ public class PostServiceTest {
         .accountId(author.getId())
         .createdOn(replyCreated)
         .lastUpdatedOn(replyCreated)
-        .likedBy(new HashSet<>())
         .likesCount(0)
         .expiresOn(replyCreated.plus(Duration.ofHours(24)))
         .build();
@@ -589,7 +613,9 @@ public class PostServiceTest {
     when(accountRepository.findById(eq(author.getId()))).thenReturn(Optional.of(author));
     when(accountRepository.findById(eq("liker")))
         .thenReturn(Optional.of(Account.builder().id("liker").username("liker").build()));
-    when(postRepository.countByParentId(eq("reply"))).thenReturn(0L);
+    when(postLikes.exists("reply", "liker")).thenReturn(false);
+    when(postLikes.like(eq("reply"), eq("liker"), any(Instant.class)))
+        .thenReturn(new PostLikeStore.LikeTransition(true, false));
     when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root"))).thenReturn(List.of(root, reply));
 
     service.toggleLike("reply");
@@ -613,7 +639,7 @@ public class PostServiceTest {
         .accountId(author.getId())
         .createdOn(rootCreated)
         .lastUpdatedOn(rootCreated)
-        .likedBy(new HashSet<>())
+        .threadReplyCount(2)
         .likesCount(0)
         .expiresOn(originalExpiration)
         .build();
@@ -640,7 +666,9 @@ public class PostServiceTest {
     when(accountRepository.findById(eq(author.getId()))).thenReturn(Optional.of(author));
     when(accountRepository.findById(eq("liker")))
         .thenReturn(Optional.of(Account.builder().id("liker").username("liker").build()));
-    when(postRepository.countByParentId(eq("root"))).thenReturn(1L);
+    when(postLikes.exists("root", "liker")).thenReturn(false);
+    when(postLikes.like(eq("root"), eq("liker"), any(Instant.class)))
+        .thenReturn(new PostLikeStore.LikeTransition(true, false));
     when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root"))).thenReturn(List.of(root, child, grandchild));
 
     service.toggleLike("root");
@@ -662,13 +690,14 @@ public class PostServiceTest {
         .likesCount(1)
         .build();
 
-    when(postRepository.findByExpiresOnIsNull()).thenReturn(List.of(stale));
+    when(postRepository.findByExpiresOnIsNull(any())).thenReturn(List.of(stale));
 
     postExpirationService.purgeExpiredPosts();
 
-    verify(postRepository).findByExpiresOnIsNull();
+    verify(postRepository).findByExpiresOnIsNull(any());
     verify(postRepository).save(eq(stale));
-    verify(postRepository).findByExpiresOnLessThanEqual(org.mockito.ArgumentMatchers.any(Instant.class));
+    verify(postRepository).findByExpiresOnLessThanEqual(
+        org.mockito.ArgumentMatchers.any(Instant.class), any());
     assertNotNull(stale.getExpiresOn());
   }
 
@@ -687,7 +716,8 @@ public class PostServiceTest {
         .parentId("parent")
         .expiresOn(Instant.now().plus(Duration.ofHours(1)))
         .build();
-    when(postRepository.findByExpiresOnLessThanEqual(any(Instant.class))).thenReturn(List.of(parent));
+    when(postRepository.findByExpiresOnLessThanEqual(any(Instant.class), any()))
+        .thenReturn(List.of(parent));
     when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root"))).thenReturn(List.of(parent, child));
 
     postExpirationService.purgeExpiredPosts();
@@ -711,10 +741,9 @@ public class PostServiceTest {
         .linkPreviews(List.of(preview))
         .build();
     var p2 = Post.builder().id("p2").accountId("a2").text("t2").createdOn(Instant.now()).build();
-    Page<Post> page = new PageImpl<>(List.of(p1, p2), PageRequest.of(0, 20), 2);
-
-    when(postRepository.findAll(org.mockito.ArgumentMatchers.any(org.springframework.data.domain.Pageable.class)))
-        .thenReturn(page);
+    when(postFeedQueryRepository.global(
+        eq(Optional.empty()), eq(20), any(PostFeedVisibility.class)))
+        .thenReturn(new PostFeedSlice(List.of(p1, p2), null));
     when(accountRepository.findAllById(eq(List.of("a1", "a2"))))
         .thenReturn(List.of(
             Account.builder().id("a1").username("user1").build(),
@@ -741,42 +770,27 @@ public class PostServiceTest {
         .createdOn(created)
         .expiresOn(created.plus(Duration.ofHours(24)))
         .build();
-    var muted = Post.builder()
-        .id("muted")
-        .accountId("muted-account")
-        .text("muted")
-        .createdOn(created)
-        .expiresOn(created.plus(Duration.ofHours(24)))
-        .build();
-    var hiddenReply = Post.builder()
-        .id("hidden-reply")
-        .rootId("hidden-root")
-        .parentId("hidden-root")
-        .accountId("other-account")
-        .text("hidden")
-        .createdOn(created)
-        .expiresOn(created.plus(Duration.ofHours(24)))
-        .build();
-    Page<Post> page = new PageImpl<>(List.of(visible, muted, hiddenReply), PageRequest.of(0, 20), 3);
     var service = spy(postService);
 
     doReturn("self").when(service).getSelfId();
     when(accountTrustService.hiddenAccountIdsForSelf()).thenReturn(Set.of("muted-account"));
     when(hiddenPostThreadService.hiddenRootIdsForSelf()).thenReturn(Set.of("hidden-root"));
-    when(postRepository.findAll(org.mockito.ArgumentMatchers.any(org.springframework.data.domain.Pageable.class)))
-        .thenReturn(page);
-    when(accountRepository.findAllById(eq(List.of("visible-account", "muted-account", "other-account"))))
+    when(postFeedQueryRepository.global(
+        eq(Optional.empty()), eq(20), any(PostFeedVisibility.class)))
+        .thenReturn(new PostFeedSlice(List.of(visible), null));
+    when(accountRepository.findAllById(eq(List.of("visible-account"))))
         .thenReturn(List.of(
-            Account.builder().id("visible-account").username("visibleUser").build(),
-            Account.builder().id("muted-account").username("mutedUser").build(),
-            Account.builder().id("other-account").username("otherUser").build()));
-    when(postRepository.countByParentId(eq("visible"))).thenReturn(0L);
-
+            Account.builder().id("visible-account").username("visibleUser").build()));
     var result = service.getGlobalFeed(null, 20);
 
     assertEquals(1, result.size());
     assertEquals("visible", result.get(0).id());
     assertEquals("visibleUser", result.get(0).username());
+    var visibility = ArgumentCaptor.forClass(PostFeedVisibility.class);
+    verify(postFeedQueryRepository).global(
+        eq(Optional.empty()), eq(20), visibility.capture());
+    assertEquals(Set.of("muted-account"), visibility.getValue().excludedAccountIds());
+    assertEquals(Set.of("hidden-root"), visibility.getValue().excludedRootIds());
   }
 
   @Test
@@ -785,7 +799,6 @@ public class PostServiceTest {
     var self = Account.builder()
         .id("self")
         .username("self_user")
-        .followingIds(new HashSet<>(List.of("a1")))
         .build();
     var author = Account.builder().id("a1").username("followed").build();
     var post = Post.builder()
@@ -793,19 +806,16 @@ public class PostServiceTest {
         .accountId("a1")
         .text("hello")
         .createdOn(Instant.now())
-        .likedBy(new HashSet<>())
         .likesCount(0)
         .build();
     var service = spy(postService);
     doReturn("self").when(service).getSelfId();
 
     when(accountRepository.findById(eq("self"))).thenReturn(Optional.of(self));
-    when(postRepository.findByAccountIdInOrderByCreatedOnDesc(
-        eq(List.of("a1")),
-        org.mockito.ArgumentMatchers.any(PageRequest.class)))
-        .thenReturn(List.of(post));
+    when(postFeedQueryRepository.following(
+        eq("self"), eq(Optional.empty()), eq(20), any(PostFeedVisibility.class)))
+        .thenReturn(new PostFeedSlice(List.of(post), null));
     when(accountRepository.findAllById(eq(List.of("a1")))).thenReturn(List.of(author));
-    when(postRepository.countByParentId(eq("p1"))).thenReturn(0L);
 
     var result = service.getFollowingFeed(null, 20);
 

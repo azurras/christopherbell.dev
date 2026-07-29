@@ -4,7 +4,7 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.pagination.StableCursorCodec;
 import dev.christopherbell.permission.PermissionService;
-import dev.christopherbell.post.PostRepository;
+import dev.christopherbell.post.feed.PostFeedItemAssembler;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostFeedItem;
 import dev.christopherbell.post.model.PostTopic;
@@ -22,10 +22,10 @@ public class VoidDiscoveryService {
 
   private final VoidDiscoveryQueryRepository queries;
   private final AccountRepository accounts;
-  private final PostRepository posts;
   private final StableCursorCodec cursors;
   private final Clock clock;
   private final PermissionService permissions;
+  private final PostFeedItemAssembler feedItems;
 
   public VoidDiscoveryPage<PostFeedItem> newArrivals(String cursor, int size)
       throws InvalidRequestException {
@@ -63,34 +63,8 @@ public class VoidDiscoveryService {
     var usernames = new LinkedHashMap<String, String>();
     accounts.findAllById(accountIds)
         .forEach(account -> usernames.put(account.getId(), account.getUsername()));
-    var items = page.items().stream()
-        .map(post -> toFeedItem(post, usernames.get(post.getAccountId()), currentUserId))
-        .toList();
+    var items = feedItems.assemble(page.items(), usernames, currentUserId);
     return new VoidDiscoveryPage<>(items, page.nextCursor());
-  }
-
-  private PostFeedItem toFeedItem(Post post, String username, String currentUserId) {
-    return PostFeedItem.builder()
-        .id(post.getId())
-        .accountId(post.getAccountId())
-        .username(username)
-        .text(post.getText())
-        .linkPreviews(post.getLinkPreviews())
-        .rootId(post.getRootId())
-        .parentId(post.getParentId())
-        .level(post.getLevel())
-        .likesCount(post.getLikesCount())
-        .liked(currentUserId != null
-            && post.getLikedBy() != null
-            && post.getLikedBy().contains(currentUserId))
-        .replyCount((int) posts.countByParentId(post.getId()))
-        .createdOn(post.getCreatedOn())
-        .lastUpdatedOn(post.getLastUpdatedOn())
-        .editedOn(post.getEditedOn())
-        .lastExtendedOn(post.getLastExtendedOn())
-        .topics(post.getTopics())
-        .expiresOn(post.getExpiresOn())
-        .build();
   }
 
   private static String canonicalTopic(String rawTopic) throws InvalidRequestException {

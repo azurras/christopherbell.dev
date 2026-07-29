@@ -1,6 +1,5 @@
 package dev.christopherbell.account.follow;
 
-import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.account.profile.AccountProfileService;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
@@ -8,7 +7,6 @@ import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.post.abuse.NewAccountVoidMutationLimiter;
 import dev.christopherbell.post.abuse.VoidMutationKind;
 import java.time.Clock;
-import java.util.HashSet;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -19,8 +17,8 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 @Service
 public class AccountFollowService {
-  private final AccountRepository accountRepository;
   private final AccountProfileService accountProfileService;
+  private final AccountFollowStore follows;
   private final NewAccountVoidMutationLimiter mutationLimiter;
   private final Clock clock;
 
@@ -34,15 +32,15 @@ public class AccountFollowService {
     if (self.getId().equals(target.getId())) {
       throw new InvalidRequestException("You cannot follow yourself.");
     }
-    if (self.getFollowingIds() == null) {
-      self.setFollowingIds(new HashSet<>());
+    var transition = follows.follow(self.getId(), target.getId(), clock.instant());
+    if (transition.created()) {
+      try {
+        mutationLimiter.require(self, VoidMutationKind.FOLLOW);
+      } catch (RuntimeException exception) {
+        follows.unfollow(self.getId(), target.getId());
+        throw exception;
+      }
     }
-    if (!self.getFollowingIds().contains(target.getId())) {
-      mutationLimiter.require(self, VoidMutationKind.FOLLOW);
-      self.getFollowingIds().add(target.getId());
-    }
-    self.setLastUpdatedOn(clock.instant());
-    accountRepository.save(self);
     return accountProfileService.toPublicProfile(target, Optional.of(self));
   }
 
@@ -52,13 +50,7 @@ public class AccountFollowService {
   public AccountProfile unfollowAccount(String username) throws ResourceNotFoundException {
     var self = accountProfileService.getSelfEntity();
     var target = accountProfileService.findBySanitizedUsername(username);
-    if (self.getFollowingIds() == null) {
-      self.setFollowingIds(new HashSet<>());
-    } else {
-      self.getFollowingIds().remove(target.getId());
-    }
-    self.setLastUpdatedOn(clock.instant());
-    accountRepository.save(self);
+    follows.unfollow(self.getId(), target.getId());
     return accountProfileService.toPublicProfile(target, Optional.of(self));
   }
 }

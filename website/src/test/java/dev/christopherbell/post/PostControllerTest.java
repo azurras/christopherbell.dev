@@ -6,10 +6,13 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.christopherbell.configuration.security.ControllerSliceSecurityTestConfig;
@@ -25,6 +28,7 @@ import dev.christopherbell.post.model.PostFeedItem;
 import dev.christopherbell.post.editing.PostEditingService;
 import dev.christopherbell.post.editing.PostEditRequest;
 import dev.christopherbell.post.feed.PostFeedPage;
+import dev.christopherbell.post.feed.PostDetailPage;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -208,8 +212,45 @@ public class PostControllerTest {
     mockMvc
         .perform(get("/api/posts" + APIVersion.V20250914 + "/me").accept(MediaType.APPLICATION_JSON))
         .andExpect(status().isOk())
+        .andExpect(header().string("Deprecation", "true"))
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload[0].id").value("p1"));
+  }
+
+  @Test
+  @DisplayName("Stable current-user history returns bounded cursor metadata")
+  @WithMockUser(authorities = {"USER"})
+  void getMyPostsPage_returnsStablePage() throws Exception {
+    var item = PostDetail.builder().id("p1").text("a").build();
+    when(postService.getMyPostsPage("cursor-1", 25))
+        .thenReturn(new PostDetailPage(List.of(item), "cursor-2"));
+
+    mockMvc.perform(get("/api/posts" + APIVersion.V20260729 + "/me")
+            .param("cursor", "cursor-1")
+            .param("size", "25"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.items[0].id").value("p1"))
+        .andExpect(jsonPath("$.payload.nextCursor").value("cursor-2"));
+  }
+
+  @Test
+  @DisplayName("Desired like state uses idempotent PUT and DELETE routes")
+  @WithMockUser(authorities = {"USER"})
+  void desiredLikeState_usesExplicitRoutes() throws Exception {
+    when(postService.setLiked("p1", true))
+        .thenReturn(PostFeedItem.builder().id("p1").liked(true).build());
+    when(postService.setLiked("p1", false))
+        .thenReturn(PostFeedItem.builder().id("p1").liked(false).build());
+
+    mockMvc.perform(put("/api/posts" + APIVersion.V20260729 + "/p1/like").with(csrf()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.liked").value(true));
+    mockMvc.perform(delete("/api/posts" + APIVersion.V20260729 + "/p1/like").with(csrf()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.payload.liked").value(false));
+
+    verify(postService).setLiked("p1", true);
+    verify(postService).setLiked("p1", false);
   }
 
   @Test
@@ -240,6 +281,7 @@ public class PostControllerTest {
     mockMvc
         .perform(get("/api/posts" + APIVersion.V20250914 + "/account/{id}", "acc-1"))
         .andExpect(status().isOk())
+        .andExpect(header().string("Deprecation", "true"))
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload[0].id").value("p1"));
 

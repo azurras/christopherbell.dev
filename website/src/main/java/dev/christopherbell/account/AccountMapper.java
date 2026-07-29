@@ -25,7 +25,6 @@ public interface AccountMapper {
   @Mapping(target = "passwordHash", ignore = true)
   @Mapping(target = "passwordResetTokenHash", ignore = true)
   @Mapping(target = "passwordResetTokenExpiresOn", ignore = true)
-  @Mapping(target = "followingIds", ignore = true)
   @Mapping(target = "pendingModerationAudit", ignore = true)
   @Mapping(target = "federationEnabled", ignore = true)
   @Mapping(target = "federationEnabledOn", ignore = true)

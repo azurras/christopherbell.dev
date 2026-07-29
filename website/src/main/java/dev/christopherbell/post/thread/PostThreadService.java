@@ -5,6 +5,7 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.expiration.PostExpirationService;
+import dev.christopherbell.post.feed.PostFeedItemAssembler;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostFeedItem;
 import java.util.List;
@@ -20,6 +21,7 @@ public class PostThreadService {
   private final PostRepository postRepository;
   private final AccountRepository accountRepository;
   private final PostExpirationService postExpirationService;
+  private final PostFeedItemAssembler feedItems;
 
   public PostFeedItem getPostById(String id, String selfId) throws ResourceNotFoundException {
     var post = postRepository.findById(id)
@@ -27,8 +29,7 @@ public class PostThreadService {
     postExpirationService.ensureActive(post);
     var author = accountRepository.findById(post.getAccountId())
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", post.getAccountId())));
-    postExpirationService.ensureExpirationSet(post);
-    return toFeedItem(post, author.getUsername(), selfId);
+    return feedItems.single(post, author.getUsername(), selfId);
   }
 
   public List<PostFeedItem> getThread(String id, String selfId) throws ResourceNotFoundException {
@@ -39,11 +40,8 @@ public class PostThreadService {
     var posts = postRepository.findByRootIdOrderByCreatedOnAsc(rootId);
     var authorIds = posts.stream().map(Post::getAccountId).distinct().toList();
     var idToUser = usernamesByAccountId(authorIds);
-    posts.forEach(postExpirationService::ensureExpirationSet);
-    return posts.stream()
-        .filter(p -> !postExpirationService.isExpired(p))
-        .map(p -> toFeedItem(p, idToUser.get(p.getAccountId()), selfId))
-        .toList();
+    var active = posts.stream().filter(p -> !postExpirationService.isExpired(p)).toList();
+    return feedItems.assemble(active, idToUser, selfId);
   }
 
   private Map<String, String> usernamesByAccountId(List<String> accountIds) {
@@ -51,26 +49,4 @@ public class PostThreadService {
         .collect(Collectors.toMap(Account::getId, Account::getUsername));
   }
 
-  private PostFeedItem toFeedItem(Post post, String username, String currentUserId) {
-    return PostFeedItem.builder()
-        .id(post.getId())
-        .accountId(post.getAccountId())
-        .username(username)
-        .text(post.getText())
-        .linkPreviews(post.getLinkPreviews())
-        .rootId(post.getRootId())
-        .parentId(post.getParentId())
-        .level(post.getLevel())
-        .likesCount(post.getLikesCount())
-        .liked(currentUserId != null
-            && post.getLikedBy() != null
-            && post.getLikedBy().contains(currentUserId))
-        .replyCount((int) postRepository.countByParentId(post.getId()))
-        .createdOn(post.getCreatedOn())
-        .lastUpdatedOn(post.getLastUpdatedOn())
-        .lastExtendedOn(post.getLastExtendedOn())
-        .topics(post.getTopics())
-        .expiresOn(post.getExpiresOn())
-        .build();
-  }
 }

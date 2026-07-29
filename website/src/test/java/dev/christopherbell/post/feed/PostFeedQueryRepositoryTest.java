@@ -12,6 +12,8 @@ import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +22,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.query.Query;
 
 @ExtendWith(MockitoExtension.class)
@@ -69,6 +73,42 @@ class PostFeedQueryRepositoryTest {
         .contains("accountId=account-1");
     assertThat(query.getAllValues().get(1).getQueryObject().toString())
         .contains("accountId", "$in", "account-2");
+  }
+
+  @Test
+  @DisplayName("Visibility predicates are applied before the stable page limit")
+  void global_appliesVisibilityInsideMongoQuery() {
+    when(mongo.find(any(Query.class), eq(Post.class))).thenReturn(List.of());
+    var cutoff = Instant.parse("2026-07-29T04:00:00Z");
+
+    repository.global(
+        Optional.empty(),
+        20,
+        new PostFeedVisibility(
+            Set.of("muted-account"), Set.of("hidden-root"), Optional.of(cutoff)));
+
+    var query = ArgumentCaptor.forClass(Query.class);
+    verify(mongo).find(query.capture(), eq(Post.class));
+    assertThat(query.getValue().getQueryObject().toString())
+        .contains("expiresOn", cutoff.toString(), "accountId", "muted-account", "rootId", "hidden-root");
+    assertThat(query.getValue().getLimit()).isEqualTo(21);
+  }
+
+  @Test
+  @DisplayName("Following pages join unique edges without materializing an account id list")
+  void following_usesEdgeLookupBeforeLimit() {
+    when(mongo.aggregate(any(Aggregation.class), eq("posts"), eq(Post.class)))
+        .thenReturn(new AggregationResults<>(List.of(), new Document()));
+
+    repository.following(
+        "self", Optional.empty(), 20, PostFeedVisibility.unrestricted());
+
+    var aggregation = ArgumentCaptor.forClass(Aggregation.class);
+    verify(mongo).aggregate(aggregation.capture(), eq("posts"), eq(Post.class));
+    var pipeline = aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString();
+    assertThat(pipeline)
+        .contains("$lookup", "account_follows", "followerAccountId", "followedAccountId", "$limit=21")
+        .doesNotContain("$in");
   }
 
   private Post post(String id, Instant createdOn) {

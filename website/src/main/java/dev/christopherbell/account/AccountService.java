@@ -114,7 +114,6 @@ public class AccountService {
         .lastUpdatedOn(Instant.now())
         .role(Role.USER)
         .status(AccountStatus.ACTIVE)
-        .followingIds(new HashSet<>())
         .username(UsernameSanitizer.sanitize(accountCreateRequest.username()))
         .build();
   }

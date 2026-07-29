@@ -2,6 +2,7 @@ package dev.christopherbell.post;
 
 import static dev.christopherbell.libs.api.APIVersion.V20250914;
 import static dev.christopherbell.libs.api.APIVersion.V20260726;
+import static dev.christopherbell.libs.api.APIVersion.V20260729;
 
 import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
@@ -9,6 +10,7 @@ import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
 import dev.christopherbell.post.feed.PostFeedPage;
+import dev.christopherbell.post.feed.PostDetailPage;
 import dev.christopherbell.post.editing.PostEditRequest;
 import dev.christopherbell.post.editing.PostEditingService;
 import jakarta.validation.Valid;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -74,12 +77,26 @@ public class PostController {
   @GetMapping(value = V20250914 + "/me", produces = MediaType.APPLICATION_JSON_VALUE)
   @PreAuthorize("@permissionService.hasAuthority('USER')")
   public ResponseEntity<Response<List<PostDetail>>> getMyPosts() throws Exception {
-    return new ResponseEntity<>(
-        Response.<List<PostDetail>>builder()
+    return ResponseEntity.ok()
+        .header("Deprecation", "true")
+        .header("Link", "</api/posts/2026-07-29/me>; rel=\"successor-version\"")
+        .body(Response.<List<PostDetail>>builder()
             .payload(postService.getMyPosts())
             .success(true)
-            .build(),
-        HttpStatus.OK);
+            .build());
+  }
+
+  /** Stable, cursor-paginated post history for the authenticated user. */
+  @GetMapping(value = V20260729 + "/me", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<PostDetailPage>> getMyPostsPage(
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @RequestParam(value = "size", required = false, defaultValue = "20") int size
+  ) throws Exception {
+    return ResponseEntity.ok(Response.<PostDetailPage>builder()
+        .payload(postService.getMyPostsPage(cursor, size))
+        .success(true)
+        .build());
   }
 
   /**
@@ -151,12 +168,29 @@ public class PostController {
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
   public ResponseEntity<Response<List<PostDetail>>> getPostsByAccountId(@PathVariable String accountId)
       throws Exception {
-    return new ResponseEntity<>(
-        Response.<List<PostDetail>>builder()
+    return ResponseEntity.ok()
+        .header("Deprecation", "true")
+        .header(
+            "Link",
+            "</api/posts/2026-07-29/account/" + accountId + ">; rel=\"successor-version\"")
+        .body(Response.<List<PostDetail>>builder()
             .payload(postService.getPostsByAccountId(accountId))
             .success(true)
-            .build(),
-        HttpStatus.OK);
+            .build());
+  }
+
+  /** Stable, cursor-paginated post history for an account (admin only). */
+  @GetMapping(value = V20260729 + "/account/{accountId}", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
+  public ResponseEntity<Response<PostDetailPage>> getPostsByAccountPage(
+      @PathVariable String accountId,
+      @RequestParam(value = "cursor", required = false) String cursor,
+      @RequestParam(value = "size", required = false, defaultValue = "20") int size
+  ) throws Exception {
+    return ResponseEntity.ok(Response.<PostDetailPage>builder()
+        .payload(postService.getPostsByAccountPage(accountId, cursor, size))
+        .success(true)
+        .build());
   }
 
   /**
@@ -261,6 +295,26 @@ public class PostController {
             .success(true)
             .build(),
         HttpStatus.OK);
+  }
+
+  /** Idempotently records the current user's desired liked state. */
+  @PutMapping(value = V20260729 + "/{postId}/like", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<PostFeedItem>> like(@PathVariable String postId) throws Exception {
+    return ResponseEntity.ok(Response.<PostFeedItem>builder()
+        .payload(postService.setLiked(postId, true))
+        .success(true)
+        .build());
+  }
+
+  /** Idempotently removes the current user's like edge. */
+  @DeleteMapping(value = V20260729 + "/{postId}/like", produces = MediaType.APPLICATION_JSON_VALUE)
+  @PreAuthorize("@permissionService.hasAuthority('USER')")
+  public ResponseEntity<Response<PostFeedItem>> unlike(@PathVariable String postId) throws Exception {
+    return ResponseEntity.ok(Response.<PostFeedItem>builder()
+        .payload(postService.setLiked(postId, false))
+        .success(true)
+        .build());
   }
 
   /**
