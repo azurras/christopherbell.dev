@@ -3,6 +3,7 @@ package dev.christopherbell.post.creation;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.federation.outbound.FederationPublicationPolicy;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
@@ -38,6 +39,7 @@ public class PostCreationService {
   private final PostExpirationService postExpirationService;
   private final NewAccountVoidMutationLimiter mutationLimiter;
   private final PostTopicExtractor postTopicExtractor;
+  private final FederationPublicationPolicy federationPublicationPolicy;
   private final Clock clock;
 
   /** Creates a post or reply for the resolved current account id. */
@@ -101,6 +103,7 @@ public class PostCreationService {
         .createdOn(now)
         .lastUpdatedOn(now)
         .expiresOn(postExpirationService.expirationForNewPost(now, inheritedReplyExpiration))
+        .federationOutboundEligible(federationPublicationPolicy.eligibleAtCreation(account))
         .topics(postTopicExtractor.extract(text))
         .linkPreviews(postLinkPreviewService.resolveForText(text))
         .build();

@@ -20,6 +20,7 @@ import dev.christopherbell.account.AccountServiceStub;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.trust.AccountTrustService;
+import dev.christopherbell.federation.outbound.FederationPublicationPolicy;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
@@ -74,6 +75,7 @@ public class PostServiceTest {
   @Mock private HiddenPostThreadService hiddenPostThreadService;
   @Mock private PostFeedQueryRepository postFeedQueryRepository;
   @Mock private NewAccountVoidMutationLimiter mutationLimiter;
+  @Mock private FederationPublicationPolicy federationPublicationPolicy;
   private PostService postService;
   private PostExpirationService postExpirationService;
   private Clock clock;
@@ -95,6 +97,7 @@ public class PostServiceTest {
             postExpirationService,
             mutationLimiter,
             new PostTopicExtractor(),
+            federationPublicationPolicy,
             clock),
         new PostFeedService(
             postRepository,

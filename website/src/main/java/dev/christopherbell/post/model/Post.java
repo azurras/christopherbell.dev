@@ -86,6 +86,14 @@ public class Post {
       timezone = "UTC")
   private Instant expiresOn;
 
+  /** True only when this post was explicitly eligible for outbound federation at creation. */
+  private Boolean federationOutboundEligible;
+
+  /** Treats historical missing/null values as explicitly ineligible. */
+  public boolean isFederationOutboundEligible() {
+    return Boolean.TRUE.equals(federationOutboundEligible);
+  }
+
   /** Most recent confirmed interaction that extended this root post's lifespan. */
   @JsonFormat(
       shape = JsonFormat.Shape.STRING,
