@@ -2,21 +2,27 @@ package dev.christopherbell.view;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.christopherbell.view.account.AccountViewController;
 import dev.christopherbell.view.content.ContentViewController;
 import dev.christopherbell.view.tools.ToolsViewController;
 import dev.christopherbell.view.voidroutes.VoidViewController;
+import dev.christopherbell.view.voidroutes.VoidPostSocialPreview;
+import dev.christopherbell.view.voidroutes.VoidPostSocialPreviewService;
 import dev.christopherbell.view.wfl.WhatsForLunchViewController;
+import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @WebMvcTest(controllers = {
     AccountViewController.class,
@@ -28,6 +34,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc(addFilters = false)
 public class ViewControllerTest {
   @Autowired private MockMvc mockMvc;
+  @MockitoBean private VoidPostSocialPreviewService postPreviews;
 
   @Test
   @DisplayName("Home page renders social preview metadata")
@@ -57,10 +64,13 @@ public class ViewControllerTest {
         .perform(get("/void"))
         .andExpect(status().isOk())
         .andExpect(content().string(containsString("CB | Void")))
-        .andExpect(
-            content()
-                .string(
-                    containsString("Short posts, quick replies, and the latest noise from the feed.")));
+        .andExpect(content().string(containsString("Nothing lasts unless people care.")))
+        .andExpect(content().string(containsString("Every thread starts with 24 hours.")))
+        .andExpect(content().string(containsString("Each keep-alive adds 24 hours.")))
+        .andExpect(content().string(containsString("Each reply adds 24 hours to the whole thread.")))
+        .andExpect(content().string(containsString("href=\"/login?redirect=/void\"")))
+        .andExpect(content().string(containsString("href=\"/signup?redirect=/void\"")))
+        .andExpect(content().string(not(containsString("value=\"active\""))));
   }
 
   @Test
@@ -202,9 +212,34 @@ public class ViewControllerTest {
   @Test
   @DisplayName("Post page renders canonical post social URL")
   public void getPostPage_rendersPostSocialUrl() throws Exception {
+    when(postPreviews.preview("post-123"))
+        .thenReturn(new VoidPostSocialPreview(
+            "@alice in the Void",
+            "Hello & goodbye <script>alert('no')</script> · Temporary thread."));
+
     mockMvc
         .perform(get("/p/post-123"))
         .andExpect(status().isOk())
-        .andExpect(content().string(containsString("https://www.christopherbell.dev/p/post-123")));
+        .andExpect(header().string("Cache-Control", containsString("no-store")))
+        .andExpect(content().string(containsString("https://www.christopherbell.dev/p/post-123")))
+        .andExpect(content().string(containsString("@alice in the Void")))
+        .andExpect(content().string(containsString("Hello &amp; goodbye &lt;script&gt;")))
+        .andExpect(content().string(not(containsString("<script>alert('no')</script>"))));
+  }
+
+  @Test
+  @DisplayName("Missing or expired post renders a content-free vanished page")
+  public void getPostPage_whenUnavailable_rendersContentFree404() throws Exception {
+    when(postPreviews.preview("missing-post"))
+        .thenThrow(new ResourceNotFoundException("SECRET_SENTINEL_POST_BODY"));
+
+    mockMvc
+        .perform(get("/p/missing-post"))
+        .andExpect(status().isNotFound())
+        .andExpect(header().string("Cache-Control", containsString("no-store")))
+        .andExpect(content().string(containsString("This post vanished into the Void")))
+        .andExpect(content().string(containsString("href=\"/void\"")))
+        .andExpect(content().string(not(containsString("SECRET_SENTINEL_POST_BODY"))))
+        .andExpect(content().string(not(containsString("/api/posts/"))));
   }
 }

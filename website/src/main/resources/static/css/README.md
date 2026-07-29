@@ -26,6 +26,9 @@ Owns site styling for server-rendered pages and frontend components.
   `/void` call to action, and live five-item Signal Rail.
 - The Void feed composer uses `.composer-preview-*` classes for the live draft
   preview, including mention links, clickable URLs, and shared rich media embeds.
+- Void survival messaging uses `.void-rules`; feed cards use
+  `.post-keep-alive-btn`, `.keep-alive-count`, and `.keep-alive-feedback` for the
+  server-confirmed 24-hour extension state on desktop and mobile.
 - Messages uses `.void-messages-*` classes in `main.css` for the Signal Bridge
   layout: dark conversation rail, private thread panel, directional message
   bubbles, unread conversation highlighting, recipient suggestion listbox, and

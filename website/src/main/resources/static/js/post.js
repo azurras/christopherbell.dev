@@ -57,8 +57,8 @@ function renderExpiredRootState(root) {
   root.innerHTML = `
     <div class="thread-expired-state" role="status">
       <p class="thread-label">Signal lost</p>
-      <h2>This post expired in the Void.</h2>
-      <p>The thread context may still show active replies until their own lifespan ends.</p>
+      <h2>This thread vanished into the Void.</h2>
+      <p>The root and its replies share one lifespan.</p>
       <a class="btn btn-outline-light btn-sm" href="/void">Back to feed</a>
     </div>`;
 
@@ -154,7 +154,9 @@ function showReplyComposer(currentUser) {
 
   composer.classList.remove('d-none');
   if (meta) {
-    meta.textContent = currentUser ? 'Replies extend the signal.' : 'Log in to reply.';
+    meta.textContent = currentUser
+      ? 'Replies add 24 hours to the entire thread.'
+      : 'Log in to reply.';
   }
 
   const replyButton = document.getElementById('replyBtn');

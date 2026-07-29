@@ -2,6 +2,7 @@ import { authHeaders, fetchJson, sanitize, isLoggedIn, formatWhen, closeOnOutsid
 import { API } from './lib/api.js';
 import { createFeedItem } from './lib/feed-render.js';
 import { canDeleteFor, canEditFor, makeRendererContext } from './lib/feed-context.js';
+import { sortVoidFeedItems } from './lib/feed-sort.js';
 import { createInfiniteScroller } from './lib/infinite.js';
 import { initComposer } from './lib/composer.js';
 import { initPostImageLightbox } from './lib/image-lightbox.js';
@@ -62,18 +63,7 @@ function filteredItems() {
     items = items.filter(item => item.level && item.level > 0);
   }
 
-  if (ACTIVE_SORT === 'active') {
-    items.sort((a, b) => ((b.likesCount || 0) + (b.replyCount || 0)) - ((a.likesCount || 0) + (a.replyCount || 0)));
-  } else if (ACTIVE_SORT === 'expiring') {
-    items.sort((a, b) => {
-      const aTime = a.expiresOn ? new Date(a.expiresOn).getTime() : Number.MAX_SAFE_INTEGER;
-      const bTime = b.expiresOn ? new Date(b.expiresOn).getTime() : Number.MAX_SAFE_INTEGER;
-      return aTime - bTime;
-    });
-  } else {
-    items.sort((a, b) => new Date(b.createdOn || b.lastUpdatedOn) - new Date(a.createdOn || a.lastUpdatedOn));
-  }
-  return items;
+  return sortVoidFeedItems(items, ACTIVE_SORT);
 }
 
 function renderFeed() {

@@ -18,7 +18,10 @@ Owns server-side routing for HTML pages.
 - `voidroutes` serves Void, profile, messages, notifications, public user feeds, and post pages.
 - `wfl` serves What's For Lunch, WFL restaurant profiles, favorites, and top-rated lists.
 - Route names used by the frontend navigation.
-- Dynamic public profile and post routes attach canonical social preview URLs for link unfurlers.
+- Dynamic public profile routes attach canonical social preview URLs for link unfurlers.
+- Active `/p/{id}` pages derive bounded social metadata only after the post
+  domain confirms the thread is still public. Missing or expired posts return a
+  generic content-free 404 page; infrastructure failures remain server errors.
 - The `/` home route renders `index.html` as a Void gateway, with `/void` as the primary action and a live Signal Rail showing the five most active posts from the public feed.
 - The shared frontend nav groups tool pages under the Tools dropdown.
 - HTML templates use `templates/fragments/social-preview.html` for Open Graph, Twitter card, canonical URL, and description metadata.

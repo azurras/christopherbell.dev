@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <th:block th:replace="~{fragments/social-preview :: socialPreview('This post vanished into the Void', 'Nothing lasts unless people care. Find the conversations that are still alive.', 'https://www.christopherbell.dev/void', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'Void on christopherbell.dev')}"></th:block>
+  <title>This post vanished into the Void</title>
+  <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}"/>
+</head>
+<body class="site-page void-shell-page post-page">
+  <div id="nav"></div>
+  <main class="site-main void-thread-page" role="main">
+    <section class="void-thread-shell" aria-labelledby="vanishedPostTitle">
+      <div class="void-thread-container">
+        <div class="feed-empty-state">
+          <p class="home-kicker">Signal lost</p>
+          <h1 id="vanishedPostTitle">This post vanished into the Void.</h1>
+          <p>Nothing lasts unless people care.</p>
+          <a class="btn btn-primary" href="/void">Return to the Void</a>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer id="footer"></footer>
+  <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
+</body>
+</html>
