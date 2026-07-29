@@ -176,7 +176,7 @@ function reportSeverityClass(report) {
 
 function userSeverityClass(account) {
   if ((account.status || '').toUpperCase() === 'SUSPENDED') return 'queue-suspended';
-  if (!account.isApproved) return 'queue-pending';
+  if ((account.status || '').toUpperCase() === 'INACTIVE') return 'queue-pending';
   return 'queue-resolved';
 }
 
@@ -199,12 +199,13 @@ function fullName(account) {
 function renderMetrics() {
   const totalReports = reportPageState.totalElements;
   const openReports = reports.filter(report => (report.status || 'OPEN') === 'OPEN').length;
-  const pendingUsers = accounts.filter(account => !account.isApproved).length;
+  const inactiveUsers = accounts.filter(
+      account => (account.status || '').toUpperCase() === 'INACTIVE').length;
   const suspendedUsers = accounts.filter(account => (account.status || '').toUpperCase() === 'SUSPENDED').length;
   const metrics = {
     metricTotalReports: totalReports,
     metricOpenReports: openReports,
-    metricPendingUsers: pendingUsers,
+    metricInactiveUsers: inactiveUsers,
     metricSuspendedUsers: suspendedUsers,
     metricRecentActivity: activityPageState.totalElements,
     reportQueueCount: `${totalReports} total`,
@@ -295,7 +296,6 @@ function renderUsers() {
           <h3>@${sanitize(account.username || 'unknown')}</h3>
           <p>${sanitize(name || account.email || 'No profile details')}</p>
           <div class="queue-meta">
-            <span>${account.isApproved ? 'Approved' : 'Pending approval'}</span>
             <span>${sanitize(account.role || 'USER')}</span>
           </div>
         </div>
@@ -369,13 +369,10 @@ function userActionSelect(account) {
   rolePromotionOptions(account).forEach(option => {
     options.push(`<option value="${sanitize(option.value)}">${sanitize(option.label)}</option>`);
   });
-  if (!account.isApproved) {
-    options.push('<option value="APPROVE">Approve</option>');
-  }
   if (status !== 'SUSPENDED') {
     options.push('<option value="SUSPEND">Suspend</option>');
   }
-  if (status !== 'ACTIVE' || !account.isApproved) {
+  if (status !== 'ACTIVE') {
     options.push('<option value="ACTIVATE">Activate</option>');
   }
   if (!options.length) {
@@ -483,7 +480,6 @@ function userDetails(account) {
   return `
     <div class="detail-section">
       ${detailRow('Status', account.status)}
-      ${detailRow('Approved', account.isApproved ? 'Yes' : 'No')}
       ${detailRow('Role', account.role)}
       ${detailRow('Email', account.email)}
       ${detailRow('Name', fullName(account))}
@@ -977,16 +973,10 @@ async function handleUserAction(target) {
   }
   target.disabled = true;
   try {
-    if (action === 'APPROVE') {
-      await updateAccount(accountId, {
-        status: 'ACTIVE', isApproved: true, moderationReason: reason,
-      });
-    } else if (action === 'SUSPEND') {
+    if (action === 'SUSPEND') {
       await updateAccount(accountId, { status: 'SUSPENDED', moderationReason: reason });
     } else if (action === 'ACTIVATE') {
-      await updateAccount(accountId, {
-        status: 'ACTIVE', isApproved: true, moderationReason: reason,
-      });
+      await updateAccount(accountId, { status: 'ACTIVE', moderationReason: reason });
     } else {
       const role = promotedRoleForAction(action);
       if (role) {

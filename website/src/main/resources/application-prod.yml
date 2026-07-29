@@ -1,6 +1,8 @@
 server:
   port: 8080
   forward-headers-strategy: none
+client-ip:
+  trusted-proxies: ${CLIENT_IP_TRUSTED_PROXIES:127.0.0.1/32,::1/128}
 spring:
   mongodb:
     database: ${SPRING_MONGODB_DATABASE:christopherbell}

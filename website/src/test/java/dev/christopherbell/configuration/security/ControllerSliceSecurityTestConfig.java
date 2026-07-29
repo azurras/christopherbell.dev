@@ -1,11 +1,13 @@
 package dev.christopherbell.configuration.security;
 
+import dev.christopherbell.account.AccountRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -21,7 +23,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class ControllerSliceSecurityTestConfig {
 
   @Bean
-  public SecurityFilterChain controllerSliceSecurityFilterChain(HttpSecurity http) throws Exception {
+  public SecurityFilterChain controllerSliceSecurityFilterChain(
+      HttpSecurity http,
+      ObjectProvider<AccountRepository> accountRepositories) throws Exception {
     return http
         .csrf(csrf -> csrf
             .spa()
@@ -38,7 +42,12 @@ public class ControllerSliceSecurityTestConfig {
             .anyRequest().authenticated())
         .addFilterBefore(new TestSecurityContextBridgeFilter(), UsernamePasswordAuthenticationFilter.class)
         .addFilterBefore(
-            new JwtAuthenticationFilter(SecurityConfig.publicMatchersList()),
+            new JwtAuthenticationFilter(
+                SecurityConfig.publicMatchersList(),
+                null,
+                null,
+                null,
+                accountRepositories.getIfAvailable()),
             AuthorizationFilter.class)
         .build();
   }

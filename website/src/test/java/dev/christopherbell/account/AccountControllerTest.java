@@ -19,6 +19,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.christopherbell.account.model.dto.AccountUpdateRequest;
+import dev.christopherbell.account.model.dto.AccountCreateRequest;
 import dev.christopherbell.account.deletion.AccountDeletionResult;
 import dev.christopherbell.account.deletion.AccountDeletionStatus;
 import dev.christopherbell.account.model.dto.AccountDetail;
@@ -243,6 +244,44 @@ public class AccountControllerTest {
   }
 
   @Test
+  @DisplayName("Create account returns 201 with the canonical account resource location")
+  @WithMockUser
+  public void createAccount_whenValid_returnsCreatedLocation() throws Exception {
+    var request = """
+        {
+          "firstName": "Chris",
+          "lastName": "Bell",
+          "email": "chris@example.com",
+          "password": "long-enough",
+          "username": "chris"
+        }
+        """;
+    var requestObject = AccountCreateRequest.builder()
+        .firstName("Chris")
+        .lastName("Bell")
+        .email("chris@example.com")
+        .password("long-enough")
+        .username("chris")
+        .build();
+    when(accountService.createAccount(eq(requestObject)))
+        .thenReturn(AccountDetail.builder().id("acc-42").username("chris").build());
+
+    mockMvc
+        .perform(post("/api/accounts" + APIVersion.V20241215 + "/create")
+            .with(csrf())
+            .content(request)
+            .contentType(MediaType.APPLICATION_JSON_VALUE))
+        .andExpect(status().isCreated())
+        .andExpect(header().string(
+            HttpHeaders.LOCATION,
+            "/api/accounts" + APIVersion.V20250903 + "/acc-42"))
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.payload.id").value("acc-42"));
+
+    verify(accountService).createAccount(eq(requestObject));
+  }
+
+  @Test
   @DisplayName("Create account: invalid email returns 400 before service")
   @WithMockUser
   public void testCreateAccount_whenInvalidEmail_Returns400() throws Exception {
@@ -293,7 +332,7 @@ public class AccountControllerTest {
                 .with(csrf())
                 .content(request)
                 .contentType(MediaType.APPLICATION_JSON_VALUE))
-        .andExpect(status().isAccepted())
+        .andExpect(status().isOk())
         .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload").isNotEmpty())
@@ -421,30 +460,6 @@ public class AccountControllerTest {
   }
 
   @Test
-  @DisplayName("testApproveAccount_whenAuthorized_Returns200")
-  @WithMockUser(authorities = {"ADMIN"})
-  public void testApproveAccount_whenAuthorized_Returns200() throws Exception {
-    var detail = AccountDetail.builder()
-        .id("acc-42")
-        .email("user@example.com")
-        .username("user42")
-        .build();
-
-    when(accountService.approveAccount(eq("acc-42"))).thenReturn(detail);
-
-    mockMvc
-        .perform(
-            post("/api/accounts" + APIVersion.V20250903 + "/approve/{accountId}", "acc-42")
-                .with(csrf())
-                .contentType(MediaType.APPLICATION_JSON_VALUE))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.payload.id").value("acc-42"));
-
-    verify(accountService).approveAccount(eq("acc-42"));
-  }
-
-  @Test
   @DisplayName("Legacy delete account returns the deleted account detail")
   @WithMockUser(authorities = {"ADMIN"})
   public void legacyDeleteAccount_whenAuthorized_preservesResponseShape() throws Exception {
@@ -461,8 +476,7 @@ public class AccountControllerTest {
     mockMvc
         .perform(
             delete("/api/accounts" + APIVersion.V20250903 + "/{id}", "to-del")
-                .with(csrf())
-                .contentType(MediaType.APPLICATION_JSON_VALUE))
+                .with(csrf()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.id").value("to-del"))
@@ -484,8 +498,7 @@ public class AccountControllerTest {
     mockMvc
         .perform(
             delete("/api/accounts" + APIVersion.V20260726 + "/{id}", "to-del")
-                .with(csrf())
-                .contentType(MediaType.APPLICATION_JSON_VALUE))
+                .with(csrf()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.pseudonym").value("deleted:abcdef012345"))

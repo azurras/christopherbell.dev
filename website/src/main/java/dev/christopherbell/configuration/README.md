@@ -17,7 +17,7 @@ Owns application-wide Spring and web infrastructure.
 - Public tool pages such as `/zip-coordinates`.
 - The public `/command-center` route serves only a data-free page shell. No
   `/api/admin/command-center/**` route is public; every API method requires both
-  ADMIN JWT authority and a fresh persisted ADMIN, ACTIVE, approved account.
+  ADMIN JWT authority and a fresh persisted ADMIN, ACTIVE account.
 - Public read-only WFL routes, including nearby restaurant lookup by browser
   coordinates or ZIP code.
 - JWT authentication filter wiring under `security`. Explicit bearer headers
@@ -54,7 +54,11 @@ Owns application-wide Spring and web infrastructure.
   rule covers deployed `/folders`, `/entries`, and `/admin/recycle/**` writes plus planned aliases;
   transcode admission covers deployed `/media/fallback` plus the planned `/media/jobs` alias.
 - `ClientIpResolver` resolves effective client IPs from `X-Forwarded-For` only
-  when the immediate remote address is listed in `client-ip.trusted-proxies`.
+  when the immediate remote address is listed in `client-ip.trusted-proxies`. It
+  validates every configured IP/CIDR at startup and walks a forwarding chain
+  from the nearest trusted hop to the first untrusted client. Production binds
+  `CLIENT_IP_TRUSTED_PROXIES` and defaults only to IPv4/IPv6 loopback for the
+  local Cloudflare tunnel process.
 - MongoDB auditing, fixed-name leases, and immutable versioned migrations under
   `mongo`.
 - `FederationSecretApplicationContextInitializer` resolves the production

@@ -75,19 +75,6 @@ public class AccountService {
   private final FederationConsentService federationConsent;
 
   /**
-   * Approves an account by setting its approvedBy field to the current user's ID and changing its
-   * status to ACTIVE.
-   *
-   * @param accountId - the ID of the account to approve.
-   * @return the approved account.
-   * @throws ResourceNotFoundException if the account cannot be found.
-   */
-  public AccountDetail approveAccount(String accountId)
-      throws InvalidRequestException, ResourceNotFoundException {
-    return accountModerationService.approveAccount(accountId);
-  }
-
-  /**
    * Creates a new account.
    *
    * @param accountCreateRequest - contains new information for an account.
@@ -98,10 +85,8 @@ public class AccountService {
     log.info("Creating account for username {}", accountCreateRequest.username());
     var account = createAccountEntity(accountCreateRequest);
     try {
-      var salt = PasswordUtil.generateSalt();
-      var hash = PasswordUtil.hashPassword(accountCreateRequest.password(), salt);
-      account.setPasswordSalt(salt);
-      account.setPasswordHash(hash);
+      account.setPasswordSalt(null);
+      account.setPasswordHash(PasswordUtil.hashPassword(accountCreateRequest.password()));
       federationConsent.prepareNewAccount(account, accountCreateRequest.federationRequested());
       accountRepository.save(account);
       log.info("Successfully created account for username {}", accountCreateRequest.username());
@@ -122,11 +107,9 @@ public class AccountService {
   public Account createAccountEntity(AccountCreateRequest accountCreateRequest) {
     return Account.builder()
         .id(String.valueOf(UUID.randomUUID()))
-        .approvedBy(null)
         .createdOn(Instant.now())
         .email(EmailSanitizer.sanitize(accountCreateRequest.email()))
         .firstName(accountCreateRequest.firstName())
-        .isApproved(true)
         .lastName(accountCreateRequest.lastName())
         .lastUpdatedOn(Instant.now())
         .role(Role.USER)

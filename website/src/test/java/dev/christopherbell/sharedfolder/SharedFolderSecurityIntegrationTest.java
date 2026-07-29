@@ -174,7 +174,7 @@ class SharedFolderSecurityIntegrationTest {
 
   @Test
   void cookieAuthenticatedMutationRequiresCsrf() throws Exception {
-    persist(Role.USER, AccountStatus.ACTIVE, true, Set.of(SHARED_FOLDER_WRITE));
+    persist(Role.USER, AccountStatus.ACTIVE, Set.of(SHARED_FOLDER_WRITE));
     String token = "session-id.secret";
 
     mockMvc.perform(post(BASE + "/folders")
@@ -208,8 +208,8 @@ class SharedFolderSecurityIntegrationTest {
 
   @Test
   void permissionsFormASeparateImmediatelyRevocableCapabilityBoundary() throws Exception {
-    String token = tokenFor(Role.USER);
-    persist(Role.USER, AccountStatus.ACTIVE, true, Set.of(SHARED_FOLDER_READ));
+    persist(Role.USER, AccountStatus.ACTIVE, Set.of(SHARED_FOLDER_READ));
+    String token = tokenForCurrentAccount();
 
     mockMvc.perform(get(BASE + "/entries").header(HttpHeaders.AUTHORIZATION, token))
         .andExpect(status().isOk())
@@ -217,13 +217,12 @@ class SharedFolderSecurityIntegrationTest {
         .andExpect(header().string("X-Content-Type-Options", "nosniff"))
         .andExpect(jsonPath("$.path").value(""));
 
-    persist(Role.USER, AccountStatus.ACTIVE, true, Set.of());
+    persist(Role.USER, AccountStatus.ACTIVE, Set.of());
     mockMvc.perform(get(BASE + "/entries").header(HttpHeaders.AUTHORIZATION, token))
-        .andExpect(status().isForbidden())
-        .andExpect(jsonPath("$.success").value(false))
-        .andExpect(jsonPath("$.messages[0].code").value("ACCESS_DENIED"));
+        .andExpect(status().isUnauthorized());
 
-    persist(Role.USER, AccountStatus.ACTIVE, true, Set.of(SHARED_FOLDER_WRITE));
+    persist(Role.USER, AccountStatus.ACTIVE, Set.of(SHARED_FOLDER_WRITE));
+    token = tokenForCurrentAccount();
     mockMvc.perform(get(BASE + "/entries").header(HttpHeaders.AUTHORIZATION, token))
         .andExpect(status().isOk());
     mockMvc.perform(post(BASE + "/folders")
@@ -238,8 +237,8 @@ class SharedFolderSecurityIntegrationTest {
 
   @Test
   void readOnlyAccountCannotMutateWithoutAWriteGrant() throws Exception {
-    String token = tokenFor(Role.USER);
-    persist(Role.USER, AccountStatus.ACTIVE, true, Set.of(SHARED_FOLDER_READ));
+    persist(Role.USER, AccountStatus.ACTIVE, Set.of(SHARED_FOLDER_READ));
+    String token = tokenForCurrentAccount();
 
     mockMvc.perform(post(BASE + "/folders")
             .header(HttpHeaders.AUTHORIZATION, token)
@@ -253,34 +252,38 @@ class SharedFolderSecurityIntegrationTest {
   @ParameterizedTest
   @EnumSource(value = Role.class, names = {"USER", "MOD"})
   void ordinaryRolesNeedAnExplicitSharedFolderCapability(Role role) throws Exception {
-    String token = tokenFor(role);
-    persist(role, AccountStatus.ACTIVE, true, Set.of());
+    persist(role, AccountStatus.ACTIVE, Set.of());
+    String token = tokenForCurrentAccount();
 
     mockMvc.perform(get(BASE + "/entries").header(HttpHeaders.AUTHORIZATION, token))
         .andExpect(status().isForbidden());
 
-    persist(role, AccountStatus.ACTIVE, true, Set.of(SHARED_FOLDER_READ));
+    persist(role, AccountStatus.ACTIVE, Set.of(SHARED_FOLDER_READ));
     mockMvc.perform(get(BASE + "/entries").header(HttpHeaders.AUTHORIZATION, token))
+        .andExpect(status().isUnauthorized());
+    mockMvc.perform(get(BASE + "/entries")
+            .header(HttpHeaders.AUTHORIZATION, tokenForCurrentAccount()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.entries").isArray());
   }
 
   @Test
-  void inactiveAndUnapprovedAccountsAreDeniedDespiteAValidTokenAndGrant() throws Exception {
-    String token = tokenFor(Role.USER);
-    persist(Role.USER, AccountStatus.INACTIVE, true, Set.of(SHARED_FOLDER_WRITE));
+  void accountStatusAloneControlsLifecycleEligibility() throws Exception {
+    persist(Role.USER, AccountStatus.INACTIVE, Set.of(SHARED_FOLDER_WRITE));
+    String token = tokenForCurrentAccount();
     mockMvc.perform(get(BASE + "/entries").header(HttpHeaders.AUTHORIZATION, token))
-        .andExpect(status().isForbidden());
+        .andExpect(status().isUnauthorized());
 
-    persist(Role.USER, AccountStatus.ACTIVE, false, Set.of(SHARED_FOLDER_WRITE));
-    mockMvc.perform(get(BASE + "/entries").header(HttpHeaders.AUTHORIZATION, token))
-        .andExpect(status().isForbidden());
+    persist(Role.USER, AccountStatus.ACTIVE, Set.of(SHARED_FOLDER_WRITE));
+    mockMvc.perform(get(BASE + "/entries")
+            .header(HttpHeaders.AUTHORIZATION, tokenForCurrentAccount()))
+        .andExpect(status().isOk());
   }
 
   @Test
   void administratorDefaultsApplyButFreshPersistedRoleStillControlsAdministration() throws Exception {
-    String staleAdminToken = tokenFor(Role.ADMIN);
-    persist(Role.ADMIN, AccountStatus.ACTIVE, true, Set.of());
+    persist(Role.ADMIN, AccountStatus.ACTIVE, Set.of());
+    String staleAdminToken = tokenForCurrentAccount();
 
     mockMvc.perform(get(BASE + "/entries").header(HttpHeaders.AUTHORIZATION, staleAdminToken))
         .andExpect(status().isOk());
@@ -294,18 +297,17 @@ class SharedFolderSecurityIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$").isArray());
 
-    persist(Role.USER, AccountStatus.ACTIVE, true,
+    persist(Role.USER, AccountStatus.ACTIVE,
         Set.of(SHARED_FOLDER_READ, SHARED_FOLDER_WRITE));
     mockMvc.perform(get(BASE + "/admin/audit")
             .header(HttpHeaders.AUTHORIZATION, staleAdminToken))
-        .andExpect(status().isForbidden())
-        .andExpect(jsonPath("$.messages[0].code").value("ACCESS_DENIED"));
+        .andExpect(status().isUnauthorized());
   }
 
   @Test
   void traversalEncodingsAreRejectedWithoutTouchingOutsideTheSharedRoot() throws Exception {
-    String token = tokenFor(Role.USER);
-    persist(Role.USER, AccountStatus.ACTIVE, true, Set.of(SHARED_FOLDER_READ));
+    persist(Role.USER, AccountStatus.ACTIVE, Set.of(SHARED_FOLDER_READ));
+    String token = tokenForCurrentAccount();
 
     for (String path : List.of("../outside.txt", "..\\outside.txt", "C:\\outside.txt")) {
       mockMvc.perform(get(BASE + "/entries")
@@ -331,22 +333,17 @@ class SharedFolderSecurityIntegrationTest {
   private void persist(
       Role role,
       AccountStatus status,
-      boolean approved,
       Set<AccountPermission> permissions) {
     persistedAccount.set(Account.builder()
         .id("account-1")
         .role(role)
         .status(status)
-        .isApproved(approved)
         .permissions(permissions)
         .build());
   }
 
-  private String tokenFor(Role role) {
-    return "Bearer " + PermissionService.generateToken(Account.builder()
-        .id("account-1")
-        .role(role)
-        .build());
+  private String tokenForCurrentAccount() {
+    return "Bearer " + PermissionService.generateToken(persistedAccount.get());
   }
 
   private static Path temporaryDirectory() {

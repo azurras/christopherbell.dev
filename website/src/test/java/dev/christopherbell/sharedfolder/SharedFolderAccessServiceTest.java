@@ -39,7 +39,7 @@ class SharedFolderAccessServiceTest {
 
   @Test
   void adminAlwaysReceivesEffectiveReadAndWrite() {
-    Account account = account(Role.ADMIN, AccountStatus.ACTIVE, true, Set.of());
+    Account account = account(Role.ADMIN, AccountStatus.ACTIVE, Set.of());
 
     assertThat(sharedFolderAccess.effectivePermissions(account))
         .containsExactlyInAnyOrder(SHARED_FOLDER_READ, SHARED_FOLDER_WRITE);
@@ -48,7 +48,7 @@ class SharedFolderAccessServiceTest {
   @Test
   void storedWritePermissionAlwaysImpliesEffectiveRead() {
     Account account = account(
-        Role.USER, AccountStatus.ACTIVE, true, Set.of(SHARED_FOLDER_WRITE));
+        Role.USER, AccountStatus.ACTIVE, Set.of(SHARED_FOLDER_WRITE));
 
     assertThat(sharedFolderAccess.effectivePermissions(account))
         .containsExactlyInAnyOrder(SHARED_FOLDER_READ, SHARED_FOLDER_WRITE);
@@ -59,7 +59,7 @@ class SharedFolderAccessServiceTest {
     when(permissionService.getSelfId()).thenReturn("account-1");
     when(accountRepository.findById("account-1"))
         .thenReturn(Optional.of(account(
-            Role.USER, AccountStatus.ACTIVE, true, Set.of(SHARED_FOLDER_READ))));
+            Role.USER, AccountStatus.ACTIVE, Set.of(SHARED_FOLDER_READ))));
 
     assertThatCode(sharedFolderAccess::requireRead).doesNotThrowAnyException();
     assertThatThrownBy(sharedFolderAccess::requireWrite)
@@ -74,8 +74,8 @@ class SharedFolderAccessServiceTest {
     when(permissionService.getSelfId()).thenReturn("account-1");
     when(accountRepository.findById("account-1"))
         .thenReturn(Optional.of(account(
-            Role.USER, AccountStatus.ACTIVE, true, Set.of(SHARED_FOLDER_READ))))
-        .thenReturn(Optional.of(account(Role.USER, AccountStatus.ACTIVE, true, Set.of())));
+            Role.USER, AccountStatus.ACTIVE, Set.of(SHARED_FOLDER_READ))))
+        .thenReturn(Optional.of(account(Role.USER, AccountStatus.ACTIVE, Set.of())));
 
     assertThatCode(sharedFolderAccess::requireRead).doesNotThrowAnyException();
     assertThatThrownBy(sharedFolderAccess::requireRead)
@@ -86,17 +86,13 @@ class SharedFolderAccessServiceTest {
   }
 
   @Test
-  void missingInactiveAndUnapprovedPersistedAccountsAreDenied() {
+  void missingAndInactiveAccountsAreDenied() {
     when(permissionService.getSelfId()).thenReturn("account-1");
     when(accountRepository.findById("account-1"))
         .thenReturn(Optional.empty())
         .thenReturn(Optional.of(account(
-            Role.USER, AccountStatus.INACTIVE, true, Set.of(SHARED_FOLDER_READ))))
-        .thenReturn(Optional.of(account(
-            Role.USER, AccountStatus.ACTIVE, false, Set.of(SHARED_FOLDER_READ))));
+            Role.USER, AccountStatus.INACTIVE, Set.of(SHARED_FOLDER_READ))));
 
-    assertThatThrownBy(sharedFolderAccess::requireRead)
-        .isInstanceOf(AccessDeniedException.class);
     assertThatThrownBy(sharedFolderAccess::requireRead)
         .isInstanceOf(AccessDeniedException.class);
     assertThatThrownBy(sharedFolderAccess::requireRead)
@@ -115,7 +111,6 @@ class SharedFolderAccessServiceTest {
             .id("different-account")
             .role(Role.ADMIN)
             .status(AccountStatus.ACTIVE)
-            .isApproved(true)
             .build()))
         .thenThrow(new IllegalStateException("database"));
 
@@ -132,13 +127,11 @@ class SharedFolderAccessServiceTest {
   private Account account(
       Role role,
       AccountStatus status,
-      boolean approved,
       Set<AccountPermission> permissions) {
     return Account.builder()
         .id("account-1")
         .role(role)
         .status(status)
-        .isApproved(approved)
         .permissions(permissions)
         .build();
   }

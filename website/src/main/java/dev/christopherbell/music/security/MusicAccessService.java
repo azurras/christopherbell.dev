@@ -29,7 +29,7 @@ public final class MusicAccessService {
     return require(AccountPermission.MUSIC_WRITE, "Music write access required");
   }
 
-  /** Requires a fresh active, approved administrator account for Music administration. */
+  /** Requires a fresh active administrator account for Music administration. */
   public Account requireAdmin() {
     Account account = currentActiveApprovedAccount();
     if (account.getRole() != Role.ADMIN) {
@@ -76,7 +76,6 @@ public final class MusicAccessService {
       return accountRepository.findById(accountId)
           .filter(account -> accountId.equals(account.getId()))
           .filter(account -> account.getStatus() == AccountStatus.ACTIVE)
-          .filter(account -> Boolean.TRUE.equals(account.getIsApproved()))
           .orElseThrow(this::denied);
     } catch (AccessDeniedException exception) {
       throw exception;

@@ -47,8 +47,10 @@ public class ControllerExceptionHandler {
   public ResponseEntity<Response<?>> handleGenericException(Exception e) {
     var frameworkStatus = statusForFrameworkException(e);
     if (frameworkStatus != null) {
-      log.error(REQUEST_ERROR, e);
-      return errorResponse(REQUEST_ERROR, e.getMessage(), frameworkStatus);
+      log.warn("{} status={} type={}", REQUEST_ERROR, frameworkStatus.value(),
+          e.getClass().getSimpleName());
+      return errorResponse(
+          REQUEST_ERROR, publicFrameworkDescription(e, frameworkStatus), frameworkStatus);
     }
 
     log.error(INTERNAL_SERVER_ERROR, e);
@@ -89,7 +91,7 @@ public class ControllerExceptionHandler {
   @ExceptionHandler(AccessDeniedException.class)
   @ResponseStatus(HttpStatus.FORBIDDEN)
   public Response<?> handleAccessDeniedException(AccessDeniedException e) {
-    log.error(ACCESS_DENIED, e);
+    log.warn("{} type={}", ACCESS_DENIED, e.getClass().getSimpleName());
     return Response.builder()
         .messages(List.of(Message.builder()
             .code(ACCESS_DENIED)
@@ -107,8 +109,10 @@ public class ControllerExceptionHandler {
    */
   @ExceptionHandler(ErrorResponseException.class)
   public ResponseEntity<Response<?>> handleErrorResponseException(ErrorResponseException e) {
-    log.error(REQUEST_ERROR, e);
-    return errorResponse(REQUEST_ERROR, e.getMessage(), e.getStatusCode());
+    log.warn("{} status={} type={}", REQUEST_ERROR, e.getStatusCode().value(),
+        e.getClass().getSimpleName());
+    return errorResponse(
+        REQUEST_ERROR, publicFrameworkDescription(e, e.getStatusCode()), e.getStatusCode());
   }
 
   /**
@@ -120,7 +124,7 @@ public class ControllerExceptionHandler {
   @ExceptionHandler(ResourceExistsException.class)
   @ResponseStatus(HttpStatus.CONFLICT)
   public Response<?> handleResourceExistsException(ResourceExistsException e) {
-    log.error(RESOURCE_EXISTS, e);
+    log.warn("{} type={}", RESOURCE_EXISTS, e.getClass().getSimpleName());
     return Response.builder()
             .messages(List.of(Message.builder()
                 .code(RESOURCE_EXISTS)
@@ -139,7 +143,7 @@ public class ControllerExceptionHandler {
   @ExceptionHandler(ResourceNotFoundException.class)
   @ResponseStatus(HttpStatus.NOT_FOUND)
   public Response<?> handleResourceNotFoundException(ResourceNotFoundException e) {
-    log.error(RESOURCE_NOT_FOUND, e);
+    log.warn("{} type={}", RESOURCE_NOT_FOUND, e.getClass().getSimpleName());
     return Response.builder()
         .messages(List.of(Message.builder()
             .code(RESOURCE_NOT_FOUND)
@@ -158,7 +162,7 @@ public class ControllerExceptionHandler {
   @ExceptionHandler(InvalidRequestException.class)
   @ResponseStatus(HttpStatus.BAD_REQUEST)
   public Response<?> handleInvalidRequestException(InvalidRequestException e) {
-    log.error(INVALID_REQUEST, e);
+    log.warn("{} type={}", INVALID_REQUEST, e.getClass().getSimpleName());
     return Response.builder()
             .messages(List.of(Message.builder()
                 .code(INVALID_REQUEST)
@@ -177,7 +181,7 @@ public class ControllerExceptionHandler {
   @ExceptionHandler(InvalidTokenException.class)
   @ResponseStatus(HttpStatus.UNAUTHORIZED)
   public Response<?> handleInvalidTokenException(InvalidTokenException e) {
-    log.error(INVALID_TOKEN, e);
+    log.warn("{} type={}", INVALID_TOKEN, e.getClass().getSimpleName());
     return Response.builder()
             .messages(List.of(Message.builder()
                 .code(INVALID_TOKEN)
@@ -214,6 +218,21 @@ public class ControllerExceptionHandler {
           "org.springframework.web.bind.MethodArgumentNotValidException",
           "org.springframework.web.method.annotation.HandlerMethodValidationException" -> HttpStatus.BAD_REQUEST;
       default -> null;
+    };
+  }
+
+  private String publicFrameworkDescription(
+      Exception failure,
+      org.springframework.http.HttpStatusCode status) {
+    if (failure.getClass().getName().equals(
+        "org.springframework.http.converter.HttpMessageNotReadableException")) {
+      return "The request body is malformed or invalid.";
+    }
+    return switch (status.value()) {
+      case 400 -> "The request is invalid.";
+      case 406 -> "The requested response format is not available.";
+      case 415 -> "The request media type is not supported.";
+      default -> "The request could not be processed.";
     };
   }
 }

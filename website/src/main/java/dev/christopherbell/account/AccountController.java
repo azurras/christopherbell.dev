@@ -28,6 +28,7 @@ import dev.christopherbell.libs.api.model.Response;
 import dev.christopherbell.permission.PermissionService;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
+import java.net.URI;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -80,36 +81,11 @@ public class AccountController {
   private final BrowserSecurityProperties browserSecurityProperties;
   private final BrowserSessionService browserSessions;
 
-    /**
-   * Approves a pending or unapproved account.
-   *
-   * <p>Requires {@code ADMIN} authority.</p>
-   *
-   * @param accountId the ID of the account to approve
-   * @return HTTP 200 with the updated {@link AccountDetail} in the response payload
-   * @throws Exception if approval fails or the account cannot be found
-   */
-  @PostMapping(
-      value = V20250903 + "/approve/{accountId}",
-      consumes = MediaType.APPLICATION_JSON_VALUE,
-      produces = MediaType.APPLICATION_JSON_VALUE
-  )
-  @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
-  public ResponseEntity<Response<AccountDetail>> approveAccount(
-      @PathVariable String accountId
-  ) throws Exception {
-    return new ResponseEntity<>(
-        Response.<AccountDetail>builder()
-            .payload(accountService.approveAccount(accountId))
-            .success(true)
-            .build(), HttpStatus.OK);
-  }
-
   /**
    * Creates a new account.
    *
    * @param accountCreateRequest the account creation request payload
-   * @return HTTP 200 with the created {@link AccountDetail} in the response payload
+   * @return HTTP 201 with the created account and its canonical resource location
    * @throws Exception if validation fails or creation cannot be completed
    */
   @PostMapping(
@@ -120,11 +96,13 @@ public class AccountController {
   public ResponseEntity<Response<AccountDetail>> createAccount(
       @Valid @RequestBody AccountCreateRequest accountCreateRequest
   ) throws Exception {
-    return new ResponseEntity<>(
-        Response.<AccountDetail>builder()
-            .payload(accountService.createAccount(accountCreateRequest))
+    var account = accountService.createAccount(accountCreateRequest);
+    var location = URI.create("/api/accounts" + V20250903 + "/" + account.getId());
+    return ResponseEntity.created(location)
+        .body(Response.<AccountDetail>builder()
+            .payload(account)
             .success(true)
-            .build(), HttpStatus.OK);
+            .build());
   }
 
   /**
@@ -138,7 +116,6 @@ public class AccountController {
    */
   @DeleteMapping(
       value = V20250903 + "/{accountId}",
-      consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
@@ -157,7 +134,6 @@ public class AccountController {
   /** Deletes an account using the resumable workflow and returns its final progress. */
   @DeleteMapping(
       value = V20260726 + "/{accountId}",
-      consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   @PreAuthorize("@permissionService.hasAuthority('ADMIN')")
@@ -532,7 +508,7 @@ public class AccountController {
         Response.<AccountDetail>builder()
             .payload(accountService.updateAccount(request))
             .success(true)
-            .build(), HttpStatus.ACCEPTED);
+            .build(), HttpStatus.OK);
   }
 
   /**

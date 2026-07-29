@@ -29,9 +29,9 @@ class CommandCenterAccessServiceTest {
   }
 
   @Test
-  void activeApprovedPersistedAdminHasFreshAccess() {
+  void activePersistedAdminHasFreshAccess() {
     when(accountRepository.findById("admin-1")).thenReturn(Optional.of(account(
-        Role.ADMIN, AccountStatus.ACTIVE, true)));
+        Role.ADMIN, AccountStatus.ACTIVE)));
 
     assertThat(accessService.hasFreshAdminAccess()).isTrue();
   }
@@ -39,7 +39,7 @@ class CommandCenterAccessServiceTest {
   @Test
   void persistedNonAdminIsDenied() {
     when(accountRepository.findById("admin-1")).thenReturn(Optional.of(account(
-        Role.USER, AccountStatus.ACTIVE, true)));
+        Role.USER, AccountStatus.ACTIVE)));
 
     assertThat(accessService.hasFreshAdminAccess()).isFalse();
   }
@@ -47,15 +47,7 @@ class CommandCenterAccessServiceTest {
   @Test
   void suspendedAdminIsDenied() {
     when(accountRepository.findById("admin-1")).thenReturn(Optional.of(account(
-        Role.ADMIN, AccountStatus.SUSPENDED, true)));
-
-    assertThat(accessService.hasFreshAdminAccess()).isFalse();
-  }
-
-  @Test
-  void unapprovedAdminIsDenied() {
-    when(accountRepository.findById("admin-1")).thenReturn(Optional.of(account(
-        Role.ADMIN, AccountStatus.ACTIVE, false)));
+        Role.ADMIN, AccountStatus.SUSPENDED)));
 
     assertThat(accessService.hasFreshAdminAccess()).isFalse();
   }
@@ -88,12 +80,11 @@ class CommandCenterAccessServiceTest {
     assertThat(accessService.hasFreshAdminAccess()).isFalse();
   }
 
-  private Account account(Role role, AccountStatus status, boolean approved) {
+  private Account account(Role role, AccountStatus status) {
     return Account.builder()
         .id("admin-1")
         .role(role)
         .status(status)
-        .isApproved(approved)
         .build();
   }
 }

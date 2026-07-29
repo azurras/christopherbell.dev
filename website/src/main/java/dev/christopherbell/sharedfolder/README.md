@@ -24,7 +24,7 @@ feature.
   treat that view as unavailable; Windows providers still enforce the native reparse-point bit.
   Deployable visible writes fail with `503` without a retained mutation capability.
 - `security` reloads the authenticated account from MongoDB for every decision. A persisted
-  active approved account needs a shared-folder capability; ADMIN has read and write implicitly,
+  active account needs a shared-folder capability; ADMIN has read and write implicitly,
   and write implies read. JWTs intentionally carry no shared-folder capability.
 - `audit` persists bounded, expiring operation events through a best-effort sink. Request and
   service boundaries inject the recorder for accepted work, safe rejection categories, logical
@@ -62,7 +62,7 @@ Unavailable` and never falls back to an unchecked production path.
 - `GET /shared` is a public, data-free HTML shell only. It contains no folder data and the browser
   redirects unauthenticated visitors to login before making any protected read request.
 - Every `/api/shared-folder/2026-07-17/**` route first reloads the authenticated account through
-  `SharedFolderAccessService.requireRead()`. Revoked, inactive, unapproved, or missing accounts
+  `SharedFolderAccessService.requireRead()`. Revoked, inactive, or missing accounts
   are denied before a filesystem service runs. The exact versioned API prefix sets
   `Cache-Control: private, no-store` before security or controller handling, so successful reads,
   range/HEAD responses, and protected errors cannot be retained by browser or intermediary caches.

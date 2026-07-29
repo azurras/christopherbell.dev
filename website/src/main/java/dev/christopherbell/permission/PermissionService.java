@@ -3,6 +3,7 @@ package dev.christopherbell.permission;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountLoginRequest;
 import dev.christopherbell.account.model.AccountStatus;
+import dev.christopherbell.account.auth.AccountSecurityFingerprint;
 import dev.christopherbell.libs.api.exception.InvalidTokenException;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.libs.security.PasswordUtil;
@@ -69,7 +70,6 @@ public class PermissionService {
   ) throws NoSuchAlgorithmException, InvalidKeySpecException {
     if (accountLoginRequest == null || account == null
         || accountLoginRequest.password() == null
-        || account.getPasswordSalt() == null || account.getPasswordSalt().isBlank()
         || account.getPasswordHash() == null || account.getPasswordHash().isBlank()) {
       return false;
     }
@@ -88,6 +88,7 @@ public class PermissionService {
   public static String generateToken(Account account) {
     var claims = new HashMap<String, Object>();
     claims.put(Account.PROPERTY_ROLE, account.getRole());
+    claims.put(AccountSecurityFingerprint.CLAIM, AccountSecurityFingerprint.from(account));
 
     return Jwts.builder()
         .claims(claims)
@@ -229,14 +230,6 @@ public class PermissionService {
       case MOD -> 2;
       case ADMIN -> 3;
     };
-  }
-
-  public static boolean isAccountApproved(Account account) throws InvalidTokenException {
-    if (account.getIsApproved()) {
-      return true;
-    } else {
-      throw new InvalidTokenException("Account is not approved.");
-    }
   }
 
   /**

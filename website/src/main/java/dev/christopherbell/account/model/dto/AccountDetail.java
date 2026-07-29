@@ -21,7 +21,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class AccountDetail {
   private String id;
-  private String approvedBy;
   private String createdBy;
 
   @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "uuuu-MM-dd'T'HH:mm:ss.SSS'Z'", timezone = "UTC")
@@ -30,7 +29,6 @@ public class AccountDetail {
   private String email;
   private Boolean federationEnabled;
   private String firstName;
-  private Boolean isApproved;
   private String lastName;
 
   @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "uuuu-MM-dd'T'HH:mm:ss.SSS'Z'", timezone = "UTC")

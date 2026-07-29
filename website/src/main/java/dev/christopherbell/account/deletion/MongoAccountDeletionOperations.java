@@ -34,7 +34,6 @@ public class MongoAccountDeletionOperations implements AccountDeletionOperations
         .setOnInsert("lastName", "User")
         .setOnInsert("role", Role.USER)
         .setOnInsert("status", AccountStatus.INACTIVE)
-        .setOnInsert("isApproved", false)
         .setOnInsert("permissions", Set.of())
         .setOnInsert("followingIds", Set.of());
     mongo.upsert(exact("_id", TOMBSTONE), tombstone, Account.class);

@@ -88,10 +88,8 @@ public class PasswordResetService {
     }
 
     try {
-      var salt = PasswordUtil.generateSalt();
-      var hash = PasswordUtil.hashPassword(request.password(), salt);
-      account.setPasswordSalt(salt);
-      account.setPasswordHash(hash);
+      account.setPasswordSalt(null);
+      account.setPasswordHash(PasswordUtil.hashPassword(request.password()));
       clearPasswordResetToken(account);
       account.setLastUpdatedOn(Instant.now());
       accountRepository.save(account);
