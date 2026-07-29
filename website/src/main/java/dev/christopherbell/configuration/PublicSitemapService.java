@@ -15,6 +15,7 @@ import java.util.TreeSet;
 import java.util.function.Function;
 import javax.xml.stream.XMLOutputFactory;
 import javax.xml.stream.XMLStreamException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -48,6 +49,7 @@ public class PublicSitemapService {
   private final Clock clock;
   private final int maxUrlsPerDocument;
 
+  @Autowired
   public PublicSitemapService(
       AccountRepository accounts,
       PostRepository posts,
