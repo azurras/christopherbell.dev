@@ -10,7 +10,7 @@ import dev.christopherbell.post.expiration.PostExpirationService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.model.PostFeedItem;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.HashSet;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,11 +24,13 @@ public class PostInteractionService {
   private final PostMapper postMapper;
   private final NotificationDeliveryService notificationDeliveryService;
   private final PostExpirationService postExpirationService;
+  private final Clock clock;
 
   public PostFeedItem toggleLike(String postId, String selfId)
       throws ResourceNotFoundException {
     var post = postRepository.findById(postId)
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Post with id %s not found.", postId)));
+    var now = clock.instant();
     postExpirationService.ensureActive(post);
     var threadRoot = postExpirationService.activeThreadRootForReply(post);
     if (post.getLikedBy() == null) {
@@ -44,11 +46,14 @@ public class PostInteractionService {
       post.setLikesCount((post.getLikesCount() == null ? 0 : post.getLikesCount()) + 1);
       liked = true;
     }
-    post.setLastUpdatedOn(Instant.now());
+    post.setLastUpdatedOn(now);
+    if (liked && threadRoot == null) {
+      post.setLastExtendedOn(now);
+    }
     postExpirationService.refreshExpiration(post);
     postRepository.save(post);
     postExpirationService.synchronizeReplyExpirations(post);
-    postExpirationService.refreshThreadRootExpiration(threadRoot, liked ? 1 : -1);
+    postExpirationService.refreshThreadRootExpiration(threadRoot, liked ? 1 : -1, liked ? now : null);
     var author = accountRepository.findById(post.getAccountId())
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", post.getAccountId())));
     if (liked && !selfId.equals(author.getId())) {
@@ -91,6 +96,8 @@ public class PostInteractionService {
         .replyCount((int) postRepository.countByParentId(post.getId()))
         .createdOn(post.getCreatedOn())
         .lastUpdatedOn(post.getLastUpdatedOn())
+        .lastExtendedOn(post.getLastExtendedOn())
+        .topics(post.getTopics())
         .expiresOn(post.getExpiresOn())
         .build();
   }

@@ -13,6 +13,8 @@ import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
 import dev.christopherbell.post.preview.PostLinkPreviewService;
+import dev.christopherbell.post.topic.PostTopicExtractor;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.UUID;
@@ -32,6 +34,8 @@ public class PostCreationService {
   private final NotificationDeliveryService notificationDeliveryService;
   private final PostLinkPreviewService postLinkPreviewService;
   private final PostExpirationService postExpirationService;
+  private final PostTopicExtractor postTopicExtractor;
+  private final Clock clock;
 
   /** Creates a post or reply for the resolved current account id. */
   public PostDetail createPost(PostCreateRequest request, Supplier<String> selfIdSupplier)
@@ -49,7 +53,7 @@ public class PostCreationService {
         .findById(selfId)
         .orElseThrow(() -> new ResourceNotFoundException(String.format("Account with id %s not found.", selfId)));
     ensureActiveAuthor(account);
-    var now = Instant.now();
+    var now = clock.instant();
 
     String parentId = request.parentId();
     String rootId;
@@ -89,11 +93,12 @@ public class PostCreationService {
         .createdOn(now)
         .lastUpdatedOn(now)
         .expiresOn(postExpirationService.expirationForNewPost(now, inheritedReplyExpiration))
+        .topics(postTopicExtractor.extract(text))
         .linkPreviews(postLinkPreviewService.resolveForText(text))
         .build();
 
     var saved = postRepository.save(post);
-    postExpirationService.refreshThreadRootExpirationForNewReply(saved);
+    postExpirationService.refreshThreadRootExpirationForNewReply(saved, now);
     notificationDeliveryService.createMentionNotifications(saved, account);
     if (parentAuthor != null) {
       notificationDeliveryService.createPostCommentNotification(saved, account, parentAuthor);

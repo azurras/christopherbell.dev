@@ -30,5 +30,7 @@ public record PostFeedItem(
     Instant createdOn,
     Instant lastUpdatedOn,
     Instant editedOn,
+    Instant lastExtendedOn,
+    List<PostTopic> topics,
     Instant expiresOn
 ) {}

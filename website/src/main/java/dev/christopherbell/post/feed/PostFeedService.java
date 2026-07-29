@@ -262,6 +262,8 @@ public class PostFeedService {
         .createdOn(post.getCreatedOn())
         .lastUpdatedOn(post.getLastUpdatedOn())
         .editedOn(post.getEditedOn())
+        .lastExtendedOn(post.getLastExtendedOn())
+        .topics(post.getTopics())
         .expiresOn(post.getExpiresOn())
         .build();
   }

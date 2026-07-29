@@ -116,24 +116,33 @@ public class PostExpirationService {
   }
 
   /** Updates a root's reply-like extension count and synchronizes reply expirations. */
-  public void refreshThreadRootExpiration(Post threadRoot, int replyLikeDelta) {
+  public void refreshThreadRootExpiration(
+      Post threadRoot, int replyLikeDelta, Instant extendedOn) {
     if (!expirationEnabled || threadRoot == null || replyLikeDelta == 0) {
       return;
     }
     var count = threadRoot.getThreadReplyLikesCount() != null ? threadRoot.getThreadReplyLikesCount() : 0;
     threadRoot.setThreadReplyLikesCount(Math.max(0, count + replyLikeDelta));
-    threadRoot.setLastUpdatedOn(Instant.now());
+    threadRoot.setLastUpdatedOn(extendedOn != null ? extendedOn : Instant.now());
+    if (replyLikeDelta > 0) {
+      threadRoot.setLastExtendedOn(Objects.requireNonNull(extendedOn, "extendedOn"));
+    }
     refreshExpiration(threadRoot);
     postRepository.save(threadRoot);
     synchronizeReplyExpirations(threadRoot);
   }
 
   /** Refreshes the thread root after a new reply has been saved. */
-  public void refreshThreadRootExpirationForNewReply(Post reply) throws ResourceNotFoundException {
+  public void refreshThreadRootExpirationForNewReply(Post reply, Instant extendedOn)
+      throws ResourceNotFoundException {
     if (!expirationEnabled || !isReply(reply)) {
       return;
     }
-    activeThreadRootForReply(reply);
+    var threadRoot = activeThreadRootForReply(reply);
+    threadRoot.setLastExtendedOn(Objects.requireNonNull(extendedOn, "extendedOn"));
+    threadRoot.setLastUpdatedOn(extendedOn);
+    postRepository.save(threadRoot);
+    synchronizeReplyExpirations(threadRoot);
   }
 
   /** Returns the root expiration a new reply should inherit. */
