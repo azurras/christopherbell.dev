@@ -4,6 +4,7 @@ import static org.mockito.Mockito.when;
 
 import dev.christopherbell.blog.model.BlogProperties;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ public class BlogServiceTest {
   }
 
   @Test
-  public void testGetPostById_success() throws InvalidRequestException {
+  public void testGetPostById_success() throws InvalidRequestException, ResourceNotFoundException {
 
     when(blogProperties.getPosts()).thenReturn(BlogStub.getPostsStub());
 
@@ -51,6 +52,15 @@ public class BlogServiceTest {
   public void testGetPostById_failure_doesNotExist() {
     Assertions.assertThrows(InvalidRequestException.class, () -> {
       blogService.getPostById("-1");
+    });
+  }
+
+  @Test
+  public void testGetPostById_failure_validButAbsentIdIsNotFound() {
+    when(blogProperties.getPosts()).thenReturn(BlogStub.getPostsStub());
+
+    Assertions.assertThrows(ResourceNotFoundException.class, () -> {
+      blogService.getPostById("00000000-0000-0000-0000-000000000000");
     });
   }
 

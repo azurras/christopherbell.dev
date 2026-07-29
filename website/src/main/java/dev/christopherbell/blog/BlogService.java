@@ -3,6 +3,7 @@ package dev.christopherbell.blog;
 import dev.christopherbell.blog.model.BlogProperties;
 import dev.christopherbell.blog.model.BlogResponse;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -25,22 +26,30 @@ public class BlogService {
    *
    * @param id the requested blog post ID
    * @return a {@link BlogResponse} containing the matching post
-   * @throws InvalidRequestException if the ID is blank or no post matches
+   * @throws InvalidRequestException if the ID is blank
+   * @throws ResourceNotFoundException if no post matches the valid ID
    */
-  public BlogResponse getPostById(String id) throws InvalidRequestException {
+  public BlogResponse getPostById(String id)
+      throws InvalidRequestException, ResourceNotFoundException {
     if (Objects.isNull(id) || id.isBlank()) {
       throw new InvalidRequestException("Id can't be null or blank");
     }
+    final UUID postId;
+    try {
+      postId = UUID.fromString(id);
+    } catch (IllegalArgumentException e) {
+      throw new InvalidRequestException("Id must be a valid UUID", e);
+    }
 
     for (var post : blogProperties.getPosts()) {
-      if (post.getId().equals(UUID.fromString(id))) {
+      if (post.getId().equals(postId)) {
         return BlogResponse.builder()
             .posts(List.of(post))
             .build();
       }
     }
 
-    throw new InvalidRequestException("No Post Found");
+    throw new ResourceNotFoundException("No Post Found");
   }
 
   /**

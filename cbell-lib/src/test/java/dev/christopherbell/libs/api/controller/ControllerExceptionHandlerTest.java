@@ -19,6 +19,7 @@ import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.libs.api.model.Response;
 import java.io.ByteArrayInputStream;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -31,6 +32,7 @@ import org.springframework.web.ErrorResponseException;
 import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.slf4j.LoggerFactory;
 
 class ControllerExceptionHandlerTest {
@@ -72,6 +74,14 @@ class ControllerExceptionHandlerTest {
             HttpStatus.BAD_REQUEST,
             "REQUEST_ERROR",
             "The request body is malformed or invalid.",
+            Level.DEBUG,
+            null),
+        entityCase(
+            () -> handler.handleGenericException(new MethodArgumentTypeMismatchException(
+                "not-a-uuid", UUID.class, "id", null, new IllegalArgumentException("invalid UUID"))),
+            HttpStatus.BAD_REQUEST,
+            "REQUEST_ERROR",
+            "The request is invalid.",
             Level.DEBUG,
             null),
         entityCase(
