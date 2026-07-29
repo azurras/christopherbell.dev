@@ -57,6 +57,10 @@ Owns application-wide Spring and web infrastructure.
   when the immediate remote address is listed in `client-ip.trusted-proxies`.
 - MongoDB auditing, fixed-name leases, and immutable versioned migrations under
   `mongo`.
+- `FederationSecretApplicationContextInitializer` resolves the production
+  ActivityPub identity-encryption key before configuration binding. It honors
+  an explicit environment secret or atomically creates and reuses one 32-byte
+  file beneath the existing protected production config directory.
 - Shared configuration properties that do not yet need a subpackage.
 - `SharedFolderProperties` binds `app.shared-folder` storage roots, resource limits, retention
   windows, and the feature gate. Local/test roots stay build-owned; production uses

@@ -411,8 +411,8 @@ token again. `deploy` fetches the exact latest `origin/main` commit into a clean
 detached Windows worktree, builds and tests it, validates it on port 8081,
 atomically switches the active release, and rolls back when port-8080
 or public-route verification fails. Candidate and production checks cover the
-home, blog, WFL, Canes tracker, crawler metadata, favicon, liveness, and
-readiness routes. Protected `deploy.json` configuration lists both
+home, blog, WFL, Canes tracker, crawler metadata, ActivityPub NodeInfo, favicon,
+liveness, and readiness routes. Protected `deploy.json` configuration lists both
 `https://christopherbell.dev/` and `https://www.christopherbell.dev/` in
 `publicUrls`; `publicUrl` remains the canonical `www` root. Existing protected
 configurations that predate `publicUrls` derive the apex root from that canonical

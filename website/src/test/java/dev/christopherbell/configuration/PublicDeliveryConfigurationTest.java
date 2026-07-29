@@ -75,13 +75,17 @@ class PublicDeliveryConfigurationTest {
   }
 
   @Test
-  void productionFederationDefaultsRemainDisabledAndPeerless() throws Exception {
+  void productionFederationActivatesOnlyDiscoveryAndRemainsPeerless() throws Exception {
     var configuration = YAML.readTree(RESOURCES.resolve("application-prod.yml").toFile());
 
     assertThat(configuration.at("/app/federation/discovery-enabled").asText())
-        .isEqualTo("${APP_FEDERATION_DISCOVERY_ENABLED:false}");
+        .isEqualTo("${APP_FEDERATION_DISCOVERY_ENABLED:true}");
+    assertThat(configuration.at("/app/federation/inbound-enabled").asText())
+        .isEqualTo("${APP_FEDERATION_INBOUND_ENABLED:false}");
     assertThat(configuration.at("/app/federation/outbound-enabled").asText())
         .isEqualTo("${APP_FEDERATION_OUTBOUND_ENABLED:false}");
+    assertThat(configuration.at("/app/federation/key-encryption-secret-file").asText())
+        .contains("C:/ProgramData/christopherbell.dev/config/");
     assertThat(configuration.at("/app/federation/outbound/peers").isEmpty()).isTrue();
     assertThat(configuration.at("/app/federation/outbound/development-loopback-enabled").asBoolean())
         .isFalse();

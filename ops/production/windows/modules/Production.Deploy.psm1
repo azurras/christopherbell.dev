@@ -9,7 +9,9 @@ $script:ProductionSmokePaths = @(
     '/sitemap.xml',
     '/favicon.ico',
     '/actuator/health/liveness',
-    '/actuator/health/readiness'
+    '/actuator/health/readiness',
+    '/.well-known/nodeinfo',
+    '/nodeinfo/2.1'
 )
 function Resolve-OriginMainRelease {
     param($Config)

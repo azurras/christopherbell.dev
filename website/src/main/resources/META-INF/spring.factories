@@ -1,2 +1,3 @@
 org.springframework.context.ApplicationContextInitializer=\
+dev.christopherbell.configuration.FederationSecretApplicationContextInitializer,\
 dev.christopherbell.configuration.ProductionSettingsApplicationContextInitializer
