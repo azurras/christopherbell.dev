@@ -3,6 +3,7 @@ package dev.christopherbell.account;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import java.util.List;
+import java.util.Collection;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.repository.MongoRepository;
@@ -91,6 +92,14 @@ public interface AccountRepository extends MongoRepository<Account, String> {
    */
   Optional<Account> findByUsernameIgnoreCase(String username);
 
+  /** Resolves an active account that explicitly exposes a local federation actor. */
+  Optional<Account> findByUsernameIgnoreCaseAndStatusAndFederationEnabledTrue(
+      String username,
+      AccountStatus status);
+
+  /** Counts accounts in one lifecycle state for aggregate public metadata. */
+  long countByStatus(AccountStatus status);
+
   /**
    * Finds active account suggestions whose usernames start with a prefix.
    *
@@ -111,4 +120,16 @@ public interface AccountRepository extends MongoRepository<Account, String> {
    * @return number of follower accounts
    */
   long countByFollowingIdsContaining(String accountId);
+
+  /** Loads a bounded local-only following projection. */
+  List<Account> findByIdInAndStatusAndFederationEnabledTrueOrderByUsernameAsc(
+      Collection<String> accountIds,
+      AccountStatus status,
+      Pageable pageable);
+
+  /** Loads a bounded local-only follower projection. */
+  List<Account> findByFollowingIdsContainingAndStatusAndFederationEnabledTrueOrderByUsernameAsc(
+      String accountId,
+      AccountStatus status,
+      Pageable pageable);
 }
