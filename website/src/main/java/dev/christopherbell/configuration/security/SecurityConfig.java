@@ -75,6 +75,7 @@ public class SecurityConfig {
       "/",
       "GET:/robots.txt",
       "GET:/sitemap.xml",
+      "GET:/sitemap-*.xml",
       "GET:/actuator/health/liveness",
       "GET:/actuator/health/readiness",
       "GET:/.well-known/webfinger",

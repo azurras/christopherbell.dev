@@ -81,6 +81,9 @@ public interface PostRepository extends MongoRepository<Post, String> {
   /** Finds posts whose expiration timestamp is at or before the provided instant. */
   List<Post> findByExpiresOnLessThanEqual(Instant cutoff);
 
+  /** Pages posts that remain publicly available beyond the provided instant. */
+  Page<Post> findByExpiresOnAfter(Instant cutoff, Pageable pageable);
+
   /** Finds posts that have not been assigned an expiration timestamp yet. */
   List<Post> findByExpiresOnIsNull();
 

@@ -7,7 +7,7 @@
     <meta name="author" content="Christopher Bell (cbell7@icloud.com)" />
     <th:block th:replace="~{fragments/social-preview :: socialPreview(${socialTitle}, ${socialDescription}, ${socialUrl}, 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
 
-    <title>CB | Restaurant</title>
+    <title th:text="${socialTitle}">CB | Restaurant</title>
 
     <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}"/>
 </head>
@@ -18,8 +18,8 @@
         <section class="site-hero site-hero-lunch" aria-labelledby="restaurantTitle">
             <div class="container">
                 <p class="home-kicker">What's For Lunch</p>
-                <h1 id="restaurantTitle">Restaurant</h1>
-                <p id="restaurantHeroText">Details, ratings, and ways to get there.</p>
+                <h1 id="restaurantTitle" th:text="${restaurantName}">Restaurant</h1>
+                <p id="restaurantHeroText" th:text="${restaurantHeroMetadata}">Details, ratings, and ways to get there.</p>
             </div>
         </section>
         <section class="site-content">

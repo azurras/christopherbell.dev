@@ -3,6 +3,7 @@ package dev.christopherbell.account.profile;
 import dev.christopherbell.account.AccountMapper;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.account.model.dto.AccountProfile;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
@@ -41,7 +42,7 @@ public class AccountProfileService {
   public Account findBySanitizedUsername(String username) throws ResourceNotFoundException {
     var sanitizedUsername = UsernameSanitizer.sanitize(username);
     return accountRepository
-        .findByUsername(sanitizedUsername)
+        .findByUsernameAndStatus(sanitizedUsername, AccountStatus.ACTIVE)
         .orElseThrow(
             () -> new ResourceNotFoundException(
                 String.format("Account with username %s not found.", sanitizedUsername)));

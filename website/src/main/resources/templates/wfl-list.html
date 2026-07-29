@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="author" content="Christopher Bell (cbell7@icloud.com)" />
-    <th:block th:replace="~{fragments/social-preview :: socialPreview(${socialTitle}, ${listDescription}, 'https://www.christopherbell.dev/wfl', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
+    <th:block th:replace="~{fragments/social-preview :: socialPreview(${socialTitle}, ${listDescription}, ${socialUrl}, 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
 
     <title th:text="${socialTitle}">CB | What's For Lunch</title>
 

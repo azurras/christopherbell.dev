@@ -3,7 +3,8 @@
 <head>
   <th:block th:fragment="socialPreview(title, description, url, image, imageAlt)">
     <meta name="description" th:content="${description}" />
-    <link rel="canonical" th:href="${url}" />
+    <meta th:if="${robotsContent != null}" name="robots" th:content="${robotsContent}" />
+    <link th:if="${url != null}" rel="canonical" th:href="${url}" />
 
     <meta property="og:site_name" content="christopherbell.dev" />
     <meta property="og:locale" content="en_US" />

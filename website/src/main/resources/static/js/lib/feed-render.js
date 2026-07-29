@@ -564,7 +564,7 @@ export function createFeedItem(post, ctx) {
           </div>
           <div class="post-meta">
             <div class="post-chips">${postStatusChips(post, liked)}</div>
-            <button class="post-menu-btn" data-post="${post.id}" aria-label="More actions">
+            <button class="post-menu-btn" type="button" data-post="${post.id}" aria-label="More actions">
               <i class="fa fa-ellipsis-h" aria-hidden="true"></i>
             </button>
             <div class="post-menu d-none">
@@ -589,17 +589,17 @@ export function createFeedItem(post, ctx) {
         ${richEmbedMarkup}
         ${previewMarkup ? `<div class="post-link-previews">${previewMarkup}</div>` : ''}
         <div class="post-actions">
-          <button class="post-action post-reply-btn" data-post="${post.id}" aria-label="Reply">
+          <button class="post-action post-reply-btn" type="button" data-post="${post.id}" aria-label="Reply">
             <i class="fa fa-comment-o" aria-hidden="true"></i>
             <span class="reply-count">${repliesCount}</span>
           </button>
-          <button class="post-action post-keep-alive-btn ${keepAlive.selected ? 'is-kept-alive' : ''}" data-post="${post.id}" data-kept-alive="${keepAlive.selected}" aria-label="${keepAlive.ariaLabel}">
+          <button class="post-action post-keep-alive-btn ${keepAlive.selected ? 'is-kept-alive' : ''}" type="button" data-post="${post.id}" data-kept-alive="${keepAlive.selected}" aria-label="${keepAlive.ariaLabel}">
             <i class="fa ${liked ? 'fa-heart' : 'fa-heart-o'}" aria-hidden="true"></i>
             <span class="keep-alive-label">${keepAlive.label}</span>
             <span class="keep-alive-count" aria-label="${keepAlive.count} keep-alives">${keepAlive.count}</span>
             <span class="keep-alive-feedback" aria-live="polite"></span>
           </button>
-          <button class="post-action post-replies-toggle" data-post="${post.id}" aria-expanded="false">
+          <button class="post-action post-replies-toggle" type="button" data-post="${post.id}" aria-expanded="false">
             <i class="fa fa-comments-o" aria-hidden="true"></i>
             <span class="toggle-label">Replies</span>
           </button>
