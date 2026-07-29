@@ -340,18 +340,65 @@ export function expiresSoon(post, now = Date.now()) {
   return delta > 0 && delta <= 12 * 60 * 60 * 1000;
 }
 
+/** Returns the complete accessible presentation for one keep-alive state. */
+export function keepAlivePresentation(keptAlive, count) {
+  const selected = keptAlive === true;
+  return {
+    ariaLabel: selected
+      ? 'Remove keep alive and 24 hours'
+      : 'Keep alive and add 24 hours',
+    count: Number.isSafeInteger(count) && count >= 0 ? count : 0,
+    label: selected ? 'Kept alive' : 'Keep alive · +24h',
+    selected
+  };
+}
+
 export function postStatusChips(post, liked) {
   const chips = [];
   if (post.level && post.level > 0) chips.push(['reply', 'Reply']);
-  if (liked) chips.push(['liked', 'Liked']);
+  if (liked) chips.push(['kept-alive', 'Kept alive']);
   if (post.editedOn) chips.push(['edited', 'Edited']);
   if (isRecent(post)) chips.push(['new', 'New']);
   if (expiresSoon(post)) chips.push(['expires', 'Expires soon']);
   return chips.map(([type, label]) => `<span class="post-chip post-chip-${type}">${label}</span>`).join('');
 }
 
-function postPermalink(postId) {
-  return `${window.location.origin}/p/${encodeURIComponent(postId)}`;
+function postPermalink(postId, origin = window.location.origin) {
+  return `${origin}/p/${encodeURIComponent(postId)}`;
+}
+
+/** Shares a canonical post link, falling back to clipboard or a copy prompt. */
+export async function sharePost(postId, browser = window) {
+  const url = postPermalink(postId, browser.location.origin);
+  const navigatorApi = browser.navigator || {};
+  if (typeof navigatorApi.share === 'function') {
+    try {
+      await navigatorApi.share({ title: 'Void post', url });
+      return 'shared';
+    } catch (error) {
+      if (error?.name === 'AbortError') return 'cancelled';
+      throw error;
+    }
+  }
+  if (typeof navigatorApi.clipboard?.writeText === 'function') {
+    await navigatorApi.clipboard.writeText(url);
+    return 'copied';
+  }
+  browser.prompt?.('Copy post link', url);
+  return 'prompted';
+}
+
+function renderKeepAlivePresentation(button, presentation) {
+  button.dataset.keptAlive = String(presentation.selected);
+  button.classList.toggle('is-kept-alive', presentation.selected);
+  button.setAttribute('aria-label', presentation.ariaLabel);
+  const label = button.querySelector('.keep-alive-label');
+  const count = button.querySelector('.keep-alive-count');
+  if (label) label.textContent = presentation.label;
+  if (count) {
+    count.textContent = presentation.count;
+    count.setAttribute('aria-label', `${presentation.count} keep-alives`);
+  }
 }
 
 function expireFeedItem(item, post, ctx) {
@@ -490,6 +537,7 @@ export function createFeedItem(post, ctx) {
   const avatarInitial = (post.username || 'U')[0].toUpperCase();
   const liked = !!post.liked;
   const likes = post.likesCount || 0;
+  const keepAlive = keepAlivePresentation(liked, likes);
   const repliesCount = post.replyCount || 0;
   const shouldCollapse = (post.text || '').length > COLLAPSE_AT;
   const previewMarkup = (post.linkPreviews || [])
@@ -521,6 +569,7 @@ export function createFeedItem(post, ctx) {
             </button>
             <div class="post-menu d-none">
               <button class="post-copy-btn" type="button" data-post="${post.id}">Copy link</button>
+              <button class="post-share-btn" type="button" data-post="${post.id}">Share</button>
               <button class="post-report-btn" type="button" data-post="${post.id}">Report</button>
               ${ctx.isLoggedIn() && typeof ctx.onHideThread === 'function' ? `<button class="post-hide-thread-btn" type="button" data-post="${post.id}">Hide thread</button>` : ''}
               ${ctx.canEdit(post) ? `<button class="post-edit-btn" type="button" data-post="${post.id}">Edit</button>` : ''}
@@ -544,9 +593,11 @@ export function createFeedItem(post, ctx) {
             <i class="fa fa-comment-o" aria-hidden="true"></i>
             <span class="reply-count">${repliesCount}</span>
           </button>
-          <button class="post-action post-like-btn ${liked ? 'is-liked' : ''}" data-post="${post.id}" data-liked="${liked}" aria-label="Like">
+          <button class="post-action post-keep-alive-btn ${keepAlive.selected ? 'is-kept-alive' : ''}" data-post="${post.id}" data-kept-alive="${keepAlive.selected}" aria-label="${keepAlive.ariaLabel}">
             <i class="fa ${liked ? 'fa-heart' : 'fa-heart-o'}" aria-hidden="true"></i>
-            <span class="like-count">${likes}</span>
+            <span class="keep-alive-label">${keepAlive.label}</span>
+            <span class="keep-alive-count" aria-label="${keepAlive.count} keep-alives">${keepAlive.count}</span>
+            <span class="keep-alive-feedback" aria-live="polite"></span>
           </button>
           <button class="post-action post-replies-toggle" data-post="${post.id}" aria-expanded="false">
             <i class="fa fa-comments-o" aria-hidden="true"></i>
@@ -594,29 +645,32 @@ export function createFeedItem(post, ctx) {
     window.location.href = `/p/${encodeURIComponent(post.id)}`;
   });
 
-  // Wire like toggle
-  const likeBtn = item.querySelector('.post-like-btn');
-  if (likeBtn) {
-    likeBtn.addEventListener('click', async () => {
+  // Keep the compatibility Like API behind the visible Keep alive contract.
+  const keepAliveBtn = item.querySelector('.post-keep-alive-btn');
+  if (keepAliveBtn) {
+    keepAliveBtn.addEventListener('click', async () => {
       if (!ctx.isLoggedIn()) { window.location.href = loginRedirectUrl(); return; }
       try {
         const updated = await ctx.onLike(post.id);
-        const countEl = likeBtn.querySelector('.like-count');
-        if (countEl) countEl.textContent = updated.likesCount ?? 0;
-        const isLiked = !!updated.liked;
-        likeBtn.dataset.liked = isLiked;
-        likeBtn.classList.toggle('is-liked', isLiked);
-        likeBtn.classList.add('like-pulse');
-        setTimeout(() => likeBtn.classList.remove('like-pulse'), 420);
-        const icon = likeBtn.querySelector('i');
+        const presentation = keepAlivePresentation(!!updated.liked, updated.likesCount);
+        renderKeepAlivePresentation(keepAliveBtn, presentation);
+        keepAliveBtn.classList.add('keep-alive-pulse');
+        setTimeout(() => keepAliveBtn.classList.remove('keep-alive-pulse'), 420);
+        const icon = keepAliveBtn.querySelector('i');
         if (icon) {
-          icon.classList.toggle('fa-heart', isLiked);
-          icon.classList.toggle('fa-heart-o', !isLiked);
+          icon.classList.toggle('fa-heart', presentation.selected);
+          icon.classList.toggle('fa-heart-o', !presentation.selected);
         }
         if (updated.expiresOn) {
           lifespanTimer.update(updated.expiresOn);
         }
-        // Server is source of truth for liked state
+        const feedback = keepAliveBtn.querySelector('.keep-alive-feedback');
+        if (feedback) {
+          feedback.textContent = presentation.selected ? '+24h' : '';
+          if (presentation.selected) {
+            setTimeout(() => { feedback.textContent = ''; }, 1200);
+          }
+        }
       } catch (err) {
         alert(err.message);
       }
@@ -773,6 +827,20 @@ export function createFeedItem(post, ctx) {
         setTimeout(() => { copyBtn.textContent = 'Copy link'; }, 1200);
       } catch (_) {
         window.prompt('Copy post link', url);
+      }
+    });
+    const shareBtn = item.querySelector('.post-share-btn');
+    shareBtn?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      menu.classList.add('d-none');
+      try {
+        const outcome = await sharePost(post.id);
+        if (outcome === 'copied') {
+          shareBtn.textContent = 'Copied';
+          setTimeout(() => { shareBtn.textContent = 'Share'; }, 1200);
+        }
+      } catch (error) {
+        alert(error.message || 'Could not share this post.');
       }
     });
     const del = item.querySelector('.post-delete-btn');

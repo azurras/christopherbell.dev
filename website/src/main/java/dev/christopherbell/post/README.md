@@ -80,6 +80,9 @@ Owns Void posts and feed behavior.
 - The Void composer preview is browser-only and reuses the shared mention/link
   and rich media rendering logic. It does not persist preview-only data; post
   creation still stores the submitted text and server-resolved link previews.
+- The browser presents the existing Like mutation as Keep alive. It shows the
+  server-returned count and shared-thread expiration only after the mutation
+  succeeds; the API route and persistence vocabulary remain compatible.
 - Post detail pages reuse the shared feed renderer so actions, author links,
   link previews, expiration state, and delete permissions stay consistent with
   feed cards. Page-specific JavaScript adds quieter root/parent "context echoes"

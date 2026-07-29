@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="author" content="Christopher Bell" />
     <meta name="keywords" content="cbell,void" />
-    <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Void', 'Short posts, quick replies, and the latest noise from the feed.', 'https://www.christopherbell.dev/void', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
+    <th:block th:replace="~{fragments/social-preview :: socialPreview('CB | Void', 'Nothing lasts unless people care. Every post begins with 24 hours. Keep it alive or let it disappear.', 'https://www.christopherbell.dev/void', 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
     <title>CB | Void</title>
 
     <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}"/>
@@ -17,9 +17,14 @@
     <main class="site-main" role="main">
         <section class="site-hero site-hero-void" aria-labelledby="voidTitle">
             <div class="container">
-                <p class="home-kicker">Live Feed</p>
-                <h1 id="voidTitle">Void</h1>
-                <p>Short posts, quick replies, and the latest noise from the feed.</p>
+                <p class="home-kicker">The temporary social feed</p>
+                <h1 id="voidTitle">Nothing lasts unless people care.</h1>
+                <p>Every post begins with 24 hours. Keep it alive or let it disappear.</p>
+                <ol class="void-rules" aria-label="How Void works">
+                    <li>Every thread starts with 24 hours.</li>
+                    <li>Each keep-alive adds 24 hours.</li>
+                    <li>Each reply adds 24 hours to the whole thread.</li>
+                </ol>
             </div>
         </section>
         <section class="site-content">
@@ -49,11 +54,11 @@
                         <div class="card-body d-flex justify-content-between align-items-center">
                             <div>
                                 <h2 class="h5 mb-1">Join the conversation</h2>
-                                <p class="mb-0 text-muted">Sign in or create an account to post.</p>
+                                <p class="mb-0 text-muted">Sign in or create an account to post, reply, and keep threads alive.</p>
                             </div>
                             <div class="d-flex gap-2">
                                 <a href="/login?redirect=/void" class="btn btn-primary">Sign in</a>
-                                <a href="/signup" class="btn btn-outline-secondary">Sign up</a>
+                                <a href="/signup?redirect=/void" class="btn btn-outline-secondary">Sign up</a>
                             </div>
                         </div>
                     </div>
@@ -68,7 +73,6 @@
                             <span>Sort</span>
                             <select id="feedSort" class="form-select form-select-sm">
                                 <option value="newest">Newest</option>
-                                <option value="active">Active</option>
                                 <option value="expiring">Expiring Soon</option>
                             </select>
                         </label>

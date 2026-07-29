@@ -41,7 +41,11 @@ Owns browser-side behavior for server-rendered pages.
   `lib/profile-stats.js` so counts do not depend on how many feed cards have
   been loaded in the browser.
 - The Void feed toolbar keeps the primary feed filter surface to `All` and
-  `Following`; profile and thread pages handle personal post and reply views.
+  `Following`; its Newest and Expiring Soon sorts use time only, never keep-alive
+  or reply totals. Profile and thread pages handle personal post and reply views.
+- Shared feed cards present the existing Like mutation as Keep alive, apply
+  server-confirmed expiration/count state before showing `+24h`, and share a
+  canonical post URL through the native share sheet or clipboard fallback.
 - `home-feed.js` wires the signed-in Void composer preview mount. The preview is
   rendered client-side from draft text and does not store preview-only data.
 - API calls go through `lib/api.js` so auth headers, response parsing, and

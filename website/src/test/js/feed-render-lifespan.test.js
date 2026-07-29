@@ -7,16 +7,69 @@ import {
   expiresSoon,
   formatLifespanCountdown,
   githubCardDetail,
+  keepAlivePresentation,
   linkPreviewCardMarkup,
   postStatusChips,
   remainingLifespanMs,
   richEmbedMarkupForPost,
   richEmbedsForPost,
+  sharePost,
   soundCloudEmbedUrl,
   spotifyEmbedUrl,
   youtubeEmbedUrl,
   youtubeEmbedUrlsForPost
 } from '../../main/resources/static/js/lib/feed-render.js';
+
+test('keep-alive presentation explains the lifespan effect in both states', () => {
+  assert.deepEqual(keepAlivePresentation(false, 3), {
+    ariaLabel: 'Keep alive and add 24 hours',
+    count: 3,
+    label: 'Keep alive · +24h',
+    selected: false
+  });
+  assert.deepEqual(keepAlivePresentation(true, 4), {
+    ariaLabel: 'Remove keep alive and 24 hours',
+    count: 4,
+    label: 'Kept alive',
+    selected: true
+  });
+});
+
+test('sharePost uses native sharing with the canonical post URL', async () => {
+  const shared = [];
+  const browser = {
+    location: { origin: 'https://christopherbell.dev' },
+    navigator: { share: async payload => shared.push(payload) }
+  };
+
+  assert.equal(await sharePost('post / 1', browser), 'shared');
+  assert.deepEqual(shared, [{
+    title: 'Void post',
+    url: 'https://christopherbell.dev/p/post%20%2F%201'
+  }]);
+});
+
+test('sharePost copies the canonical URL when native sharing is unavailable', async () => {
+  const copied = [];
+  const browser = {
+    location: { origin: 'https://christopherbell.dev' },
+    navigator: { clipboard: { writeText: async value => copied.push(value) } }
+  };
+
+  assert.equal(await sharePost('post-123', browser), 'copied');
+  assert.deepEqual(copied, ['https://christopherbell.dev/p/post-123']);
+});
+
+test('sharePost treats native share cancellation as a quiet outcome', async () => {
+  const cancelled = new Error('cancelled');
+  cancelled.name = 'AbortError';
+  const browser = {
+    location: { origin: 'https://christopherbell.dev' },
+    navigator: { share: async () => { throw cancelled; } }
+  };
+
+  assert.equal(await sharePost('post-123', browser), 'cancelled');
+});
 
 test('edited posts expose a clear status chip', () => {
   assert.match(postStatusChips({ editedOn: '2026-07-26T12:00:00Z' }, false), />Edited</);

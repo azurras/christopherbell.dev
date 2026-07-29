@@ -1130,6 +1130,19 @@ body {
         url("/images/photos/IMG_0390.jpeg") center center / cover no-repeat;
 }
 
+.void-rules {
+    display: grid;
+    gap: 0.35rem;
+    max-width: 42rem;
+    margin: 1.1rem 0 0;
+    padding-left: 1.35rem;
+}
+
+.void-rules li::marker {
+    color: #f0d39b;
+    font-weight: 900;
+}
+
 .site-hero-lunch {
     background:
         linear-gradient(90deg, rgba(13, 18, 24, 0.84), rgba(79, 125, 77, 0.56)),
@@ -3189,7 +3202,7 @@ body {
     text-transform: uppercase;
 }
 
-.post-chip-liked,
+.post-chip-kept-alive,
 .post-chip-expires {
     background: #ffe4e6;
     color: #9f1239;
@@ -3645,13 +3658,24 @@ body {
     background: #f4f0e8;
 }
 
-.post-like-btn.is-liked {
+.post-keep-alive-btn.is-kept-alive {
     color: #be123c;
     background: #fff1f2;
     border-color: #fecdd3;
 }
 
-.like-pulse {
+.keep-alive-count {
+    opacity: 0.72;
+}
+
+.keep-alive-feedback {
+    min-width: 0;
+    color: #15803d;
+    font-size: 0.76rem;
+    font-weight: 900;
+}
+
+.keep-alive-pulse {
     animation: likePulse 0.42s ease;
 }
 
@@ -3868,7 +3892,7 @@ body {
     color: #9ee1d2;
 }
 
-.void-shell-page .post-chip-liked,
+.void-shell-page .post-chip-kept-alive,
 .void-shell-page .post-chip-expires {
     background: rgba(240, 184, 138, 0.16);
     color: #f0c89e;
@@ -3891,6 +3915,18 @@ body {
     background: rgba(117, 202, 185, 0.15);
     border-color: rgba(117, 202, 185, 0.42);
     color: #ffffff;
+}
+
+.void-shell-page .post-keep-alive-btn.is-kept-alive,
+.void-thread-page .post-keep-alive-btn.is-kept-alive {
+    background: rgba(240, 184, 138, 0.16);
+    border-color: rgba(240, 184, 138, 0.42);
+    color: #f0c89e;
+}
+
+.void-shell-page .keep-alive-feedback,
+.void-thread-page .keep-alive-feedback {
+    color: #9ee1d2;
 }
 
 .void-shell-page .post-menu {

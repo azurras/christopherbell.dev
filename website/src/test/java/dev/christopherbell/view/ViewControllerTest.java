@@ -57,10 +57,13 @@ public class ViewControllerTest {
         .perform(get("/void"))
         .andExpect(status().isOk())
         .andExpect(content().string(containsString("CB | Void")))
-        .andExpect(
-            content()
-                .string(
-                    containsString("Short posts, quick replies, and the latest noise from the feed.")));
+        .andExpect(content().string(containsString("Nothing lasts unless people care.")))
+        .andExpect(content().string(containsString("Every thread starts with 24 hours.")))
+        .andExpect(content().string(containsString("Each keep-alive adds 24 hours.")))
+        .andExpect(content().string(containsString("Each reply adds 24 hours to the whole thread.")))
+        .andExpect(content().string(containsString("href=\"/login?redirect=/void\"")))
+        .andExpect(content().string(containsString("href=\"/signup?redirect=/void\"")))
+        .andExpect(content().string(not(containsString("value=\"active\""))));
   }
 
   @Test
