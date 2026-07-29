@@ -20,7 +20,9 @@ import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntryType;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
+import dev.christopherbell.sharedfolder.model.SharedFolderCatalogFreshness;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
+import dev.christopherbell.sharedfolder.model.SharedFolderSearchRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderSearchResponse;
 import dev.christopherbell.sharedfolder.model.SharedFolderRadioDurationRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderRadioResponse;
@@ -110,7 +112,7 @@ class SharedFolderReadControllerTest {
             10, Instant.parse("2026-07-17T00:00:00Z"), SharedFolderPreviewKind.AUDIO))));
     when(downloads.open("music/track.flac", "bytes=0-3"))
         .thenReturn(new SharedFolderDownload(
-            new ByteArrayResource("0123456789".getBytes(StandardCharsets.UTF_8)),
+            new ByteArrayResource("0123".getBytes(StandardCharsets.UTF_8)),
             0, 4, 10, true, MediaType.APPLICATION_OCTET_STREAM,
             "attachment; filename=track.flac"));
 
@@ -136,6 +138,8 @@ class SharedFolderReadControllerTest {
     verify(access, times(2)).requireRead();
     verify(browser).list("music");
     verify(downloads).open("music/track.flac", "bytes=0-3");
+    verify(audit).recordFor(
+        null, "DOWNLOAD_COMPLETED", "music/track.flac", 4L, "accepted", null);
   }
 
   @Test
@@ -217,7 +221,8 @@ class SharedFolderReadControllerTest {
   @Test
   @WithMockUser(authorities = "USER")
   void missingSearchQuery_refreshesReadAccessBeforeCatalogValidation() throws Exception {
-    when(catalog.search(null)).thenThrow(new ResponseStatusException(
+    SharedFolderSearchRequest request = new SharedFolderSearchRequest(null, null, null);
+    when(catalog.search(request)).thenThrow(new ResponseStatusException(
         org.springframework.http.HttpStatus.BAD_REQUEST, "Search query is required"));
 
     mockMvc.perform(get(BASE + "/search"))
@@ -225,26 +230,32 @@ class SharedFolderReadControllerTest {
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"));
 
     verify(access).requireRead();
-    verify(catalog).search(null);
+    verify(catalog).search(request);
   }
 
   @Test
   @WithMockUser(authorities = "USER")
   void readUser_canSearchWithFreshAccessAndReceivesOnlyPublicSafeMetadata() throws Exception {
-    when(catalog.search("track")).thenReturn(new SharedFolderSearchResponse("track", List.of(
+    SharedFolderSearchRequest request = new SharedFolderSearchRequest("track", null, 10);
+    when(catalog.search(request)).thenReturn(new SharedFolderSearchResponse("track", List.of(
         new SharedDirectoryEntry("track.flac", "music/track.flac", SharedDirectoryEntryType.FILE,
-            10, Instant.parse("2026-07-17T00:00:00Z"), SharedFolderPreviewKind.AUDIO)), false));
+            10, Instant.parse("2026-07-17T00:00:00Z"), SharedFolderPreviewKind.AUDIO)),
+        "next", 4, Instant.parse("2026-07-17T00:00:00Z"),
+        SharedFolderCatalogFreshness.FRESH, false));
 
-    mockMvc.perform(get(BASE + "/search").queryParam("query", "track"))
+    mockMvc.perform(get(BASE + "/search").queryParam("query", "track").queryParam("size", "10"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "private, no-store"))
         .andExpect(jsonPath("$.query").value("track"))
         .andExpect(jsonPath("$.entries[0].path").value("music/track.flac"))
-        .andExpect(jsonPath("$.truncated").value(false))
+        .andExpect(jsonPath("$.nextCursor").value("next"))
+        .andExpect(jsonPath("$.generation").value(4))
+        .andExpect(jsonPath("$.freshness").value("FRESH"))
+        .andExpect(jsonPath("$.partial").value(false))
         .andExpect(content().string(not(containsString("A:\\Shared"))));
 
     verify(access).requireRead();
-    verify(catalog).search("track");
+    verify(catalog).search(request);
     verify(audit).recordFor(null, "SEARCH", "search", null, "accepted", null);
   }
 

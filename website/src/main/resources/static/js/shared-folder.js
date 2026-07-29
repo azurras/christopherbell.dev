@@ -715,6 +715,7 @@ export function createSharedFolderSearchController({
 }) {
   let generation = 0;
   let active = false;
+  let currentResponse = null;
   let currentController = null;
 
   const begin = () => {
@@ -734,9 +735,39 @@ export function createSharedFolderSearchController({
     invalidateNavigation();
     const request = begin();
     try {
-      const response = validateSharedFolderSearchResponse(await load(requestedQuery, request.signal));
+      const response = validateSharedFolderSearchResponse(
+        await load(requestedQuery, request.signal, null));
       if (request.generation !== generation) return false;
+      currentResponse = response;
       render(response);
+      return true;
+    } catch (error) {
+      if (request.generation !== generation || error?.name === 'AbortError') return false;
+      onError(error);
+      return false;
+    }
+  };
+
+  const loadMore = async () => {
+    if (!active || !currentResponse?.nextCursor) return false;
+    const previous = currentResponse;
+    const request = begin();
+    try {
+      const page = validateSharedFolderSearchResponse(
+        await load(previous.query, request.signal, previous.nextCursor));
+      if (request.generation !== generation) return false;
+      if (page.query !== previous.query || page.generation !== previous.generation) {
+        throw new Error('The shared folder catalog changed. Search again.');
+      }
+      const paths = new Set(previous.entries.map(entry => entry.path));
+      if (page.entries.some(entry => paths.has(entry.path))) {
+        throw new Error('The shared folder returned an invalid search response.');
+      }
+      currentResponse = Object.freeze({
+        ...page,
+        entries: Object.freeze([...previous.entries, ...page.entries]),
+      });
+      render(currentResponse);
       return true;
     } catch (error) {
       if (request.generation !== generation || error?.name === 'AbortError') return false;
@@ -747,6 +778,7 @@ export function createSharedFolderSearchController({
 
   const clear = async () => {
     active = false;
+    currentResponse = null;
     const request = begin();
     try {
       const restored = await restore(request.signal);
@@ -761,27 +793,40 @@ export function createSharedFolderSearchController({
   const leave = () => {
     const wasActive = active;
     active = false;
+    currentResponse = null;
     begin();
     return wasActive;
   };
 
-  return Object.freeze({ search, clear, leave, active: () => active });
+  return Object.freeze({
+    search, loadMore, clear, leave, active: () => active,
+    hasMore: () => Boolean(active && currentResponse?.nextCursor),
+  });
 }
 
-export function bindSharedFolderSearchForm({ form, input, clearButton, controller, statusFn = status }) {
+export function bindSharedFolderSearchForm({
+  form, input, clearButton, loadMoreButton, controller, statusFn = status,
+}) {
   if (!form || !input || !clearButton || !controller) return false;
 
-  const updateClearAction = () => {
+  const updateActions = () => {
     clearButton.disabled = !controller.active();
+    if (loadMoreButton) {
+      loadMoreButton.disabled = !controller.hasMore();
+      loadMoreButton.hidden = !controller.hasMore();
+    }
   };
   form.addEventListener('submit', event => {
     event.preventDefault();
-    void controller.search(input.value).then(updateClearAction);
+    void controller.search(input.value).then(updateActions);
+  });
+  loadMoreButton?.addEventListener('click', () => {
+    void controller.loadMore().then(updateActions);
   });
   clearButton.addEventListener('click', () => {
     void controller.clear().then(restored => {
       if (restored) input.value = '';
-      updateClearAction();
+      updateActions();
     });
   });
   input.addEventListener('input', () => {
@@ -789,7 +834,7 @@ export function bindSharedFolderSearchForm({ form, input, clearButton, controlle
       statusFn('Clear search to return to the current folder.');
     }
   });
-  updateClearAction();
+  updateActions();
   return true;
 }
 
@@ -799,6 +844,7 @@ function configureSharedFolderSearchForm({ controller, statusFn = status }) {
     form: document.getElementById('shared-folder-search-form'),
     input: document.getElementById('shared-folder-search-query'),
     clearButton: document.getElementById('shared-folder-search-clear'),
+    loadMoreButton: document.getElementById('shared-folder-search-more'),
     controller,
     statusFn,
   });
@@ -871,7 +917,7 @@ export async function initializeSharedFolderPage({
     });
     if (!await navigator.restore(requestedPath())) return;
     searchController = createSharedFolderSearchController({
-      load: (query, signal) => fetchJsonFn(API.sharedFolder.search(query), {
+      load: (query, signal, cursor) => fetchJsonFn(API.sharedFolder.search(query, cursor, 25), {
         headers: authHeadersFn(),
         redirectOnUnauthorized: false,
         signal,

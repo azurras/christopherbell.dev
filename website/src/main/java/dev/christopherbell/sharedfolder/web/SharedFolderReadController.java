@@ -4,6 +4,7 @@ import static dev.christopherbell.libs.api.APIVersion.V20260717;
 
 import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewResponse;
+import dev.christopherbell.sharedfolder.model.SharedFolderSearchRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderSearchResponse;
 import dev.christopherbell.sharedfolder.model.SharedFolderRadioDurationRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderRadioResponse;
@@ -13,6 +14,7 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService;
 import dev.christopherbell.sharedfolder.service.SharedFolderDownloadService.SharedFolderDownload;
+import dev.christopherbell.sharedfolder.service.SharedFolderDownloadAuditResource;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService;
 import dev.christopherbell.sharedfolder.service.SharedFolderPreviewService.SharedFolderPreview;
 import dev.christopherbell.sharedfolder.service.SharedFolderBrowserService;
@@ -79,10 +81,13 @@ public class SharedFolderReadController {
   /** Searches the fresh public-safe catalog after refreshing effective read access. */
   @GetMapping("/search")
   public ResponseEntity<SharedFolderSearchResponse> search(
-      @RequestParam(required = false) String query) {
+      @RequestParam(required = false) String query,
+      @RequestParam(required = false) String cursor,
+      @RequestParam(required = false) Integer size) {
     try {
       Account account = access.requireRead();
-      SharedFolderSearchResponse response = catalog.search(query);
+      SharedFolderSearchResponse response = catalog.search(
+          new SharedFolderSearchRequest(query, cursor, size));
       audit.recordFor(account, "SEARCH", "search", null, "accepted", null);
       return ResponseEntity.ok()
           .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
@@ -127,11 +132,23 @@ public class SharedFolderReadController {
       @RequestParam String path,
       @RequestHeader HttpHeaders headers) {
     try {
-      access.requireRead();
+      Account account = access.requireRead();
       List<String> ranges = headers.get(HttpHeaders.RANGE);
       String range = ranges == null || ranges.isEmpty() ? null : String.join(",", ranges);
       SharedFolderDownload download = downloads.open(path, range);
       audit.recordLogicalAccess("DOWNLOAD_STARTED", path, download.totalLength());
+      Resource auditedResource = new SharedFolderDownloadAuditResource(
+          download.resource(), download.length(), (outcome, deliveredBytes) -> {
+            if (outcome == SharedFolderDownloadAuditResource.Outcome.COMPLETED) {
+              audit.recordFor(account, "DOWNLOAD_COMPLETED", path, deliveredBytes, "accepted", null);
+            } else if (outcome == SharedFolderDownloadAuditResource.Outcome.ABORTED) {
+              audit.recordFor(account, "DOWNLOAD_ABORTED", path, deliveredBytes,
+                  "aborted", "stream_incomplete");
+            } else {
+              audit.recordFor(account, "DOWNLOAD_FAILED", path, deliveredBytes,
+                  "rejected", "stream_failure");
+            }
+          });
       HttpHeaders responseHeaders = new HttpHeaders();
       responseHeaders.set(HttpHeaders.ACCEPT_RANGES, "bytes");
       responseHeaders.set("X-Content-Type-Options", "nosniff");
@@ -144,7 +161,7 @@ public class SharedFolderReadController {
         responseHeaders.set(HttpHeaders.CONTENT_RANGE,
             "bytes " + download.start() + "-" + end + "/" + download.totalLength());
       }
-      return new ResponseEntity<>(download.resource(), responseHeaders,
+      return new ResponseEntity<>(auditedResource, responseHeaders,
           download.partial() ? HttpStatus.PARTIAL_CONTENT : HttpStatus.OK);
     } catch (SharedFolderRangeNotSatisfiableException exception) {
       return rangeNotSatisfiable(exception.totalLength());

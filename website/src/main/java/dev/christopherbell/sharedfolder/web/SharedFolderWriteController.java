@@ -8,6 +8,8 @@ import dev.christopherbell.sharedfolder.model.SharedFolderDeleteRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderMoveRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderRenameRequest;
 import dev.christopherbell.sharedfolder.service.SharedFolderMutationService;
+import dev.christopherbell.sharedfolder.service.SharedFolderCatalogInvalidation;
+import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadCompleteRequest;
@@ -43,17 +45,20 @@ public class SharedFolderWriteController {
   private final SharedFolderUploadService uploads;
   private final SharedFolderRecycleService recycle;
   private final SharedFolderAuditRecorder audit;
+  private final SharedFolderCatalogService catalog;
 
   /** Creates the protected write controller. Services refresh persisted write access per operation. */
   public SharedFolderWriteController(
       SharedFolderMutationService mutations,
       SharedFolderUploadService uploads,
       SharedFolderRecycleService recycle,
-      SharedFolderAuditRecorder audit) {
+      SharedFolderAuditRecorder audit,
+      SharedFolderCatalogService catalog) {
     this.mutations = mutations;
     this.uploads = uploads;
     this.recycle = recycle;
     this.audit = audit;
+    this.catalog = catalog;
   }
 
   /** Creates one direct child directory. */
@@ -64,6 +69,7 @@ public class SharedFolderWriteController {
         : request.parentPath() + "/" + request.name();
     SharedDirectoryEntry result = audited(
         "CREATE_FOLDER", requestedPath, () -> mutations.createFolder(request));
+    catalog.invalidate(SharedFolderCatalogInvalidation.MUTATION);
     audit.recordCurrent("CREATE_FOLDER", result.path(), 0L, "accepted", null);
     return ResponseEntity.status(HttpStatus.CREATED).headers(noStore()).body(result);
   }
@@ -74,6 +80,7 @@ public class SharedFolderWriteController {
       @Valid @RequestBody SharedFolderRenameRequest request) {
     SharedDirectoryEntry result = audited(
         "RENAME", request.path(), () -> mutations.rename(request));
+    catalog.invalidate(SharedFolderCatalogInvalidation.MUTATION);
     audit.recordCurrent("RENAME", result.path(), result.size(), "accepted", null);
     return ResponseEntity.ok().headers(noStore()).body(result);
   }
@@ -83,6 +90,7 @@ public class SharedFolderWriteController {
   public ResponseEntity<SharedDirectoryEntry> move(@Valid @RequestBody SharedFolderMoveRequest request) {
     SharedDirectoryEntry result = audited(
         "MOVE", request.path(), () -> mutations.move(request));
+    catalog.invalidate(SharedFolderCatalogInvalidation.MUTATION);
     audit.recordCurrent("MOVE", result.path(), result.size(), "accepted", null);
     return ResponseEntity.ok().headers(noStore()).body(result);
   }
@@ -91,6 +99,7 @@ public class SharedFolderWriteController {
   @DeleteMapping("/entries")
   public ResponseEntity<Void> delete(@Valid @RequestBody SharedFolderDeleteRequest request) {
     audited("RECYCLE", request.path(), () -> recycle.recycle(request));
+    catalog.invalidate(SharedFolderCatalogInvalidation.MUTATION);
     return ResponseEntity.noContent().headers(noStore()).build();
   }
 
@@ -137,6 +146,7 @@ public class SharedFolderWriteController {
     SharedFolderUploadStatus result = audited(
         "UPLOAD_FINALIZE", id,
         () -> uploads.complete(id, request != null && request.replace()));
+    catalog.invalidate(SharedFolderCatalogInvalidation.UPLOAD);
     audit.recordCurrent("UPLOAD_FINALIZE", id, result.expectedBytes(), "accepted", null);
     return ResponseEntity.ok().headers(noStore()).body(result);
   }

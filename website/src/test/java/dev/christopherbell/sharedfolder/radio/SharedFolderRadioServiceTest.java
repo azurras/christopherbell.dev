@@ -19,6 +19,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -30,6 +31,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 class SharedFolderRadioServiceTest {
   private static final Instant START = Instant.parse("2026-07-25T12:00:00Z");
@@ -128,7 +130,7 @@ class SharedFolderRadioServiceTest {
     assertThat(response.playback().stationSequence()).isEqualTo(1);
     assertThat(response.playback().startedAt()).isEqualTo(START);
     assertThat(response.playback().positionSeconds()).isZero();
-    assertThat(response.playback().durationSeconds()).isNull();
+    assertThat(response.playback().durationSeconds()).isEqualTo(30.0);
     assertThat(response.playback().entry()).isEqualTo(track);
   }
 
@@ -164,7 +166,8 @@ class SharedFolderRadioServiceTest {
   void reportDuration_rejectsInvalidSequenceAndUnsafePathBeforeCatalogWork() {
     SharedFolderCatalogService catalog = mock(SharedFolderCatalogService.class);
     SharedFolderRadioService service = new SharedFolderRadioService(
-        catalog, new InMemoryRadioRepository().repository(), new MutableClock(START), bound -> 0);
+        catalog, new InMemoryRadioRepository().repository(), trustedDurations(30),
+        new MutableClock(START), bound -> 0);
 
     assertThatThrownBy(() -> service.reportDuration(new SharedFolderRadioDurationRequest(
         0, "Music/song.mp3", 120)))
@@ -211,14 +214,36 @@ class SharedFolderRadioServiceTest {
   void reportDuration_acceptsTheInclusiveDurationBounds(double durationSeconds) {
     SharedDirectoryEntry track = track("Music/song.mp3");
     InMemoryRadioRepository repository = new InMemoryRadioRepository();
-    SharedFolderRadioService service = service(
-        List.of(track), repository, new MutableClock(START), 0);
+    SharedFolderCatalogService catalog = mock(SharedFolderCatalogService.class);
+    when(catalog.audioTracksBelowMusic()).thenReturn(List.of(track));
+    SharedFolderRadioService service = new SharedFolderRadioService(
+        catalog, repository.repository(), trustedDurations(durationSeconds),
+        new MutableClock(START), bound -> 0);
     SharedFolderRadioResponse current = service.current();
 
     SharedFolderRadioResponse updated = service.reportDuration(new SharedFolderRadioDurationRequest(
         current.playback().stationSequence(), track.path(), durationSeconds));
 
     assertThat(updated.playback().durationSeconds()).isEqualTo(durationSeconds);
+  }
+
+  @Test
+  void reportDuration_rejectsForgedTimingWithoutChangingTrustedStationDuration() {
+    SharedDirectoryEntry track = track("Music/song.mp3");
+    InMemoryRadioRepository repository = new InMemoryRadioRepository();
+    SharedFolderRadioService service = service(
+        List.of(track), repository, new MutableClock(START), 0);
+    SharedFolderRadioResponse current = service.current();
+
+    assertThatThrownBy(() -> service.reportDuration(new SharedFolderRadioDurationRequest(
+        current.playback().stationSequence(), track.path(), 1)))
+        .isInstanceOfSatisfying(ResponseStatusException.class,
+            exception -> assertThat(exception.getStatusCode().value()).isEqualTo(409));
+    assertThatThrownBy(() -> service.reportDuration(new SharedFolderRadioDurationRequest(
+        current.playback().stationSequence(), track.path(), 86_400)))
+        .isInstanceOfSatisfying(ResponseStatusException.class,
+            exception -> assertThat(exception.getStatusCode().value()).isEqualTo(409));
+    assertThat(repository.saved().durationSeconds()).isEqualTo(30.0);
   }
 
   @Test
@@ -311,8 +336,13 @@ class SharedFolderRadioServiceTest {
     AtomicReference<List<SharedDirectoryEntry>> tracks =
         new AtomicReference<>(List.of(original));
     InMemoryRadioRepository repository = new InMemoryRadioRepository();
-    SharedFolderRadioService service = service(
-        tracks, repository, new MutableClock(START), 0);
+    SharedFolderCatalogService catalog = mock(SharedFolderCatalogService.class);
+    when(catalog.audioTracksBelowMusic()).thenAnswer(ignored -> List.copyOf(tracks.get()));
+    SharedFolderRadioDurationResolver resolver = mock(SharedFolderRadioDurationResolver.class);
+    when(resolver.resolve(original)).thenReturn(30.0);
+    when(resolver.resolve(replacement)).thenReturn(null);
+    SharedFolderRadioService service = new SharedFolderRadioService(
+        catalog, repository.repository(), resolver, new MutableClock(START), bound -> 0);
     SharedFolderRadioResponse initial = service.current();
     service.reportDuration(new SharedFolderRadioDurationRequest(
         initial.playback().stationSequence(), original.path(), 30));
@@ -348,7 +378,7 @@ class SharedFolderRadioServiceTest {
     });
     when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     SharedFolderRadioService service = new SharedFolderRadioService(
-        catalog, repository, new MutableClock(START), bound -> 0);
+        catalog, repository, trustedDurations(30), new MutableClock(START), bound -> 0);
     var executor = Executors.newFixedThreadPool(2);
 
     try {
@@ -422,7 +452,7 @@ class SharedFolderRadioServiceTest {
       }
     };
     SharedFolderRadioService service = new SharedFolderRadioService(
-        catalog, repository, transitionClock, bound -> 0);
+        catalog, repository, trustedDurations(30), transitionClock, bound -> 0);
     var executor = Executors.newFixedThreadPool(2);
 
     try {
@@ -445,6 +475,63 @@ class SharedFolderRadioServiceTest {
     }
   }
 
+  @Test
+  void concurrentInstancesPersistOnlyOneExpiredTrackAdvance() throws Exception {
+    SharedDirectoryEntry first = track("Music/first.mp3");
+    SharedDirectoryEntry second = track("Music/second.mp3");
+    AtomicReference<SharedFolderRadioDocument> stored = new AtomicReference<>(
+        new SharedFolderRadioDocument(
+            SharedFolderRadioDocument.ID, SharedFolderRadioDocument.State.PLAYING,
+            1, first.path(), START, 30.0,
+            List.of(new SharedFolderRadioDocument.TrackDuration(
+                first.path(), first.observedToken(), 30.0)), 1L));
+    CyclicBarrier initialReads = new CyclicBarrier(2);
+    AtomicInteger reads = new AtomicInteger();
+    SharedFolderRadioRepository repository = mock(SharedFolderRadioRepository.class);
+    when(repository.findById(any())).thenAnswer(ignored -> {
+      SharedFolderRadioDocument snapshot = stored.get();
+      if (reads.incrementAndGet() <= 2) initialReads.await(2, TimeUnit.SECONDS);
+      return Optional.of(snapshot);
+    });
+    when(repository.save(any())).thenAnswer(invocation -> {
+      SharedFolderRadioDocument candidate = invocation.getArgument(0);
+      SharedFolderRadioDocument current = stored.get();
+      if (!java.util.Objects.equals(candidate.version(), current.version())) {
+        throw new OptimisticLockingFailureException("radio version changed");
+      }
+      SharedFolderRadioDocument saved = new SharedFolderRadioDocument(
+          candidate.id(), candidate.state(), candidate.stationSequence(), candidate.path(),
+          candidate.startedAt(), candidate.durationSeconds(), candidate.knownDurations(),
+          current.version() + 1);
+      if (!stored.compareAndSet(current, saved)) {
+        throw new OptimisticLockingFailureException("radio version changed");
+      }
+      return saved;
+    });
+    SharedFolderCatalogService catalog = mock(SharedFolderCatalogService.class);
+    when(catalog.audioTracksBelowMusic()).thenReturn(List.of(first, second));
+    MutableClock clock = new MutableClock(START.plusSeconds(34));
+    SharedFolderRadioDurationResolver durations = trustedDurations(30);
+    SharedFolderRadioService one = new SharedFolderRadioService(
+        catalog, repository, durations, clock, bound -> 0);
+    SharedFolderRadioService two = new SharedFolderRadioService(
+        catalog, repository, durations, clock, bound -> 0);
+    var executor = Executors.newFixedThreadPool(2);
+
+    try {
+      var firstResult = executor.submit(one::current);
+      var secondResult = executor.submit(two::current);
+
+      assertThat(firstResult.get(2, TimeUnit.SECONDS).playback().stationSequence()).isEqualTo(2);
+      assertThat(secondResult.get(2, TimeUnit.SECONDS).playback().stationSequence()).isEqualTo(2);
+      assertThat(stored.get().stationSequence()).isEqualTo(2);
+      assertThat(stored.get().path()).isEqualTo(second.path());
+      assertThat(stored.get().version()).isEqualTo(2L);
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
   private SharedFolderRadioService service(
       List<SharedDirectoryEntry> tracks,
       InMemoryRadioRepository repository,
@@ -453,7 +540,8 @@ class SharedFolderRadioServiceTest {
     SharedFolderCatalogService catalog = mock(SharedFolderCatalogService.class);
     when(catalog.audioTracksBelowMusic()).thenReturn(List.copyOf(tracks));
     IntUnaryOperator randomIndex = bound -> selectedIndex;
-    return new SharedFolderRadioService(catalog, repository.repository(), clock, randomIndex);
+    return new SharedFolderRadioService(
+        catalog, repository.repository(), trustedDurations(30), clock, randomIndex);
   }
 
   private SharedFolderRadioService service(
@@ -464,7 +552,14 @@ class SharedFolderRadioServiceTest {
     SharedFolderCatalogService catalog = mock(SharedFolderCatalogService.class);
     when(catalog.audioTracksBelowMusic()).thenAnswer(ignored -> List.copyOf(tracks.get()));
     IntUnaryOperator randomIndex = bound -> selectedIndex;
-    return new SharedFolderRadioService(catalog, repository.repository(), clock, randomIndex);
+    return new SharedFolderRadioService(
+        catalog, repository.repository(), trustedDurations(30), clock, randomIndex);
+  }
+
+  private SharedFolderRadioDurationResolver trustedDurations(double seconds) {
+    SharedFolderRadioDurationResolver resolver = mock(SharedFolderRadioDurationResolver.class);
+    when(resolver.resolve(any())).thenReturn(seconds);
+    return resolver;
   }
 
   private SharedDirectoryEntry track(String path) {

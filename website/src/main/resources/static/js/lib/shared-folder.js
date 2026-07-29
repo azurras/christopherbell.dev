@@ -269,15 +269,26 @@ function validatedSharedFolderSearchEntry(entry) {
 
 /** Validate the shared-folder search boundary before recursive entries reach the page. */
 export function validateSharedFolderSearchResponse(response) {
+  const validCursor = response?.nextCursor === null
+    || typeof response?.nextCursor === 'string' && response.nextCursor.length > 0;
+  const validSnapshot = typeof response?.snapshotCreatedAt === 'string'
+    && Number.isFinite(Date.parse(response.snapshotCreatedAt));
   if (!response || typeof response.query !== 'string' || response.query !== response.query.trim()
       || response.query.length < 1 || response.query.length > 200
-      || !Array.isArray(response.entries) || typeof response.truncated !== 'boolean') {
+      || !Array.isArray(response.entries) || !validCursor
+      || !Number.isSafeInteger(response.generation) || response.generation < 1 || !validSnapshot
+      || !['BUILDING', 'FRESH', 'STALE', 'FAILED'].includes(response.freshness)
+      || typeof response.partial !== 'boolean') {
     throw new Error('The shared folder returned an invalid search response.');
   }
   return Object.freeze({
     query: response.query,
     entries: Object.freeze(response.entries.map(validatedSharedFolderSearchEntry)),
-    truncated: response.truncated,
+    nextCursor: response.nextCursor,
+    generation: response.generation,
+    snapshotCreatedAt: response.snapshotCreatedAt,
+    freshness: response.freshness,
+    partial: response.partial,
   });
 }
 
@@ -293,13 +304,14 @@ export function renderSharedFolderEntryParentPath(target, entry) {
   target.textContent = `In ${sharedFolderEntryParentPath(entry) || 'Shared'}`;
 }
 
-/** Build accessible search-result status text, including the server-owned result cap. */
+/** Build accessible search-result status text, including pagination and catalog coverage. */
 export function sharedFolderSearchResultDescription(response) {
   const validated = validateSharedFolderSearchResponse(response);
   const count = validated.entries.length;
   const noun = count === 1 ? 'result' : 'results';
-  const truncated = validated.truncated ? ' Results are limited; refine your search.' : '';
-  return `${count} ${noun} for “${validated.query}”.${truncated}`;
+  const more = validated.nextCursor ? ' More results are available.' : '';
+  const partial = validated.partial ? ' Catalog coverage is partial.' : '';
+  return `${count} ${noun} for “${validated.query}”.${more}${partial}`;
 }
 
 /** Build a same-origin link that can be copied without exposing a filesystem path. */

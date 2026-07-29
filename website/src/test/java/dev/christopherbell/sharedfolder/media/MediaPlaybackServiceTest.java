@@ -92,7 +92,8 @@ class MediaPlaybackServiceTest {
     when(jobs.findByOwnerIdOrderByIdAsc(
         "account-1", org.springframework.data.domain.PageRequest.of(0, 100)))
         .thenReturn(new SliceImpl<>(List.of(job)));
-    when(jobs.cancelActive("owned-job", "account-1", NOW)).thenReturn(1L);
+    when(jobs.cancelActive(
+        "owned-job", "account-1", NOW, NOW.plus(Duration.ofMinutes(15)))).thenReturn(1L);
     var cancellationRequested = new AtomicBoolean();
     var statusReads = new AtomicInteger();
     var artifactsDeleted = new AtomicBoolean();
@@ -122,9 +123,59 @@ class MediaPlaybackServiceTest {
 
     deleting.deleteOwnedPrivateState("account-1");
 
-    verify(jobs).cancelActive("owned-job", "account-1", NOW);
+    verify(jobs).cancelActive(
+        "owned-job", "account-1", NOW, NOW.plus(Duration.ofMinutes(15)));
     verify(jobs).deleteById("owned-job");
     assertThat(artifactsDeleted).isTrue();
+  }
+
+  @Test
+  void terminalCleanupDeletesArtifactsBeforeRedactionAndDiagnosticTtl() throws Exception {
+    MediaJob failed = job("failed-job", "private-cache-key", MediaJobStatus.FAILED);
+    failed.setActiveCacheKey("private-cache-key");
+    failed.setReservedBytes(100);
+    failed.setFailureCategory("worker_failed");
+    failed.setCleanupAfter(NOW.minusSeconds(1));
+    MediaStorage cleanupStorage = mock(MediaStorage.class);
+    when(jobs.findByStatusInAndCleanupAfterLessThanEqualAndArtifactsCleanedFalseOrderByCleanupAfterAscIdAsc(
+        any(), any(), any())).thenReturn(new SliceImpl<>(List.of(failed)));
+    MediaPlaybackService cleanup = new MediaPlaybackService(
+        access, jobs, audit, sources, cleanupStorage, folderProperties, mediaProperties,
+        Clock.fixed(NOW, ZoneOffset.UTC), () -> "unused");
+
+    assertThat(cleanup.cleanupTerminalJobs()).isEqualTo(1);
+
+    verify(cleanupStorage).deleteJobArtifacts(failed);
+    assertThat(failed.isArtifactsCleaned()).isTrue();
+    assertThat(failed.getDeleteAt()).isEqualTo(NOW.plus(Duration.ofDays(7)));
+    assertThat(failed.getOwnerId()).isNull();
+    assertThat(failed.getSourcePath()).isNull();
+    assertThat(failed.getCacheKey()).isNull();
+    assertThat(failed.getActiveCacheKey()).isNull();
+    assertThat(failed.getReservedBytes()).isZero();
+    assertThat(failed.getFailureCategory()).isEqualTo("worker_failed");
+  }
+
+  @Test
+  void terminalCleanupFailureRetainsRetryableIdentityAndNeverArmsTtl() throws Exception {
+    MediaJob failed = job("failed-job", "private-cache-key", MediaJobStatus.FAILED);
+    failed.setReservedBytes(100);
+    failed.setCleanupAfter(NOW.minusSeconds(1));
+    MediaStorage cleanupStorage = mock(MediaStorage.class);
+    doThrow(new java.io.IOException("locked")).when(cleanupStorage).deleteJobArtifacts(failed);
+    when(jobs.findByStatusInAndCleanupAfterLessThanEqualAndArtifactsCleanedFalseOrderByCleanupAfterAscIdAsc(
+        any(), any(), any())).thenReturn(new SliceImpl<>(List.of(failed)));
+    MediaPlaybackService cleanup = new MediaPlaybackService(
+        access, jobs, audit, sources, cleanupStorage, folderProperties, mediaProperties,
+        Clock.fixed(NOW, ZoneOffset.UTC), () -> "unused");
+
+    assertThat(cleanup.cleanupTerminalJobs()).isZero();
+
+    assertThat(failed.isArtifactsCleaned()).isFalse();
+    assertThat(failed.getDeleteAt()).isNull();
+    assertThat(failed.getOwnerId()).isEqualTo("account-1");
+    assertThat(failed.getSourcePath()).isEqualTo("video/source.mkv");
+    assertThat(failed.getReservedBytes()).isEqualTo(100);
   }
 
   @Test
@@ -167,7 +218,7 @@ class MediaPlaybackServiceTest {
         .hasMessageContaining("temporarily unavailable")
         .hasRootCauseMessage("Timed out waiting for media worker cancellation.");
 
-    verify(jobs, org.mockito.Mockito.never()).cancelActive(any(), any(), any());
+    verify(jobs, org.mockito.Mockito.never()).cancelActive(any(), any(), any(), any());
     verify(jobs, org.mockito.Mockito.never()).deleteById(any());
     assertThat(artifactsDeleted).isFalse();
   }
@@ -503,7 +554,8 @@ class MediaPlaybackServiceTest {
     MediaJob first = job("job-1", "b".repeat(64), MediaJobStatus.QUEUED);
     first.setDescriptorPublished(true);
     when(jobs.findById("job-1")).thenReturn(Optional.of(first));
-    when(jobs.cancelActive("job-1", "account-1", NOW)).thenReturn(1L);
+    when(jobs.cancelActive(
+        "job-1", "account-1", NOW, NOW.plus(Duration.ofMinutes(15)))).thenReturn(1L);
     MediaSourceSnapshot second = source("video/second.mkv", 40, NOW.minusSeconds(3));
     when(sources.resolve(second.relativePath())).thenReturn(second);
     when(jobs.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(any(), any()))
@@ -558,7 +610,8 @@ class MediaPlaybackServiceTest {
   void ownerCanCancelQueuedJobAndOtherAccountCannotObserveIt() {
     MediaJob queued = job("job-1", "cache-1", MediaJobStatus.QUEUED);
     when(jobs.findById("job-1")).thenReturn(Optional.of(queued));
-    when(jobs.cancelActive("job-1", "account-1", NOW)).thenReturn(1L);
+    when(jobs.cancelActive(
+        "job-1", "account-1", NOW, NOW.plus(Duration.ofMinutes(15)))).thenReturn(1L);
 
     assertThat(media.cancel("job-1").status()).isEqualTo(MediaJobStatus.CANCELED);
 

@@ -11,6 +11,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -29,6 +30,12 @@ public class MediaPlaybackService {
   public static final int PROFILE_VERSION = 1;
   private static final int CACHE_PAGE_SIZE = 200;
   private static final int PRIVATE_DELETION_PAGE_SIZE = 100;
+  private static final int TERMINAL_CLEANUP_PAGE_SIZE = 100;
+  private static final List<MediaJobStatus> CLEANUP_STATUSES = List.of(
+      MediaJobStatus.FAILED,
+      MediaJobStatus.CANCELED,
+      MediaJobStatus.INSUFFICIENT_SPACE,
+      MediaJobStatus.TIMED_OUT);
 
   private final SharedFolderAccessService access;
   private final MediaJobRepository jobs;
@@ -174,13 +181,16 @@ public class MediaPlaybackService {
         } catch (IOException failure) {
           throw unavailable(failure);
         }
-        if (jobs.cancelActive(id, account.getId(), clock.instant()) != 1) {
+        Instant now = clock.instant();
+        Instant cleanupAfter = now.plus(properties.cleanupDelay(MediaJobStatus.CANCELED));
+        if (jobs.cancelActive(id, account.getId(), now, cleanupAfter) != 1) {
           job = owned(id, account.getId());
         } else {
           job.setStatus(MediaJobStatus.CANCELED);
           job.setActiveCacheKey(null);
           job.setDescriptorPublished(false);
-          job.setUpdatedAt(clock.instant());
+          job.setUpdatedAt(now);
+          applyTerminalRetention(job, MediaJobStatus.CANCELED, now);
           audit.recordFor(account, "MEDIA_CANCELED", job.getSourcePath(), job.getOutputBytes(),
               "accepted", null);
           publishNextIfIdleLocked();
@@ -203,7 +213,9 @@ public class MediaPlaybackService {
               storage.requestCancellation(job);
               awaitWorkerTerminal(job);
             }
-            jobs.cancelActive(job.getId(), ownerId, clock.instant());
+            Instant now = clock.instant();
+            jobs.cancelActive(job.getId(), ownerId, now,
+                now.plus(properties.cleanupDelay(MediaJobStatus.CANCELED)));
           }
           storage.deleteJobArtifacts(job);
           jobs.deleteById(job.getId());
@@ -272,7 +284,13 @@ public class MediaPlaybackService {
     if (job.getStatus().terminal()) {
       job.setActiveCacheKey(null);
       job.setDescriptorPublished(false);
-      if (job.getStatus() == MediaJobStatus.READY) job.setLastAccessedAt(now);
+      if (job.getStatus() == MediaJobStatus.READY) {
+        job.setLastAccessedAt(now);
+        job.setCleanupAfter(null);
+        job.setDeleteAt(null);
+      } else {
+        applyTerminalRetention(job, job.getStatus(), now);
+      }
     }
     jobs.save(job);
     String action = switch (job.getStatus()) {
@@ -545,6 +563,50 @@ public class MediaPlaybackService {
     return total;
   }
 
+  /** Deletes a bounded due page, then redacts identity and arms diagnostic TTL. */
+  public int cleanupTerminalJobs() {
+    Instant now = clock.instant();
+    var due = jobs
+        .findByStatusInAndCleanupAfterLessThanEqualAndArtifactsCleanedFalseOrderByCleanupAfterAscIdAsc(
+            CLEANUP_STATUSES, now, PageRequest.of(0, TERMINAL_CLEANUP_PAGE_SIZE));
+    int cleaned = 0;
+    for (MediaJob job : due.getContent()) {
+      if (!CLEANUP_STATUSES.contains(job.getStatus()) || job.isArtifactsCleaned()
+          || job.getCleanupAfter() == null || job.getCleanupAfter().isAfter(now)) continue;
+      try {
+        storage.deleteJobArtifacts(job);
+        redactCleanedJob(job, now);
+        jobs.save(job);
+        cleaned++;
+      } catch (IOException | RuntimeException failure) {
+        try {
+          audit.recordSystem(
+              "MEDIA_CLEANUP_DEFERRED", job.getId(), job.getOutputBytes(),
+              "rejected", "artifact_cleanup");
+        } catch (RuntimeException ignored) {
+          // Retention remains retryable even when its best-effort audit also degrades.
+        }
+      }
+    }
+    return cleaned;
+  }
+
+  private void redactCleanedJob(MediaJob job, Instant now) {
+    job.setOwnerId(null);
+    job.setSourcePath(null);
+    job.setSourceSize(0);
+    job.setSourceModifiedAt(null);
+    job.setCacheKey(null);
+    job.setActiveCacheKey(null);
+    job.setReservedBytes(0);
+    job.setDescriptorPublished(false);
+    job.setDeadline(null);
+    job.setCleanupAfter(null);
+    job.setArtifactsCleaned(true);
+    job.setDeleteAt(now.plus(properties.diagnosticRetention()));
+    job.setUpdatedAt(now);
+  }
+
   private void terminal(
       MediaJob job, MediaJobStatus status, String failureCategory, Instant now) {
     job.setStatus(status);
@@ -552,7 +614,17 @@ public class MediaPlaybackService {
     job.setActiveCacheKey(null);
     job.setDescriptorPublished(false);
     job.setUpdatedAt(now);
+    applyTerminalRetention(job, status, now);
     jobs.save(job);
+  }
+
+  private void applyTerminalRetention(MediaJob job, MediaJobStatus status, Instant now) {
+    if (!CLEANUP_STATUSES.contains(status)) return;
+    if (job.getCleanupAfter() == null) {
+      job.setCleanupAfter(now.plus(properties.cleanupDelay(status)));
+    }
+    job.setArtifactsCleaned(false);
+    job.setDeleteAt(null);
   }
 
   private boolean validTransition(MediaJobStatus from, MediaJobStatus to) {

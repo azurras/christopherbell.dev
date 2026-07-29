@@ -16,6 +16,8 @@ import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntryType;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
 import dev.christopherbell.sharedfolder.service.SharedFolderMutationService;
+import dev.christopherbell.sharedfolder.service.SharedFolderCatalogInvalidation;
+import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditEvent;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService;
@@ -64,6 +66,7 @@ class SharedFolderWriteControllerTest {
   @MockitoBean private SharedFolderRecycleService recycle;
   @MockitoBean private SharedFolderAuditQueryService auditQueries;
   @MockitoBean private SharedFolderAuditRecorder auditRecorder;
+  @MockitoBean private SharedFolderCatalogService catalog;
 
   @Test
   @WithMockUser(authorities = "ADMIN")
@@ -99,6 +102,8 @@ class SharedFolderWriteControllerTest {
     org.mockito.Mockito.verify(recycle).restore("item-1", true);
     org.mockito.Mockito.verify(recycle).purge("item-1", "PURGE item-1");
     org.mockito.Mockito.verify(recycle).listPage(3);
+    org.mockito.Mockito.verify(catalog).invalidate(SharedFolderCatalogInvalidation.RESTORE);
+    org.mockito.Mockito.verify(catalog).invalidate(SharedFolderCatalogInvalidation.PURGE);
     org.mockito.Mockito.verify(auditRecorder).recordCurrent(
         "AUDIT_BROWSE", "docs/report.pdf", null, "accepted", null);
     org.mockito.Mockito.verify(auditRecorder).recordCurrent(
@@ -127,6 +132,53 @@ class SharedFolderWriteControllerTest {
 
     org.mockito.Mockito.verify(auditRecorder).recordRejectedOnce(
         "CREATE_FOLDER", "request", "invalid_request");
+    org.mockito.Mockito.verifyNoInteractions(catalog);
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void visibleMutationAndUploadFinalizationInvalidateOnlyAfterSuccess() throws Exception {
+    SharedDirectoryEntry renamed = new SharedDirectoryEntry(
+        "renamed.txt", "docs/renamed.txt", SharedDirectoryEntryType.FILE, 5,
+        Instant.parse("2026-07-17T00:00:00Z"), SharedFolderPreviewKind.TEXT, "renamed-token");
+    SharedDirectoryEntry moved = new SharedDirectoryEntry(
+        "moved.txt", "archive/moved.txt", SharedDirectoryEntryType.FILE, 5,
+        Instant.parse("2026-07-17T00:00:00Z"), SharedFolderPreviewKind.TEXT, "moved-token");
+    when(mutations.rename(any())).thenReturn(renamed);
+    when(mutations.move(any())).thenReturn(moved);
+    when(uploads.complete("session-1", false)).thenReturn(new SharedFolderUploadStatus(
+        "session-1", "docs", "video.mkv", 5, 5, SharedFolderUploadState.COMPLETED,
+        Instant.parse("2026-07-18T00:00:00Z")));
+
+    mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+            .patch(BASE + "/entries/rename").contentType("application/json")
+            .content("{\"path\":\"docs/a.txt\",\"name\":\"renamed.txt\",\"observedToken\":\"old\"}"))
+        .andExpect(status().isOk());
+    mockMvc.perform(post(BASE + "/entries/move").contentType("application/json")
+            .content("{\"path\":\"docs/renamed.txt\",\"destinationPath\":\"archive\","
+                + "\"name\":\"moved.txt\",\"observedToken\":\"renamed-token\","
+                + "\"replace\":false}"))
+        .andExpect(status().isOk());
+    mockMvc.perform(post(BASE + "/uploads/session-1/complete")
+            .contentType("application/json").content("{\"replace\":false}"))
+        .andExpect(status().isOk());
+
+    org.mockito.Mockito.verify(catalog, org.mockito.Mockito.times(2))
+        .invalidate(SharedFolderCatalogInvalidation.MUTATION);
+    org.mockito.Mockito.verify(catalog).invalidate(SharedFolderCatalogInvalidation.UPLOAD);
+  }
+
+  @Test
+  @WithMockUser(authorities = "USER")
+  void failedVisibleMutationDoesNotInvalidateCatalog() throws Exception {
+    when(mutations.createFolder(any())).thenThrow(new org.springframework.web.server.ResponseStatusException(
+        org.springframework.http.HttpStatus.CONFLICT, "already exists"));
+
+    mockMvc.perform(post(BASE + "/folders").contentType("application/json")
+            .content("{\"parentPath\":\"\",\"name\":\"docs\"}"))
+        .andExpect(status().isConflict());
+
+    org.mockito.Mockito.verifyNoInteractions(catalog);
   }
 
   @Test
@@ -144,6 +196,7 @@ class SharedFolderWriteControllerTest {
         .andExpect(header().string("Cache-Control", "private, no-store"));
 
     org.mockito.Mockito.verify(recycle).recycle(any());
+    org.mockito.Mockito.verify(catalog).invalidate(SharedFolderCatalogInvalidation.MUTATION);
     org.mockito.Mockito.verifyNoInteractions(mutations);
   }
 
@@ -174,6 +227,7 @@ class SharedFolderWriteControllerTest {
         .andExpect(header().string("Cache-Control", "private, no-store"))
         .andExpect(jsonPath("$.path").value("docs"))
         .andExpect(jsonPath("$.observedToken").value("opaque-token"));
+    org.mockito.Mockito.verify(catalog).invalidate(SharedFolderCatalogInvalidation.MUTATION);
 
     mockMvc.perform(post(BASE + "/uploads").contentType("application/json")
             .content("{\"parentPath\":\"docs\",\"name\":\"video.mkv\",\"expectedBytes\":5}"))

@@ -1,10 +1,17 @@
 package dev.christopherbell.sharedfolder.model;
 
+import java.time.Instant;
 import java.util.List;
 
-/** Public-safe shared-folder entries that match one validated search query. */
+/** One stable page from an immutable shared-folder catalog generation. */
 public record SharedFolderSearchResponse(
-    String query, List<SharedDirectoryEntry> entries, boolean truncated) {
+    String query,
+    List<SharedDirectoryEntry> entries,
+    String nextCursor,
+    long generation,
+    Instant snapshotCreatedAt,
+    SharedFolderCatalogFreshness freshness,
+    boolean partial) {
   public SharedFolderSearchResponse {
     entries = List.copyOf(entries);
   }

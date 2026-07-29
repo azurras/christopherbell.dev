@@ -49,6 +49,8 @@ public class SharedFolderUploadSession {
   private String finalizationLeaseToken;
   private Instant finalizationLeaseExpiresAt;
   @Indexed private Instant expiresAt;
+  @Indexed(name = "shared_upload_delete_ttl", expireAfter = "0s")
+  private Instant deleteAt;
   private Instant maintenanceRetryAt;
   private int maintenanceAttempts;
   private SharedFolderUploadState state;

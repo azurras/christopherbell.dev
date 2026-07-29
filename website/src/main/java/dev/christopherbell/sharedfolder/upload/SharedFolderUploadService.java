@@ -486,8 +486,9 @@ public class SharedFolderUploadService {
       }
       String completedFinalizationLeaseToken = session.getFinalizationLeaseToken();
       session.setState(SharedFolderUploadState.COMPLETED);
+      armCompletedRetention(session);
       clearFinalization(session);
-      session.setUpdatedAt(Instant.now());
+      session.setUpdatedAt(clock.instant());
       try {
         return status(sessions.save(session));
       } catch (RuntimeException exception) {
@@ -935,8 +936,9 @@ public class SharedFolderUploadService {
       }
       String completedFinalizationLeaseToken = session.getFinalizationLeaseToken();
       session.setState(SharedFolderUploadState.COMPLETED);
+      armCompletedRetention(session);
       clearFinalization(session);
-      session.setUpdatedAt(Instant.now());
+      session.setUpdatedAt(clock.instant());
       try {
         return status(sessions.save(session));
       } catch (RuntimeException exception) {
@@ -1539,10 +1541,13 @@ public class SharedFolderUploadService {
     SharedFolderUploadFinalizationState previousFinalizationState = session.getFinalizationState();
     String previousLeaseToken = session.getFinalizationLeaseToken();
     Instant previousLeaseExpiry = session.getFinalizationLeaseExpiresAt();
+    Instant previousDeleteAt = session.getDeleteAt();
     if (previous == SharedFolderUploadState.FINALIZING) {
       renewFinalizationLease(session);
     }
     session.setState(state);
+    if (state == SharedFolderUploadState.COMPLETED) armCompletedRetention(session);
+    else session.setDeleteAt(null);
     if (previous == SharedFolderUploadState.FINALIZING) {
       clearFinalization(session);
     }
@@ -1558,7 +1563,14 @@ public class SharedFolderUploadService {
       session.setFinalizationState(previousFinalizationState);
       session.setFinalizationLeaseToken(previousLeaseToken);
       session.setFinalizationLeaseExpiresAt(previousLeaseExpiry);
+      session.setDeleteAt(previousDeleteAt);
       return session;
+    }
+  }
+
+  private void armCompletedRetention(SharedFolderUploadSession session) {
+    if (session.getDeleteAt() == null) {
+      session.setDeleteAt(clock.instant().plus(properties.completedUploadRetention()));
     }
   }
 
