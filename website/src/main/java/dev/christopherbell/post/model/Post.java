@@ -2,10 +2,10 @@ package dev.christopherbell.post.model;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import java.time.Instant;
-import java.util.List;
-import java.util.ArrayList;
 import dev.christopherbell.post.editing.PostEditAuditEvent;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -85,6 +85,17 @@ public class Post {
       pattern = "uuuu-MM-dd'T'HH:mm:ss.SSS'Z'",
       timezone = "UTC")
   private Instant expiresOn;
+
+  /** Most recent confirmed interaction that extended this root post's lifespan. */
+  @JsonFormat(
+      shape = JsonFormat.Shape.STRING,
+      pattern = "uuuu-MM-dd'T'HH:mm:ss.SSS'Z'",
+      timezone = "UTC")
+  private Instant lastExtendedOn;
+
+  /** Normalized hashtags extracted from {@link #text} for public discovery. */
+  @Builder.Default
+  private List<PostTopic> topics = new ArrayList<>();
 
   // Likes
   /** Set of account IDs that liked this post. */

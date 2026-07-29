@@ -32,10 +32,14 @@ import dev.christopherbell.post.interaction.PostInteractionService;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostCreateRequest;
 import dev.christopherbell.post.model.PostDetail;
+import dev.christopherbell.post.model.PostTopic;
 import dev.christopherbell.post.preview.PostLinkPreviewService;
 import dev.christopherbell.post.thread.PostThreadService;
+import dev.christopherbell.post.topic.PostTopicExtractor;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -54,6 +58,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
 public class PostServiceTest {
+  private static final Instant NOW = Instant.parse("2026-07-29T03:00:00Z");
   @Mock private PostRepository postRepository;
   @Mock private AccountRepository accountRepository;
   @Mock private PostMapper postMapper;
@@ -65,9 +70,11 @@ public class PostServiceTest {
   @Mock private PostFeedQueryRepository postFeedQueryRepository;
   private PostService postService;
   private PostExpirationService postExpirationService;
+  private Clock clock;
 
   @BeforeEach
   void setUp() {
+    clock = Clock.fixed(NOW, ZoneOffset.UTC);
     postExpirationService = new PostExpirationService(postRepository, true);
     lenient().when(accountTrustService.hiddenAccountIdsForSelf()).thenReturn(Set.of());
     lenient().when(hiddenPostThreadService.hiddenRootIdsForSelf()).thenReturn(Set.of());
@@ -79,7 +86,9 @@ public class PostServiceTest {
             postMapper,
             notificationDeliveryService,
             postLinkPreviewService,
-            postExpirationService),
+            postExpirationService,
+            new PostTopicExtractor(),
+            clock),
         new PostFeedService(
             postRepository,
             accountRepository,
@@ -95,7 +104,8 @@ public class PostServiceTest {
             accountRepository,
             postMapper,
             notificationDeliveryService,
-            postExpirationService));
+            postExpirationService,
+            clock));
   }
 
   @Test
@@ -144,6 +154,23 @@ public class PostServiceTest {
     assertEquals(
         savedPost.getValue().getCreatedOn().plus(Duration.ofHours(24)),
         savedPost.getValue().getExpiresOn());
+  }
+
+  @Test
+  @DisplayName("Create extracts safe topics at the post write boundary")
+  public void testCreatePost_whenTextHasTopics_StoresNormalizedTopics() throws Exception {
+    var existing = AccountServiceStub.getAccountWhenExistsStub();
+    var service = spy(postService);
+    doReturn(existing.getId()).when(service).getSelfId();
+    when(accountRepository.findById(eq(existing.getId()))).thenReturn(Optional.of(existing));
+    when(postRepository.save(any(Post.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(postMapper.toDetail(any(Post.class))).thenReturn(PostDetail.builder().id("p1").build());
+
+    service.createPost(PostCreateRequest.builder().text("#Music and #ＭＵＳＩＣ").build());
+
+    var savedPost = ArgumentCaptor.forClass(Post.class);
+    verify(postRepository).save(savedPost.capture());
+    assertEquals(List.of(new PostTopic("music", "Music")), savedPost.getValue().getTopics());
   }
 
   @Test
@@ -460,7 +487,7 @@ public class PostServiceTest {
     var service = spy(postService);
     doReturn(likerId).when(service).getSelfId();
 
-    var created = Instant.now().minus(Duration.ofHours(1));
+    var created = NOW.minus(Duration.ofHours(1));
     var post = Post.builder()
         .id("p1")
         .accountId(author.getId())
@@ -483,12 +510,14 @@ public class PostServiceTest {
     assertEquals(created.plus(Duration.ofHours(48)), post.getExpiresOn());
     assertNotNull(likedItem);
     assertEquals(true, likedItem.liked());
+    assertEquals(NOW, post.getLastExtendedOn());
 
     var unlikedItem = service.toggleLike("p1");
     assertEquals(0, post.getLikesCount());
     assertEquals(created.plus(Duration.ofHours(24)), post.getExpiresOn());
     assertNotNull(unlikedItem);
     assertEquals(false, unlikedItem.liked());
+    assertEquals(NOW, post.getLastExtendedOn());
     verify(notificationDeliveryService).createPostLikeNotification(eq(post), eq(liker), eq(author));
   }
 

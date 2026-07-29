@@ -68,6 +68,8 @@ public class PostThreadService {
         .replyCount((int) postRepository.countByParentId(post.getId()))
         .createdOn(post.getCreatedOn())
         .lastUpdatedOn(post.getLastUpdatedOn())
+        .lastExtendedOn(post.getLastExtendedOn())
+        .topics(post.getTopics())
         .expiresOn(post.getExpiresOn())
         .build();
   }

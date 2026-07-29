@@ -17,5 +17,7 @@ public record PostDetail(
     List<PostLinkPreview> linkPreviews,
     Instant createdOn,
     Instant lastUpdatedOn,
-    Instant editedOn
+    Instant editedOn,
+    Instant lastExtendedOn,
+    List<PostTopic> topics
 ) {}
