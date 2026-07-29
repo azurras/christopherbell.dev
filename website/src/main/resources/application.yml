@@ -87,6 +87,16 @@ app:
     software-name: christopherbell.dev
     software-version: ${GIT_COMMIT:development}
     key-encryption-secret: ""
+    outbound:
+      not-before:
+      peers: []
+      connect-timeout: 3s
+      request-timeout: 10s
+      initial-backoff: 30s
+      max-backoff: 6h
+      max-attempts: 6
+      batch-size: 10
+      development-loopback-enabled: false
   jwt:
     secret: ${APP_JWT_SECRET:local-development-jwt-secret-change-me-at-least-32-bytes}
   shared-folder:

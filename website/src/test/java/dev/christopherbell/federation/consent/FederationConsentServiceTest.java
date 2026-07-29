@@ -49,7 +49,8 @@ class FederationConsentServiceTest {
         false,
         "christopherbell.dev",
         "1.0",
-        Base64.getEncoder().encodeToString(secret));
+        Base64.getEncoder().encodeToString(secret),
+        null);
     service = new FederationConsentService(
         accounts,
         accountMapper,
@@ -86,7 +87,7 @@ class FederationConsentServiceTest {
   @Test
   void enabledSignupFailsClosedWhenDiscoveryEnrollmentIsUnavailable() {
     var disabled = new FederationProperties(
-        false, false, false, "christopherbell.dev", "1.0", null);
+        false, false, false, "christopherbell.dev", "1.0", null, null);
     service = new FederationConsentService(
         accounts,
         accountMapper,
