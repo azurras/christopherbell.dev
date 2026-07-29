@@ -108,7 +108,15 @@ app:
     transcode-cache-limit: 250GB
     recycle-retention: 30d
     audit-retention: 180d
+    completed-upload-retention: 7d
     enabled: false
+    catalog:
+      max-entries: 50000
+      max-directories: 10000
+      max-depth: 32
+      max-scan-duration: 30s
+      refresh-after: 15s
+      default-page-size: 25
     media:
       queue-capacity: 8
       per-account-queue-capacity: 2
@@ -117,6 +125,11 @@ app:
       progressive-idle-timeout: 30s
       initial-buffer: 2MB
       max-output: 50GB
+      failed-cleanup-delay: 1h
+      canceled-cleanup-delay: 15m
+      insufficient-space-cleanup-delay: 1h
+      timed-out-cleanup-delay: 1h
+      diagnostic-retention: 7d
   music:
     root: build/shared-folder/default/shared/Music
     artwork-cache-root: build/shared-folder/default/system/music-artwork

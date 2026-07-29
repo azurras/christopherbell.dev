@@ -5,16 +5,17 @@ import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedFolderRadioDurationRequest;
 import dev.christopherbell.sharedfolder.model.SharedFolderRadioResponse;
 import dev.christopherbell.sharedfolder.model.SharedFolderRadioResponse.Playback;
-import dev.christopherbell.sharedfolder.radio.SharedFolderRadioDocument.TrackDuration;
 import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntUnaryOperator;
+import java.util.function.Supplier;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -23,10 +24,11 @@ import org.springframework.web.server.ResponseStatusException;
 /** Owns the durable, in-process atomic transitions of the shared-folder radio station. */
 @Service
 public final class SharedFolderRadioService {
-  private static final int MAX_KNOWN_DURATIONS = 10_000;
+  private static final int MAX_TRANSITION_ATTEMPTS = 5;
 
   private final SharedFolderCatalogService catalog;
   private final SharedFolderRadioRepository repository;
+  private final SharedFolderRadioDurationResolver durations;
   private final Clock clock;
   private final IntUnaryOperator randomIndex;
   private final Object stationLock = new Object();
@@ -36,21 +38,26 @@ public final class SharedFolderRadioService {
   public SharedFolderRadioService(
       SharedFolderCatalogService catalog,
       SharedFolderRadioRepository repository,
+      SharedFolderRadioDurationResolver durations,
       Clock clock) {
-    this(catalog, repository, clock, bound -> ThreadLocalRandom.current().nextInt(bound));
+    this(catalog, repository, durations, clock,
+        bound -> ThreadLocalRandom.current().nextInt(bound));
   }
 
   /** Creates a deterministically selectable station for focused tests. */
   SharedFolderRadioService(
       SharedFolderCatalogService catalog,
       SharedFolderRadioRepository repository,
+      SharedFolderRadioDurationResolver durations,
       Clock clock,
       IntUnaryOperator randomIndex) {
-    if (catalog == null || repository == null || clock == null || randomIndex == null) {
+    if (catalog == null || repository == null || durations == null
+        || clock == null || randomIndex == null) {
       throw new IllegalArgumentException("Radio dependencies are required");
     }
     this.catalog = catalog;
     this.repository = repository;
+    this.durations = durations;
     this.clock = clock;
     this.randomIndex = randomIndex;
   }
@@ -59,11 +66,12 @@ public final class SharedFolderRadioService {
   public SharedFolderRadioResponse current() {
     List<SharedDirectoryEntry> tracks = catalog.audioTracksBelowMusic();
     synchronized (stationLock) {
-      SharedFolderRadioDocument current = repository
-          .findById(SharedFolderRadioDocument.ID)
-          .orElse(null);
-      Instant now = clock.instant();
-      return transition(tracks, current, now, null);
+      return retryTransition(() -> {
+        SharedFolderRadioDocument current = repository
+            .findById(SharedFolderRadioDocument.ID)
+            .orElse(null);
+        return transition(tracks, current, clock.instant());
+      });
     }
   }
 
@@ -72,23 +80,23 @@ public final class SharedFolderRadioService {
     requireValidReport(request);
     List<SharedDirectoryEntry> tracks = catalog.audioTracksBelowMusic();
     synchronized (stationLock) {
-      SharedFolderRadioDocument current = repository
-          .findById(SharedFolderRadioDocument.ID)
-          .orElseThrow(this::staleReport);
-      if (current.state() == SharedFolderRadioDocument.State.EMPTY) {
-        throw staleReport();
-      }
-      SharedDirectoryEntry activeTrack = findTrack(tracks, current.path());
-      if (activeTrack == null) {
-        saveEmpty(current);
-        throw staleReport();
-      }
-      if (request.stationSequence() != current.stationSequence()
-          || !request.path().equals(current.path())) {
-        throw staleReport();
-      }
-      Instant now = clock.instant();
-      return transition(tracks, current, now, request.durationSeconds());
+      return retryTransition(() -> {
+        SharedFolderRadioDocument current = repository
+            .findById(SharedFolderRadioDocument.ID)
+            .orElseThrow(this::staleReport);
+        if (current.state() == SharedFolderRadioDocument.State.EMPTY) throw staleReport();
+        SharedDirectoryEntry activeTrack = findTrack(tracks, current.path());
+        if (activeTrack == null) {
+          saveEmpty(current);
+          throw staleReport();
+        }
+        if (request.stationSequence() != current.stationSequence()
+            || !request.path().equals(current.path())) throw staleReport();
+        Double trustedDuration = durations.resolve(activeTrack);
+        if (trustedDuration != null && !durationReportMatches(
+            request.durationSeconds(), trustedDuration)) throw staleReport();
+        return transition(tracks, current, clock.instant());
+      });
     }
   }
 
@@ -107,8 +115,7 @@ public final class SharedFolderRadioService {
   private SharedFolderRadioResponse transition(
       List<SharedDirectoryEntry> tracks,
       SharedFolderRadioDocument current,
-      Instant now,
-      Double observedDuration) {
+      Instant now) {
     if (tracks.isEmpty()) {
       saveEmpty(current);
       return SharedFolderRadioResponse.empty();
@@ -121,23 +128,16 @@ public final class SharedFolderRadioService {
       long sequence = current == null ? 1 : Math.incrementExact(current.stationSequence());
       String previousPath = current == null
           || current.state() == SharedFolderRadioDocument.State.EMPTY ? null : current.path();
-      KnownDurations knownDurations = KnownDurations.from(current);
       SharedDirectoryEntry selected = selectTrack(tracks, previousPath);
-      return saveAndRespond(selected, sequence, now, knownDurations.find(selected),
-          knownDurations.values(), now);
+      return saveAndRespond(selected, sequence, now, durations.resolve(selected),
+          current == null ? null : current.version(), now);
     }
-    KnownDurations knownDurations = KnownDurations.from(current);
-    if (observedDuration != null) {
-      knownDurations.record(activeTrack, observedDuration);
-    }
-    Double durationSeconds = observedDuration != null
-        ? observedDuration : knownDurations.find(activeTrack);
+    Double durationSeconds = durations.resolve(activeTrack);
     SharedFolderRadioDocument resolved = SharedFolderRadioDocument.playing(
         current.stationSequence(), current.path(), current.startedAt(), durationSeconds,
-        knownDurations.values());
-    boolean changed = observedDuration != null
-        || !Objects.equals(current.durationSeconds(), durationSeconds)
-        || !current.knownDurations().equals(resolved.knownDurations());
+        List.of(), current.version());
+    boolean changed = !Objects.equals(current.durationSeconds(), durationSeconds)
+        || !current.knownDurations().isEmpty();
     while (resolved.durationSeconds() != null) {
       Instant priorEnd = resolved.startedAt().plusMillis(
           Math.round(resolved.durationSeconds() * 1_000));
@@ -147,7 +147,7 @@ public final class SharedFolderRadioService {
       activeTrack = selectTrack(tracks, resolved.path());
       resolved = SharedFolderRadioDocument.playing(
           Math.incrementExact(resolved.stationSequence()), activeTrack.path(), priorEnd,
-          knownDurations.find(activeTrack), knownDurations.values());
+          durations.resolve(activeTrack), List.of(), resolved.version());
       changed = true;
     }
     SharedFolderRadioDocument saved = changed ? repository.save(resolved) : resolved;
@@ -159,8 +159,8 @@ public final class SharedFolderRadioService {
       return current;
     }
     long sequence = current == null ? 1 : Math.incrementExact(current.stationSequence());
-    List<TrackDuration> knownDurations = current == null ? List.of() : current.knownDurations();
-    return repository.save(SharedFolderRadioDocument.empty(sequence, knownDurations));
+    return repository.save(SharedFolderRadioDocument.empty(
+        sequence, List.of(), current == null ? null : current.version()));
   }
 
   private SharedFolderRadioResponse saveAndRespond(
@@ -168,10 +168,10 @@ public final class SharedFolderRadioService {
       long sequence,
       Instant startedAt,
       Double durationSeconds,
-      List<TrackDuration> knownDurations,
+      Long version,
       Instant now) {
     SharedFolderRadioDocument saved = repository.save(SharedFolderRadioDocument.playing(
-        sequence, track.path(), startedAt, durationSeconds, knownDurations));
+        sequence, track.path(), startedAt, durationSeconds, List.of(), version));
     return respond(saved, track, now);
   }
 
@@ -212,44 +212,23 @@ public final class SharedFolderRadioService {
     return new ResponseStatusException(HttpStatus.BAD_REQUEST, "Radio duration report is invalid");
   }
 
-  private static final class KnownDurations {
-    private final LinkedHashMap<String, TrackDuration> byObservedToken;
+  private boolean durationReportMatches(double reported, double trusted) {
+    double tolerance = Math.max(1.0, trusted * 0.02);
+    return Math.abs(reported - trusted) <= tolerance;
+  }
 
-    private KnownDurations(LinkedHashMap<String, TrackDuration> byObservedToken) {
-      this.byObservedToken = byObservedToken;
-    }
-
-    private static KnownDurations from(SharedFolderRadioDocument document) {
-      LinkedHashMap<String, TrackDuration> durations = new LinkedHashMap<>();
-      if (document != null) {
-        for (TrackDuration duration : document.knownDurations()) {
-          durations.put(duration.observedToken(), duration);
+  private <T> T retryTransition(Supplier<T> operation) {
+    for (int attempt = 1; attempt <= MAX_TRANSITION_ATTEMPTS; attempt++) {
+      try {
+        return operation.get();
+      } catch (OptimisticLockingFailureException | DuplicateKeyException conflict) {
+        if (attempt == MAX_TRANSITION_ATTEMPTS) {
+          throw new ResponseStatusException(
+              HttpStatus.SERVICE_UNAVAILABLE, "Radio state is temporarily busy");
         }
       }
-      return new KnownDurations(durations);
     }
-
-    private Double find(SharedDirectoryEntry track) {
-      TrackDuration duration = byObservedToken.get(track.observedToken());
-      return duration != null && duration.path().equals(track.path())
-          ? duration.durationSeconds() : null;
-    }
-
-    private void record(SharedDirectoryEntry track, double durationSeconds) {
-      if (track.observedToken() == null || track.observedToken().isBlank()) {
-        return;
-      }
-      byObservedToken.remove(track.observedToken());
-      byObservedToken.put(track.observedToken(),
-          new TrackDuration(track.path(), track.observedToken(), durationSeconds));
-      while (byObservedToken.size() > MAX_KNOWN_DURATIONS) {
-        String oldest = byObservedToken.keySet().iterator().next();
-        byObservedToken.remove(oldest);
-      }
-    }
-
-    private List<TrackDuration> values() {
-      return List.copyOf(byObservedToken.values());
-    }
+    throw new IllegalStateException("Radio retry loop did not terminate");
   }
+
 }

@@ -14,6 +14,9 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @NoArgsConstructor
 @Document("shared_folder_media_jobs")
 @CompoundIndex(name = "media_lru", def = "{'status': 1, 'lastAccessedAt': 1, '_id': 1}")
+@CompoundIndex(
+    name = "media_cleanup_due",
+    def = "{'artifactsCleaned': 1, 'cleanupAfter': 1, 'status': 1, '_id': 1}")
 public class MediaJob {
   @Id private String id;
   @Version private Long version;
@@ -34,4 +37,8 @@ public class MediaJob {
   private Instant createdAt;
   @Indexed private Instant updatedAt;
   private Instant lastAccessedAt;
+  private Instant cleanupAfter;
+  private boolean artifactsCleaned;
+  @Indexed(name = "shared_media_delete_ttl", expireAfter = "0s")
+  private Instant deleteAt;
 }

@@ -10,6 +10,8 @@ import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleEntry;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecyclePage;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
+import dev.christopherbell.sharedfolder.service.SharedFolderCatalogInvalidation;
+import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -36,14 +38,17 @@ public class SharedFolderAdminController {
   private final SharedFolderAuditQueryService audit;
   private final SharedFolderRecycleService recycle;
   private final SharedFolderAuditRecorder recorder;
+  private final SharedFolderCatalogService catalog;
 
   public SharedFolderAdminController(
       SharedFolderAuditQueryService audit,
       SharedFolderRecycleService recycle,
-      SharedFolderAuditRecorder recorder) {
+      SharedFolderAuditRecorder recorder,
+      SharedFolderCatalogService catalog) {
     this.audit = audit;
     this.recycle = recycle;
     this.recorder = recorder;
+    this.catalog = catalog;
   }
 
   @GetMapping("/audit")
@@ -73,8 +78,10 @@ public class SharedFolderAdminController {
   @PostMapping("/recycle/{id}/restore")
   public ResponseEntity<SharedDirectoryEntry> restore(
       @PathVariable String id, @Valid @RequestBody RestoreRequest request) {
-    return ResponseEntity.ok().headers(noStore()).body(audited(
-        "RESTORE", id, () -> recycle.restore(id, request.replace())));
+    SharedDirectoryEntry restored = audited(
+        "RESTORE", id, () -> recycle.restore(id, request.replace()));
+    catalog.invalidate(SharedFolderCatalogInvalidation.RESTORE);
+    return ResponseEntity.ok().headers(noStore()).body(restored);
   }
 
   @DeleteMapping("/recycle/{id}")
@@ -84,6 +91,7 @@ public class SharedFolderAdminController {
       recycle.purge(id, request.confirmation());
       return Boolean.TRUE;
     });
+    catalog.invalidate(SharedFolderCatalogInvalidation.PURGE);
     return ResponseEntity.noContent().headers(noStore()).build();
   }
 

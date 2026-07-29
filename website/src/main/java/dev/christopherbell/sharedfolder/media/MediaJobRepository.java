@@ -35,9 +35,14 @@ public interface MediaJobRepository extends MongoRepository<MediaJob, String> {
   Slice<MediaJob> findByStatusOrderByLastAccessedAtAscIdAsc(
       MediaJobStatus status, Pageable pageable);
 
+  Slice<MediaJob>
+      findByStatusInAndCleanupAfterLessThanEqualAndArtifactsCleanedFalseOrderByCleanupAfterAscIdAsc(
+          Collection<MediaJobStatus> statuses, Instant cleanupAfter, Pageable pageable);
+
   @Query("{ '_id': ?0, 'ownerId': ?1, 'status': { '$in': ['QUEUED', 'INSPECTING', "
       + "'TRANSCODING', 'BUFFERING'] } }")
-  @Update("{ '$set': { 'status': 'CANCELED', 'updatedAt': ?2, 'descriptorPublished': false }, "
-      + "'$unset': { 'activeCacheKey': '' }, '$inc': { 'version': 1 } }")
-  long cancelActive(String id, String ownerId, Instant updatedAt);
+  @Update("{ '$set': { 'status': 'CANCELED', 'updatedAt': ?2, 'cleanupAfter': ?3, "
+      + "'artifactsCleaned': false, 'descriptorPublished': false }, "
+      + "'$unset': { 'activeCacheKey': '', 'deleteAt': '' }, '$inc': { 'version': 1 } }")
+  long cancelActive(String id, String ownerId, Instant updatedAt, Instant cleanupAfter);
 }

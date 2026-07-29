@@ -2,19 +2,28 @@ package dev.christopherbell.sharedfolder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.configuration.SharedFolderCatalogProperties;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntry;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryEntryType;
 import dev.christopherbell.sharedfolder.model.SharedDirectoryResponse;
+import dev.christopherbell.sharedfolder.model.SharedFolderCatalogFreshness;
 import dev.christopherbell.sharedfolder.model.SharedFolderPreviewKind;
+import dev.christopherbell.sharedfolder.model.SharedFolderSearchRequest;
 import dev.christopherbell.sharedfolder.service.SharedFolderBrowserService;
+import dev.christopherbell.sharedfolder.service.SharedFolderCatalogInvalidation;
 import dev.christopherbell.sharedfolder.service.SharedFolderCatalogService;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.List;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.web.server.ResponseStatusException;
@@ -23,57 +32,118 @@ class SharedFolderCatalogServiceTest {
   private static final Instant MODIFIED_AT = Instant.parse("2026-07-25T12:00:00Z");
 
   @Test
-  void search_recursivelyMatchesCaseInsensitiveNamesAndPathsInBreadthFirstOrder() {
+  void requestReturnsBuildingWithoutEnumeratingOnTheRequestThread() {
+    SharedFolderBrowserService browser = Mockito.mock(SharedFolderBrowserService.class);
+    when(browser.list("")).thenReturn(directory("", List.of(file("track.mp3", "track.mp3"))));
+    ManualExecutor executor = new ManualExecutor();
+    SharedFolderCatalogService catalog = catalog(browser, new MutableClock(MODIFIED_AT), executor,
+        properties(100, 20, 10, Duration.ofSeconds(5)));
+
+    var building = catalog.search("track");
+
+    assertThat(building.entries()).isEmpty();
+    assertThat(catalog.status().freshness()).isEqualTo(SharedFolderCatalogFreshness.BUILDING);
+    assertThat(executor.queued()).isEqualTo(1);
+    verify(browser, never()).list("");
+
+    executor.runNext();
+
+    assertThat(catalog.search("track").entries()).extracting(SharedDirectoryEntry::path)
+        .containsExactly("track.mp3");
+    assertThat(catalog.status().freshness()).isEqualTo(SharedFolderCatalogFreshness.FRESH);
+  }
+
+  @Test
+  void entryDirectoryAndDepthBudgetsPublishABoundedPartialSnapshot() {
     SharedFolderBrowserService browser = Mockito.mock(SharedFolderBrowserService.class);
     when(browser.list("")).thenReturn(directory("", List.of(
-        directoryEntry("Music", "Music"), directoryEntry("track-library", "track-library"),
-        file("unrelated.txt", "unrelated.txt"))));
-    when(browser.list("Music")).thenReturn(directory("Music", List.of(
-        directoryEntry("archive", "Music/archive"),
-        file("MiXeD tRaCk.flac", "Music/MiXeD tRaCk.flac"),
-        file("Track-000.mp3", "Music/Track-000.mp3"))));
-    when(browser.list("track-library")).thenReturn(directory("track-library", List.of(
-        file("notes.txt", "track-library/notes.txt"))));
-    when(browser.list("Music/archive")).thenReturn(directory("Music/archive", tracks()));
+        directoryEntry("A", "A"), directoryEntry("B", "B"), file("one.mp3", "one.mp3"))));
+    when(browser.list("A")).thenReturn(directory("A", List.of(
+        directoryEntry("Deep", "A/Deep"), file("two.mp3", "A/two.mp3"))));
+    ManualExecutor executor = new ManualExecutor();
+    SharedFolderCatalogService catalog = catalog(browser, new MutableClock(MODIFIED_AT), executor,
+        properties(4, 2, 1, Duration.ofSeconds(5)));
 
-    var response = new SharedFolderCatalogService(browser, Clock.fixed(MODIFIED_AT, ZoneOffset.UTC))
-        .search("  tRaCk  ");
+    catalog.refreshAsync();
+    executor.runNext();
 
-    assertThat(response.query()).isEqualTo("tRaCk");
-    assertThat(response.entries()).hasSize(200);
-    assertThat(response.entries()).extracting(SharedDirectoryEntry::path)
-        .startsWith("track-library", "Music/MiXeD tRaCk.flac", "Music/Track-000.mp3",
-            "track-library/notes.txt")
-        .endsWith("Music/archive/Track-196.mp3")
-        .doesNotContain("unrelated.txt");
-    assertThat(response.entries()).allSatisfy(entry -> assertThat(entry.path())
-        .doesNotContain(":", "\\\\"));
-    assertThat(response.truncated()).isTrue();
+    assertThat(catalog.status().partial()).isTrue();
+    assertThat(catalog.status().entryCount()).isLessThanOrEqualTo(4);
+    verify(browser).list("");
+    verify(browser).list("A");
+    verify(browser, never()).list("B");
+    verify(browser, never()).list("A/Deep");
   }
 
   @Test
-  void search_reusesItsImmutableCatalogForFifteenSecondsBeforeRefreshing() {
+  void inaccessibleChildMarksPartialButKeepsReachableEntries() {
+    SharedFolderBrowserService browser = Mockito.mock(SharedFolderBrowserService.class);
+    when(browser.list("")).thenReturn(directory("", List.of(
+        directoryEntry("Private", "Private"), file("track.mp3", "track.mp3"))));
+    when(browser.list("Private")).thenThrow(new ResponseStatusException(
+        org.springframework.http.HttpStatus.NOT_FOUND));
+    ManualExecutor executor = new ManualExecutor();
+    SharedFolderCatalogService catalog = catalog(browser, new MutableClock(MODIFIED_AT), executor,
+        properties(100, 20, 10, Duration.ofSeconds(5)));
+
+    catalog.refreshAsync();
+    executor.runNext();
+
+    assertThat(catalog.status().partial()).isTrue();
+    assertThat(catalog.search("track").entries()).extracting(SharedDirectoryEntry::path)
+        .containsExactly("track.mp3");
+  }
+
+  @Test
+  void timeoutPublishesPartialAndRootFailurePreservesLastKnownGood() {
     SharedFolderBrowserService browser = Mockito.mock(SharedFolderBrowserService.class);
     MutableClock clock = new MutableClock(MODIFIED_AT);
-    when(browser.list("")).thenReturn(directory("", List.of(file("first.txt", "first.txt"))));
-    SharedFolderCatalogService catalog = new SharedFolderCatalogService(browser, clock);
+    when(browser.list("")).thenAnswer(ignored -> {
+      clock.advance(Duration.ofSeconds(2));
+      return directory("", List.of(
+          directoryEntry("Pending", "Pending"), file("first.mp3", "first.mp3")));
+    });
+    ManualExecutor executor = new ManualExecutor();
+    SharedFolderCatalogService catalog = catalog(browser, clock, executor,
+        properties(100, 20, 10, Duration.ofSeconds(1)));
 
+    catalog.refreshAsync();
+    executor.runNext();
+    assertThat(catalog.status().partial()).isTrue();
+
+    when(browser.list("")).thenThrow(new IllegalStateException("offline"));
+    catalog.invalidate(SharedFolderCatalogInvalidation.MUTATION);
+    executor.runNext();
+
+    assertThat(catalog.status().freshness()).isEqualTo(SharedFolderCatalogFreshness.FAILED);
     assertThat(catalog.search("first").entries()).extracting(SharedDirectoryEntry::path)
-        .containsExactly("first.txt");
-    when(browser.list("")).thenReturn(directory("", List.of(file("second.txt", "second.txt"))));
-
-    assertThat(catalog.search("first").entries()).extracting(SharedDirectoryEntry::path)
-        .containsExactly("first.txt");
-    clock.advanceSeconds(15);
-
-    assertThat(catalog.search("second").entries()).extracting(SharedDirectoryEntry::path)
-        .containsExactly("second.txt");
+        .containsExactly("first.mp3");
   }
 
   @Test
-  void search_rejectsBlankAndOverlongQueries() {
-    SharedFolderCatalogService catalog = new SharedFolderCatalogService(
-        Mockito.mock(SharedFolderBrowserService.class), Clock.fixed(MODIFIED_AT, ZoneOffset.UTC));
+  void invalidationCancelsQueuedGenerationAndOnlyNewestResultPublishes() {
+    SharedFolderBrowserService browser = Mockito.mock(SharedFolderBrowserService.class);
+    when(browser.list("")).thenReturn(directory("", List.of(file("new.mp3", "new.mp3"))));
+    ManualExecutor executor = new ManualExecutor();
+    SharedFolderCatalogService catalog = catalog(browser, new MutableClock(MODIFIED_AT), executor,
+        properties(100, 20, 10, Duration.ofSeconds(5)));
+
+    catalog.refreshAsync();
+    catalog.invalidate(SharedFolderCatalogInvalidation.MUTATION);
+    executor.runNext();
+    executor.runNext();
+
+    assertThat(catalog.status().generation()).isEqualTo(2);
+    assertThat(catalog.search("new").entries()).extracting(SharedDirectoryEntry::path)
+        .containsExactly("new.mp3");
+    verify(browser, Mockito.times(1)).list("");
+  }
+
+  @Test
+  void queryValidationStillRejectsBlankAndOverlongValuesWithoutSchedulingWork() {
+    ManualExecutor executor = new ManualExecutor();
+    SharedFolderCatalogService catalog = catalog(Mockito.mock(SharedFolderBrowserService.class),
+        new MutableClock(MODIFIED_AT), executor, properties(100, 20, 10, Duration.ofSeconds(5)));
 
     assertThatThrownBy(() -> catalog.search("   "))
         .isInstanceOfSatisfying(ResponseStatusException.class,
@@ -81,36 +151,67 @@ class SharedFolderCatalogServiceTest {
     assertThatThrownBy(() -> catalog.search("x".repeat(201)))
         .isInstanceOfSatisfying(ResponseStatusException.class,
             exception -> assertThat(exception.getStatusCode().value()).isEqualTo(400));
+    assertThat(executor.queued()).isZero();
   }
 
   @Test
-  void audioTracksBelowMusic_returnsOnlyRecursiveAudioFilesUnderRootMusicIgnoringCase() {
+  void searchPagesInStablePathOrderWithoutDuplicates() {
     SharedFolderBrowserService browser = Mockito.mock(SharedFolderBrowserService.class);
     when(browser.list("")).thenReturn(directory("", List.of(
-        directoryEntry("mUsIc", "mUsIc"), directoryEntry("Elsewhere", "Elsewhere"))));
-    when(browser.list("mUsIc")).thenReturn(directory("mUsIc", List.of(
-        directoryEntry("Live", "mUsIc/Live"),
-        file("root.mp3", "mUsIc/root.mp3"),
-        nonAudioFile("cover.jpg", "mUsIc/cover.jpg"))));
-    when(browser.list("mUsIc/Live")).thenReturn(directory("mUsIc/Live", List.of(
-        file("nested.flac", "mUsIc/Live/nested.flac"))));
-    when(browser.list("Elsewhere")).thenReturn(directory("Elsewhere", List.of(
-        file("outside.mp3", "Elsewhere/outside.mp3"))));
+        file("report.txt", "z/report.txt"),
+        file("REPORT.txt", "A/REPORT.txt"),
+        file("report.txt", "a/report.txt"))));
+    ManualExecutor executor = new ManualExecutor();
+    SharedFolderCatalogService catalog = catalog(browser, new MutableClock(MODIFIED_AT), executor,
+        properties(100, 20, 10, Duration.ofSeconds(5)));
+    catalog.refreshAsync();
+    executor.runNext();
 
-    var tracks = new SharedFolderCatalogService(browser, Clock.fixed(MODIFIED_AT, ZoneOffset.UTC))
-        .audioTracksBelowMusic();
+    var first = catalog.search(new SharedFolderSearchRequest("report", null, 2));
+    var second = catalog.search(new SharedFolderSearchRequest("report", first.nextCursor(), 2));
 
-    assertThat(tracks).extracting(SharedDirectoryEntry::path)
-        .containsExactly("mUsIc/root.mp3", "mUsIc/Live/nested.flac");
+    assertThat(first.entries()).extracting(SharedDirectoryEntry::path)
+        .containsExactly("A/REPORT.txt", "a/report.txt");
+    assertThat(first.nextCursor()).isNotBlank();
+    assertThat(second.entries()).extracting(SharedDirectoryEntry::path)
+        .containsExactly("z/report.txt");
+    assertThat(second.nextCursor()).isNull();
+    assertThat(second.generation()).isEqualTo(first.generation());
   }
 
-  private List<SharedDirectoryEntry> tracks() {
-    List<SharedDirectoryEntry> entries = new ArrayList<>();
-    for (int number = 1; number <= 201; number++) {
-      String filename = "Track-%03d.mp3".formatted(number);
-      entries.add(file(filename, "Music/archive/" + filename));
-    }
-    return List.copyOf(entries);
+  @Test
+  void searchRejectsCursorAfterCatalogGenerationChanges() {
+    SharedFolderBrowserService browser = Mockito.mock(SharedFolderBrowserService.class);
+    when(browser.list("")).thenReturn(directory("", List.of(
+        file("report-1.txt", "report-1.txt"), file("report-2.txt", "report-2.txt"))));
+    ManualExecutor executor = new ManualExecutor();
+    SharedFolderCatalogService catalog = catalog(browser, new MutableClock(MODIFIED_AT), executor,
+        properties(100, 20, 10, Duration.ofSeconds(5)));
+    catalog.refreshAsync();
+    executor.runNext();
+    var first = catalog.search(new SharedFolderSearchRequest("report", null, 1));
+
+    catalog.invalidate(SharedFolderCatalogInvalidation.MUTATION);
+    executor.runNext();
+
+    assertThatThrownBy(() -> catalog.search(
+        new SharedFolderSearchRequest("report", first.nextCursor(), 1)))
+        .isInstanceOfSatisfying(ResponseStatusException.class,
+            exception -> assertThat(exception.getStatusCode().value()).isEqualTo(409));
+  }
+
+  private SharedFolderCatalogService catalog(
+      SharedFolderBrowserService browser,
+      Clock clock,
+      ManualExecutor executor,
+      SharedFolderCatalogProperties properties) {
+    return new SharedFolderCatalogService(browser, clock, properties, executor);
+  }
+
+  private SharedFolderCatalogProperties properties(
+      int maxEntries, int maxDirectories, int maxDepth, Duration maxDuration) {
+    return new SharedFolderCatalogProperties(
+        maxEntries, maxDirectories, maxDepth, maxDuration, Duration.ofSeconds(15), 25);
   }
 
   private SharedDirectoryResponse directory(String path, List<SharedDirectoryEntry> entries) {
@@ -127,16 +228,11 @@ class SharedFolderCatalogServiceTest {
         SharedFolderPreviewKind.AUDIO);
   }
 
-  private SharedDirectoryEntry nonAudioFile(String name, String path) {
-    return new SharedDirectoryEntry(name, path, SharedDirectoryEntryType.FILE, 1, MODIFIED_AT,
-        SharedFolderPreviewKind.IMAGE);
-  }
-
   private static final class MutableClock extends Clock {
-    private Instant instant;
+    private Instant value;
 
-    private MutableClock(Instant instant) {
-      this.instant = instant;
+    private MutableClock(Instant value) {
+      this.value = value;
     }
 
     @Override
@@ -151,11 +247,58 @@ class SharedFolderCatalogServiceTest {
 
     @Override
     public Instant instant() {
-      return instant;
+      return value;
     }
 
-    private void advanceSeconds(long seconds) {
-      instant = instant.plusSeconds(seconds);
+    private void advance(Duration duration) {
+      value = value.plus(duration);
+    }
+  }
+
+  private static final class ManualExecutor extends AbstractExecutorService {
+    private final ArrayDeque<Runnable> tasks = new ArrayDeque<>();
+    private boolean shutdown;
+
+    @Override
+    public void execute(Runnable command) {
+      tasks.add(command);
+    }
+
+    private int queued() {
+      return tasks.size();
+    }
+
+    private void runNext() {
+      Runnable task = tasks.removeFirst();
+      task.run();
+    }
+
+    @Override
+    public void shutdown() {
+      shutdown = true;
+    }
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      shutdown = true;
+      List<Runnable> remaining = List.copyOf(tasks);
+      tasks.clear();
+      return remaining;
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return shutdown;
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return shutdown && tasks.isEmpty();
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) {
+      return isTerminated();
     }
   }
 }

@@ -145,8 +145,10 @@ export const API = {
       const params = new URLSearchParams({ path: String(path || '') });
       return `/api/shared-folder/2026-07-17/entries?${params}`;
     },
-    search: (query) => {
+    search: (query, cursor = null, size = 25) => {
       const params = new URLSearchParams({ query: String(query ?? '') });
+      if (cursor) params.set('cursor', String(cursor));
+      params.set('size', String(size));
       return `/api/shared-folder/2026-07-17/search?${params}`;
     },
     content: (path) => {

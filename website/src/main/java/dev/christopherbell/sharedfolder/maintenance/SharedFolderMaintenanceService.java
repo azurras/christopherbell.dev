@@ -68,6 +68,8 @@ public final class SharedFolderMaintenanceService {
       if (!renewLease()) return false;
       step("MAINTENANCE_RECYCLE_FAILED", recycle::cleanupExpired);
       if (!renewLease()) return false;
+      step("MAINTENANCE_MEDIA_CLEANUP_FAILED", media::cleanupTerminalJobs);
+      if (!renewLease()) return false;
       step("MAINTENANCE_CACHE_FAILED", media::evictReadyCache);
       if (!renewLease()) return false;
       step("MAINTENANCE_WORKER_FAILED", media::reconcileWorkerStatuses);

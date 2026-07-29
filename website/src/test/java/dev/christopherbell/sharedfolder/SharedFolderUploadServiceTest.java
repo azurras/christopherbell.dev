@@ -570,6 +570,7 @@ class SharedFolderUploadServiceTest {
     uploads.append(session.id(), 0, new ByteArrayInputStream(first), sha256(first));
     SharedFolderUploadStatus retried = uploads.append(
         session.id(), 0, new ByteArrayInputStream(first), sha256(first));
+    assertThat(sessions.get(session.id()).getDeleteAt()).isNull();
 
     assertThat(retried.chunkSizeBytes()).isEqualTo(DataSize.ofMegabytes(8).toBytes());
     assertThat(retried.committedChunks()).containsExactly(
@@ -579,6 +580,8 @@ class SharedFolderUploadServiceTest {
 
     assertThat(retried.nextOffset()).isEqualTo(first.length);
     assertThat(Files.readAllBytes(root.resolve("video.mkv"))).isEqualTo(first);
+    assertThat(sessions.get(session.id()).getDeleteAt())
+        .isBetween(Instant.now().plus(Duration.ofDays(6)), Instant.now().plus(Duration.ofDays(8)));
     assertThat(retried.toString()).doesNotContain(temp.toString());
   }
 
@@ -634,7 +637,8 @@ class SharedFolderUploadServiceTest {
     MockMvc mvc = MockMvcBuilders.standaloneSetup(new SharedFolderWriteController(
         mock(SharedFolderMutationService.class), uploads,
         mock(dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService.class),
-        mock(dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder.class)))
+        mock(dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder.class),
+        mock(dev.christopherbell.sharedfolder.service.SharedFolderCatalogService.class)))
         .setControllerAdvice(new ControllerExceptionHandler())
         .addFilters(unknownLength, new RequestSizeLimitFilter(1_000_000, 4))
         .build();
@@ -2252,6 +2256,7 @@ class SharedFolderUploadServiceTest {
     copy.setAppendDigest(source.getAppendDigest());
     copy.setAppendChunkKey(source.getAppendChunkKey());
     copy.setExpiresAt(source.getExpiresAt());
+    copy.setDeleteAt(source.getDeleteAt());
     copy.setMaintenanceRetryAt(source.getMaintenanceRetryAt());
     copy.setMaintenanceAttempts(source.getMaintenanceAttempts());
     copy.setState(source.getState());

@@ -33,6 +33,14 @@ import {
   waitForTerminalMediaJob,
 } from '../../main/resources/static/js/lib/shared-folder.js';
 
+function searchPage(overrides = {}) {
+  return {
+    query: 'report', entries: [], nextCursor: null, generation: 7,
+    snapshotCreatedAt: '2026-07-25T00:00:00Z', freshness: 'FRESH', partial: false,
+    ...overrides,
+  };
+}
+
 test('shared-folder API paths encode each decoded relative path once', () => {
   assert.equal(API.sharedFolder.entries('music/live set'),
     '/api/shared-folder/2026-07-17/entries?path=music%2Flive+set');
@@ -78,24 +86,23 @@ test('shared-folder radio control delegates playback and reports an empty statio
 
 test('shared-folder search encodes queries and presents validated recursive results', () => {
   assert.equal(typeof API.sharedFolder.search, 'function');
-  assert.equal(API.sharedFolder.search('plans & notes'),
-    '/api/shared-folder/2026-07-17/search?query=plans+%26+notes');
+  assert.equal(API.sharedFolder.search('plans & notes', 'opaque', 10),
+    '/api/shared-folder/2026-07-17/search?query=plans+%26+notes&cursor=opaque&size=10');
   assert.equal(typeof sharedFolder.validateSharedFolderSearchResponse, 'function');
   assert.equal(typeof sharedFolder.sharedFolderSearchResultDescription, 'function');
   assert.equal(typeof sharedFolder.sharedFolderEntryParentPath, 'function');
 
-  const response = sharedFolder.validateSharedFolderSearchResponse({
-    query: 'report',
+  const response = sharedFolder.validateSharedFolderSearchResponse(searchPage({
     entries: [{
       name: 'report.txt', path: 'archive/2026/report.txt', type: 'FILE', size: 12,
       modifiedAt: '2026-07-25T00:00:00Z', previewKind: 'TEXT', observedToken: 'proof',
     }],
-    truncated: true,
-  });
+    nextCursor: 'next-page', partial: true,
+  }));
   assert.deepEqual(response.entries.map(entry => entry.name), ['report.txt']);
   assert.equal(sharedFolder.sharedFolderEntryParentPath(response.entries[0]), 'archive/2026');
   assert.equal(sharedFolder.sharedFolderSearchResultDescription(response),
-    '1 result for “report”. Results are limited; refine your search.');
+    '1 result for “report”. More results are available. Catalog coverage is partial.');
 });
 
 test('shared-folder search rejects every malformed result partition before row actions use it', () => {
@@ -104,37 +111,40 @@ test('shared-folder search rejects every malformed result partition before row a
     modifiedAt: '2026-07-25T00:00:00Z', previewKind: 'TEXT', observedToken: 'proof',
   };
   const invalidResponses = [
-    ['blank query', { query: '', entries: [], truncated: false }],
-    ['whitespace query', { query: ' ', entries: [], truncated: false }],
-    ['untrimmed query', { query: ' report', entries: [], truncated: false }],
-    ['overlong query', { query: 'x'.repeat(201), entries: [], truncated: false }],
-    ['blank name', { query: 'report', entries: [{ ...validEntry, name: '  ' }], truncated: false }],
-    ['untrimmed name', { query: 'report', entries: [{ ...validEntry, name: ' report.txt' }], truncated: false }],
-    ['mismatched name', { query: 'report', entries: [{ ...validEntry, name: 'target.txt' }], truncated: false }],
-    ['slash in name', { query: 'report', entries: [{ ...validEntry, name: 'archive/report.txt' }], truncated: false }],
-    ['backslash in name', { query: 'report', entries: [{ ...validEntry, name: 'archive\\report.txt' }], truncated: false }],
-    ['dot name', { query: 'report', entries: [{ ...validEntry, name: '.' }], truncated: false }],
-    ['NUL in name', { query: 'report', entries: [{ ...validEntry, name: 'report\0.txt' }], truncated: false }],
-    ['control character in name', { query: 'report', entries: [{ ...validEntry, name: 'report\n.txt' }], truncated: false }],
+    ['blank query', searchPage({ query: '' })],
+    ['whitespace query', searchPage({ query: ' ' })],
+    ['untrimmed query', searchPage({ query: ' report' })],
+    ['overlong query', searchPage({ query: 'x'.repeat(201) })],
+    ['blank name', searchPage({ entries: [{ ...validEntry, name: '  ' }] })],
+    ['untrimmed name', searchPage({ entries: [{ ...validEntry, name: ' report.txt' }] })],
+    ['mismatched name', searchPage({ entries: [{ ...validEntry, name: 'target.txt' }] })],
+    ['slash in name', searchPage({ entries: [{ ...validEntry, name: 'archive/report.txt' }] })],
+    ['backslash in name', searchPage({ entries: [{ ...validEntry, name: 'archive\\report.txt' }] })],
+    ['dot name', searchPage({ entries: [{ ...validEntry, name: '.' }] })],
+    ['NUL in name', searchPage({ entries: [{ ...validEntry, name: 'report\0.txt' }] })],
+    ['control character in name', searchPage({ entries: [{ ...validEntry, name: 'report\n.txt' }] })],
     ['C1 control character in name', {
-      query: 'report',
+      ...searchPage(),
       entries: [{ ...validEntry, name: 'report\u0085.txt', path: 'archive/2026/report\u0085.txt' }],
-      truncated: false,
     }],
-    ['empty path', { query: 'report', entries: [{ ...validEntry, path: '' }], truncated: false }],
-    ['absolute path', { query: 'report', entries: [{ ...validEntry, path: '/report.txt' }], truncated: false }],
-    ['empty path segment', { query: 'report', entries: [{ ...validEntry, path: 'archive//report.txt' }], truncated: false }],
-    ['current-directory path segment', { query: 'report', entries: [{ ...validEntry, path: 'archive/./report.txt' }], truncated: false }],
-    ['traversal path segment', { query: 'report', entries: [{ ...validEntry, path: 'archive/../report.txt' }], truncated: false }],
-    ['backslash path separator', { query: 'report', entries: [{ ...validEntry, path: 'archive\\report.txt' }], truncated: false }],
-    ['unknown entry type', { query: 'report', entries: [{ ...validEntry, type: 'SYMLINK' }], truncated: false }],
-    ['fractional size', { query: 'report', entries: [{ ...validEntry, size: 1.5 }], truncated: false }],
-    ['negative size', { query: 'report', entries: [{ ...validEntry, size: -1 }], truncated: false }],
-    ['unsafe size', { query: 'report', entries: [{ ...validEntry, size: Number.MAX_SAFE_INTEGER + 1 }], truncated: false }],
-    ['invalid timestamp', { query: 'report', entries: [{ ...validEntry, modifiedAt: 'not-a-date' }], truncated: false }],
-    ['unknown preview kind', { query: 'report', entries: [{ ...validEntry, previewKind: 'SCRIPT' }], truncated: false }],
-    ['directory preview kind', { query: 'report', entries: [{ ...validEntry, type: 'DIRECTORY', previewKind: 'TEXT' }], truncated: false }],
-    ['invalid truncation flag', { query: 'report', entries: [], truncated: 'false' }],
+    ['empty path', searchPage({ entries: [{ ...validEntry, path: '' }] })],
+    ['absolute path', searchPage({ entries: [{ ...validEntry, path: '/report.txt' }] })],
+    ['empty path segment', searchPage({ entries: [{ ...validEntry, path: 'archive//report.txt' }] })],
+    ['current-directory path segment', searchPage({ entries: [{ ...validEntry, path: 'archive/./report.txt' }] })],
+    ['traversal path segment', searchPage({ entries: [{ ...validEntry, path: 'archive/../report.txt' }] })],
+    ['backslash path separator', searchPage({ entries: [{ ...validEntry, path: 'archive\\report.txt' }] })],
+    ['unknown entry type', searchPage({ entries: [{ ...validEntry, type: 'SYMLINK' }] })],
+    ['fractional size', searchPage({ entries: [{ ...validEntry, size: 1.5 }] })],
+    ['negative size', searchPage({ entries: [{ ...validEntry, size: -1 }] })],
+    ['unsafe size', searchPage({ entries: [{ ...validEntry, size: Number.MAX_SAFE_INTEGER + 1 }] })],
+    ['invalid timestamp', searchPage({ entries: [{ ...validEntry, modifiedAt: 'not-a-date' }] })],
+    ['unknown preview kind', searchPage({ entries: [{ ...validEntry, previewKind: 'SCRIPT' }] })],
+    ['directory preview kind', searchPage({ entries: [{ ...validEntry, type: 'DIRECTORY', previewKind: 'TEXT' }] })],
+    ['invalid cursor', searchPage({ nextCursor: '' })],
+    ['invalid generation', searchPage({ generation: 0 })],
+    ['invalid snapshot timestamp', searchPage({ snapshotCreatedAt: 'nope' })],
+    ['invalid freshness', searchPage({ freshness: 'MAGICAL' })],
+    ['invalid partial flag', searchPage({ partial: 'false' })],
   ];
 
   invalidResponses.forEach(([name, response]) => {
@@ -143,15 +153,14 @@ test('shared-folder search rejects every malformed result partition before row a
   });
 
   const validUnicodeName = 'Résumé final 2026.txt';
-  const validUnicodeResponse = sharedFolder.validateSharedFolderSearchResponse({
+  const validUnicodeResponse = sharedFolder.validateSharedFolderSearchResponse(searchPage({
     query: 'résumé',
     entries: [{
       ...validEntry,
       name: validUnicodeName,
       path: `archive/${validUnicodeName}`,
     }],
-    truncated: false,
-  });
+  }));
   assert.equal(validUnicodeResponse.entries[0].name, validUnicodeName);
 });
 
@@ -164,7 +173,7 @@ test('shared-folder search controller ignores stale results and clear restores t
   const controller = sharedFolderPage.createSharedFolderSearchController({
     load: query => query === 'first'
       ? new Promise(resolve => { resolveFirst = resolve; })
-      : Promise.resolve({ query, entries: [], truncated: false }),
+      : Promise.resolve(searchPage({ query })),
     render: response => rendered.push(response.query),
     restore: async () => { restoredPaths.push('archive/2026'); return true; },
     onError: error => errors.push(error.message),
@@ -175,7 +184,7 @@ test('shared-folder search controller ignores stale results and clear restores t
   await controller.clear();
   assert.deepEqual(restoredPaths, ['archive/2026']);
   assert.equal(controller.active(), false);
-  resolveFirst({ query: 'first', entries: [], truncated: false });
+  resolveFirst(searchPage({ query: 'first' }));
   assert.equal(await first, false);
   assert.deepEqual(rendered, []);
   assert.deepEqual(errors, []);
@@ -184,6 +193,41 @@ test('shared-folder search controller ignores stale results and clear restores t
   assert.deepEqual(rendered, ['second']);
   assert.equal(controller.leave(), true);
   assert.equal(controller.active(), false);
+});
+
+test('shared-folder search controller loads the next stable page without duplicate rows', async () => {
+  const requests = [];
+  const renderedPaths = [];
+  const controller = sharedFolderPage.createSharedFolderSearchController({
+    load: async (query, _signal, cursor) => {
+      requests.push([query, cursor]);
+      if (!cursor) return searchPage({
+        query,
+        entries: [{
+          name: 'a.txt', path: 'a.txt', type: 'FILE', size: 1,
+          modifiedAt: '2026-07-25T00:00:00Z', previewKind: 'TEXT', observedToken: 'a',
+        }],
+        nextCursor: 'page-2',
+      });
+      return searchPage({
+        query,
+        entries: [{
+          name: 'b.txt', path: 'b.txt', type: 'FILE', size: 1,
+          modifiedAt: '2026-07-25T00:00:00Z', previewKind: 'TEXT', observedToken: 'b',
+        }],
+      });
+    },
+    render: response => renderedPaths.push(response.entries.map(entry => entry.path)),
+    restore: async () => true,
+    onError: error => assert.fail(error),
+  });
+
+  assert.equal(await controller.search('txt'), true);
+  assert.equal(controller.hasMore(), true);
+  assert.equal(await controller.loadMore(), true);
+  assert.equal(controller.hasMore(), false);
+  assert.deepEqual(requests, [['txt', null], ['txt', 'page-2']]);
+  assert.deepEqual(renderedPaths, [['a.txt'], ['a.txt', 'b.txt']]);
 });
 
 test('search invalidates a deferred folder navigation before it can render or rewrite history', async () => {
@@ -196,7 +240,7 @@ test('search invalidates a deferred folder navigation before it can render or re
     onError: error => assert.fail(error),
   });
   const controller = sharedFolderPage.createSharedFolderSearchController({
-    load: async query => ({ query, entries: [], truncated: false }),
+    load: async query => searchPage({ query }),
     render: response => events.push(['search', response.query]),
     restore: async () => true,
     onError: error => assert.fail(error),
@@ -247,14 +291,13 @@ test('search form submits, warns on an emptied active query, and clears through 
   const controller = sharedFolderPage.createSharedFolderSearchController({
     load: async query => {
       requests.push(API.sharedFolder.search(query));
-      return {
+      return searchPage({
         query,
         entries: [{
           name: 'report.txt', path: '<img src=x>/report.txt', type: 'FILE', size: 1,
           modifiedAt: '2026-07-25T00:00:00Z', previewKind: 'TEXT', observedToken: 'proof',
         }],
-        truncated: false,
-      };
+      });
     },
     render: response => sharedFolder.renderSharedFolderEntryParentPath(parentPath, response.entries[0]),
     restore: async () => { restoredPaths.push('archive/2026'); return true; },
@@ -268,7 +311,7 @@ test('search form submits, warns on an emptied active query, and clears through 
   const submitted = form.dispatch('submit');
   assert.equal(submitted.prevented, true);
   await flushSearchFormEvents();
-  assert.deepEqual(requests, ['/api/shared-folder/2026-07-17/search?query=report']);
+  assert.deepEqual(requests, ['/api/shared-folder/2026-07-17/search?query=report&size=25']);
   assert.equal(clearButton.disabled, false);
   assert.equal(parentPath.textContent, 'In <img src=x>');
 

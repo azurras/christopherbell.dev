@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.util.unit.DataSize;
 import org.springframework.validation.annotation.Validated;
 
@@ -20,14 +21,31 @@ public record SharedFolderProperties(
     @NotNull DataSize transcodeCacheLimit,
     @NotNull @DurationMin(seconds = 1) Duration recycleRetention,
     @NotNull @DurationMin(seconds = 1) Duration auditRetention,
+    @NotNull @DurationMin(seconds = 1) Duration completedUploadRetention,
     boolean enabled) {
 
   /** Rejects zero-sized resource limits during binding instead of accepting an unsafe default. */
+  @ConstructorBinding
   public SharedFolderProperties {
     requirePositive(maxUpload, "max upload");
     requirePositive(uploadChunk, "upload chunk");
     requirePositive(minimumFreeSpace, "minimum free space");
     requirePositive(transcodeCacheLimit, "transcode cache limit");
+  }
+
+  /** Preserves callers created before completed-upload retention became configurable. */
+  public SharedFolderProperties(
+      Path root,
+      Path systemRoot,
+      DataSize maxUpload,
+      DataSize uploadChunk,
+      DataSize minimumFreeSpace,
+      DataSize transcodeCacheLimit,
+      Duration recycleRetention,
+      Duration auditRetention,
+      boolean enabled) {
+    this(root, systemRoot, maxUpload, uploadChunk, minimumFreeSpace, transcodeCacheLimit,
+        recycleRetention, auditRetention, Duration.ofDays(7), enabled);
   }
 
   private static void requirePositive(DataSize value, String label) {
