@@ -17,6 +17,7 @@ import dev.christopherbell.music.web.MusicNoStoreFilter;
 import dev.christopherbell.sharedfolder.web.SharedFolderNoStoreFilter;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
 import dev.christopherbell.federation.discovery.FederationNoStoreFilter;
+import jakarta.servlet.DispatcherType;
 import java.time.Clock;
 import java.util.Arrays;
 import java.util.List;
@@ -185,10 +186,11 @@ public class SecurityConfig {
               .policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN));
         })
 
-        // Configure authorization rules
+        // Authorize the initial request once; servlet completion redispatches retain the filter chain.
         .authorizeHttpRequests(auth -> auth
-            .requestMatchers(publicMatchers()).permitAll() // Allow public access to defined URLs
-            .anyRequest().authenticated() // Secure all other endpoints
+            .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+            .requestMatchers(publicMatchers()).permitAll()
+            .anyRequest().authenticated()
         )
 
         // Add rate limiting and JWT authentication filters
