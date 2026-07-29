@@ -10,12 +10,14 @@ import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 
 import java.util.List;
+import java.util.Set;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -36,6 +38,10 @@ public class ControllerExceptionHandler {
   private static final String INVALID_TOKEN = "INVALID_TOKEN";
   private static final String ACCESS_DENIED = "ACCESS_DENIED";
   private static final String REQUEST_ERROR = "REQUEST_ERROR";
+  private static final Set<Integer> SECURITY_RELEVANT_CLIENT_STATUSES = Set.of(
+      HttpStatus.UNAUTHORIZED.value(),
+      HttpStatus.FORBIDDEN.value(),
+      HttpStatus.TOO_MANY_REQUESTS.value());
 
   /**
    * Fallback handler for unanticipated exceptions. Returns HTTP 500 with a generic error message.
@@ -47,8 +53,7 @@ public class ControllerExceptionHandler {
   public ResponseEntity<Response<?>> handleGenericException(Exception e) {
     var frameworkStatus = statusForFrameworkException(e);
     if (frameworkStatus != null) {
-      log.warn("{} status={} type={}", REQUEST_ERROR, frameworkStatus.value(),
-          e.getClass().getSimpleName());
+      logHttpFailure(REQUEST_ERROR, frameworkStatus, e);
       return errorResponse(
           REQUEST_ERROR, publicFrameworkDescription(e, frameworkStatus), frameworkStatus);
     }
@@ -91,7 +96,7 @@ public class ControllerExceptionHandler {
   @ExceptionHandler(AccessDeniedException.class)
   @ResponseStatus(HttpStatus.FORBIDDEN)
   public Response<?> handleAccessDeniedException(AccessDeniedException e) {
-    log.warn("{} type={}", ACCESS_DENIED, e.getClass().getSimpleName());
+    logHttpFailure(ACCESS_DENIED, HttpStatus.FORBIDDEN, e);
     return Response.builder()
         .messages(List.of(Message.builder()
             .code(ACCESS_DENIED)
@@ -109,8 +114,7 @@ public class ControllerExceptionHandler {
    */
   @ExceptionHandler(ErrorResponseException.class)
   public ResponseEntity<Response<?>> handleErrorResponseException(ErrorResponseException e) {
-    log.warn("{} status={} type={}", REQUEST_ERROR, e.getStatusCode().value(),
-        e.getClass().getSimpleName());
+    logHttpFailure(REQUEST_ERROR, e.getStatusCode(), e);
     return errorResponse(
         REQUEST_ERROR, publicFrameworkDescription(e, e.getStatusCode()), e.getStatusCode());
   }
@@ -124,11 +128,11 @@ public class ControllerExceptionHandler {
   @ExceptionHandler(ResourceExistsException.class)
   @ResponseStatus(HttpStatus.CONFLICT)
   public Response<?> handleResourceExistsException(ResourceExistsException e) {
-    log.warn("{} type={}", RESOURCE_EXISTS, e.getClass().getSimpleName());
+    logHttpFailure(RESOURCE_EXISTS, HttpStatus.CONFLICT, e);
     return Response.builder()
             .messages(List.of(Message.builder()
                 .code(RESOURCE_EXISTS)
-                .description(e.getMessage())
+                .description("The resource already exists.")
                 .build()))
             .success(false)
             .build();
@@ -143,11 +147,11 @@ public class ControllerExceptionHandler {
   @ExceptionHandler(ResourceNotFoundException.class)
   @ResponseStatus(HttpStatus.NOT_FOUND)
   public Response<?> handleResourceNotFoundException(ResourceNotFoundException e) {
-    log.warn("{} type={}", RESOURCE_NOT_FOUND, e.getClass().getSimpleName());
+    logHttpFailure(RESOURCE_NOT_FOUND, HttpStatus.NOT_FOUND, e);
     return Response.builder()
         .messages(List.of(Message.builder()
             .code(RESOURCE_NOT_FOUND)
-            .description(e.getMessage())
+            .description("The requested resource was not found.")
             .build()))
         .success(false)
         .build();
@@ -162,11 +166,11 @@ public class ControllerExceptionHandler {
   @ExceptionHandler(InvalidRequestException.class)
   @ResponseStatus(HttpStatus.BAD_REQUEST)
   public Response<?> handleInvalidRequestException(InvalidRequestException e) {
-    log.warn("{} type={}", INVALID_REQUEST, e.getClass().getSimpleName());
+    logHttpFailure(INVALID_REQUEST, HttpStatus.BAD_REQUEST, e);
     return Response.builder()
             .messages(List.of(Message.builder()
                 .code(INVALID_REQUEST)
-                .description(e.getMessage())
+                .description("The request is invalid.")
                 .build()))
             .success(false)
             .build();
@@ -181,24 +185,38 @@ public class ControllerExceptionHandler {
   @ExceptionHandler(InvalidTokenException.class)
   @ResponseStatus(HttpStatus.UNAUTHORIZED)
   public Response<?> handleInvalidTokenException(InvalidTokenException e) {
-    log.warn("{} type={}", INVALID_TOKEN, e.getClass().getSimpleName());
+    logHttpFailure(INVALID_TOKEN, HttpStatus.UNAUTHORIZED, e);
     return Response.builder()
             .messages(List.of(Message.builder()
                 .code(INVALID_TOKEN)
-                .description(e.getMessage())
+                .description("Authentication is required.")
                 .build()))
             .success(false)
             .build();
   }
 
+  private void logHttpFailure(String code, HttpStatusCode status, Exception failure) {
+    if (status.is5xxServerError()) {
+      log.error("{} status={} type={}", code, status.value(), failure.getClass().getSimpleName(),
+          failure);
+      return;
+    }
+    if (SECURITY_RELEVANT_CLIENT_STATUSES.contains(status.value())) {
+      log.warn("{} status={} type={}", code, status.value(),
+          failure.getClass().getSimpleName());
+      return;
+    }
+    log.debug("{} status={} type={}", code, status.value(), failure.getClass().getSimpleName());
+  }
+
   private ResponseEntity<Response<?>> errorResponse(String code, String description, HttpStatus status) {
-    return errorResponse(code, description, (org.springframework.http.HttpStatusCode) status);
+    return errorResponse(code, description, (HttpStatusCode) status);
   }
 
   private ResponseEntity<Response<?>> errorResponse(
       String code,
       String description,
-      org.springframework.http.HttpStatusCode status
+      HttpStatusCode status
   ) {
     var body = Response.builder()
         .messages(List.of(Message.builder()
@@ -223,15 +241,19 @@ public class ControllerExceptionHandler {
 
   private String publicFrameworkDescription(
       Exception failure,
-      org.springframework.http.HttpStatusCode status) {
-    if (failure.getClass().getName().equals(
-        "org.springframework.http.converter.HttpMessageNotReadableException")) {
+      HttpStatusCode status) {
+    if (failure instanceof org.springframework.http.converter.HttpMessageNotReadableException) {
       return "The request body is malformed or invalid.";
     }
     return switch (status.value()) {
       case 400 -> "The request is invalid.";
+      case 401 -> "Authentication is required.";
+      case 403 -> "Access is denied.";
+      case 404 -> "The requested resource was not found.";
       case 406 -> "The requested response format is not available.";
+      case 409 -> "The resource already exists.";
       case 415 -> "The request media type is not supported.";
+      case 429 -> "Too many requests. Please try again later.";
       default -> "The request could not be processed.";
     };
   }
