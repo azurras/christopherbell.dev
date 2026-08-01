@@ -189,7 +189,7 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
         BoundedResponseBodyHandlers.ofString(
             MAXIMUM_JSON_RESPONSE_BYTES,
             StandardCharsets.UTF_8,
-            status -> status == 200));
+            status -> status >= 200 && status < 300));
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
       throw new IllegalStateException(
           "Official GraphQL API returned HTTP " + response.statusCode() + ".");

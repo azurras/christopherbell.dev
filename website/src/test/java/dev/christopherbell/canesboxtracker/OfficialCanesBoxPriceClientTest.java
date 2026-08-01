@@ -400,6 +400,29 @@ class OfficialCanesBoxPriceClientTest {
   }
 
   @Test
+  void fetchBoxComboPriceAcceptsGraphQlCreatedResponses() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext("/graphql", exchange -> {
+      var requestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+      var body = requestBody.contains("\"operationName\":\"Restaurants\"")
+          ? locationSearchBody()
+          : menuBody();
+      respond(exchange, 201, body);
+    });
+    server.start();
+    try {
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), propertiesFor(server));
+
+      var result = client.fetchBoxComboPrice(coordinateTarget());
+
+      assertEquals("SUCCESS", result.getStatus());
+      assertEquals(new BigDecimal("14.99"), result.getPrice());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
   void fetchBoxComboPriceRejectsGraphQlResponseOneBytePastLimitWithoutLeakingBody()
       throws Exception {
     var server = HttpServer.create(new InetSocketAddress(0), 0);
