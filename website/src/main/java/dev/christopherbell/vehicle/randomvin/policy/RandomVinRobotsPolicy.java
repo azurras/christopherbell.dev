@@ -1,12 +1,11 @@
 package dev.christopherbell.vehicle.randomvin.policy;
 
-import dev.christopherbell.libs.http.BoundedResponseBodyReader;
+import dev.christopherbell.libs.http.BoundedResponseBodyHandlers;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -62,14 +61,17 @@ public class RandomVinRobotsPolicy {
         .build();
 
     try {
-      var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+      var response = BoundedResponseBodyHandlers.send(
+          httpClient,
+          request,
+          BoundedResponseBodyHandlers.ofString(
+              MAXIMUM_RESPONSE_BYTES,
+              StandardCharsets.UTF_8,
+              status -> status >= 200 && status < 300));
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
-        response.body().close();
         return Result.denied("robots_fetch_status_" + response.statusCode(), failClosed);
       }
-      var body = BoundedResponseBodyReader.readString(
-          response.body(), MAXIMUM_RESPONSE_BYTES, StandardCharsets.UTF_8);
-      return evaluate(body);
+      return evaluate(response.body());
     } catch (IOException e) {
       return Result.denied("robots_fetch_failed", failClosed);
     } catch (InterruptedException e) {

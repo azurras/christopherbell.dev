@@ -8,11 +8,15 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import tools.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeBatchRequest;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeCache;
 import dev.christopherbell.vehicle.model.VehicleVinDecodeRequest;
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -20,6 +24,11 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -80,6 +89,73 @@ class VehicleVinDecodeBulkheadTest {
     var response = service.decode(new VehicleVinDecodeRequest(VIN), "client");
     assertEquals("HONDA", response.make());
     org.mockito.Mockito.verify(cacheRepository).save(any(VehicleVinDecodeCache.class));
+  }
+
+  @Test
+  void upstreamBodyTimeoutReleasesPermitForTheNextRemoteCall() throws Exception {
+    var requestCount = new AtomicInteger();
+    var bodyStarted = new CountDownLatch(1);
+    var releaseFirstBody = new CountDownLatch(1);
+    var server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+    server.createContext("/", exchange -> {
+      exchange.getRequestBody().readAllBytes();
+      if (requestCount.incrementAndGet() == 1) {
+        exchange.sendResponseHeaders(200, 128);
+        exchange.getResponseBody().write('{');
+        exchange.getResponseBody().flush();
+        bodyStarted.countDown();
+        try {
+          releaseFirstBody.await();
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+        } finally {
+          exchange.close();
+        }
+        return;
+      }
+      var body = ("{\"Results\":[{\"VIN\":\"" + VIN + "\",\"Make\":\"HONDA\"}]}")
+          .getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(200, body.length);
+      exchange.getResponseBody().write(body);
+      exchange.close();
+    });
+    server.start();
+    var properties = properties(Duration.ZERO);
+    properties.getNhtsaVin().setUrl("http://localhost:" + server.getAddress().getPort());
+    properties.getNhtsaVin().setConnectTimeout(Duration.ofSeconds(1));
+    properties.getNhtsaVin().setRequestTimeout(Duration.ofMillis(150));
+    properties.getNhtsaVin().setMaxBatchSize(20);
+    when(cacheRepository.findById(VIN)).thenReturn(Optional.empty());
+    var realClient = new NhtsaVinClient(new ObjectMapper(), properties);
+    var service = new VehicleVinDecodeService(
+        Clock.fixed(NOW, ZoneOffset.UTC),
+        realClient,
+        properties,
+        cacheRepository,
+        rateLimiter,
+        new VinDecodeBulkhead(1));
+
+    var executor = Executors.newVirtualThreadPerTaskExecutor();
+    var firstCall = executor.submit(
+        () -> service.decode(new VehicleVinDecodeRequest(VIN), "client"));
+    try {
+      assertTrue(bodyStarted.await(1, TimeUnit.SECONDS));
+      var exception = assertThrows(
+          ExecutionException.class, () -> firstCall.get(1, TimeUnit.SECONDS));
+      assertTrue(exception.getCause() instanceof VehicleVinDecodeUnavailableException);
+    } finally {
+      firstCall.cancel(true);
+      releaseFirstBody.countDown();
+      executor.close();
+    }
+
+    try {
+      var response = service.decode(new VehicleVinDecodeRequest(VIN), "client");
+      assertEquals("HONDA", response.make());
+      assertEquals(2, requestCount.get());
+    } finally {
+      server.stop(0);
+    }
   }
 
   @Test

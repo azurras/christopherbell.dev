@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.randomvin.policy.RandomVinRobotsPolicy;
+import dev.christopherbell.testsupport.HeadersThenStallServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -120,6 +121,21 @@ public class RandomVinRobotsPolicyTest {
 
     assertFalse(result.allowed());
     assertEquals("robots_fetch_failed", result.reason());
+  }
+
+  @Test
+  @DisplayName("Fails closed when a robots response stalls after headers")
+  void evaluate_whenBodyStallsAfterHeaders_honorsRequestTimeout() throws Exception {
+    try (var stall = new HeadersThenStallServer()) {
+      var properties = vehicleProperties(stall.uri("/robots.txt").toString());
+      properties.getRandomVin().setRequestTimeout(Duration.ofMillis(150));
+      var policy = new RandomVinRobotsPolicy(properties);
+
+      var result = stall.callWhileBodyStalls(policy::evaluate, Duration.ofSeconds(1));
+
+      assertFalse(result.allowed());
+      assertEquals("robots_fetch_failed", result.reason());
+    }
   }
 
   private VehicleProperties vehicleProperties() {

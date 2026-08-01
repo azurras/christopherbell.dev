@@ -5,7 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
 
-/** Reads a remote body without materializing bytes beyond a declared maximum. */
+/** Reads a stream and returns content only when its total byte count is within a declared maximum. */
 public final class BoundedResponseBodyReader {
   private static final int BUFFER_SIZE = 8_192;
 
@@ -48,7 +48,7 @@ public final class BoundedResponseBodyReader {
    * Reads and decodes a bounded response stream.
    *
    * @param input response stream owned by this call
-   * @param maximumBytes largest encoded response that may be returned
+   * @param maximumBytes largest stream content that may be decoded
    * @param charset response character set
    * @return the decoded response body
    * @throws BodyLimitExceededException when the response exceeds the maximum

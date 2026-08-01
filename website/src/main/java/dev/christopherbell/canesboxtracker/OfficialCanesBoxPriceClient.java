@@ -5,13 +5,13 @@ import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.canesboxtracker.model.CanesBoxMetroPrice;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
 import dev.christopherbell.libs.http.BoundedResponseBodyReader;
+import dev.christopherbell.libs.http.BoundedResponseBodyHandlers;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -183,14 +183,18 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
         .header("platform", "web")
         .header("app-version", "prod")
         .build();
-    var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+    var response = BoundedResponseBodyHandlers.send(
+        httpClient,
+        request,
+        BoundedResponseBodyHandlers.ofString(
+            MAXIMUM_JSON_RESPONSE_BYTES,
+            StandardCharsets.UTF_8,
+            status -> status == 200));
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
-      response.body().close();
       throw new IllegalStateException(
           "Official GraphQL API returned HTTP " + response.statusCode() + ".");
     }
-    var body = BoundedResponseBodyReader.readString(
-        response.body(), MAXIMUM_JSON_RESPONSE_BYTES, StandardCharsets.UTF_8);
+    var body = response.body();
     var root = objectMapper.readTree(body);
     if (root.path("errors").isArray() && !root.path("errors").isEmpty()) {
       throw new IllegalStateException(root.path("errors").get(0).path("message").asText("Official GraphQL API returned an error."));
@@ -212,13 +216,17 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
           .header("ui-transformer", "restaurantByRef")
           .header("ui-cache-ttl", "300")
           .build();
-      var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+      var response = BoundedResponseBodyHandlers.send(
+          httpClient,
+          request,
+          BoundedResponseBodyHandlers.ofString(
+              MAXIMUM_JSON_RESPONSE_BYTES,
+              StandardCharsets.UTF_8,
+              status -> status >= 200 && status < 300));
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
-        response.body().close();
         throw new IllegalStateException("Official Cane's API returned HTTP " + response.statusCode());
       }
-      var body = BoundedResponseBodyReader.readString(
-          response.body(), MAXIMUM_JSON_RESPONSE_BYTES, StandardCharsets.UTF_8);
+      var body = response.body();
       var price = findBoxComboPrice(body)
           .orElseThrow(() -> new IllegalStateException("The Box Combo price was not found."));
       var result = CanesBoxMetroPrice.success(target, price, Instant.now(), "OFFICIAL_API", restaurantUri(target).toString());
@@ -347,16 +355,18 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
           .header("Accept", "text/html,application/json")
           .header("User-Agent", "christopherbell.dev raising-canes-box-index")
           .build();
-      var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+      var response = BoundedResponseBodyHandlers.send(
+          httpClient,
+          request,
+          BoundedResponseBodyHandlers.ofByteArray(
+              MAXIMUM_FALLBACK_RESPONSE_BYTES,
+              status -> status >= 200 && status < 300));
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
-        response.body().close();
         return CanesBoxMetroPrice.failure(
             target,
             officialFailure + "; fallback menu returned HTTP " + response.statusCode());
       }
-      var responseBytes = BoundedResponseBodyReader.read(
-          response.body(), MAXIMUM_FALLBACK_RESPONSE_BYTES);
-      var body = responseBody(responseBytes, response.headers());
+      var body = responseBody(response.body(), response.headers());
       var price = findPublicMenuBoxComboPrice(body)
           .orElseThrow(() -> new IllegalStateException("Fallback menu did not contain The Box Combo price."));
       if (price.compareTo(properties.getMinimumPublicMenuPrice()) < 0) {
@@ -380,7 +390,8 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
     var encoding = headers.firstValue("Content-Encoding").orElse("");
     if ("gzip".equalsIgnoreCase(encoding) || (bytes.length > 2 && bytes[0] == 0x1f && bytes[1] == (byte) 0x8b)) {
       try (var input = new GZIPInputStream(new java.io.ByteArrayInputStream(bytes))) {
-        return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        return BoundedResponseBodyReader.readString(
+            input, MAXIMUM_FALLBACK_RESPONSE_BYTES, StandardCharsets.UTF_8);
       }
     }
     return new String(bytes, StandardCharsets.UTF_8);

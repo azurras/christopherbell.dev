@@ -3,14 +3,13 @@ package dev.christopherbell.vehicle.nhtsa.decode;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
-import dev.christopherbell.libs.http.BoundedResponseBodyReader;
+import dev.christopherbell.libs.http.BoundedResponseBodyHandlers;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -92,15 +91,18 @@ public class NhtsaVinClient {
         .header("Content-Type", "application/x-www-form-urlencoded")
         .build();
 
-    var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+    var response = BoundedResponseBodyHandlers.send(
+        httpClient,
+        request,
+        BoundedResponseBodyHandlers.ofString(
+            MAXIMUM_RESPONSE_BYTES,
+            StandardCharsets.UTF_8,
+            status -> status >= 200 && status < 300));
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
-      response.body().close();
       throw new NhtsaVinClientException(response.statusCode());
     }
 
-    var responseBody = BoundedResponseBodyReader.readString(
-        response.body(), MAXIMUM_RESPONSE_BYTES, StandardCharsets.UTF_8);
-    var nhtsaResponse = objectMapper.readValue(responseBody, RESPONSE_TYPE);
+    var nhtsaResponse = objectMapper.readValue(response.body(), RESPONSE_TYPE);
     if (nhtsaResponse.Results() == null || nhtsaResponse.Results().isEmpty()) {
       throw new InvalidRequestException("NHTSA returned no VIN decode results.");
     }

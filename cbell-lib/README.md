@@ -14,10 +14,12 @@ Reusable Java library that contains shared domain and utility code.
 
 ## Bounded HTTP response bodies
 
-`BoundedResponseBodyReader` is the shared JDK-only boundary for remote response
-streams whose callers declare a maximum encoded byte count. It closes every
-owned stream and raises `BodyLimitExceededException` before returning an
-oversized byte array or decoded string. Feature clients continue to own status,
+`BoundedResponseBodyHandlers` is the shared JDK-only boundary for HTTP response
+bodies whose callers declare a maximum encoded byte count. Its completion stage
+stays tied to the full body so the JDK request timeout remains effective after
+headers arrive, and it cancels a response before returning oversized content.
+`BoundedResponseBodyReader` applies the same return-size contract to an owned
+stream, including bounded decompression. Feature clients continue to own status,
 timeout, parsing, and domain-error translation.
 
 ## Workflow retry lifecycle

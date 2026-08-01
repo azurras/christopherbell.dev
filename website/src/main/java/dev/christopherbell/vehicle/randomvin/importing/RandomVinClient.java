@@ -1,12 +1,11 @@
 package dev.christopherbell.vehicle.randomvin.importing;
 
-import dev.christopherbell.libs.http.BoundedResponseBodyReader;
+import dev.christopherbell.libs.http.BoundedResponseBodyHandlers;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import org.springframework.stereotype.Component;
 
@@ -51,13 +50,17 @@ public class RandomVinClient {
         .header("Accept", "text/plain,text/html")
         .build();
 
-    var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+    var response = BoundedResponseBodyHandlers.send(
+        httpClient,
+        request,
+        BoundedResponseBodyHandlers.ofString(
+            MAXIMUM_RESPONSE_BYTES,
+            StandardCharsets.UTF_8,
+            status -> status >= 200 && status < 300));
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
-      response.body().close();
       throw new RandomVinClientException(response.statusCode());
     }
 
-    return BoundedResponseBodyReader.readString(
-        response.body(), MAXIMUM_RESPONSE_BYTES, StandardCharsets.UTF_8);
+    return response.body();
   }
 }

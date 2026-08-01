@@ -8,10 +8,12 @@ import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.randomvin.importing.RandomVinClient;
 import dev.christopherbell.vehicle.randomvin.importing.RandomVinClientException;
 import dev.christopherbell.libs.http.BodyLimitExceededException;
+import dev.christopherbell.testsupport.HeadersThenStallServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.net.http.HttpTimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -64,6 +66,20 @@ class RandomVinClientTest {
     var client = new RandomVinClient(properties(serverUrl()));
 
     assertThrows(BodyLimitExceededException.class, client::getVin);
+  }
+
+  @Test
+  @DisplayName("Get VIN times out when a response stalls after headers")
+  void getVin_whenBodyStallsAfterHeaders_honorsRequestTimeout() throws Exception {
+    try (var stall = new HeadersThenStallServer()) {
+      var properties = properties(stall.uri("/getvin.php").toString());
+      properties.getRandomVin().setRequestTimeout(Duration.ofMillis(150));
+      var client = new RandomVinClient(properties);
+
+      assertThrows(
+          HttpTimeoutException.class,
+          () -> stall.callWhileBodyStalls(client::getVin, Duration.ofSeconds(1)));
+    }
   }
 
   private void startServer(int status, String responseBody) throws IOException {

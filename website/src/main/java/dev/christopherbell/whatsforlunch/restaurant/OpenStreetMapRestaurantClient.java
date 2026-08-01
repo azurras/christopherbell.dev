@@ -2,7 +2,7 @@ package dev.christopherbell.whatsforlunch.restaurant;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import dev.christopherbell.libs.http.BoundedResponseBodyReader;
+import dev.christopherbell.libs.http.BoundedResponseBodyHandlers;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.model.Address;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -52,15 +51,18 @@ public class OpenStreetMapRestaurantClient {
         .header("User-Agent", "christopherbell.dev whats-for-lunch importer")
         .build();
 
-    var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+    var response = BoundedResponseBodyHandlers.send(
+        httpClient,
+        request,
+        BoundedResponseBodyHandlers.ofString(
+            MAXIMUM_RESPONSE_BYTES,
+            StandardCharsets.UTF_8,
+            status -> status >= 200 && status < 300));
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
-      response.body().close();
       throw new IOException("Overpass request failed with status " + response.statusCode());
     }
 
-    var body = BoundedResponseBodyReader.readString(
-        response.body(), MAXIMUM_RESPONSE_BYTES, StandardCharsets.UTF_8);
-    return parseRestaurants(body);
+    return parseRestaurants(response.body());
   }
 
   private String buildQuery() {

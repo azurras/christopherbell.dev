@@ -3,11 +3,15 @@ package dev.christopherbell.canesboxtracker;
 import tools.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
+import dev.christopherbell.testsupport.HeadersThenStallServer;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -515,6 +519,58 @@ class OfficialCanesBoxPriceClientTest {
     }
   }
 
+  @Test
+  void fetchBoxComboPriceRejectsGzipFallbackThatExpandsOneBytePastLimit() throws Exception {
+    var expandedBody = padded(publicMenuBody(), MAXIMUM_FALLBACK_RESPONSE_BYTES + 1);
+    var compressedBody = gzip(expandedBody);
+    assertTrue(compressedBody.length < MAXIMUM_FALLBACK_RESPONSE_BYTES);
+    var server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext("/restaurants/byref/raising-canes-101", exchange ->
+        respond(exchange, 503, "official unavailable"));
+    server.createContext("/fallback", exchange -> {
+      exchange.getResponseHeaders().add("Content-Encoding", "gzip");
+      exchange.sendResponseHeaders(200, compressedBody.length);
+      exchange.getResponseBody().write(compressedBody);
+      exchange.close();
+    });
+    server.start();
+    try {
+      var properties = propertiesFor(server);
+      properties.setGraphQlUrl("");
+      properties.setPublicMenuFallbackEnabled(true);
+      var target = coordinateTarget();
+      target.setFallbackMenuUrl(serverUrl(server) + "/fallback");
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+
+      var result = client.fetchBoxComboPrice(target);
+
+      assertEquals("FAILED", result.getStatus());
+      assertTrue(result.getFailureReason().contains("8388608 byte limit"));
+      assertTrue(!result.getFailureReason().contains("The Box Combo"));
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void fetchBoxComboPriceWhenOfficialResponseStallsAfterHeadersHonorsRequestTimeout()
+      throws Exception {
+    try (var stall = new HeadersThenStallServer()) {
+      var properties = new CanesBoxTrackerProperties();
+      properties.setApiBaseUrl(stall.uri("").toString());
+      properties.setGraphQlUrl("");
+      properties.setRequestTimeout(Duration.ofMillis(150));
+      properties.setItemName("The Box Combo");
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+
+      var result = stall.callWhileBodyStalls(
+          () -> client.fetchBoxComboPrice(coordinateTarget()), Duration.ofSeconds(1));
+
+      assertEquals("FAILED", result.getStatus());
+      assertTrue(result.getFailureReason().contains("timed out"));
+    }
+  }
+
   private CanesBoxTrackerProperties propertiesFor(HttpServer server) {
     var properties = new CanesBoxTrackerProperties();
     properties.setApiBaseUrl(serverUrl(server));
@@ -561,6 +617,14 @@ class OfficialCanesBoxPriceClientTest {
 
   private String padded(String body, int byteCount) {
     return body + " ".repeat(byteCount - body.getBytes(StandardCharsets.UTF_8).length);
+  }
+
+  private byte[] gzip(String body) throws IOException {
+    var output = new ByteArrayOutputStream();
+    try (var gzip = new GZIPOutputStream(output)) {
+      gzip.write(body.getBytes(StandardCharsets.UTF_8));
+    }
+    return output.toByteArray();
   }
 
   private String serverUrl(HttpServer server) {

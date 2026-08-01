@@ -8,10 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import tools.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
+import dev.christopherbell.testsupport.HeadersThenStallServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -209,6 +212,23 @@ class OpenStreetMapRestaurantClientTest {
 
     assertTrue(exception.getMessage().contains("503"));
     assertTrue(!exception.getMessage().contains("upstream secret body"));
+  }
+
+  @Test
+  void getConfiguredMetroRestaurantsWhenBodyStallsAfterHeadersHonorsRequestTimeout()
+      throws Exception {
+    try (var stall = new HeadersThenStallServer()) {
+      var properties = new WflProperties();
+      properties.getRestaurantImport().getOsm().setEndpoint(stall.uri("/overpass"));
+      properties.getRestaurantImport().getOsm().setTimeout(Duration.ofMillis(100));
+      properties.getRestaurantImport().getOsm().setResultLimit(500);
+      var client = new OpenStreetMapRestaurantClient(new ObjectMapper(), properties);
+
+      assertThrows(
+          HttpTimeoutException.class,
+          () -> stall.callWhileBodyStalls(
+              client::getConfiguredMetroRestaurants, Duration.ofSeconds(12)));
+    }
   }
 
   private OpenStreetMapRestaurantClient client() {
