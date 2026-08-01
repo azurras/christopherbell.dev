@@ -2,6 +2,7 @@ package dev.christopherbell.whatsforlunch.restaurant;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import dev.christopherbell.libs.http.BoundedResponseBodyReader;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.model.Address;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
@@ -23,6 +24,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class OpenStreetMapRestaurantClient {
+  private static final long MAXIMUM_RESPONSE_BYTES = 16L * 1024 * 1024;
+
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
   private final WflProperties.Osm properties;
@@ -49,12 +52,15 @@ public class OpenStreetMapRestaurantClient {
         .header("User-Agent", "christopherbell.dev whats-for-lunch importer")
         .build();
 
-    var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
+      response.body().close();
       throw new IOException("Overpass request failed with status " + response.statusCode());
     }
 
-    return parseRestaurants(response.body());
+    var body = BoundedResponseBodyReader.readString(
+        response.body(), MAXIMUM_RESPONSE_BYTES, StandardCharsets.UTF_8);
+    return parseRestaurants(body);
   }
 
   private String buildQuery() {

@@ -21,6 +21,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class NhtsaVinClientTest {
+  private static final int MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024;
   private HttpServer server;
 
   @AfterEach
@@ -85,6 +86,32 @@ class NhtsaVinClientTest {
 
     assertThrows(
         InvalidRequestException.class,
+        () -> client.decodeVins(List.of(new NhtsaVinClient.NhtsaVinDecodeRequest("VIN1", null))));
+  }
+
+  @Test
+  @DisplayName("Decode VINs rejects a response one byte above the response limit")
+  void decodeVins_whenResponseExceedsLimit_throwsBodyLimitException() throws Exception {
+    var json = "{\"Results\":[{\"VIN\":\"VIN1\"}]}";
+    startServer(
+        200,
+        json + " ".repeat(MAXIMUM_RESPONSE_BYTES + 1 - json.length()),
+        new AtomicReference<>());
+    var client = new NhtsaVinClient(new ObjectMapper(), properties(serverUrl(), 5));
+
+    assertThrows(
+        dev.christopherbell.libs.http.BodyLimitExceededException.class,
+        () -> client.decodeVins(List.of(new NhtsaVinClient.NhtsaVinDecodeRequest("VIN1", null))));
+  }
+
+  @Test
+  @DisplayName("Decode VINs preserves malformed JSON diagnostics")
+  void decodeVins_whenResponseIsMalformed_throwsParsingException() throws Exception {
+    startServer(200, "not-json", new AtomicReference<>());
+    var client = new NhtsaVinClient(new ObjectMapper(), properties(serverUrl(), 5));
+
+    assertThrows(
+        tools.jackson.core.exc.StreamReadException.class,
         () -> client.decodeVins(List.of(new NhtsaVinClient.NhtsaVinDecodeRequest("VIN1", null))));
   }
 

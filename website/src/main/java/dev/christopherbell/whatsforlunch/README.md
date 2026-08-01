@@ -21,6 +21,7 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
 - Legacy daily lunch picks persisted per day and refreshed at midnight Central.
 - Startup-validated OpenStreetMap metro configuration, with Austin, the San
   Francisco Bay Area, New Orleans, and Dallas enabled by default.
+- OpenStreetMap import responses are bounded at 16 MiB before JSON parsing.
 - One leased import workflow shared by scheduled and manual runs. Manual runs
   require a short-lived operator-bound preview token, re-fetch the source, and
   reject changed checksums before writing. Durable admin status records bounded

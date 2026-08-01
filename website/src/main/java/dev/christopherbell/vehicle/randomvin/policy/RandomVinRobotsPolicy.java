@@ -1,11 +1,13 @@
 package dev.christopherbell.vehicle.randomvin.policy;
 
+import dev.christopherbell.libs.http.BoundedResponseBodyReader;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,6 +20,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class RandomVinRobotsPolicy {
+  private static final long MAXIMUM_RESPONSE_BYTES = 256L * 1024;
+
   private final boolean failClosed;
   private final HttpClient httpClient;
   private final String robotsUrl;
@@ -58,11 +62,14 @@ public class RandomVinRobotsPolicy {
         .build();
 
     try {
-      var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+      var response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
+        response.body().close();
         return Result.denied("robots_fetch_status_" + response.statusCode(), failClosed);
       }
-      return evaluate(response.body());
+      var body = BoundedResponseBodyReader.readString(
+          response.body(), MAXIMUM_RESPONSE_BYTES, StandardCharsets.UTF_8);
+      return evaluate(body);
     } catch (IOException e) {
       return Result.denied("robots_fetch_failed", failClosed);
     } catch (InterruptedException e) {

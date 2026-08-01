@@ -7,6 +7,7 @@ import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.randomvin.importing.RandomVinClient;
 import dev.christopherbell.vehicle.randomvin.importing.RandomVinClientException;
+import dev.christopherbell.libs.http.BodyLimitExceededException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class RandomVinClientTest {
+  private static final int MAXIMUM_RESPONSE_BYTES = 4 * 1024;
   private HttpServer server;
 
   @AfterEach
@@ -43,6 +45,25 @@ class RandomVinClientTest {
     var exception = assertThrows(RandomVinClientException.class, client::getVin);
 
     assertEquals(429, exception.getStatusCode());
+  }
+
+  @Test
+  @DisplayName("Get VIN accepts a response at the exact byte limit")
+  void getVin_whenResponseIsAtLimit_returnsBody() throws Exception {
+    var body = "V".repeat(MAXIMUM_RESPONSE_BYTES);
+    startServer(200, body);
+    var client = new RandomVinClient(properties(serverUrl()));
+
+    assertEquals(body, client.getVin());
+  }
+
+  @Test
+  @DisplayName("Get VIN rejects a response one byte above the limit")
+  void getVin_whenResponseExceedsLimit_throwsBodyLimitException() throws Exception {
+    startServer(200, "V".repeat(MAXIMUM_RESPONSE_BYTES + 1));
+    var client = new RandomVinClient(properties(serverUrl()));
+
+    assertThrows(BodyLimitExceededException.class, client::getVin);
   }
 
   private void startServer(int status, String responseBody) throws IOException {

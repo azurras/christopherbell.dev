@@ -4,9 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.randomvin.policy.RandomVinRobotsPolicy;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +20,16 @@ import org.junit.jupiter.api.Test;
  */
 @DisplayName("RandomVinRobotsPolicy unit tests")
 public class RandomVinRobotsPolicyTest {
+  private static final int MAXIMUM_RESPONSE_BYTES = 256 * 1024;
+  private HttpServer server;
+
+  @AfterEach
+  void stopServer() {
+    if (server != null) {
+      server.stop(0);
+    }
+  }
+
   @Test
   @DisplayName("Allows RandomVIN current comment-only robots file")
   public void testIsAllowed_whenRobotsHasNoUserAgentDirectives_returnsTrue() {
@@ -83,14 +98,57 @@ public class RandomVinRobotsPolicyTest {
     assertTrue(result.failClosed());
   }
 
+  @Test
+  @DisplayName("Allows a robots response at the exact byte limit")
+  void evaluate_whenRobotsResponseIsAtLimit_returnsParsedDecision() throws Exception {
+    startServer(200, "#".repeat(MAXIMUM_RESPONSE_BYTES));
+    var policy = new RandomVinRobotsPolicy(vehicleProperties(serverUrl()));
+
+    var result = policy.evaluate();
+
+    assertTrue(result.allowed());
+    assertEquals("no_user_agent_rules", result.reason());
+  }
+
+  @Test
+  @DisplayName("Fails closed when a robots response exceeds the byte limit")
+  void evaluate_whenRobotsResponseExceedsLimit_returnsFetchFailure() throws Exception {
+    startServer(200, "#".repeat(MAXIMUM_RESPONSE_BYTES + 1));
+    var policy = new RandomVinRobotsPolicy(vehicleProperties(serverUrl()));
+
+    var result = policy.evaluate();
+
+    assertFalse(result.allowed());
+    assertEquals("robots_fetch_failed", result.reason());
+  }
+
   private VehicleProperties vehicleProperties() {
+    return vehicleProperties("https://randomvin.com/robots.txt");
+  }
+
+  private VehicleProperties vehicleProperties(String robotsUrl) {
     var properties = new VehicleProperties();
     properties.getRandomVin().setConnectTimeout(Duration.ofSeconds(10));
     properties.getRandomVin().setRequestTimeout(Duration.ofSeconds(15));
     properties.getRandomVin().setRobotsFailClosed(true);
-    properties.getRandomVin().setRobotsUrl("https://randomvin.com/robots.txt");
+    properties.getRandomVin().setRobotsUrl(robotsUrl);
     properties.getRandomVin().setPath("/getvin.php");
     properties.getRandomVin().setUserAgent("christopherbell.dev vehicle data collector");
     return properties;
+  }
+
+  private void startServer(int status, String responseBody) throws IOException {
+    server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+    server.createContext("/robots.txt", exchange -> {
+      var bytes = responseBody.getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(status, bytes.length);
+      exchange.getResponseBody().write(bytes);
+      exchange.close();
+    });
+    server.start();
+  }
+
+  private String serverUrl() {
+    return "http://localhost:" + server.getAddress().getPort() + "/robots.txt";
   }
 }

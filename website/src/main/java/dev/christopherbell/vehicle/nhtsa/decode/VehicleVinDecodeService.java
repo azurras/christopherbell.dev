@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
@@ -34,6 +35,7 @@ public class VehicleVinDecodeService {
   private final NhtsaVinClient nhtsaVinClient;
   private final VehicleProperties.NhtsaVin nhtsaProperties;
   private final VehicleProperties.VinDecoder vinDecoderProperties;
+  private final VinDecodeBulkhead bulkhead;
   private final VehicleVinDecodeRateLimiter rateLimiter;
   private final Map<String, Object> vinLocks = new ConcurrentHashMap<>();
 
@@ -46,11 +48,30 @@ public class VehicleVinDecodeService {
       VehicleVinDecodeCacheRepository cacheRepository,
       VehicleVinDecodeRateLimiter rateLimiter
   ) {
+    this(
+        clock,
+        nhtsaVinClient,
+        vehicleProperties,
+        cacheRepository,
+        rateLimiter,
+        new VinDecodeBulkhead());
+  }
+
+  @Autowired
+  VehicleVinDecodeService(
+      Clock clock,
+      NhtsaVinClient nhtsaVinClient,
+      VehicleProperties vehicleProperties,
+      VehicleVinDecodeCacheRepository cacheRepository,
+      VehicleVinDecodeRateLimiter rateLimiter,
+      VinDecodeBulkhead bulkhead
+  ) {
     this.clock = clock;
     this.cacheRepository = cacheRepository;
     this.nhtsaVinClient = nhtsaVinClient;
     this.nhtsaProperties = vehicleProperties.getNhtsaVin();
     this.vinDecoderProperties = vehicleProperties.getVinDecoder();
+    this.bulkhead = bulkhead;
     this.rateLimiter = rateLimiter;
   }
 
@@ -89,10 +110,9 @@ public class VehicleVinDecodeService {
   }
 
   private VehicleVinDecodeResponse decodeAndCache(String vin) {
-    try {
-      var response = toResponse(vin, nhtsaVinClient.decodeVin(vin, null));
-      saveCachedResponse(vin, response);
-      return response;
+    final Map<String, String> values;
+    try (var ignored = bulkhead.tryAcquire().orElseThrow(this::temporarilyUnavailable)) {
+      values = nhtsaVinClient.decodeVin(vin, null);
     } catch (NhtsaVinClientException e) {
       coolDownNhtsa("NHTSA VIN decode failed with HTTP status " + e.getStatusCode(), e);
       throw temporarilyUnavailable(e);
@@ -106,6 +126,9 @@ public class VehicleVinDecodeService {
       coolDownNhtsa("NHTSA VIN decode was interrupted", e);
       throw temporarilyUnavailable(e);
     }
+    var response = toResponse(vin, values);
+    saveCachedResponse(vin, response);
+    return response;
   }
 
   private void coolDownNhtsa(String reason, Throwable cause) {
@@ -178,8 +201,22 @@ public class VehicleVinDecodeService {
       if (isNhtsaCoolingDown()) {
         unavailable = true;
       } else {
-        try {
-          for (var values : nhtsaVinClient.decodeVins(List.copyOf(misses.values()))) {
+        var permit = bulkhead.tryAcquire();
+        if (permit.isEmpty()) {
+          unavailable = true;
+        } else {
+          List<Map<String, String>> remoteValues = List.of();
+          try (var ignored = permit.orElseThrow()) {
+            remoteValues = nhtsaVinClient.decodeVins(List.copyOf(misses.values()));
+          } catch (NhtsaVinClientException | InvalidRequestException | IOException e) {
+            coolDownNhtsa("NHTSA VIN batch decode failed", e);
+            unavailable = true;
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            coolDownNhtsa("NHTSA VIN batch decode was interrupted", e);
+            unavailable = true;
+          }
+          for (var values : remoteValues) {
             var vin = normalizeNhtsaVin(values);
             if (vin != null && misses.containsKey(vin)) {
               var response = toResponse(vin, values);
@@ -187,13 +224,6 @@ public class VehicleVinDecodeService {
               saveCachedResponse(vin, response);
             }
           }
-        } catch (NhtsaVinClientException | InvalidRequestException | IOException e) {
-          coolDownNhtsa("NHTSA VIN batch decode failed", e);
-          unavailable = true;
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-          coolDownNhtsa("NHTSA VIN batch decode was interrupted", e);
-          unavailable = true;
         }
       }
     }
