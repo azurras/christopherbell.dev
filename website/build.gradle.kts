@@ -404,6 +404,24 @@ val pwshExecutable = providers.environmentVariable("PWSH_EXE")
     .orElse("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 val windowsPowerShellExecutable = providers.environmentVariable("WINDOWS_POWERSHELL_EXE")
     .orElse("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
+val isWindowsHost = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+
+fun isProductionDeploymentBuild(
+    marker: String?, isWindows: Boolean, username: String?, gradleHome: String): Boolean {
+    if (marker != null && marker != "1") {
+        throw GradleException("CHRISTOPHERBELL_PRODUCTION_DEPLOYMENT must be exactly 1 when set.")
+    }
+    val normalizedGradleHome = gradleHome.replace('/', '\\').trimEnd('\\').lowercase()
+    return isWindows &&
+        username.equals("SYSTEM", ignoreCase = true) &&
+        normalizedGradleHome.endsWith("\\christopherbell.dev\\gradle-home")
+}
+
+val productionDeploymentBuild = isProductionDeploymentBuild(
+    providers.environmentVariable("CHRISTOPHERBELL_PRODUCTION_DEPLOYMENT").orNull,
+    isWindowsHost,
+    System.getenv("USERNAME"),
+    gradle.gradleUserHomeDir.path)
 
 fun quotedPowerShellPath(path: String): String = "'${path.replace("'", "''")}'"
 
@@ -563,10 +581,29 @@ tasks.register("sharedFolderVerification") {
 
 tasks.named("check") {
     dependsOn("jsTest")
-    if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+    if (isWindowsHost && !productionDeploymentBuild) {
         dependsOn(windowsPesterVerification)
     }
 }
+
+val verifyProductionDeploymentBuildContext = tasks.register("verifyProductionDeploymentBuildContext") {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Verifies that only the protected Windows deployment context can omit Pester."
+    doLast {
+        val productionHome = "C:\\ProgramData\\christopherbell.dev\\gradle-home"
+        check(isProductionDeploymentBuild(null, true, "SYSTEM", productionHome))
+        check(isProductionDeploymentBuild("1", true, "system", "$productionHome\\"))
+        check(!isProductionDeploymentBuild(null, false, "SYSTEM", productionHome))
+        check(!isProductionDeploymentBuild(null, true, "runneradmin", productionHome))
+        check(!isProductionDeploymentBuild(null, true, "SYSTEM", "C:\\Gradle"))
+        val invalidMarker = runCatching {
+            isProductionDeploymentBuild("true", true, "SYSTEM", productionHome)
+        }.exceptionOrNull()
+        check(invalidMarker is GradleException)
+    }
+}
+
+tasks.named("check") { dependsOn(verifyProductionDeploymentBuildContext) }
 
 val verifySensorRuntime by tasks.registering {
     dependsOn(tasks.named("bootJar"))
