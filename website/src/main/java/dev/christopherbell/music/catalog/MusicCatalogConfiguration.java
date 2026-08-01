@@ -2,6 +2,7 @@ package dev.christopherbell.music.catalog;
 
 import java.time.Clock;
 import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.music.metadata.FfmpegMusicTagProcess;
 import dev.christopherbell.music.metadata.MusicMetadataEditRepository;
 import dev.christopherbell.music.metadata.MusicMetadataFileStore;
@@ -61,9 +62,10 @@ public class MusicCatalogConfiguration {
       MusicProperties properties,
       MusicTrackRepository tracks,
       MusicProbe probe,
-      MusicArtworkService artwork) {
+      MusicArtworkService artwork,
+      ScheduledCollectorCoordinator scheduledCollectors) {
     return new MusicCatalogReconciler(
-        properties, tracks, probe, artwork, Clock.systemUTC());
+        properties, tracks, probe, artwork, scheduledCollectors, Clock.systemUTC());
   }
 
   @Bean
@@ -101,9 +103,10 @@ public class MusicCatalogConfiguration {
       MusicMetadataFileStore files,
       MusicMetadataEditRepository edits,
       MusicAccessService access,
-      MongoLeaseService leases) {
+      MongoLeaseService leases,
+      ScheduledCollectorCoordinator scheduledCollectors) {
     return new MusicMetadataService(
         music, metadata, catalog, tracks, probe, artwork, tagProcess, files, edits, access,
-        leases, Clock.systemUTC());
+        leases, scheduledCollectors, Clock.systemUTC());
   }
 }

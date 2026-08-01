@@ -4,6 +4,9 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
+import dev.christopherbell.configuration.mongo.lease.CollectorLeaseGuard;
+import dev.christopherbell.configuration.mongo.lease.LeaseOwnershipLostException;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
@@ -28,6 +31,7 @@ import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepos
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingQueryRepository;
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingSummary;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -75,6 +79,7 @@ public class RestaurantServiceTest {
   @Mock private DailyLunchPicksRepository dailyLunchPicksRepository;
   @Mock private OpenStreetMapRestaurantClient openStreetMapRestaurantClient;
   @Mock private PermissionService permissionService;
+  @Mock private ScheduledCollectorCoordinator scheduledCollectors;
   @Mock private RestaurantMapper restaurantMapper;
   @Mock private RestaurantFavoriteRepository restaurantFavoriteRepository;
   @Mock private RestaurantDuplicateQueryRepository restaurantDuplicateQueries;
@@ -911,6 +916,41 @@ public class RestaurantServiceTest {
     assertTrue(pick.getRestaurantIds().containsAll(List.of("austin", "pflugerville", "round-rock")));
     verify(restaurantRepository).findAll();
     verify(dailyLunchPicksRepository).save(org.mockito.ArgumentMatchers.any(DailyLunchPicks.class));
+  }
+
+  @Test
+  @DisplayName("Scheduled daily picks: lock contention performs no restaurant or pick work")
+  void setRestaurantOfTheDay_whenLeaseIsContended_skipsWithoutSideEffects() {
+    wflProperties.getRestaurantOfTheDay().setEnabled(true);
+    when(scheduledCollectors.run(
+        eq("wfl-daily-picks"), eq(Duration.ofMinutes(10)), any()))
+        .thenReturn(null);
+
+    restaurantService.setRestaurantOfTheDay();
+
+    verifyNoInteractions(restaurantRepository, dailyLunchPicksRepository);
+  }
+
+  @Test
+  @DisplayName("Scheduled daily picks: lost ownership prevents the pick write")
+  void setRestaurantOfTheDay_whenOwnershipIsLost_doesNotSaveThePick() throws Exception {
+    wflProperties.getRestaurantOfTheDay().setEnabled(true);
+    var guard = org.mockito.Mockito.mock(CollectorLeaseGuard.class);
+    org.mockito.Mockito.doThrow(new LeaseOwnershipLostException("wfl-daily-picks"))
+        .when(guard).verifyHeld();
+    when(scheduledCollectors.run(
+        eq("wfl-daily-picks"), eq(Duration.ofMinutes(10)), any()))
+        .thenAnswer(invocation -> {
+          ScheduledCollectorCoordinator.Work<?> work = invocation.getArgument(2);
+          return work.execute(guard);
+        });
+    when(restaurantRepository.findAll()).thenReturn(List.of());
+
+    assertThrows(
+        LeaseOwnershipLostException.class,
+        () -> restaurantService.setRestaurantOfTheDay());
+
+    verify(dailyLunchPicksRepository, never()).save(any());
   }
 
   @Test

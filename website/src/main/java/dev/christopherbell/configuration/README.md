@@ -63,8 +63,9 @@ Owns application-wide Spring and web infrastructure.
   from the nearest trusted hop to the first untrusted client. Production binds
   `CLIENT_IP_TRUSTED_PROXIES` and defaults only to IPv4/IPv6 loopback for the
   local Cloudflare tunnel process.
-- MongoDB auditing, fixed-name leases, and immutable versioned migrations under
-  `mongo`.
+- MongoDB auditing, fixed-name renewable leases, shared scheduled-collector ownership and status,
+  and immutable versioned migrations under `mongo`. WFL daily picks, Music catalog scans, and Music
+  metadata cleanup use that coordinator and verify ownership immediately before writes.
 - `FederationSecretApplicationContextInitializer` resolves the production
   ActivityPub identity-encryption key before configuration binding. It honors
   an explicit environment secret or atomically creates and reuses one 32-byte

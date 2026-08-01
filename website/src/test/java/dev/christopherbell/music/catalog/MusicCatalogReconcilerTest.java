@@ -1,13 +1,19 @@
 package dev.christopherbell.music.catalog;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.configuration.mongo.lease.CollectorLeaseGuard;
+import dev.christopherbell.configuration.mongo.lease.LeaseOwnershipLostException;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -87,11 +93,69 @@ class MusicCatalogReconcilerTest {
     verify(probe, never()).probe(any());
   }
 
+  @Test
+  void scheduledReconcileWhenLeaseIsContendedDoesNotScanOrWrite() throws Exception {
+    var root = Files.createDirectory(tempDir.resolve("Music"));
+    Files.writeString(root.resolve("song.mp3"), "audio");
+    var repository = memoryRepository();
+    var probe = mock(MusicProbe.class);
+    var coordinator = mock(ScheduledCollectorCoordinator.class);
+    when(coordinator.run(
+        org.mockito.ArgumentMatchers.eq("music-catalog-reconcile"),
+        org.mockito.ArgumentMatchers.eq(Duration.ofMinutes(30)),
+        any()))
+        .thenReturn(null);
+
+    reconciler(root, repository.proxy(), probe, 100, coordinator).scheduledReconcile();
+
+    assertThat(repository.rows).isEmpty();
+    verify(probe, never()).probe(any());
+  }
+
+  @Test
+  void scheduledReconcileStopsWritingAfterLeaseOwnershipIsLost() throws Exception {
+    var root = Files.createDirectory(tempDir.resolve("Music"));
+    Files.writeString(root.resolve("first.mp3"), "first-audio");
+    Files.writeString(root.resolve("second.mp3"), "second-audio");
+    var repository = memoryRepository();
+    var probe = mock(MusicProbe.class);
+    when(probe.probe(any())).thenReturn(metadata("Song"));
+    var guard = mock(CollectorLeaseGuard.class);
+    doNothing().doThrow(new LeaseOwnershipLostException("music-catalog-reconcile"))
+        .when(guard).verifyHeld();
+    var coordinator = mock(ScheduledCollectorCoordinator.class);
+    when(coordinator.run(
+        org.mockito.ArgumentMatchers.eq("music-catalog-reconcile"),
+        org.mockito.ArgumentMatchers.eq(Duration.ofMinutes(30)),
+        any()))
+        .thenAnswer(invocation -> {
+          ScheduledCollectorCoordinator.Work<?> work = invocation.getArgument(2);
+          return work.execute(guard);
+        });
+
+    var reconciler = reconciler(root, repository.proxy(), probe, 100, coordinator);
+
+    assertThatThrownBy(reconciler::scheduledReconcile)
+        .isInstanceOf(LeaseOwnershipLostException.class);
+    assertThat(repository.rows).hasSize(1);
+    assertThat(repository.byPath("first.mp3")).isNotNull();
+  }
+
   private MusicCatalogReconciler reconciler(
       Path root,
       MusicTrackRepository repository,
       MusicProbe probe,
       int batchSize) {
+    return reconciler(
+        root, repository, probe, batchSize, mock(ScheduledCollectorCoordinator.class));
+  }
+
+  private MusicCatalogReconciler reconciler(
+      Path root,
+      MusicTrackRepository repository,
+      MusicProbe probe,
+      int batchSize,
+      ScheduledCollectorCoordinator scheduledCollectors) {
     var properties = new MusicProperties(
         root,
         tempDir.resolve("artwork"),
@@ -107,7 +171,8 @@ class MusicCatalogReconcilerTest {
     var artwork = mock(MusicArtworkService.class);
     when(artwork.extract(any(), any(), any())).thenReturn(Optional.empty());
     return new MusicCatalogReconciler(
-        properties, repository, probe, artwork, Clock.fixed(NOW, ZoneOffset.UTC));
+        properties, repository, probe, artwork, scheduledCollectors,
+        Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
   private MusicProbeResult metadata(String title) {
