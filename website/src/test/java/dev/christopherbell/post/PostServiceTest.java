@@ -89,7 +89,7 @@ public class PostServiceTest {
   @BeforeEach
   void setUp() {
     clock = Clock.fixed(NOW, ZoneOffset.UTC);
-    postExpirationService = new PostExpirationService(postRepository, true);
+    postExpirationService = new PostExpirationService(postRepository, null, clock, true);
     lenient().when(accountTrustService.hiddenAccountIdsForSelf()).thenReturn(Set.of());
     lenient().when(hiddenPostThreadService.hiddenRootIdsForSelf()).thenReturn(Set.of());
     lenient().when(engagement.replyCounts(any())).thenReturn(Map.of());
@@ -305,9 +305,9 @@ public class PostServiceTest {
         .parentId("root")
         .accountId("other")
         .text("old")
-        .createdOn(Instant.now().minus(Duration.ofHours(48)))
-        .lastUpdatedOn(Instant.now().minus(Duration.ofHours(48)))
-        .expiresOn(Instant.now().minus(Duration.ofHours(1)))
+        .createdOn(NOW.minus(Duration.ofHours(48)))
+        .lastUpdatedOn(NOW.minus(Duration.ofHours(48)))
+        .expiresOn(NOW.minus(Duration.ofHours(1)))
         .build();
     var child = Post.builder()
         .id("child")
@@ -315,9 +315,9 @@ public class PostServiceTest {
         .parentId("parent")
         .accountId("other")
         .text("older reply")
-        .createdOn(Instant.now().minus(Duration.ofHours(47)))
-        .lastUpdatedOn(Instant.now().minus(Duration.ofHours(47)))
-        .expiresOn(Instant.now().plus(Duration.ofHours(1)))
+        .createdOn(NOW.minus(Duration.ofHours(47)))
+        .lastUpdatedOn(NOW.minus(Duration.ofHours(47)))
+        .expiresOn(NOW.plus(Duration.ofHours(1)))
         .build();
     when(postRepository.findById(eq("parent"))).thenReturn(Optional.of(expiredParent));
     when(postRepository.findByRootIdOrderByCreatedOnAsc(eq("root")))

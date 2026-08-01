@@ -47,9 +47,11 @@ class PostExpirationServiceTest {
 
   @Test
   void confirmedReplyImmediatelyRevivesTheRootAndSynchronizesTheThread() throws Exception {
-    var service = new PostExpirationService(postRepository, true);
     var createdOn = Instant.parse("2026-07-29T01:00:00Z");
     var extendedOn = Instant.parse("2026-07-29T03:00:00Z");
+    var service =
+        new PostExpirationService(
+            postRepository, null, Clock.fixed(extendedOn, ZoneOffset.UTC), true);
     var root = Post.builder()
         .id("root")
         .rootId("root")
