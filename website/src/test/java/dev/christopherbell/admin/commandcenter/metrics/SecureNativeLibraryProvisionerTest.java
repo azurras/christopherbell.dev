@@ -194,10 +194,9 @@ class SecureNativeLibraryProvisionerTest {
   }
 
   @Test
-  void productionAclNeverGrantsAnArbitraryCurrentOwner() {
+  void productionAclContainsOnlyFixedPrivilegedPrincipals() {
     assertThat(SecureNativeLibraryProvisioner.WindowsAclPolicy.trustedPrincipalNames())
-        .containsExactlyInAnyOrder("NT AUTHORITY\\SYSTEM", "BUILTIN\\Administrators")
-        .noneMatch(name -> name.contains(System.getProperty("user.name")));
+        .containsExactlyInAnyOrder("NT AUTHORITY\\SYSTEM", "BUILTIN\\Administrators");
   }
 
   @Test
