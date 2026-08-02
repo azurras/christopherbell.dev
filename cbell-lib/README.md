@@ -22,11 +22,11 @@ headers arrive, and it cancels a response before returning oversized content.
 stream, including bounded decompression. Feature clients continue to own status,
 timeout, parsing, and domain-error translation.
 
-## Workflow retry lifecycle
+## Shared pagination and scheduling
 
-`WorkflowExecutor.executeWorkflowWithRetry` runs workflows synchronously against
-the supplied `RetryPolicy`. Each attempt increments `WorkflowContext.attemptCount`.
-Retryable workflow failures use `RetryPolicy.getBackoffTimeInMinutes()` and
-`calculateNextRetry(...)` before another attempt is made. Non-retryable terminal
-statuses return immediately. When the retry window expires, the context is marked
-`STOPPED` and execution stops with `WorkflowStopExecutionException`.
+Stable cursor encoding lives under `dev.christopherbell.libs.pagination`, while
+the reusable Mongo lease and scheduled-collector coordination types live under
+`dev.christopherbell.libs.mongo.lease`.
+
+`TestUtil` is published only through the module's Gradle test-fixtures variant;
+it is not part of the production library artifact.
