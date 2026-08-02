@@ -72,6 +72,11 @@ Restaurants are imported from OpenStreetMap through a leased workflow shared by
 the monthly scheduler and admin-only manual flow. Create and review a preview,
 then apply its operator-bound token before it expires:
 
+Configured coverage uses current U.S. Census incorporated-place and
+Census-designated-place names intersecting each import rectangle. City and state
+values are canonicalized, rectangle ownership is enforced, and elements without
+a supported locality are omitted. The normal importer does not call a geocoder.
+
 ```bash
 curl -X POST \
   -H "Authorization: Bearer <admin-token>" \

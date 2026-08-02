@@ -129,6 +129,59 @@ class OpenStreetMapRestaurantClientTest {
   }
 
   @Test
+  void parseRestaurants_disambiguatesSameNamePlacesByCoordinates() throws Exception {
+    var restaurants = parseRestaurants("""
+        {
+          "elements": [
+            {"type":"node","id":1,"lat":37.3688,"lon":-122.0363,
+             "tags":{"name":"California Sunnyvale","addr:city":"Sunnyvale"}},
+            {"type":"node","id":2,"lat":32.7965,"lon":-96.5608,
+             "tags":{"name":"Texas Sunnyvale","addr:city":"Sunnyvale"}}
+          ]
+        }
+        """);
+
+    assertEquals(java.util.List.of("CA", "TX"), restaurants.stream()
+        .map(restaurant -> restaurant.getAddress().getState())
+        .toList());
+  }
+
+  @Test
+  void parseRestaurants_acceptsExpandedPlacesAndFullStateNames() throws Exception {
+    var restaurants = parseRestaurants("""
+        {
+          "elements": [
+            {"type":"node","id":1,"lat":32.7555,"lon":-97.3308,
+             "tags":{"name":"Fort Worth Lunch","addr:city":"Fort Worth","addr:state":"Texas"}},
+            {"type":"node","id":2,"lat":37.6819,"lon":-121.7680,
+             "tags":{"name":"Livermore Lunch","addr:city":"Livermore","addr:state":"California"}},
+            {"type":"node","id":3,"lat":29.9511,"lon":-90.0715,
+             "tags":{"name":"New Orleans Lunch","addr:city":"New Orleans","addr:state":"Louisiana"}}
+          ]
+        }
+        """);
+
+    assertEquals(java.util.List.of("Fort Worth", "Livermore", "New Orleans"), restaurants.stream()
+        .map(restaurant -> restaurant.getAddress().getCity())
+        .toList());
+    assertEquals(java.util.List.of("TX", "CA", "LA"), restaurants.stream()
+        .map(restaurant -> restaurant.getAddress().getState())
+        .toList());
+  }
+
+  @Test
+  void parseRestaurants_rejectsCityOutsideOwningMetroBounds() throws Exception {
+    var restaurants = parseRestaurants("""
+        {
+          "elements": [{"type":"node","id":1,"lat":32.7767,"lon":-96.7970,
+            "tags":{"name":"Misplaced Austin","addr:city":"Austin"}}]
+        }
+        """);
+
+    assertTrue(restaurants.isEmpty());
+  }
+
+  @Test
   void parseRestaurants_rejectsUnsupportedContradictoryOrCoordinateLessLocations() throws Exception {
     var restaurants = parseRestaurants("""
         {
