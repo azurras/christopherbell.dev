@@ -87,9 +87,11 @@ public class MusicCatalogReconciler {
       probed++;
       try {
         var metadata = probe.probe(source.toAbsolutePath().normalize());
-        var artworkRevision = metadata.hasArtwork()
-            ? artwork.extract(source, relative, revision).orElse(null)
-            : null;
+        String artworkRevision = null;
+        if (metadata.hasArtwork()) {
+          guard.verifyHeld();
+          artworkRevision = artwork.extract(source, relative, revision).orElse(null);
+        }
         guard.verifyHeld();
         tracks.save(MusicTrack.indexed(
             existing, relative, revision.token(), metadata, artworkRevision, clock.instant()));

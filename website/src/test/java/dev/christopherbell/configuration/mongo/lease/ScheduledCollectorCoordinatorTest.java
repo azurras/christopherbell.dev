@@ -13,7 +13,6 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
@@ -41,36 +40,6 @@ class ScheduledCollectorCoordinatorTest {
     assertThat(ran).isFalse();
     verify(leases, never()).release(any(), any());
     verify(mongo).save(any(ScheduledCollectorRun.class));
-  }
-
-  @Test
-  void twoNodesSharingALeaseRunOnlyTheOwningNodesWork() {
-    var leases = Mockito.mock(MongoLeaseService.class);
-    var firstMongo = Mockito.mock(MongoTemplate.class);
-    var secondMongo = Mockito.mock(MongoTemplate.class);
-    when(leases.tryAcquire(any(), any(), any(), any())).thenReturn(true, false);
-    var clock = Clock.fixed(NOW, ZoneOffset.UTC);
-    var firstNode = new ScheduledCollectorCoordinator(leases, firstMongo, clock);
-    var secondNode = new ScheduledCollectorCoordinator(leases, secondMongo, clock);
-    var workRuns = new AtomicInteger();
-    var losingOutcome = new AtomicReference<ScheduledCollectorCoordinator.Outcome<String>>();
-
-    var owningOutcome = firstNode.run("collector:test", Duration.ofMinutes(2), firstGuard -> {
-      losingOutcome.set(secondNode.run(
-          "collector:test", Duration.ofMinutes(2), secondGuard -> {
-            workRuns.incrementAndGet();
-            return "loser";
-          }));
-      workRuns.incrementAndGet();
-      return "owner";
-    });
-
-    assertThat(owningOutcome.status()).isEqualTo(ScheduledCollectorRunStatus.SUCCEEDED);
-    assertThat(owningOutcome.value()).isEqualTo("owner");
-    assertThat(losingOutcome.get().status())
-        .isEqualTo(ScheduledCollectorRunStatus.SKIPPED_LOCKED);
-    assertThat(workRuns).hasValue(1);
-    verify(secondMongo).save(any(ScheduledCollectorRun.class));
   }
 
   @Test

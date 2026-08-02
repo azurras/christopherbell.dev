@@ -141,6 +141,35 @@ class MusicCatalogReconcilerTest {
     assertThat(repository.byPath("first.mp3")).isNotNull();
   }
 
+  @Test
+  void scheduledReconcileChecksLeaseBeforeExtractingArtwork() throws Exception {
+    var root = Files.createDirectory(tempDir.resolve("Music"));
+    Files.writeString(root.resolve("song.flac"), "audio");
+    var repository = memoryRepository();
+    var probe = mock(MusicProbe.class);
+    when(probe.probe(any())).thenReturn(metadataWithArtwork("Song"));
+    var artwork = mock(MusicArtworkService.class);
+    var guard = mock(CollectorLeaseGuard.class);
+    doThrow(new LeaseOwnershipLostException("music-catalog-reconcile"))
+        .when(guard).verifyHeld();
+    var coordinator = mock(ScheduledCollectorCoordinator.class);
+    when(coordinator.run(
+        org.mockito.ArgumentMatchers.eq("music-catalog-reconcile"),
+        org.mockito.ArgumentMatchers.eq(Duration.ofMinutes(30)),
+        any()))
+        .thenAnswer(invocation -> {
+          ScheduledCollectorCoordinator.Work<?> work = invocation.getArgument(2);
+          return work.execute(guard);
+        });
+    var reconciler = reconciler(
+        root, repository.proxy(), probe, 100, artwork, coordinator);
+
+    assertThatThrownBy(reconciler::scheduledReconcile)
+        .isInstanceOf(LeaseOwnershipLostException.class);
+    verify(artwork, never()).extract(any(), any(), any());
+    assertThat(repository.rows).isEmpty();
+  }
+
   private MusicCatalogReconciler reconciler(
       Path root,
       MusicTrackRepository repository,
@@ -156,6 +185,18 @@ class MusicCatalogReconcilerTest {
       MusicProbe probe,
       int batchSize,
       ScheduledCollectorCoordinator scheduledCollectors) {
+    var artwork = mock(MusicArtworkService.class);
+    when(artwork.extract(any(), any(), any())).thenReturn(Optional.empty());
+    return reconciler(root, repository, probe, batchSize, artwork, scheduledCollectors);
+  }
+
+  private MusicCatalogReconciler reconciler(
+      Path root,
+      MusicTrackRepository repository,
+      MusicProbe probe,
+      int batchSize,
+      MusicArtworkService artwork,
+      ScheduledCollectorCoordinator scheduledCollectors) {
     var properties = new MusicProperties(
         root,
         tempDir.resolve("artwork"),
@@ -168,8 +209,6 @@ class MusicCatalogReconcilerTest {
         5_242_880,
         2048,
         true);
-    var artwork = mock(MusicArtworkService.class);
-    when(artwork.extract(any(), any(), any())).thenReturn(Optional.empty());
     return new MusicCatalogReconciler(
         properties, repository, probe, artwork, scheduledCollectors,
         Clock.fixed(NOW, ZoneOffset.UTC));
@@ -179,6 +218,12 @@ class MusicCatalogReconcilerTest {
     return new MusicProbeResult(
         title, "Artist", "Artist", "Album", 1, 1, "Genre", 2026,
         180.0, "flac", "flac", false);
+  }
+
+  private MusicProbeResult metadataWithArtwork(String title) {
+    return new MusicProbeResult(
+        title, "Artist", "Artist", "Album", 1, 1, "Genre", 2026,
+        180.0, "flac", "flac", true);
   }
 
   private MemoryRepository memoryRepository(MusicTrack... initial) {
