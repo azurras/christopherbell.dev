@@ -407,20 +407,27 @@ val windowsPowerShellExecutable = providers.environmentVariable("WINDOWS_POWERSH
 val isWindowsHost = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 
 fun isProductionDeploymentBuild(
-    marker: String?, isWindows: Boolean, username: String?, gradleHome: String): Boolean {
+    marker: String?,
+    isWindows: Boolean,
+    environmentUsername: String?,
+    runtimeUsername: String?,
+    gradleHome: String): Boolean {
     if (marker != null && marker != "1") {
         throw GradleException("CHRISTOPHERBELL_PRODUCTION_DEPLOYMENT must be exactly 1 when set.")
     }
     val normalizedGradleHome = gradleHome.replace('/', '\\').trimEnd('\\').lowercase()
+    val protectedIdentity = environmentUsername.equals("SYSTEM", ignoreCase = true) ||
+        runtimeUsername.equals("SYSTEM", ignoreCase = true)
     return isWindows &&
-        username.equals("SYSTEM", ignoreCase = true) &&
-        normalizedGradleHome.endsWith("\\christopherbell.dev\\gradle-home")
+        normalizedGradleHome.endsWith("\\christopherbell.dev\\gradle-home") &&
+        (marker == "1" || protectedIdentity)
 }
 
 val productionDeploymentBuild = isProductionDeploymentBuild(
     providers.environmentVariable("CHRISTOPHERBELL_PRODUCTION_DEPLOYMENT").orNull,
     isWindowsHost,
     System.getenv("USERNAME"),
+    System.getProperty("user.name"),
     gradle.gradleUserHomeDir.path)
 
 fun quotedPowerShellPath(path: String): String = "'${path.replace("'", "''")}'"
@@ -591,13 +598,16 @@ val verifyProductionDeploymentBuildContext = tasks.register("verifyProductionDep
     description = "Verifies that only the protected Windows deployment context can omit Pester."
     doLast {
         val productionHome = "C:\\ProgramData\\christopherbell.dev\\gradle-home"
-        check(isProductionDeploymentBuild(null, true, "SYSTEM", productionHome))
-        check(isProductionDeploymentBuild("1", true, "system", "$productionHome\\"))
-        check(!isProductionDeploymentBuild(null, false, "SYSTEM", productionHome))
-        check(!isProductionDeploymentBuild(null, true, "runneradmin", productionHome))
-        check(!isProductionDeploymentBuild(null, true, "SYSTEM", "C:\\Gradle"))
+        check(isProductionDeploymentBuild(null, true, "SYSTEM", null, productionHome))
+        check(isProductionDeploymentBuild(null, true, null, "SYSTEM", productionHome))
+        check(isProductionDeploymentBuild("1", true, "runneradmin", "runneradmin", "$productionHome\\"))
+        check(!isProductionDeploymentBuild(null, false, "SYSTEM", "SYSTEM", productionHome))
+        check(!isProductionDeploymentBuild(null, true, "runneradmin", "runneradmin", productionHome))
+        check(!isProductionDeploymentBuild(null, true, "SYSTEM", "SYSTEM", "C:\\Gradle"))
+        check(!isProductionDeploymentBuild("1", false, "runneradmin", "runneradmin", productionHome))
+        check(!isProductionDeploymentBuild("1", true, "runneradmin", "runneradmin", "C:\\Gradle"))
         val invalidMarker = runCatching {
-            isProductionDeploymentBuild("true", true, "SYSTEM", productionHome)
+            isProductionDeploymentBuild("true", true, "SYSTEM", "SYSTEM", productionHome)
         }.exceptionOrNull()
         check(invalidMarker is GradleException)
     }
