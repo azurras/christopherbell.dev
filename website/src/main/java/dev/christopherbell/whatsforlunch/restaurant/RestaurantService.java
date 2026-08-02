@@ -711,7 +711,13 @@ public class RestaurantService {
         continue;
       }
       applyNormalizedName(restaurant);
-      var existing = restaurantRepository.findById(restaurant.getId())
+      var existingById = restaurantRepository.findById(restaurant.getId());
+      if (existingById.isPresent()
+          && hasConflictingNormalizedNameOwner(existingById.get(), restaurant)) {
+        unchanged++;
+        continue;
+      }
+      var existing = existingById
           .or(() -> findRestaurantByNormalizedName(restaurant.getNormalizedName()));
       if (existing.isEmpty()) {
         created++;
@@ -760,7 +766,12 @@ public class RestaurantService {
 
       var existingById = restaurantRepository.findById(restaurant.getId());
       if (existingById.isPresent()) {
-        if (mergeImportedRestaurant(existingById.get(), restaurant, true)) {
+        if (hasConflictingNormalizedNameOwner(existingById.get(), restaurant)) {
+          skippedExisting++;
+          log.debug(
+              "Skipping OpenStreetMap restaurant id {} because normalized name {} belongs to another restaurant.",
+              restaurant.getId(), restaurant.getNormalizedName());
+        } else if (mergeImportedRestaurant(existingById.get(), restaurant, true)) {
           restaurantRepository.save(existingById.get());
           updated++;
           log.info("Updated existing OpenStreetMap restaurant id: {}, name: {}",
@@ -1539,6 +1550,19 @@ public class RestaurantService {
     if (owner.isPresent() && (selfId == null || !selfId.equals(owner.get().getId()))) {
       throw new ResourceExistsException("Restaurant with that name already exists.");
     }
+  }
+
+  /** Returns whether another restaurant owns an imported rename before mutation occurs. */
+  private boolean hasConflictingNormalizedNameOwner(
+      Restaurant persistedById,
+      Restaurant imported
+  ) {
+    if (java.util.Objects.equals(
+        persistedById.getNormalizedName(), imported.getNormalizedName())) {
+      return false;
+    }
+    return findRestaurantByNormalizedName(imported.getNormalizedName()).stream()
+        .anyMatch(owner -> !java.util.Objects.equals(owner.getId(), persistedById.getId()));
   }
 
   private Optional<Restaurant> findRestaurantByNormalizedName(String normalizedName) {

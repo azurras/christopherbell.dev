@@ -76,6 +76,7 @@ Owns the data model and APIs for What's For Lunch restaurants.
 - Automated imports run monthly on the fifteenth using `wfl.restaurant-import.monthly.cron`.
 - The scheduler logs start, completion, and failure events.
 - `RestaurantImportState` stores the last completed import month. On application startup, WFL checks whether the previous month has a completed import; if not, it runs a catch-up import immediately.
+- If an existing OpenStreetMap id is renamed to a normalized name owned by another restaurant, preview reports it unchanged and apply skips it without mutation so the remaining import can complete.
 
 ## Update This Doc
 

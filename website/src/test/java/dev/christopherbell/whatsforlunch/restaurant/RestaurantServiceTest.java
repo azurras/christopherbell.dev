@@ -1074,6 +1074,61 @@ public class RestaurantServiceTest {
   }
 
   @Test
+  @DisplayName("OpenStreetMap import: skips an ID rename owned by another restaurant")
+  public void testPreparedImport_whenIdRenameCollidesWithAnotherOwner_skipsAndContinues()
+      throws Exception {
+    var persistedById = RestaurantStub.getRestaurantStub("osm:node:8178213204");
+    persistedById.setName("China Villa");
+    persistedById.setNormalizedName("china villa");
+    persistedById.setDedupeKey("china villa");
+    persistedById.getAddress().setCity("Livermore");
+
+    var importedRename = RestaurantStub.getRestaurantStub("osm:node:8178213204");
+    importedRename.setName("Aama's Kitchen");
+    importedRename.getAddress().setCity("Livermore");
+
+    var normalizedNameOwner = RestaurantStub.getRestaurantStub("osm:node:13485126044");
+    normalizedNameOwner.setName("Aama's Kitchen");
+    normalizedNameOwner.setNormalizedName("aama's kitchen");
+    normalizedNameOwner.setDedupeKey("aama's kitchen");
+    normalizedNameOwner.getAddress().setCity("Hayward");
+
+    var laterCandidate = RestaurantStub.getRestaurantStub("osm:node:99999999999");
+    laterCandidate.setName("Later Candidate Cafe");
+
+    when(openStreetMapRestaurantClient.getConfiguredMetroRestaurants())
+        .thenReturn(List.of(importedRename, laterCandidate));
+    when(restaurantRepository.findById(eq(importedRename.getId())))
+        .thenReturn(Optional.of(persistedById));
+    when(restaurantRepository.findByNormalizedName(eq("aama's kitchen")))
+        .thenReturn(Optional.of(normalizedNameOwner));
+    when(restaurantRepository.findById(eq(laterCandidate.getId()))).thenReturn(Optional.empty());
+    when(restaurantRepository.findByNormalizedName(eq("later candidate cafe")))
+        .thenReturn(Optional.empty());
+    when(restaurantRepository.findAll()).thenReturn(List.of());
+    when(restaurantRepository.save(any(Restaurant.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    var snapshot = restaurantService.prepareConfiguredMetroImport();
+    var result = restaurantService.applyPreparedImport(snapshot, RestaurantImportLeaseGuard.NONE);
+
+    assertEquals(2, snapshot.counts().fetched());
+    assertEquals(1, snapshot.counts().created());
+    assertEquals(0, snapshot.counts().updated());
+    assertEquals(1, snapshot.counts().unchanged());
+    assertEquals(2, result.fetched());
+    assertEquals(1, result.imported());
+    assertEquals(0, result.updated());
+    assertEquals(1, result.skippedExisting());
+    assertEquals("China Villa", persistedById.getName());
+    assertEquals("china villa", persistedById.getNormalizedName());
+    assertEquals("Aama's Kitchen", normalizedNameOwner.getName());
+    verify(restaurantRepository, never()).save(eq(persistedById));
+    verify(restaurantRepository, never()).save(eq(normalizedNameOwner));
+    verify(restaurantRepository).save(eq(laterCandidate));
+  }
+
+  @Test
   @DisplayName("Prepared import verifies lease before each write and after completion")
   public void testApplyPreparedImport_verifiesLeaseThroughoutMutation() throws Exception {
     var imported = RestaurantStub.getRestaurantStub("osm:node:lease");
