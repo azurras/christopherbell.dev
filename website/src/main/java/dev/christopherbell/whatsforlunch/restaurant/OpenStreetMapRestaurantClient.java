@@ -14,8 +14,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -28,6 +31,7 @@ public class OpenStreetMapRestaurantClient {
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
   private final WflProperties.Osm properties;
+  private final Map<String, SupportedLocation> supportedLocations;
 
   public OpenStreetMapRestaurantClient(
       ObjectMapper objectMapper,
@@ -35,6 +39,7 @@ public class OpenStreetMapRestaurantClient {
   ) {
     this.objectMapper = objectMapper;
     this.properties = wflProperties.getRestaurantImport().getOsm();
+    this.supportedLocations = configuredLocations(properties.getMetros());
     this.httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
         .build();
@@ -107,23 +112,29 @@ public class OpenStreetMapRestaurantClient {
     return restaurants;
   }
 
-  private java.util.Optional<Restaurant> toRestaurant(JsonNode element) {
+  private Optional<Restaurant> toRestaurant(JsonNode element) {
     var tags = element.path("tags");
     var name = text(tags, "name");
-    if (name == null || name.isBlank()) {
-      return java.util.Optional.empty();
+    var location = supportedLocation(tags);
+    var latitude = coordinate(element, "lat");
+    var longitude = coordinate(element, "lon");
+    if (name == null || name.isBlank() || location.isEmpty()
+        || !isCoordinate(latitude, -90.0, 90.0)
+        || !isCoordinate(longitude, -180.0, 180.0)) {
+      return Optional.empty();
     }
+    var supportedLocation = location.orElseThrow();
 
-    return java.util.Optional.of(Restaurant.builder()
+    return Optional.of(Restaurant.builder()
         .id("osm:" + element.path("type").asText() + ":" + element.path("id").asText())
         .name(name.strip())
         .address(Address.builder()
             .street1(street1(tags))
-            .city(defaultText(text(tags, "addr:city"), "Imported Metro"))
-            .state(defaultText(text(tags, "addr:state"), "TX"))
-            .country(defaultText(text(tags, "addr:country"), "US"))
-            .latitude(coordinate(element, "lat"))
-            .longitude(coordinate(element, "lon"))
+            .city(supportedLocation.city())
+            .state(supportedLocation.state())
+            .country("US")
+            .latitude(latitude)
+            .longitude(longitude)
             .postalCode(text(tags, "addr:postcode"))
             .build())
         .cuisine(text(tags, "cuisine"))
@@ -132,6 +143,34 @@ public class OpenStreetMapRestaurantClient {
         .website(RestaurantWebsiteUrlPolicy.safeOrNull(
             firstText(tags, "contact:website", "website")))
         .build());
+  }
+
+  private Optional<SupportedLocation> supportedLocation(JsonNode tags) {
+    var locality = firstText(tags, "addr:city", "addr:town", "addr:village", "addr:municipality");
+    var location = supportedLocations.get(normalizeLocation(locality));
+    if (location == null) {
+      return Optional.empty();
+    }
+    var suppliedState = text(tags, "addr:state");
+    if (suppliedState != null
+        && !suppliedState.isBlank()
+        && !normalizeLocation(suppliedState).equals(normalizeLocation(location.state()))) {
+      return Optional.empty();
+    }
+    var suppliedCountry = text(tags, "addr:country");
+    return suppliedCountry == null || suppliedCountry.isBlank() || isUnitedStates(suppliedCountry)
+        ? Optional.of(location)
+        : Optional.empty();
+  }
+
+  private Map<String, SupportedLocation> configuredLocations(List<WflProperties.Metro> metros) {
+    var locations = new LinkedHashMap<String, SupportedLocation>();
+    for (var metro : metros) {
+      for (var city : metro.getCities()) {
+        locations.put(normalizeLocation(city), new SupportedLocation(city.strip(), metro.getState().strip()));
+      }
+    }
+    return Map.copyOf(locations);
   }
 
   private String street1(JsonNode tags) {
@@ -172,11 +211,26 @@ public class OpenStreetMapRestaurantClient {
     return center.isNumber() ? center.asDouble() : null;
   }
 
-  private String defaultText(String value, String defaultValue) {
-    return value == null || value.isBlank() ? defaultValue : value;
+  private boolean isCoordinate(Double value, double minimum, double maximum) {
+    return value != null
+        && !value.isNaN()
+        && !value.isInfinite()
+        && value >= minimum
+        && value <= maximum;
+  }
+
+  private boolean isUnitedStates(String value) {
+    return List.of("us", "usa", "unitedstates").contains(normalizeLocation(value));
+  }
+
+  private String normalizeLocation(String value) {
+    return value == null ? "" : value.strip().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
   }
 
   private String normalize(String value) {
     return value == null ? "" : value.strip().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9 -]", "");
+  }
+
+  private record SupportedLocation(String city, String state) {
   }
 }

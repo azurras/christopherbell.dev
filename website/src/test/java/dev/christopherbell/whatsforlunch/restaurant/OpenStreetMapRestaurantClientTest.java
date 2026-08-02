@@ -1,7 +1,6 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -87,73 +86,82 @@ class OpenStreetMapRestaurantClientTest {
   }
 
   @Test
-  void parseRestaurants_defaultsMissingAddressCityToImportedMetro() throws Exception {
-    var client = client();
-    var method = OpenStreetMapRestaurantClient.class.getDeclaredMethod("parseRestaurants", String.class);
-    method.setAccessible(true);
-    var body = """
+  void parseRestaurants_rejectsMissingLocalityInsteadOfInventingOne() throws Exception {
+    var restaurants = parseRestaurants("""
+        {
+          "elements": [{
+            "type": "way",
+            "id": 789,
+            "center": {"lat": 30.3001, "lon": -97.7002},
+            "tags": {"name": "Metro Lunch"}
+          }]
+        }
+        """);
+
+    assertTrue(restaurants.isEmpty());
+  }
+
+  @Test
+  void parseRestaurants_acceptsSupportedLocalityTagsWithCanonicalCityAndState() throws Exception {
+    var restaurants = parseRestaurants("""
         {
           "elements": [
-            {
-              "type": "way",
-              "id": 789,
-              "center": {
-                "lat": 30.3001,
-                "lon": -97.7002
-              },
-              "tags": {
-                "name": "Metro Lunch"
-              }
-            }
+            {"type":"node","id":1,"lat":30.2672,"lon":-97.7431,
+             "tags":{"name":"A City","addr:city":"austin"}},
+            {"type":"node","id":2,"lat":37.8044,"lon":-122.2712,
+             "tags":{"name":"B Town","addr:town":"OAKLAND","addr:state":"CA"}},
+            {"type":"node","id":3,"lat":29.9841,"lon":-90.1529,
+             "tags":{"name":"C Village","addr:village":"Metairie","addr:country":"USA"}},
+            {"type":"node","id":4,"lat":33.0198,"lon":-96.6989,
+             "tags":{"name":"D Municipality","addr:municipality":"Plano","addr:country":"United States"}}
           ]
         }
-        """;
+        """);
 
-    @SuppressWarnings("unchecked")
-    var restaurants = (java.util.List<dev.christopherbell.whatsforlunch.restaurant.model.Restaurant>)
-        method.invoke(client, body);
+    assertEquals(java.util.List.of("Austin", "Oakland", "Metairie", "Plano"), restaurants.stream()
+        .map(restaurant -> restaurant.getAddress().getCity())
+        .toList());
+    assertEquals(java.util.List.of("TX", "CA", "LA", "TX"), restaurants.stream()
+        .map(restaurant -> restaurant.getAddress().getState())
+        .toList());
+    assertTrue(restaurants.stream()
+        .allMatch(restaurant -> "US".equals(restaurant.getAddress().getCountry())));
+  }
 
-    assertEquals(1, restaurants.size());
-    var restaurant = restaurants.getFirst();
-    assertEquals("osm:way:789", restaurant.getId());
-    assertEquals("Imported Metro", restaurant.getAddress().getCity());
-    assertEquals("TX", restaurant.getAddress().getState());
-    assertEquals(30.3001, restaurant.getAddress().getLatitude());
-    assertEquals(-97.7002, restaurant.getAddress().getLongitude());
-    assertNull(restaurant.getAddress().getStreet1());
+  @Test
+  void parseRestaurants_rejectsUnsupportedContradictoryOrCoordinateLessLocations() throws Exception {
+    var restaurants = parseRestaurants("""
+        {
+          "elements": [
+            {"type":"node","id":1,"lat":30.2672,"lon":-97.7431,
+             "tags":{"name":"Unsupported","addr:city":"Houston"}},
+            {"type":"node","id":2,"lat":30.2672,"lon":-97.7431,
+             "tags":{"name":"Wrong State","addr:city":"Austin","addr:state":"CA"}},
+            {"type":"node","id":3,"lat":30.2672,"lon":-97.7431,
+             "tags":{"name":"Wrong Country","addr:city":"Austin","addr:country":"CA"}},
+            {"type":"node","id":4,"lon":-97.7431,
+             "tags":{"name":"Missing Latitude","addr:city":"Austin"}},
+            {"type":"node","id":5,"lat":30.2672,
+             "tags":{"name":"Missing Longitude","addr:city":"Austin"}}
+          ]
+        }
+        """);
+
+    assertTrue(restaurants.isEmpty());
   }
 
   @Test
   void parseRestaurants_sortsByNameWithoutFastFoodPenalty() throws Exception {
-    var client = client();
-    var method = OpenStreetMapRestaurantClient.class.getDeclaredMethod("parseRestaurants", String.class);
-    method.setAccessible(true);
-    var body = """
+    var restaurants = parseRestaurants("""
         {
           "elements": [
-            {
-              "type": "node",
-              "id": 1,
-              "tags": {
-                "name": "A Taco Bell",
-                "amenity": "fast_food"
-              }
-            },
-            {
-              "type": "node",
-              "id": 2,
-              "tags": {
-                "name": "Z Bistro",
-                "amenity": "restaurant"
-              }
-            }
+            {"type":"node","id":1,"lat":30.2672,"lon":-97.7431,
+             "tags":{"name":"A Taco Bell","amenity":"fast_food","addr:city":"Austin"}},
+            {"type":"node","id":2,"lat":30.2673,"lon":-97.7432,
+             "tags":{"name":"Z Bistro","amenity":"restaurant","addr:city":"Austin"}}
           ]
         }
-        """;
-
-    @SuppressWarnings("unchecked")
-    var restaurants = (java.util.List<dev.christopherbell.whatsforlunch.restaurant.model.Restaurant>)
-        method.invoke(client, body);
+        """);
 
     assertEquals(2, restaurants.size());
     assertEquals("A Taco Bell", restaurants.getFirst().getName());
@@ -229,6 +237,15 @@ class OpenStreetMapRestaurantClientTest {
           () -> stall.callWhileBodyStalls(
               client::getConfiguredMetroRestaurants, Duration.ofSeconds(12)));
     }
+  }
+
+  @SuppressWarnings("unchecked")
+  private java.util.List<dev.christopherbell.whatsforlunch.restaurant.model.Restaurant>
+      parseRestaurants(String body) throws Exception {
+    var method = OpenStreetMapRestaurantClient.class.getDeclaredMethod("parseRestaurants", String.class);
+    method.setAccessible(true);
+    return (java.util.List<dev.christopherbell.whatsforlunch.restaurant.model.Restaurant>)
+        method.invoke(client(), body);
   }
 
   private OpenStreetMapRestaurantClient client() {
