@@ -4,16 +4,16 @@ import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import lombok.experimental.UtilityClass;
 
 /**
  * Utility class for reading JSON files from the classpath and converting them
  * into Java objects or strings. This is particularly useful for testing purposes,
  * such as loading test data or request/response payloads.
  */
-@UtilityClass
 public final class TestUtil {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+  private TestUtil() {}
 
   /**
    * Reads a JSON file from the classpath and converts it into the given type.

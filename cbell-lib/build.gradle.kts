@@ -1,5 +1,6 @@
 plugins {
     `java-library`
+    `java-test-fixtures`
     id("io.spring.dependency-management")
 }
 
@@ -32,6 +33,7 @@ dependencies {
     testImplementation("org.assertj:assertj-core")
     testImplementation("org.mockito:mockito-junit-jupiter")
     testImplementation("jakarta.servlet:jakarta.servlet-api")
+    testFixturesImplementation("tools.jackson.core:jackson-databind")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
