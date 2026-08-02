@@ -1,4 +1,4 @@
-package dev.christopherbell.libs.workflow.retry;
+package dev.christopherbell.whatsforlunch.workflow.engine.retry;
 
 import java.time.Instant;
 

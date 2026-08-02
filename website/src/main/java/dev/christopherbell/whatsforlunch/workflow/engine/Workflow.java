@@ -1,8 +1,8 @@
-package dev.christopherbell.libs.workflow;
+package dev.christopherbell.whatsforlunch.workflow.engine;
 
-import dev.christopherbell.libs.workflow.exception.WorkflowException;
-import dev.christopherbell.libs.workflow.model.WorkflowContext;
-import dev.christopherbell.libs.workflow.model.WorkflowResult;
+import dev.christopherbell.whatsforlunch.workflow.engine.exception.WorkflowException;
+import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowContext;
+import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowResult;
 
 /**
  * Represents a workflow that can be executed with a given context.

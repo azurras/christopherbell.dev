@@ -1,4 +1,4 @@
-package dev.christopherbell.libs.workflow.operation;
+package dev.christopherbell.whatsforlunch.workflow.engine.operation;
 
 /**
  * Enum representing the status of an operation within a workflow.

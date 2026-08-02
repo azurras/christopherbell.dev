@@ -1,6 +1,6 @@
-package dev.christopherbell.libs.workflow.operation;
+package dev.christopherbell.whatsforlunch.workflow.engine.operation;
 
-import dev.christopherbell.libs.workflow.model.WorkflowContext;
+import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowContext;
 
 /**
  * Represents an operation that can be executed within a workflow.

@@ -1,4 +1,4 @@
-package dev.christopherbell.libs.workflow.exception;
+package dev.christopherbell.whatsforlunch.workflow.engine.exception;
 
 /**
  * Base exception class for workflow-related exceptions.

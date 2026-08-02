@@ -1,4 +1,4 @@
-package dev.christopherbell.libs.workflow.model;
+package dev.christopherbell.whatsforlunch.workflow.engine.model;
 
 import java.time.Instant;
 import java.util.UUID;

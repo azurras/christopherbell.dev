@@ -1,4 +1,4 @@
-package dev.christopherbell.libs.workflow.model;
+package dev.christopherbell.whatsforlunch.workflow.engine.model;
 
 /**
  * Enum representing the status of a workflow.

@@ -1,10 +1,10 @@
-package dev.christopherbell.libs.workflow;
+package dev.christopherbell.whatsforlunch.workflow.engine;
 
-import dev.christopherbell.libs.workflow.model.WorkflowContext;
-import dev.christopherbell.libs.workflow.model.WorkflowResult;
-import dev.christopherbell.libs.workflow.operation.Operation;
-import dev.christopherbell.libs.workflow.operation.OperationResult;
-import dev.christopherbell.libs.workflow.retry.RetryPolicy;
+import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowContext;
+import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowResult;
+import dev.christopherbell.whatsforlunch.workflow.engine.operation.Operation;
+import dev.christopherbell.whatsforlunch.workflow.engine.operation.OperationResult;
+import dev.christopherbell.whatsforlunch.workflow.engine.retry.RetryPolicy;
 
 /**
  * Interface representing a workflow engine capable of executing operations and workflows.

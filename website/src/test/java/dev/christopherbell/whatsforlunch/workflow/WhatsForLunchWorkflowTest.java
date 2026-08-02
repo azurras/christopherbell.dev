@@ -4,9 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import dev.christopherbell.libs.workflow.exception.WorkflowStopExecutionException;
-import dev.christopherbell.libs.workflow.model.WorkflowContext;
-import dev.christopherbell.libs.workflow.model.WorkflowStatus;
+import dev.christopherbell.whatsforlunch.workflow.engine.exception.WorkflowStopExecutionException;
+import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowContext;
+import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowStatus;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

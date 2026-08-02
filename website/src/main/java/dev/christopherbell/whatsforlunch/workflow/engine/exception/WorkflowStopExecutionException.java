@@ -1,4 +1,4 @@
-package dev.christopherbell.libs.workflow.exception;
+package dev.christopherbell.whatsforlunch.workflow.engine.exception;
 
 /**
  * Exception indicating that a workflow execution should be stopped.

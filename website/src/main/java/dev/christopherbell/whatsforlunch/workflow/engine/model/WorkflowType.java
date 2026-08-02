@@ -1,4 +1,4 @@
-package dev.christopherbell.libs.workflow.model;
+package dev.christopherbell.whatsforlunch.workflow.engine.model;
 
 /**
  * Represents a type of workflow within the system. Enums should

@@ -1,6 +1,6 @@
-package dev.christopherbell.libs.workflow.model;
+package dev.christopherbell.whatsforlunch.workflow.engine.model;
 
-import dev.christopherbell.libs.workflow.operation.OperationStatus;
+import dev.christopherbell.whatsforlunch.workflow.engine.operation.OperationStatus;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
