@@ -1014,6 +1014,36 @@ public class RestaurantServiceTest {
   }
 
   @Test
+  @DisplayName("OpenStreetMap import: skips candidates without supported real locations")
+  void testPreparedImport_whenLocationIsUnsupportedOrCoordinatesMissing_skipsInvalid()
+      throws Exception {
+    var placeholder = RestaurantStub.getRestaurantStub("osm:node:location-1");
+    placeholder.getAddress().setCity("Imported Metro");
+    var wrongState = RestaurantStub.getRestaurantStub("osm:node:location-2");
+    wrongState.getAddress().setState("CA");
+    var missingCoordinates = RestaurantStub.getRestaurantStub("osm:node:location-3");
+    missingCoordinates.getAddress().setLatitude(null);
+    var wrongCountry = RestaurantStub.getRestaurantStub("osm:node:location-4");
+    wrongCountry.getAddress().setCountry("CA");
+
+    when(openStreetMapRestaurantClient.getConfiguredMetroRestaurants())
+        .thenReturn(List.of(placeholder, wrongState, missingCoordinates, wrongCountry));
+
+    var snapshot = restaurantService.prepareConfiguredMetroImport();
+    var result = restaurantService.applyPreparedImport(snapshot, RestaurantImportLeaseGuard.NONE);
+
+    assertEquals(4, snapshot.counts().fetched());
+    assertEquals(4, snapshot.counts().invalid());
+    assertEquals(0, snapshot.counts().created());
+    assertEquals(0, snapshot.counts().updated());
+    assertEquals(4, result.fetched());
+    assertEquals(4, result.skippedInvalid());
+    assertEquals(0, result.imported());
+    assertEquals(0, result.updated());
+    verifyNoInteractions(restaurantRepository);
+  }
+
+  @Test
   @DisplayName("OpenStreetMap import: updates existing same-name same-address restaurants")
   public void testImportConfiguredMetroRestaurantsFromOpenStreetMap_UpdatesSameNameSameAddress()
       throws Exception {
@@ -1081,17 +1111,20 @@ public class RestaurantServiceTest {
     persistedById.setName("China Villa");
     persistedById.setNormalizedName("china villa");
     persistedById.setDedupeKey("china villa");
-    persistedById.getAddress().setCity("Livermore");
+    persistedById.getAddress().setCity("Fremont");
+    persistedById.getAddress().setState("CA");
 
     var importedRename = RestaurantStub.getRestaurantStub("osm:node:8178213204");
     importedRename.setName("Aama's Kitchen");
-    importedRename.getAddress().setCity("Livermore");
+    importedRename.getAddress().setCity("Fremont");
+    importedRename.getAddress().setState("CA");
 
     var normalizedNameOwner = RestaurantStub.getRestaurantStub("osm:node:13485126044");
     normalizedNameOwner.setName("Aama's Kitchen");
     normalizedNameOwner.setNormalizedName("aama's kitchen");
     normalizedNameOwner.setDedupeKey("aama's kitchen");
     normalizedNameOwner.getAddress().setCity("Hayward");
+    normalizedNameOwner.getAddress().setState("CA");
 
     var laterCandidate = RestaurantStub.getRestaurantStub("osm:node:99999999999");
     laterCandidate.setName("Later Candidate Cafe");
