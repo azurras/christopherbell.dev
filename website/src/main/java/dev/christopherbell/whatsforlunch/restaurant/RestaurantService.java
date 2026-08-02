@@ -1288,10 +1288,30 @@ public class RestaurantService {
         && !restaurant.getId().isBlank()
         && restaurant.getName() != null
         && !restaurant.getName().isBlank()
-        && restaurant.getAddress() != null
+        && hasSupportedImportLocation(restaurant)
         && (restaurant.getWebsite() == null
             || restaurant.getWebsite().isBlank()
             || RestaurantWebsiteUrlPolicy.safeOrNull(restaurant.getWebsite()) != null);
+  }
+
+  private boolean hasSupportedImportLocation(Restaurant restaurant) {
+    if (!hasCoordinates(restaurant)) {
+      return false;
+    }
+    var address = restaurant.getAddress();
+    var city = normalizeCity(address.getCity());
+    var state = normalizeCity(address.getState());
+    if (city.isBlank() || state.isBlank() || !isUnitedStates(address.getCountry())) {
+      return false;
+    }
+    return wflProperties.getRestaurantImport().getOsm().getMetros().stream()
+        .anyMatch(metro -> normalizeCity(metro.getState()).equals(state)
+            && metro.getCities().stream().anyMatch(candidate -> normalizeCity(candidate).equals(city)));
+  }
+
+  private boolean isUnitedStates(String value) {
+    var normalized = normalizeCity(value).replaceAll("[^a-z]", "");
+    return List.of("us", "usa", "unitedstates").contains(normalized);
   }
 
   private boolean mergeImportedRestaurant(
