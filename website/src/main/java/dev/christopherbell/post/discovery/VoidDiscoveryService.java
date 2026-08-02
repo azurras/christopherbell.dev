@@ -2,7 +2,7 @@ package dev.christopherbell.post.discovery;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
-import dev.christopherbell.pagination.StableCursorCodec;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.feed.PostFeedItemAssembler;
 import dev.christopherbell.post.model.Post;

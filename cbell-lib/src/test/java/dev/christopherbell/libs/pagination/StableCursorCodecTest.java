@@ -1,4 +1,4 @@
-package dev.christopherbell.pagination;
+package dev.christopherbell.libs.pagination;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

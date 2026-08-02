@@ -1,4 +1,4 @@
-package dev.christopherbell.pagination;
+package dev.christopherbell.libs.pagination;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import java.nio.charset.StandardCharsets;

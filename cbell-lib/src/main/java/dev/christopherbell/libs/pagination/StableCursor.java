@@ -1,4 +1,4 @@
-package dev.christopherbell.pagination;
+package dev.christopherbell.libs.pagination;
 
 import java.time.Instant;
 
