@@ -1,6 +1,6 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
 import org.springframework.data.domain.Sort.Direction;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;

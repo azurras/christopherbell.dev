@@ -1,4 +1,4 @@
-package dev.christopherbell.configuration.mongo.lease;
+package dev.christopherbell.libs.mongo.lease;
 
 import java.time.Instant;
 import lombok.Data;

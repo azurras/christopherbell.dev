@@ -1,6 +1,6 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;

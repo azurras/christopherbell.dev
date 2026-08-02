@@ -1,4 +1,4 @@
-package dev.christopherbell.configuration.mongo.lease;
+package dev.christopherbell.libs.mongo.lease;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;

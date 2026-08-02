@@ -30,6 +30,7 @@ dependencies {
     testAnnotationProcessor("org.projectlombok:lombok:1.18.46")
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.assertj:assertj-core")
+    testImplementation("org.mockito:mockito-junit-jupiter")
     testImplementation("jakarta.servlet:jakarta.servlet-api")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

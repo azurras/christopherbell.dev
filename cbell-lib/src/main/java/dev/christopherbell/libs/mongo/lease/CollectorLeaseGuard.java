@@ -1,4 +1,4 @@
-package dev.christopherbell.configuration.mongo.lease;
+package dev.christopherbell.libs.mongo.lease;
 
 /** Verifies that a long-running collector still owns its renewable lease. */
 @FunctionalInterface

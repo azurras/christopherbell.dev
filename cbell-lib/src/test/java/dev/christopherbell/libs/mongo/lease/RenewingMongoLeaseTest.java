@@ -1,4 +1,4 @@
-package dev.christopherbell.configuration.mongo.lease;
+package dev.christopherbell.libs.mongo.lease;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;

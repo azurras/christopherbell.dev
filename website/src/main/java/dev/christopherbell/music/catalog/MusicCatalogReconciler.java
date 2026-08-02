@@ -1,8 +1,8 @@
 package dev.christopherbell.music.catalog;
 
-import dev.christopherbell.configuration.mongo.lease.CollectorLeaseGuard;
-import dev.christopherbell.configuration.mongo.lease.LeaseOwnershipLostException;
-import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.mongo.lease.CollectorLeaseGuard;
+import dev.christopherbell.libs.mongo.lease.LeaseOwnershipLostException;
+import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;

@@ -10,7 +10,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;

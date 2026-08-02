@@ -9,10 +9,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.model.Account;
-import dev.christopherbell.configuration.mongo.lease.CollectorLeaseGuard;
-import dev.christopherbell.configuration.mongo.lease.LeaseOwnershipLostException;
-import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
-import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.mongo.lease.CollectorLeaseGuard;
+import dev.christopherbell.libs.mongo.lease.LeaseOwnershipLostException;
+import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.music.catalog.MusicArtworkService;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicFileRevision;
@@ -221,7 +221,7 @@ class MusicMetadataServiceTest {
       Object value = work.execute(guard);
       guard.verifyHeld();
       return new ScheduledCollectorCoordinator.Outcome<>(
-          dev.christopherbell.configuration.mongo.lease.ScheduledCollectorRunStatus.SUCCEEDED,
+          dev.christopherbell.libs.mongo.lease.ScheduledCollectorRunStatus.SUCCEEDED,
           value);
     });
     return coordinator;

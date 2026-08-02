@@ -6,7 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.vehicle.model.VehicleVinDecodeCache;
-import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorRun;
+import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun;
 import dev.christopherbell.post.preview.PostLinkPreviewCacheEntry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

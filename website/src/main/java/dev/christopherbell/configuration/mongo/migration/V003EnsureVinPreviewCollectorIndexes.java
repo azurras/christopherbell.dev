@@ -1,7 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
 import dev.christopherbell.vehicle.model.VehicleVinDecodeCache;
-import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorRun;
+import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun;
 import dev.christopherbell.post.preview.PostLinkPreviewCacheEntry;
 import java.time.Duration;
 import org.springframework.data.domain.Sort.Direction;

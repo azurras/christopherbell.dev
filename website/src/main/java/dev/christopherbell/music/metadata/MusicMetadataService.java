@@ -1,8 +1,8 @@
 package dev.christopherbell.music.metadata;
 
-import dev.christopherbell.configuration.mongo.lease.LeaseOwnershipLostException;
-import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
-import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.mongo.lease.LeaseOwnershipLostException;
+import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.music.catalog.MusicArtworkService;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicFileRevision;
