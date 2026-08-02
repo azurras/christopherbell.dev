@@ -336,21 +336,39 @@ tasks.named("check") {
 }
 
 sourceSets.named("main") { resources.srcDir(sensorResourceDirectory) }
-val releaseGitCommit = providers.exec {
-    commandLine("git", "rev-parse", "HEAD")
-    workingDir(rootProject.projectDir)
-}.standardOutput.asText.map { output ->
-    val commit = output.trim().lowercase()
-    if (!commit.matches(Regex("[0-9a-f]{40}"))) {
-        throw GradleException("Git HEAD must resolve to a full 40-character commit SHA.")
-    }
-    commit
+val staticAssetRoot = file("src/main/resources/static")
+val staticAssetFiles = fileTree(staticAssetRoot) {
+    exclude("**/.DS_Store")
+}
+val staticAssetFingerprint = providers.provider {
+    val digest = MessageDigest.getInstance("SHA-256")
+    staticAssetFiles.files
+        .filter { it.isFile }
+        .sortedBy { it.relativeTo(staticAssetRoot).invariantSeparatorsPath }
+        .forEach { asset ->
+            val relativePath = asset.relativeTo(staticAssetRoot).invariantSeparatorsPath
+            digest.update(relativePath.toByteArray(Charsets.UTF_8))
+            digest.update(0.toByte())
+            asset.inputStream().use { input ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                }
+            }
+        }
+    HexFormat.of().formatHex(digest.digest()).take(20)
 }
 tasks.named<ProcessResources>("processResources") {
     dependsOn(prepareSensorResources)
-    inputs.property("releaseGitCommit", releaseGitCommit)
+    inputs.files(staticAssetFiles)
+        .withPathSensitivity(org.gradle.api.tasks.PathSensitivity.RELATIVE)
+    inputs.property("staticAssetFingerprint", staticAssetFingerprint)
     filesMatching("application.yml") {
-        filter { line -> line.replace("@releaseGitCommit@", releaseGitCommit.get()) }
+        filter { line ->
+            line.replace("@staticAssetFingerprint@", staticAssetFingerprint.get())
+        }
     }
 }
 
