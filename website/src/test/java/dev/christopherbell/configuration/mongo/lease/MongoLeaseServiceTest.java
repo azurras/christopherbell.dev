@@ -55,7 +55,7 @@ class MongoLeaseServiceTest {
         any(FindAndModifyOptions.class),
         eq(MongoLeaseDocument.class));
     assertThat(query.getValue().getQueryObject().toString())
-        .contains("_id", "application-migrations", "ownerToken", "expiresAt");
+        .contains("_id", "application-migrations", "ownerToken", "expiresAt", "$lte");
   }
 
   @Test
@@ -85,6 +85,15 @@ class MongoLeaseServiceTest {
   }
 
   @Test
+  void renewReturnsFalseWhenTheCurrentOwnerDoesNotMatch() {
+    when(mongo.updateFirst(any(Query.class), any(Update.class), eq(MongoLeaseDocument.class)))
+        .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+
+    assertThat(service.renew("application-migrations", "stale-owner", NOW, EXPIRES_AT))
+        .isFalse();
+  }
+
+  @Test
   void releaseRequiresCurrentOwner() {
     when(mongo.updateFirst(any(Query.class), any(Update.class), eq(MongoLeaseDocument.class)))
         .thenReturn(UpdateResult.acknowledged(1, 1L, null));
@@ -95,5 +104,13 @@ class MongoLeaseServiceTest {
     verify(mongo).updateFirst(query.capture(), any(Update.class), eq(MongoLeaseDocument.class));
     assertThat(query.getValue().getQueryObject().toJson())
         .contains("_id", "application-migrations", "ownerToken", "owner-1");
+  }
+
+  @Test
+  void releaseReturnsFalseWhenTheCurrentOwnerDoesNotMatch() {
+    when(mongo.updateFirst(any(Query.class), any(Update.class), eq(MongoLeaseDocument.class)))
+        .thenReturn(UpdateResult.acknowledged(0, 0L, null));
+
+    assertThat(service.release("application-migrations", "stale-owner")).isFalse();
   }
 }

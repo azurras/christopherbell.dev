@@ -4,12 +4,14 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.canesboxtracker.model.CanesBoxMetroPrice;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
+import dev.christopherbell.libs.http.BoundedResponseBodyReader;
+import dev.christopherbell.libs.http.BoundedResponseBodyHandlers;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -27,6 +29,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
+  private static final long MAXIMUM_JSON_RESPONSE_BYTES = 4L * 1024 * 1024;
+  private static final long MAXIMUM_FALLBACK_RESPONSE_BYTES = 8L * 1024 * 1024;
   private static final String OFFICIAL_ORDER_BASE_URL = "https://order.raisingcanes.com";
 
   private final HttpClient httpClient;
@@ -179,10 +183,16 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
         .header("platform", "web")
         .header("app-version", "prod")
         .build();
-    var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    var response = BoundedResponseBodyHandlers.send(
+        httpClient,
+        request,
+        BoundedResponseBodyHandlers.ofString(
+            MAXIMUM_JSON_RESPONSE_BYTES,
+            StandardCharsets.UTF_8,
+            status -> status >= 200 && status < 300));
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
       throw new IllegalStateException(
-          "Official GraphQL API returned HTTP " + response.statusCode() + ": " + response.body());
+          "Official GraphQL API returned HTTP " + response.statusCode() + ".");
     }
     var body = response.body();
     var root = objectMapper.readTree(body);
@@ -206,7 +216,13 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
           .header("ui-transformer", "restaurantByRef")
           .header("ui-cache-ttl", "300")
           .build();
-      var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+      var response = BoundedResponseBodyHandlers.send(
+          httpClient,
+          request,
+          BoundedResponseBodyHandlers.ofString(
+              MAXIMUM_JSON_RESPONSE_BYTES,
+              StandardCharsets.UTF_8,
+              status -> status >= 200 && status < 300));
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
         throw new IllegalStateException("Official Cane's API returned HTTP " + response.statusCode());
       }
@@ -339,13 +355,18 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
           .header("Accept", "text/html,application/json")
           .header("User-Agent", "christopherbell.dev raising-canes-box-index")
           .build();
-      var response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+      var response = BoundedResponseBodyHandlers.send(
+          httpClient,
+          request,
+          BoundedResponseBodyHandlers.ofByteArray(
+              MAXIMUM_FALLBACK_RESPONSE_BYTES,
+              status -> status >= 200 && status < 300));
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
         return CanesBoxMetroPrice.failure(
             target,
             officialFailure + "; fallback menu returned HTTP " + response.statusCode());
       }
-      var body = responseBody(response);
+      var body = responseBody(response.body(), response.headers());
       var price = findPublicMenuBoxComboPrice(body)
           .orElseThrow(() -> new IllegalStateException("Fallback menu did not contain The Box Combo price."));
       if (price.compareTo(properties.getMinimumPublicMenuPrice()) < 0) {
@@ -365,12 +386,12 @@ public class OfficialCanesBoxPriceClient implements CanesBoxPriceClient {
     }
   }
 
-  private String responseBody(HttpResponse<byte[]> response) throws Exception {
-    var bytes = response.body();
-    var encoding = response.headers().firstValue("Content-Encoding").orElse("");
+  private String responseBody(byte[] bytes, HttpHeaders headers) throws Exception {
+    var encoding = headers.firstValue("Content-Encoding").orElse("");
     if ("gzip".equalsIgnoreCase(encoding) || (bytes.length > 2 && bytes[0] == 0x1f && bytes[1] == (byte) 0x8b)) {
       try (var input = new GZIPInputStream(new java.io.ByteArrayInputStream(bytes))) {
-        return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        return BoundedResponseBodyReader.readString(
+            input, MAXIMUM_FALLBACK_RESPONSE_BYTES, StandardCharsets.UTF_8);
       }
     }
     return new String(bytes, StandardCharsets.UTF_8);

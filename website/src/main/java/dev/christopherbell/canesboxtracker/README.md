@@ -12,7 +12,10 @@ Tracks weekly Raising Canes Box Combo pricing as a public Tool.
   app APIs. It searches the official GraphQL location API by metro coordinates,
   fetches that restaurant's official menu, and reads the Box Combo `cost`.
   The older NomNom restaurant-by-ref API is retained as a secondary official
-  fallback before the disabled-by-default public menu fallback.
+  fallback before the disabled-by-default public menu fallback. GraphQL and
+  restaurant JSON responses are bounded at 4 MiB, public menu fallback responses
+  are bounded at 8 MiB in both compressed and decoded form, configured request
+  deadlines cover full bodies, and non-success bodies are never included in diagnostics.
 - `CanesBoxPriceSnapshotRepository` owns MongoDB access for weekly snapshots.
 - `model` contains configuration properties, Mongo documents, metro sample
   details, admin review request records, and API response records.

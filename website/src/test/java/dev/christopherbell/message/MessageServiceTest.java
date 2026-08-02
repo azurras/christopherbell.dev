@@ -1,11 +1,14 @@
 package dev.christopherbell.message;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.AccountRepository;
@@ -19,16 +22,23 @@ import dev.christopherbell.message.conversation.ConversationMessageSlice;
 import dev.christopherbell.message.conversation.ConversationQueryRepository;
 import dev.christopherbell.pagination.StableCursorCodec;
 import dev.christopherbell.message.delivery.MessageDeliveryService;
+import dev.christopherbell.message.model.ConversationSummary;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.message.model.MessageCreateRequest;
 import dev.christopherbell.notification.delivery.NotificationDeliveryService;
 import dev.christopherbell.permission.PermissionService;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -147,6 +157,90 @@ public class MessageServiceTest {
     verify(messageRepository).saveAll(eq(List.of(incoming)));
   }
 
+  @ParameterizedTest(name = "{0} conversation summaries use one unread-count query")
+  @ValueSource(ints = {1, 50})
+  void getConversations_batchesUnreadCountsForEveryReturnedConversation(int conversationCount)
+      throws Exception {
+    var self = Account.builder().id("self").username("self").build();
+    var messages = IntStream.range(0, conversationCount)
+        .mapToObj(this::conversationSummaryMessage)
+        .toList();
+    var otherIds = messages.stream().map(Message::getSenderAccountId).toList();
+    var requestedIds = new LinkedHashSet<>(otherIds);
+    var accounts = otherIds.stream()
+        .map(id -> Account.builder().id(id).username("user-" + id).build())
+        .toList();
+
+    when(permissionService.getSelfId()).thenReturn(self.getId());
+    when(accountRepository.findById(self.getId())).thenReturn(Optional.of(self));
+    when(conversationQueries.latestDistinctVisible(self.getId(), conversationCount))
+        .thenReturn(messages);
+    when(accountRepository.findAllById(requestedIds)).thenReturn(accounts);
+    when(conversationQueries.unreadCounts(self.getId(), requestedIds))
+        .thenReturn(otherIds.stream().collect(Collectors.toUnmodifiableMap(
+            id -> id,
+            id -> 7L)));
+
+    var summaries = service().getConversations(conversationCount);
+
+    assertThat(summaries)
+        .extracting(ConversationSummary::accountId)
+        .containsExactlyElementsOf(otherIds);
+    assertThat(summaries).extracting(ConversationSummary::unreadCount).containsOnly(7L);
+    verify(conversationQueries, times(1)).latestDistinctVisible(self.getId(), conversationCount);
+    verify(accountRepository, times(1)).findAllById(requestedIds);
+    verify(conversationQueries, times(1)).unreadCounts(self.getId(), requestedIds);
+    verifyNoInteractions(messageRepository);
+  }
+
+  @Test
+  void getConversations_preservesOrderDisplayNamesAndMissingUnreadDefaults() throws Exception {
+    var self = Account.builder().id("self").username("self").build();
+    var newest = message("m-new", "self", "outgoing", "sent", "2026-07-29T12:00:00Z");
+    var middle = message("m-middle", "missing", "self", "unknown", "2026-07-29T11:00:00Z");
+    var oldest = message("m-old", "known", "self", "received", "2026-07-29T10:00:00Z");
+    var outgoing = Account.builder()
+        .id("outgoing")
+        .username("ada")
+        .firstName("Ada")
+        .lastName("Lovelace")
+        .build();
+    var known = Account.builder().id("known").username("grace").build();
+    var requestedIds = new LinkedHashSet<>(List.of("outgoing", "missing", "known"));
+
+    when(permissionService.getSelfId()).thenReturn(self.getId());
+    when(accountRepository.findById(self.getId())).thenReturn(Optional.of(self));
+    when(conversationQueries.latestDistinctVisible(self.getId(), 3))
+        .thenReturn(List.of(newest, middle, oldest));
+    when(accountRepository.findAllById(requestedIds)).thenReturn(List.of(outgoing, known));
+    when(conversationQueries.unreadCounts(self.getId(), requestedIds))
+        .thenReturn(Map.of("outgoing", 2L, "known", 4L));
+
+    assertThat(service().getConversations(3)).containsExactly(
+        ConversationSummary.builder()
+            .accountId("outgoing")
+            .username("ada")
+            .displayName("Ada Lovelace")
+            .latestText("sent")
+            .lastMessageOn(Instant.parse("2026-07-29T12:00:00Z"))
+            .unreadCount(2L)
+            .build(),
+        ConversationSummary.builder()
+            .accountId("missing")
+            .latestText("unknown")
+            .lastMessageOn(Instant.parse("2026-07-29T11:00:00Z"))
+            .unreadCount(0L)
+            .build(),
+        ConversationSummary.builder()
+            .accountId("known")
+            .username("grace")
+            .displayName("grace")
+            .latestText("received")
+            .lastMessageOn(Instant.parse("2026-07-29T10:00:00Z"))
+            .unreadCount(4L)
+            .build());
+  }
+
   @Test
   void archiveConversation_resolvesParticipantsAndArchivesOnlySelfView() throws Exception {
     var self = Account.builder().id("self").username("self").build();
@@ -180,5 +274,36 @@ public class MessageServiceTest {
             conversationQueries,
             conversationArchives,
             new StableCursorCodec()));
+  }
+
+  private Message conversationSummaryMessage(int index) {
+    var otherId = "other-" + index;
+    return message(
+        "message-" + index,
+        otherId,
+        "self",
+        "text-" + index,
+        Instant.parse("2026-07-29T12:00:00Z").minusSeconds(index).toString());
+  }
+
+  private Message message(
+      String id,
+      String senderAccountId,
+      String recipientAccountId,
+      String text,
+      String createdOn
+  ) {
+    return Message.builder()
+        .id(id)
+        .conversationKey(senderAccountId.compareTo(recipientAccountId) < 0
+            ? senderAccountId + ":" + recipientAccountId
+            : recipientAccountId + ":" + senderAccountId)
+        .participantIds(new HashSet<>(List.of(senderAccountId, recipientAccountId)))
+        .senderAccountId(senderAccountId)
+        .recipientAccountId(recipientAccountId)
+        .text(text)
+        .read(false)
+        .createdOn(Instant.parse(createdOn))
+        .build();
   }
 }

@@ -12,15 +12,21 @@ import dev.christopherbell.vehicle.nhtsa.decode.NhtsaVinClient;
 import dev.christopherbell.vehicle.nhtsa.decode.NhtsaVinClientException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class NhtsaVinClientTest {
+  private static final int MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024;
   private HttpServer server;
 
   @AfterEach
@@ -88,6 +94,71 @@ class NhtsaVinClientTest {
         () -> client.decodeVins(List.of(new NhtsaVinClient.NhtsaVinDecodeRequest("VIN1", null))));
   }
 
+  @Test
+  @DisplayName("Decode VINs rejects a response one byte above the response limit")
+  void decodeVins_whenResponseExceedsLimit_throwsBodyLimitException() throws Exception {
+    var json = "{\"Results\":[{\"VIN\":\"VIN1\"}]}";
+    startServer(
+        200,
+        json + " ".repeat(MAXIMUM_RESPONSE_BYTES + 1 - json.length()),
+        new AtomicReference<>());
+    var client = new NhtsaVinClient(new ObjectMapper(), properties(serverUrl(), 5));
+
+    assertThrows(
+        dev.christopherbell.libs.http.BodyLimitExceededException.class,
+        () -> client.decodeVins(List.of(new NhtsaVinClient.NhtsaVinDecodeRequest("VIN1", null))));
+  }
+
+  @Test
+  @DisplayName("Decode VINs preserves malformed JSON diagnostics")
+  void decodeVins_whenResponseIsMalformed_throwsParsingException() throws Exception {
+    startServer(200, "not-json", new AtomicReference<>());
+    var client = new NhtsaVinClient(new ObjectMapper(), properties(serverUrl(), 5));
+
+    assertThrows(
+        tools.jackson.core.exc.StreamReadException.class,
+        () -> client.decodeVins(List.of(new NhtsaVinClient.NhtsaVinDecodeRequest("VIN1", null))));
+  }
+
+  @Test
+  @DisplayName("Decode VINs times out when a response stalls after headers")
+  void decodeVins_whenBodyStallsAfterHeaders_honorsRequestTimeout() throws Exception {
+    var bodyStarted = new CountDownLatch(1);
+    var releaseBody = new CountDownLatch(1);
+    server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+    server.createContext("/", exchange -> {
+      exchange.getRequestBody().readAllBytes();
+      exchange.sendResponseHeaders(200, 128);
+      exchange.getResponseBody().write('{');
+      exchange.getResponseBody().flush();
+      bodyStarted.countDown();
+      try {
+        releaseBody.await();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      } finally {
+        exchange.close();
+      }
+    });
+    server.start();
+    var client = new NhtsaVinClient(
+        new ObjectMapper(), properties(serverUrl(), 5, Duration.ofMillis(150)));
+
+    var executor = Executors.newVirtualThreadPerTaskExecutor();
+    var result = executor.submit(() -> client.decodeVins(List.of(
+        new NhtsaVinClient.NhtsaVinDecodeRequest("VIN1", null))));
+    try {
+      assertTrue(bodyStarted.await(1, TimeUnit.SECONDS));
+
+      var exception = assertThrows(ExecutionException.class, () -> result.get(1, TimeUnit.SECONDS));
+      assertTrue(exception.getCause() instanceof HttpTimeoutException);
+    } finally {
+      result.cancel(true);
+      releaseBody.countDown();
+      executor.close();
+    }
+  }
+
   private void startServer(int status, String responseBody, AtomicReference<String> requestBody)
       throws IOException {
     server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
@@ -106,10 +177,14 @@ class NhtsaVinClientTest {
   }
 
   private VehicleProperties properties(String url, int maxBatchSize) {
+    return properties(url, maxBatchSize, Duration.ofSeconds(1));
+  }
+
+  private VehicleProperties properties(String url, int maxBatchSize, Duration requestTimeout) {
     var properties = new VehicleProperties();
     properties.getNhtsaVin().setUrl(url);
     properties.getNhtsaVin().setConnectTimeout(Duration.ofSeconds(1));
-    properties.getNhtsaVin().setRequestTimeout(Duration.ofSeconds(1));
+    properties.getNhtsaVin().setRequestTimeout(requestTimeout);
     properties.getNhtsaVin().setMaxBatchSize(maxBatchSize);
     return properties;
   }

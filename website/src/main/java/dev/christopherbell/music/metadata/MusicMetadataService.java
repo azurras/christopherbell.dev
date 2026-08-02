@@ -1,6 +1,8 @@
 package dev.christopherbell.music.metadata;
 
+import dev.christopherbell.configuration.mongo.lease.LeaseOwnershipLostException;
 import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.music.catalog.MusicArtworkService;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicFileRevision;
@@ -15,6 +17,7 @@ import dev.christopherbell.sharedfolder.fs.SharedFolderPathResolver;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.Locale;
 import java.util.Set;
@@ -27,6 +30,7 @@ import org.springframework.web.server.ResponseStatusException;
 public final class MusicMetadataService {
   private static final Set<String> WRITABLE_EXTENSIONS = Set.of("mp3", "flac", "m4a");
   private static final double DURATION_TOLERANCE_SECONDS = 0.5;
+  private static final Duration CLEANUP_LEASE_DURATION = Duration.ofMinutes(10);
   private final MusicProperties music;
   private final MusicMetadataProperties properties;
   private final MusicCatalog catalog;
@@ -38,6 +42,7 @@ public final class MusicMetadataService {
   private final MusicMetadataEditRepository edits;
   private final MusicAccessService access;
   private final MongoLeaseService leases;
+  private final ScheduledCollectorCoordinator scheduledCollectors;
   private final Clock clock;
   private final Object localLock = new Object();
 
@@ -53,6 +58,7 @@ public final class MusicMetadataService {
       MusicMetadataEditRepository edits,
       MusicAccessService access,
       MongoLeaseService leases,
+      ScheduledCollectorCoordinator scheduledCollectors,
       Clock clock) {
     this.music = music;
     this.properties = properties;
@@ -65,6 +71,7 @@ public final class MusicMetadataService {
     this.edits = edits;
     this.access = access;
     this.leases = leases;
+    this.scheduledCollectors = scheduledCollectors;
     this.clock = clock;
   }
 
@@ -160,14 +167,22 @@ public final class MusicMetadataService {
 
   @Scheduled(fixedDelayString = "${app.music.metadata.cleanup-delay:1h}")
   public void cleanupExpired() {
-    for (MusicMetadataEdit edit : edits.findTop100ByExpiresAtBeforeOrderByExpiresAtAsc(clock.instant())) {
-      try {
-        files.delete(edit.backupFileName());
-        edits.delete(edit);
-      } catch (RuntimeException ignored) {
-        // A later bounded cleanup pass retries the same private artifact.
+    scheduledCollectors.run("music-metadata-cleanup", CLEANUP_LEASE_DURATION, guard -> {
+      for (MusicMetadataEdit edit
+          : edits.findTop100ByExpiresAtBeforeOrderByExpiresAtAsc(clock.instant())) {
+        guard.verifyHeld();
+        try {
+          files.delete(edit.backupFileName());
+          guard.verifyHeld();
+          edits.delete(edit);
+        } catch (LeaseOwnershipLostException failure) {
+          throw failure;
+        } catch (RuntimeException ignored) {
+          // A later bounded cleanup pass retries the same private artifact.
+        }
       }
-    }
+      return null;
+    });
   }
 
   private MusicTrack refresh(

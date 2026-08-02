@@ -60,11 +60,24 @@ public final class RateLimitBucketStore {
     return bucket;
   }
 
+  /** Atomically obtains one bucket and consumes tokens before eviction can replace it. */
+  public synchronized boolean tryConsume(
+      String key,
+      Duration inactivityWindow,
+      Supplier<Bucket> factory,
+      long tokens
+  ) {
+    Bucket bucket = getOrCreate(key, inactivityWindow, factory);
+    return tokens >= 1 && bucket.tryConsume(tokens);
+  }
+
   synchronized boolean contains(String key) {
     return entries.containsKey(key);
   }
 
-  synchronized int size() {
+  /** Returns active bucket cardinality after removing expired entries. */
+  public synchronized int size() {
+    removeExpired(nanoTime.getAsLong());
     return entries.size();
   }
 

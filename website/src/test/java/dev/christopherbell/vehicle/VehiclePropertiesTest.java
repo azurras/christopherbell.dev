@@ -6,6 +6,8 @@ import dev.christopherbell.vehicle.model.VehicleProperties;
 import jakarta.validation.Validation;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class VehiclePropertiesTest {
   @Test
@@ -38,5 +40,26 @@ class VehiclePropertiesTest {
     assertThat(randomVin.getFixedDelay()).isEqualTo(Duration.ofMinutes(10));
     assertThat(randomVin.getMinimumSafeDelay()).isEqualTo(Duration.ofMinutes(1));
     assertThat(randomVin.getMaxCallsPerDay()).isEqualTo(144);
+  }
+
+  @Test
+  void vinDecoderDefaultsToTenThousandBuckets() {
+    assertThat(new VehicleProperties().getVinDecoder().getMaximumBuckets())
+        .isEqualTo(10_000);
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {99, 100_001})
+  void rejectsVinDecoderMaximumBucketsOutsideOperationalBounds(int maximumBuckets) {
+    var vinDecoder = new VehicleProperties.VinDecoder();
+    vinDecoder.setMaximumBuckets(maximumBuckets);
+
+    try (var validatorFactory = Validation.buildDefaultValidatorFactory()) {
+      var paths = validatorFactory.getValidator().validate(vinDecoder).stream()
+          .map(violation -> violation.getPropertyPath().toString())
+          .toList();
+
+      assertThat(paths).contains("maximumBuckets");
+    }
   }
 }

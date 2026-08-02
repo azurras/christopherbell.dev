@@ -2,13 +2,32 @@ package dev.christopherbell.whatsforlunch.restaurant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import tools.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
+import dev.christopherbell.testsupport.HeadersThenStallServer;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 class OpenStreetMapRestaurantClientTest {
+  private static final int MAXIMUM_RESPONSE_BYTES = 16 * 1024 * 1024;
+  private HttpServer server;
+
+  @AfterEach
+  void stopServer() {
+    if (server != null) {
+      server.stop(0);
+    }
+  }
 
   @Test
   void parseRestaurants_mapsOpenStreetMapTags() throws Exception {
@@ -156,11 +175,92 @@ class OpenStreetMapRestaurantClientTest {
     assertTrue(query.contains("fast_food"));
   }
 
+  @Test
+  void getConfiguredMetroRestaurantsAcceptsJsonAtTheExactResponseLimit() throws Exception {
+    startServer(200, paddedJson(MAXIMUM_RESPONSE_BYTES));
+
+    var restaurants = client(serverUri()).getConfiguredMetroRestaurants();
+
+    assertTrue(restaurants.isEmpty());
+  }
+
+  @Test
+  void getConfiguredMetroRestaurantsRejectsJsonOneBytePastTheResponseLimit() throws Exception {
+    startServer(200, paddedJson(MAXIMUM_RESPONSE_BYTES + 1));
+
+    assertThrows(
+        dev.christopherbell.libs.http.BodyLimitExceededException.class,
+        () -> client(serverUri()).getConfiguredMetroRestaurants());
+  }
+
+  @Test
+  void getConfiguredMetroRestaurantsPreservesMalformedJsonFailure() throws Exception {
+    startServer(200, "not-json");
+
+    assertThrows(
+        tools.jackson.core.exc.StreamReadException.class,
+        () -> client(serverUri()).getConfiguredMetroRestaurants());
+  }
+
+  @Test
+  void getConfiguredMetroRestaurantsPreservesStatusDiagnosticWithoutResponseBody() throws Exception {
+    startServer(503, "upstream secret body");
+
+    var exception = assertThrows(
+        IOException.class,
+        () -> client(serverUri()).getConfiguredMetroRestaurants());
+
+    assertTrue(exception.getMessage().contains("503"));
+    assertTrue(!exception.getMessage().contains("upstream secret body"));
+  }
+
+  @Test
+  void getConfiguredMetroRestaurantsWhenBodyStallsAfterHeadersHonorsRequestTimeout()
+      throws Exception {
+    try (var stall = new HeadersThenStallServer()) {
+      var properties = new WflProperties();
+      properties.getRestaurantImport().getOsm().setEndpoint(stall.uri("/overpass"));
+      properties.getRestaurantImport().getOsm().setTimeout(Duration.ofMillis(100));
+      properties.getRestaurantImport().getOsm().setResultLimit(500);
+      var client = new OpenStreetMapRestaurantClient(new ObjectMapper(), properties);
+
+      assertThrows(
+          HttpTimeoutException.class,
+          () -> stall.callWhileBodyStalls(
+              client::getConfiguredMetroRestaurants, Duration.ofSeconds(12)));
+    }
+  }
+
   private OpenStreetMapRestaurantClient client() {
+    return client(URI.create("https://example.com"));
+  }
+
+  private OpenStreetMapRestaurantClient client(URI endpoint) {
     var properties = new WflProperties();
-    properties.getRestaurantImport().getOsm().setEndpoint(java.net.URI.create("https://example.com"));
+    properties.getRestaurantImport().getOsm().setEndpoint(endpoint);
     properties.getRestaurantImport().getOsm().setTimeout(java.time.Duration.ofSeconds(25));
     properties.getRestaurantImport().getOsm().setResultLimit(500);
     return new OpenStreetMapRestaurantClient(new ObjectMapper(), properties);
+  }
+
+  private void startServer(int status, String body) throws IOException {
+    server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+    server.createContext("/", exchange -> {
+      exchange.getRequestBody().readAllBytes();
+      var bytes = body.getBytes(StandardCharsets.UTF_8);
+      exchange.sendResponseHeaders(status, bytes.length);
+      exchange.getResponseBody().write(bytes);
+      exchange.close();
+    });
+    server.start();
+  }
+
+  private URI serverUri() {
+    return URI.create("http://localhost:" + server.getAddress().getPort());
+  }
+
+  private String paddedJson(int byteCount) {
+    var json = "{\"elements\":[]}";
+    return json + " ".repeat(byteCount - json.length());
   }
 }

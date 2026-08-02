@@ -4,6 +4,8 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
+import dev.christopherbell.configuration.mongo.lease.CollectorLeaseGuard;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
@@ -39,6 +41,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -75,6 +78,7 @@ public class RestaurantService {
   private static final int DEFAULT_NEARBY_LUNCH_RADIUS_MILES = 15;
   private static final List<Integer> ALLOWED_NEARBY_LUNCH_RADII_MILES = List.of(1, 5, 10, 15, 20);
   private static final int MAX_CUISINE_FILTERS = 20;
+  private static final Duration DAILY_PICK_LEASE_DURATION = Duration.ofMinutes(10);
 
   private final Clock clock;
   private final DailyLunchPicksRepository dailyLunchPicksRepository;
@@ -87,6 +91,7 @@ public class RestaurantService {
   private final RestaurantRatingRepository restaurantRatingRepository;
   private final RestaurantRatingQueryRepository restaurantRatingQueryRepository;
   private final RestaurantRepository restaurantRepository;
+  private final ScheduledCollectorCoordinator scheduledCollectors;
   private final WhatsForLunchPreferenceRepository whatsForLunchPreferenceRepository;
   private final ZipCoordinateService zipCoordinateService;
   private final WflProperties wflProperties;
@@ -923,17 +928,21 @@ public class RestaurantService {
     if (!wflProperties.getRestaurantOfTheDay().isEnabled()) {
       return;
     }
-    log.info("Restaurant of the day job started.");
-    try {
+    scheduledCollectors.run("wfl-daily-picks", DAILY_PICK_LEASE_DURATION, guard -> {
       var today = LocalDate.now(getRestaurantOfTheDayZone());
-      var picks = refreshDailyLunchPicks(today);
+      var picks = refreshDailyLunchPicks(today, guard);
       log.info("Restaurant of the day selected {} picks for {}.", picks.getRestaurantIds().size(), today);
-    } finally {
-      log.info("Restaurant of the day job completed.");
-    }
+      return null;
+    });
   }
 
   DailyLunchPicks refreshDailyLunchPicks(LocalDate pickDate) {
+    return refreshDailyLunchPicks(pickDate, CollectorLeaseGuard.NONE);
+  }
+
+  private DailyLunchPicks refreshDailyLunchPicks(
+      LocalDate pickDate,
+      CollectorLeaseGuard guard) {
     var candidates = orderLunchCandidates(getSupportedMetroRestaurants());
     var restaurantIds = candidates.stream()
         .limit(dailyPickCount())
@@ -945,6 +954,7 @@ public class RestaurantService {
         .restaurantIds(restaurantIds)
         .generatedOn(Instant.now())
         .build();
+    guard.verifyHeld();
     return dailyLunchPicksRepository.save(pick);
   }
 

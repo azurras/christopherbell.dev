@@ -3,8 +3,11 @@ package dev.christopherbell.message.conversation;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.pagination.StableCursor;
 import dev.christopherbell.pagination.StableCursorCodec;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.bson.Document;
 import org.springframework.data.domain.Sort;
@@ -52,6 +55,28 @@ public class ConversationQueryRepository {
         Aggregation.sort(Sort.by(Sort.Direction.DESC, "createdOn", "_id")),
         Aggregation.limit(limit));
     return mongo.aggregate(aggregation, "messages", Message.class).getMappedResults();
+  }
+
+  /** Counts unread incoming messages for all returned conversation peers in one query. */
+  public Map<String, Long> unreadCounts(
+      String recipientAccountId,
+      Collection<String> senderAccountIds
+  ) {
+    if (senderAccountIds.isEmpty()) {
+      return Map.of();
+    }
+    var criteria = new Criteria().andOperator(
+        Criteria.where("recipientAccountId").is(recipientAccountId),
+        Criteria.where("senderAccountId").in(senderAccountIds),
+        Criteria.where("read").is(false));
+    var aggregation = Aggregation.newAggregation(
+        Aggregation.match(criteria),
+        Aggregation.group("senderAccountId").count().as("count"));
+    return mongo.aggregate(aggregation, "messages", ConversationUnreadCount.class)
+        .getMappedResults().stream()
+        .collect(Collectors.toUnmodifiableMap(
+            ConversationUnreadCount::id,
+            ConversationUnreadCount::count));
   }
 
   /** Reads one newest-to-oldest stable slice; callers choose the presentation order. */

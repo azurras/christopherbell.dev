@@ -3,9 +3,15 @@ package dev.christopherbell.canesboxtracker;
 import tools.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.christopherbell.canesboxtracker.model.CanesBoxTrackerProperties;
+import dev.christopherbell.testsupport.HeadersThenStallServer;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -14,6 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OfficialCanesBoxPriceClientTest {
+  private static final int MAXIMUM_JSON_RESPONSE_BYTES = 4 * 1024 * 1024;
+  private static final int MAXIMUM_FALLBACK_RESPONSE_BYTES = 8 * 1024 * 1024;
 
   @Test
   void findBoxComboPriceFindsNestedOfficialMenuPrice() throws Exception {
@@ -365,5 +373,292 @@ class OfficialCanesBoxPriceClientTest {
     } finally {
       server.stop(0);
     }
+  }
+
+  @Test
+  void fetchBoxComboPriceAcceptsGraphQlResponseAtExactLimit() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext("/graphql", exchange -> {
+      var requestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+      var body = requestBody.contains("\"operationName\":\"Restaurants\"")
+          ? padded(locationSearchBody(), MAXIMUM_JSON_RESPONSE_BYTES)
+          : menuBody();
+      respond(exchange, 200, body);
+    });
+    server.start();
+    try {
+      var properties = propertiesFor(server);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+
+      var result = client.fetchBoxComboPrice(coordinateTarget());
+
+      assertEquals("SUCCESS", result.getStatus());
+      assertEquals(new BigDecimal("14.99"), result.getPrice());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void fetchBoxComboPriceAcceptsGraphQlCreatedResponses() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext("/graphql", exchange -> {
+      var requestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+      var body = requestBody.contains("\"operationName\":\"Restaurants\"")
+          ? locationSearchBody()
+          : menuBody();
+      respond(exchange, 201, body);
+    });
+    server.start();
+    try {
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), propertiesFor(server));
+
+      var result = client.fetchBoxComboPrice(coordinateTarget());
+
+      assertEquals("SUCCESS", result.getStatus());
+      assertEquals(new BigDecimal("14.99"), result.getPrice());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void fetchBoxComboPriceRejectsGraphQlResponseOneBytePastLimitWithoutLeakingBody()
+      throws Exception {
+    var server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext("/graphql", exchange -> respond(
+        exchange,
+        200,
+        padded("{\"secret-upstream-body\":true}", MAXIMUM_JSON_RESPONSE_BYTES + 1)));
+    server.createContext("/restaurants/byref/raising-canes-101", exchange ->
+        respond(exchange, 503, "restaurant-secret-body"));
+    server.start();
+    try {
+      var properties = propertiesFor(server);
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+
+      var result = client.fetchBoxComboPrice(coordinateTarget());
+
+      assertEquals("FAILED", result.getStatus());
+      assertTrue(result.getFailureReason().contains("4194304 byte limit"));
+      assertTrue(!result.getFailureReason().contains("secret-upstream-body"));
+      assertTrue(!result.getFailureReason().contains("restaurant-secret-body"));
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void fetchBoxComboPriceAcceptsRestaurantJsonAtExactLimit() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext("/restaurants/byref/raising-canes-101", exchange ->
+        respond(exchange, 200, padded(menuBody(), MAXIMUM_JSON_RESPONSE_BYTES)));
+    server.start();
+    try {
+      var properties = propertiesFor(server);
+      properties.setGraphQlUrl("");
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+
+      var result = client.fetchBoxComboPrice(coordinateTarget());
+
+      assertEquals("SUCCESS", result.getStatus());
+      assertEquals(new BigDecimal("14.99"), result.getPrice());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void fetchBoxComboPriceRejectsRestaurantJsonOneBytePastLimit() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext("/restaurants/byref/raising-canes-101", exchange ->
+        respond(exchange, 200, padded(menuBody(), MAXIMUM_JSON_RESPONSE_BYTES + 1)));
+    server.start();
+    try {
+      var properties = propertiesFor(server);
+      properties.setGraphQlUrl("");
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+
+      var result = client.fetchBoxComboPrice(coordinateTarget());
+
+      assertEquals("FAILED", result.getStatus());
+      assertTrue(result.getFailureReason().contains("4194304 byte limit"));
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void fetchBoxComboPriceAcceptsPublicMenuFallbackAtExactLimit() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext("/restaurants/byref/raising-canes-101", exchange ->
+        respond(exchange, 503, "official unavailable"));
+    server.createContext("/fallback", exchange -> respond(
+        exchange,
+        200,
+        padded(publicMenuBody(), MAXIMUM_FALLBACK_RESPONSE_BYTES)));
+    server.start();
+    try {
+      var properties = propertiesFor(server);
+      properties.setGraphQlUrl("");
+      properties.setPublicMenuFallbackEnabled(true);
+      var target = coordinateTarget();
+      target.setFallbackMenuUrl(serverUrl(server) + "/fallback");
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+
+      var result = client.fetchBoxComboPrice(target);
+
+      assertEquals("SUCCESS", result.getStatus());
+      assertEquals(new BigDecimal("14.99"), result.getPrice());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void fetchBoxComboPriceRejectsPublicMenuFallbackOneBytePastLimit() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext("/restaurants/byref/raising-canes-101", exchange ->
+        respond(exchange, 503, "official unavailable"));
+    server.createContext("/fallback", exchange -> respond(
+        exchange,
+        200,
+        padded(publicMenuBody(), MAXIMUM_FALLBACK_RESPONSE_BYTES + 1)));
+    server.start();
+    try {
+      var properties = propertiesFor(server);
+      properties.setGraphQlUrl("");
+      properties.setPublicMenuFallbackEnabled(true);
+      var target = coordinateTarget();
+      target.setFallbackMenuUrl(serverUrl(server) + "/fallback");
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+
+      var result = client.fetchBoxComboPrice(target);
+
+      assertEquals("FAILED", result.getStatus());
+      assertTrue(result.getFailureReason().contains("8388608 byte limit"));
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void fetchBoxComboPriceRejectsGzipFallbackThatExpandsOneBytePastLimit() throws Exception {
+    var expandedBody = padded(publicMenuBody(), MAXIMUM_FALLBACK_RESPONSE_BYTES + 1);
+    var compressedBody = gzip(expandedBody);
+    assertTrue(compressedBody.length < MAXIMUM_FALLBACK_RESPONSE_BYTES);
+    var server = HttpServer.create(new InetSocketAddress(0), 0);
+    server.createContext("/restaurants/byref/raising-canes-101", exchange ->
+        respond(exchange, 503, "official unavailable"));
+    server.createContext("/fallback", exchange -> {
+      exchange.getResponseHeaders().add("Content-Encoding", "gzip");
+      exchange.sendResponseHeaders(200, compressedBody.length);
+      exchange.getResponseBody().write(compressedBody);
+      exchange.close();
+    });
+    server.start();
+    try {
+      var properties = propertiesFor(server);
+      properties.setGraphQlUrl("");
+      properties.setPublicMenuFallbackEnabled(true);
+      var target = coordinateTarget();
+      target.setFallbackMenuUrl(serverUrl(server) + "/fallback");
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+
+      var result = client.fetchBoxComboPrice(target);
+
+      assertEquals("FAILED", result.getStatus());
+      assertTrue(result.getFailureReason().contains("8388608 byte limit"));
+      assertTrue(!result.getFailureReason().contains("The Box Combo"));
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void fetchBoxComboPriceWhenOfficialResponseStallsAfterHeadersHonorsRequestTimeout()
+      throws Exception {
+    try (var stall = new HeadersThenStallServer()) {
+      var properties = new CanesBoxTrackerProperties();
+      properties.setApiBaseUrl(stall.uri("").toString());
+      properties.setGraphQlUrl("");
+      properties.setRequestTimeout(Duration.ofMillis(150));
+      properties.setItemName("The Box Combo");
+      var client = new OfficialCanesBoxPriceClient(new ObjectMapper(), properties);
+
+      var result = stall.callWhileBodyStalls(
+          () -> client.fetchBoxComboPrice(coordinateTarget()), Duration.ofSeconds(1));
+
+      assertEquals("FAILED", result.getStatus());
+      assertTrue(result.getFailureReason().contains("timed out"));
+    }
+  }
+
+  private CanesBoxTrackerProperties propertiesFor(HttpServer server) {
+    var properties = new CanesBoxTrackerProperties();
+    properties.setApiBaseUrl(serverUrl(server));
+    properties.setGraphQlUrl(serverUrl(server) + "/graphql");
+    properties.setItemName("The Box Combo");
+    return properties;
+  }
+
+  private CanesBoxTrackerProperties.MetroTarget coordinateTarget() {
+    var target = new CanesBoxTrackerProperties.MetroTarget();
+    target.setMetroName("Austin-Round Rock");
+    target.setCity("Austin");
+    target.setState("TX");
+    target.setLatitude(30.2672);
+    target.setLongitude(-97.7431);
+    target.setRestaurantRef("raising-canes-101");
+    return target;
+  }
+
+  private String locationSearchBody() {
+    return """
+        {"data":{"restaurants":[{
+          "id":101,
+          "slug":"raising-canes-101",
+          "extRef":"0101",
+          "name":"Raising Cane's #101",
+          "streetAddress":"100 Main Street",
+          "city":"Austin",
+          "state":"TX",
+          "zip":"78701",
+          "distance":1.0,
+          "supportsOnlineOrdering":true
+        }]}}
+        """;
+  }
+
+  private String menuBody() {
+    return "{\"products\":[{\"name\":\"The Box Combo\",\"cost\":1499}]}";
+  }
+
+  private String publicMenuBody() {
+    return "{\"name\":\"The Box Combo\",\"Price\":\"14.99\"}";
+  }
+
+  private String padded(String body, int byteCount) {
+    return body + " ".repeat(byteCount - body.getBytes(StandardCharsets.UTF_8).length);
+  }
+
+  private byte[] gzip(String body) throws IOException {
+    var output = new ByteArrayOutputStream();
+    try (var gzip = new GZIPOutputStream(output)) {
+      gzip.write(body.getBytes(StandardCharsets.UTF_8));
+    }
+    return output.toByteArray();
+  }
+
+  private String serverUrl(HttpServer server) {
+    return "http://localhost:" + server.getAddress().getPort();
+  }
+
+  private void respond(com.sun.net.httpserver.HttpExchange exchange, int status, String body)
+      throws IOException {
+    var bytes = body.getBytes(StandardCharsets.UTF_8);
+    exchange.sendResponseHeaders(status, bytes.length);
+    exchange.getResponseBody().write(bytes);
+    exchange.close();
   }
 }

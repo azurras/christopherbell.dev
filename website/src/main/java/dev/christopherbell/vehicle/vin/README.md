@@ -17,6 +17,11 @@ to `vehicles.vin-decoder.max-batch-size` positions and returns one ordered
 success or specific error for every submitted position. Each position consumes
 one rate-limit token.
 
+Process-local per-client decode buckets expire after two inactive rate-limit
+windows and are capped by `vehicles.vin-decoder.maximum-buckets` (10,000 by
+default). When the cap is reached, the least recently used bucket is evicted;
+that rare client receives a fresh local allowance on its next request.
+
 Decode cache entries are reused only while their `decoderVersion` matches
 `vehicles.vin-decoder.decoder-version` and `expiresOn` is in the future. Fresh
 entries live for `vehicles.vin-decoder.cache-ttl`; failed stale refreshes do not

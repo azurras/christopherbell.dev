@@ -2,6 +2,7 @@ package dev.christopherbell.whatsforlunch.restaurant;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import dev.christopherbell.libs.http.BoundedResponseBodyHandlers;
 import dev.christopherbell.whatsforlunch.restaurant.config.WflProperties;
 import dev.christopherbell.whatsforlunch.restaurant.model.Address;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
@@ -9,7 +10,6 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -23,6 +23,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class OpenStreetMapRestaurantClient {
+  private static final long MAXIMUM_RESPONSE_BYTES = 16L * 1024 * 1024;
+
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
   private final WflProperties.Osm properties;
@@ -49,7 +51,13 @@ public class OpenStreetMapRestaurantClient {
         .header("User-Agent", "christopherbell.dev whats-for-lunch importer")
         .build();
 
-    var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    var response = BoundedResponseBodyHandlers.send(
+        httpClient,
+        request,
+        BoundedResponseBodyHandlers.ofString(
+            MAXIMUM_RESPONSE_BYTES,
+            StandardCharsets.UTF_8,
+            status -> status >= 200 && status < 300));
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
       throw new IOException("Overpass request failed with status " + response.statusCode());
     }

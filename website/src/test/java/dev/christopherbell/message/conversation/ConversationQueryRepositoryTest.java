@@ -1,9 +1,11 @@
 package dev.christopherbell.message.conversation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.message.model.Message;
@@ -51,6 +53,45 @@ class ConversationQueryRepositoryTest {
     assertThat(aggregation.getValue().toString())
         .contains("$group", "conversationKey", "$lookup", "conversation_archive_states")
         .contains("ownerAccountId", "$limit");
+  }
+
+  @Test
+  @DisplayName("Unread counts group all requested senders in one immutable result")
+  void unreadCounts_groupsAllRequestedSendersInOneAggregation() {
+    when(mongo.aggregate(
+            any(Aggregation.class), eq("messages"), eq(ConversationUnreadCount.class)))
+        .thenReturn(new AggregationResults<>(
+            List.of(new ConversationUnreadCount("other-a", 2L)), new Document()));
+
+    var counts = repository.unreadCounts("self", List.of("other-a", "other-b"));
+
+    assertThat(counts).containsExactlyEntriesOf(java.util.Map.of("other-a", 2L));
+    assertThatThrownBy(() -> counts.put("other-b", 1L))
+        .isInstanceOf(UnsupportedOperationException.class);
+    var aggregation = ArgumentCaptor.forClass(Aggregation.class);
+    verify(mongo).aggregate(
+        aggregation.capture(), eq("messages"), eq(ConversationUnreadCount.class));
+    assertThat(aggregation.getValue().toString())
+        .contains(
+            "recipientAccountId",
+            "self",
+            "senderAccountId",
+            "$in",
+            "other-a",
+            "other-b",
+            "read",
+            "false",
+            "$group",
+            "count",
+            "$sum");
+  }
+
+  @Test
+  @DisplayName("Unread counts skip Mongo when no senders are requested")
+  void unreadCounts_returnsEmptyWithoutQueryForNoSenders() {
+    assertThat(repository.unreadCounts("self", List.of())).isEmpty();
+
+    verifyNoInteractions(mongo);
   }
 
   @Test

@@ -1,5 +1,8 @@
 package dev.christopherbell.music.catalog;
 
+import dev.christopherbell.configuration.mongo.lease.CollectorLeaseGuard;
+import dev.christopherbell.configuration.mongo.lease.LeaseOwnershipLostException;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -16,10 +19,12 @@ public class MusicCatalogReconciler {
   private static final Set<String> AUDIO_EXTENSIONS = Set.of(
       "aac", "alac", "flac", "m4a", "mka", "mp3", "ogg", "opus", "wav", "wma");
   private static final Duration FAILED_PROBE_RETRY = Duration.ofHours(1);
+  private static final Duration SCAN_LEASE_DURATION = Duration.ofMinutes(30);
   private final MusicProperties properties;
   private final MusicTrackRepository tracks;
   private final MusicProbe probe;
   private final MusicArtworkService artwork;
+  private final ScheduledCollectorCoordinator scheduledCollectors;
   private final Clock clock;
 
   public MusicCatalogReconciler(
@@ -27,20 +32,30 @@ public class MusicCatalogReconciler {
       MusicTrackRepository tracks,
       MusicProbe probe,
       MusicArtworkService artwork,
+      ScheduledCollectorCoordinator scheduledCollectors,
       Clock clock) {
     this.properties = properties;
     this.tracks = tracks;
     this.probe = probe;
     this.artwork = artwork;
+    this.scheduledCollectors = scheduledCollectors;
     this.clock = clock;
   }
 
   @Scheduled(fixedDelayString = "${app.music.scan-interval:5m}")
   public void scheduledReconcile() {
-    if (properties.enabled()) reconcile();
+    if (!properties.enabled()) return;
+    scheduledCollectors.run("music-catalog-reconcile", SCAN_LEASE_DURATION, guard -> {
+      reconcile(guard);
+      return null;
+    });
   }
 
   public MusicReconcileResult reconcile() {
+    return reconcile(CollectorLeaseGuard.NONE);
+  }
+
+  private MusicReconcileResult reconcile(CollectorLeaseGuard guard) {
     if (!properties.enabled()) return new MusicReconcileResult(0, 0, 0, 0, 0, 0);
     Path root = safeRoot();
     var candidates = discover(root);
@@ -72,13 +87,19 @@ public class MusicCatalogReconciler {
       probed++;
       try {
         var metadata = probe.probe(source.toAbsolutePath().normalize());
-        var artworkRevision = metadata.hasArtwork()
-            ? artwork.extract(source, relative, revision).orElse(null)
-            : null;
+        String artworkRevision = null;
+        if (metadata.hasArtwork()) {
+          guard.verifyHeld();
+          artworkRevision = artwork.extract(source, relative, revision).orElse(null);
+        }
+        guard.verifyHeld();
         tracks.save(MusicTrack.indexed(
             existing, relative, revision.token(), metadata, artworkRevision, clock.instant()));
         updated++;
+      } catch (LeaseOwnershipLostException failure) {
+        throw failure;
       } catch (RuntimeException failure) {
+        guard.verifyHeld();
         tracks.save(MusicTrack.probeFailed(
             existing, relative, revision.token(), failureCategory(failure), clock.instant()));
         failed++;
@@ -88,6 +109,7 @@ public class MusicCatalogReconciler {
     int missing = 0;
     for (MusicTrack track : tracks.findAllByMissingSinceIsNull()) {
       if (!presentPaths.contains(track.path())) {
+        guard.verifyHeld();
         tracks.save(track.markMissing(clock.instant()));
         missing++;
       }

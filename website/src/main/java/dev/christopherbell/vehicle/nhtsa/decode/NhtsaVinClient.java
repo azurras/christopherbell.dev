@@ -3,13 +3,13 @@ package dev.christopherbell.vehicle.nhtsa.decode;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
+import dev.christopherbell.libs.http.BoundedResponseBodyHandlers;
 import dev.christopherbell.vehicle.model.VehicleProperties;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +21,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class NhtsaVinClient {
+  private static final long MAXIMUM_RESPONSE_BYTES = 2L * 1024 * 1024;
   private static final TypeReference<NhtsaResponse> RESPONSE_TYPE = new TypeReference<>() {};
 
   private final HttpClient httpClient;
@@ -90,7 +91,13 @@ public class NhtsaVinClient {
         .header("Content-Type", "application/x-www-form-urlencoded")
         .build();
 
-    var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    var response = BoundedResponseBodyHandlers.send(
+        httpClient,
+        request,
+        BoundedResponseBodyHandlers.ofString(
+            MAXIMUM_RESPONSE_BYTES,
+            StandardCharsets.UTF_8,
+            status -> status >= 200 && status < 300));
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
       throw new NhtsaVinClientException(response.statusCode());
     }

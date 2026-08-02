@@ -9,7 +9,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.configuration.mongo.lease.CollectorLeaseGuard;
+import dev.christopherbell.configuration.mongo.lease.LeaseOwnershipLostException;
 import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
+import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.music.catalog.MusicArtworkService;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicFileRevision;
@@ -122,12 +125,84 @@ class MusicMetadataServiceTest {
     verify(edits, never()).save(any());
   }
 
+  @Test
+  void cleanupExpiredWhenLeaseIsContendedLeavesBackupsAndRowsUntouched() throws Exception {
+    Path backup = privateBackup("contended.backup.mp3");
+    var edits = mock(MusicMetadataEditRepository.class);
+    var coordinator = mock(ScheduledCollectorCoordinator.class);
+    when(coordinator.run(
+        org.mockito.ArgumentMatchers.eq("music-metadata-cleanup"),
+        org.mockito.ArgumentMatchers.eq(Duration.ofMinutes(10)),
+        any()))
+        .thenReturn(null);
+    var service = service(
+        mock(MusicCatalog.class), mock(MusicTrackRepository.class),
+        ignored -> metadata("mp3", 180), mock(MusicTagProcess.class), edits, coordinator);
+
+    service.cleanupExpired();
+
+    assertThat(backup).exists();
+    verify(edits, never()).delete(any());
+  }
+
+  @Test
+  void cleanupExpiredWhenOwnershipIsLostBeforeFileDeleteLeavesBackupAndRow() throws Exception {
+    Path backup = privateBackup("before-file.backup.mp3");
+    var edit = expiredEdit(backup.getFileName().toString());
+    var edits = mock(MusicMetadataEditRepository.class);
+    when(edits.findTop100ByExpiresAtBeforeOrderByExpiresAtAsc(any())).thenReturn(List.of(edit));
+    var guard = mock(CollectorLeaseGuard.class);
+    org.mockito.Mockito.doThrow(new LeaseOwnershipLostException("music-metadata-cleanup"))
+        .when(guard).verifyHeld();
+    var service = service(
+        mock(MusicCatalog.class), mock(MusicTrackRepository.class),
+        ignored -> metadata("mp3", 180), mock(MusicTagProcess.class), edits,
+        runningCoordinator(guard));
+
+    assertThatThrownBy(service::cleanupExpired)
+        .isInstanceOf(LeaseOwnershipLostException.class);
+    assertThat(backup).exists();
+    verify(edits, never()).delete(any());
+  }
+
+  @Test
+  void cleanupExpiredWhenOwnershipIsLostAfterFileDeleteKeepsRepositoryRow() throws Exception {
+    Path backup = privateBackup("before-row.backup.mp3");
+    var edit = expiredEdit(backup.getFileName().toString());
+    var edits = mock(MusicMetadataEditRepository.class);
+    when(edits.findTop100ByExpiresAtBeforeOrderByExpiresAtAsc(any())).thenReturn(List.of(edit));
+    var guard = mock(CollectorLeaseGuard.class);
+    org.mockito.Mockito.doNothing()
+        .doThrow(new LeaseOwnershipLostException("music-metadata-cleanup"))
+        .when(guard).verifyHeld();
+    var service = service(
+        mock(MusicCatalog.class), mock(MusicTrackRepository.class),
+        ignored -> metadata("mp3", 180), mock(MusicTagProcess.class), edits,
+        runningCoordinator(guard));
+
+    assertThatThrownBy(service::cleanupExpired)
+        .isInstanceOf(LeaseOwnershipLostException.class);
+    assertThat(backup).doesNotExist();
+    verify(edits, never()).delete(any());
+  }
+
   private MusicMetadataService service(
       MusicCatalog catalog,
       MusicTrackRepository tracks,
       MusicProbe probe,
       MusicTagProcess process,
       MusicMetadataEditRepository edits) {
+    return service(
+        catalog, tracks, probe, process, edits, runningCoordinator(CollectorLeaseGuard.NONE));
+  }
+
+  private MusicMetadataService service(
+      MusicCatalog catalog,
+      MusicTrackRepository tracks,
+      MusicProbe probe,
+      MusicTagProcess process,
+      MusicMetadataEditRepository edits,
+      ScheduledCollectorCoordinator scheduledCollectors) {
     var access = mock(MusicAccessService.class);
     when(access.requireWrite()).thenReturn(Account.builder().id("writer").build());
     var leases = mock(MongoLeaseService.class);
@@ -136,7 +211,33 @@ class MusicMetadataServiceTest {
     return new MusicMetadataService(
         musicProperties(), properties, catalog, tracks, probe, mock(MusicArtworkService.class),
         process, new MusicMetadataFileStore(properties, temporary.resolve("music")),
-        edits, access, leases, Clock.fixed(NOW, ZoneOffset.UTC));
+        edits, access, leases, scheduledCollectors, Clock.fixed(NOW, ZoneOffset.UTC));
+  }
+
+  private ScheduledCollectorCoordinator runningCoordinator(CollectorLeaseGuard guard) {
+    var coordinator = mock(ScheduledCollectorCoordinator.class);
+    when(coordinator.run(any(), any(), any())).thenAnswer(invocation -> {
+      ScheduledCollectorCoordinator.Work<?> work = invocation.getArgument(2);
+      Object value = work.execute(guard);
+      guard.verifyHeld();
+      return new ScheduledCollectorCoordinator.Outcome<>(
+          dev.christopherbell.configuration.mongo.lease.ScheduledCollectorRunStatus.SUCCEEDED,
+          value);
+    });
+    return coordinator;
+  }
+
+  private Path privateBackup(String fileName) throws IOException {
+    Path root = Files.createDirectories(temporary.resolve("private"));
+    return Files.writeString(root.resolve(fileName), "backup");
+  }
+
+  private MusicMetadataEdit expiredEdit(String backupFileName) {
+    return new MusicMetadataEdit(
+        "edit", "track", "song.mp3", backupFileName, "a".repeat(64),
+        "b".repeat(64), "c".repeat(64), "mp3", 180, "writer",
+        NOW.minus(Duration.ofDays(31)), NOW.minus(Duration.ofDays(1)),
+        MusicMetadataEdit.Status.APPLIED, null, 0L);
   }
 
   private MusicProperties musicProperties() {

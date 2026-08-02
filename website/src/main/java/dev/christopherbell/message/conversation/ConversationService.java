@@ -87,8 +87,14 @@ public class ConversationService {
     var accounts = accountRepository.findAllById(latestByOtherId.keySet());
     var accountById = new HashMap<String, Account>();
     accounts.forEach(account -> accountById.put(account.getId(), account));
+    var unreadBySender = conversationQueries.unreadCounts(
+        self.getId(), latestByOtherId.keySet());
     return latestByOtherId.entrySet().stream()
-        .map(entry -> summary(entry.getKey(), entry.getValue(), self, accountById.get(entry.getKey())))
+        .map(entry -> summary(
+            entry.getKey(),
+            entry.getValue(),
+            accountById.get(entry.getKey()),
+            unreadBySender.getOrDefault(entry.getKey(), 0L)))
         .toList();
   }
 
@@ -101,16 +107,19 @@ public class ConversationService {
         java.util.Set.of(participants.self().getId(), participants.other().getId()));
   }
 
-  private ConversationSummary summary(String otherId, Message message, Account self, Account other) {
+  private ConversationSummary summary(
+      String otherId,
+      Message message,
+      Account other,
+      long unreadCount
+  ) {
     return ConversationSummary.builder()
         .accountId(otherId)
         .username(other == null ? null : other.getUsername())
         .displayName(displayName(other))
         .latestText(message.getText())
         .lastMessageOn(message.getCreatedOn())
-        .unreadCount(messageRepository.countByRecipientAccountIdAndSenderAccountIdAndReadFalse(
-            self.getId(),
-            otherId))
+        .unreadCount(unreadCount)
         .build();
   }
 

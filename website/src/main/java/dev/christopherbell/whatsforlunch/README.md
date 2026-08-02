@@ -18,9 +18,13 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
   days, and carry a TTL deletion deadline.
 - Logged-in restaurant ratings with public whole-number rating totals.
 - Restaurant websites are persisted and rendered only as absolute HTTP(S) URLs; unsafe legacy values are omitted.
-- Legacy daily lunch picks persisted per day and refreshed at midnight Central.
+- Legacy daily lunch picks persisted per day and refreshed at midnight Central. Scheduled refreshes
+  use the shared renewable Mongo lease so only one application instance writes a given run; request
+  fallback generation keeps its existing behavior.
 - Startup-validated OpenStreetMap metro configuration, with Austin, the San
   Francisco Bay Area, New Orleans, and Dallas enabled by default.
+- OpenStreetMap import responses are bounded at 16 MiB before JSON parsing, and
+  the request deadline remains effective until the complete response body arrives.
 - One leased import workflow shared by scheduled and manual runs. Manual runs
   require a short-lived operator-bound preview token, re-fetch the source, and
   reject changed checksums before writing. Durable admin status records bounded

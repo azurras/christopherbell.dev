@@ -40,6 +40,31 @@ class RateLimitBucketStoreTest {
   }
 
   @Test
+  void sizeRemovesExpiredBucketsWithoutAnotherLookup() {
+    var now = new AtomicLong();
+    var store = new RateLimitBucketStore(2, now::get);
+    store.getOrCreate("one", Duration.ofSeconds(5), this::bucket);
+    now.set(Duration.ofSeconds(5).toNanos());
+
+    assertThat(store.size()).isZero();
+  }
+
+  @Test
+  void leastRecentlyUsedBucketIsEvictedAtCapacity() {
+    var store = new RateLimitBucketStore(2, () -> 0L);
+    var first = store.getOrCreate("one", Duration.ofMinutes(1), this::bucket);
+    store.getOrCreate("two", Duration.ofMinutes(1), this::bucket);
+    assertThat(store.getOrCreate("one", Duration.ofMinutes(1), this::bucket))
+        .isSameAs(first);
+
+    store.getOrCreate("three", Duration.ofMinutes(1), this::bucket);
+
+    assertThat(store.contains("one")).isTrue();
+    assertThat(store.contains("two")).isFalse();
+    assertThat(store.contains("three")).isTrue();
+  }
+
+  @Test
   void extremeWindowDoesNotOverflowExpiryIntoThePast() {
     var store = new RateLimitBucketStore(2, () -> Long.MAX_VALUE - 1);
     var bucket = store.getOrCreate("one", Duration.ofSeconds(Long.MAX_VALUE), this::bucket);
