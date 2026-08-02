@@ -10,10 +10,11 @@ Owns application-wide Spring and web infrastructure.
   explicit revalidation instead of the long-lived immutable browser-asset cache.
 - Standard Actuator liveness and readiness groups are public and detail-free;
   the readiness group also checks MongoDB. Other Actuator routes stay protected.
-- CSS, JavaScript, images, and favicon URLs use the `GIT_COMMIT` fixed resource
-  version. Versioned URLs receive one-year immutable public caching; direct
-  unversioned paths use a bounded one-hour cache. The build embeds its exact Git
-  SHA as the default, and deployments may override it with `GIT_COMMIT`.
+- CSS, JavaScript, images, and favicon URLs use a deterministic static-content
+  fingerprint as the fixed resource version. Versioned URLs receive one-year
+  immutable public caching; direct unversioned paths use a bounded one-hour
+  cache. Operators normally leave `ASSET_VERSION` unset; it is available only
+  as an explicit emergency cache-namespace override.
 - Public tool pages such as `/zip-coordinates`.
 - The public `/command-center` route serves only a data-free page shell. No
   `/api/admin/command-center/**` route is public; every API method requires both

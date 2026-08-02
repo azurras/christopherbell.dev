@@ -253,7 +253,7 @@ function textLinks(value) {
     });
 }
 
-function trimUrlPunctuation(url) {
+export function trimUrlPunctuation(url) {
   let value = String(url || '');
   while (URL_TRAILING_PUNCTUATION.test(value)) {
     value = value.slice(0, -1);

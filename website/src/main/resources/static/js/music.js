@@ -10,7 +10,7 @@ import {
   musicTrack,
   musicTrackMarkup,
 } from './lib/music.js';
-import { playMusicRadio, playMusicTrack } from './lib/site-media-player.js';
+import { playMusicRadio, playMusicTrack } from './lib/site-media-loader.js';
 import { fetchJson, loginRedirectUrl, sanitize } from './lib/util.js';
 
 const elements = Object.freeze({

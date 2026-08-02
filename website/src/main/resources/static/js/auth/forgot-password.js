@@ -2,16 +2,13 @@
  * Forgot password page behavior.
  */
 import { API } from '../lib/api.js';
+import { renderAlert } from '../lib/status-message.js';
 import { fetchJson } from '../lib/util.js';
 
 const alertBox = () => document.getElementById('forgotPasswordAlert');
 
 function showAlert(message, type) {
-  const alert = alertBox();
-  if (!alert) return;
-  alert.textContent = message;
-  alert.classList.remove('d-none', 'alert-danger', 'alert-success');
-  alert.classList.add(type === 'success' ? 'alert-success' : 'alert-danger');
+  renderAlert(alertBox(), message, type === 'success' ? 'success' : 'danger');
 }
 
 async function requestPasswordReset(email) {

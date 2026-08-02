@@ -8,6 +8,12 @@ import {
   writeAnonymousWflSession,
 } from './lib/wfl-anonymous-session.js';
 import { wflFreshnessMarkup } from './lib/wfl-freshness.js';
+import {
+  formatCuisine,
+  ratingSummary,
+  restaurantAddressLine,
+  wflSecondaryNavigation,
+} from './lib/wfl-ui.js';
 
 const mount = document.getElementById('whats-for-lunch');
 const LOCATION_OPTIONS = {
@@ -52,21 +58,6 @@ let sessionPollId = null;
 let sessionPollInFlight = false;
 let dataFreshness = null;
 
-function wflSecondaryNav(active = 'picks') {
-  const items = [
-    { key: 'picks', href: '/wfl', label: 'Picks' },
-    { key: 'top-rated', href: '/wfl/top-rated', label: 'Top 10 Rated' },
-    { key: 'favorites', href: '/wfl/favorites', label: 'Favorites' },
-  ];
-  return `
-    <nav class="wfl-secondary-nav" aria-label="What's For Lunch navigation">
-      ${items.map((item) => `
-        <a class="${active === item.key ? 'active' : ''}" href="${item.href}">${item.label}</a>
-      `).join('')}
-    </nav>
-  `;
-}
-
 function memberSessionKey() {
   const claims = getAuthClaims();
   const subject = String(claims?.sub || 'anonymous');
@@ -93,12 +84,6 @@ function storeAnonymousSession(restaurants) {
 
 function clearStoredAnonymousSession() {
   clearAnonymousWflSession();
-}
-
-function addressLine(address = {}) {
-  return [address.street1, address.city, address.state, address.postalCode]
-    .filter(Boolean)
-    .join(', ');
 }
 
 function hasCoordinate(value) {
@@ -153,7 +138,7 @@ function directionsUrl(restaurant) {
   if (hasCoordinate(address.latitude) && hasCoordinate(address.longitude)) {
     params.set('destination', `${address.latitude},${address.longitude}`);
   } else {
-    const destination = [restaurant.name, addressLine(address)]
+    const destination = [restaurant.name, restaurantAddressLine(address)]
       .filter(Boolean)
       .join(', ');
     if (!destination) return '';
@@ -166,7 +151,7 @@ function directionsUrl(restaurant) {
 function restaurantCard(restaurant, index) {
   const id = restaurant.id || '';
   const restaurantHref = id ? `/wfl/restaurants/${encodeURIComponent(id)}` : '';
-  const address = addressLine(restaurant.address);
+  const address = restaurantAddressLine(restaurant.address);
   const directions = directionsUrl(restaurant);
   const sessionVoters = activeSession?.votesByRestaurant?.[id] || [];
   const myVote = activeSession?.myVoteRestaurantId === id;
@@ -245,11 +230,7 @@ function attachRestaurantWebsiteLinks(restaurants) {
 }
 
 function ratingSummaryMarkup(restaurant) {
-  const ratingSum = Number.parseInt(String(restaurant.ratingSum ?? 0), 10) || 0;
-  const ratingCount = Number.parseInt(String(restaurant.ratingCount ?? 0), 10) || 0;
-  const displayedRating = ratingCount > 0 ? Math.round(ratingSum / ratingCount) : 0;
-  const overall = ratingCount > 0 ? `${displayedRating}/5` : 'No Ratings';
-  const myRating = Number.parseInt(String(restaurant.myRating ?? 0), 10) || 0;
+  const { myRating, overall } = ratingSummary(restaurant);
   if (isLoggedIn) {
     return `
       <div class="lunch-rating-summary">
@@ -405,7 +386,7 @@ function renderPicks(picks) {
     ? `Showing ${picks.length} lunch ${suggestionLabel} in this session.`
     : `Showing ${picks.length} ${suggestionLabel} within ${selectedRadiusMiles} mile${selectedRadiusMiles === 1 ? '' : 's'}.${sanitize(selectedFilterLabel())}`;
   mount.innerHTML = `
-    ${wflSecondaryNav('picks')}
+    ${wflSecondaryNavigation('picks')}
     ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-toolbar">
       <div>
@@ -438,7 +419,7 @@ function renderPicksLoading(message = 'Picking lunch...') {
 
 function renderEmpty() {
   mount.innerHTML = `
-    ${wflSecondaryNav('picks')}
+    ${wflSecondaryNavigation('picks')}
     ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-empty">
       <h2>No nearby lunch picks</h2>
@@ -452,7 +433,7 @@ function renderEmpty() {
 function renderLocationPrompt(message) {
   activeControlPanel = 'location';
   mount.innerHTML = `
-    ${wflSecondaryNav('picks')}
+    ${wflSecondaryNavigation('picks')}
     ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-empty">
       <h2>Share your location</h2>
@@ -464,7 +445,7 @@ function renderLocationPrompt(message) {
 
 function renderError(err) {
   mount.innerHTML = `
-    ${wflSecondaryNav('picks')}
+    ${wflSecondaryNavigation('picks')}
     ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-empty">
       <h2>Could not load lunch picks</h2>
@@ -487,7 +468,7 @@ function authLink(path, sessionId) {
 
 function renderSessionAuthPrompt(sessionId) {
   mount.innerHTML = `
-    ${wflSecondaryNav('picks')}
+    ${wflSecondaryNavigation('picks')}
     <div class="lunch-empty">
       <h2>Join this lunch session</h2>
       <p>Log in or create an account to join the shared picks and vote.</p>
@@ -1110,25 +1091,6 @@ mount?.addEventListener('change', (event) => {
 function normalizeRadius(value) {
   const radius = Number.parseInt(String(value ?? DEFAULT_RADIUS_MILES), 10);
   return RADIUS_OPTIONS.includes(radius) ? radius : DEFAULT_RADIUS_MILES;
-}
-
-function formatCuisine(value) {
-  return String(value || '')
-    .split(/([;,/|])/)
-    .map((part) => /^[;,/|]$/.test(part) ? `${part} ` : titleCaseCuisine(part))
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function titleCaseCuisine(value) {
-  return value
-    .trim()
-    .replace(/[_-]+/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
 }
 
 pubsub.subscribe('auth:login', clearStoredAnonymousSession);

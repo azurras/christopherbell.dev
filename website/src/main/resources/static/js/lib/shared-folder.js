@@ -1,18 +1,8 @@
 /** Pure shared-folder UI helpers. */
-
-/** Return the effective read capability reported by the current-account API. */
-export function accountHasSharedFolderRead(account) {
-  if (account?.role === 'ADMIN') return true;
-  const permissions = new Set(Array.isArray(account?.permissions) ? account.permissions : []);
-  return permissions.has('SHARED_FOLDER_READ') || permissions.has('SHARED_FOLDER_WRITE');
-}
-
-/** Return the effective write capability reported by the current-account API. */
-export function accountHasSharedFolderWrite(account) {
-  if (account?.role === 'ADMIN') return true;
-  const permissions = new Set(Array.isArray(account?.permissions) ? account.permissions : []);
-  return permissions.has('SHARED_FOLDER_WRITE');
-}
+export {
+  accountHasSharedFolderRead,
+  accountHasSharedFolderWrite,
+} from './account-capabilities.js';
 
 /** Return a bounded whole-number percentage for an upload status response. */
 export function uploadProgressPercent(status) {

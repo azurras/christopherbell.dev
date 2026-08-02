@@ -1,4 +1,5 @@
 import { API } from './lib/api.js';
+import { renderAlert } from './lib/status-message.js';
 import { fetchJson } from './lib/util.js';
 
 const form = document.getElementById('vinDecodeForm');
@@ -30,9 +31,7 @@ function curlFor(vin) {
 }
 
 function showAlert(message) {
-  if (!alertBox) return;
-  alertBox.textContent = message;
-  alertBox.classList.remove('d-none');
+  renderAlert(alertBox, message);
 }
 
 function hideAlert() {

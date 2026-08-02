@@ -82,7 +82,7 @@ class PublicDeliveryConfigurationTest {
   }
 
   @Test
-  void staticAssetsUseReleaseScopedImmutableCaching() throws Exception {
+  void staticAssetsUseContentScopedImmutableCaching() throws Exception {
     var configuration = applicationConfiguration();
     assertThat(configuration.at("/spring/web/resources/cache/cachecontrol/max-age").asText())
         .isEqualTo("1h");
@@ -93,7 +93,7 @@ class PublicDeliveryConfigurationTest {
     assertThat(configuration.at("/spring/web/resources/chain/strategy/fixed/enabled").asBoolean())
         .isTrue();
     assertThat(configuration.at("/spring/web/resources/chain/strategy/fixed/version").asText())
-        .isEqualTo("${GIT_COMMIT:@releaseGitCommit@}");
+        .isEqualTo("${ASSET_VERSION:@staticAssetFingerprint@}");
     assertThat(configuration.at("/spring/web/resources/chain/strategy/fixed/paths").asText())
         .isEqualTo("/css/**,/js/**,/images/**,/vendor/**,/favicon.ico");
     assertThat(isPublic("GET", "/release-sha/css/main.css")).isTrue();
@@ -106,13 +106,13 @@ class PublicDeliveryConfigurationTest {
   }
 
   @Test
-  void packagedConfigurationEmbedsReleaseShaAsAssetFallback() throws Exception {
+  void packagedConfigurationEmbedsStaticAssetFingerprintAsFallback() throws Exception {
     try (var packagedConfiguration = getClass().getResourceAsStream("/application.yml")) {
       assertThat(packagedConfiguration).isNotNull();
       var configuration = YAML.readTree(packagedConfiguration);
 
       assertThat(configuration.at("/spring/web/resources/chain/strategy/fixed/version").asText())
-          .matches("\\$\\{GIT_COMMIT:[0-9a-f]{40}}");
+          .matches("\\$\\{ASSET_VERSION:[0-9a-f]{20}}");
     }
   }
 

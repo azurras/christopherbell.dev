@@ -1,11 +1,10 @@
 import { activeImageUrl, imageFallbackMarkup } from './image-lightbox.js';
 import { lazyIframeMarkup } from './lazy-media.js';
-import { appendTextWithMentionLinks, loginRedirectUrl } from './util.js';
+import { appendTextWithMentionLinks, loginRedirectUrl, trimUrlPunctuation } from './util.js';
 
 const LIFESPAN_TICK_MS = 1000;
 const EXPIRY_ANIMATION_MS = 560;
 const WEB_URL_RE = /\bhttps?:\/\/[^\s<>()]+/gi;
-const URL_TRAILING_PUNCTUATION = /[.,!?;:]$/;
 const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 const DIRECT_IMAGE_EXT_RE = /\.(jpe?g|png|gif|webp|avif)$/i;
 const DIRECT_GIF_EXT_RE = /\.gif$/i;
@@ -309,14 +308,6 @@ function urlsFromText(text) {
     if (url) urls.push(url);
   }
   return urls;
-}
-
-function trimUrlPunctuation(url) {
-  let value = String(url || '');
-  while (URL_TRAILING_PUNCTUATION.test(value)) {
-    value = value.slice(0, -1);
-  }
-  return value;
 }
 
 function previewDomain(url) {

@@ -144,7 +144,8 @@ test('metric display formats uptime as seconds, minutes, hours, and days', () =>
 });
 
 test('metric cards reserve a full row for values and wrap exceptional text', () => {
-  const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
+  const css = fs.readFileSync(
+    'website/src/main/resources/static/css/command-center.css', 'utf8');
   assert.match(css, /\.command-metric-card\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s);
   assert.match(css, /\.command-metric-value\s*\{[^}]*overflow-wrap:\s*anywhere;/s);
 });

@@ -40,7 +40,7 @@ import {
   playSharedFolderMedia,
   playSharedFolderRadio as joinSharedFolderRadio,
   stopSiteMediaPlayback,
-} from './lib/site-media-player.js';
+} from './lib/site-media-loader.js';
 
 const root = typeof document === 'undefined' ? null : document.getElementById('shared-folder-app');
 let currentPreviewLostAccess = false;
@@ -75,7 +75,7 @@ function renderBreadcrumbs(path, navigatePath) {
 function handleSharedFolderAccessLoss(statusCode) {
   const denial = sharedFolderStreamingDenial(statusCode);
   currentPreviewLostAccess = true;
-  stopSiteMediaPlayback();
+  void stopSiteMediaPlayback();
   status(denial.message);
   if (denial.redirectToLogin && !window.location.pathname.startsWith('/login')) {
     clearAuthState();

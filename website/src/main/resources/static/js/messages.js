@@ -1,4 +1,5 @@
 import { API } from './lib/api.js';
+import { renderAlert } from './lib/status-message.js';
 import { appendTextWithMentionLinks, authHeaders, fetchJson, formatWhen, isLoggedIn, sanitize, loginRedirectUrl } from './lib/util.js';
 
 let ACTIVE_USERNAME = null;
@@ -63,10 +64,7 @@ function alertBox() {
 }
 
 function showAlert(message) {
-  const alert = alertBox();
-  if (!alert) return;
-  alert.textContent = message;
-  alert.classList.remove('d-none');
+  renderAlert(alertBox(), message);
 }
 
 function clearAlert() {
