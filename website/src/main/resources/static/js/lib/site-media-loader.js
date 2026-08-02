@@ -10,13 +10,24 @@ export function createSiteMediaLoader({
   windowRoot,
   documentRoot,
   findPlayerHost = () => null,
+  playerStylesheetUrl,
 }) {
   let runtimePromise;
+
+  function ensurePlayerStyles() {
+    if (documentRoot.querySelector('link[data-site-media-player-styles]')) return;
+    const link = documentRoot.createElement('link');
+    link.rel = 'stylesheet';
+    link.dataset.siteMediaPlayerStyles = 'true';
+    link.href = playerStylesheetUrl;
+    documentRoot.head.appendChild(link);
+  }
 
   async function loadRuntime() {
     if (!runtimePromise) {
       runtimePromise = Promise.all([loadComponent(), loadApi()])
         .then(([, api]) => {
+          ensurePlayerStyles();
           if (windowRoot.top === windowRoot && !api.siteMediaPlayerHost(windowRoot)) {
             documentRoot.body.appendChild(
               documentRoot.createElement(api.SITE_MEDIA_PLAYER_TAG),
@@ -82,6 +93,7 @@ function siteMediaLoader() {
           return document.querySelector('site-media-player');
         }
       },
+      playerStylesheetUrl: new URL('../../css/site-media-player.css', import.meta.url).href,
     });
   }
   return defaultLoader;

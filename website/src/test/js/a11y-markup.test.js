@@ -26,7 +26,8 @@ test('image lightbox keeps keyboard behavior in its module', () => {
 
 test('command center shell exposes labelled regions and an accessible action dialog', () => {
   const html = fs.readFileSync('website/src/main/resources/templates/command-center.html', 'utf8');
-  const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
+  const css = fs.readFileSync(
+    'website/src/main/resources/static/css/command-center.css', 'utf8');
 
   assert.match(html, /id="commandCenterRoot"[^>]*class="[^"]*d-none/);
   assert.match(html, /aria-labelledby="commandCenterTitle"/);

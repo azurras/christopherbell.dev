@@ -734,7 +734,8 @@ test('file-browser presentation exposes familiar types, sizes, and folder-first 
 });
 
 test('shared-folder shell presents an explorer layout with compact actions and responsive preview', () => {
-  const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
+  const css = fs.readFileSync(
+    'website/src/main/resources/static/css/shared-folder.css', 'utf8');
   const page = fs.readFileSync('website/src/main/resources/static/js/shared-folder.js', 'utf8');
   const player = fs.readFileSync(
     'website/src/main/resources/static/js/components/site-media-player.js', 'utf8');
@@ -781,7 +782,8 @@ test('shared-folder shell presents an explorer layout with compact actions and r
 });
 
 test('shared-folder command bar stacks before tablet controls can overflow', () => {
-  const css = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
+  const css = fs.readFileSync(
+    'website/src/main/resources/static/css/shared-folder.css', 'utf8');
   const tablet = cssMediaBlock(css, '@media (max-width: 1024px)');
 
   assert.match(tablet,

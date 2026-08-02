@@ -88,13 +88,32 @@ test('media loader stops an existing top-document player without importing runti
   assert.deepEqual(calls, ['existing:stop']);
 });
 
-function fakeBoundary(calls, overrides = {}) {
+test('media loader installs the versioned player stylesheet once before mounting', async () => {
+  assert.ifError(loaderModule.loadFailure);
+  const calls = [];
+  const boundary = fakeBoundary(calls, {}, { stylesPresent: false });
+  const loader = loaderModule.createSiteMediaLoader(boundary.options);
+
+  await loader.playMusicRadio();
+  await loader.playMusicRadio();
+
+  assert.deepEqual(calls.filter(value => value.startsWith('style:append:')), [
+    'style:append:https://www.christopherbell.dev/version/css/site-media-player.css',
+  ]);
+  assert.ok(calls.indexOf('element:create:link')
+    < calls.indexOf('element:create:site-media-player'));
+});
+
+function fakeBoundary(calls, overrides = {}, { stylesPresent = true } = {}) {
   const player = { tagName: 'site-media-player' };
   const documentRoot = {
     body: { appendChild: element => calls.push(`element:append:${element.tagName}`) },
+    head: { appendChild: element => calls.push(`style:append:${element.href}`) },
+    querySelector: selector => selector === 'link[data-site-media-player-styles]'
+      && stylesPresent ? {} : null,
     createElement: tagName => {
       calls.push(`element:create:${tagName}`);
-      return { tagName };
+      return { tagName, dataset: {} };
     },
     addEventListener: (name, _listener, capture) => {
       calls.push(`listener:add:${name}:${capture}`);
@@ -109,6 +128,8 @@ function fakeBoundary(calls, overrides = {}) {
       windowRoot,
       documentRoot,
       findPlayerHost: () => null,
+      playerStylesheetUrl:
+        'https://www.christopherbell.dev/version/css/site-media-player.css',
       ...overrides,
     },
     player,
