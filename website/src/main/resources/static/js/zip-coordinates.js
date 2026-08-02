@@ -1,4 +1,5 @@
 import { API } from './lib/api.js';
+import { renderAlert } from './lib/status-message.js';
 import { fetchJson } from './lib/util.js';
 
 const hasDocument = typeof document !== 'undefined';
@@ -32,9 +33,7 @@ function setText(id, value) {
 }
 
 function showAlert(message) {
-  if (!alertBox) return;
-  alertBox.textContent = message;
-  alertBox.classList.remove('d-none');
+  renderAlert(alertBox, message);
 }
 
 function hideAlert() {

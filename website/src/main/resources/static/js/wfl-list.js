@@ -1,6 +1,12 @@
 import { API } from './lib/api.js';
 import { authHeaders, fetchJson, getAuthClaims, loginRedirectUrl, sanitize } from './lib/util.js';
 import { wflFreshnessMarkup } from './lib/wfl-freshness.js';
+import {
+  formatCuisine,
+  ratingSummary,
+  restaurantAddressLine,
+  wflSecondaryNavigation,
+} from './lib/wfl-ui.js';
 
 const mount = document.getElementById('wfl-list');
 const mode = mount?.dataset.listMode || 'top-rated';
@@ -9,52 +15,8 @@ const isLoggedIn = !!getAuthClaims()?.sub;
 let restaurants = [];
 let dataFreshness = null;
 
-function wflSecondaryNav(active = 'top-rated') {
-  const items = [
-    { key: 'picks', href: '/wfl', label: 'Picks' },
-    { key: 'top-rated', href: '/wfl/top-rated', label: 'Top 10 Rated' },
-    { key: 'favorites', href: '/wfl/favorites', label: 'Favorites' },
-  ];
-  return `
-    <nav class="wfl-secondary-nav" aria-label="What's For Lunch navigation">
-      ${items.map((item) => `
-        <a class="${active === item.key ? 'active' : ''}" href="${item.href}">${item.label}</a>
-      `).join('')}
-    </nav>
-  `;
-}
-
-function addressLine(address = {}) {
-  return [address.street1, address.city, address.state, address.postalCode]
-    .filter(Boolean)
-    .join(', ');
-}
-
-function formatCuisine(value) {
-  return String(value || '')
-    .split(/([;,/|])/)
-    .map((part) => /^[;,/|]$/.test(part) ? `${part} ` : titleCaseCuisine(part))
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function titleCaseCuisine(value) {
-  return value
-    .trim()
-    .replace(/[_-]+/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
-}
-
 function ratingSummaryMarkup(restaurant) {
-  const ratingSum = Number.parseInt(String(restaurant.ratingSum ?? 0), 10) || 0;
-  const ratingCount = Number.parseInt(String(restaurant.ratingCount ?? 0), 10) || 0;
-  const displayedRating = ratingCount > 0 ? Math.round(ratingSum / ratingCount) : 0;
-  const overall = ratingCount > 0 ? `${displayedRating}/5` : 'No Ratings';
-  const myRating = Number.parseInt(String(restaurant.myRating ?? 0), 10) || 0;
+  const { myRating, overall } = ratingSummary(restaurant);
   if (isLoggedIn) {
     return `
       <div class="lunch-rating-summary">
@@ -69,7 +31,7 @@ function ratingSummaryMarkup(restaurant) {
 function restaurantCard(restaurant, index) {
   const id = restaurant.id || '';
   const href = id ? `/wfl/restaurants/${encodeURIComponent(id)}` : '/wfl';
-  const address = addressLine(restaurant.address);
+  const address = restaurantAddressLine(restaurant.address);
   const cuisine = restaurant.cuisine
     ? `<span class="lunch-cuisine">${sanitize(formatCuisine(restaurant.cuisine))}</span>`
     : '';
@@ -102,7 +64,7 @@ function renderList() {
     ? 'No favorite restaurants yet.'
     : 'No rated restaurants yet.';
   mount.innerHTML = `
-    ${wflSecondaryNav(mode)}
+    ${wflSecondaryNavigation(mode)}
     ${wflFreshnessMarkup(dataFreshness)}
     <div class="wfl-list-heading">
       <h2>${sanitize(title)}</h2>
@@ -118,7 +80,7 @@ function renderList() {
 
 function renderLoginPrompt() {
   mount.innerHTML = `
-    ${wflSecondaryNav('favorites')}
+    ${wflSecondaryNavigation('favorites')}
     ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-empty">
       <h2>Sign in to see favorites</h2>
@@ -130,7 +92,7 @@ function renderLoginPrompt() {
 
 function renderError(err) {
   mount.innerHTML = `
-    ${wflSecondaryNav(mode)}
+    ${wflSecondaryNavigation(mode)}
     ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-empty">
       <h2>Could not load restaurants</h2>
@@ -153,7 +115,7 @@ async function loadRestaurants() {
   }
 
   mount.innerHTML = `
-    ${wflSecondaryNav(mode)}
+    ${wflSecondaryNavigation(mode)}
     <div class="lunch-empty"><p>Loading restaurants...</p></div>
   `;
 

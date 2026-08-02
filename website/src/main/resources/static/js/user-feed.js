@@ -4,6 +4,7 @@ import { createFeedItem } from './lib/feed-render.js';
 import { initPostImageLightbox } from './lib/image-lightbox.js';
 import { initLazyMedia } from './lib/lazy-media.js';
 import { profileActivityStats } from './lib/profile-stats.js';
+import { renderAlert } from './lib/status-message.js';
 /**
  * User feed page script.
  * - Resolves username from URL and loads their posts
@@ -111,11 +112,7 @@ function renderEmptyFeed() {
 }
 
 function showAlert(message) {
-  const alert = document.getElementById('userAlert');
-  if (alert) {
-    alert.textContent = message;
-    alert.classList.remove('d-none');
-  }
+  renderAlert(document.getElementById('userAlert'), message);
 }
 
 async function toggleFollow() {

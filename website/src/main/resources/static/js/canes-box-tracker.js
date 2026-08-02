@@ -1,4 +1,5 @@
 import { API } from './lib/api.js';
+import { renderAlert } from './lib/status-message.js';
 import { fetchJson, sanitize } from './lib/util.js';
 
 const hasDocument = typeof document !== 'undefined';
@@ -185,9 +186,7 @@ export function canesBoxChartMarkup(weeks, label = 'Weekly average Box Combo pri
 }
 
 function showAlert(message) {
-  if (!alertBox) return;
-  alertBox.textContent = message;
-  alertBox.classList.remove('d-none');
+  renderAlert(alertBox, message);
 }
 
 function renderLatest(latest) {

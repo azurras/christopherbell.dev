@@ -1,6 +1,11 @@
 import { API } from './lib/api.js';
 import { authHeaders, fetchJson, getAuthClaims, loginRedirectUrl, sanitize } from './lib/util.js';
 import { appendSafeHttpLink } from './lib/safe-http-link.js';
+import {
+  ratingSummary,
+  restaurantAddressLine,
+  wflSecondaryNavigation,
+} from './lib/wfl-ui.js';
 
 const mount = document.getElementById('restaurant-profile');
 const title = document.getElementById('restaurantTitle');
@@ -9,38 +14,13 @@ const RATING_OPTIONS = [1, 2, 3, 4, 5];
 let currentRestaurant = null;
 let isLoggedIn = false;
 
-function wflSecondaryNav(active = 'picks') {
-  const items = [
-    { key: 'picks', href: '/wfl', label: 'Picks' },
-    { key: 'top-rated', href: '/wfl/top-rated', label: 'Top 10 Rated' },
-    { key: 'favorites', href: '/wfl/favorites', label: 'Favorites' },
-  ];
-  return `
-    <nav class="wfl-secondary-nav" aria-label="What's For Lunch navigation">
-      ${items.map((item) => `
-        <a class="${active === item.key ? 'active' : ''}" href="${item.href}">${item.label}</a>
-      `).join('')}
-    </nav>
-  `;
-}
-
 function restaurantIdFromPath() {
   const match = window.location.pathname.match(/\/wfl\/restaurants\/([^/]+)$/);
   return match ? decodeURIComponent(match[1]) : '';
 }
 
-function addressLine(address = {}) {
-  return [address.street1, address.street2, address.city, address.state, address.postalCode]
-    .filter(Boolean)
-    .join(', ');
-}
-
 function ratingMarkup(restaurant) {
-  const count = Number.parseInt(String(restaurant.ratingCount ?? 0), 10) || 0;
-  const sum = Number.parseInt(String(restaurant.ratingSum ?? 0), 10) || 0;
-  const rating = count > 0 ? Math.round(sum / count) : 0;
-  const overall = count > 0 ? `${rating}/5` : 'No Ratings';
-  const myRating = Number.parseInt(String(restaurant.myRating ?? 0), 10) || 0;
+  const { myRating, overall } = ratingSummary(restaurant);
   if (!isLoggedIn) {
     return `<p class="restaurant-profile-rating">Rating: ${overall}</p>`;
   }
@@ -61,14 +41,14 @@ function mapsUrl(restaurant) {
   const address = restaurant.address || {};
   const destination = address.latitude && address.longitude
     ? `${address.latitude},${address.longitude}`
-    : [restaurant.name, addressLine(address)].filter(Boolean).join(', ');
+    : [restaurant.name, restaurantAddressLine(address, true)].filter(Boolean).join(', ');
   const params = new URLSearchParams({ api: '1', destination });
   return `https://www.google.com/maps/search/?${params}`;
 }
 
 function renderRestaurant(restaurant) {
   currentRestaurant = restaurant;
-  const address = addressLine(restaurant.address);
+  const address = restaurantAddressLine(restaurant.address, true);
   const favoriteAction = isLoggedIn
     ? `<button type="button" class="btn ${restaurant.myFavorite ? 'btn-success' : 'btn-outline-success'} restaurant-favorite-toggle" aria-pressed="${restaurant.myFavorite ? 'true' : 'false'}">
         <span aria-hidden="true">&hearts;</span> ${restaurant.myFavorite ? 'Favorited' : 'Favorite'}
@@ -77,7 +57,7 @@ function renderRestaurant(restaurant) {
   if (title) title.textContent = restaurant.name || 'Restaurant';
   if (heroText) heroText.textContent = address || 'Restaurant details from What\'s For Lunch.';
   mount.innerHTML = `
-    ${wflSecondaryNav('picks')}
+    ${wflSecondaryNavigation('picks')}
     <article class="restaurant-profile">
       <div>
         <p class="home-kicker mb-2">${sanitize(restaurant.cuisine || 'Restaurant')}</p>

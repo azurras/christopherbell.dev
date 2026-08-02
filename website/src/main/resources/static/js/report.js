@@ -3,6 +3,7 @@
  * Requires authentication to submit reports.
  */
 import { API } from './lib/api.js';
+import { renderAlert } from './lib/status-message.js';
 import { appendTextWithMentionLinks, authHeaders, fetchJson, isLoggedIn, loginRedirectUrl } from './lib/util.js';
 
 const alertBox = document.getElementById('reportAlert');
@@ -11,9 +12,7 @@ const postAuthorEl = document.getElementById('reportPostAuthor');
 const form = document.getElementById('reportForm');
 
 function showAlert(message) {
-  if (!alertBox) return;
-  alertBox.textContent = message;
-  alertBox.classList.remove('d-none');
+  renderAlert(alertBox, message);
 }
 
 function getPostId() {

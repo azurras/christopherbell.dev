@@ -3,6 +3,7 @@
  */
 import { API } from './lib/api.js';
 import { canesBoxIndexResultMarkup } from './lib/back-office-canes-box-index.js';
+import { renderAlert } from './lib/status-message.js';
 import {
   accountPageNavigation,
   parseAdminAccountPage,
@@ -131,9 +132,7 @@ let sharedRecyclePageNumber = 0;
 let sharedRecycleHasNext = false;
 
 function showAlert(msg) {
-  if (!alertBox) return;
-  alertBox.textContent = msg;
-  alertBox.classList.remove('d-none');
+  renderAlert(alertBox, msg);
 }
 
 function clearAlert() {
