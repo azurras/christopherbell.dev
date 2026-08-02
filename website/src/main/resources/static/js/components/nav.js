@@ -8,8 +8,10 @@
 import pubsub from './pubsub.js';
 import { API } from '../lib/api.js';
 import { authHeaders, fetchJson, formatWhen, isLoggedIn, loginRedirectUrl, sanitize } from '../lib/util.js';
-import { accountHasMusicRead } from '../lib/music.js';
-import { accountHasSharedFolderRead } from '../lib/shared-folder.js';
+import {
+    accountHasMusicRead,
+    accountHasSharedFolderRead,
+} from '../lib/account-capabilities.js';
 import {
     browserNotificationsToShow,
     notificationTargetUrl,

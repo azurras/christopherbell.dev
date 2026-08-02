@@ -8,24 +8,14 @@
  */
 import './components/nav.js';
 import './components/footer.js';
-import './components/blog.js';
-import './components/gallery.js';
-import './components/site-media-player.js';
 import pubsub from './components/pubsub.js';
 import { API } from './lib/api.js';
 import { clearAuthState, fetchJson } from './lib/util.js';
-import {
-    handleSiteNavigationClick,
-    siteMediaPlayerHost,
-    stopSiteMediaPlayback,
-} from './lib/site-media-player.js';
+import { mountLazyComponent } from './lib/lazy-component.js';
+import { resumeSiteMediaIfPresent, stopSiteMediaPlayback } from './lib/site-media-loader.js';
 
 /** Wire core layout and global auth behavior once DOM is ready. */
-document.addEventListener('DOMContentLoaded', () => {
-    if (window.top === window && !siteMediaPlayerHost()) {
-        document.body.appendChild(document.createElement('site-media-player'));
-    }
-
+async function bootstrapApp() {
     const navContainer = document.getElementById('nav');
     if (navContainer) {
         navContainer.appendChild(document.createElement('app-nav'));
@@ -36,30 +26,32 @@ document.addEventListener('DOMContentLoaded', () => {
         footerContainer.appendChild(document.createElement('app-footer'));
     }
 
-    const blogContainer = document.getElementById('blog');
-    if (blogContainer) {
-        blogContainer.appendChild(document.createElement('blog-posts'));
-    }
-
-    const galleryContainer = document.getElementById('gallery');
-    if (galleryContainer) {
-        galleryContainer.appendChild(document.createElement('photo-gallery'));
-    }
-
     pubsub.subscribe('auth:logout', async () => {
-        const playerHost = siteMediaPlayerHost();
+        const siteWindow = window.top || window;
         try {
             await fetchJson(API.accounts.logout, { method: 'POST' });
         } finally {
-            stopSiteMediaPlayback();
+            await stopSiteMediaPlayback();
             clearAuthState();
-            const siteWindow = playerHost?.ownerDocument?.defaultView || window;
             siteWindow.location.href = '/login';
         }
     });
 
-});
+    await Promise.all([
+        mountLazyComponent(
+            document.getElementById('blog'),
+            'blog-posts',
+            () => import('./components/blog.js'),
+        ),
+        mountLazyComponent(
+            document.getElementById('gallery'),
+            'photo-gallery',
+            () => import('./components/gallery.js'),
+        ),
+        resumeSiteMediaIfPresent(),
+    ]);
+}
 
-document.addEventListener('click', event => {
-    handleSiteNavigationClick(event);
-}, true);
+document.addEventListener('DOMContentLoaded', () => {
+    void bootstrapApp().catch(error => console.error('App bootstrap failed.', error));
+});
