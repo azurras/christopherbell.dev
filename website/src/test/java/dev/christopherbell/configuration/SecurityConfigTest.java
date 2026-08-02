@@ -195,13 +195,17 @@ class SecurityConfigTest {
         "/api/blog/v1/posts",
         "/api/blog/v1/posts/post-1",
         "/api/photo/v1",
-        "/webjars/bootstrap/5.3.3/css/bootstrap.min.css",
-        "/webjars/bootstrap/5.3.3/js/bootstrap.bundle.min.js");
+        "/webjars/bootstrap/5.3.8/css/bootstrap.min.css",
+        "/webjars/bootstrap/5.3.8/js/bootstrap.bundle.min.js");
 
     for (var path : paths) {
       assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request("GET", path))));
       assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request("POST", path))));
     }
+    assertFalse(publicMatchers().stream().anyMatch(matcher ->
+        matcher.matches(request("GET", "/webjars/bootstrap/5.3.3/css/bootstrap.min.css"))));
+    assertFalse(publicMatchers().stream().anyMatch(matcher ->
+        matcher.matches(request("GET", "/webjars/other/1.0.0/example.js"))));
   }
 
   @Test

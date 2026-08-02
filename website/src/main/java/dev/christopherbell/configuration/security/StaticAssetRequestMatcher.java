@@ -14,7 +14,7 @@ public final class StaticAssetRequestMatcher implements RequestMatcher {
       get("/images/**"),
       get("/js/**"),
       get("/vendor/**"),
-      get("/webjars/bootstrap/5.3.3/**"),
+      get("/webjars/bootstrap/5.3.8/**"),
       get("/{assetVersion}/favicon.ico"),
       get("/{assetVersion}/css/**"),
       get("/{assetVersion}/images/**"),

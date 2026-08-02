@@ -22,7 +22,7 @@ Owns site styling for server-rendered pages and frontend components.
 
 - Current templates should use `main.css`; feature pages add their dedicated
   stylesheet when their class family is not shared site-wide.
-- `main.css` imports the pinned, application-served Bootstrap 5.3.3 WebJar once; current templates must not add a second Bootstrap stylesheet or a Bootstrap CDN URL.
+- `main.css` imports the pinned, application-served Bootstrap 5.3.8 WebJar once; current templates must not add a second Bootstrap stylesheet or a Bootstrap CDN URL.
 - Shared components and page modules rely on stable class names in `main.css`.
 - The shared nav uses `.void-console-nav` classes for the Signal Online status
   row, Void brand mark, compact nav pills, auth actions, dark dropdowns, and

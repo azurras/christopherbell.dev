@@ -129,7 +129,7 @@ public class SecurityConfig {
       "/images/**",
       "/js/**",
       "/vendor/**",
-      "GET:/webjars/bootstrap/5.3.3/**",
+      "GET:/webjars/bootstrap/5.3.8/**",
       "GET:/{assetVersion}/css/**",
       "GET:/{assetVersion}/images/**",
       "GET:/{assetVersion}/js/**",
