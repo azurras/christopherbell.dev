@@ -99,7 +99,7 @@ function siteMediaLoader() {
   return defaultLoader;
 }
 
-export function resumeSiteMediaIfPresent(storage = window.localStorage) {
+export function resumeSiteMediaIfPresent(storage = window.sessionStorage) {
   return siteMediaLoader().resumeSiteMediaIfPresent(storage);
 }
 

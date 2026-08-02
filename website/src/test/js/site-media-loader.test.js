@@ -58,6 +58,40 @@ test('media loader resumes only when persisted playback exists', async () => {
   assert.equal(calls.filter(value => value === 'api:load').length, 1);
 });
 
+test('default media resume checks same-tab session storage', async context => {
+  assert.ifError(loaderModule.loadFailure);
+  const hadWindow = Object.hasOwn(globalThis, 'window');
+  const originalWindow = globalThis.window;
+  const hadDocument = Object.hasOwn(globalThis, 'document');
+  const originalDocument = globalThis.document;
+  context.after(() => {
+    if (hadWindow) globalThis.window = originalWindow;
+    else delete globalThis.window;
+    if (hadDocument) globalThis.document = originalDocument;
+    else delete globalThis.document;
+  });
+  const emptySessionStorage = { getItem: () => null };
+  const staleLocalStorage = {
+    getItem: key => key === 'cbellSiteMediaResumeV1' ? '{}' : null,
+  };
+  const documentRoot = {
+    body: { appendChild: () => {} },
+    head: { appendChild: () => {} },
+    querySelector: () => null,
+    createElement: tagName => ({ tagName, dataset: {} }),
+    addEventListener: () => {},
+  };
+  globalThis.window = {
+    document: documentRoot,
+    localStorage: staleLocalStorage,
+    sessionStorage: emptySessionStorage,
+  };
+  globalThis.window.top = globalThis.window;
+  globalThis.document = documentRoot;
+
+  assert.equal(await loaderModule.resumeSiteMediaIfPresent(), false);
+});
+
 test('media loader stop is a no-op before initialization and contains load failure', async () => {
   assert.ifError(loaderModule.loadFailure);
   const calls = [];
