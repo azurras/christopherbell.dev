@@ -43,9 +43,7 @@ class BuildAutomationConfigurationTest {
     assertThat(build)
         .contains(
             "CHRISTOPHERBELL_PRODUCTION_DEPLOYMENT",
-            "SYSTEM",
-            "System.getProperty(\"user.name\")",
-            "christopherbell.dev\\\\gradle-home",
+            "c:\\\\programdata\\\\christopherbell.dev\\\\gradle-home",
             "verifyProductionDeploymentBuildContext");
     assertThat(deploy).contains("CHRISTOPHERBELL_PRODUCTION_DEPLOYMENT = '1'");
   }
