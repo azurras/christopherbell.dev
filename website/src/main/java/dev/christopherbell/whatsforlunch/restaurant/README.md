@@ -71,8 +71,10 @@ Owns the data model and APIs for What's For Lunch restaurants.
 ## OpenStreetMap Import
 
 - Manual imports still run through the admin endpoint.
-- The default Overpass import covers Austin, the San Francisco Bay Area, New Orleans, and Dallas through semicolon-separated bounding boxes in `wfl.restaurant-import.osm.bbox`.
-- Missing OpenStreetMap `addr:city` values default to `Imported Metro` instead of an Austin-specific city label.
+- The default Overpass import covers configured bounding boxes for Austin, the San Francisco Bay Area, New Orleans, and Dallas.
+- Imported locality is the first nonblank `addr:city`, `addr:town`, `addr:village`, or `addr:municipality` value that matches a configured supported city. The canonical configured city and state are stored.
+- Missing, unsupported, state/country-conflicting, or coordinate-less locations are excluded; the importer never invents a city or state.
+- Street and postal-code tags remain optional when the supported locality and coordinates are valid.
 - Automated imports run monthly on the fifteenth using `wfl.restaurant-import.monthly.cron`.
 - The scheduler logs start, completion, and failure events.
 - `RestaurantImportState` stores the last completed import month. On application startup, WFL checks whether the previous month has a completed import; if not, it runs a catch-up import immediately.
