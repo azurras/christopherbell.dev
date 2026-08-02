@@ -13,6 +13,13 @@ function filesUnder(root) {
   });
 }
 
+function bootstrapVersion() {
+  const build = fs.readFileSync('website/build.gradle.kts', 'utf8');
+  const dependency = build.match(/implementation\("org\.webjars:bootstrap:([^"]+)"\)/);
+  assert.ok(dependency, 'website/build.gradle.kts must pin the Bootstrap WebJar');
+  return dependency[1];
+}
+
 test('public components use versioned APIs and unwrap Response payloads', async () => {
   const { blogPostsFromResponse } = await import('../../main/resources/static/js/components/blog.js');
   const { galleryImagesFromResponse } = await import('../../main/resources/static/js/components/gallery.js');
@@ -69,9 +76,27 @@ test('The Bell archive has real links, local assets, and no insecure image sourc
   }
 });
 
+test('Bootstrap WebJar references match the packaged dependency', () => {
+  const expectedVersion = bootstrapVersion();
+  const roots = [
+    'website/src/main/resources',
+    'website/src/main/java/dev/christopherbell/configuration/security',
+  ];
+
+  for (const file of roots.flatMap(filesUnder)) {
+    if (!/\.(?:css|html|java|md)$/i.test(file)) continue;
+    const source = fs.readFileSync(file, 'utf8');
+    for (const match of source.matchAll(/\/webjars\/bootstrap\/([^/]+)\//g)) {
+      assert.equal(match[1], expectedVersion, file + ': ' + match[0]);
+    }
+  }
+});
+
 test('Bootstrap is self-hosted and no CDN include remains', () => {
   const mainCss = fs.readFileSync('website/src/main/resources/static/css/main.css', 'utf8');
-  assert.match(mainCss, /\/webjars\/bootstrap\/5\.3\.3\/css\/bootstrap\.min\.css/);
+  assert.ok(mainCss.includes(
+    '/webjars/bootstrap/' + bootstrapVersion() + '/css/bootstrap.min.css'
+  ));
 
   for (const file of filesUnder('website/src/main/resources')) {
     if (!/\.(?:css|html)$/i.test(file)) continue;
