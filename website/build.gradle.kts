@@ -340,26 +340,69 @@ val staticAssetRoot = file("src/main/resources/static")
 val staticAssetFiles = fileTree(staticAssetRoot) {
     exclude("**/.DS_Store")
 }
-val staticAssetFingerprint = providers.provider {
+
+data class StaticAssetFingerprintEntry(
+    val relativePath: String,
+    val updateDigest: (MessageDigest) -> Unit)
+
+fun staticAssetFingerprint(entries: Iterable<StaticAssetFingerprintEntry>): String {
     val digest = MessageDigest.getInstance("SHA-256")
-    staticAssetFiles.files
+    entries.sortedBy { it.relativePath }.forEach { asset ->
+        digest.update(asset.relativePath.toByteArray(Charsets.UTF_8))
+        digest.update(0.toByte())
+        val contentDigest = MessageDigest.getInstance("SHA-256")
+        asset.updateDigest(contentDigest)
+        digest.update(contentDigest.digest())
+    }
+    return HexFormat.of().formatHex(digest.digest()).take(20)
+}
+
+val staticAssetFingerprint = providers.provider {
+    staticAssetFingerprint(staticAssetFiles.files
         .filter { it.isFile }
-        .sortedBy { it.relativeTo(staticAssetRoot).invariantSeparatorsPath }
-        .forEach { asset ->
-            val relativePath = asset.relativeTo(staticAssetRoot).invariantSeparatorsPath
-            digest.update(relativePath.toByteArray(Charsets.UTF_8))
-            digest.update(0.toByte())
-            asset.inputStream().use { input ->
-                val buffer = ByteArray(8192)
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    digest.update(buffer, 0, count)
+        .map { asset ->
+            StaticAssetFingerprintEntry(
+                asset.relativeTo(staticAssetRoot).invariantSeparatorsPath) { digest ->
+                asset.inputStream().use { input ->
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        digest.update(buffer, 0, count)
+                    }
                 }
             }
-        }
-    HexFormat.of().formatHex(digest.digest()).take(20)
+        })
 }
+
+val verifyStaticAssetFingerprintSerialization =
+    tasks.register("verifyStaticAssetFingerprintSerialization") {
+        group = LifecycleBasePlugin.VERIFICATION_GROUP
+        description = "Verifies static asset fingerprint records have unambiguous boundaries."
+
+        doLast {
+            fun entry(path: String, content: ByteArray) =
+                StaticAssetFingerprintEntry(path) { digest -> digest.update(content) }
+
+            val splitFiles = staticAssetFingerprint(listOf(
+                entry("a", "x".toByteArray(Charsets.UTF_8)),
+                entry("c", "y".toByteArray(Charsets.UTF_8))))
+            val shiftedBoundary = staticAssetFingerprint(listOf(
+                entry("a", "x".toByteArray(Charsets.UTF_8)
+                    + "c".toByteArray(Charsets.UTF_8)
+                    + byteArrayOf(0)
+                    + "y".toByteArray(Charsets.UTF_8))))
+
+            check(splitFiles != shiftedBoundary) {
+                "Static asset fingerprint records must preserve file boundaries."
+            }
+        }
+    }
+
+tasks.named("check") {
+    dependsOn(verifyStaticAssetFingerprintSerialization)
+}
+
 tasks.named<ProcessResources>("processResources") {
     dependsOn(prepareSensorResources)
     inputs.files(staticAssetFiles)

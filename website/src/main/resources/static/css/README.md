@@ -4,8 +4,14 @@ Owns site styling for server-rendered pages and frontend components.
 
 ## What Lives Here
 
-- `main.css` is the primary stylesheet for the current site, Void, tools, auth,
-  profile, messages, post cards, and responsive layout.
+- `main.css` is the primary shared stylesheet for the current site, Void feed,
+  tools, auth, profile, messages, post cards, and responsive layout.
+- `void-discovery.css` owns the public Void Explore and topic discovery surfaces.
+- `command-center.css` owns the private Mission Control console and loads before
+  `main.css` so the shared Void shell retains its established page background.
+- `shared-folder.css` owns the authenticated Shared Folder explorer.
+- `site-media-player.css` owns the persistent site media player and navigation
+  frame; its loader adds the stylesheet only when the player runtime is needed.
 - `music.css` owns the three-pane desktop and stacked mobile Music hub, including its track,
   playlist, queue, filter, numbered pagination, dialog, and notification surfaces.
 - `blog.css` contains older blog-specific styling.
@@ -14,8 +20,8 @@ Owns site styling for server-rendered pages and frontend components.
 
 ## How It Works
 
-- Current templates should use `main.css` unless they are intentionally part of a
-  legacy area.
+- Current templates should use `main.css`; feature pages add their dedicated
+  stylesheet when their class family is not shared site-wide.
 - `main.css` imports the pinned, application-served Bootstrap 5.3.3 WebJar once; current templates must not add a second Bootstrap stylesheet or a Bootstrap CDN URL.
 - Shared components and page modules rely on stable class names in `main.css`.
 - The shared nav uses `.void-console-nav` classes for the Signal Online status
@@ -47,7 +53,8 @@ Owns site styling for server-rendered pages and frontend components.
   latest-price summary, responsive data-quality summary grids, chart panels,
   selected-metro trend panel, official API curl verification block, and
   clickable metro sample table.
-- Mission Control styling is owned by the `.command-*` classes in `main.css`:
+- Mission Control styling is owned by the `.command-*` classes in
+  `command-center.css`:
   the initially hidden admin-gated shell, phone-first telemetry grid, explicit
   available/stale/unavailable states, 15-minute sparklines, alert strip, delayed
   text log console, pending-action countdown, native accessible challenge dialog,
@@ -70,10 +77,12 @@ Owns site styling for server-rendered pages and frontend components.
   for this page after the broader feed mobile rules hide them elsewhere.
 - Public profile cards use `.profile-trust-status` for mute/block feedback
   inside the same Void shell treatment as the rest of the profile page.
-- The shared-folder portal uses `.shared-folder-*` classes for its keyboard-visible entry and
+- The shared-folder portal uses `.shared-folder-*` classes in `shared-folder.css`
+  for its keyboard-visible entry and
   mutation controls, two-column listing/preview surface, bounded text preview, upload picker,
   drag/drop state, progress/cancel controls, and single-column mobile layout below 768px.
-- The site-wide media surface uses `.site-media-player-*` for its fixed audio/video controls and
+- The site-wide media surface uses `.site-media-player-*` in
+  `site-media-player.css` for its fixed audio/video controls and
   `.site-player-content-*` for the full-viewport navigation frame above it. A measured CSS custom
   property keeps framed pages clear of the player as audio/video height changes on desktop and mobile.
   Its `data-presentation` state enlarges the same player on `/music` and returns it to the compact

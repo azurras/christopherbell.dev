@@ -49,3 +49,28 @@ test('feature templates link their versioned dedicated stylesheets', async () =>
     ));
   }
 });
+
+test('command center preserves the shared Void shell cascade', async () => {
+  const source = await resource('templates/command-center.html');
+  const featureStylesheet = source.indexOf('href="/css/command-center.css"');
+  const sharedStylesheet = source.indexOf('href="/css/main.css"');
+
+  assert.ok(featureStylesheet >= 0);
+  assert.ok(sharedStylesheet >= 0);
+  assert.ok(featureStylesheet < sharedStylesheet,
+    'command-center.css must precede main.css so shared Void shell rules remain effective');
+});
+
+test('stylesheet ownership documentation names every split feature file', async () => {
+  const readme = await resource('static/css/README.md');
+
+  for (const stylesheet of [
+    'command-center.css',
+    'shared-folder.css',
+    'site-media-player.css',
+    'void-discovery.css',
+  ]) {
+    const reference = String.fromCharCode(96) + stylesheet + String.fromCharCode(96);
+    assert.ok(readme.includes(reference), `CSS README must document ${reference}`);
+  }
+});
