@@ -8,6 +8,10 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.ClassPathResource;
 
 class WflPropertiesTest {
   @Test
@@ -46,6 +50,37 @@ class WflPropertiesTest {
 
     assertThat(violations(properties))
         .anyMatch(path -> path.endsWith("leaseCoversRemoteRequest"));
+  }
+
+  @Test
+  void defaultsContainPinnedCensusPlaceCoverage() {
+    var metros = new WflProperties().getRestaurantImport().getOsm().getMetros();
+
+    assertThat(metros)
+        .extracting(metro -> metro.getCities().size())
+        .containsExactly(70, 154, 46, 123);
+    assertThat(metros)
+        .flatExtracting(WflProperties.Metro::getCities)
+        .hasSize(393);
+    assertThat(metros)
+        .filteredOn(metro -> metro.getCities().contains("Sunnyvale"))
+        .extracting(WflProperties.Metro::getState)
+        .containsExactly("CA", "TX");
+  }
+
+  @Test
+  void applicationYamlMatchesDefaultCensusPlaceCoverage() throws Exception {
+    var loader = new YamlPropertySourceLoader();
+    var environment = new StandardEnvironment();
+    loader.load("application", new ClassPathResource("application.yml"))
+        .forEach(environment.getPropertySources()::addLast);
+    var configured = Binder.get(environment).bind("wfl", WflProperties.class)
+        .orElseThrow(() -> new AssertionError("wfl configuration was not bound"));
+    var defaults = new WflProperties();
+
+    assertThat(configured.getRestaurantImport().getOsm().getMetros())
+        .usingRecursiveComparison()
+        .isEqualTo(defaults.getRestaurantImport().getOsm().getMetros());
   }
 
   private List<String> violations(WflProperties properties) {

@@ -1306,7 +1306,20 @@ public class RestaurantService {
     }
     return wflProperties.getRestaurantImport().getOsm().getMetros().stream()
         .anyMatch(metro -> normalizeCity(metro.getState()).equals(state)
-            && metro.getCities().stream().anyMatch(candidate -> normalizeCity(candidate).equals(city)));
+            && metro.getCities().stream().anyMatch(candidate -> normalizeCity(candidate).equals(city))
+            && isWithinBounds(
+                metro.getBounds(), address.getLatitude(), address.getLongitude()));
+  }
+
+  private boolean isWithinBounds(
+      WflProperties.BoundingBox bounds,
+      double latitude,
+      double longitude
+  ) {
+    return latitude >= bounds.getSouth()
+        && latitude <= bounds.getNorth()
+        && longitude >= bounds.getWest()
+        && longitude <= bounds.getEast();
   }
 
   private boolean isUnitedStates(String value) {

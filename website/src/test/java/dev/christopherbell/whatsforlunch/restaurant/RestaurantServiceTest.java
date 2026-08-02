@@ -1044,6 +1044,42 @@ public class RestaurantServiceTest {
   }
 
   @Test
+  @DisplayName("OpenStreetMap import: accepts expanded coverage and rejects wrong rectangle")
+  void testPreparedImport_whenCoverageAndCoordinatesDisagree_skipsOnlyMismatch()
+      throws Exception {
+    var livermore = RestaurantStub.getRestaurantStub("osm:node:livermore");
+    livermore.setName("Livermore Bistro");
+    livermore.getAddress().setCity("Livermore");
+    livermore.getAddress().setState("CA");
+    livermore.getAddress().setLatitude(37.6819);
+    livermore.getAddress().setLongitude(-121.7680);
+    var misplaced = RestaurantStub.getRestaurantStub("osm:node:misplaced");
+    misplaced.setName("Misplaced Austin");
+    misplaced.getAddress().setCity("Austin");
+    misplaced.getAddress().setState("TX");
+    misplaced.getAddress().setLatitude(32.7767);
+    misplaced.getAddress().setLongitude(-96.7970);
+
+    when(openStreetMapRestaurantClient.getConfiguredMetroRestaurants())
+        .thenReturn(List.of(livermore, misplaced));
+    when(restaurantRepository.findById(eq(livermore.getId()))).thenReturn(Optional.empty());
+    when(restaurantRepository.findByNormalizedName(eq("livermore bistro")))
+        .thenReturn(Optional.empty());
+    when(restaurantRepository.findAll()).thenReturn(List.of());
+    when(restaurantRepository.save(eq(livermore))).thenReturn(livermore);
+
+    var snapshot = restaurantService.prepareConfiguredMetroImport();
+    var result = restaurantService.applyPreparedImport(snapshot, RestaurantImportLeaseGuard.NONE);
+
+    assertEquals(1, snapshot.counts().created());
+    assertEquals(1, snapshot.counts().invalid());
+    assertEquals(1, result.imported());
+    assertEquals(1, result.skippedInvalid());
+    verify(restaurantRepository).save(eq(livermore));
+    verify(restaurantRepository, never()).save(eq(misplaced));
+  }
+
+  @Test
   @DisplayName("OpenStreetMap import: updates existing same-name same-address restaurants")
   public void testImportConfiguredMetroRestaurantsFromOpenStreetMap_UpdatesSameNameSameAddress()
       throws Exception {
@@ -1113,11 +1149,15 @@ public class RestaurantServiceTest {
     persistedById.setDedupeKey("china villa");
     persistedById.getAddress().setCity("Fremont");
     persistedById.getAddress().setState("CA");
+    persistedById.getAddress().setLatitude(37.5483);
+    persistedById.getAddress().setLongitude(-121.9886);
 
     var importedRename = RestaurantStub.getRestaurantStub("osm:node:8178213204");
     importedRename.setName("Aama's Kitchen");
     importedRename.getAddress().setCity("Fremont");
     importedRename.getAddress().setState("CA");
+    importedRename.getAddress().setLatitude(37.5483);
+    importedRename.getAddress().setLongitude(-121.9886);
 
     var normalizedNameOwner = RestaurantStub.getRestaurantStub("osm:node:13485126044");
     normalizedNameOwner.setName("Aama's Kitchen");
@@ -1125,6 +1165,8 @@ public class RestaurantServiceTest {
     normalizedNameOwner.setDedupeKey("aama's kitchen");
     normalizedNameOwner.getAddress().setCity("Hayward");
     normalizedNameOwner.getAddress().setState("CA");
+    normalizedNameOwner.getAddress().setLatitude(37.6688);
+    normalizedNameOwner.getAddress().setLongitude(-122.0808);
 
     var laterCandidate = RestaurantStub.getRestaurantStub("osm:node:99999999999");
     laterCandidate.setName("Later Candidate Cafe");
