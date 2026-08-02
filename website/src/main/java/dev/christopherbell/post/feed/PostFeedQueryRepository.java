@@ -1,7 +1,7 @@
 package dev.christopherbell.post.feed;
 
-import dev.christopherbell.pagination.StableCursor;
-import dev.christopherbell.pagination.StableCursorCodec;
+import dev.christopherbell.libs.pagination.StableCursor;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.account.follow.AccountFollow;
 import dev.christopherbell.post.model.Post;
 import java.util.ArrayList;

@@ -2,8 +2,8 @@ package dev.christopherbell.notification.inbox;
 
 import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.notification.model.NotificationDetail;
-import dev.christopherbell.pagination.StableCursor;
-import dev.christopherbell.pagination.StableCursorCodec;
+import dev.christopherbell.libs.pagination.StableCursor;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;

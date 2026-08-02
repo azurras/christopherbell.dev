@@ -1,8 +1,8 @@
 package dev.christopherbell.message.conversation;
 
 import dev.christopherbell.message.model.Message;
-import dev.christopherbell.pagination.StableCursor;
-import dev.christopherbell.pagination.StableCursorCodec;
+import dev.christopherbell.libs.pagination.StableCursor;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;

@@ -35,7 +35,7 @@ import dev.christopherbell.post.feed.PostEngagementQueryRepository;
 import dev.christopherbell.post.feed.PostFeedItemAssembler;
 import dev.christopherbell.post.feed.PostFeedSlice;
 import dev.christopherbell.post.feed.PostFeedVisibility;
-import dev.christopherbell.pagination.StableCursorCodec;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.hide.HiddenPostThreadService;
 import dev.christopherbell.post.interaction.PostInteractionService;
 import dev.christopherbell.post.like.PostLikeStore;

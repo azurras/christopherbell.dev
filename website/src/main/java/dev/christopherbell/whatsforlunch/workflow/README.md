@@ -5,7 +5,10 @@ Owns workflow scaffolding for What's For Lunch.
 ## What Lives Here
 
 - Workflow context and command-style orchestration primitives for WFL behavior.
-- Shared workflow types that can coordinate restaurant operations as the feature grows.
+- The WFL-owned execution engine, retry policy, operation, result, and exception
+  types under `workflow/engine`.
+- Retryable failures use the configured backoff and retry window. Terminal
+  failures return immediately, and an expired retry window stops the context.
 
 ## Update This Doc
 

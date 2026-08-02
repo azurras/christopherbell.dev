@@ -9,7 +9,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicProbeResult;
 import dev.christopherbell.music.catalog.MusicProperties;

@@ -1,8 +1,8 @@
 package dev.christopherbell.music.catalog;
 
 import java.time.Clock;
-import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
-import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.music.metadata.FfmpegMusicTagProcess;
 import dev.christopherbell.music.metadata.MusicMetadataEditRepository;
 import dev.christopherbell.music.metadata.MusicMetadataFileStore;

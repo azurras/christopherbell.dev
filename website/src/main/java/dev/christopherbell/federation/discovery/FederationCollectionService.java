@@ -9,7 +9,7 @@ import dev.christopherbell.federation.discovery.FederationDiscoveryModels.Activi
 import dev.christopherbell.federation.outbound.FederationActivityFactory;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
-import dev.christopherbell.pagination.StableCursorCodec;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Collection;

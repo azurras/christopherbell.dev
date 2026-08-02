@@ -13,7 +13,7 @@ import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.ActivityPubActor;
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.ActivityPubPublicKey;
 import dev.christopherbell.federation.outbound.FederationActivityFactory;
-import dev.christopherbell.pagination.StableCursorCodec;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.model.Post;
 import java.time.Clock;
 import java.time.Instant;

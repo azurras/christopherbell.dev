@@ -1,6 +1,6 @@
 package dev.christopherbell.whatsforlunch.workflow;
 
-import dev.christopherbell.libs.workflow.model.WorkflowResult;
+import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowResult;
 
 /**
  * Result type for the WhatsForLunch workflow.

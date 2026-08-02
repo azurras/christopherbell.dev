@@ -10,7 +10,7 @@ import dev.christopherbell.message.model.ConversationSummary;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.message.model.MessageDetail;
 import dev.christopherbell.permission.PermissionService;
-import dev.christopherbell.pagination.StableCursorCodec;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;

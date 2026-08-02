@@ -1,6 +1,6 @@
 package dev.christopherbell.music.radio;
 
-import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicProperties;
 import dev.christopherbell.music.catalog.MusicTrack;

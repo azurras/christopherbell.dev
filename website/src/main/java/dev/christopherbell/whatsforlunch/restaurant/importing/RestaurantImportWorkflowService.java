@@ -1,7 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant.importing;
 
-import dev.christopherbell.configuration.mongo.lease.MongoLeaseService;
-import dev.christopherbell.configuration.mongo.lease.RenewingMongoLease;
+import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.mongo.lease.RenewingMongoLease;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantImportStateRepository;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantService;

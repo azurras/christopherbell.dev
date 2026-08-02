@@ -1,11 +1,11 @@
 package dev.christopherbell.whatsforlunch.workflow;
 
-import dev.christopherbell.libs.workflow.Workflow;
-import dev.christopherbell.libs.workflow.exception.WorkflowException;
-import dev.christopherbell.libs.workflow.exception.WorkflowStopExecutionException;
-import dev.christopherbell.libs.workflow.model.WorkflowContext;
-import dev.christopherbell.libs.workflow.model.WorkflowResult;
-import dev.christopherbell.libs.workflow.model.WorkflowStatus;
+import dev.christopherbell.whatsforlunch.workflow.engine.Workflow;
+import dev.christopherbell.whatsforlunch.workflow.engine.exception.WorkflowException;
+import dev.christopherbell.whatsforlunch.workflow.engine.exception.WorkflowStopExecutionException;
+import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowContext;
+import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowResult;
+import dev.christopherbell.whatsforlunch.workflow.engine.model.WorkflowStatus;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.stereotype.Component;

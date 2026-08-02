@@ -20,7 +20,7 @@ import dev.christopherbell.message.conversation.ConversationService;
 import dev.christopherbell.message.conversation.ConversationArchiveService;
 import dev.christopherbell.message.conversation.ConversationMessageSlice;
 import dev.christopherbell.message.conversation.ConversationQueryRepository;
-import dev.christopherbell.pagination.StableCursorCodec;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.message.delivery.MessageDeliveryService;
 import dev.christopherbell.message.model.ConversationSummary;
 import dev.christopherbell.message.model.Message;

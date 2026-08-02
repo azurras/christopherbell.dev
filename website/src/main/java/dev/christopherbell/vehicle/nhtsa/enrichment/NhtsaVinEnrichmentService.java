@@ -1,7 +1,7 @@
 package dev.christopherbell.vehicle.nhtsa.enrichment;
 
-import dev.christopherbell.configuration.mongo.lease.CollectorLeaseGuard;
-import dev.christopherbell.configuration.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.mongo.lease.CollectorLeaseGuard;
+import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.Vehicle;

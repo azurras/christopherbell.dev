@@ -9,7 +9,7 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
-import dev.christopherbell.pagination.StableCursorCodec;
+import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.post.feed.PostEngagementQueryRepository;
 import dev.christopherbell.post.feed.PostFeedItemAssembler;
