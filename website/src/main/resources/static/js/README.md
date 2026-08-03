@@ -72,10 +72,10 @@ Owns browser-side behavior for server-rendered pages.
   shows archived shared sessions as read-only, permits only the host to request
   new shared picks, and only re-queries when the user clicks "Try 3 more", applies filters, changes
   ZIP/location, or an admin deletes a restaurant.
-- `restaurant-profile.js` renders the public WFL restaurant profile page from
-  the restaurant detail API, including aggregate rating, personal rating, and
-  favorite state when the visitor is signed in. It and the WFL cards construct
-  validated HTTP(S) website anchors through DOM properties rather than HTML interpolation.
+- Restaurant profiles render their complete public content and validated
+  HTTP(S) website links on the server. `restaurant-profile.js` makes no
+  anonymous detail request; for signed-in visitors it progressively adds only
+  personal rating and favorite controls, with failures isolated to that panel.
 - `zip-coordinates.js` renders the Tools ZIP coordinate lookup page around
   `GET /api/location/zip/{zipCode}`, including ZIP normalization, inline errors,
   result fields, and copyable API/curl output.

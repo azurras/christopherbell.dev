@@ -1969,47 +1969,6 @@ body {
     text-align: center;
 }
 
-.restaurant-profile {
-    display: grid;
-    gap: 1rem;
-}
-
-.restaurant-profile h2 {
-    margin-bottom: 0.5rem;
-}
-
-.restaurant-profile-rating {
-    margin-bottom: 0.5rem;
-    font-weight: 800;
-}
-
-.restaurant-profile-rating p {
-    margin: 0 0 0.15rem;
-}
-
-.restaurant-detail-list {
-    display: grid;
-    gap: 0.75rem;
-    margin: 0;
-}
-
-.restaurant-detail-list div {
-    display: grid;
-    gap: 0.2rem;
-}
-
-.restaurant-detail-list dt {
-    color: rgba(23, 32, 42, 0.58);
-    font-size: 0.85rem;
-    font-weight: 800;
-    text-transform: uppercase;
-}
-
-.restaurant-detail-list dd {
-    margin: 0;
-    overflow-wrap: anywhere;
-}
-
 @media (max-width: 900px) {
     .lunch-toolbar {
         align-items: flex-start;
