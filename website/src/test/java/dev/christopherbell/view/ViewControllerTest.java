@@ -183,6 +183,21 @@ public class ViewControllerTest {
         .andExpect(content().string(not(containsString("private-account"))));
   }
 
+  @Test
+  @DisplayName("WFL restaurant page renders the zero-vote public profile without an aggregate")
+  void getWhatsForLunchRestaurantPageRendersNoVotesWithoutApprovalSummaryOrAggregate() throws Exception {
+    when(restaurantProfiles.profile("restaurant-without-votes"))
+        .thenReturn(profilePageWithoutVotes());
+
+    mockMvc.perform(get("/wfl/restaurants/restaurant-without-votes"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("No votes yet")))
+        .andExpect(content().string(not(containsString("% liked ·"))))
+        .andExpect(content().string(not(containsString(" up ·"))))
+        .andExpect(content().string(not(containsString(" down"))))
+        .andExpect(content().string(not(containsString("aggregateRating"))));
+  }
+
   private static RestaurantProfilePage profilePage() {
     return new RestaurantProfilePage(
         "restaurant-123",
@@ -201,6 +216,27 @@ public class ViewControllerTest {
         "restaurant",
         "https://www.google.com/maps/search/?api=1&destination=30.2672%2C-97.7431",
         "{\"@context\":\"https://schema.org\",\"@type\":\"Restaurant\",\"name\":\"Taco Place\"}");
+  }
+
+  private static RestaurantProfilePage profilePageWithoutVotes() {
+    var page = profilePage();
+    return new RestaurantProfilePage(
+        "restaurant-without-votes",
+        "/wfl/restaurants/restaurant-without-votes",
+        "https://www.christopherbell.dev/wfl/restaurants/restaurant-without-votes",
+        page.title(),
+        page.description(),
+        page.name(),
+        page.cuisine(),
+        page.heroMetadata(),
+        page.address(),
+        null,
+        page.phoneNumber(),
+        page.website(),
+        page.sourceType(),
+        page.directionsUrl(),
+        "{\"@context\":\"https://schema.org\",\"@type\":\"Restaurant\","
+            + "\"name\":\"Taco Place\"}");
   }
 
   @Test
