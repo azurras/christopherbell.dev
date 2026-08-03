@@ -3,13 +3,11 @@ package dev.christopherbell.view.wfl;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.view.ViewIndexingPolicy;
 import jakarta.servlet.http.HttpServletResponse;
-import java.nio.charset.StandardCharsets;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.util.UriUtils;
 
 /**
  * Serves What's For Lunch HTML pages and their social metadata.
@@ -18,7 +16,7 @@ import org.springframework.web.util.UriUtils;
 @RequiredArgsConstructor
 public class WhatsForLunchViewController {
   private static final String PUBLIC_ROOT = "https://www.christopherbell.dev";
-  private final RestaurantSocialPreviewService restaurantPreviews;
+  private final RestaurantProfilePageService restaurantProfiles;
 
   /**
    * Serves the What's For Lunch page.
@@ -73,14 +71,8 @@ public class WhatsForLunchViewController {
       HttpServletResponse response,
       Model model
   ) {
-    var encodedRestaurantId = UriUtils.encodePathSegment(restaurantId, StandardCharsets.UTF_8);
-    model.addAttribute("socialUrl", PUBLIC_ROOT + "/wfl/restaurants/" + encodedRestaurantId);
     try {
-      var preview = restaurantPreviews.preview(restaurantId);
-      model.addAttribute("socialTitle", preview.title());
-      model.addAttribute("socialDescription", preview.description());
-      model.addAttribute("restaurantName", preview.name());
-      model.addAttribute("restaurantHeroMetadata", preview.heroMetadata());
+      model.addAttribute("restaurantProfile", restaurantProfiles.profile(restaurantId));
       return "restaurant.html";
     } catch (ResourceNotFoundException exception) {
       response.setStatus(HttpServletResponse.SC_NOT_FOUND);

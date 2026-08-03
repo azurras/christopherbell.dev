@@ -5,35 +5,107 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="author" content="Christopher Bell (cbell7@icloud.com)" />
-    <th:block th:replace="~{fragments/social-preview :: socialPreview(${socialTitle}, ${socialDescription}, ${socialUrl}, 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
+    <th:block th:replace="~{fragments/social-preview :: socialPreview(${restaurantProfile.title}, ${restaurantProfile.description}, ${restaurantProfile.canonicalUrl}, 'https://www.christopherbell.dev/images/previews/christopherbell-dev.png', 'The Void preview for christopherbell.dev')}"></th:block>
 
-    <title th:text="${socialTitle}">CB | Restaurant</title>
+    <title th:text="${restaurantProfile.title}">CB | Restaurant</title>
 
     <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}"/>
+    <link rel="stylesheet" type="text/css" href="/css/whats-for-lunch.css"
+          th:href="@{/css/whats-for-lunch.css}"/>
+    <script type="application/ld+json"
+            th:utext="${restaurantProfile.structuredDataJson}">{"@context":"https://schema.org","@type":"Restaurant"}</script>
 </head>
 
-<body class="site-page lunch-page restaurant-profile-page">
+<body class="site-page void-shell-page lunch-page lunch-void-page restaurant-profile-page">
     <div id="nav"></div>
-    <main class="site-main" role="main">
-        <section class="site-hero site-hero-lunch" aria-labelledby="restaurantTitle">
-            <div class="container">
-                <p class="home-kicker">What's For Lunch</p>
-                <h1 id="restaurantTitle" th:text="${restaurantName}">Restaurant</h1>
-                <p id="restaurantHeroText" th:text="${restaurantHeroMetadata}">Details, ratings, and ways to get there.</p>
+    <main class="site-main lunch-void-main" aria-labelledby="restaurantTitle">
+        <div class="lunch-void-shell">
+            <div class="container lunch-void-container restaurant-profile-container">
+                <nav class="wfl-secondary-nav" aria-label="What's For Lunch navigation">
+                    <a href="/wfl">Picks</a>
+                    <a href="/wfl/top-rated">Top 10 Rated</a>
+                    <a href="/wfl/favorites">Favorites</a>
+                </nav>
+
+                <header class="lunch-void-hero restaurant-profile-hero">
+                    <p class="home-kicker">Restaurant signal</p>
+                    <h1 id="restaurantTitle" th:text="${restaurantProfile.name}">Restaurant</h1>
+                    <p th:text="${restaurantProfile.heroMetadata}">Restaurant details.</p>
+                </header>
+
+                <article class="restaurant-profile-void" aria-label="Restaurant profile">
+                    <section class="restaurant-rating-signal"
+                             aria-labelledby="restaurantRatingTitle">
+                        <p class="restaurant-profile-label">Public signal</p>
+                        <h2 id="restaurantRatingTitle">Aggregate rating</h2>
+                        <p id="restaurant-public-rating"
+                           class="restaurant-rating-value"
+                           th:if="${restaurantProfile.hasRating()}"
+                           th:text="${#numbers.formatDecimal(restaurantProfile.averageRating(), 1, 1) + '/5 from ' + restaurantProfile.rating.count + (restaurantProfile.rating.count == 1 ? ' rating' : ' ratings')}">4.5/5 from 2 ratings</p>
+                        <p id="restaurant-public-rating"
+                           class="restaurant-rating-value"
+                           th:unless="${restaurantProfile.hasRating()}">No ratings yet</p>
+                        <p th:text="${restaurantProfile.cuisine}">Restaurant</p>
+                    </section>
+
+                    <section class="restaurant-profile-details"
+                             aria-labelledby="restaurantDetailsTitle">
+                        <h2 id="restaurantDetailsTitle">Restaurant details</h2>
+                        <dl class="restaurant-detail-list">
+                            <div th:if="${!restaurantProfile.addressLine().isEmpty()}">
+                                <dt>Address</dt>
+                                <dd th:text="${restaurantProfile.addressLine()}">Address</dd>
+                            </div>
+                            <div th:if="${restaurantProfile.phoneNumber != null}">
+                                <dt>Phone</dt>
+                                <dd>
+                                    <a th:href="${'tel:' + restaurantProfile.phoneNumber}"
+                                       th:text="${restaurantProfile.phoneNumber}">Phone</a>
+                                </dd>
+                            </div>
+                            <div th:if="${restaurantProfile.website != null}">
+                                <dt>Website</dt>
+                                <dd>
+                                    <a th:href="${restaurantProfile.website}"
+                                       target="_blank"
+                                       rel="noopener noreferrer">Visit website</a>
+                                </dd>
+                            </div>
+                            <div th:if="${restaurantProfile.sourceType != null}">
+                                <dt>Source type</dt>
+                                <dd th:text="${restaurantProfile.sourceType}">Restaurant</dd>
+                            </div>
+                        </dl>
+                        <div class="restaurant-profile-actions">
+                            <a class="btn btn-primary"
+                               th:href="${restaurantProfile.directionsUrl}"
+                               target="_blank"
+                               rel="noopener noreferrer">Open in Maps</a>
+                            <a class="btn btn-outline-secondary" href="/wfl">Back to WFL</a>
+                        </div>
+                    </section>
+
+                    <section class="restaurant-member-panel"
+                             aria-labelledby="restaurantMemberTitle">
+                        <p class="restaurant-profile-label">Member controls</p>
+                        <h2 id="restaurantMemberTitle">Your signal</h2>
+                        <div id="restaurant-member-controls"
+                             aria-live="polite"
+                             th:attr="data-restaurant-id=${restaurantProfile.id}">
+                            <p>Sign in to rate or favorite this restaurant.</p>
+                            <a class="btn btn-outline-primary"
+                               th:href="@{/login(redirect=${restaurantProfile.path})}">Sign in</a>
+                        </div>
+                    </section>
+                </article>
             </div>
-        </section>
-        <section class="site-content">
-            <div class="container">
-                <div class="content-panel lunch-panel">
-                    <div id="restaurant-profile"></div>
-                </div>
-            </div>
-        </section>
+        </div>
     </main>
     <footer id="footer"></footer>
-</body>
 
-<script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
-<script type="module" src="/js/restaurant-profile.js" th:src="@{/js/restaurant-profile.js}"></script>
+    <script type="module" src="/js/app.js" th:src="@{/js/app.js}"></script>
+    <script type="module" src="/js/restaurant-profile.js"
+            th:src="@{/js/restaurant-profile.js}"></script>
+</body>
 
 </html>

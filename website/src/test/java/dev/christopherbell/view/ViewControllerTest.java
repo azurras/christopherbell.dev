@@ -16,8 +16,8 @@ import dev.christopherbell.view.voidroutes.VoidPostSocialPreview;
 import dev.christopherbell.view.voidroutes.VoidPostSocialPreviewService;
 import dev.christopherbell.view.voidroutes.VoidUserSocialPreview;
 import dev.christopherbell.view.voidroutes.VoidUserSocialPreviewService;
-import dev.christopherbell.view.wfl.RestaurantSocialPreview;
-import dev.christopherbell.view.wfl.RestaurantSocialPreviewService;
+import dev.christopherbell.view.wfl.RestaurantProfilePage;
+import dev.christopherbell.view.wfl.RestaurantProfilePageService;
 import dev.christopherbell.view.wfl.WhatsForLunchViewController;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.federation.consent.FederationConsentService;
@@ -43,7 +43,7 @@ public class ViewControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private VoidPostSocialPreviewService postPreviews;
   @MockitoBean private VoidUserSocialPreviewService userPreviews;
-  @MockitoBean private RestaurantSocialPreviewService restaurantPreviews;
+  @MockitoBean private RestaurantProfilePageService restaurantProfiles;
   @MockitoBean private FederationConsentService federationConsent;
 
   @ParameterizedTest
@@ -156,21 +156,78 @@ public class ViewControllerTest {
   }
 
   @Test
-  @DisplayName("WFL restaurant page renders social preview metadata")
-  public void getWhatsForLunchRestaurantPage_rendersSocialPreviewMetadata() throws Exception {
-    when(restaurantPreviews.preview("restaurant-123")).thenReturn(new RestaurantSocialPreview(
-        "CB | Taco Place",
-        "Mexican restaurant in Austin, Texas. Details and ratings from What's For Lunch.",
-        "Taco Place",
-        "Mexican restaurant in Austin, Texas."));
+  @DisplayName("WFL restaurant page renders complete public indexable content")
+  void getWhatsForLunchRestaurantPageRendersPublicProfile() throws Exception {
+    when(restaurantProfiles.profile("restaurant-123")).thenReturn(profilePage());
 
-    mockMvc
-        .perform(get("/wfl/restaurants/restaurant-123"))
+    mockMvc.perform(get("/wfl/restaurants/restaurant-123"))
         .andExpect(status().isOk())
         .andExpect(content().string(containsString("CB | Taco Place")))
-        .andExpect(content().string(containsString("Mexican restaurant in Austin, Texas")))
-        .andExpect(content().string(containsString("<h1 id=\"restaurantTitle\">Taco Place</h1>")))
-        .andExpect(content().string(containsString("https://www.christopherbell.dev/wfl/restaurants/restaurant-123")));
+        .andExpect(content().string(containsString(
+            "rel=\"canonical\" href=\"https://www.christopherbell.dev/wfl/restaurants/restaurant-123\"")))
+        .andExpect(content().string(containsString("100 Main St, Austin, TX, 78701")))
+        .andExpect(content().string(containsString("4.5/5 from 2 ratings")))
+        .andExpect(content().string(containsString("href=\"/css/whats-for-lunch.css\"")))
+        .andExpect(content().string(containsString(
+            "void-shell-page lunch-page lunch-void-page restaurant-profile-page")))
+        .andExpect(content().string(containsString(
+            "<h1 id=\"restaurantTitle\">Taco Place</h1>")))
+        .andExpect(content().string(containsString("512-555-0100")))
+        .andExpect(content().string(containsString("https://example.com/menu")))
+        .andExpect(content().string(containsString("type=\"application/ld+json\"")))
+        .andExpect(content().string(containsString("\"@type\":\"Restaurant\"")))
+        .andExpect(content().string(not(containsString("noindex"))))
+        .andExpect(content().string(not(containsString("myRating"))))
+        .andExpect(content().string(not(containsString("private-account"))));
+  }
+
+  private static RestaurantProfilePage profilePage() {
+    return new RestaurantProfilePage(
+        "restaurant-123",
+        "/wfl/restaurants/restaurant-123",
+        "https://www.christopherbell.dev/wfl/restaurants/restaurant-123",
+        "CB | Taco Place",
+        "Mexican restaurant in Austin, TX. Details and ratings from What's For Lunch.",
+        "Taco Place",
+        "Mexican",
+        "Mexican restaurant in Austin, TX.",
+        new RestaurantProfilePage.Address(
+            "100 Main St", null, "Austin", "TX", "78701", "US", 30.2672, -97.7431),
+        new RestaurantProfilePage.Rating(2, 9),
+        "512-555-0100",
+        "https://example.com/menu",
+        "restaurant",
+        "https://www.google.com/maps/search/?api=1&destination=30.2672%2C-97.7431",
+        "{\"@context\":\"https://schema.org\",\"@type\":\"Restaurant\",\"name\":\"Taco Place\"}");
+  }
+
+  @Test
+  void getWhatsForLunchRestaurantPageEscapesHtmlAndPreservesSafeJsonLd() throws Exception {
+    var base = profilePage();
+    when(restaurantProfiles.profile("hostile")).thenReturn(new RestaurantProfilePage(
+        "hostile",
+        "/wfl/restaurants/hostile",
+        "https://www.christopherbell.dev/wfl/restaurants/hostile",
+        "CB | Hostile Restaurant",
+        base.description(),
+        "</h1><script>alert(1)</script>",
+        base.cuisine(),
+        base.heroMetadata(),
+        base.address(),
+        base.rating(),
+        base.phoneNumber(),
+        base.website(),
+        base.sourceType(),
+        base.directionsUrl(),
+        "{\"@context\":\"https://schema.org\",\"@type\":\"Restaurant\","
+            + "\"name\":\"\\u003c/script\\u003e\"}"));
+
+    mockMvc.perform(get("/wfl/restaurants/hostile"))
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString(
+            "&lt;/h1&gt;&lt;script&gt;alert(1)&lt;/script&gt;")))
+        .andExpect(content().string(containsString("\\u003c/script\\u003e")))
+        .andExpect(content().string(not(containsString("</h1><script>alert(1)</script>"))));
   }
 
   @Test
@@ -193,13 +250,14 @@ public class ViewControllerTest {
 
   @Test
   void getWhatsForLunchRestaurantPage_whenMissing_returnsNoIndex404() throws Exception {
-    when(restaurantPreviews.preview("missing-restaurant"))
+    when(restaurantProfiles.profile("missing-restaurant"))
         .thenThrow(new ResourceNotFoundException("SECRET_RESTAURANT"));
 
     mockMvc.perform(get("/wfl/restaurants/missing-restaurant"))
         .andExpect(status().isNotFound())
         .andExpect(content().string(containsString("Page not found")))
         .andExpect(content().string(containsString("noindex,nofollow")))
+        .andExpect(content().string(not(containsString("application/ld+json"))))
         .andExpect(content().string(not(containsString("SECRET_RESTAURANT"))));
   }
 
