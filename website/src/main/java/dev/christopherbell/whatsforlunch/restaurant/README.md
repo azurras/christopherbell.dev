@@ -41,11 +41,16 @@ Owns the data model and APIs for What's For Lunch restaurants.
 
 - `PUT /api/whatsforlunch/restaurant/2026-05-17/vote` lets a signed-in member set one binary vote by sending `restaurantId` and `vote` (`"UP"` or `"DOWN"`) in JSON. This avoids putting OpenStreetMap ids with punctuation in the URL path.
 - `PUT /api/whatsforlunch/restaurant/2026-05-17/{id}/vote` is the equivalent path form for simple restaurant IDs.
-- Numeric, fractional, and unknown vote values are rejected; each member has one persisted vote per restaurant.
+- Vote request JSON is exact: the path form accepts only `vote`, and the body-ID
+  form accepts only `restaurantId` and `vote`. Missing, null, numeric,
+  fractional, string-number, legacy `rating`, and all other unknown properties
+  are rejected; each member has one persisted vote per restaurant.
 - Public restaurant details include `upVotes`, `downVotes`, and `voteCount`; signed-in callers also receive `myVote` when they have voted.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/top-liked` returns restaurants with at least one vote, ordered by approval ratio descending, vote count descending, and restaurant ID ascending.
-- Browser vote controls submit the binary vote contract and refresh from the
-  server-confirmed restaurant detail response.
+- Browser vote controls on picks, profiles, Favorites, and Top Liked submit the
+  binary vote contract and refresh from the server-confirmed restaurant detail
+  response. Per-restaurant generation guards prevent older responses from
+  overwriting the latest click.
 
 ## Favorites
 

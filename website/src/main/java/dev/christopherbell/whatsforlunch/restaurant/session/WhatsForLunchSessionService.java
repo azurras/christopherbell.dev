@@ -271,7 +271,7 @@ public class WhatsForLunchSessionService {
       String selfId,
       List<Restaurant> restaurants
   ) {
-    return toDetailFromHydratedRestaurants(session, selfId, toRatedDetails(restaurants, selfId));
+    return toDetailFromHydratedRestaurants(session, selfId, toVoteDetails(restaurants, selfId));
   }
 
   private List<WhatsForLunchSessionDetail> toDetails(
@@ -290,7 +290,7 @@ public class WhatsForLunchSessionService {
     var restaurantsById = new LinkedHashMap<String, Restaurant>();
     restaurantRepository.findAllById(restaurantIds)
         .forEach(restaurant -> restaurantsById.put(restaurant.getId(), restaurant));
-    var detailsById = toRatedDetails(restaurantIds.stream()
+    var detailsById = toVoteDetails(restaurantIds.stream()
         .map(restaurantsById::get)
         .filter(java.util.Objects::nonNull)
         .toList(), selfId).stream()
@@ -352,7 +352,7 @@ public class WhatsForLunchSessionService {
         .build();
   }
 
-  private List<RestaurantDetail> toRatedDetails(List<Restaurant> restaurants, String selfId) {
+  private List<RestaurantDetail> toVoteDetails(List<Restaurant> restaurants, String selfId) {
     var details = restaurants.stream()
         .map(restaurantMapper::toRestaurantDetail)
         .toList();

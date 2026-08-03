@@ -386,8 +386,10 @@ Production requires an explicit `SPRING_MONGODB_URI`; there is no localhost
 fallback. Pre-refresh validation also requires a strong `APP_JWT_SECRET` and an
 explicit mail policy. Use `APP_MAIL_ENABLED=true` with `RESEND_API_KEY` and
 `APP_MAIL_FROM`, or `APP_MAIL_ENABLED=false` to intentionally disable delivery.
-Startup applies immutable, leased MongoDB migrations before readiness. Back up
-before migration releases; application rollback does not reverse data. See the
+Startup applies immutable, leased MongoDB migrations before readiness. The
+deployment candidate runs first against a verified backup restored into a
+disposable database; it never starts against the live database. Back up before
+migration releases; application rollback does not reverse data. See the
 [MongoDB migration runbook](docs/operations/mongodb-migrations.md).
 
 From an elevated PowerShell prompt, bootstrap and configure the runtime, then
@@ -408,9 +410,13 @@ placeholder. On a fresh host, `CloudflareTokenPath` points to a temporary,
 protected file containing only the rotated tunnel token; delete that file as
 soon as installation succeeds. Existing cloudflared services do not require the
 token again. `deploy` fetches the exact latest `origin/main` commit into a clean
-detached Windows worktree, builds and tests it, validates it on port 8081,
-atomically switches the active release, and rolls back when port-8080
-or public-route verification fails. Candidate and production checks cover the
+detached Windows worktree, builds and tests it, backs up the live database,
+restores that backup into a bounded disposable candidate database, and validates
+the release on port 8081 against only that clone. Cutover stops the old writer
+before the new release can run migrations against live data. Once the new
+release is started, failures are forward-only: the website remains stopped and
+unready for an operator to repair forward; deployment never restarts the prior
+binary or automatically restores data. Candidate and production checks cover the
 home, blog, WFL, Canes tracker, crawler metadata, ActivityPub NodeInfo, favicon,
 liveness, and readiness routes. Protected `deploy.json` configuration lists both
 `https://christopherbell.dev/` and `https://www.christopherbell.dev/` in
@@ -423,7 +429,7 @@ the secret-bearing configuration file.
 at boot and once per minute. Each invocation checks the remote SHA once and
 exits, so there is no persistent terminal process to interrupt or confirm.
 Unchanged checks do not fetch, build, or restart the site. A changed SHA enters
-the same locked deployment and rollback pipeline; no inbound webhook, GitHub
+the same locked deployment and forward-only cutover pipeline; no inbound webhook, GitHub
 runner, routine administrator approval, or manual deployment command is
 required.
 
@@ -438,6 +444,10 @@ Common operations:
 .\prod.cmd auto-status
 .\prod.cmd verify-startup
 ```
+
+`rollback` changes application release junctions only. Do not use it after an
+incompatible migration has crossed the live migration boundary; repair forward
+or perform an explicitly approved restore from the retained verified backup.
 
 The `prod` Spring profile also enables Mission Control host integrations. It
 sets `command-center.actions.mode=WINDOWS`, reads only the fixed WinSW service

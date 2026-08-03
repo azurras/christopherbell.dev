@@ -177,6 +177,41 @@ function Invoke-CheckedProcess {
     return $stdout
 }
 
+function Get-NativeMongoDumpArguments {
+    param([Parameter(Mandatory)][string]$Archive)
+    @('--uri=mongodb://127.0.0.1:27017','--db=christopherbell',"--archive=$Archive",'--gzip')
+}
+
+function Get-NativeMongoRestoreDryRunArguments {
+    param([Parameter(Mandatory)][string]$Archive)
+    @('--uri=mongodb://127.0.0.1:27017',"--archive=$Archive",'--gzip','--dryRun')
+}
+
+function New-ProductionBackup {
+    $config = Read-ProductionConfig
+    New-Item -ItemType Directory -Force $config.backupRoot | Out-Null
+    $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+    $archive = Join-Path $config.backupRoot "christopherbell-native-$stamp.archive.gz"
+    Invoke-CheckedProcess `
+        (Join-Path $config.mongoToolsPath 'mongodump.exe') `
+        (Get-NativeMongoDumpArguments $archive) `
+        $config.repositoryPath | Out-Null
+    if (-not (Test-Path -LiteralPath $archive -PathType Leaf) -or
+        (Get-Item -LiteralPath $archive).Length -eq 0) {
+        throw 'mongodump failed or created an empty archive.'
+    }
+    Invoke-CheckedProcess `
+        (Join-Path $config.mongoToolsPath 'mongorestore.exe') `
+        (Get-NativeMongoRestoreDryRunArguments $archive) `
+        $config.repositoryPath | Out-Null
+    [ordered]@{
+        archive = $archive
+        sha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+        createdAt = (Get-Date).ToUniversalTime().ToString('o')
+    } | ConvertTo-Json | Set-Content -LiteralPath "$archive.sha256.json" -Encoding utf8
+    return $archive
+}
+
 function Enter-DeploymentLock {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$LockPath)
@@ -492,4 +527,4 @@ Commands: install, deploy, status, logs, restart, releases, rollback, backup,
 '@ | Write-Output
 }
 
-Export-ModuleMember -Function Read-ProductionConfig,New-ProductionProcessStartInfo,Invoke-CheckedProcess,Enter-DeploymentLock,New-ProtectedProductionAcl,Assert-ProductionPathNotReparse,Assert-ProductionTreeNotReparse,Assert-ProtectedProductionPath,Protect-ProductionPath,Protect-ProductionTree,Assert-ProtectedProductionTree,Invoke-ProductionWebRequest,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Get-TrustedGitArguments,Show-ProductionHelp
+Export-ModuleMember -Function Read-ProductionConfig,New-ProductionProcessStartInfo,Invoke-CheckedProcess,Get-NativeMongoDumpArguments,Get-NativeMongoRestoreDryRunArguments,New-ProductionBackup,Enter-DeploymentLock,New-ProtectedProductionAcl,Assert-ProductionPathNotReparse,Assert-ProductionTreeNotReparse,Assert-ProtectedProductionPath,Protect-ProductionPath,Protect-ProductionTree,Assert-ProtectedProductionTree,Invoke-ProductionWebRequest,Wait-HttpStatus,Read-ProductionEnvironment,Assert-ReleasePath,Get-JunctionTarget,Set-AtomicJunction,Get-TrustedGitArguments,Show-ProductionHelp

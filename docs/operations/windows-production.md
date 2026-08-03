@@ -259,10 +259,18 @@ Manual deployment remains available as a break-glass operation:
 .\prod.cmd deploy
 ```
 
-Deployment fetches `origin/main`, builds a disposable detached worktree,
-validates a candidate on port 8081, switches release junctions, starts the
-service, verifies port 8080, and restores the prior junction if verification
-fails.
+Deployment fetches `origin/main`, builds a disposable detached worktree, creates
+a verified live-database backup, restores it into an exact bounded candidate
+database, and validates the candidate on port 8081 against that clone. The clone
+is removed in `finally`; its generated name is allowlisted before both restore
+and cleanup, while the verified archive and SHA-256 sidecar are retained.
+
+Cutover stops the old website service and verifies the production listener is
+gone before switching release junctions or starting the new release. Starting
+the new release is the live migration boundary. Any failure after that point is
+forward-only: deployment stops the website, leaves it unready, and reports an
+actionable error. It does not restart the prior binary or automatically restore
+MongoDB data.
 
 Monitor automatic deployment:
 
@@ -509,10 +517,11 @@ The command connects explicitly to IPv4 loopback, writes
 `mongorestore --dryRun`, and writes a SHA-256 JSON sidecar. It never removes
 older verified archives.
 
-Before restoring production, verify the sidecar hash, restore into a disposable
-database, compare required collections/counts/indexes, and exercise a candidate
-release against that database. Production restore is an explicit maintenance
-operation; ordinary deployment and application rollback do not modify MongoDB.
+Every ordinary deployment uses the verified archive to restore a bounded,
+disposable candidate database and exercises the candidate against it. Candidate
+cleanup is exact and automatic, but the archive remains recovery evidence.
+Production restore is a separate, explicit maintenance operation; deployment
+and application rollback never restore live MongoDB data automatically.
 
 See [MongoDB Backup and Restore](mongodb-backup-restore.md) for detailed restore
 commands.
@@ -527,6 +536,12 @@ commands.
 Rollback requires valid `current` and `previous` release junctions. If the
 restored release fails endpoint verification, the command restores the original
 junctions and service. It does not roll back MongoDB or cloudflared.
+
+Use release rollback only when the live database is known to remain compatible
+with the prior binary. After an incompatible migration has crossed the live
+migration boundary, do not run or restart the prior release. Keep the website
+stopped and unready, preserve the deployment backup and failure evidence, and
+repair forward or obtain explicit approval for a production data restore.
 
 ## cloudflared Token Rotation
 
@@ -587,10 +602,15 @@ sidecar.
 
 ## Failure Recovery
 
-- Candidate failure: production remains on the current release; inspect build
-  and candidate logs.
-- Port-8080 verification failure: automatic release rollback restores the prior
-  junction.
+- Candidate failure: production remains on the current release; inspect build,
+  restore, candidate, and exact-cleanup evidence. The candidate never uses the
+  live database.
+- Failure before the live migration boundary: production remains on the prior
+  compatible release.
+- Failure after the live migration boundary, including port-8080 or public-route
+  verification: the website remains stopped and unready. Do not restart the
+  prior binary; preserve the verified backup and repair forward. Restore live
+  data only as a separate, explicitly approved maintenance operation.
 - MongoDB failure: stop deployment activity, inspect the native MongoDB service
   and logs, and restore only from a verified archive after explicit approval.
 - cloudflared failure: restart the native service, inspect Windows events, and

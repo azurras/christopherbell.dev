@@ -91,7 +91,7 @@ test('restaurant profile uses the accessible Void profile shell', () => {
   assert.match(css, /\.lunch-void-page \.restaurant-profile-void/);
   assert.match(
     css,
-    /\.lunch-void-page \.restaurant-vote-value\s*{[^}]*white-space:\s*nowrap/s,
+    /\.lunch-void-page \.restaurant-vote-value\s*{[^}]*white-space:\s*normal[^}]*overflow-wrap:\s*anywhere/s,
   );
   assert.match(
     css,
@@ -103,6 +103,24 @@ test('restaurant profile uses the accessible Void profile shell', () => {
     /\.lunch-void-page \.lunch-vote-button\[aria-pressed="true"\]\s*{[^}]*background:/s,
   );
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+test('WFL list vote controls are scoped, wrapping, and keyboard visible', () => {
+  const css = fs.readFileSync(
+    'website/src/main/resources/static/css/main.css', 'utf8');
+
+  assert.match(
+    css,
+    /\.wfl-list-card \.lunch-vote-control\s*{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/s,
+  );
+  assert.match(
+    css,
+    /\.wfl-list-card \.lunch-vote-button:focus-visible\s*{[^}]*outline:/s,
+  );
+  assert.match(
+    css,
+    /\.wfl-list-card \.lunch-vote-button\[aria-pressed="true"\]\s*{[^}]*background:/s,
+  );
 });
 
 test('back office Music permissions expose labelled read and write controls', () => {

@@ -45,7 +45,10 @@ Owns What's For Lunch restaurant persistence and API records.
   imported restaurant data. Aggregate `upVotes`, `downVotes`, and `voteCount`
   are attached to `RestaurantDetail`. Signed-in callers also get their own
   `myVote` value. Browser/API writes use `RestaurantVoteSetRequest` so provider
-  IDs such as OpenStreetMap IDs stay in JSON instead of URL path segments.
+  IDs such as OpenStreetMap IDs stay in JSON instead of URL path segments. The
+  set request accepts exactly `restaurantId` and `vote`; the path request accepts
+  exactly `vote`. Unknown properties, including the removed `rating` key, are
+  rejected locally even when their value is null.
 - The model/API contract is binary votes. SSR and browser presentation consume
   the vote fields directly without a compatibility layer.
 - Favorites are stored separately from restaurants so member personalization does

@@ -46,9 +46,11 @@ Owns site styling for server-rendered pages and frontend components.
   classes for the full Signal Log page and category preference panel. The nav
   bell keeps only the three most recent notifications and uses the compact
   notification dropdown rules near the shared nav styles.
-- WFL Favorites and Top Liked retain their shared list classes in `main.css`.
+- WFL Favorites and Top Liked retain their shared list classes in `main.css`,
+  including wrapping, visible-focus binary controls scoped to list cards.
   Picks and restaurant profiles use `.lunch-void-*`, `.lunch-vote-*`, and scoped
-  rules from `whats-for-lunch.css` without changing neighboring pages.
+  rules from `whats-for-lunch.css`; long vote totals wrap instead of widening
+  mobile cards, without changing neighboring pages.
 - ZIP Coordinates uses `.zip-coordinate-*` classes in `main.css` for its
   Void-inspired lookup shell, result grid, and copyable endpoint output.
 - Raising Canes Box Index uses `.canes-box-*` classes in `main.css` for its

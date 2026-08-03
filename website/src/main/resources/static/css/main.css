@@ -1605,6 +1605,47 @@ body {
     color: rgba(23, 32, 42, 0.72);
 }
 
+.wfl-list-card .lunch-vote-summary {
+    overflow-wrap: anywhere;
+}
+
+.wfl-list-card .lunch-vote-control {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.wfl-list-card .lunch-vote-button {
+    min-width: 2.75rem;
+    min-height: 2.5rem;
+    border: 1px solid rgba(23, 32, 42, 0.28);
+    border-radius: 0.35rem;
+    background: #ffffff;
+    color: #244323;
+}
+
+.wfl-list-card .lunch-vote-button:hover {
+    border-color: #4f7d4d;
+    background: #eef6ed;
+}
+
+.wfl-list-card .lunch-vote-button:focus-visible {
+    outline: 3px solid #4f7d4d;
+    outline-offset: 2px;
+}
+
+.wfl-list-card .lunch-vote-button[aria-pressed="true"] {
+    border-color: #4f7d4d;
+    background: #dcebd9;
+    color: #244323;
+    font-weight: 800;
+}
+
+.wfl-list-card .lunch-vote-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
 .lunch-toolbar {
     width: 100%;
     display: grid;

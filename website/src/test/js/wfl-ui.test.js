@@ -58,4 +58,14 @@ test('WFL cuisine and vote summaries preserve display fallbacks', () => {
     approvalPercentage: null,
     overall: 'No votes yet',
   });
+  assert.deepEqual(wflUi.voteSummary({
+    upVotes: '123456789', downVotes: '123456789', voteCount: '246913578', myVote: 'DOWN',
+  }), {
+    upVotes: 123456789,
+    downVotes: 123456789,
+    voteCount: 246913578,
+    myVote: 'DOWN',
+    approvalPercentage: 50,
+    overall: '50% liked · 123456789 up · 123456789 down',
+  });
 });

@@ -101,7 +101,10 @@ Owns browser-side behavior for server-rendered pages.
   cards so rich iframes defer their `src` until they are near the viewport.
 - `wfl-list.js` renders the WFL secondary pages for favorites and the public Top
   10 Liked list, whose server order is approval percentage, vote count, then
-  stable restaurant ID.
+  stable restaurant ID. Signed-in members receive accessible binary vote
+  controls on both lists. Each card owns its pending/error state and ignores
+  stale responses from earlier clicks; anonymous Top Liked uses only the public
+  list response and never fetches per-restaurant details.
 - `user-feed.js` renders public profiles and exposes signed-in mute/block
   actions for other users.
 - `back-office.js` gates the Back Office to admins, renders report/user queues

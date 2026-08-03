@@ -113,7 +113,7 @@ public class RestaurantService {
 
     try {
       var savedRestaurant = restaurantRepository.save(restaurant);
-      return toRatedDetail(savedRestaurant);
+      return toVoteDetail(savedRestaurant);
     } catch (DuplicateKeyException e) {
       throw new ResourceExistsException("Restaurant already exists", e);
     } catch (DataAccessException e) {
@@ -145,7 +145,7 @@ public class RestaurantService {
     } catch (DataAccessException e) {
       throw new ServiceUnavailableException("Failed to delete restaurant with id: " + id, e);
     }
-    return toRatedDetail(restaurant);
+    return toVoteDetail(restaurant);
   }
 
   /**
@@ -158,7 +158,7 @@ public class RestaurantService {
         0,
         100,
         Sort.by(Sort.Order.asc("normalizedName"), Sort.Order.asc("_id")))).getContent();
-    return toRatedDetails(restaurants);
+    return toVoteDetails(restaurants);
   }
 
   /** Returns one stable searchable admin inventory page. */
@@ -171,7 +171,7 @@ public class RestaurantService {
   ) {
     var page = restaurantInventoryQueries.find(name, city, state, cursor, size);
     return new RestaurantInventoryPage(
-        toRatedDetails(page.items()), page.nextCursor(), page.total());
+        toVoteDetails(page.items()), page.nextCursor(), page.total());
   }
 
   /**
@@ -187,7 +187,7 @@ public class RestaurantService {
     if (picks.size() < Math.min(dailyPickCount(), getSupportedMetroRestaurants().size())) {
       picks = getRestaurantsForPick(refreshDailyLunchPicks(today));
     }
-    return toRatedDetails(picks);
+    return toVoteDetails(picks);
   }
 
   /**
@@ -303,7 +303,7 @@ public class RestaurantService {
             restaurant.getAddress().getLongitude()) <= radiusMiles)
         .toList();
 
-    return toRatedDetails(selectLunchCandidates(
+    return toVoteDetails(selectLunchCandidates(
         candidates, NEARBY_LUNCH_PICK_COUNT));
   }
 
@@ -395,7 +395,7 @@ public class RestaurantService {
     existing.setVote(vote);
     existing.setLastUpdatedOn(now);
     restaurantVoteRepository.save(existing);
-    return toRatedDetail(restaurant);
+    return toVoteDetail(restaurant);
   }
 
   /**
@@ -421,7 +421,7 @@ public class RestaurantService {
           .createdOn(Instant.now(clock))
           .build());
     }
-    return toRatedDetail(restaurant);
+    return toVoteDetail(restaurant);
   }
 
   /**
@@ -439,7 +439,7 @@ public class RestaurantService {
         .orElseThrow(() -> new ResourceNotFoundException("Restaurant not found: " + restaurantId));
     var accountId = permissionService.getSelfId();
     restaurantFavoriteRepository.deleteByRestaurantIdAndAccountId(restaurantId, accountId);
-    return toRatedDetail(restaurant);
+    return toVoteDetail(restaurant);
   }
 
   /**
@@ -459,7 +459,7 @@ public class RestaurantService {
     var restaurantsById = new java.util.LinkedHashMap<String, Restaurant>();
     restaurantRepository.findAllById(restaurantIds)
         .forEach(restaurant -> restaurantsById.put(restaurant.getId(), restaurant));
-    return toRatedDetails(restaurantIds.stream()
+    return toVoteDetails(restaurantIds.stream()
         .map(restaurantsById::get)
         .filter(restaurant -> restaurant != null)
         .toList());
@@ -479,7 +479,7 @@ public class RestaurantService {
     var restaurantsById = new java.util.LinkedHashMap<String, Restaurant>();
     restaurantRepository.findAllById(restaurantIds)
         .forEach(restaurant -> restaurantsById.put(restaurant.getId(), restaurant));
-    return toRatedDetails(restaurantIds.stream()
+    return toVoteDetails(restaurantIds.stream()
         .map(restaurantsById::get)
         .filter(restaurant -> restaurant != null)
         .toList());
@@ -509,7 +509,7 @@ public class RestaurantService {
 
     log.info("Deleted today's lunch restaurant id: {}.", id);
     var updatedPick = replaceDeletedRestaurantInTodaysPick(id);
-    return toRatedDetails(getRestaurantsForPick(updatedPick));
+    return toVoteDetails(getRestaurantsForPick(updatedPick));
   }
 
   /**
@@ -885,7 +885,7 @@ public class RestaurantService {
     }
 
     return restaurantRepository.findById(id)
-        .map(this::toRatedDetail)
+        .map(this::toVoteDetail)
         .orElseThrow(() -> new ResourceNotFoundException("Restaurant not found: " + id));
   }
 
@@ -922,7 +922,7 @@ public class RestaurantService {
 
     try {
       var saved = restaurantRepository.save(restaurantToUpdate);
-      return toRatedDetail(saved);
+      return toVoteDetail(saved);
     } catch (DataAccessException e) {
       throw new ServiceUnavailableException(
           "Failed to update restaurant with id: " + request.id(), e);
@@ -1019,26 +1019,26 @@ public class RestaurantService {
         .collect(Collectors.toCollection(ArrayList::new));
   }
 
-  private RestaurantDetail toRatedDetail(Restaurant restaurant) {
+  private RestaurantDetail toVoteDetail(Restaurant restaurant) {
     if (restaurant == null) {
       return null;
     }
-    var details = toRatedDetails(List.of(restaurant));
+    var details = toVoteDetails(List.of(restaurant));
     return details.isEmpty() ? null : details.get(0);
   }
 
-  private List<RestaurantDetail> toRatedDetails(List<Restaurant> restaurants) {
+  private List<RestaurantDetail> toVoteDetails(List<Restaurant> restaurants) {
     var safeRestaurants = Optional.ofNullable(restaurants).orElseGet(List::of);
     var details = safeRestaurants.stream()
         .map(restaurantMapper::toRestaurantDetail)
         .toList();
     details.forEach(detail -> detail.setWebsite(
         RestaurantWebsiteUrlPolicy.safeOrNull(detail.getWebsite())));
-    applyRatingSummaries(details);
+    applyVoteSummaries(details);
     return details;
   }
 
-  private void applyRatingSummaries(List<RestaurantDetail> details) {
+  private void applyVoteSummaries(List<RestaurantDetail> details) {
     if (details == null || details.isEmpty()) {
       return;
     }

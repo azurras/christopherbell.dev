@@ -390,7 +390,8 @@
     font-size: clamp(1.65rem, 4vw, 1.95rem);
     font-weight: 800;
     letter-spacing: -0.035em;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .lunch-void-page .restaurant-vote-signal > p:last-child,
