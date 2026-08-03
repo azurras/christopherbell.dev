@@ -200,7 +200,6 @@ function restaurantCard(restaurant, index) {
 
   return `
     <article class="lunch-pick" ${restaurantHref ? `data-restaurant-href="${sanitize(restaurantHref)}"` : ''}>
-      <div class="lunch-pick-rank">${index + 1}</div>
       <div class="lunch-pick-body">
         <div class="lunch-pick-header">
           <h2>${restaurantHref
@@ -389,8 +388,9 @@ function renderPicks(picks) {
     ${wflSecondaryNavigation('picks')}
     ${wflFreshnessMarkup(dataFreshness)}
     <div class="lunch-toolbar">
-      <div>
+      <div class="lunch-toolbar-copy">
         <p>${toolbarText}</p>
+        <p class="lunch-weighting-note">Ratings influence the draw. Every eligible restaurant stays in the mix.</p>
       </div>
       <button type="button" class="btn btn-primary lunch-location-refresh lunch-primary-refresh" ${activeSession && !activeSession.canChangeRestaurants ? 'disabled title="Only the active session host can change the picks"' : ''}>Try 3 more</button>
     </div>

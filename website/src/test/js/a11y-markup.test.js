@@ -51,6 +51,24 @@ test('back office links admins to the dedicated command center', () => {
   assert.match(html, /href="\/command-center"/);
 });
 
+test('WFL decision console is labelled, non-ranked, and keyboard visible', () => {
+  const html = fs.readFileSync(
+    'website/src/main/resources/templates/whatsforlunch.html', 'utf8');
+  const css = fs.readFileSync(
+    'website/src/main/resources/static/css/whats-for-lunch.css', 'utf8');
+  const script = fs.readFileSync(
+    'website/src/main/resources/static/js/whats-for-lunch.js', 'utf8');
+
+  assert.equal((html.match(/<main\b/g) || []).length, 1);
+  assert.equal((html.match(/<h1\b/g) || []).length, 1);
+  assert.match(html, /<main[^>]+aria-labelledby="lunchTitle"/);
+  assert.match(html, /class="[^"]*lunch-void-page/);
+  assert.match(script, /class="lunch-weighting-note"/);
+  assert.doesNotMatch(script, /lunch-pick-rank/);
+  assert.match(css, /\.lunch-void-page [^{]+:focus-visible/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
 test('back office Music permissions expose labelled read and write controls', () => {
   const html = fs.readFileSync('website/src/main/resources/templates/back-office.html', 'utf8');
 
