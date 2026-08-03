@@ -20,12 +20,12 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
   receive atomic session updates, and vote. The creator alone can reset picks.
   Sessions are active for 24 hours, remain as a read-only archive for 30 more
   days, and carry a TTL deletion deadline.
-- Logged-in restaurant ratings with public whole-number rating totals.
+- Logged-in restaurant thumb votes with public approval percentages and vote totals.
 - Restaurant websites are persisted and rendered only as absolute HTTP(S) URLs; unsafe legacy values are omitted.
 - Public restaurant profile routes server-render indexable profile content,
   canonical and social metadata, and schema.org Restaurant JSON-LD. Browser
-  JavaScript adds only signed-in rating and favorite controls, so anonymous
-  visitors and crawlers do not depend on the restaurant detail API.
+  controls remain separate from the public page, so anonymous visitors and
+  crawlers do not depend on the restaurant detail API.
 - Legacy daily lunch picks persisted per day and refreshed at midnight Central. Scheduled refreshes
   use the shared renewable Mongo lease so only one application instance writes a given run; request
   fallback generation keeps its existing behavior. Already persisted daily and
@@ -48,6 +48,6 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
 ## Update This Doc
 
 Update this README when restaurant fields, import behavior, dedupe rules, nearby
-pick behavior, Location ZIP dependencies, rating behavior, shared session
+pick behavior, Location ZIP dependencies, vote behavior, shared session
 behavior, daily pick behavior, WFL routes, or admin maintenance endpoints
 change.

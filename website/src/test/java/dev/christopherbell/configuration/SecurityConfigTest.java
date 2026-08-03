@@ -45,6 +45,22 @@ class SecurityConfigTest {
   }
 
   @Test
+  void publicMatchers_whenWflTopLikedRequested_exposesOnlyPublicReads() throws Exception {
+    var api = "/api/whatsforlunch/restaurant/2026-05-17/top-liked";
+    var canonicalPage = "/wfl/top-liked";
+    var legacyPage = "/wfl/top-rated";
+    var vote = "/api/whatsforlunch/restaurant/2026-05-17/restaurant-1/vote";
+
+    assertTrue(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request("GET", api))));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request("PUT", api))));
+    assertTrue(publicMatchers().stream().anyMatch(
+        matcher -> matcher.matches(request("GET", canonicalPage))));
+    assertTrue(publicMatchers().stream().anyMatch(
+        matcher -> matcher.matches(request("GET", legacyPage))));
+    assertFalse(publicMatchers().stream().anyMatch(matcher -> matcher.matches(request("PUT", vote))));
+  }
+
+  @Test
   void publicMatchers_whenVinBatchDecodeRequested_matchesOnlyExactPost() throws Exception {
     var path = "/api/vehicles/2026-07-26/vin/decode/batch";
 

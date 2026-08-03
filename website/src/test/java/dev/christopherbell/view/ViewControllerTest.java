@@ -166,7 +166,9 @@ public class ViewControllerTest {
         .andExpect(content().string(containsString(
             "rel=\"canonical\" href=\"https://www.christopherbell.dev/wfl/restaurants/restaurant-123\"")))
         .andExpect(content().string(containsString("100 Main St, Austin, TX, 78701")))
-        .andExpect(content().string(containsString("4.5/5 from 2 ratings")))
+        .andExpect(content().string(containsString("88% liked · 7 up · 1 down")))
+        .andExpect(content().string(not(containsString("Aggregate rating"))))
+        .andExpect(content().string(not(containsString("/5 from"))))
         .andExpect(content().string(containsString("href=\"/css/whats-for-lunch.css\"")))
         .andExpect(content().string(containsString(
             "void-shell-page lunch-page lunch-void-page restaurant-profile-page")))
@@ -187,13 +189,13 @@ public class ViewControllerTest {
         "/wfl/restaurants/restaurant-123",
         "https://www.christopherbell.dev/wfl/restaurants/restaurant-123",
         "CB | Taco Place",
-        "Mexican restaurant in Austin, TX. Details and ratings from What's For Lunch.",
+        "Mexican restaurant in Austin, TX. Details and member approval from What's For Lunch.",
         "Taco Place",
         "Mexican",
         "Mexican restaurant in Austin, TX.",
         new RestaurantProfilePage.Address(
             "100 Main St", null, "Austin", "TX", "78701", "US", 30.2672, -97.7431),
-        new RestaurantProfilePage.Rating(2, 9),
+        new RestaurantProfilePage.VoteSummary(7, 1, 8),
         "512-555-0100",
         "https://example.com/menu",
         "restaurant",
@@ -214,7 +216,7 @@ public class ViewControllerTest {
         base.cuisine(),
         base.heroMetadata(),
         base.address(),
-        base.rating(),
+        base.votes(),
         base.phoneNumber(),
         base.website(),
         base.sourceType(),
@@ -276,16 +278,24 @@ public class ViewControllerTest {
   }
 
   @Test
-  @DisplayName("WFL top-rated page renders the list app mount")
-  public void getWhatsForLunchTopRatedPage_rendersListMount() throws Exception {
+  @DisplayName("WFL top-liked page renders the canonical list app mount")
+  public void getWhatsForLunchTopLikedPage_rendersListMount() throws Exception {
     mockMvc
-        .perform(get("/wfl/top-rated"))
+        .perform(get("/wfl/top-liked"))
         .andExpect(status().isOk())
-        .andExpect(content().string(containsString("CB | Top Rated Restaurants")))
+        .andExpect(content().string(containsString("CB | Top 10 Liked Restaurants")))
         .andExpect(content().string(not(containsString("noindex,nofollow"))))
         .andExpect(content().string(containsString(
-            "rel=\"canonical\" href=\"https://www.christopherbell.dev/wfl/top-rated\"")))
-        .andExpect(content().string(containsString("data-list-mode=\"top-rated\"")));
+            "rel=\"canonical\" href=\"https://www.christopherbell.dev/wfl/top-liked\"")))
+        .andExpect(content().string(containsString("data-list-mode=\"top-liked\"")));
+  }
+
+  @Test
+  @DisplayName("WFL top-rated permanently redirects to the canonical top-liked page")
+  public void getWhatsForLunchTopRatedPage_permanentlyRedirectsToTopLiked() throws Exception {
+    mockMvc.perform(get("/wfl/top-rated"))
+        .andExpect(status().isPermanentRedirect())
+        .andExpect(header().string("Location", "/wfl/top-liked"));
   }
 
   @Test

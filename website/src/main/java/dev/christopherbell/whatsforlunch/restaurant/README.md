@@ -20,7 +20,7 @@ Owns the data model and APIs for What's For Lunch restaurants.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/nearby/zip/{zipCode}` accepts a 5-digit ZIP code and uses imported Location Census ZCTA coordinates as the search origin.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/profile/{id}` returns a public restaurant profile used by `/wfl/restaurants/{id}`.
 - `/wfl/favorites` lists the signed-in user's favorited restaurants.
-- The existing `/wfl/top-rated` browser/SSR route is deferred Task 4 presentation work. It is not the current Java/API leaderboard contract; clients use the `/top-liked` API below until that presentation migration is completed.
+- `/wfl/top-liked` is the canonical public Top 10 Liked browser/SSR route; legacy `/wfl/top-rated` permanently redirects to it. The client-side list rendering remains owned by Task 5.
 - Optional `radiusMiles` query param controls the nearby search radius. Allowed values are `1`, `5`, `10`, `15`, and `20`.
 - Optional `cuisine` query params filter nearby picks by OpenStreetMap cuisine tags. Multiple values are allowed.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/preferences` is public so `/wfl` can load for anonymous visitors; it returns saved filters for an authenticated token and default filters otherwise.

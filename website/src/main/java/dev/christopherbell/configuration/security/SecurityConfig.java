@@ -151,6 +151,7 @@ public class SecurityConfig {
       "/command-center",
       "/wfl",
       "/wfl/favorites",
+      "/wfl/top-liked",
       "/wfl/top-rated",
       "/wfl/restaurants/**"
   };
