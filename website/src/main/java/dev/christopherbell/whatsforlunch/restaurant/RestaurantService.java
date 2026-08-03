@@ -36,6 +36,8 @@ import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenc
 import dev.christopherbell.whatsforlunch.restaurant.preference.WhatsForLunchPreferenceRepository;
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingQueryRepository;
+import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingSummary;
+import dev.christopherbell.whatsforlunch.restaurant.selection.RatingWeightedRestaurantSelector;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -47,14 +49,12 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Random;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -90,6 +90,7 @@ public class RestaurantService {
   private final RestaurantInventoryQueryRepository restaurantInventoryQueries;
   private final RestaurantRatingRepository restaurantRatingRepository;
   private final RestaurantRatingQueryRepository restaurantRatingQueryRepository;
+  private final RatingWeightedRestaurantSelector restaurantSelector;
   private final RestaurantRepository restaurantRepository;
   private final ScheduledCollectorCoordinator scheduledCollectors;
   private final WhatsForLunchPreferenceRepository whatsForLunchPreferenceRepository;
@@ -301,9 +302,8 @@ public class RestaurantService {
             restaurant.getAddress().getLongitude()) <= radiusMiles)
         .toList();
 
-    return toRatedDetails(orderLunchCandidates(candidates).stream()
-        .limit(NEARBY_LUNCH_PICK_COUNT)
-        .toList());
+    return toRatedDetails(selectLunchCandidates(
+        candidates, NEARBY_LUNCH_PICK_COUNT));
   }
 
   /**
@@ -954,9 +954,9 @@ public class RestaurantService {
   private DailyLunchPicks refreshDailyLunchPicks(
       LocalDate pickDate,
       CollectorLeaseGuard guard) {
-    var candidates = orderLunchCandidates(getSupportedMetroRestaurants());
-    var restaurantIds = candidates.stream()
-        .limit(dailyPickCount())
+    var selected = selectLunchCandidates(
+        getSupportedMetroRestaurants(), dailyPickCount());
+    var restaurantIds = selected.stream()
         .map(Restaurant::getId)
         .toList();
     var pick = DailyLunchPicks.builder()
@@ -979,15 +979,13 @@ public class RestaurantService {
 
     var selectedIds = getExistingPickIdsWithoutDeletedRestaurant(existing, deletedRestaurantId);
     if (selectedIds.size() < dailyPickCount()) {
-      var candidates = orderLunchCandidates(getSupportedMetroRestaurants().stream()
+      int replacementCount = dailyPickCount() - selectedIds.size();
+      var candidates = getSupportedMetroRestaurants().stream()
           .filter(restaurant -> !selectedIds.contains(restaurant.getId()))
-          .toList());
-      for (Restaurant candidate : candidates) {
-        if (selectedIds.size() >= dailyPickCount()) {
-          break;
-        }
-        selectedIds.add(candidate.getId());
-      }
+          .toList();
+      selectLunchCandidates(candidates, replacementCount).stream()
+          .map(Restaurant::getId)
+          .forEach(selectedIds::add);
     }
 
     var pick = DailyLunchPicks.builder()
@@ -1116,10 +1114,23 @@ public class RestaurantService {
         .toList();
   }
 
-  private List<Restaurant> orderLunchCandidates(List<Restaurant> restaurants) {
-    var candidates = new ArrayList<>(restaurants);
-    Collections.shuffle(candidates, new Random());
-    return candidates;
+  private List<Restaurant> selectLunchCandidates(
+      List<Restaurant> candidates,
+      int requestedCount
+  ) {
+    if (candidates.isEmpty() || requestedCount == 0) {
+      return List.of();
+    }
+    var candidateIds = candidates.stream()
+        .map(Restaurant::getId)
+        .toList();
+    Map<String, RestaurantRatingSummary> summariesByRestaurantId =
+        restaurantRatingQueryRepository.summariesForRestaurants(candidateIds).stream()
+            .collect(Collectors.toUnmodifiableMap(
+                RestaurantRatingSummary::restaurantId,
+                Function.identity()));
+    return restaurantSelector.select(
+        candidates, summariesByRestaurantId, requestedCount);
   }
 
   private List<String> resolveCuisineFilters(

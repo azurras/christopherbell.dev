@@ -30,13 +30,16 @@ import dev.christopherbell.whatsforlunch.restaurant.preference.WhatsForLunchPref
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingQueryRepository;
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingSummary;
+import dev.christopherbell.whatsforlunch.restaurant.selection.RatingWeightedRestaurantSelector;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,10 +61,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -86,11 +92,24 @@ public class RestaurantServiceTest {
   @Mock private RestaurantInventoryQueryRepository restaurantInventoryQueries;
   @Mock private RestaurantRatingRepository restaurantRatingRepository;
   @Mock private RestaurantRatingQueryRepository restaurantRatingQueryRepository;
+  @Mock private RatingWeightedRestaurantSelector restaurantSelector;
   @Mock private RestaurantRepository restaurantRepository;
   @Mock private WhatsForLunchPreferenceRepository whatsForLunchPreferenceRepository;
   @Mock private ZipCoordinateService zipCoordinateService;
   @Spy private WflProperties wflProperties = new WflProperties();
   @InjectMocks private RestaurantService restaurantService;
+
+  @BeforeEach
+  void setUpWeightedSelectionDefaults() {
+    lenient().when(restaurantRatingQueryRepository.summariesForRestaurants(any()))
+        .thenReturn(List.of());
+    lenient().when(restaurantSelector.select(any(), any(), anyInt()))
+        .thenAnswer(invocation -> {
+          List<Restaurant> candidates = invocation.getArgument(0);
+          int requestedCount = invocation.getArgument(2);
+          return candidates.stream().limit(requestedCount).toList();
+        });
+  }
 
   @Test
   @DisplayName("Maps request -> entity, saves, maps to detail, returns detail")
@@ -350,6 +369,36 @@ public class RestaurantServiceTest {
     assertEquals(3, result.size());
     assertTrue(ids.containsAll(List.of("austin", "east-austin", "south-austin")));
     verify(restaurantRepository).findByCoordinateBounds(anyDouble(), anyDouble(), anyDouble(), anyDouble());
+  }
+
+  @Test
+  @DisplayName("Nearby lunch picks: returns the weighted selector's choice")
+  void nearbyLunchPicksReturnTheWeightedSelectorsChoice() throws Exception {
+    var low = nearbyRestaurant("low", "Low", 30.2672, -97.7431);
+    var neutral = nearbyRestaurant("neutral", "Neutral", 30.2673, -97.7432);
+    var high = nearbyRestaurant("high", "High", 30.2674, -97.7433);
+    var extra = nearbyRestaurant("extra", "Extra", 30.2675, -97.7434);
+    var highDetail = RestaurantStub.getRestaurantDetailStub("high");
+    var neutralDetail = RestaurantStub.getRestaurantDetailStub("neutral");
+    var extraDetail = RestaurantStub.getRestaurantDetailStub("extra");
+    var summaries = List.of(
+        new RestaurantRatingSummary("low", 20, 20),
+        new RestaurantRatingSummary("high", 20, 100));
+
+    stubCoordinateCandidates(List.of(low, neutral, high, extra));
+    when(restaurantRatingQueryRepository.summariesForRestaurants(
+        List.of("low", "neutral", "high", "extra"))).thenReturn(summaries);
+    when(restaurantSelector.select(
+        List.of(low, neutral, high, extra),
+        Map.of("low", summaries.get(0), "high", summaries.get(1)),
+        3))
+        .thenReturn(List.of(high, neutral, extra));
+    when(restaurantMapper.toRestaurantDetail(high)).thenReturn(highDetail);
+    when(restaurantMapper.toRestaurantDetail(neutral)).thenReturn(neutralDetail);
+    when(restaurantMapper.toRestaurantDetail(extra)).thenReturn(extraDetail);
+
+    assertThat(restaurantService.getNearbyLunchPicks(30.2672, -97.7431))
+        .containsExactly(highDetail, neutralDetail, extraDetail);
   }
 
   @Test
@@ -855,14 +904,19 @@ public class RestaurantServiceTest {
   }
 
   @Test
-  @DisplayName("Delete today's lunch pick: deletes restaurant and replaces it")
-  public void testDeleteRestaurantFromTodaysLunchPicks_DeletesAndReplacesPick()
+  @DisplayName("Delete today's lunch pick: preserves survivors and uses weighted replacements")
+  void deleteTodaysLunchPickPreservesSurvivorsAndUsesWeightedReplacements()
       throws Exception {
     var deleted = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
     var kept = RestaurantStub.getRestaurantStub(RestaurantStub.ID_2);
-    var replacement = RestaurantStub.getRestaurantStub("replacement");
+    var first = RestaurantStub.getRestaurantStub("first");
+    var second = RestaurantStub.getRestaurantStub("second");
+    var third = RestaurantStub.getRestaurantStub("third");
+    List.of(kept, first, second, third)
+        .forEach(restaurant -> restaurant.getAddress().setCity("Austin"));
     var keptDetail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID_2);
-    var replacementDetail = RestaurantStub.getRestaurantDetailStub("replacement");
+    var thirdDetail = RestaurantStub.getRestaurantDetailStub("third");
+    var firstDetail = RestaurantStub.getRestaurantDetailStub("first");
     var today = LocalDate.now(ZoneId.of("America/Chicago")).toString();
     var existingPick = DailyLunchPicks.builder()
         .id(today)
@@ -870,24 +924,25 @@ public class RestaurantServiceTest {
         .restaurantIds(List.of(RestaurantStub.ID, RestaurantStub.ID_2))
         .build();
 
-    when(restaurantRepository.findById(eq(RestaurantStub.ID))).thenReturn(Optional.of(deleted));
-    when(dailyLunchPicksRepository.findById(eq(today))).thenReturn(Optional.of(existingPick));
-    when(restaurantRepository.findAllById(eq(List.of(RestaurantStub.ID_2)))).thenReturn(List.of(kept));
-    when(restaurantRepository.findAll()).thenReturn(List.of(kept, replacement));
-    when(dailyLunchPicksRepository.save(org.mockito.ArgumentMatchers.any(DailyLunchPicks.class)))
+    when(restaurantRepository.findById(RestaurantStub.ID)).thenReturn(Optional.of(deleted));
+    when(dailyLunchPicksRepository.findById(today)).thenReturn(Optional.of(existingPick));
+    when(restaurantRepository.findAllById(List.of(RestaurantStub.ID_2))).thenReturn(List.of(kept));
+    when(restaurantRepository.findAll()).thenReturn(List.of(kept, first, second, third));
+    when(restaurantSelector.select(List.of(first, second, third), Map.of(), 2))
+        .thenReturn(List.of(third, first));
+    when(dailyLunchPicksRepository.save(any(DailyLunchPicks.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
-    when(restaurantRepository.findAllById(eq(List.of(RestaurantStub.ID_2, "replacement"))))
-        .thenReturn(List.of(kept, replacement));
-    when(restaurantMapper.toRestaurantDetail(eq(kept))).thenReturn(keptDetail);
-    when(restaurantMapper.toRestaurantDetail(eq(replacement))).thenReturn(replacementDetail);
+    when(restaurantRepository.findAllById(
+        List.of(RestaurantStub.ID_2, "third", "first")))
+        .thenReturn(List.of(kept, third, first));
+    when(restaurantMapper.toRestaurantDetail(kept)).thenReturn(keptDetail);
+    when(restaurantMapper.toRestaurantDetail(third)).thenReturn(thirdDetail);
+    when(restaurantMapper.toRestaurantDetail(first)).thenReturn(firstDetail);
 
     var result = restaurantService.deleteRestaurantFromTodaysLunchPicks(RestaurantStub.ID);
 
-    assertEquals(List.of(keptDetail, replacementDetail), result);
-    verify(restaurantRepository).delete(eq(deleted));
-    verify(dailyLunchPicksRepository)
-        .save(org.mockito.ArgumentMatchers.argThat(pick ->
-            pick.getRestaurantIds().equals(List.of(RestaurantStub.ID_2, "replacement"))));
+    assertThat(result).containsExactly(keptDetail, thirdDetail, firstDetail);
+    verify(restaurantRepository).delete(deleted);
   }
 
   @Test
@@ -916,6 +971,37 @@ public class RestaurantServiceTest {
     assertTrue(pick.getRestaurantIds().containsAll(List.of("austin", "pflugerville", "round-rock")));
     verify(restaurantRepository).findAll();
     verify(dailyLunchPicksRepository).save(org.mockito.ArgumentMatchers.any(DailyLunchPicks.class));
+  }
+
+  @Test
+  @DisplayName("Refresh daily picks: persists the weighted selector's order")
+  void refreshDailyLunchPicksPersistsTheWeightedSelectorsOrder() {
+    var first = RestaurantStub.getRestaurantStub("first");
+    var second = RestaurantStub.getRestaurantStub("second");
+    var third = RestaurantStub.getRestaurantStub("third");
+    var fourth = RestaurantStub.getRestaurantStub("fourth");
+    List.of(first, second, third, fourth)
+        .forEach(restaurant -> restaurant.getAddress().setCity("Austin"));
+    var summaries = List.of(
+        new RestaurantRatingSummary("first", 20, 20),
+        new RestaurantRatingSummary("fourth", 20, 100));
+
+    when(restaurantRepository.findAll())
+        .thenReturn(List.of(first, second, third, fourth));
+    when(restaurantRatingQueryRepository.summariesForRestaurants(
+        List.of("first", "second", "third", "fourth"))).thenReturn(summaries);
+    when(restaurantSelector.select(
+        List.of(first, second, third, fourth),
+        Map.of("first", summaries.get(0), "fourth", summaries.get(1)),
+        3))
+        .thenReturn(List.of(fourth, second, third));
+    when(dailyLunchPicksRepository.save(any(DailyLunchPicks.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    var pick = restaurantService.refreshDailyLunchPicks(LocalDate.of(2026, 8, 2));
+
+    assertThat(pick.getRestaurantIds())
+        .containsExactly("fourth", "second", "third");
   }
 
   @Test
