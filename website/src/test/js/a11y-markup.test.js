@@ -87,6 +87,14 @@ test('restaurant profile uses the accessible Void profile shell', () => {
   assert.match(html, /id="restaurant-member-controls"[\s\S]*?aria-live="polite"/);
   assert.match(html, /type="application\/ld\+json"/);
   assert.match(css, /\.lunch-void-page \.restaurant-profile-void/);
+  assert.match(
+    css,
+    /\.lunch-void-page \.restaurant-rating-value\s*{[^}]*white-space:\s*nowrap/s,
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 640px\)\s*{[\s\S]*\.lunch-void-page \.restaurant-rating-value\s*{[^}]*font-size:/,
+  );
   assert.match(css, /\.lunch-void-page [^{]+:focus-visible/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });
