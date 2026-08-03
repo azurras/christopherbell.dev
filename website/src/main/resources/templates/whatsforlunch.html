@@ -11,25 +11,25 @@
     <title>CB | What's For Lunch?</title>
 
     <link rel="stylesheet" type="text/css" href="/css/main.css" th:href="@{/css/main.css}"/>
+    <link rel="stylesheet" type="text/css" href="/css/whats-for-lunch.css"
+          th:href="@{/css/whats-for-lunch.css}"/>
 </head>
 
-<body class="site-page lunch-page">
+<body class="site-page void-shell-page lunch-page lunch-void-page">
     <div id="nav"></div>
-    <main class="site-main" role="main">
-        <section class="site-hero site-hero-lunch" aria-labelledby="lunchTitle">
-            <div class="container">
-                <p class="home-kicker">Decision support</p>
-                <h1 id="lunchTitle">What's For Lunch?</h1>
-                <p>Restaurant picks for the moment when everybody is hungry and nobody has a plan.</p>
-            </div>
-        </section>
-        <section class="site-content">
-            <div class="container">
-                <div class="content-panel lunch-panel">
+    <main class="site-main lunch-void-main" aria-labelledby="lunchTitle">
+        <div class="lunch-void-shell">
+            <div class="container lunch-void-container">
+                <header class="lunch-void-hero">
+                    <p class="home-kicker">Decision console</p>
+                    <h1 id="lunchTitle">What's For Lunch?</h1>
+                    <p>Three signals. One good decision.</p>
+                </header>
+                <section class="lunch-void-console" aria-label="Lunch decision console">
                     <div id="whats-for-lunch"></div>
-                </div>
+                </section>
             </div>
-        </section>
+        </div>
     </main>
     <footer id="footer"></footer>
 </body>

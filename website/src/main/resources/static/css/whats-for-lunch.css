@@ -1,0 +1,348 @@
+.lunch-void-page {
+    --lunch-void-bg: #070b10;
+    --lunch-void-panel: #0c131a;
+    --lunch-void-panel-raised: #111b24;
+    --lunch-void-line: rgba(117, 202, 187, 0.24);
+    --lunch-void-line-strong: rgba(117, 202, 187, 0.58);
+    --lunch-void-teal: #75cabb;
+    --lunch-void-gold: #deb15f;
+    --lunch-void-text: #e6edf2;
+    --lunch-void-muted: #9baab5;
+    background:
+        radial-gradient(circle at 16% 0%, rgba(117, 202, 187, 0.11), transparent 34rem),
+        var(--lunch-void-bg);
+    color: var(--lunch-void-text);
+}
+
+.lunch-void-main,
+.lunch-void-shell {
+    min-height: calc(100vh - 8rem);
+}
+
+.lunch-void-shell {
+    padding: clamp(1.4rem, 4vw, 3.5rem) 0 4rem;
+}
+
+.lunch-void-container {
+    max-width: 1240px;
+}
+
+.lunch-void-hero {
+    max-width: 48rem;
+    margin-bottom: 1.25rem;
+}
+
+.lunch-void-hero h1 {
+    margin: 0.2rem 0 0.55rem;
+    color: var(--lunch-void-text);
+    font-size: clamp(2rem, 6vw, 4.4rem);
+    letter-spacing: -0.045em;
+}
+
+.lunch-void-hero > p:last-child {
+    margin: 0;
+    color: var(--lunch-void-muted);
+    font-size: clamp(1rem, 2vw, 1.2rem);
+}
+
+.lunch-void-console {
+    padding: clamp(0.85rem, 2.4vw, 1.35rem);
+    border: 1px solid var(--lunch-void-line);
+    border-radius: 8px;
+    background: rgba(8, 14, 20, 0.92);
+    box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.28);
+}
+
+.lunch-void-page .wfl-secondary-nav,
+.lunch-void-page .lunch-tools-nav {
+    gap: 0.45rem;
+}
+
+.lunch-void-page .wfl-secondary-nav a,
+.lunch-void-page .lunch-tool-tab {
+    border-color: var(--lunch-void-line);
+    border-radius: 4px;
+    background: #0a1118;
+    color: var(--lunch-void-muted);
+}
+
+.lunch-void-page .wfl-secondary-nav a:hover,
+.lunch-void-page .wfl-secondary-nav a:focus-visible,
+.lunch-void-page .wfl-secondary-nav a.active,
+.lunch-void-page .lunch-tool-tab:hover,
+.lunch-void-page .lunch-tool-tab:focus-visible,
+.lunch-void-page .lunch-tool-tab.active {
+    border-color: var(--lunch-void-line-strong);
+    background: rgba(117, 202, 187, 0.10);
+    color: var(--lunch-void-teal);
+}
+
+.lunch-void-page .wfl-freshness,
+.lunch-void-page .lunch-toolbar,
+.lunch-void-page .lunch-tools-nav,
+.lunch-void-page .lunch-control-panel,
+.lunch-void-page .lunch-session-panel,
+.lunch-void-page .lunch-empty {
+    border-color: var(--lunch-void-line);
+    border-radius: 6px;
+    background: var(--lunch-void-panel);
+    color: var(--lunch-void-text);
+}
+
+.lunch-void-page .wfl-freshness,
+.lunch-void-page .lunch-toolbar {
+    margin-bottom: 0.8rem;
+}
+
+.lunch-void-page .wfl-freshness summary {
+    color: var(--lunch-void-teal);
+    cursor: pointer;
+}
+
+.lunch-void-page .lunch-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 0.85rem;
+}
+
+.lunch-void-page .lunch-toolbar-copy {
+    display: grid;
+    gap: 0.3rem;
+}
+
+.lunch-void-page .lunch-toolbar p,
+.lunch-void-page .lunch-control-heading p,
+.lunch-void-page .lunch-session-panel p,
+.lunch-void-page .lunch-filter-status,
+.lunch-void-page .lunch-pick-body > p,
+.lunch-void-page .lunch-empty p,
+.lunch-void-page .lunch-loading-state {
+    color: var(--lunch-void-muted);
+}
+
+.lunch-void-page .lunch-weighting-note {
+    color: var(--lunch-void-gold);
+    font-size: 0.86rem;
+}
+
+.lunch-void-page .lunch-primary-refresh {
+    min-height: 2.75rem;
+    padding-inline: 1rem;
+    border-radius: 4px;
+}
+
+.lunch-void-page .lunch-controls {
+    margin-bottom: 0.85rem;
+}
+
+.lunch-void-page .lunch-tools-nav {
+    margin-bottom: 0.6rem;
+    padding: 0.4rem;
+}
+
+.lunch-void-page .lunch-control-panel,
+.lunch-void-page .lunch-session-panel {
+    padding: 0.85rem;
+}
+
+.lunch-void-page .lunch-control-heading h2,
+.lunch-void-page .lunch-session-panel h2,
+.lunch-void-page .lunch-empty h2 {
+    color: var(--lunch-void-text);
+}
+
+.lunch-void-page .lunch-filters {
+    background: var(--lunch-void-panel);
+}
+
+.lunch-void-page .lunch-radius-control,
+.lunch-void-page .lunch-filter {
+    color: var(--lunch-void-text);
+}
+
+.lunch-void-page .lunch-filter,
+.lunch-void-page .form-control,
+.lunch-void-page .form-select {
+    border-color: var(--lunch-void-line);
+    background: #080e14;
+    color: var(--lunch-void-text);
+}
+
+.lunch-void-page .lunch-filter:hover {
+    border-color: var(--lunch-void-line-strong);
+}
+
+.lunch-void-page .form-control::placeholder {
+    color: #778792;
+}
+
+.lunch-void-page .form-control:focus,
+.lunch-void-page .form-select:focus {
+    border-color: var(--lunch-void-teal);
+    box-shadow: 0 0 0 0.2rem rgba(117, 202, 187, 0.16);
+}
+
+.lunch-void-page .lunch-session-status,
+.lunch-void-page .lunch-session-voters {
+    color: var(--lunch-void-muted);
+}
+
+.lunch-void-page .lunch-picks {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.85rem;
+}
+
+.lunch-void-page .lunch-pick {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    min-height: 100%;
+    padding: 1rem;
+    border-color: var(--lunch-void-line);
+    border-radius: 6px;
+    background:
+        linear-gradient(180deg, rgba(117, 202, 187, 0.045), transparent 42%),
+        var(--lunch-void-panel-raised);
+    color: var(--lunch-void-text);
+}
+
+.lunch-void-page .lunch-pick:hover,
+.lunch-void-page .lunch-pick:focus-within {
+    border-color: var(--lunch-void-line-strong);
+    box-shadow:
+        0 0 0 1px rgba(117, 202, 187, 0.08),
+        0 1rem 2rem rgba(0, 0, 0, 0.24);
+}
+
+.lunch-void-page .lunch-pick-body {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.lunch-void-page .lunch-pick-body h2 {
+    color: var(--lunch-void-text);
+    font-size: 1.15rem;
+}
+
+.lunch-void-page .lunch-pick-body h2 a:hover,
+.lunch-void-page .lunch-pick-body h2 a:focus-visible {
+    color: var(--lunch-void-teal);
+}
+
+.lunch-void-page .lunch-cuisine {
+    color: var(--lunch-void-teal);
+}
+
+.lunch-void-page p.lunch-rating-summary,
+.lunch-void-page .lunch-rating-summary p {
+    color: var(--lunch-void-teal);
+}
+
+.lunch-void-page .lunch-pick-actions {
+    margin-top: auto;
+    padding-top: 0.85rem;
+}
+
+.lunch-void-page .lunch-rating-button {
+    border-color: var(--lunch-void-line);
+    background: #080e14;
+    color: var(--lunch-void-text);
+}
+
+.lunch-void-page .lunch-rating-button:hover,
+.lunch-void-page .lunch-rating-button:focus-visible,
+.lunch-void-page .lunch-rating-button.active,
+.lunch-void-page .btn-primary {
+    border-color: var(--lunch-void-teal);
+    background: var(--lunch-void-teal);
+    color: #07100f;
+}
+
+.lunch-void-page .btn-primary,
+.lunch-void-page .btn-success {
+    font-weight: 800;
+}
+
+.lunch-void-page .btn-outline-primary,
+.lunch-void-page .btn-outline-secondary,
+.lunch-void-page .btn-outline-success {
+    border-color: var(--lunch-void-line-strong);
+    color: var(--lunch-void-teal);
+}
+
+.lunch-void-page .btn-success {
+    border-color: var(--lunch-void-teal);
+    background: rgba(117, 202, 187, 0.18);
+    color: var(--lunch-void-teal);
+}
+
+.lunch-void-page .btn-outline-danger {
+    border-color: rgba(236, 126, 126, 0.52);
+    color: #ef9a9a;
+}
+
+.lunch-void-page .btn:hover:not(:disabled) {
+    filter: brightness(1.08);
+}
+
+.lunch-void-page button:disabled,
+.lunch-void-page .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+}
+
+.lunch-void-page a:focus-visible,
+.lunch-void-page button:focus-visible,
+.lunch-void-page input:focus-visible,
+.lunch-void-page select:focus-visible,
+.lunch-void-page summary:focus-visible {
+    outline: 3px solid var(--lunch-void-gold);
+    outline-offset: 3px;
+}
+
+.lunch-void-page .lunch-loading-wheel {
+    border-color: rgba(117, 202, 187, 0.18);
+    border-top-color: var(--lunch-void-teal);
+}
+
+.lunch-void-page .lunch-empty,
+.lunch-void-page .lunch-picks-loading {
+    min-height: 15rem;
+}
+
+@media (max-width: 960px) {
+    .lunch-void-page .lunch-picks {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    .lunch-void-shell {
+        padding-top: 1rem;
+    }
+
+    .lunch-void-page .lunch-toolbar,
+    .lunch-void-page .lunch-session-panel {
+        grid-template-columns: 1fr;
+    }
+
+    .lunch-void-page .lunch-primary-refresh,
+    .lunch-void-page .lunch-zip-input {
+        width: 100%;
+    }
+
+    .lunch-void-page .lunch-location-controls,
+    .lunch-void-page .lunch-zip-form {
+        align-items: stretch;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .lunch-void-page *,
+    .lunch-void-page *::before,
+    .lunch-void-page *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}
