@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingQueryRepository;
@@ -51,5 +52,36 @@ class RestaurantRatingQueryRepositoryTest {
     assertThat(aggregation.getValue().toString())
         .contains("$group", "restaurantId", "ratingCount", "ratingSum")
         .contains("$sort", "averageRating", "$limit", "50");
+  }
+
+  @Test
+  void summariesForRestaurants_matchesAndGroupsInsideMongo() {
+    var summary = new RestaurantRatingSummary("restaurant-1", 2, 9);
+    when(mongo.aggregate(
+        any(Aggregation.class),
+        eq("whatsforlunch_ratings"),
+        eq(RestaurantRatingSummary.class)))
+        .thenReturn(new AggregationResults<>(List.of(summary), new Document()));
+
+    assertThat(repository.summariesForRestaurants(
+        List.of("restaurant-1", "restaurant-2")))
+        .containsExactly(summary);
+
+    var aggregation = ArgumentCaptor.forClass(Aggregation.class);
+    verify(mongo).aggregate(
+        aggregation.capture(),
+        eq("whatsforlunch_ratings"),
+        eq(RestaurantRatingSummary.class));
+    assertThat(aggregation.getValue().toString())
+        .contains("$match", "$in", "restaurant-1", "restaurant-2")
+        .contains("$group", "restaurantId", "ratingCount", "ratingSum")
+        .doesNotContain("$limit");
+  }
+
+  @Test
+  void summariesForRestaurants_skipsMongoForEmptyCandidates() {
+    assertThat(repository.summariesForRestaurants(List.of())).isEmpty();
+
+    verifyNoInteractions(mongo);
   }
 }
