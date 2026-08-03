@@ -56,7 +56,6 @@ let activeSession = null;
 let sessionPollId = null;
 let sessionPollInFlight = false;
 let dataFreshness = null;
-const restaurantVoteMutations = new Map();
 
 function memberSessionKey() {
   const claims = getAuthClaims();
@@ -973,42 +972,63 @@ async function voteForRestaurant(restaurantId) {
   }
 }
 
-export function createPicksVoteMutation({ buttons, apply, showError }) {
-  return createRestaurantVoteMutation({ buttons, apply, showError });
+export function createPicksVoteController({
+  mount,
+  getCurrentPicks,
+  setCurrentPicks,
+  getActiveSession,
+  setActiveSession,
+  renderPicks,
+  request = fetchJson,
+  headers = authHeaders,
+}) {
+  const mutations = new Map();
+
+  return async function setRestaurantVote(restaurantId, vote) {
+    if (!restaurantId || !['UP', 'DOWN'].includes(vote)) return;
+    let mutation = mutations.get(restaurantId);
+    if (!mutation) {
+      mutation = createRestaurantVoteMutation({
+        buttons: () => Array.from(mount?.querySelectorAll?.('.lunch-vote-button') || [])
+          .filter(button => button.dataset.restaurantId === restaurantId),
+        apply: updatedRestaurant => {
+          const updatedPicks = getCurrentPicks().map((restaurant) =>
+            restaurant.id === restaurantId ? updatedRestaurant : restaurant);
+          setCurrentPicks(updatedPicks);
+          const activeSession = getActiveSession();
+          if (activeSession?.restaurants) {
+            setActiveSession({
+              ...activeSession,
+              restaurants: activeSession.restaurants.map((restaurant) =>
+                restaurant.id === restaurantId ? updatedRestaurant : restaurant),
+            });
+          }
+          renderPicks(updatedPicks);
+        },
+        showError: err => {
+          mount?.insertAdjacentHTML('afterbegin', `
+            <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not save vote.')}</div>
+          `);
+        },
+      });
+      mutations.set(restaurantId, mutation);
+    }
+    await mutation(() => request(API.whatsForLunch.voteRestaurant, {
+      method: 'PUT',
+      headers: headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ restaurantId, vote }),
+    }));
+  };
 }
 
-async function setRestaurantVote(restaurantId, vote) {
-  if (!restaurantId || !['UP', 'DOWN'].includes(vote)) return;
-  let mutation = restaurantVoteMutations.get(restaurantId);
-  if (!mutation) {
-    mutation = createPicksVoteMutation({
-      buttons: () => Array.from(mount.querySelectorAll('.lunch-vote-button'))
-        .filter(button => button.dataset.restaurantId === restaurantId),
-      apply: updatedRestaurant => {
-        currentPicks = currentPicks.map((restaurant) => restaurant.id === restaurantId ? updatedRestaurant : restaurant);
-        if (activeSession?.restaurants) {
-          activeSession = {
-            ...activeSession,
-            restaurants: activeSession.restaurants.map((restaurant) =>
-              restaurant.id === restaurantId ? updatedRestaurant : restaurant),
-          };
-        }
-        renderPicks(currentPicks);
-      },
-      showError: err => {
-        mount.insertAdjacentHTML('afterbegin', `
-          <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not save vote.')}</div>
-        `);
-      },
-    });
-    restaurantVoteMutations.set(restaurantId, mutation);
-  }
-  await mutation(() => fetchJson(API.whatsForLunch.voteRestaurant, {
-      method: 'PUT',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ restaurantId, vote }),
-  }));
-}
+const setRestaurantVote = createPicksVoteController({
+  mount,
+  getCurrentPicks: () => currentPicks,
+  setCurrentPicks: picks => { currentPicks = picks; },
+  getActiveSession: () => activeSession,
+  setActiveSession: session => { activeSession = session; },
+  renderPicks,
+});
 
 async function toggleFavorite(restaurantId) {
   if (!restaurantId) return;
