@@ -15,6 +15,8 @@ Owns reusable browser-side modules that are not tied to one page.
 - `wfl-anonymous-session.js` owns the 30-minute versioned anonymous WFL record.
   It stores only up to three restaurant IDs and an optional ZIP, migrates the
   legacy full-payload key, and clears expired or malformed values.
+- `wfl-ui.js` normalizes public `upVotes`, `downVotes`, and `voteCount`, then
+  renders the rounded approval summary and optional signed-in `myVote` state.
 - `shared-folder-streaming.js` defines the exact shared-folder API scope, request cloning that
   preserves `Range` while attaching the per-client JWT in the service worker, worker readiness,
   logout/401 token cleanup, and actionable 401/403 streaming states. Worker forwarding uses

@@ -46,9 +46,8 @@ Owns What's For Lunch restaurant persistence and API records.
   are attached to `RestaurantDetail`. Signed-in callers also get their own
   `myVote` value. Browser/API writes use `RestaurantVoteSetRequest` so provider
   IDs such as OpenStreetMap IDs stay in JSON instead of URL path segments.
-- Task 4/5 owns deferred SSR and browser presentation conversion. The model/API
-  contract is binary votes now; callers must not use removed numeric-rating
-  fields or request records as a compatibility layer.
+- The model/API contract is binary votes. SSR and browser presentation consume
+  the vote fields directly without a compatibility layer.
 - Favorites are stored separately from restaurants so member personalization does
   not modify imported restaurant data. Browser writes use `RestaurantFavoriteRequest`
   for the same provider-ID reason as votes. Signed-in callers get `myFavorite`

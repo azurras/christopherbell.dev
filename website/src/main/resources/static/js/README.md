@@ -66,8 +66,8 @@ Owns browser-side behavior for server-rendered pages.
   payloads), saves filters for signed-in users, creates
   shareable voting sessions for logged-in users, polls active sessions for
   restaurant/vote changes, links vote usernames to public profiles, lets session-link visitors join after authentication,
-  lets signed-in users rate restaurants with whole-number buttons, lets signed-in
-  users favorite restaurants, links cards to restaurant profile pages, replaces
+  lets signed-in users set `UP` or `DOWN` restaurant votes with accessible thumb
+  controls, lets signed-in users favorite restaurants, links cards to restaurant profile pages, replaces
   the card list with a loading wheel while "Try 3 more" fetches new picks, and
   shows archived shared sessions as read-only, permits only the host to request
   new shared picks, and only re-queries when the user clicks "Try 3 more", applies filters, changes
@@ -75,7 +75,7 @@ Owns browser-side behavior for server-rendered pages.
 - Restaurant profiles render their complete public content and validated
   HTTP(S) website links on the server. `restaurant-profile.js` makes no
   anonymous detail request; for signed-in visitors it progressively adds only
-  personal rating and favorite controls, with failures isolated to that panel.
+  personal vote and favorite controls, with failures isolated to that panel.
 - `zip-coordinates.js` renders the Tools ZIP coordinate lookup page around
   `GET /api/location/zip/{zipCode}`, including ZIP normalization, inline errors,
   result fields, and copyable API/curl output.
@@ -99,8 +99,9 @@ Owns browser-side behavior for server-rendered pages.
   relative, protocol-relative, and other-scheme values stay non-clickable.
 - Feed-rendering pages initialize `lib/lazy-media.js` after rendering post
   cards so rich iframes defer their `src` until they are near the viewport.
-- `wfl-list.js` renders the WFL secondary pages for favorites and the public top
-  10 rated restaurants.
+- `wfl-list.js` renders the WFL secondary pages for favorites and the public Top
+  10 Liked list, whose server order is approval percentage, vote count, then
+  stable restaurant ID.
 - `user-feed.js` renders public profiles and exposes signed-in mute/block
   actions for other users.
 - `back-office.js` gates the Back Office to admins, renders report/user queues

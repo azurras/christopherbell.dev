@@ -20,7 +20,7 @@ Owns the data model and APIs for What's For Lunch restaurants.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/nearby/zip/{zipCode}` accepts a 5-digit ZIP code and uses imported Location Census ZCTA coordinates as the search origin.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/profile/{id}` returns a public restaurant profile used by `/wfl/restaurants/{id}`.
 - `/wfl/favorites` lists the signed-in user's favorited restaurants.
-- `/wfl/top-liked` is the canonical public Top 10 Liked browser/SSR route; legacy `/wfl/top-rated` permanently redirects to it. The client-side list rendering remains owned by Task 5.
+- `/wfl/top-liked` is the canonical public Top 10 Liked browser/SSR route; legacy `/wfl/top-rated` permanently redirects to it.
 - Optional `radiusMiles` query param controls the nearby search radius. Allowed values are `1`, `5`, `10`, `15`, and `20`.
 - Optional `cuisine` query params filter nearby picks by OpenStreetMap cuisine tags. Multiple values are allowed.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/preferences` is public so `/wfl` can load for anonymous visitors; it returns saved filters for an authenticated token and default filters otherwise.
@@ -44,7 +44,8 @@ Owns the data model and APIs for What's For Lunch restaurants.
 - Numeric, fractional, and unknown vote values are rejected; each member has one persisted vote per restaurant.
 - Public restaurant details include `upVotes`, `downVotes`, and `voteCount`; signed-in callers also receive `myVote` when they have voted.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/top-liked` returns restaurants with at least one vote, ordered by approval ratio descending, vote count descending, and restaurant ID ascending.
-- Task 5 owns the browser vote controls and response rendering. The still-deferred star-rating browser module is not a supported API contract and must be replaced rather than calling the removed rating helpers.
+- Browser vote controls submit the binary vote contract and refresh from the
+  server-confirmed restaurant detail response.
 
 ## Favorites
 

@@ -8,14 +8,14 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
 - Restaurant persistence outages use the shared service-unavailable contract
   with preserved diagnostic causes and a redacted public response.
 - Public location-aware lunch picks that query bounded nearby candidates and
-  return three rating-weighted suggestions within the user's selected radius
+  return three approval-weighted suggestions within the user's selected radius
   from their browser location or entered ZIP code. ZIP searches resolve their
   radius origin from imported Location Census ZCTA coordinates before loading
   restaurant candidates.
-- New nearby, daily, and deleted-pick replacement draws use one batch of rating
-  totals and sample without replacement. Three neutral 3-star virtual ratings
-  temper sparse data; unrated restaurants retain the neutral weight and every
-  eligible restaurant keeps a positive chance of selection.
+- New nearby, daily, and deleted-pick replacement draws use one batch of binary
+  vote totals and sample without replacement. `ApprovalWeightedRestaurantSelector`
+  smooths approval with a 1.5-UP, 3-vote prior; restaurants without votes retain
+  neutral weight and every eligible restaurant keeps a positive chance of selection.
 - Logged-in shared sessions where up to 20 members see the same three restaurants,
   receive atomic session updates, and vote. The creator alone can reset picks.
   Sessions are active for 24 hours, remain as a read-only archive for 30 more

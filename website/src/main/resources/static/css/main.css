@@ -1903,47 +1903,6 @@ body {
     overflow-wrap: anywhere;
 }
 
-.lunch-rating-summary {
-    margin-bottom: 0.45rem;
-    font-size: 0.9rem;
-    font-weight: 700;
-}
-
-.lunch-rating-summary p {
-    margin: 0 0 0.15rem;
-}
-
-.lunch-rating-shell {
-    display: grid;
-    justify-items: start;
-    gap: 0.5rem;
-    margin-bottom: 0.65rem;
-}
-
-.lunch-rating-control {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-}
-
-.lunch-rating-button {
-    width: 2rem;
-    height: 2rem;
-    border: 1px solid rgba(23, 32, 42, 0.18);
-    border-radius: 999px;
-    background: #ffffff;
-    color: rgba(23, 32, 42, 0.78);
-    font-weight: 800;
-}
-
-.lunch-rating-button:hover,
-.lunch-rating-button:focus-visible,
-.lunch-rating-button.active {
-    border-color: #4f7d4d;
-    background: #4f7d4d;
-    color: #ffffff;
-}
-
 .lunch-pick-body p,
 .lunch-empty p {
     color: rgba(23, 32, 42, 0.72);
