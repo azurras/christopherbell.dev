@@ -43,6 +43,10 @@ class RestaurantVoteQueryRepositoryTest {
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
     verify(mongo).aggregate(aggregation.capture(), eq("whatsforlunch_ratings"),
         eq(RestaurantVoteSummary.class));
+    assertThat(aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).get(2))
+        .containsEntry("$sort", new Document("approvalRatio", -1)
+            .append("voteCount", -1)
+            .append("restaurantId", 1));
     assertThat(aggregation.getValue().toString())
         .contains("$group", "restaurantId", "upVotes", "downVotes", "voteCount", "vote")
         .contains("approvalRatio", "$sort", "voteCount", "$limit", "50");
