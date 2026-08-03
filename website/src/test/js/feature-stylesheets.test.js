@@ -35,6 +35,7 @@ test('feature-only selectors have one dedicated stylesheet owner', async () => {
     ['.shared-folder-main', sharedFolder],
     ['.site-media-player-host', siteMediaPlayer],
     ['.lunch-void-page', whatsForLunch],
+    ['.restaurant-profile-void', whatsForLunch],
   ];
 
   for (const [selector, owner] of ownership) {
@@ -50,6 +51,7 @@ test('feature templates link their versioned dedicated stylesheets', async () =>
     ['templates/void/explore.html', 'void-discovery.css'],
     ['templates/void/topic.html', 'void-discovery.css'],
     ['templates/whatsforlunch.html', 'whats-for-lunch.css'],
+    ['templates/restaurant.html', 'whats-for-lunch.css'],
   ];
 
   for (const [template, stylesheet] of templates) {

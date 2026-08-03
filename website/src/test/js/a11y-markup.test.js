@@ -73,6 +73,24 @@ test('WFL decision console is labelled, non-ranked, and keyboard visible', () =>
   );
 });
 
+test('restaurant profile uses the accessible Void profile shell', () => {
+  const html = fs.readFileSync(
+    'website/src/main/resources/templates/restaurant.html', 'utf8');
+  const css = fs.readFileSync(
+    'website/src/main/resources/static/css/whats-for-lunch.css', 'utf8');
+
+  assert.equal((html.match(/<main\b/g) || []).length, 1);
+  assert.equal((html.match(/<h1\b/g) || []).length, 1);
+  assert.match(html, /<main[^>]+aria-labelledby="restaurantTitle"/);
+  assert.match(html, /class="[^"]*lunch-void-page[^"]*restaurant-profile-page/);
+  assert.match(html, /<article class="restaurant-profile-void"/);
+  assert.match(html, /id="restaurant-member-controls"[\s\S]*?aria-live="polite"/);
+  assert.match(html, /type="application\/ld\+json"/);
+  assert.match(css, /\.lunch-void-page \.restaurant-profile-void/);
+  assert.match(css, /\.lunch-void-page [^{]+:focus-visible/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
 test('back office Music permissions expose labelled read and write controls', () => {
   const html = fs.readFileSync('website/src/main/resources/templates/back-office.html', 'utf8');
 

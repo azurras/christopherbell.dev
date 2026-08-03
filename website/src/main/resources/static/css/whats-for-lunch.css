@@ -309,9 +309,151 @@
     min-height: 15rem;
 }
 
+.lunch-void-page .restaurant-profile-container {
+    max-width: 1120px;
+}
+
+.lunch-void-page .restaurant-profile-hero {
+    max-width: 62rem;
+    margin-block: clamp(1.6rem, 4vw, 3rem) clamp(1rem, 3vw, 1.75rem);
+}
+
+.lunch-void-page .restaurant-profile-void {
+    display: grid;
+    grid-template-areas:
+        "rating details"
+        "member details";
+    grid-template-columns: minmax(15rem, 0.75fr) minmax(0, 1.35fr);
+    gap: 0.85rem;
+    align-items: start;
+}
+
+.lunch-void-page .restaurant-rating-signal,
+.lunch-void-page .restaurant-profile-details,
+.lunch-void-page .restaurant-member-panel {
+    min-width: 0;
+    padding: clamp(1rem, 2.5vw, 1.5rem);
+    border: 1px solid var(--lunch-void-line);
+    border-radius: 6px;
+    background:
+        linear-gradient(180deg, rgba(117, 202, 187, 0.045), transparent 52%),
+        var(--lunch-void-panel);
+    box-shadow: 0 1.25rem 3rem rgba(0, 0, 0, 0.18);
+}
+
+.lunch-void-page .restaurant-rating-signal {
+    grid-area: rating;
+    border-top-color: var(--lunch-void-teal);
+}
+
+.lunch-void-page .restaurant-profile-details {
+    grid-area: details;
+    min-height: 100%;
+}
+
+.lunch-void-page .restaurant-member-panel {
+    grid-area: member;
+    border-top-color: var(--lunch-void-gold);
+}
+
+.lunch-void-page .restaurant-profile-void h2 {
+    margin: 0 0 0.9rem;
+    color: var(--lunch-void-text);
+    font-size: clamp(1.15rem, 2vw, 1.45rem);
+}
+
+.lunch-void-page .restaurant-profile-label {
+    margin: 0 0 0.35rem;
+    color: var(--lunch-void-gold);
+    font-size: 0.74rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.lunch-void-page .restaurant-rating-value {
+    margin: 0 0 0.35rem;
+    color: var(--lunch-void-teal);
+    font-size: clamp(1.65rem, 4vw, 2.4rem);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+}
+
+.lunch-void-page .restaurant-rating-signal > p:last-child,
+.lunch-void-page .restaurant-member-panel p,
+.lunch-void-page .restaurant-member-loading {
+    color: var(--lunch-void-muted);
+}
+
+.lunch-void-page .restaurant-detail-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.7rem;
+    margin: 0;
+}
+
+.lunch-void-page .restaurant-detail-list div {
+    min-width: 0;
+    padding: 0.8rem;
+    border: 1px solid var(--lunch-void-line);
+    border-radius: 4px;
+    background: rgba(7, 11, 16, 0.62);
+}
+
+.lunch-void-page .restaurant-detail-list dt {
+    margin-bottom: 0.25rem;
+    color: var(--lunch-void-muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+}
+
+.lunch-void-page .restaurant-detail-list dd {
+    margin: 0;
+    color: var(--lunch-void-text);
+    overflow-wrap: anywhere;
+}
+
+.lunch-void-page .restaurant-detail-list a {
+    color: var(--lunch-void-teal);
+}
+
+.lunch-void-page .restaurant-profile-actions,
+.lunch-void-page #restaurant-member-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    align-items: center;
+}
+
+.lunch-void-page .restaurant-profile-actions {
+    margin-top: 1rem;
+}
+
+.lunch-void-page #restaurant-member-controls > p,
+.lunch-void-page #restaurant-member-controls > .alert {
+    flex-basis: 100%;
+    margin: 0;
+}
+
+.lunch-void-page .restaurant-member-panel .lunch-rating-control {
+    flex-basis: 100%;
+}
+
 @media (max-width: 960px) {
     .lunch-void-page .lunch-picks {
         grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 760px) {
+    .lunch-void-page .restaurant-profile-void {
+        grid-template-areas:
+            "rating"
+            "details"
+            "member";
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
@@ -333,6 +475,15 @@
     .lunch-void-page .lunch-location-controls,
     .lunch-void-page .lunch-zip-form {
         align-items: stretch;
+    }
+
+    .lunch-void-page .restaurant-detail-list {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .lunch-void-page .restaurant-profile-actions .btn,
+    .lunch-void-page #restaurant-member-controls > .btn {
+        width: 100%;
     }
 }
 
