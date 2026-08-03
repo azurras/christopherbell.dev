@@ -228,8 +228,12 @@
     color: var(--lunch-void-teal);
 }
 
-.lunch-void-page .lunch-cuisine,
-.lunch-void-page .lunch-rating-summary {
+.lunch-void-page .lunch-cuisine {
+    color: var(--lunch-void-teal);
+}
+
+.lunch-void-page p.lunch-rating-summary,
+.lunch-void-page .lunch-rating-summary p {
     color: var(--lunch-void-teal);
 }
 

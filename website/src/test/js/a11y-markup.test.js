@@ -67,6 +67,10 @@ test('WFL decision console is labelled, non-ranked, and keyboard visible', () =>
   assert.doesNotMatch(script, /lunch-pick-rank/);
   assert.match(css, /\.lunch-void-page [^{]+:focus-visible/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(
+    css,
+    /\.lunch-void-page p\.lunch-rating-summary,\s*\.lunch-void-page \.lunch-rating-summary p\s*{[^}]*color:\s*var\(--lunch-void-teal\)/s,
+  );
 });
 
 test('back office Music permissions expose labelled read and write controls', () => {
