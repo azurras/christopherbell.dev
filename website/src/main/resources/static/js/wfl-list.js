@@ -3,29 +3,21 @@ import { authHeaders, fetchJson, getAuthClaims, loginRedirectUrl, sanitize } fro
 import { wflFreshnessMarkup } from './lib/wfl-freshness.js';
 import {
   formatCuisine,
-  ratingSummary,
+  voteSummary,
   restaurantAddressLine,
   wflSecondaryNavigation,
 } from './lib/wfl-ui.js';
 
 const mount = document.getElementById('wfl-list');
-const mode = mount?.dataset.listMode || 'top-rated';
-const title = mount?.dataset.listTitle || 'Restaurants';
+const mode = mount?.dataset.listMode || 'top-liked';
+const title = mount?.dataset.listTitle || (mode === 'favorites' ? 'Favorite Restaurants' : 'Top 10 Liked');
 const isLoggedIn = !!getAuthClaims()?.sub;
 let restaurants = [];
 let dataFreshness = null;
 
-function ratingSummaryMarkup(restaurant) {
-  const { myRating, overall } = ratingSummary(restaurant);
-  if (isLoggedIn) {
-    return `
-      <div class="lunch-rating-summary">
-        <p>Overall rating: ${overall}</p>
-        <p>Your rating: ${myRating > 0 ? `${myRating}/5` : 'Not rated'}</p>
-      </div>
-    `;
-  }
-  return `<p class="lunch-rating-summary">Rating: ${overall}</p>`;
+function voteSummaryMarkup(restaurant) {
+  const summary = voteSummary(restaurant);
+  return `<p class="lunch-vote-summary">${summary.overall}</p>`;
 }
 
 function restaurantCard(restaurant, index) {
@@ -50,7 +42,7 @@ function restaurantCard(restaurant, index) {
         </div>
         ${cuisine}
         ${address ? `<p>${sanitize(address)}</p>` : ''}
-        ${ratingSummaryMarkup(restaurant)}
+        ${voteSummaryMarkup(restaurant)}
         <div class="lunch-pick-actions">
           <a class="btn btn-outline-primary btn-sm" href="${sanitize(href)}">Details</a>
         </div>
@@ -62,7 +54,7 @@ function restaurantCard(restaurant, index) {
 function renderList() {
   const emptyText = mode === 'favorites'
     ? 'No favorite restaurants yet.'
-    : 'No rated restaurants yet.';
+    : 'No liked restaurants yet.';
   mount.innerHTML = `
     ${wflSecondaryNavigation(mode)}
     ${wflFreshnessMarkup(dataFreshness)}
@@ -70,7 +62,7 @@ function renderList() {
       <h2>${sanitize(title)}</h2>
       <p>${mode === 'favorites'
         ? 'Restaurants you have marked as favorites.'
-        : 'The highest-rated WFL restaurants with at least one member rating.'}</p>
+        : 'WFL restaurants with the highest member approval.'}</p>
     </div>
     ${restaurants.length > 0
       ? `<div class="lunch-picks wfl-list">${restaurants.map(restaurantCard).join('')}</div>`
@@ -121,7 +113,7 @@ async function loadRestaurants() {
 
   try {
     restaurants = await fetchJson(
-      mode === 'favorites' ? API.whatsForLunch.favorites : API.whatsForLunch.topRated(10),
+      mode === 'favorites' ? API.whatsForLunch.favorites : API.whatsForLunch.topLiked(10),
       { headers: authHeaders() },
     );
     restaurants = Array.isArray(restaurants) ? restaurants : [];

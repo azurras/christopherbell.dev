@@ -1,35 +1,41 @@
 import { API } from './lib/api.js';
 import { authHeaders, fetchJson, getAuthClaims, sanitize } from './lib/util.js';
-import { ratingSummary } from './lib/wfl-ui.js';
+import { voteSummary } from './lib/wfl-ui.js';
 
-const RATING_OPTIONS = Object.freeze([1, 2, 3, 4, 5]);
+const VOTE_OPTIONS = Object.freeze([
+  Object.freeze({ value: 'UP', label: 'Thumbs up', glyph: '👍' }),
+  Object.freeze({ value: 'DOWN', label: 'Thumbs down', glyph: '👎' }),
+]);
 
 function memberRestaurant(value, expectedId) {
   if (!value || typeof value !== 'object' || String(value.id || '') !== expectedId) {
     throw new Error('Restaurant controls returned invalid data.');
   }
-  const summary = ratingSummary(value);
+  const summary = voteSummary(value);
   return Object.freeze({
     id: expectedId,
     name: typeof value.name === 'string' && value.name.trim()
       ? value.name.trim()
       : 'restaurant',
-    ratingCount: summary.count,
-    ratingSum: Number.parseInt(String(value.ratingSum ?? 0), 10) || 0,
-    myRating: RATING_OPTIONS.includes(summary.myRating) ? summary.myRating : 0,
+    upVotes: summary.upVotes,
+    downVotes: summary.downVotes,
+    voteCount: summary.voteCount,
+    myVote: summary.myVote,
     myFavorite: value.myFavorite === true,
   });
 }
 
 function memberMarkup(restaurant) {
   return `
-    <p>Your rating: ${restaurant.myRating > 0 ? `${restaurant.myRating}/5` : 'Not rated'}</p>
-    <div class="lunch-rating-control" role="group" aria-label="Rate ${sanitize(restaurant.name)}">
-      ${RATING_OPTIONS.map(value => `
+    <p>Your vote: ${restaurant.myVote === 'UP' ? 'Thumbs up'
+      : restaurant.myVote === 'DOWN' ? 'Thumbs down' : 'Not voted'}</p>
+    <div class="lunch-vote-control" role="group" aria-label="Vote on ${sanitize(restaurant.name)}">
+      ${VOTE_OPTIONS.map(option => `
         <button type="button"
-          class="lunch-rating-button ${restaurant.myRating === value ? 'active' : ''}"
-          data-rating="${value}"
-          aria-label="Rate ${value} out of 5">${value}</button>
+          class="lunch-vote-button"
+          data-vote="${option.value}"
+          aria-label="${option.label}"
+          aria-pressed="${restaurant.myVote === option.value}">${option.glyph}</button>
       `).join('')}
     </div>
     <button type="button"
@@ -39,17 +45,13 @@ function memberMarkup(restaurant) {
     </button>`;
 }
 
-function aggregateRatingText(restaurant) {
-  const count = Number.parseInt(String(restaurant.ratingCount ?? 0), 10);
-  const sum = Number.parseInt(String(restaurant.ratingSum ?? 0), 10);
-  if (!Number.isInteger(count)
-      || !Number.isInteger(sum)
-      || count <= 0
-      || sum < count
-      || sum > count * 5) {
-    return 'No ratings yet';
-  }
-  return `${(sum / count).toFixed(1)}/5 from ${count} ${count === 1 ? 'rating' : 'ratings'}`;
+async function saveVote(restaurantId, vote, request, headers) {
+  if (!VOTE_OPTIONS.some(option => option.value === vote)) return null;
+  return request(API.whatsForLunch.voteRestaurant, {
+    method: 'PUT',
+    headers: headers({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ restaurantId, vote }),
+  });
 }
 
 /** Adds authenticated personal controls without rebuilding public profile content. */
@@ -57,9 +59,9 @@ export async function initializeRestaurantProfile({
   mount = typeof document === 'undefined'
     ? null
     : document.getElementById('restaurant-member-controls'),
-  publicRating = typeof document === 'undefined'
+  publicMount = typeof document === 'undefined'
     ? null
-    : document.getElementById('restaurant-public-rating'),
+    : document.getElementById('restaurant-public-votes'),
   claims = getAuthClaims,
   request = fetchJson,
   headers = authHeaders,
@@ -71,7 +73,7 @@ export async function initializeRestaurantProfile({
 
   const anonymousFallback = mount.innerHTML;
   const state = { restaurant: null };
-  mount.innerHTML = '<p class="restaurant-member-loading">Loading your rating and favorite...</p>';
+  mount.innerHTML = '<p class="restaurant-member-loading">Loading your vote and favorite...</p>';
 
   const render = value => {
     const restaurant = memberRestaurant(value, restaurantId);
@@ -100,21 +102,21 @@ export async function initializeRestaurantProfile({
   }
 
   mount.addEventListener('click', async event => {
-    const ratingButton = event.target?.closest?.('.lunch-rating-button');
+    const voteButton = event.target?.closest?.('.lunch-vote-button');
     const favoriteButton = event.target?.closest?.('.restaurant-favorite-toggle');
-    if (!ratingButton && !favoriteButton) return;
+    if (!voteButton && !favoriteButton) return;
 
+    if (voteButton) voteButton.disabled = true;
     try {
-      if (ratingButton) {
-        const rating = Number.parseInt(String(ratingButton.dataset.rating), 10);
-        if (!RATING_OPTIONS.includes(rating)) return;
-        const updated = render(await request(API.whatsForLunch.rateRestaurant, {
-          method: 'PUT',
-          headers: headers({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ restaurantId: state.restaurant.id, rating }),
-        }));
-        if (publicRating) {
-          publicRating.textContent = aggregateRatingText(updated);
+      if (voteButton) {
+        const updated = render(await saveVote(
+          state.restaurant.id,
+          voteButton.dataset.vote,
+          request,
+          headers,
+        ));
+        if (publicMount) {
+          publicMount.textContent = voteSummary(updated).overall;
         }
         return;
       }
@@ -131,6 +133,8 @@ export async function initializeRestaurantProfile({
         return;
       }
       showError(error);
+    } finally {
+      if (voteButton) voteButton.disabled = false;
     }
   });
 }

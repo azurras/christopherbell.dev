@@ -69,7 +69,7 @@ test('WFL decision console is labelled, non-ranked, and keyboard visible', () =>
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(
     css,
-    /\.lunch-void-page p\.lunch-rating-summary,\s*\.lunch-void-page \.lunch-rating-summary p\s*{[^}]*color:\s*var\(--lunch-void-teal\)/s,
+    /\.lunch-void-page p\.lunch-vote-summary,\s*\.lunch-void-page \.lunch-vote-summary p\s*{[^}]*color:\s*var\(--lunch-void-teal\)/s,
   );
 });
 
@@ -89,11 +89,11 @@ test('restaurant profile uses the accessible Void profile shell', () => {
   assert.match(css, /\.lunch-void-page \.restaurant-profile-void/);
   assert.match(
     css,
-    /\.lunch-void-page \.restaurant-rating-value\s*{[^}]*white-space:\s*nowrap/s,
+    /\.lunch-void-page \.restaurant-vote-value\s*{[^}]*white-space:\s*nowrap/s,
   );
   assert.match(
     css,
-    /@media \(max-width: 640px\)\s*{[\s\S]*\.lunch-void-page \.restaurant-rating-value\s*{[^}]*font-size:/,
+    /@media \(max-width: 767\.98px\)\s*{[\s\S]*\.lunch-void-page \.restaurant-vote-value\s*{[^}]*font-size:\s*1\.625rem/,
   );
   assert.match(css, /\.lunch-void-page [^{]+:focus-visible/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);

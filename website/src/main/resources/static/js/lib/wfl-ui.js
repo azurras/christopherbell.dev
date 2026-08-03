@@ -1,6 +1,6 @@
 const NAV_ITEMS = Object.freeze([
   { key: 'picks', href: '/wfl', label: 'Picks' },
-  { key: 'top-rated', href: '/wfl/top-rated', label: 'Top 10 Rated' },
+  { key: 'top-liked', href: '/wfl/top-liked', label: 'Top 10 Liked' },
   { key: 'favorites', href: '/wfl/favorites', label: 'Favorites' },
 ]);
 
@@ -39,13 +39,20 @@ export function formatCuisine(value) {
     .trim();
 }
 
-export function ratingSummary(restaurant = {}) {
-  const sum = Number.parseInt(String(restaurant.ratingSum ?? 0), 10) || 0;
-  const count = Number.parseInt(String(restaurant.ratingCount ?? 0), 10) || 0;
-  const myRating = Number.parseInt(String(restaurant.myRating ?? 0), 10) || 0;
+export function voteSummary(restaurant = {}) {
+  const upVotes = Number.parseInt(String(restaurant.upVotes ?? 0), 10) || 0;
+  const downVotes = Number.parseInt(String(restaurant.downVotes ?? 0), 10) || 0;
+  const voteCount = Number.parseInt(String(restaurant.voteCount ?? 0), 10) || 0;
+  const myVote = ['UP', 'DOWN'].includes(restaurant.myVote) ? restaurant.myVote : null;
+  const approvalPercentage = voteCount > 0 ? Math.round(upVotes * 100 / voteCount) : null;
   return Object.freeze({
-    count,
-    myRating,
-    overall: count > 0 ? `${Math.round(sum / count)}/5` : 'No Ratings',
+    upVotes,
+    downVotes,
+    voteCount,
+    myVote,
+    approvalPercentage,
+    overall: voteCount > 0
+      ? `${approvalPercentage}% liked · ${upVotes} up · ${downVotes} down`
+      : 'No votes yet',
   });
 }

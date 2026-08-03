@@ -10,7 +10,7 @@ import {
 import { wflFreshnessMarkup } from './lib/wfl-freshness.js';
 import {
   formatCuisine,
-  ratingSummary,
+  voteSummary,
   restaurantAddressLine,
   wflSecondaryNavigation,
 } from './lib/wfl-ui.js';
@@ -23,7 +23,6 @@ const LOCATION_OPTIONS = {
 };
 const DEFAULT_RADIUS_MILES = 15;
 const RADIUS_OPTIONS = [1, 5, 10, 15, 20];
-const RATING_OPTIONS = [1, 2, 3, 4, 5];
 const SESSION_POLL_INTERVAL_MS = 5000;
 const MEMBER_SESSION_KEY_PREFIX = 'cbellWflMemberSession';
 const CUISINE_FILTERS = [
@@ -53,7 +52,6 @@ let selectedRadiusMiles = DEFAULT_RADIUS_MILES;
 let activeControlPanel = 'filters';
 let currentPicks = [];
 let activeSession = null;
-let visibleRatingControls = new Set();
 let sessionPollId = null;
 let sessionPollInFlight = false;
 let dataFreshness = null;
@@ -158,25 +156,20 @@ function restaurantCard(restaurant, index) {
   const cuisine = restaurant.cuisine
     ? `<span class="lunch-cuisine">${sanitize(formatCuisine(restaurant.cuisine))}</span>`
     : '';
-  const myRating = Number.parseInt(String(restaurant.myRating ?? 0), 10) || 0;
   const favoriteButton = isLoggedIn && id
     ? `<button type="button" class="btn ${restaurant.myFavorite ? 'btn-success' : 'btn-outline-success'} btn-sm lunch-favorite-toggle" data-restaurant-id="${sanitize(id)}" aria-pressed="${restaurant.myFavorite ? 'true' : 'false'}">
         <span aria-hidden="true">&hearts;</span> ${restaurant.myFavorite ? 'Favorited' : 'Favorite'}
       </button>`
     : '';
-  const ratingSummary = ratingSummaryMarkup(restaurant);
-  const ratingControls = isLoggedIn && id
-    ? `<div class="lunch-rating-shell">
-        <button type="button" class="btn btn-outline-secondary btn-sm lunch-rating-toggle" data-restaurant-id="${sanitize(id)}" aria-expanded="${visibleRatingControls.has(id)}">
-          Rate
-        </button>
-        <div class="lunch-rating-control ${visibleRatingControls.has(id) ? '' : 'd-none'}" aria-label="Rate ${sanitize(restaurant.name || 'restaurant')}">
-          ${RATING_OPTIONS.map((rating) => `
-            <button type="button" class="lunch-rating-button ${myRating === rating ? 'active' : ''}" data-restaurant-id="${sanitize(id)}" data-rating="${rating}" aria-label="Rate ${rating} out of 5">${rating}</button>
-          `).join('')}
-        </div>
-      </div>`
-    : '';
+  const { myVote: restaurantVote, overall } = voteSummary(restaurant);
+  const voteControls = isLoggedIn && id ? `<div class="lunch-vote-control" role="group"
+    aria-label="Vote on ${sanitize(restaurant.name || 'restaurant')}">
+  <button type="button" class="lunch-vote-button" data-restaurant-id="${sanitize(id)}"
+    data-vote="UP" aria-label="Thumbs up" aria-pressed="${restaurantVote === 'UP'}">👍</button>
+  <button type="button" class="lunch-vote-button" data-restaurant-id="${sanitize(id)}"
+    data-vote="DOWN" aria-label="Thumbs down" aria-pressed="${restaurantVote === 'DOWN'}">👎</button>
+</div>` : '';
+  const voteSummaryMarkup = `<p class="lunch-vote-summary">${overall}</p>`;
   const website = restaurant.website
     ? `<span class="lunch-website-link" data-restaurant-index="${index}"></span>`
     : '';
@@ -209,8 +202,8 @@ function restaurantCard(restaurant, index) {
         </div>
         ${cuisine}
         ${address ? `<p>${sanitize(address)}</p>` : ''}
-        ${ratingSummary}
-        ${ratingControls}
+        ${voteSummaryMarkup}
+        ${voteControls}
         ${voterText}
         <div class="lunch-pick-actions">${favoriteButton}${voteButton}${directionsButton}${website}${phone}</div>
       </div>
@@ -226,19 +219,6 @@ function attachRestaurantWebsiteLinks(restaurants) {
       label: 'Website',
     });
   });
-}
-
-function ratingSummaryMarkup(restaurant) {
-  const { myRating, overall } = ratingSummary(restaurant);
-  if (isLoggedIn) {
-    return `
-      <div class="lunch-rating-summary">
-        <p>Overall rating: ${overall}</p>
-        <p>Your rating: ${myRating > 0 ? `${myRating}/5` : 'Not rated'}</p>
-      </div>
-    `;
-  }
-  return `<p class="lunch-rating-summary">Rating: ${overall}</p>`;
 }
 
 function sessionMarkup() {
@@ -894,11 +874,14 @@ mount?.addEventListener('click', async (event) => {
     return;
   }
 
-  const ratingButton = event.target instanceof Element
-    ? event.target.closest('.lunch-rating-button')
+  const restaurantVoteButton = event.target instanceof Element
+    ? event.target.closest('.lunch-vote-button')
     : null;
-  if (ratingButton) {
-    await rateRestaurant(ratingButton.dataset.restaurantId, ratingButton.dataset.rating);
+  if (restaurantVoteButton) {
+    await setRestaurantVote(
+      restaurantVoteButton.dataset.restaurantId,
+      restaurantVoteButton.dataset.vote,
+    );
     return;
   }
 
@@ -907,22 +890,6 @@ mount?.addEventListener('click', async (event) => {
     : null;
   if (favoriteButton) {
     await toggleFavorite(favoriteButton.dataset.restaurantId);
-    return;
-  }
-
-  const ratingToggle = event.target instanceof Element
-    ? event.target.closest('.lunch-rating-toggle')
-    : null;
-  if (ratingToggle) {
-    const restaurantId = ratingToggle.dataset.restaurantId;
-    if (restaurantId && visibleRatingControls.has(restaurantId)) {
-      visibleRatingControls.delete(restaurantId);
-    } else if (restaurantId) {
-      visibleRatingControls.add(restaurantId);
-    }
-    const ratingControl = ratingToggle.parentElement?.querySelector('.lunch-rating-control');
-    if (ratingControl) ratingControl.classList.toggle('d-none', !visibleRatingControls.has(restaurantId));
-    ratingToggle.setAttribute('aria-expanded', String(visibleRatingControls.has(restaurantId)));
     return;
   }
 
@@ -1004,18 +971,17 @@ async function voteForRestaurant(restaurantId) {
   }
 }
 
-async function rateRestaurant(restaurantId, rating) {
-  const selectedRating = Number.parseInt(String(rating), 10);
-  if (!restaurantId || !RATING_OPTIONS.includes(selectedRating)) return;
-  const button = Array.from(mount.querySelectorAll('.lunch-rating-button'))
+async function setRestaurantVote(restaurantId, vote) {
+  if (!restaurantId || !['UP', 'DOWN'].includes(vote)) return;
+  const button = Array.from(mount.querySelectorAll('.lunch-vote-button'))
     .find((candidate) => candidate.dataset.restaurantId === restaurantId
-      && Number.parseInt(candidate.dataset.rating || '', 10) === selectedRating);
+      && candidate.dataset.vote === vote);
   if (button) button.disabled = true;
   try {
-    const updatedRestaurant = await fetchJson(API.whatsForLunch.rateRestaurant, {
+    const updatedRestaurant = await fetchJson(API.whatsForLunch.voteRestaurant, {
       method: 'PUT',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ restaurantId, rating: selectedRating }),
+      body: JSON.stringify({ restaurantId, vote }),
     });
     currentPicks = currentPicks.map((restaurant) => restaurant.id === restaurantId ? updatedRestaurant : restaurant);
     if (activeSession?.restaurants) {
@@ -1028,7 +994,7 @@ async function rateRestaurant(restaurantId, rating) {
     renderPicks(currentPicks);
   } catch (err) {
     mount.insertAdjacentHTML('afterbegin', `
-      <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not save rating.')}</div>
+      <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not save vote.')}</div>
     `);
   } finally {
     if (button) button.disabled = false;
