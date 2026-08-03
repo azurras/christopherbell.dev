@@ -22,6 +22,10 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
   days, and carry a TTL deletion deadline.
 - Logged-in restaurant ratings with public whole-number rating totals.
 - Restaurant websites are persisted and rendered only as absolute HTTP(S) URLs; unsafe legacy values are omitted.
+- Public restaurant profile routes server-render indexable profile content,
+  canonical and social metadata, and schema.org Restaurant JSON-LD. Browser
+  JavaScript adds only signed-in rating and favorite controls, so anonymous
+  visitors and crawlers do not depend on the restaurant detail API.
 - Legacy daily lunch picks persisted per day and refreshed at midnight Central. Scheduled refreshes
   use the shared renewable Mongo lease so only one application instance writes a given run; request
   fallback generation keeps its existing behavior. Already persisted daily and
