@@ -973,11 +973,15 @@ async function voteForRestaurant(restaurantId) {
   }
 }
 
+export function createPicksVoteMutation({ buttons, apply, showError }) {
+  return createRestaurantVoteMutation({ buttons, apply, showError });
+}
+
 async function setRestaurantVote(restaurantId, vote) {
   if (!restaurantId || !['UP', 'DOWN'].includes(vote)) return;
   let mutation = restaurantVoteMutations.get(restaurantId);
   if (!mutation) {
-    mutation = createRestaurantVoteMutation({
+    mutation = createPicksVoteMutation({
       buttons: () => Array.from(mount.querySelectorAll('.lunch-vote-button'))
         .filter(button => button.dataset.restaurantId === restaurantId),
       apply: updatedRestaurant => {
