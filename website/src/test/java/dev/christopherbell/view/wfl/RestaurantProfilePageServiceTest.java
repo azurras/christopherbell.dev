@@ -37,9 +37,9 @@ class RestaurantProfilePageServiceTest {
         .phoneNumber("512-555-0100")
         .website("https://example.com/menu")
         .sourceAmenity("restaurant")
-        .ratingCount(2)
-        .ratingSum(9)
-        .myRating(5)
+        .upVotes(7)
+        .downVotes(1)
+        .voteCount(8)
         .myFavorite(true)
         .createdBy("private-account")
         .build());
@@ -52,7 +52,7 @@ class RestaurantProfilePageServiceTest {
     assertThat(page.directionsUrl()).contains("destination=30.2672", "-97.7431");
     assertThat(page.structuredDataJson()).contains("\\u003c/script\\u003e");
     assertThat(page.structuredDataJson()).doesNotContain(
-        "</script>", "myRating", "myFavorite", "private-account", "createdBy");
+        "</script>", "myVote", "myFavorite", "private-account", "createdBy");
 
     var json = new ObjectMapper().readTree(page.structuredDataJson());
     assertThat(json.get("@type").asText()).isEqualTo("Restaurant");
@@ -66,8 +66,9 @@ class RestaurantProfilePageServiceTest {
         .id("sparse")
         .name("Sparse Cafe")
         .website("javascript:alert(1)")
-        .ratingCount(0)
-        .ratingSum(0)
+        .upVotes(0)
+        .downVotes(0)
+        .voteCount(0)
         .build());
 
     var page = service().profile("sparse");

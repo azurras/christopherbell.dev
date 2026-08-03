@@ -23,8 +23,9 @@ import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingSetRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteSetRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteValue;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionService;
@@ -183,20 +184,21 @@ class RestaurantControllerMemberSecurityTest {
   }
 
   @Test
-  @DisplayName("Member token can rate an OpenStreetMap restaurant through body-based endpoint")
-  void rateRestaurant_whenBearerTokenAndOpenStreetMapId_returns200() throws Exception {
+  @DisplayName("Member token can vote on an OpenStreetMap restaurant through the body-based endpoint")
+  void voteRestaurant_whenBearerTokenAndOpenStreetMapId_returns200() throws Exception {
     when(permissionService.hasAuthority(eq("USER"))).thenReturn(true);
     var restaurantId = "osm:way:55591510";
-    var request = new RestaurantRatingSetRequest(restaurantId, 3);
-    var serviceRequest = new RestaurantRatingRequest(3);
+    var request = new RestaurantVoteSetRequest(restaurantId, "UP");
+    var serviceRequest = new RestaurantVoteRequest("UP");
     var detail = RestaurantStub.getRestaurantDetailStub(restaurantId);
-    detail.setRatingSum(3);
-    detail.setRatingCount(1);
-    detail.setMyRating(3);
-    when(restaurantService.rateRestaurant(eq(restaurantId), eq(serviceRequest))).thenReturn(detail);
+    detail.setUpVotes(1);
+    detail.setDownVotes(0);
+    detail.setVoteCount(1);
+    detail.setMyVote(RestaurantVoteValue.UP);
+    when(restaurantService.voteRestaurant(eq(restaurantId), eq(serviceRequest))).thenReturn(detail);
 
     mockMvc
-        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/rating")
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/vote")
             .with(csrf())
             .header("Authorization", bearer(Role.USER))
             .contentType(MediaType.APPLICATION_JSON)
@@ -205,27 +207,28 @@ class RestaurantControllerMemberSecurityTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.id").value(restaurantId))
-        .andExpect(jsonPath("$.payload.myRating").value(3));
+        .andExpect(jsonPath("$.payload.myVote").value("UP"));
 
-    verify(restaurantService).rateRestaurant(eq(restaurantId), eq(serviceRequest));
+    verify(restaurantService).voteRestaurant(eq(restaurantId), eq(serviceRequest));
   }
 
   @Test
-  @DisplayName("Anonymous request can read top-rated WFL restaurants")
-  void getTopRatedRestaurants_whenAnonymous_returns200() throws Exception {
+  @DisplayName("Anonymous request can read top-liked WFL restaurants")
+  void getTopLikedRestaurants_whenAnonymous_returns200() throws Exception {
     var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
-    detail.setRatingSum(5);
-    detail.setRatingCount(1);
-    when(restaurantService.getTopRatedRestaurants(eq(10))).thenReturn(List.of(detail));
+    detail.setUpVotes(1);
+    detail.setDownVotes(0);
+    detail.setVoteCount(1);
+    when(restaurantService.getTopLikedRestaurants(null)).thenReturn(List.of(detail));
 
     mockMvc
-        .perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-rated")
+        .perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-liked")
             .accept(MediaType.APPLICATION_JSON))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.payload[0].ratingCount").value(1));
+        .andExpect(jsonPath("$.payload[0].voteCount").value(1));
 
-    verify(restaurantService).getTopRatedRestaurants(eq(10));
+    verify(restaurantService).getTopLikedRestaurants(null);
   }
 
   @Test

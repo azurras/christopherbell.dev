@@ -26,8 +26,8 @@ import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupePrevie
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantInventoryPage;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingSetRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteSetRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantUpdateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportApplyRequest;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantDataFreshness;
@@ -244,21 +244,19 @@ public class RestaurantController {
   }
 
   /**
-   * Lists top-rated public WFL restaurants.
+   * Lists top-liked public WFL restaurants.
    *
    * @param limit maximum number of restaurants to return
-   * @return HTTP 200 with rated restaurants sorted highest first
+   * @return HTTP 200 with restaurants sorted by approval first
    */
-  @GetMapping(value = APIVersion.V20260517 + "/top-rated", produces = MediaType.APPLICATION_JSON_VALUE)
-  public ResponseEntity<Response<List<RestaurantDetail>>> getTopRatedRestaurants(
-      @RequestParam(value = "limit", required = false, defaultValue = "10") int limit
+  @GetMapping(value = APIVersion.V20260517 + "/top-liked", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<Response<List<RestaurantDetail>>> getTopLikedRestaurants(
+      @RequestParam(required = false) Integer limit
   ) {
-    var response = restaurantService.getTopRatedRestaurants(limit);
-    return new ResponseEntity<>(
-        Response.<List<RestaurantDetail>>builder()
-            .payload(response)
-            .success(true)
-            .build(), HttpStatus.OK);
+    return ResponseEntity.ok(Response.<List<RestaurantDetail>>builder()
+        .payload(restaurantService.getTopLikedRestaurants(limit))
+        .success(true)
+        .build());
   }
 
   /**
@@ -300,23 +298,23 @@ public class RestaurantController {
   }
 
   /**
-   * Sets the signed-in user's whole-number rating for a restaurant.
+   * Sets the signed-in user's binary vote for a restaurant.
    *
    * @param id restaurant id
-   * @param request rating payload
-   * @return HTTP 200 with the restaurant's updated public rating totals
+   * @param request vote payload
+   * @return HTTP 200 with the restaurant's updated public vote totals
    */
   @PutMapping(
-      value = APIVersion.V20260517 + "/{id}/rating",
+      value = APIVersion.V20260517 + "/{id}/vote",
       consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   @PreAuthorize("isAuthenticated()")
-  public ResponseEntity<Response<RestaurantDetail>> rateRestaurant(
+  public ResponseEntity<Response<RestaurantDetail>> voteRestaurant(
       @PathVariable String id,
-      @RequestBody RestaurantRatingRequest request
+      @RequestBody RestaurantVoteRequest request
   ) throws Exception {
-    var response = restaurantService.rateRestaurant(id, request);
+    var response = restaurantService.voteRestaurant(id, request);
     return new ResponseEntity<>(
         Response.<RestaurantDetail>builder()
             .payload(response)
@@ -325,23 +323,23 @@ public class RestaurantController {
   }
 
   /**
-   * Sets the signed-in user's whole-number rating without putting provider ids in the path.
+   * Sets the signed-in user's binary vote without putting provider ids in the path.
    *
-   * @param request restaurant id and rating payload
-   * @return HTTP 200 with the restaurant's updated public rating totals
+   * @param request restaurant id and vote payload
+   * @return HTTP 200 with the restaurant's updated public vote totals
    */
   @PutMapping(
-      value = APIVersion.V20260517 + "/rating",
+      value = APIVersion.V20260517 + "/vote",
       consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE
   )
   @PreAuthorize("isAuthenticated()")
-  public ResponseEntity<Response<RestaurantDetail>> rateRestaurant(
-      @RequestBody RestaurantRatingSetRequest request
+  public ResponseEntity<Response<RestaurantDetail>> voteRestaurant(
+      @RequestBody RestaurantVoteSetRequest request
   ) throws Exception {
-    var response = restaurantService.rateRestaurant(
+    var response = restaurantService.voteRestaurant(
         request == null ? null : request.restaurantId(),
-        new RestaurantRatingRequest(request == null ? null : request.rating()));
+        new RestaurantVoteRequest(request == null ? null : request.vote()));
     return new ResponseEntity<>(
         Response.<RestaurantDetail>builder()
             .payload(response)

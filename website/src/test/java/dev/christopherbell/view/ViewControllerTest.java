@@ -177,7 +177,7 @@ public class ViewControllerTest {
         .andExpect(content().string(containsString("type=\"application/ld+json\"")))
         .andExpect(content().string(containsString("\"@type\":\"Restaurant\"")))
         .andExpect(content().string(not(containsString("noindex"))))
-        .andExpect(content().string(not(containsString("myRating"))))
+        .andExpect(content().string(not(containsString("myVote"))))
         .andExpect(content().string(not(containsString("private-account"))));
   }
 

@@ -30,8 +30,9 @@ import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPr
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewResponse;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportWorkflowService;
 import java.time.Instant;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingSetRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteSetRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteValue;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
@@ -298,8 +299,9 @@ public class RestaurantControllerTest {
   @WithMockUser
   public void testGetPublicRestaurantById_Returns200() throws Exception {
     var restaurantDetail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
-    restaurantDetail.setRatingSum(5);
-    restaurantDetail.setRatingCount(1);
+    restaurantDetail.setUpVotes(1);
+    restaurantDetail.setDownVotes(0);
+    restaurantDetail.setVoteCount(1);
     when(restaurantService.getRestaurantById(eq(RestaurantStub.ID)))
         .thenReturn(restaurantDetail);
 
@@ -310,8 +312,9 @@ public class RestaurantControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.id").value(RestaurantStub.ID))
-        .andExpect(jsonPath("$.payload.ratingSum").value(5))
-        .andExpect(jsonPath("$.payload.ratingCount").value(1));
+        .andExpect(jsonPath("$.payload.upVotes").value(1))
+        .andExpect(jsonPath("$.payload.downVotes").value(0))
+        .andExpect(jsonPath("$.payload.voteCount").value(1));
 
     verify(restaurantService).getRestaurantById(eq(RestaurantStub.ID));
   }
@@ -543,72 +546,77 @@ public class RestaurantControllerTest {
   }
 
   @Test
-  @DisplayName("Should rate a restaurant when caller has USER role.")
+  @DisplayName("Should vote for a restaurant when caller has USER role.")
   @WithMockUser(authorities = {"USER"})
-  public void testRateRestaurant_whenUser_ReturnsUpdatedRatingTotals() throws Exception {
-    var request = new RestaurantRatingRequest(5);
+  public void testVoteRestaurant_whenUser_ReturnsUpdatedVoteTotals() throws Exception {
+    var request = new RestaurantVoteRequest("UP");
     var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
-    detail.setRatingSum(9);
-    detail.setRatingCount(2);
-    detail.setMyRating(5);
-    when(restaurantService.rateRestaurant(eq(RestaurantStub.ID), eq(request))).thenReturn(detail);
+    detail.setUpVotes(2);
+    detail.setDownVotes(0);
+    detail.setVoteCount(2);
+    detail.setMyVote(RestaurantVoteValue.UP);
+    when(restaurantService.voteRestaurant(eq(RestaurantStub.ID), eq(request))).thenReturn(detail);
 
     mockMvc
-        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/" + RestaurantStub.ID + "/rating")
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/" + RestaurantStub.ID + "/vote")
             .with(csrf())
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)
-            .content("{\"rating\":5}"))
+            .content("{\"vote\":\"UP\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.payload.ratingSum").value(9))
-        .andExpect(jsonPath("$.payload.ratingCount").value(2))
-        .andExpect(jsonPath("$.payload.myRating").value(5));
+        .andExpect(jsonPath("$.payload.upVotes").value(2))
+        .andExpect(jsonPath("$.payload.downVotes").value(0))
+        .andExpect(jsonPath("$.payload.voteCount").value(2))
+        .andExpect(jsonPath("$.payload.myVote").value("UP"));
 
-    verify(restaurantService).rateRestaurant(eq(RestaurantStub.ID), eq(request));
+    verify(restaurantService).voteRestaurant(eq(RestaurantStub.ID), eq(request));
   }
 
   @Test
-  @DisplayName("Should rate a restaurant when caller has Spring ROLE_USER authority.")
+  @DisplayName("Should vote for a restaurant when caller has Spring ROLE_USER authority.")
   @WithMockUser(authorities = {"ROLE_USER"})
-  public void testRateRestaurant_whenSpringRoleUser_ReturnsUpdatedRatingTotals() throws Exception {
-    var request = new RestaurantRatingRequest(4);
+  public void testVoteRestaurant_whenSpringRoleUser_ReturnsUpdatedVoteTotals() throws Exception {
+    var request = new RestaurantVoteRequest("DOWN");
     var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
-    detail.setRatingSum(4);
-    detail.setRatingCount(1);
-    detail.setMyRating(4);
-    when(restaurantService.rateRestaurant(eq(RestaurantStub.ID), eq(request))).thenReturn(detail);
+    detail.setUpVotes(0);
+    detail.setDownVotes(1);
+    detail.setVoteCount(1);
+    detail.setMyVote(RestaurantVoteValue.DOWN);
+    when(restaurantService.voteRestaurant(eq(RestaurantStub.ID), eq(request))).thenReturn(detail);
 
     mockMvc
-        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/" + RestaurantStub.ID + "/rating")
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/" + RestaurantStub.ID + "/vote")
             .with(csrf())
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)
-            .content("{\"rating\":4}"))
+            .content("{\"vote\":\"DOWN\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.payload.ratingSum").value(4))
-        .andExpect(jsonPath("$.payload.ratingCount").value(1))
-        .andExpect(jsonPath("$.payload.myRating").value(4));
+        .andExpect(jsonPath("$.payload.upVotes").value(0))
+        .andExpect(jsonPath("$.payload.downVotes").value(1))
+        .andExpect(jsonPath("$.payload.voteCount").value(1))
+        .andExpect(jsonPath("$.payload.myVote").value("DOWN"));
 
-    verify(restaurantService).rateRestaurant(eq(RestaurantStub.ID), eq(request));
+    verify(restaurantService).voteRestaurant(eq(RestaurantStub.ID), eq(request));
   }
 
   @Test
-  @DisplayName("Should rate an OpenStreetMap restaurant through body-based rating endpoint.")
+  @DisplayName("Should vote on an OpenStreetMap restaurant through the body-based vote endpoint.")
   @WithMockUser(authorities = {"USER"})
-  public void testRateRestaurantWithBody_whenOpenStreetMapId_ReturnsUpdatedRatingTotals() throws Exception {
+  public void testVoteRestaurantWithBody_whenOpenStreetMapId_ReturnsUpdatedVoteTotals() throws Exception {
     var restaurantId = "osm:way:55591510";
-    var request = new RestaurantRatingSetRequest(restaurantId, 3);
-    var serviceRequest = new RestaurantRatingRequest(3);
+    var request = new RestaurantVoteSetRequest(restaurantId, "UP");
+    var serviceRequest = new RestaurantVoteRequest("UP");
     var detail = RestaurantStub.getRestaurantDetailStub(restaurantId);
-    detail.setRatingSum(3);
-    detail.setRatingCount(1);
-    detail.setMyRating(3);
-    when(restaurantService.rateRestaurant(eq(restaurantId), eq(serviceRequest))).thenReturn(detail);
+    detail.setUpVotes(1);
+    detail.setDownVotes(0);
+    detail.setVoteCount(1);
+    detail.setMyVote(RestaurantVoteValue.UP);
+    when(restaurantService.voteRestaurant(eq(restaurantId), eq(serviceRequest))).thenReturn(detail);
 
     mockMvc
-        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/rating")
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/vote")
             .with(csrf())
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)
@@ -616,23 +624,38 @@ public class RestaurantControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.id").value(restaurantId))
-        .andExpect(jsonPath("$.payload.ratingSum").value(3))
-        .andExpect(jsonPath("$.payload.ratingCount").value(1))
-        .andExpect(jsonPath("$.payload.myRating").value(3));
+        .andExpect(jsonPath("$.payload.upVotes").value(1))
+        .andExpect(jsonPath("$.payload.downVotes").value(0))
+        .andExpect(jsonPath("$.payload.voteCount").value(1))
+        .andExpect(jsonPath("$.payload.myVote").value("UP"));
 
-    verify(restaurantService).rateRestaurant(eq(restaurantId), eq(serviceRequest));
+    verify(restaurantService).voteRestaurant(eq(restaurantId), eq(serviceRequest));
   }
 
   @Test
-  @DisplayName("Should reject restaurant ratings without authentication.")
-  public void testRateRestaurant_whenUnauthenticated_Returns401() throws Exception {
+  @DisplayName("Should reject restaurant votes without authentication.")
+  public void testVoteRestaurant_whenUnauthenticated_Returns401() throws Exception {
     mockMvc
-        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/" + RestaurantStub.ID + "/rating")
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/" + RestaurantStub.ID + "/vote")
             .with(csrf())
             .contentType(MediaType.APPLICATION_JSON)
             .accept(MediaType.APPLICATION_JSON)
-            .content("{\"rating\":5}"))
+            .content("{\"vote\":\"UP\"}"))
         .andExpect(status().isUnauthorized());
+
+    verifyNoInteractions(restaurantService);
+  }
+
+  @Test
+  @WithMockUser(authorities = {"USER"})
+  void legacyRatingAndTopRatedRoutesAreNotMapped() throws Exception {
+    mockMvc.perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/rating")
+            .with(csrf())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"rating\":5}"))
+        .andExpect(status().isNotFound());
+    mockMvc.perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-rated"))
+        .andExpect(status().isNotFound());
 
     verifyNoInteractions(restaurantService);
   }
@@ -701,23 +724,25 @@ public class RestaurantControllerTest {
   }
 
   @Test
-  @DisplayName("Should list top-rated restaurants.")
+  @DisplayName("Should list top-liked restaurants.")
   @WithMockUser
-  public void testGetTopRatedRestaurants_ReturnsRatedRestaurants() throws Exception {
+  public void testGetTopLikedRestaurants_ReturnsLikedRestaurants() throws Exception {
     var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
-    detail.setRatingSum(10);
-    detail.setRatingCount(2);
-    when(restaurantService.getTopRatedRestaurants(eq(10))).thenReturn(List.of(detail));
+    detail.setUpVotes(2);
+    detail.setDownVotes(0);
+    detail.setVoteCount(2);
+    when(restaurantService.getTopLikedRestaurants(null)).thenReturn(List.of(detail));
 
     mockMvc
-        .perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-rated")
+        .perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-liked")
             .accept(MediaType.APPLICATION_JSON))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.payload[0].ratingSum").value(10))
-        .andExpect(jsonPath("$.payload[0].ratingCount").value(2));
+        .andExpect(jsonPath("$.payload[0].upVotes").value(2))
+        .andExpect(jsonPath("$.payload[0].downVotes").value(0))
+        .andExpect(jsonPath("$.payload[0].voteCount").value(2));
 
-    verify(restaurantService).getTopRatedRestaurants(eq(10));
+    verify(restaurantService).getTopLikedRestaurants(null);
   }
 
   @Test

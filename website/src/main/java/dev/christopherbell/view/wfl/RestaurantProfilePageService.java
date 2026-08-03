@@ -51,7 +51,7 @@ public class RestaurantProfilePageService {
         address == null ? null : address.state());
     var hero = location.isEmpty() ? cuisine : cuisine + " restaurant in " + location;
     var description = hero + ". Details and ratings from What's For Lunch.";
-    var rating = publicRating(detail.getRatingCount(), detail.getRatingSum());
+    var rating = publicRating(detail.getVoteCount(), detail.getUpVotes(), detail.getDownVotes());
     var website = RestaurantWebsiteUrlPolicy.safeOrNull(detail.getWebsite());
     var phone = valueOrNull(detail.getPhoneNumber());
     var source = firstPresent(detail.getSourceAmenity(), detail.getType());
@@ -106,11 +106,17 @@ public class RestaurantProfilePageService {
         ? null : result;
   }
 
-  private static RestaurantProfilePage.Rating publicRating(Integer count, Integer sum) {
-    if (count == null || sum == null || count <= 0 || sum < count || sum > count * 5) {
+  private static RestaurantProfilePage.Rating publicRating(
+      Integer voteCount,
+      Integer upVotes,
+      Integer downVotes
+  ) {
+    if (voteCount == null || upVotes == null || downVotes == null || voteCount <= 0
+        || upVotes < 0 || downVotes < 0 || voteCount != upVotes + downVotes) {
       return null;
     }
-    return new RestaurantProfilePage.Rating(count, sum);
+    long score = (long) upVotes * 5L + downVotes;
+    return score > Integer.MAX_VALUE ? null : new RestaurantProfilePage.Rating(voteCount, (int) score);
   }
 
   private static String directionsUrl(

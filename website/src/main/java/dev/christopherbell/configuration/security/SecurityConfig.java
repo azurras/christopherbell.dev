@@ -114,7 +114,7 @@ public class SecurityConfig {
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/nearby/zip/**",
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/profile/**",
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/preferences",
-      "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-rated",
+      "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-liked",
       "GET:/api/whatsforlunch/restaurant" + APIVersion.V20260726 + "/freshness",
       "GET:/api/posts" + APIVersion.V20250914 + "/feed",
       "GET:/api/posts" + APIVersion.V20250914 + "/user/**",
