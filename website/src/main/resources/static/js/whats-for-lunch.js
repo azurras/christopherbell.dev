@@ -2,6 +2,7 @@ import { API } from './lib/api.js';
 import { authHeaders, fetchJson, getAuthClaims, linkMentions, loginRedirectUrl, sanitize } from './lib/util.js';
 import pubsub from './components/pubsub.js';
 import { appendSafeHttpLink } from './lib/safe-http-link.js';
+import { createRestaurantVoteMutation } from './lib/restaurant-vote-mutation.js';
 import {
   clearAnonymousWflSession,
   readAnonymousWflSession,
@@ -55,6 +56,7 @@ let activeSession = null;
 let sessionPollId = null;
 let sessionPollInFlight = false;
 let dataFreshness = null;
+const restaurantVoteMutations = new Map();
 
 function memberSessionKey() {
   const claims = getAuthClaims();
@@ -370,7 +372,7 @@ function renderPicks(picks) {
     <div class="lunch-toolbar">
       <div class="lunch-toolbar-copy">
         <p>${toolbarText}</p>
-        <p class="lunch-weighting-note">Ratings influence the draw. Every eligible restaurant stays in the mix.</p>
+        <p class="lunch-weighting-note">Member approval influences the draw. Every eligible restaurant stays in the mix.</p>
       </div>
       <button type="button" class="btn btn-primary lunch-location-refresh lunch-primary-refresh" ${activeSession && !activeSession.canChangeRestaurants ? 'disabled title="Only the active session host can change the picks"' : ''}>Try 3 more</button>
     </div>
@@ -973,32 +975,35 @@ async function voteForRestaurant(restaurantId) {
 
 async function setRestaurantVote(restaurantId, vote) {
   if (!restaurantId || !['UP', 'DOWN'].includes(vote)) return;
-  const button = Array.from(mount.querySelectorAll('.lunch-vote-button'))
-    .find((candidate) => candidate.dataset.restaurantId === restaurantId
-      && candidate.dataset.vote === vote);
-  if (button) button.disabled = true;
-  try {
-    const updatedRestaurant = await fetchJson(API.whatsForLunch.voteRestaurant, {
+  let mutation = restaurantVoteMutations.get(restaurantId);
+  if (!mutation) {
+    mutation = createRestaurantVoteMutation({
+      buttons: () => Array.from(mount.querySelectorAll('.lunch-vote-button'))
+        .filter(button => button.dataset.restaurantId === restaurantId),
+      apply: updatedRestaurant => {
+        currentPicks = currentPicks.map((restaurant) => restaurant.id === restaurantId ? updatedRestaurant : restaurant);
+        if (activeSession?.restaurants) {
+          activeSession = {
+            ...activeSession,
+            restaurants: activeSession.restaurants.map((restaurant) =>
+              restaurant.id === restaurantId ? updatedRestaurant : restaurant),
+          };
+        }
+        renderPicks(currentPicks);
+      },
+      showError: err => {
+        mount.insertAdjacentHTML('afterbegin', `
+          <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not save vote.')}</div>
+        `);
+      },
+    });
+    restaurantVoteMutations.set(restaurantId, mutation);
+  }
+  await mutation(() => fetchJson(API.whatsForLunch.voteRestaurant, {
       method: 'PUT',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ restaurantId, vote }),
-    });
-    currentPicks = currentPicks.map((restaurant) => restaurant.id === restaurantId ? updatedRestaurant : restaurant);
-    if (activeSession?.restaurants) {
-      activeSession = {
-        ...activeSession,
-        restaurants: activeSession.restaurants.map((restaurant) =>
-          restaurant.id === restaurantId ? updatedRestaurant : restaurant),
-      };
-    }
-    renderPicks(currentPicks);
-  } catch (err) {
-    mount.insertAdjacentHTML('afterbegin', `
-      <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not save vote.')}</div>
-    `);
-  } finally {
-    if (button) button.disabled = false;
-  }
+  }));
 }
 
 async function toggleFavorite(restaurantId) {

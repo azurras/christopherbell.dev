@@ -1,4 +1,5 @@
 import { API } from './lib/api.js';
+import { createRestaurantVoteMutation } from './lib/restaurant-vote-mutation.js';
 import { authHeaders, fetchJson, getAuthClaims, sanitize } from './lib/util.js';
 import { voteSummary } from './lib/wfl-ui.js';
 
@@ -91,6 +92,22 @@ export async function initializeRestaurantProfile({
     );
   };
 
+  const voteMutation = createRestaurantVoteMutation({
+    buttons: () => Array.from(mount.querySelectorAll?.('.lunch-vote-button') || []),
+    apply: value => {
+      const updated = render(value);
+      if (publicMount) publicMount.textContent = voteSummary(updated).overall;
+    },
+    showError: error => {
+      if (error?.status === 401) {
+        state.restaurant = null;
+        mount.innerHTML = anonymousFallback;
+        return;
+      }
+      showError(error);
+    },
+  });
+
   try {
     render(await request(API.whatsForLunch.restaurant(restaurantId), {
       headers: headers(),
@@ -106,18 +123,12 @@ export async function initializeRestaurantProfile({
     const favoriteButton = event.target?.closest?.('.restaurant-favorite-toggle');
     if (!voteButton && !favoriteButton) return;
 
-    if (voteButton) voteButton.disabled = true;
     try {
       if (voteButton) {
-        const updated = render(await saveVote(
-          state.restaurant.id,
-          voteButton.dataset.vote,
-          request,
-          headers,
-        ));
-        if (publicMount) {
-          publicMount.textContent = voteSummary(updated).overall;
-        }
+        const controls = Array.from(mount.querySelectorAll?.('.lunch-vote-button') || [voteButton]);
+        await voteMutation(() => saveVote(
+          state.restaurant.id, voteButton.dataset.vote, request, headers,
+        ), controls);
         return;
       }
 
@@ -133,8 +144,6 @@ export async function initializeRestaurantProfile({
         return;
       }
       showError(error);
-    } finally {
-      if (voteButton) voteButton.disabled = false;
     }
   });
 }

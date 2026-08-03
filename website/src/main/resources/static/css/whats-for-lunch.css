@@ -258,10 +258,16 @@
 }
 
 .lunch-void-page .lunch-vote-button:hover,
-.lunch-void-page .lunch-vote-button:focus-visible,
-.lunch-void-page .lunch-vote-button[aria-pressed="true"] {
+.lunch-void-page .lunch-vote-button:focus-visible {
     border-color: var(--lunch-void-teal);
     color: var(--lunch-void-teal);
+}
+
+.lunch-void-page .lunch-vote-button[aria-pressed="true"] {
+    border-color: var(--lunch-void-teal);
+    background: rgba(117, 202, 187, 0.18);
+    color: var(--lunch-void-teal);
+    font-weight: 800;
 }
 
 .lunch-void-page .btn-primary,
