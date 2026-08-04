@@ -12,6 +12,12 @@ The archive is stored under `backupRoot` from
 `mongorestore.exe --dryRun`, and have a JSON sidecar containing its SHA-256.
 The command never deletes the prior verified archive.
 
+Ordinary deployment invokes the same verified backup operation before candidate
+startup. It restores `christopherbell.*` into a generated database matching the
+strict `cbell_candidate_<sha-prefix>_<nonce>` allowlist, validates port 8081
+against only that clone, and drops only that exact database in `finally`. A
+restore or cleanup failure fails deployment; the archive and sidecar are kept.
+
 ## Inspect and Verify
 
 ```powershell
@@ -47,6 +53,9 @@ Run the application against the validation database on a non-production port.
 Confirm `GET /` returns HTTP 200 and the known smoke email returns HTTP 401 with
 an invalid password, never `RESOURCE_NOT_FOUND`.
 
+The automated deployment candidate follows this validation-restore shape, but
+it does not compare or modify the live database and does not promote the clone.
+
 ## Production Restore
 
 Restoring `christopherbell` is destructive and requires a maintenance window,
@@ -59,6 +68,12 @@ successful validation restore. Only then run the equivalent restore with:
 
 Recompute the inventory and repeat the port-8081 checks before starting or
 restarting `ChristopherBellDev` on port 8080.
+
+Production restore is never an automatic deployment rollback. After the new
+binary has crossed the live migration boundary, keep the website stopped and
+unready, preserve the deployment backup and failure evidence, and obtain
+explicit approval before restoring live data. Do not restart the prior binary
+against potentially migrated data.
 
 ## WSL Migration Fallback
 

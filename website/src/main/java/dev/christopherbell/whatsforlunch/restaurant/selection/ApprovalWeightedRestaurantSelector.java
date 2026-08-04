@@ -1,7 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant.selection;
 
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
-import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingSummary;
+import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteSummary;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -11,29 +11,25 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.DoubleSupplier;
 import org.springframework.stereotype.Component;
 
-/** Selects unique restaurant candidates using confidence-adjusted rating weights. */
+/** Selects unique restaurant candidates using confidence-adjusted approval weights. */
 @Component
-public final class RatingWeightedRestaurantSelector {
-  private static final double PRIOR_RATING = 3.0;
-  private static final int PRIOR_RATING_COUNT = 3;
-  private static final double[] RATING_WEIGHTS = {0.35, 0.60, 1.00, 1.50, 2.00};
+public final class ApprovalWeightedRestaurantSelector {
+  private static final double PRIOR_UP_VOTES = 1.5;
+  private static final double PRIOR_VOTE_COUNT = 3.0;
 
   /** Selects at most {@code requestedCount} candidates without replacement. */
   public List<Restaurant> select(
       List<Restaurant> candidates,
-      Map<String, RestaurantRatingSummary> summariesByRestaurantId,
+      Map<String, RestaurantVoteSummary> summariesByRestaurantId,
       int requestedCount
   ) {
-    return select(
-        candidates,
-        summariesByRestaurantId,
-        requestedCount,
+    return select(candidates, summariesByRestaurantId, requestedCount,
         ThreadLocalRandom.current()::nextDouble);
   }
 
   List<Restaurant> select(
       List<Restaurant> candidates,
-      Map<String, RestaurantRatingSummary> summariesByRestaurantId,
+      Map<String, RestaurantVoteSummary> summariesByRestaurantId,
       int requestedCount,
       DoubleSupplier random
   ) {
@@ -54,23 +50,20 @@ public final class RatingWeightedRestaurantSelector {
         throw new IllegalArgumentException("candidate restaurant id must not be blank");
       }
       if (!seenIds.add(candidate.getId())) {
-        throw new IllegalArgumentException(
-            "candidate restaurant ids must be unique: " + candidate.getId());
+        throw new IllegalArgumentException("candidate restaurant ids must be unique: "
+            + candidate.getId());
       }
       var summary = summariesByRestaurantId.get(candidate.getId());
       if (summary != null && !candidate.getId().equals(summary.restaurantId())) {
-        throw new IllegalArgumentException(
-            "rating summary id does not match candidate: " + candidate.getId());
+        throw new IllegalArgumentException("vote summary id does not match candidate: "
+            + candidate.getId());
       }
       remaining.add(new WeightedRestaurant(candidate, weightFor(summary)));
     }
 
-    var selected = new ArrayList<Restaurant>(
-        Math.min(requestedCount, remaining.size()));
+    var selected = new ArrayList<Restaurant>(Math.min(requestedCount, remaining.size()));
     while (selected.size() < requestedCount && !remaining.isEmpty()) {
-      double totalWeight = remaining.stream()
-          .mapToDouble(WeightedRestaurant::weight)
-          .sum();
+      double totalWeight = remaining.stream().mapToDouble(WeightedRestaurant::weight).sum();
       double sample = random.getAsDouble();
       if (!Double.isFinite(sample) || sample < 0.0 || sample >= 1.0) {
         throw new IllegalArgumentException("random sample must be in [0, 1)");
@@ -90,34 +83,22 @@ public final class RatingWeightedRestaurantSelector {
     return List.copyOf(selected);
   }
 
-  static double weightFor(RestaurantRatingSummary summary) {
-    if (summary == null) {
-      return interpolateWeight(PRIOR_RATING);
+  static double weightFor(RestaurantVoteSummary summary) {
+    if (summary == null || summary.voteCount() == 0) {
+      return 1.0;
     }
-    if (summary.ratingCount() <= 0
-        || summary.ratingSum() < summary.ratingCount()
-        || (long) summary.ratingSum() > (long) summary.ratingCount() * 5L) {
-      throw new IllegalArgumentException("rating summary count and sum are invalid");
-    }
-    double adjustedRating =
-        (summary.ratingSum() + PRIOR_RATING * PRIOR_RATING_COUNT)
-            / (summary.ratingCount() + (double) PRIOR_RATING_COUNT);
-    return interpolateWeight(adjustedRating);
+    double adjustedApproval =
+        (summary.upVotes() + PRIOR_UP_VOTES) / (summary.voteCount() + PRIOR_VOTE_COUNT);
+    return interpolateWeight(adjustedApproval);
   }
 
-  static double interpolateWeight(double adjustedRating) {
-    if (!Double.isFinite(adjustedRating)
-        || adjustedRating < 1.0
-        || adjustedRating > 5.0) {
-      throw new IllegalArgumentException("adjusted rating must be between 1 and 5");
+  static double interpolateWeight(double approval) {
+    if (!Double.isFinite(approval) || approval < 0.0 || approval > 1.0) {
+      throw new IllegalArgumentException("adjusted approval must be in [0, 1]");
     }
-    int lowerAnchor = (int) Math.floor(adjustedRating);
-    if (lowerAnchor == 5) {
-      return RATING_WEIGHTS[4];
-    }
-    double lowerWeight = RATING_WEIGHTS[lowerAnchor - 1];
-    double upperWeight = RATING_WEIGHTS[lowerAnchor];
-    return lowerWeight + (upperWeight - lowerWeight) * (adjustedRating - lowerAnchor);
+    return approval <= 0.5
+        ? 0.35 + (1.0 - 0.35) * (approval / 0.5)
+        : 1.0 + (2.0 - 1.0) * ((approval - 0.5) / 0.5);
   }
 
   private record WeightedRestaurant(Restaurant restaurant, double weight) {}

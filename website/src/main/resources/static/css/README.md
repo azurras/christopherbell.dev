@@ -7,9 +7,9 @@ Owns site styling for server-rendered pages and frontend components.
 - `main.css` is the primary shared stylesheet for the current site, Void feed,
   tools, auth, profile, messages, post cards, and responsive layout.
 - `void-discovery.css` owns the public Void Explore and topic discovery surfaces.
-- `whats-for-lunch.css` owns the `/wfl` Void decision console and public
-  restaurant-profile presentation; shared Favorites and Top Rated list
-  primitives remain in `main.css`.
+- `whats-for-lunch.css` owns the `/wfl` Void decision console, accessible binary
+  vote controls, and public restaurant-profile presentation; shared Favorites
+  and Top Liked list primitives remain in `main.css`.
 - `command-center.css` owns the private Mission Control console and loads before
   `main.css` so the shared Void shell retains its established page background.
 - `shared-folder.css` owns the authenticated Shared Folder explorer.
@@ -46,9 +46,11 @@ Owns site styling for server-rendered pages and frontend components.
   classes for the full Signal Log page and category preference panel. The nav
   bell keeps only the three most recent notifications and uses the compact
   notification dropdown rules near the shared nav styles.
-- WFL Favorites and Top Rated retain their shared list classes in `main.css`.
-  Picks and restaurant profiles use `.lunch-void-*` and scoped rules from
-  `whats-for-lunch.css` without changing neighboring pages.
+- WFL Favorites and Top Liked retain their shared list classes in `main.css`,
+  including wrapping, visible-focus binary controls scoped to list cards.
+  Picks and restaurant profiles use `.lunch-void-*`, `.lunch-vote-*`, and scoped
+  rules from `whats-for-lunch.css`; long vote totals wrap instead of widening
+  mobile cards, without changing neighboring pages.
 - ZIP Coordinates uses `.zip-coordinate-*` classes in `main.css` for its
   Void-inspired lookup shell, result grid, and copyable endpoint output.
 - Raising Canes Box Index uses `.canes-box-*` classes in `main.css` for its

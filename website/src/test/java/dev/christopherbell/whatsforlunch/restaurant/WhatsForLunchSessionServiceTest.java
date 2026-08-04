@@ -22,7 +22,7 @@ import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionVoteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
+import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.session.WflSessionConflictException;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionMutationStore;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionRepository;
@@ -59,7 +59,7 @@ class WhatsForLunchSessionServiceTest {
   @Mock private PermissionService permissionService;
   @Mock private RestaurantMapper restaurantMapper;
   @Mock private RestaurantFavoriteRepository restaurantFavoriteRepository;
-  @Mock private RestaurantRatingRepository restaurantRatingRepository;
+  @Mock private RestaurantVoteRepository restaurantVoteRepository;
   @Mock private RestaurantRepository restaurantRepository;
   @Mock private WhatsForLunchSessionMutationStore mutations;
   @Mock private WhatsForLunchSessionRepository sessionRepository;
@@ -220,14 +220,14 @@ class WhatsForLunchSessionServiceTest {
         .findByParticipantAccountIdsContainingAndDeleteOnAfterOrderByCreatedOnDesc(
             eq("owner-id"), eq(NOW), any(Pageable.class))).thenReturn(sessions);
     stubRestaurants(ORIGINAL_IDS);
-    when(restaurantRatingRepository.findByRestaurantIdIn(ORIGINAL_IDS)).thenReturn(List.of());
+    when(restaurantVoteRepository.findByRestaurantIdIn(ORIGINAL_IDS)).thenReturn(List.of());
     when(restaurantFavoriteRepository.findByRestaurantIdInAndAccountId(ORIGINAL_IDS, "owner-id"))
         .thenReturn(List.of());
 
     assertThat(service.getMySessions(sessionCount)).hasSize(sessionCount);
 
     verify(restaurantRepository, times(1)).findAllById(ORIGINAL_IDS);
-    verify(restaurantRatingRepository, times(1)).findByRestaurantIdIn(ORIGINAL_IDS);
+    verify(restaurantVoteRepository, times(1)).findByRestaurantIdIn(ORIGINAL_IDS);
     verify(restaurantFavoriteRepository, times(1))
         .findByRestaurantIdInAndAccountId(ORIGINAL_IDS, "owner-id");
   }

@@ -18,7 +18,7 @@ Owns server-side routing for HTML pages.
 - `voidroutes` serves Void, profile, messages, notifications, public user feeds,
   post pages, the public `/void/explore` discovery page, and normalized public
   `/void/topic/{topic}` pages.
-- `wfl` serves What's For Lunch, WFL restaurant profiles, favorites, and top-rated lists.
+- `wfl` serves What's For Lunch, WFL restaurant profiles, favorites, and the canonical top-liked list; `/wfl/top-rated` permanently redirects to it.
 - Route names used by the frontend navigation.
 - Dynamic public profile routes attach canonical social preview URLs for link unfurlers.
 - Active `/p/{id}` pages derive bounded social metadata only after the post

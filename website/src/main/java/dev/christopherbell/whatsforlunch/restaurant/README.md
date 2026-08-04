@@ -8,8 +8,8 @@ Owns the data model and APIs for What's For Lunch restaurants.
 - Public nearby lunch picks, legacy daily lunch picks, and admin-only maintenance endpoints.
 - User WFL preferences for saved cuisine filters. Preference persistence lives in `preference`.
 - Shared WFL sessions where logged-in members see the same three restaurants and vote. Session orchestration lives in `session`.
-- Whole-number restaurant ratings from logged-in members, plus public rating totals. Rating persistence lives in `rating`.
-- Favorite restaurants for logged-in members and a public top-rated restaurant list. Favorite persistence lives in `favorite`.
+- Binary UP/DOWN restaurant votes from logged-in members, plus public vote totals. Vote persistence and aggregation live in `vote`.
+- Favorite restaurants for logged-in members and a public top-liked restaurant API. Favorite persistence lives in `favorite`.
 - Daily pick persistence and replacement behavior after admin deletion.
 - OpenStreetMap import with coordinates, same-name/address updates, duplicate-name protection, duplicate cleanup, monthly scheduling, and startup catch-up when the previous month was missed.
 - Restaurant DTOs, import summaries, daily pick models, and repository interfaces.
@@ -20,7 +20,7 @@ Owns the data model and APIs for What's For Lunch restaurants.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/nearby/zip/{zipCode}` accepts a 5-digit ZIP code and uses imported Location Census ZCTA coordinates as the search origin.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/profile/{id}` returns a public restaurant profile used by `/wfl/restaurants/{id}`.
 - `/wfl/favorites` lists the signed-in user's favorited restaurants.
-- `/wfl/top-rated` lists the public top 10 rated restaurants.
+- `/wfl/top-liked` is the canonical public Top 10 Liked browser/SSR route; legacy `/wfl/top-rated` permanently redirects to it.
 - Optional `radiusMiles` query param controls the nearby search radius. Allowed values are `1`, `5`, `10`, `15`, and `20`.
 - Optional `cuisine` query params filter nearby picks by OpenStreetMap cuisine tags. Multiple values are allowed.
 - `GET /api/whatsforlunch/restaurant/2026-05-17/preferences` is public so `/wfl` can load for anonymous visitors; it returns saved filters for an authenticated token and default filters otherwise.
@@ -37,15 +37,20 @@ Owns the data model and APIs for What's For Lunch restaurants.
 - Clicking "Try 3 more" clears the current solo session and requests a new set of restaurants. In a shared session it replaces the session's restaurants for every participant.
 - Admin deletes remove the restaurant from the database. The WFL page then requests a fresh nearby list to replace the deleted card.
 
-## Ratings
+## Restaurant Votes
 
-- `PUT /api/whatsforlunch/restaurant/2026-05-17/rating` lets a signed-in member set one rating for a restaurant by sending `restaurantId` and `rating` in JSON. This avoids putting OpenStreetMap ids with punctuation in the URL path.
-- `PUT /api/whatsforlunch/restaurant/2026-05-17/{id}/rating` remains available for older callers with simple ids.
-- Ratings must be whole numbers from `1` through `5`; fractional values are rejected instead of rounded.
-- Public restaurant details include `ratingSum` and `ratingCount`; the UI displays a whole-number `Rating: N/5` or `No Ratings` when nobody has rated the restaurant.
-- Signed-in callers also receive `myRating` when they have already rated that restaurant.
-- Signed-in views show both the overall rating and the caller's personal rating.
-- `GET /api/whatsforlunch/restaurant/2026-05-17/top-rated` returns the highest-rated restaurants with at least one rating.
+- `PUT /api/whatsforlunch/restaurant/2026-05-17/vote` lets a signed-in member set one binary vote by sending `restaurantId` and `vote` (`"UP"` or `"DOWN"`) in JSON. This avoids putting OpenStreetMap ids with punctuation in the URL path.
+- `PUT /api/whatsforlunch/restaurant/2026-05-17/{id}/vote` is the equivalent path form for simple restaurant IDs.
+- Vote request JSON is exact: the path form accepts only `vote`, and the body-ID
+  form accepts only `restaurantId` and `vote`. Missing, null, numeric,
+  fractional, string-number, legacy `rating`, and all other unknown properties
+  are rejected; each member has one persisted vote per restaurant.
+- Public restaurant details include `upVotes`, `downVotes`, and `voteCount`; signed-in callers also receive `myVote` when they have voted.
+- `GET /api/whatsforlunch/restaurant/2026-05-17/top-liked` returns restaurants with at least one vote, ordered by approval ratio descending, vote count descending, and restaurant ID ascending.
+- Browser vote controls on picks, profiles, Favorites, and Top Liked submit the
+  binary vote contract and refresh from the server-confirmed restaurant detail
+  response. Per-restaurant generation guards prevent older responses from
+  overwriting the latest click.
 
 ## Favorites
 
@@ -82,4 +87,4 @@ Owns the data model and APIs for What's For Lunch restaurants.
 
 ## Update This Doc
 
-Update this README when restaurant fields, import matching/merge rules, duplicate rules, daily pick rules, nearby pick rules, rating/favorite rules, session voting rules, import scheduling, admin endpoints, or public WFL response shapes change.
+Update this README when restaurant fields, import matching/merge rules, duplicate rules, daily pick rules, nearby pick rules, vote/favorite rules, session voting rules, import scheduling, admin endpoints, or public WFL response shapes change.

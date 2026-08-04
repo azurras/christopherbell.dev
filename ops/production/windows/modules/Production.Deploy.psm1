@@ -13,6 +13,7 @@ $script:ProductionSmokePaths = @(
     '/.well-known/nodeinfo',
     '/nodeinfo/2.1'
 )
+$script:CandidateDatabasePattern = '^cbell_candidate_[0-9a-f]{12}_[0-9a-f]{24}$'
 function Resolve-OriginMainRelease {
     param($Config)
     $fetchArguments = Get-TrustedGitArguments $Config.repositoryPath @('fetch','--prune',$Config.remote,$Config.branch)
@@ -148,6 +149,102 @@ function Test-CandidateRelease {
         if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
         $process.WaitForExit(10000) | Out-Null
     }
+}
+
+function Assert-CandidateDatabaseName {
+    param([Parameter(Mandatory)][string]$Database)
+    if ($Database -notmatch $script:CandidateDatabasePattern) {
+        throw 'Invalid candidate database name.'
+    }
+    return $Database
+}
+
+function New-CandidateDatabaseName {
+    param([Parameter(Mandatory)][string]$Sha)
+    if ($Sha -notmatch '^[0-9a-f]{40}$') {
+        throw 'Candidate database release must use a full Git SHA.'
+    }
+    $nonce = [guid]::NewGuid().ToString('N').Substring(0, 24)
+    return Assert-CandidateDatabaseName "cbell_candidate_$($Sha.Substring(0, 12))_$nonce"
+}
+
+function Restore-CandidateDatabaseFromBackup {
+    param(
+        $Config,
+        [Parameter(Mandatory)][string]$Archive,
+        [Parameter(Mandatory)][string]$Database
+    )
+    $database = Assert-CandidateDatabaseName $Database
+    $arguments = @(
+        '--uri=mongodb://127.0.0.1:27017'
+        "--archive=$Archive"
+        '--gzip'
+        '--drop'
+        '--nsFrom=christopherbell.*'
+        "--nsTo=$database.*"
+    )
+    Invoke-CheckedProcess `
+        -FilePath (Join-Path $Config.mongoToolsPath 'mongorestore.exe') `
+        -ArgumentList $arguments `
+        -WorkingDirectory $Config.repositoryPath | Out-Null
+}
+
+function Remove-CandidateDatabase {
+    param($Config, [Parameter(Mandatory)][string]$Database)
+    $database = Assert-CandidateDatabaseName $Database
+    $cleanupScript = @'
+const candidateDatabase = process.env.CBELL_CANDIDATE_DATABASE;
+if (!/^cbell_candidate_[0-9a-f]{12}_[0-9a-f]{24}$/.test(candidateDatabase)) {
+  throw new Error('Invalid candidate database name.');
+}
+const result = db.getSiblingDB(candidateDatabase).dropDatabase();
+if (!result.ok) {
+  throw new Error('Candidate database cleanup failed.');
+}
+'@
+    Invoke-CheckedProcess `
+        -FilePath $Config.mongoShellExe `
+        -ArgumentList @(
+            '--quiet'
+            'mongodb://127.0.0.1:27017/admin'
+            '--eval'
+            $cleanupScript
+        ) `
+        -WorkingDirectory $Config.repositoryPath `
+        -Environment @{ CBELL_CANDIDATE_DATABASE = $database } | Out-Null
+}
+
+function Invoke-CandidateReleaseValidation {
+    param(
+        $Config,
+        [Parameter(Mandatory)][string]$Release,
+        [Parameter(Mandatory)][string]$Sha
+    )
+    $database = New-CandidateDatabaseName -Sha $Sha
+    $validationFailure = $null
+    $cleanupFailure = $null
+    try {
+        $archive = New-ProductionBackup
+        Restore-CandidateDatabaseFromBackup `
+            -Config $Config -Archive $archive -Database $database
+        Test-CandidateRelease -Config $Config -Release $Release -Database $database
+    } catch {
+        $validationFailure = $_.Exception
+    } finally {
+        try {
+            Remove-CandidateDatabase -Config $Config -Database $database
+        } catch {
+            $cleanupFailure = $_.Exception
+        }
+    }
+
+    if ($validationFailure -and $cleanupFailure) {
+        throw [System.AggregateException]::new(
+            'Candidate validation and exact database cleanup both failed.',
+            [System.Exception[]]@($validationFailure, $cleanupFailure))
+    }
+    if ($cleanupFailure) { throw $cleanupFailure }
+    if ($validationFailure) { throw $validationFailure }
 }
 
 function Invoke-BoundedCheckedProcess {
@@ -448,14 +545,32 @@ function Switch-ProductionRelease {
     $previousPath = Join-Path $Config.programDataRoot 'previous'
     $old = Get-JunctionTarget $currentPath
     Stop-ProductionWebsiteService -ProductionPort $Config.productionPort
+    $liveMigrationStarted = $false
     try {
         if ($old) { Set-AtomicJunction $Config $previousPath $old }
         Set-AtomicJunction $Config $currentPath $release
+        $liveMigrationStarted = $true
         Start-Service ChristopherBellDev
         Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
         Test-ProductionPublicEndpoints -Config $Config | Out-Null
     } catch {
         $deploymentFailure = $_.Exception
+        if ($liveMigrationStarted) {
+            $stopFailure = $null
+            try {
+                Stop-ProductionWebsiteService -ProductionPort $Config.productionPort
+            } catch {
+                $stopFailure = $_.Exception
+            }
+            if ($stopFailure) {
+                throw [System.AggregateException]::new(
+                    'Forward-only production migration/cutover failed after the live migration boundary and the website stop postcondition could not be confirmed. Do not restart the prior binary; repair forward with operator intervention.',
+                    [System.Exception[]]@($deploymentFailure, $stopFailure))
+            }
+            throw [System.InvalidOperationException]::new(
+                'Forward-only production migration/cutover failed after the live migration boundary. The website is stopped and unready. Repair the live data or deploy a compatible forward release; do not restart the prior binary.',
+                $deploymentFailure)
+        }
         if ($old) {
             try {
                 Stop-ProductionWebsiteService -ProductionPort $Config.productionPort
@@ -497,7 +612,7 @@ function Invoke-ProductionDeploy {
         $sha = Resolve-OriginMainRelease $config
         if ($WhatIf) { Write-Output "Would deploy $($config.remote)/$($config.branch) at $sha"; return }
         $release = New-ReleaseFromOriginMain $config $sha
-        Test-CandidateRelease $config $release
+        Invoke-CandidateReleaseValidation -Config $config -Release $release -Sha $sha
         Switch-ProductionRelease $config $release
         Remove-ExpiredReleases $config
     } finally { $lock.Dispose() }

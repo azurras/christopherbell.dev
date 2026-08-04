@@ -11,15 +11,15 @@ import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-/** User-submitted whole-number rating for a WFL restaurant. */
+/** Binary member vote for a WFL restaurant. */
 @AllArgsConstructor
 @Builder
 @Data
 @NoArgsConstructor
 @CompoundIndex(name = "restaurant_account_unique", def = "{'restaurantId': 1, 'accountId': 1}", unique = true)
 @Document("whatsforlunch_ratings")
-public class RestaurantRating {
-  private final String type = "restaurant_rating";
+public class RestaurantVote {
+  private final String type = "restaurant_vote";
 
   @Id
   private String id;
@@ -27,7 +27,7 @@ public class RestaurantRating {
   @Indexed
   private String restaurantId;
   private String accountId;
-  private Integer rating;
+  private RestaurantVoteValue vote;
 
   @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "uuuu-MM-dd'T'HH:mm:ss.SSS'Z'", timezone = "UTC")
   private Instant createdOn;

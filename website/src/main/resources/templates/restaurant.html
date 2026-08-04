@@ -23,7 +23,7 @@
             <div class="container lunch-void-container restaurant-profile-container">
                 <nav class="wfl-secondary-nav" aria-label="What's For Lunch navigation">
                     <a href="/wfl">Picks</a>
-                    <a href="/wfl/top-rated">Top 10 Rated</a>
+                    <a href="/wfl/top-liked">Top 10 Liked</a>
                     <a href="/wfl/favorites">Favorites</a>
                 </nav>
 
@@ -34,17 +34,19 @@
                 </header>
 
                 <article class="restaurant-profile-void" aria-label="Restaurant profile">
-                    <section class="restaurant-rating-signal"
-                             aria-labelledby="restaurantRatingTitle">
+                    <section class="restaurant-vote-signal"
+                             aria-labelledby="restaurantVoteTitle">
                         <p class="restaurant-profile-label">Public signal</p>
-                        <h2 id="restaurantRatingTitle">Aggregate rating</h2>
-                        <p id="restaurant-public-rating"
-                           class="restaurant-rating-value"
-                           th:if="${restaurantProfile.hasRating()}"
-                           th:text="${#numbers.formatDecimal(restaurantProfile.averageRating(), 1, 1) + '/5 from ' + restaurantProfile.rating.count + (restaurantProfile.rating.count == 1 ? ' rating' : ' ratings')}">4.5/5 from 2 ratings</p>
-                        <p id="restaurant-public-rating"
-                           class="restaurant-rating-value"
-                           th:unless="${restaurantProfile.hasRating()}">No ratings yet</p>
+                        <h2 id="restaurantVoteTitle">Member approval</h2>
+                        <p id="restaurant-public-votes"
+                           class="restaurant-vote-value"
+                           th:if="${restaurantProfile.hasVotes()}"
+                           th:text="${restaurantProfile.approvalPercentage() + '% liked · '
+                               + restaurantProfile.votes.upVotes + ' up · '
+                               + restaurantProfile.votes.downVotes + ' down'}">83% liked · 10 up · 2 down</p>
+                        <p id="restaurant-public-votes"
+                           class="restaurant-vote-value"
+                           th:unless="${restaurantProfile.hasVotes()}">No votes yet</p>
                         <p th:text="${restaurantProfile.cuisine}">Restaurant</p>
                     </section>
 
@@ -92,7 +94,7 @@
                         <div id="restaurant-member-controls"
                              aria-live="polite"
                              th:attr="data-restaurant-id=${restaurantProfile.id}">
-                            <p>Sign in to rate or favorite this restaurant.</p>
+                            <p>Sign in to vote or favorite this restaurant.</p>
                             <a class="btn btn-outline-primary"
                                th:href="@{/login(redirect=${restaurantProfile.path})}">Sign in</a>
                         </div>

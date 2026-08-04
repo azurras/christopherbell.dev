@@ -1,6 +1,8 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -19,12 +21,14 @@ import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.security.ControllerSliceMethodSecurityTestConfig;
 import dev.christopherbell.libs.api.APIVersion;
 import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
+import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingSetRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteSetRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteValue;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
 import dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionService;
@@ -183,20 +187,21 @@ class RestaurantControllerMemberSecurityTest {
   }
 
   @Test
-  @DisplayName("Member token can rate an OpenStreetMap restaurant through body-based endpoint")
-  void rateRestaurant_whenBearerTokenAndOpenStreetMapId_returns200() throws Exception {
+  @DisplayName("Member token can vote on an OpenStreetMap restaurant through the body-based endpoint")
+  void voteRestaurant_whenBearerTokenAndOpenStreetMapId_returns200() throws Exception {
     when(permissionService.hasAuthority(eq("USER"))).thenReturn(true);
     var restaurantId = "osm:way:55591510";
-    var request = new RestaurantRatingSetRequest(restaurantId, 3);
-    var serviceRequest = new RestaurantRatingRequest(3);
+    var request = new RestaurantVoteSetRequest(restaurantId, "UP");
+    var serviceRequest = new RestaurantVoteRequest("UP");
     var detail = RestaurantStub.getRestaurantDetailStub(restaurantId);
-    detail.setRatingSum(3);
-    detail.setRatingCount(1);
-    detail.setMyRating(3);
-    when(restaurantService.rateRestaurant(eq(restaurantId), eq(serviceRequest))).thenReturn(detail);
+    detail.setUpVotes(1);
+    detail.setDownVotes(0);
+    detail.setVoteCount(1);
+    detail.setMyVote(RestaurantVoteValue.UP);
+    when(restaurantService.voteRestaurant(eq(restaurantId), eq(serviceRequest))).thenReturn(detail);
 
     mockMvc
-        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/rating")
+        .perform(put("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/vote")
             .with(csrf())
             .header("Authorization", bearer(Role.USER))
             .contentType(MediaType.APPLICATION_JSON)
@@ -205,27 +210,161 @@ class RestaurantControllerMemberSecurityTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.payload.id").value(restaurantId))
-        .andExpect(jsonPath("$.payload.myRating").value(3));
+        .andExpect(jsonPath("$.payload.myVote").value("UP"));
 
-    verify(restaurantService).rateRestaurant(eq(restaurantId), eq(serviceRequest));
+    verify(restaurantService).voteRestaurant(eq(restaurantId), eq(serviceRequest));
   }
 
   @Test
-  @DisplayName("Anonymous request can read top-rated WFL restaurants")
-  void getTopRatedRestaurants_whenAnonymous_returns200() throws Exception {
-    var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
-    detail.setRatingSum(5);
-    detail.setRatingCount(1);
-    when(restaurantService.getTopRatedRestaurants(eq(10))).thenReturn(List.of(detail));
+  @DisplayName("Path vote rejects a legacy rating property even when vote is valid")
+  void voteRestaurantByPath_whenLegacyRatingIsPresent_returns400() throws Exception {
+    when(permissionService.hasAuthority(eq("USER"))).thenReturn(true);
+    var endpoint = "/api/whatsforlunch/restaurant" + APIVersion.V20260517
+        + "/" + RestaurantStub.ID + "/vote";
+
+    for (var body : List.of(
+        "{\"vote\":\"UP\",\"rating\":1}",
+        "{\"vote\":\"UP\",\"rating\":null}")) {
+      mockMvc
+          .perform(put(endpoint)
+              .with(csrf())
+              .header("Authorization", bearer(Role.USER))
+              .contentType(MediaType.APPLICATION_JSON)
+              .accept(MediaType.APPLICATION_JSON)
+              .content(body))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.success").value(false))
+          .andExpect(jsonPath("$.messages[0].code").value("REQUEST_ERROR"));
+    }
+
+    verify(restaurantService, never()).voteRestaurant(eq(RestaurantStub.ID), any());
+  }
+
+  @Test
+  @DisplayName("Body vote rejects a legacy rating property even when vote is valid")
+  void voteRestaurantByBody_whenLegacyRatingIsPresent_returns400() throws Exception {
+    when(permissionService.hasAuthority(eq("USER"))).thenReturn(true);
+    var endpoint = "/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/vote";
+
+    for (var body : List.of(
+        "{\"restaurantId\":\"" + RestaurantStub.ID + "\",\"vote\":\"DOWN\",\"rating\":2}",
+        "{\"restaurantId\":\"" + RestaurantStub.ID + "\",\"vote\":\"DOWN\",\"rating\":null}")) {
+      mockMvc
+          .perform(put(endpoint)
+              .with(csrf())
+              .header("Authorization", bearer(Role.USER))
+              .contentType(MediaType.APPLICATION_JSON)
+              .accept(MediaType.APPLICATION_JSON)
+              .content(body))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.success").value(false))
+          .andExpect(jsonPath("$.messages[0].code").value("REQUEST_ERROR"));
+    }
+
+    verify(restaurantService, never()).voteRestaurant(any(), any());
+  }
+
+  @Test
+  @DisplayName("Both vote endpoint forms reject arbitrary unknown properties")
+  void voteRestaurant_whenUnknownPropertyIsPresent_returns400() throws Exception {
+    when(permissionService.hasAuthority(eq("USER"))).thenReturn(true);
+    var pathEndpoint = "/api/whatsforlunch/restaurant" + APIVersion.V20260517
+        + "/" + RestaurantStub.ID + "/vote";
+    var bodyEndpoint = "/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/vote";
 
     mockMvc
-        .perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-rated")
+        .perform(put(pathEndpoint)
+            .with(csrf())
+            .header("Authorization", bearer(Role.USER))
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content("{\"vote\":\"UP\",\"unexpected\":true}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.messages[0].code").value("REQUEST_ERROR"));
+    mockMvc
+        .perform(put(bodyEndpoint)
+            .with(csrf())
+            .header("Authorization", bearer(Role.USER))
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content("{\"restaurantId\":\"" + RestaurantStub.ID
+                + "\",\"vote\":\"UP\",\"unexpected\":true}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.messages[0].code").value("REQUEST_ERROR"));
+
+    verify(restaurantService, never()).voteRestaurant(any(), any());
+  }
+
+  @Test
+  @DisplayName("Both vote endpoint forms preserve invalid vote partitions")
+  void voteRestaurant_whenVoteValueIsMalformed_returns400() throws Exception {
+    when(permissionService.hasAuthority(eq("USER"))).thenReturn(true);
+    when(restaurantService.voteRestaurant(eq(RestaurantStub.ID), any(RestaurantVoteRequest.class)))
+        .thenThrow(new InvalidRequestException("Restaurant vote must be UP or DOWN."));
+    var pathEndpoint = "/api/whatsforlunch/restaurant" + APIVersion.V20260517
+        + "/" + RestaurantStub.ID + "/vote";
+    var bodyEndpoint = "/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/vote";
+    var malformedVotes = List.of("5", "\"MAYBE\"", "null");
+
+    for (var malformedVote : malformedVotes) {
+      mockMvc
+          .perform(put(pathEndpoint)
+              .with(csrf())
+              .header("Authorization", bearer(Role.USER))
+              .contentType(MediaType.APPLICATION_JSON)
+              .accept(MediaType.APPLICATION_JSON)
+              .content("{\"vote\":" + malformedVote + "}"))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.messages[0].code").value("INVALID_REQUEST"));
+      mockMvc
+          .perform(put(bodyEndpoint)
+              .with(csrf())
+              .header("Authorization", bearer(Role.USER))
+              .contentType(MediaType.APPLICATION_JSON)
+              .accept(MediaType.APPLICATION_JSON)
+              .content("{\"restaurantId\":\"" + RestaurantStub.ID
+                  + "\",\"vote\":" + malformedVote + "}"))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.messages[0].code").value("INVALID_REQUEST"));
+    }
+
+    mockMvc
+        .perform(put(pathEndpoint)
+            .with(csrf())
+            .header("Authorization", bearer(Role.USER))
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content("{}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.messages[0].code").value("INVALID_REQUEST"));
+    mockMvc
+        .perform(put(bodyEndpoint)
+            .with(csrf())
+            .header("Authorization", bearer(Role.USER))
+            .contentType(MediaType.APPLICATION_JSON)
+            .accept(MediaType.APPLICATION_JSON)
+            .content("{\"restaurantId\":\"" + RestaurantStub.ID + "\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.messages[0].code").value("INVALID_REQUEST"));
+  }
+
+  @Test
+  @DisplayName("Anonymous request can read top-liked WFL restaurants")
+  void getTopLikedRestaurants_whenAnonymous_returns200() throws Exception {
+    var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
+    detail.setUpVotes(1);
+    detail.setDownVotes(0);
+    detail.setVoteCount(1);
+    when(restaurantService.getTopLikedRestaurants(null)).thenReturn(List.of(detail));
+
+    mockMvc
+        .perform(get("/api/whatsforlunch/restaurant" + APIVersion.V20260517 + "/top-liked")
             .accept(MediaType.APPLICATION_JSON))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.payload[0].ratingCount").value(1));
+        .andExpect(jsonPath("$.payload[0].voteCount").value(1));
 
-    verify(restaurantService).getTopRatedRestaurants(eq(10));
+    verify(restaurantService).getTopLikedRestaurants(null);
   }
 
   @Test

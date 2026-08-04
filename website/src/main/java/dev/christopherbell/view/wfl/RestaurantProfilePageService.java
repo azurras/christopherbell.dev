@@ -50,14 +50,14 @@ public class RestaurantProfilePageService {
         address == null ? null : address.city(),
         address == null ? null : address.state());
     var hero = location.isEmpty() ? cuisine : cuisine + " restaurant in " + location;
-    var description = hero + ". Details and ratings from What's For Lunch.";
-    var rating = publicRating(detail.getRatingCount(), detail.getRatingSum());
+    var description = hero + ". Details and member approval from What's For Lunch.";
+    var votes = publicVotes(detail.getUpVotes(), detail.getDownVotes(), detail.getVoteCount());
     var website = RestaurantWebsiteUrlPolicy.safeOrNull(detail.getWebsite());
     var phone = valueOrNull(detail.getPhoneNumber());
     var source = firstPresent(detail.getSourceAmenity(), detail.getType());
     var directions = directionsUrl(name, address);
     var structuredData = structuredData(
-        canonicalUrl, name, publicCuisine, address, rating, phone, website);
+        canonicalUrl, name, publicCuisine, address, votes, phone, website);
 
     return new RestaurantProfilePage(
         id,
@@ -69,7 +69,7 @@ public class RestaurantProfilePageService {
         cuisine,
         hero + ".",
         address,
-        rating,
+        votes,
         phone,
         website,
         source,
@@ -106,11 +106,18 @@ public class RestaurantProfilePageService {
         ? null : result;
   }
 
-  private static RestaurantProfilePage.Rating publicRating(Integer count, Integer sum) {
-    if (count == null || sum == null || count <= 0 || sum < count || sum > count * 5) {
+  private static RestaurantProfilePage.VoteSummary publicVotes(
+      Integer upVotes,
+      Integer downVotes,
+      Integer voteCount
+  ) {
+    int up = upVotes == null ? 0 : upVotes;
+    int down = downVotes == null ? 0 : downVotes;
+    int count = voteCount == null ? 0 : voteCount;
+    if (up == 0 && down == 0 && count == 0) {
       return null;
     }
-    return new RestaurantProfilePage.Rating(count, sum);
+    return new RestaurantProfilePage.VoteSummary(up, down, count);
   }
 
   private static String directionsUrl(
@@ -133,7 +140,7 @@ public class RestaurantProfilePageService {
       String name,
       String cuisine,
       RestaurantProfilePage.Address address,
-      RestaurantProfilePage.Rating rating,
+      RestaurantProfilePage.VoteSummary votes,
       String phone,
       String website
   ) {
@@ -160,13 +167,14 @@ public class RestaurantProfilePageService {
     if (website != null) {
       json.put("sameAs", website);
     }
-    if (rating != null) {
-      json.put("aggregateRating", Map.of(
-          "@type", "AggregateRating",
-          "ratingValue", rating.average(),
-          "ratingCount", rating.count(),
-          "bestRating", 5,
-          "worstRating", 1));
+    if (votes != null) {
+      Map<String, Object> aggregateRating = new LinkedHashMap<>();
+      aggregateRating.put("@type", "AggregateRating");
+      aggregateRating.put("ratingValue", votes.approvalPercentage());
+      aggregateRating.put("bestRating", 100);
+      aggregateRating.put("worstRating", 0);
+      aggregateRating.put("ratingCount", votes.voteCount());
+      json.put("aggregateRating", aggregateRating);
     }
     return json;
   }

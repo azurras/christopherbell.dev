@@ -616,43 +616,44 @@ Describe 'native Windows deployment' {
             Should -Invoke Invoke-CheckedProcess -ParameterFilter { $ArgumentList -contains 'fetch' }
         }
 
-        It 'restores the former release through the controlled stop boundary when verification fails' {
+        It 'stops the old writer before the new release can start against live data' {
             Mock Assert-ReleasePath { $Path }
             Mock Get-JunctionTarget { 'C:\data\releases\old' }
-            Mock Stop-ProductionWebsiteService { }
-            Mock Start-Service { }
-            Mock Set-AtomicJunction { }
-            $script:attempt = 0
-            Mock Test-ProductionEndpoints {
-                if ($script:attempt++ -eq 0) { throw 'failed verification' }
+            $script:cutoverEvents = [System.Collections.Generic.List[string]]::new()
+            Mock Stop-ProductionWebsiteService {
+                [void]$script:cutoverEvents.Add('stop-old-writer')
             }
+            Mock Set-AtomicJunction {
+                [void]$script:cutoverEvents.Add("junction:$Target")
+            }
+            Mock Start-Service {
+                [void]$script:cutoverEvents.Add('start-new-release')
+            }
+            Mock Test-ProductionEndpoints { }
+            Mock Test-ProductionPublicEndpoints { 22 }
             $config = [pscustomobject]@{
                 programDataRoot = 'C:\data'
                 productionPort = 8080
             }
 
-            {
-                Switch-ProductionRelease $config 'C:\data\releases\new'
-            } | Should -Throw '*failed verification*'
+            Switch-ProductionRelease $config 'C:\data\releases\new'
 
-            Should -Invoke Stop-ProductionWebsiteService -Times 2 -Exactly -ParameterFilter {
-                $ProductionPort -eq 8080
-            }
-            Should -Invoke Set-AtomicJunction -ParameterFilter {
-                $Target -eq 'C:\data\releases\old'
-            }
+            $script:cutoverEvents | Should -Be @(
+                'stop-old-writer',
+                'junction:C:\data\releases\old',
+                'junction:C:\data\releases\new',
+                'start-new-release'
+            )
         }
 
-        It 'preserves deployment and rollback failures together' {
+        It 'leaves the new release selected and never restarts the old binary after live migration begins' {
             Mock Assert-ReleasePath { $Path }
             Mock Get-JunctionTarget { 'C:\data\releases\old' }
-            $script:stopAttempt = 0
-            Mock Stop-ProductionWebsiteService {
-                if ($script:stopAttempt++ -eq 1) { throw 'rollback stop failed' }
-            }
+            Mock Stop-ProductionWebsiteService { }
             Mock Start-Service { }
             Mock Set-AtomicJunction { }
             Mock Test-ProductionEndpoints { throw 'deployment verification failed' }
+            Mock Test-ProductionPublicEndpoints { 22 }
             $config = [pscustomobject]@{
                 programDataRoot = 'C:\data'
                 productionPort = 8080
@@ -665,11 +666,14 @@ Describe 'native Windows deployment' {
                 $_.Exception
             }
 
-            $failure.GetType().FullName | Should -Be 'System.AggregateException'
-            $failure.Message | Should -Match '^Production deployment and automatic rollback both failed\.'
-            @($failure.InnerExceptions).Count | Should -Be 2
-            $failure.InnerExceptions[0].Message | Should -Be 'deployment verification failed'
-            $failure.InnerExceptions[1].Message | Should -Be 'rollback stop failed'
+            $failure.Message | Should -Match '^Forward-only production migration/cutover failed after the live migration boundary\.'
+            $failure.Message | Should -Match 'stopped and unready'
+            $failure.InnerException.Message | Should -Be 'deployment verification failed'
+            Should -Invoke Start-Service -Times 1 -Exactly
+            Should -Invoke Stop-ProductionWebsiteService -Times 2 -Exactly
+            Should -Invoke Set-AtomicJunction -Times 0 -Exactly -ParameterFilter {
+                $Path -eq 'C:\data\current' -and $Target -eq 'C:\data\releases\old'
+            }
         }
 
         It 'overrides the candidate database for migration validation' {
@@ -705,6 +709,159 @@ Describe 'native Windows deployment' {
             ) -Raw
 
             $deploy | Should -Match '--enable-native-access=ALL-UNNAMED'
+        }
+
+        It 'generates a unique bounded candidate database name that cannot be the live database' {
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+
+            $first = New-CandidateDatabaseName -Sha $sha
+            $second = New-CandidateDatabaseName -Sha $sha
+
+            $first | Should -Match '^cbell_candidate_0123456789ab_[0-9a-f]{24}$'
+            $second | Should -Match '^cbell_candidate_0123456789ab_[0-9a-f]{24}$'
+            $first | Should -Not -Be $second
+            $first | Should -Not -Be 'christopherbell'
+        }
+
+        It 'restores only the production namespace into the exact bounded candidate database' {
+            $script:restoreInvocation = $null
+            Mock Invoke-CheckedProcess {
+                param($FilePath, $ArgumentList, $WorkingDirectory)
+                $script:restoreInvocation = [pscustomobject]@{
+                    FilePath = $FilePath
+                    Arguments = @($ArgumentList)
+                    WorkingDirectory = $WorkingDirectory
+                }
+            }
+            $config = [pscustomobject]@{
+                mongoToolsPath = 'C:\mongo-tools'
+                repositoryPath = 'C:\repo'
+            }
+            $database = 'cbell_candidate_0123456789ab_0123456789abcdef01234567'
+
+            Restore-CandidateDatabaseFromBackup `
+                -Config $config `
+                -Archive 'A:\backups\verified.archive.gz' `
+                -Database $database
+
+            $script:restoreInvocation.FilePath | Should -Be 'C:\mongo-tools\mongorestore.exe'
+            $script:restoreInvocation.WorkingDirectory | Should -Be 'C:\repo'
+            $script:restoreInvocation.Arguments | Should -Be @(
+                '--uri=mongodb://127.0.0.1:27017',
+                '--archive=A:\backups\verified.archive.gz',
+                '--gzip',
+                '--drop',
+                '--nsFrom=christopherbell.*',
+                "--nsTo=$database.*"
+            )
+            $script:restoreInvocation.Arguments | Should -Not -Contain '--nsTo=christopherbell.*'
+        }
+
+        It 'drops only the exact generated candidate database through an environment-bound script' {
+            $script:cleanupInvocation = $null
+            Mock Invoke-CheckedProcess {
+                param($FilePath, $ArgumentList, $WorkingDirectory, $Environment)
+                $script:cleanupInvocation = [pscustomobject]@{
+                    FilePath = $FilePath
+                    Arguments = @($ArgumentList)
+                    WorkingDirectory = $WorkingDirectory
+                    Environment = $Environment.Clone()
+                }
+            }
+            $config = [pscustomobject]@{
+                mongoShellExe = 'C:\mongosh\mongosh.exe'
+                repositoryPath = 'C:\repo'
+            }
+            $database = 'cbell_candidate_0123456789ab_0123456789abcdef01234567'
+
+            Remove-CandidateDatabase -Config $config -Database $database
+
+            $script:cleanupInvocation.FilePath | Should -Be 'C:\mongosh\mongosh.exe'
+            $script:cleanupInvocation.Environment.CBELL_CANDIDATE_DATABASE | Should -Be $database
+            $script:cleanupInvocation.Arguments | Should -Contain '--eval'
+            ($script:cleanupInvocation.Arguments -join ' ') | Should -Not -Match [regex]::Escape($database)
+            {
+                Remove-CandidateDatabase -Config $config -Database 'christopherbell'
+            } | Should -Throw '*candidate database name*'
+        }
+
+        It 'runs candidate V013 against a verified clone and cleans the same database before cutover' {
+            function New-ProductionBackup { throw 'unexpected real backup seam reached' }
+            $script:candidateEvents = [System.Collections.Generic.List[string]]::new()
+            $script:candidateDatabase = $null
+            Mock New-ProductionBackup {
+                [void]$script:candidateEvents.Add('backup')
+                'A:\backups\verified.archive.gz'
+            }
+            Mock Restore-CandidateDatabaseFromBackup {
+                [void]$script:candidateEvents.Add("restore:$Database")
+                $script:candidateDatabase = $Database
+            }
+            Mock Test-CandidateRelease {
+                [void]$script:candidateEvents.Add("candidate:$Database")
+            }
+            Mock Remove-CandidateDatabase {
+                [void]$script:candidateEvents.Add("cleanup:$Database")
+            }
+            $config = [pscustomobject]@{ }
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+
+            Invoke-CandidateReleaseValidation `
+                -Config $config -Release 'C:\data\releases\new' -Sha $sha
+
+            $script:candidateDatabase | Should -Match '^cbell_candidate_0123456789ab_[0-9a-f]{24}$'
+            $script:candidateEvents | Should -Be @(
+                'backup',
+                "restore:$($script:candidateDatabase)",
+                "candidate:$($script:candidateDatabase)",
+                "cleanup:$($script:candidateDatabase)"
+            )
+            Should -Invoke Test-CandidateRelease -Times 1 -Exactly -ParameterFilter {
+                $Database -eq $script:candidateDatabase -and
+                $Database -ne 'christopherbell'
+            }
+        }
+
+        It 'cleans the exact candidate database and preserves validation failure context' {
+            function New-ProductionBackup { throw 'unexpected real backup seam reached' }
+            $script:failedCandidateDatabase = $null
+            Mock New-ProductionBackup { 'A:\backups\verified.archive.gz' }
+            Mock Restore-CandidateDatabaseFromBackup {
+                $script:failedCandidateDatabase = $Database
+            }
+            Mock Test-CandidateRelease { throw 'candidate migration failed' }
+            Mock Remove-CandidateDatabase { }
+
+            {
+                Invoke-CandidateReleaseValidation `
+                    -Config ([pscustomobject]@{}) `
+                    -Release 'C:\data\releases\new' `
+                    -Sha '0123456789abcdef0123456789abcdef01234567'
+            } | Should -Throw '*candidate migration failed*'
+
+            Should -Invoke Remove-CandidateDatabase -Times 1 -Exactly -ParameterFilter {
+                $Database -eq $script:failedCandidateDatabase
+            }
+        }
+
+        It 'completes disposable candidate cleanup before stopping the live writer' {
+            $lock = [pscustomobject]@{ }
+            $lock | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
+            $script:deployEvents = [System.Collections.Generic.List[string]]::new()
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; remote='origin'; branch='main' } }
+            Mock Enter-DeploymentLock { $lock }
+            Mock Resolve-OriginMainRelease { '0123456789abcdef0123456789abcdef01234567' }
+            Mock New-ReleaseFromOriginMain { 'C:\data\releases\new' }
+            Mock Invoke-CandidateReleaseValidation { [void]$script:deployEvents.Add('candidate-cleaned') }
+            Mock Switch-ProductionRelease { [void]$script:deployEvents.Add('live-writer-stop-and-cutover') }
+            Mock Remove-ExpiredReleases { }
+
+            Invoke-ProductionDeploy
+
+            $script:deployEvents | Should -Be @('candidate-cleaned', 'live-writer-stop-and-cutover')
+            Should -Invoke Invoke-CandidateReleaseValidation -Times 1 -Exactly -ParameterFilter {
+                $Sha -eq '0123456789abcdef0123456789abcdef01234567'
+            }
         }
     }
 }

@@ -22,15 +22,16 @@ import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeConfir
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDedupeApplyRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavoriteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRating;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRatingRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVote;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteRequest;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteValue;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreference;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
 import dev.christopherbell.whatsforlunch.restaurant.preference.WhatsForLunchPreferenceRepository;
-import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
-import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingQueryRepository;
-import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingSummary;
-import dev.christopherbell.whatsforlunch.restaurant.selection.RatingWeightedRestaurantSelector;
+import dev.christopherbell.whatsforlunch.restaurant.selection.ApprovalWeightedRestaurantSelector;
+import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteQueryRepository;
+import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteRepository;
+import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteSummary;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -90,9 +91,9 @@ public class RestaurantServiceTest {
   @Mock private RestaurantFavoriteRepository restaurantFavoriteRepository;
   @Mock private RestaurantDuplicateQueryRepository restaurantDuplicateQueries;
   @Mock private RestaurantInventoryQueryRepository restaurantInventoryQueries;
-  @Mock private RestaurantRatingRepository restaurantRatingRepository;
-  @Mock private RestaurantRatingQueryRepository restaurantRatingQueryRepository;
-  @Mock private RatingWeightedRestaurantSelector restaurantSelector;
+  @Mock private RestaurantVoteRepository restaurantVoteRepository;
+  @Mock private RestaurantVoteQueryRepository restaurantVoteQueryRepository;
+  @Mock private ApprovalWeightedRestaurantSelector restaurantSelector;
   @Mock private RestaurantRepository restaurantRepository;
   @Mock private WhatsForLunchPreferenceRepository whatsForLunchPreferenceRepository;
   @Mock private ZipCoordinateService zipCoordinateService;
@@ -101,7 +102,7 @@ public class RestaurantServiceTest {
 
   @BeforeEach
   void setUpWeightedSelectionDefaults() {
-    lenient().when(restaurantRatingQueryRepository.summariesForRestaurants(any()))
+    lenient().when(restaurantVoteQueryRepository.summariesForRestaurants(any()))
         .thenReturn(List.of());
     lenient().when(restaurantSelector.select(any(), any(), anyInt()))
         .thenAnswer(invocation -> {
@@ -382,11 +383,11 @@ public class RestaurantServiceTest {
     var neutralDetail = RestaurantStub.getRestaurantDetailStub("neutral");
     var extraDetail = RestaurantStub.getRestaurantDetailStub("extra");
     var summaries = List.of(
-        new RestaurantRatingSummary("low", 20, 20),
-        new RestaurantRatingSummary("high", 20, 100));
+        new RestaurantVoteSummary("low", 0, 20, 20),
+        new RestaurantVoteSummary("high", 20, 0, 20));
 
     stubCoordinateCandidates(List.of(low, neutral, high, extra));
-    when(restaurantRatingQueryRepository.summariesForRestaurants(
+    when(restaurantVoteQueryRepository.summariesForRestaurants(
         List.of("low", "neutral", "high", "extra"))).thenReturn(summaries);
     when(restaurantSelector.select(
         List.of(low, neutral, high, extra),
@@ -708,52 +709,53 @@ public class RestaurantServiceTest {
   }
 
   @Test
-  @DisplayName("Ratings: saves whole-number rating and returns aggregate totals")
-  public void testRateRestaurant_whenValidWholeNumber_savesRatingAndReturnsTotals() throws Exception {
+  @DisplayName("Votes: saves a binary vote and returns aggregate totals")
+  public void testVoteRestaurant_whenValidVote_savesVoteAndReturnsTotals() throws Exception {
     var restaurant = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
     var detail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
     var now = Instant.parse("2026-05-19T12:00:00Z");
     when(clock.instant()).thenReturn(now);
     when(permissionService.getSelfId()).thenReturn("account-1");
     when(restaurantRepository.findById(eq(RestaurantStub.ID))).thenReturn(Optional.of(restaurant));
-    when(restaurantRatingRepository.findByRestaurantIdAndAccountId(eq(RestaurantStub.ID), eq("account-1")))
+    when(restaurantVoteRepository.findByRestaurantIdAndAccountId(eq(RestaurantStub.ID), eq("account-1")))
         .thenReturn(Optional.empty());
-    when(restaurantRatingRepository.save(any(RestaurantRating.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(restaurantVoteRepository.save(any(RestaurantVote.class))).thenAnswer(invocation -> invocation.getArgument(0));
     when(restaurantMapper.toRestaurantDetail(eq(restaurant))).thenReturn(detail);
-    when(restaurantRatingRepository.findByRestaurantIdIn(eq(List.of(RestaurantStub.ID))))
+    when(restaurantVoteRepository.findByRestaurantIdIn(eq(List.of(RestaurantStub.ID))))
         .thenReturn(List.of(
-            RestaurantRating.builder().restaurantId(RestaurantStub.ID).accountId("account-1").rating(5).build(),
-            RestaurantRating.builder().restaurantId(RestaurantStub.ID).accountId("account-2").rating(4).build()));
+            RestaurantVote.builder().restaurantId(RestaurantStub.ID).accountId("account-1").vote(RestaurantVoteValue.UP).build(),
+            RestaurantVote.builder().restaurantId(RestaurantStub.ID).accountId("account-2").vote(RestaurantVoteValue.DOWN).build()));
 
-    var result = restaurantService.rateRestaurant(RestaurantStub.ID, new RestaurantRatingRequest(5));
+    var result = restaurantService.voteRestaurant(RestaurantStub.ID, new RestaurantVoteRequest("UP"));
 
-    assertEquals(9, result.getRatingSum());
-    assertEquals(2, result.getRatingCount());
-    assertEquals(5, result.getMyRating());
-    verify(restaurantRatingRepository).save(argThat(rating ->
-        RestaurantStub.ID.equals(rating.getRestaurantId())
-            && "account-1".equals(rating.getAccountId())
-            && Integer.valueOf(5).equals(rating.getRating())));
+    assertEquals(1, result.getUpVotes());
+    assertEquals(1, result.getDownVotes());
+    assertEquals(2, result.getVoteCount());
+    assertEquals(RestaurantVoteValue.UP, result.getMyVote());
+    verify(restaurantVoteRepository).save(argThat(vote ->
+        RestaurantStub.ID.equals(vote.getRestaurantId())
+            && "account-1".equals(vote.getAccountId())
+            && RestaurantVoteValue.UP.equals(vote.getVote())));
   }
 
   @Test
-  @DisplayName("Ratings: rejects fractional ratings")
-  public void testRateRestaurant_whenFractionalRating_ThrowsInvalidRequestException() {
+  @DisplayName("Votes: rejects numeric votes")
+  public void testVoteRestaurant_whenNumericVote_ThrowsInvalidRequestException() {
     assertThrows(
         InvalidRequestException.class,
-        () -> restaurantService.rateRestaurant(RestaurantStub.ID, new RestaurantRatingRequest(3.5)));
+        () -> restaurantService.voteRestaurant(RestaurantStub.ID, new RestaurantVoteRequest(3.5)));
 
-    verifyNoInteractions(restaurantRepository, restaurantRatingRepository);
+    verifyNoInteractions(restaurantRepository, restaurantVoteRepository);
   }
 
   @Test
-  @DisplayName("Ratings: rejects out-of-range whole numbers")
-  public void testRateRestaurant_whenRatingOutOfRange_ThrowsInvalidRequestException() {
+  @DisplayName("Votes: rejects unknown strings")
+  public void testVoteRestaurant_whenVoteIsUnknown_ThrowsInvalidRequestException() {
     assertThrows(
         InvalidRequestException.class,
-        () -> restaurantService.rateRestaurant(RestaurantStub.ID, new RestaurantRatingRequest(6)));
+        () -> restaurantService.voteRestaurant(RestaurantStub.ID, new RestaurantVoteRequest("MAYBE")));
 
-    verifyNoInteractions(restaurantRepository, restaurantRatingRepository);
+    verifyNoInteractions(restaurantRepository, restaurantVoteRepository);
   }
 
   @Test
@@ -832,39 +834,39 @@ public class RestaurantServiceTest {
   }
 
   @Test
-  @DisplayName("Top rated: excludes unrated restaurants and sorts by average then count")
-  public void testGetTopRatedRestaurants_sortsByAverageThenCount() {
+  @DisplayName("Top liked: excludes restaurants without votes and sorts by approval then count")
+  public void testGetTopLikedRestaurants_sortsByApprovalThenCount() {
     var fiveWithTwoRatings = RestaurantStub.getRestaurantStub("five-two");
     var fiveWithOneRating = RestaurantStub.getRestaurantStub("five-one");
     var fourStar = RestaurantStub.getRestaurantStub("four-star");
     var fiveWithTwoRatingsDetail = RestaurantStub.getRestaurantDetailStub("five-two");
     var fiveWithOneRatingDetail = RestaurantStub.getRestaurantDetailStub("five-one");
     var fourStarDetail = RestaurantStub.getRestaurantDetailStub("four-star");
-    var ratings = List.of(
-        RestaurantRating.builder().restaurantId("five-one").accountId("account-1").rating(5).build(),
-        RestaurantRating.builder().restaurantId("five-two").accountId("account-1").rating(5).build(),
-        RestaurantRating.builder().restaurantId("five-two").accountId("account-2").rating(5).build(),
-        RestaurantRating.builder().restaurantId("four-star").accountId("account-1").rating(4).build());
+    var votes = List.of(
+        RestaurantVote.builder().restaurantId("five-one").accountId("account-1").vote(RestaurantVoteValue.UP).build(),
+        RestaurantVote.builder().restaurantId("five-two").accountId("account-1").vote(RestaurantVoteValue.UP).build(),
+        RestaurantVote.builder().restaurantId("five-two").accountId("account-2").vote(RestaurantVoteValue.UP).build(),
+        RestaurantVote.builder().restaurantId("four-star").accountId("account-1").vote(RestaurantVoteValue.DOWN).build());
 
-    when(restaurantRatingQueryRepository.topRated(eq(10))).thenReturn(List.of(
-        new RestaurantRatingSummary("five-two", 2, 10),
-        new RestaurantRatingSummary("five-one", 1, 5),
-        new RestaurantRatingSummary("four-star", 1, 4)));
+    when(restaurantVoteQueryRepository.topLiked(eq(10))).thenReturn(List.of(
+        new RestaurantVoteSummary("five-two", 2, 0, 2),
+        new RestaurantVoteSummary("five-one", 1, 0, 1),
+        new RestaurantVoteSummary("four-star", 0, 1, 1)));
     when(restaurantRepository.findAllById(eq(List.of("five-two", "five-one", "four-star"))))
         .thenReturn(List.of(fiveWithOneRating, fourStar, fiveWithTwoRatings));
     when(restaurantMapper.toRestaurantDetail(eq(fiveWithTwoRatings))).thenReturn(fiveWithTwoRatingsDetail);
     when(restaurantMapper.toRestaurantDetail(eq(fiveWithOneRating))).thenReturn(fiveWithOneRatingDetail);
     when(restaurantMapper.toRestaurantDetail(eq(fourStar))).thenReturn(fourStarDetail);
-    when(restaurantRatingRepository.findByRestaurantIdIn(eq(List.of("five-two", "five-one", "four-star"))))
-        .thenReturn(ratings);
+    when(restaurantVoteRepository.findByRestaurantIdIn(eq(List.of("five-two", "five-one", "four-star"))))
+        .thenReturn(votes);
 
-    var result = restaurantService.getTopRatedRestaurants(10);
+    var result = restaurantService.getTopLikedRestaurants(10);
 
     assertEquals(List.of(fiveWithTwoRatingsDetail, fiveWithOneRatingDetail, fourStarDetail), result);
-    assertEquals(2, result.get(0).getRatingCount());
-    assertEquals(10, result.get(0).getRatingSum());
-    verify(restaurantRatingQueryRepository).topRated(eq(10));
-    verify(restaurantRatingRepository, never()).findAll();
+    assertEquals(2, result.get(0).getUpVotes());
+    assertEquals(0, result.get(0).getDownVotes());
+    verify(restaurantVoteQueryRepository).topLiked(eq(10));
+    verify(restaurantVoteRepository, never()).findAll();
   }
 
   @Test
@@ -983,12 +985,12 @@ public class RestaurantServiceTest {
     List.of(first, second, third, fourth)
         .forEach(restaurant -> restaurant.getAddress().setCity("Austin"));
     var summaries = List.of(
-        new RestaurantRatingSummary("first", 20, 20),
-        new RestaurantRatingSummary("fourth", 20, 100));
+        new RestaurantVoteSummary("first", 0, 20, 20),
+        new RestaurantVoteSummary("fourth", 20, 0, 20));
 
     when(restaurantRepository.findAll())
         .thenReturn(List.of(first, second, third, fourth));
-    when(restaurantRatingQueryRepository.summariesForRestaurants(
+    when(restaurantVoteQueryRepository.summariesForRestaurants(
         List.of("first", "second", "third", "fourth"))).thenReturn(summaries);
     when(restaurantSelector.select(
         List.of(first, second, third, fourth),
@@ -1420,7 +1422,7 @@ public class RestaurantServiceTest {
   }
 
   @Test
-  @DisplayName("Returns rated detail when entity is found")
+  @DisplayName("Returns vote-enriched detail when entity is found")
   public void testGetRestaurantById_whenFound_ReturnsRestaurantDetail() throws Exception {
     var restaurant = RestaurantStub.getRestaurantStub(RestaurantStub.ID);
     var restaurantDetail = RestaurantStub.getRestaurantDetailStub(RestaurantStub.ID);
@@ -1432,8 +1434,9 @@ public class RestaurantServiceTest {
     var result = restaurantService.getRestaurantById(RestaurantStub.ID);
 
     assertSame(restaurantDetail, result);
-    assertEquals(0, result.getRatingCount());
-    assertEquals(0, result.getRatingSum());
+    assertEquals(0, result.getUpVotes());
+    assertEquals(0, result.getDownVotes());
+    assertEquals(0, result.getVoteCount());
 
     verify(restaurantRepository).findById(eq(RestaurantStub.ID));
     verify(restaurantMapper).toRestaurantDetail(eq(restaurant));

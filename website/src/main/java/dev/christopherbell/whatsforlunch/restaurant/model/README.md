@@ -10,8 +10,8 @@ Owns What's For Lunch restaurant persistence and API records.
 - `RestaurantDetail` is the API response shape.
 - `RestaurantFavorite` stores one favorite marker per account and restaurant.
 - `RestaurantFavoriteRequest` is the favorite/unfavorite API contract.
-- `RestaurantRating` stores one whole-number rating per account and restaurant.
-- `RestaurantRatingRequest` and `RestaurantRatingSetRequest` are the rating API contracts.
+- `RestaurantVote` stores one binary `UP` or `DOWN` vote per account and restaurant.
+- `RestaurantVoteValue`, `RestaurantVoteRequest`, and `RestaurantVoteSetRequest` are the vote API contracts.
 - `RestaurantImportResult` summarizes OpenStreetMap import work.
 - `RestaurantImportState` stores monthly OpenStreetMap import scheduler state.
 - `RestaurantDedupeResult` summarizes duplicate-name cleanup.
@@ -41,18 +41,23 @@ Owns What's For Lunch restaurant persistence and API records.
   ids, because the page only needs member-facing labels.
 - Replacing session restaurants uses its own request record so refreshes do not
   share the invite-only fields from session creation.
-- Ratings are stored separately from restaurants so rating writes do not modify
-  imported restaurant data. Aggregate totals are attached to `RestaurantDetail`.
-  Signed-in callers also get their own `myRating` value on `RestaurantDetail`.
-  Browser writes use `RestaurantRatingSetRequest` so provider ids such as
-  OpenStreetMap ids stay in JSON instead of URL path segments.
+- Votes are stored separately from restaurants so vote writes do not modify
+  imported restaurant data. Aggregate `upVotes`, `downVotes`, and `voteCount`
+  are attached to `RestaurantDetail`. Signed-in callers also get their own
+  `myVote` value. Browser/API writes use `RestaurantVoteSetRequest` so provider
+  IDs such as OpenStreetMap IDs stay in JSON instead of URL path segments. The
+  set request accepts exactly `restaurantId` and `vote`; the path request accepts
+  exactly `vote`. Unknown properties, including the removed `rating` key, are
+  rejected locally even when their value is null.
+- The model/API contract is binary votes. SSR and browser presentation consume
+  the vote fields directly without a compatibility layer.
 - Favorites are stored separately from restaurants so member personalization does
   not modify imported restaurant data. Browser writes use `RestaurantFavoriteRequest`
-  for the same provider-id reason as ratings. Signed-in callers get `myFavorite`
+  for the same provider-ID reason as votes. Signed-in callers get `myFavorite`
   on `RestaurantDetail` so pages can render heart state without another lookup.
 
 ## Update This Doc
 
 Update this README when restaurant identity rules, address fields, import result
 fields, daily pick storage, nearby pick behavior, preference storage, session
-voting storage, rating/favorite storage, or dedupe behavior changes.
+voting storage, vote/favorite storage, or dedupe behavior changes.

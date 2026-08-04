@@ -77,6 +77,8 @@ class PublicSitemapServiceTest {
         .contains("https://www.christopherbell.dev/")
         .contains("https://www.christopherbell.dev/photos/usage")
         .contains("https://www.christopherbell.dev/thebell/tony")
+        .contains("https://www.christopherbell.dev/wfl/top-liked")
+        .doesNotContain("https://www.christopherbell.dev/wfl/top-rated")
         .contains("https://www.christopherbell.dev/u/active_user")
         .contains("https://www.christopherbell.dev/p/post%20id")
         .contains("https://www.christopherbell.dev/wfl/restaurants/rest%2Fone");

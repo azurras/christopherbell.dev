@@ -2,6 +2,7 @@ import { API } from './lib/api.js';
 import { authHeaders, fetchJson, getAuthClaims, linkMentions, loginRedirectUrl, sanitize } from './lib/util.js';
 import pubsub from './components/pubsub.js';
 import { appendSafeHttpLink } from './lib/safe-http-link.js';
+import { createRestaurantVoteMutation } from './lib/restaurant-vote-mutation.js';
 import {
   clearAnonymousWflSession,
   readAnonymousWflSession,
@@ -10,7 +11,7 @@ import {
 import { wflFreshnessMarkup } from './lib/wfl-freshness.js';
 import {
   formatCuisine,
-  ratingSummary,
+  voteSummary,
   restaurantAddressLine,
   wflSecondaryNavigation,
 } from './lib/wfl-ui.js';
@@ -23,7 +24,6 @@ const LOCATION_OPTIONS = {
 };
 const DEFAULT_RADIUS_MILES = 15;
 const RADIUS_OPTIONS = [1, 5, 10, 15, 20];
-const RATING_OPTIONS = [1, 2, 3, 4, 5];
 const SESSION_POLL_INTERVAL_MS = 5000;
 const MEMBER_SESSION_KEY_PREFIX = 'cbellWflMemberSession';
 const CUISINE_FILTERS = [
@@ -53,7 +53,6 @@ let selectedRadiusMiles = DEFAULT_RADIUS_MILES;
 let activeControlPanel = 'filters';
 let currentPicks = [];
 let activeSession = null;
-let visibleRatingControls = new Set();
 let sessionPollId = null;
 let sessionPollInFlight = false;
 let dataFreshness = null;
@@ -158,25 +157,20 @@ function restaurantCard(restaurant, index) {
   const cuisine = restaurant.cuisine
     ? `<span class="lunch-cuisine">${sanitize(formatCuisine(restaurant.cuisine))}</span>`
     : '';
-  const myRating = Number.parseInt(String(restaurant.myRating ?? 0), 10) || 0;
   const favoriteButton = isLoggedIn && id
     ? `<button type="button" class="btn ${restaurant.myFavorite ? 'btn-success' : 'btn-outline-success'} btn-sm lunch-favorite-toggle" data-restaurant-id="${sanitize(id)}" aria-pressed="${restaurant.myFavorite ? 'true' : 'false'}">
         <span aria-hidden="true">&hearts;</span> ${restaurant.myFavorite ? 'Favorited' : 'Favorite'}
       </button>`
     : '';
-  const ratingSummary = ratingSummaryMarkup(restaurant);
-  const ratingControls = isLoggedIn && id
-    ? `<div class="lunch-rating-shell">
-        <button type="button" class="btn btn-outline-secondary btn-sm lunch-rating-toggle" data-restaurant-id="${sanitize(id)}" aria-expanded="${visibleRatingControls.has(id)}">
-          Rate
-        </button>
-        <div class="lunch-rating-control ${visibleRatingControls.has(id) ? '' : 'd-none'}" aria-label="Rate ${sanitize(restaurant.name || 'restaurant')}">
-          ${RATING_OPTIONS.map((rating) => `
-            <button type="button" class="lunch-rating-button ${myRating === rating ? 'active' : ''}" data-restaurant-id="${sanitize(id)}" data-rating="${rating}" aria-label="Rate ${rating} out of 5">${rating}</button>
-          `).join('')}
-        </div>
-      </div>`
-    : '';
+  const { myVote: restaurantVote, overall } = voteSummary(restaurant);
+  const voteControls = isLoggedIn && id ? `<div class="lunch-vote-control" role="group"
+    aria-label="Vote on ${sanitize(restaurant.name || 'restaurant')}">
+  <button type="button" class="lunch-vote-button" data-restaurant-id="${sanitize(id)}"
+    data-vote="UP" aria-label="Thumbs up" aria-pressed="${restaurantVote === 'UP'}">👍</button>
+  <button type="button" class="lunch-vote-button" data-restaurant-id="${sanitize(id)}"
+    data-vote="DOWN" aria-label="Thumbs down" aria-pressed="${restaurantVote === 'DOWN'}">👎</button>
+</div>` : '';
+  const voteSummaryMarkup = `<p class="lunch-vote-summary">${overall}</p>`;
   const website = restaurant.website
     ? `<span class="lunch-website-link" data-restaurant-index="${index}"></span>`
     : '';
@@ -209,8 +203,8 @@ function restaurantCard(restaurant, index) {
         </div>
         ${cuisine}
         ${address ? `<p>${sanitize(address)}</p>` : ''}
-        ${ratingSummary}
-        ${ratingControls}
+        ${voteSummaryMarkup}
+        ${voteControls}
         ${voterText}
         <div class="lunch-pick-actions">${favoriteButton}${voteButton}${directionsButton}${website}${phone}</div>
       </div>
@@ -226,19 +220,6 @@ function attachRestaurantWebsiteLinks(restaurants) {
       label: 'Website',
     });
   });
-}
-
-function ratingSummaryMarkup(restaurant) {
-  const { myRating, overall } = ratingSummary(restaurant);
-  if (isLoggedIn) {
-    return `
-      <div class="lunch-rating-summary">
-        <p>Overall rating: ${overall}</p>
-        <p>Your rating: ${myRating > 0 ? `${myRating}/5` : 'Not rated'}</p>
-      </div>
-    `;
-  }
-  return `<p class="lunch-rating-summary">Rating: ${overall}</p>`;
 }
 
 function sessionMarkup() {
@@ -390,7 +371,7 @@ function renderPicks(picks) {
     <div class="lunch-toolbar">
       <div class="lunch-toolbar-copy">
         <p>${toolbarText}</p>
-        <p class="lunch-weighting-note">Ratings influence the draw. Every eligible restaurant stays in the mix.</p>
+        <p class="lunch-weighting-note">Member approval influences the draw. Every eligible restaurant stays in the mix.</p>
       </div>
       <button type="button" class="btn btn-primary lunch-location-refresh lunch-primary-refresh" ${activeSession && !activeSession.canChangeRestaurants ? 'disabled title="Only the active session host can change the picks"' : ''}>Try 3 more</button>
     </div>
@@ -894,11 +875,14 @@ mount?.addEventListener('click', async (event) => {
     return;
   }
 
-  const ratingButton = event.target instanceof Element
-    ? event.target.closest('.lunch-rating-button')
+  const restaurantVoteButton = event.target instanceof Element
+    ? event.target.closest('.lunch-vote-button')
     : null;
-  if (ratingButton) {
-    await rateRestaurant(ratingButton.dataset.restaurantId, ratingButton.dataset.rating);
+  if (restaurantVoteButton) {
+    await setRestaurantVote(
+      restaurantVoteButton.dataset.restaurantId,
+      restaurantVoteButton.dataset.vote,
+    );
     return;
   }
 
@@ -907,22 +891,6 @@ mount?.addEventListener('click', async (event) => {
     : null;
   if (favoriteButton) {
     await toggleFavorite(favoriteButton.dataset.restaurantId);
-    return;
-  }
-
-  const ratingToggle = event.target instanceof Element
-    ? event.target.closest('.lunch-rating-toggle')
-    : null;
-  if (ratingToggle) {
-    const restaurantId = ratingToggle.dataset.restaurantId;
-    if (restaurantId && visibleRatingControls.has(restaurantId)) {
-      visibleRatingControls.delete(restaurantId);
-    } else if (restaurantId) {
-      visibleRatingControls.add(restaurantId);
-    }
-    const ratingControl = ratingToggle.parentElement?.querySelector('.lunch-rating-control');
-    if (ratingControl) ratingControl.classList.toggle('d-none', !visibleRatingControls.has(restaurantId));
-    ratingToggle.setAttribute('aria-expanded', String(visibleRatingControls.has(restaurantId)));
     return;
   }
 
@@ -1004,36 +972,63 @@ async function voteForRestaurant(restaurantId) {
   }
 }
 
-async function rateRestaurant(restaurantId, rating) {
-  const selectedRating = Number.parseInt(String(rating), 10);
-  if (!restaurantId || !RATING_OPTIONS.includes(selectedRating)) return;
-  const button = Array.from(mount.querySelectorAll('.lunch-rating-button'))
-    .find((candidate) => candidate.dataset.restaurantId === restaurantId
-      && Number.parseInt(candidate.dataset.rating || '', 10) === selectedRating);
-  if (button) button.disabled = true;
-  try {
-    const updatedRestaurant = await fetchJson(API.whatsForLunch.rateRestaurant, {
-      method: 'PUT',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ restaurantId, rating: selectedRating }),
-    });
-    currentPicks = currentPicks.map((restaurant) => restaurant.id === restaurantId ? updatedRestaurant : restaurant);
-    if (activeSession?.restaurants) {
-      activeSession = {
-        ...activeSession,
-        restaurants: activeSession.restaurants.map((restaurant) =>
-          restaurant.id === restaurantId ? updatedRestaurant : restaurant),
-      };
+export function createPicksVoteController({
+  mount,
+  getCurrentPicks,
+  setCurrentPicks,
+  getActiveSession,
+  setActiveSession,
+  renderPicks,
+  request = fetchJson,
+  headers = authHeaders,
+}) {
+  const mutations = new Map();
+
+  return async function setRestaurantVote(restaurantId, vote) {
+    if (!restaurantId || !['UP', 'DOWN'].includes(vote)) return;
+    let mutation = mutations.get(restaurantId);
+    if (!mutation) {
+      mutation = createRestaurantVoteMutation({
+        buttons: () => Array.from(mount?.querySelectorAll?.('.lunch-vote-button') || [])
+          .filter(button => button.dataset.restaurantId === restaurantId),
+        apply: updatedRestaurant => {
+          const updatedPicks = getCurrentPicks().map((restaurant) =>
+            restaurant.id === restaurantId ? updatedRestaurant : restaurant);
+          setCurrentPicks(updatedPicks);
+          const activeSession = getActiveSession();
+          if (activeSession?.restaurants) {
+            setActiveSession({
+              ...activeSession,
+              restaurants: activeSession.restaurants.map((restaurant) =>
+                restaurant.id === restaurantId ? updatedRestaurant : restaurant),
+            });
+          }
+          renderPicks(updatedPicks);
+        },
+        showError: err => {
+          mount?.insertAdjacentHTML('afterbegin', `
+            <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not save vote.')}</div>
+          `);
+        },
+      });
+      mutations.set(restaurantId, mutation);
     }
-    renderPicks(currentPicks);
-  } catch (err) {
-    mount.insertAdjacentHTML('afterbegin', `
-      <div class="alert alert-danger" role="alert">${sanitize(err.message || 'Could not save rating.')}</div>
-    `);
-  } finally {
-    if (button) button.disabled = false;
-  }
+    await mutation(() => request(API.whatsForLunch.voteRestaurant, {
+      method: 'PUT',
+      headers: headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ restaurantId, vote }),
+    }));
+  };
 }
+
+const setRestaurantVote = createPicksVoteController({
+  mount,
+  getCurrentPicks: () => currentPicks,
+  setCurrentPicks: picks => { currentPicks = picks; },
+  getActiveSession: () => activeSession,
+  setActiveSession: session => { activeSession = session; },
+  renderPicks,
+});
 
 async function toggleFavorite(restaurantId) {
   if (!restaurantId) return;

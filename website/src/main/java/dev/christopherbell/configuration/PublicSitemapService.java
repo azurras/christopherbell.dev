@@ -39,7 +39,7 @@ public class PublicSitemapService {
       PUBLIC_ROOT + "/void",
       PUBLIC_ROOT + "/void/explore",
       PUBLIC_ROOT + "/wfl",
-      PUBLIC_ROOT + "/wfl/top-rated",
+      PUBLIC_ROOT + "/wfl/top-liked",
       PUBLIC_ROOT + "/zip-coordinates");
 
   private final AccountRepository accounts;

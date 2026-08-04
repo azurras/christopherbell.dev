@@ -20,7 +20,7 @@ class RestaurantProfilePageServiceTest {
   @Mock private RestaurantService restaurants;
 
   @Test
-  void profileBuildsCompletePublicPageAndSafeRestaurantJsonLd() throws Exception {
+  void profileBuildsPublicVoteApprovalAndSafeRestaurantJsonLd() throws Exception {
     when(restaurants.getRestaurantById("rest/one")).thenReturn(RestaurantDetail.builder()
         .id("rest/one")
         .name("Taco </script><script>alert(1)</script>")
@@ -37,9 +37,9 @@ class RestaurantProfilePageServiceTest {
         .phoneNumber("512-555-0100")
         .website("https://example.com/menu")
         .sourceAmenity("restaurant")
-        .ratingCount(2)
-        .ratingSum(9)
-        .myRating(5)
+        .upVotes(7)
+        .downVotes(1)
+        .voteCount(8)
         .myFavorite(true)
         .createdBy("private-account")
         .build());
@@ -48,15 +48,19 @@ class RestaurantProfilePageServiceTest {
 
     assertThat(page.canonicalUrl()).endsWith("/wfl/restaurants/rest%2Fone");
     assertThat(page.addressLine()).isEqualTo("100 Main St, Austin, TX, 78701");
-    assertThat(page.averageRating()).isEqualTo(4.5);
+    assertThat(page.description()).isEqualTo(
+        "Mexican restaurant in Austin, TX. Details and member approval from What's For Lunch.");
     assertThat(page.directionsUrl()).contains("destination=30.2672", "-97.7431");
     assertThat(page.structuredDataJson()).contains("\\u003c/script\\u003e");
     assertThat(page.structuredDataJson()).doesNotContain(
-        "</script>", "myRating", "myFavorite", "private-account", "createdBy");
+        "</script>", "myVote", "myFavorite", "private-account", "createdBy");
 
     var json = new ObjectMapper().readTree(page.structuredDataJson());
     assertThat(json.get("@type").asText()).isEqualTo("Restaurant");
-    assertThat(json.at("/aggregateRating/ratingValue").asDouble()).isEqualTo(4.5);
+    assertThat(json.at("/aggregateRating/ratingValue").asInt()).isEqualTo(88);
+    assertThat(json.at("/aggregateRating/bestRating").asInt()).isEqualTo(100);
+    assertThat(json.at("/aggregateRating/worstRating").asInt()).isZero();
+    assertThat(json.at("/aggregateRating/ratingCount").asInt()).isEqualTo(8);
     assertThat(json.at("/address/addressLocality").asText()).isEqualTo("Austin");
   }
 
@@ -66,13 +70,14 @@ class RestaurantProfilePageServiceTest {
         .id("sparse")
         .name("Sparse Cafe")
         .website("javascript:alert(1)")
-        .ratingCount(0)
-        .ratingSum(0)
+        .upVotes(0)
+        .downVotes(0)
+        .voteCount(0)
         .build());
 
     var page = service().profile("sparse");
 
-    assertThat(page.hasRating()).isFalse();
+    assertThat(page.hasVotes()).isFalse();
     assertThat(page.website()).isNull();
     assertThat(page.address()).isNull();
     var json = new ObjectMapper().readTree(page.structuredDataJson());
@@ -80,6 +85,21 @@ class RestaurantProfilePageServiceTest {
     assertThat(json.has("address")).isFalse();
     assertThat(json.has("sameAs")).isFalse();
     assertThat(json.has("servesCuisine")).isFalse();
+  }
+
+  @Test
+  void profileRejectsMalformedNonzeroPublicVoteTotals() throws Exception {
+    when(restaurants.getRestaurantById("malformed")).thenReturn(RestaurantDetail.builder()
+        .id("malformed")
+        .name("Malformed Cafe")
+        .upVotes(1)
+        .downVotes(1)
+        .voteCount(1)
+        .build());
+
+    assertThatThrownBy(() -> service().profile("malformed"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Restaurant vote summary is invalid.");
   }
 
   @Test
@@ -93,8 +113,8 @@ class RestaurantProfilePageServiceTest {
   }
 
   @Test
-  void pageValueTypesRejectImpossibleRatingAndCoordinateStates() {
-    assertThatThrownBy(() -> new RestaurantProfilePage.Rating(0, 0))
+  void pageValueTypesRejectImpossibleVoteAndCoordinateStates() {
+    assertThatThrownBy(() -> new RestaurantProfilePage.VoteSummary(0, 0, 0))
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> new RestaurantProfilePage.Address(
         null, null, null, null, null, null, 91.0, 0.0))

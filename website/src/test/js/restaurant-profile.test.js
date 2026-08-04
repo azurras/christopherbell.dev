@@ -24,23 +24,35 @@ function requireInitializer() {
 function mount(id = 'restaurant-123') {
   return {
     dataset: { restaurantId: id },
-    innerHTML: '<p>Sign in to rate or favorite this restaurant.</p>',
+    innerHTML: '<p>Sign in to vote or favorite this restaurant.</p>',
     listener: null,
+    buttons: [],
     addEventListener(_type, listener) {
       this.listener = listener;
     },
     insertAdjacentHTML(_position, html) {
       this.innerHTML += html;
     },
+    querySelectorAll() {
+      return this.buttons.length ? this.buttons : undefined;
+    },
   };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
 }
 
 const DETAIL = Object.freeze({
   id: 'restaurant-123',
   name: 'Taco Place',
-  ratingCount: 2,
-  ratingSum: 9,
-  myRating: 4,
+  upVotes: 2,
+  downVotes: 1,
+  voteCount: 3,
+  myVote: 'UP',
   myFavorite: true,
 });
 
@@ -59,7 +71,7 @@ test('anonymous profile keeps server fallback and makes no detail request', asyn
   });
 
   assert.equal(requests, 0);
-  assert.match(memberMount.innerHTML, /Sign in to rate or favorite/);
+  assert.match(memberMount.innerHTML, /Sign in to vote or favorite/);
 });
 
 test('signed-in profile renders only personal controls from the detail response', async () => {
@@ -81,8 +93,12 @@ test('signed-in profile renders only personal controls from the detail response'
     urls,
     ['/api/whatsforlunch/restaurant/2026-05-17/profile/restaurant-123'],
   );
-  assert.match(memberMount.innerHTML, /Your rating: 4\/5/);
+  assert.match(memberMount.innerHTML, /Your vote: Thumbs up/);
+  assert.match(memberMount.innerHTML, /data-vote="UP"/);
+  assert.match(memberMount.innerHTML, /aria-pressed="true"/);
+  assert.match(memberMount.innerHTML, /aria-label="Thumbs down"\s+aria-pressed="false"/);
   assert.match(memberMount.innerHTML, /Favorited/);
+  assert.doesNotMatch(memberMount.innerHTML, /rating|data-rating/);
   assert.doesNotMatch(memberMount.innerHTML, /100 Main|Phone|Website|Source type/);
 });
 
@@ -98,7 +114,7 @@ test('member load failure stays local and preserves the anonymous fallback', asy
     },
   });
 
-  assert.match(memberMount.innerHTML, /Sign in to rate or favorite/);
+  assert.match(memberMount.innerHTML, /Sign in to vote or favorite/);
   assert.match(memberMount.innerHTML, /Service unavailable/);
 });
 
@@ -115,41 +131,214 @@ test('stale browser session restores sign-in fallback without an error banner', 
     },
   });
 
-  assert.match(memberMount.innerHTML, /Sign in to rate or favorite/);
+  assert.match(memberMount.innerHTML, /Sign in to vote or favorite/);
   assert.doesNotMatch(memberMount.innerHTML, /alert-danger|Authentication required/);
 });
 
-test('rating interaction sends the existing mutation contract', async () => {
+test('vote interaction sends the string UP contract and updates approval state', async () => {
   requireInitializer();
   const memberMount = mount();
-  const publicRating = { textContent: '' };
+  const publicMount = { textContent: '' };
   const calls = [];
 
   await initializeRestaurantProfile({
     mount: memberMount,
-    publicRating,
+    publicMount,
     claims: () => ({ sub: 'browser-session' }),
     request: async (url, options = {}) => {
       calls.push([url, options]);
       return calls.length === 1
         ? DETAIL
-        : { ...DETAIL, myRating: 5, ratingCount: 3, ratingSum: 14 };
+        : { ...DETAIL, upVotes: 3, downVotes: 1, voteCount: 4, myVote: 'UP' };
     },
     headers: (extra = {}) => extra,
   });
   await memberMount.listener({
     target: {
-      closest: selector => selector === '.lunch-rating-button'
-        ? { dataset: { rating: '5' } }
+      closest: selector => selector === '.lunch-vote-button'
+        ? { dataset: { vote: 'UP' } }
         : null,
     },
   });
 
-  assert.equal(calls[1][0], '/api/whatsforlunch/restaurant/2026-05-17/rating');
+  assert.equal(calls[1][0], '/api/whatsforlunch/restaurant/2026-05-17/vote');
   assert.equal(calls[1][1].method, 'PUT');
-  assert.equal(calls[1][1].body, '{"restaurantId":"restaurant-123","rating":5}');
-  assert.match(memberMount.innerHTML, /Your rating: 5\/5/);
-  assert.equal(publicRating.textContent, '4.7/5 from 3 ratings');
+  assert.equal(calls[1][1].body, '{"restaurantId":"restaurant-123","vote":"UP"}');
+  assert.match(memberMount.innerHTML, /Your vote: Thumbs up/);
+  assert.equal(publicMount.textContent, '75% liked · 3 up · 1 down');
+});
+
+test('active vote remains an idempotent UP request rather than clearing the vote', async () => {
+  requireInitializer();
+  const memberMount = mount();
+  const calls = [];
+
+  await initializeRestaurantProfile({
+    mount: memberMount,
+    claims: () => ({ sub: 'browser-session' }),
+    request: async (url, options = {}) => {
+      calls.push([url, options]);
+      return DETAIL;
+    },
+    headers: (extra = {}) => extra,
+  });
+  await memberMount.listener({
+    target: { closest: selector => selector === '.lunch-vote-button' ? { dataset: { vote: 'UP' } } : null },
+  });
+
+  assert.equal(calls[1][1].body, '{"restaurantId":"restaurant-123","vote":"UP"}');
+  assert.match(memberMount.innerHTML, /aria-pressed="true"/);
+});
+
+test('a failed vote keeps the local controls and restores the busy thumb', async () => {
+  requireInitializer();
+  const memberMount = mount();
+  const busyStates = [];
+  const voteButton = {
+    dataset: { vote: 'DOWN' },
+    get disabled() { return busyStates.at(-1) || false; },
+    set disabled(value) { busyStates.push(value); },
+  };
+
+  await initializeRestaurantProfile({
+    mount: memberMount,
+    claims: () => ({ sub: 'browser-session' }),
+    request: async (_url, options = {}) => {
+      if (!options.method) return DETAIL;
+      throw new Error('Vote service unavailable');
+    },
+    headers: (extra = {}) => extra,
+  });
+  await memberMount.listener({
+    target: { closest: selector => selector === '.lunch-vote-button' ? voteButton : null },
+  });
+
+  assert.deepEqual(busyStates, [true, false]);
+  assert.match(memberMount.innerHTML, /Vote service unavailable/);
+  assert.match(memberMount.innerHTML, /Your vote: Thumbs up/);
+});
+
+test('profile ignores stale opposite-thumb results and retains only the latest confirmed vote', async () => {
+  const memberMount = mount();
+  const publicMount = { textContent: '67% liked · 2 up · 1 down' };
+  const first = deferred();
+  const second = deferred();
+  const up = { dataset: { vote: 'UP' }, disabled: false };
+  const down = { dataset: { vote: 'DOWN' }, disabled: false };
+  memberMount.buttons = [up, down];
+  let mutations = 0;
+
+  await initializeRestaurantProfile({
+    mount: memberMount,
+    publicMount,
+    claims: () => ({ sub: 'browser-session' }),
+    request: async (_url, options = {}) => {
+      if (!options.method) return DETAIL;
+      mutations += 1;
+      return mutations === 1 ? first.promise : second.promise;
+    },
+    headers: (extra = {}) => extra,
+  });
+  const firstClick = memberMount.listener({ target: { closest: selector => selector === '.lunch-vote-button' ? up : null } });
+  const secondClick = memberMount.listener({ target: { closest: selector => selector === '.lunch-vote-button' ? down : null } });
+
+  assert.match(memberMount.innerHTML, /Your vote: Thumbs up/);
+  assert.equal(publicMount.textContent, '67% liked · 2 up · 1 down');
+  second.resolve({ ...DETAIL, upVotes: 2, downVotes: 2, voteCount: 4, myVote: 'DOWN' });
+  await secondClick;
+  first.resolve({ ...DETAIL, upVotes: 3, downVotes: 1, voteCount: 4, myVote: 'UP' });
+  await firstClick;
+
+  assert.match(memberMount.innerHTML, /Your vote: Thumbs down/);
+  assert.equal(publicMount.textContent, '50% liked · 2 up · 2 down');
+  assert.equal(up.disabled, false);
+  assert.equal(down.disabled, false);
+});
+
+test('profile ignores a stale opposite-thumb failure after the latest vote succeeds', async () => {
+  const memberMount = mount();
+  const publicMount = { textContent: '67% liked · 2 up · 1 down' };
+  const first = deferred();
+  const second = deferred();
+  const up = { dataset: { vote: 'UP' }, disabled: false };
+  const down = { dataset: { vote: 'DOWN' }, disabled: false };
+  memberMount.buttons = [up, down];
+  let mutations = 0;
+
+  await initializeRestaurantProfile({
+    mount: memberMount,
+    publicMount,
+    claims: () => ({ sub: 'browser-session' }),
+    request: async (_url, options = {}) => {
+      if (!options.method) return DETAIL;
+      mutations += 1;
+      return mutations === 1 ? first.promise : second.promise;
+    },
+    headers: (extra = {}) => extra,
+  });
+  const firstClick = memberMount.listener({ target: { closest: selector => selector === '.lunch-vote-button' ? up : null } });
+  const secondClick = memberMount.listener({ target: { closest: selector => selector === '.lunch-vote-button' ? down : null } });
+
+  second.resolve({ ...DETAIL, upVotes: 2, downVotes: 2, voteCount: 4, myVote: 'DOWN' });
+  await secondClick;
+  first.reject(new Error('stale UP failure'));
+  await firstClick;
+
+  assert.match(memberMount.innerHTML, /Your vote: Thumbs down/);
+  assert.equal(publicMount.textContent, '50% liked · 2 up · 2 down');
+  assert.doesNotMatch(memberMount.innerHTML, /stale UP failure/);
+});
+
+test('profile sends an active thumb again without changing its confirmed state before the response', async () => {
+  const memberMount = mount();
+  const publicMount = { textContent: '67% liked · 2 up · 1 down' };
+  const pending = deferred();
+  const up = { dataset: { vote: 'UP' }, disabled: false };
+  memberMount.buttons = [up];
+  const calls = [];
+
+  await initializeRestaurantProfile({
+    mount: memberMount,
+    publicMount,
+    claims: () => ({ sub: 'browser-session' }),
+    request: async (url, options = {}) => {
+      calls.push([url, options]);
+      return options.method ? pending.promise : DETAIL;
+    },
+    headers: (extra = {}) => extra,
+  });
+  const click = memberMount.listener({ target: { closest: selector => selector === '.lunch-vote-button' ? up : null } });
+
+  assert.equal(calls[1][1].body, '{"restaurantId":"restaurant-123","vote":"UP"}');
+  assert.match(memberMount.innerHTML, /Your vote: Thumbs up/);
+  assert.equal(publicMount.textContent, '67% liked · 2 up · 1 down');
+  pending.resolve({ ...DETAIL, upVotes: 3, voteCount: 4, myVote: 'UP' });
+  await click;
+
+  assert.match(memberMount.innerHTML, /Your vote: Thumbs up/);
+  assert.equal(publicMount.textContent, '75% liked · 3 up · 1 down');
+});
+
+test('profile keeps the last confirmed vote after the latest deferred request fails', async () => {
+  const memberMount = mount();
+  const pending = deferred();
+  const down = { dataset: { vote: 'DOWN' }, disabled: false };
+  memberMount.buttons = [down];
+
+  await initializeRestaurantProfile({
+    mount: memberMount,
+    claims: () => ({ sub: 'browser-session' }),
+    request: async (_url, options = {}) => options.method ? pending.promise : DETAIL,
+    headers: (extra = {}) => extra,
+  });
+  const click = memberMount.listener({ target: { closest: selector => selector === '.lunch-vote-button' ? down : null } });
+  assert.match(memberMount.innerHTML, /Your vote: Thumbs up/);
+  pending.reject(new Error('Vote service unavailable'));
+  await click;
+
+  assert.match(memberMount.innerHTML, /Your vote: Thumbs up/);
+  assert.match(memberMount.innerHTML, /Vote service unavailable/);
+  assert.equal(down.disabled, false);
 });
 
 test('favorite interaction preserves the existing method and payload contract', async () => {

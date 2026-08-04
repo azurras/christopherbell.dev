@@ -8,24 +8,24 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
 - Restaurant persistence outages use the shared service-unavailable contract
   with preserved diagnostic causes and a redacted public response.
 - Public location-aware lunch picks that query bounded nearby candidates and
-  return three rating-weighted suggestions within the user's selected radius
+  return three approval-weighted suggestions within the user's selected radius
   from their browser location or entered ZIP code. ZIP searches resolve their
   radius origin from imported Location Census ZCTA coordinates before loading
   restaurant candidates.
-- New nearby, daily, and deleted-pick replacement draws use one batch of rating
-  totals and sample without replacement. Three neutral 3-star virtual ratings
-  temper sparse data; unrated restaurants retain the neutral weight and every
-  eligible restaurant keeps a positive chance of selection.
+- New nearby, daily, and deleted-pick replacement draws use one batch of binary
+  vote totals and sample without replacement. `ApprovalWeightedRestaurantSelector`
+  smooths approval with a 1.5-UP, 3-vote prior; restaurants without votes retain
+  neutral weight and every eligible restaurant keeps a positive chance of selection.
 - Logged-in shared sessions where up to 20 members see the same three restaurants,
   receive atomic session updates, and vote. The creator alone can reset picks.
   Sessions are active for 24 hours, remain as a read-only archive for 30 more
   days, and carry a TTL deletion deadline.
-- Logged-in restaurant ratings with public whole-number rating totals.
+- Logged-in restaurant thumb votes with public approval percentages and vote totals.
 - Restaurant websites are persisted and rendered only as absolute HTTP(S) URLs; unsafe legacy values are omitted.
 - Public restaurant profile routes server-render indexable profile content,
   canonical and social metadata, and schema.org Restaurant JSON-LD. Browser
-  JavaScript adds only signed-in rating and favorite controls, so anonymous
-  visitors and crawlers do not depend on the restaurant detail API.
+  controls remain separate from the public page, so anonymous visitors and
+  crawlers do not depend on the restaurant detail API.
 - Legacy daily lunch picks persisted per day and refreshed at midnight Central. Scheduled refreshes
   use the shared renewable Mongo lease so only one application instance writes a given run; request
   fallback generation keeps its existing behavior. Already persisted daily and
@@ -48,6 +48,6 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
 ## Update This Doc
 
 Update this README when restaurant fields, import behavior, dedupe rules, nearby
-pick behavior, Location ZIP dependencies, rating behavior, shared session
+pick behavior, Location ZIP dependencies, vote behavior, shared session
 behavior, daily pick behavior, WFL routes, or admin maintenance endpoints
 change.

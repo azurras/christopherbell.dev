@@ -28,9 +28,10 @@ public interface RestaurantMapper {
    * @return a new {@link RestaurantDetail} representing the provided entity,
    *         or {@code null} if the input is {@code null}
    */
-  @Mapping(target = "ratingCount", ignore = true)
-  @Mapping(target = "ratingSum", ignore = true)
-  @Mapping(target = "myRating", ignore = true)
+  @Mapping(target = "upVotes", ignore = true)
+  @Mapping(target = "downVotes", ignore = true)
+  @Mapping(target = "voteCount", ignore = true)
+  @Mapping(target = "myVote", ignore = true)
   @Mapping(target = "myFavorite", ignore = true)
   RestaurantDetail toRestaurantDetail(Restaurant restaurant);
 

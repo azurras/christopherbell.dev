@@ -14,7 +14,7 @@ public record RestaurantProfilePage(
     String cuisine,
     String heroMetadata,
     Address address,
-    Rating rating,
+    VoteSummary votes,
     String phoneNumber,
     String website,
     String sourceType,
@@ -39,14 +39,14 @@ public record RestaurantProfilePage(
     return address == null ? "" : address.displayLine();
   }
 
-  /** Whether the page has a valid non-empty aggregate rating. */
-  public boolean hasRating() {
-    return rating != null;
+  /** Whether the page has a valid non-empty public vote summary. */
+  public boolean hasVotes() {
+    return votes != null;
   }
 
-  /** Returns the average rating, or zero when no aggregate exists. */
-  public double averageRating() {
-    return rating == null ? 0.0 : rating.average();
+  /** Returns public member approval, or zero when no vote summary exists. */
+  public int approvalPercentage() {
+    return votes == null ? 0 : votes.approvalPercentage();
   }
 
   /** Public postal and optional coordinate data. */
@@ -89,17 +89,17 @@ public record RestaurantProfilePage(
     }
   }
 
-  /** Valid non-empty aggregate rating. */
-  public record Rating(int count, int sum) {
-    public Rating {
-      if (count <= 0 || sum < count || sum > count * 5) {
-        throw new IllegalArgumentException("Restaurant rating summary is invalid.");
+  /** Valid non-empty public vote summary. */
+  public record VoteSummary(int upVotes, int downVotes, int voteCount) {
+    public VoteSummary {
+      if (upVotes < 0 || downVotes < 0 || voteCount <= 0 || upVotes + downVotes != voteCount) {
+        throw new IllegalArgumentException("Restaurant vote summary is invalid.");
       }
     }
 
-    /** Returns the exact arithmetic mean. */
-    public double average() {
-      return (double) sum / count;
+    /** Returns the nearest whole percent of public member approval. */
+    public int approvalPercentage() {
+      return (int) Math.round(upVotes * 100.0 / voteCount);
     }
   }
 

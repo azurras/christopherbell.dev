@@ -3,7 +3,10 @@ package dev.christopherbell.view.wfl;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.view.ViewIndexingPolicy;
 import jakarta.servlet.http.HttpServletResponse;
+import java.net.URI;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -46,18 +49,26 @@ public class WhatsForLunchViewController {
   }
 
   /**
-   * Serves the public WFL top-rated restaurants page.
+   * Serves the public WFL top-liked restaurants page.
    *
    * @return {@code wfl-list.html}
    */
-  @GetMapping(value = "/wfl/top-rated")
-  public String getWhatsForLunchTopRatedPage(Model model) {
-    model.addAttribute("socialTitle", "CB | Top Rated Restaurants");
-    model.addAttribute("socialUrl", PUBLIC_ROOT + "/wfl/top-rated");
-    model.addAttribute("listMode", "top-rated");
-    model.addAttribute("listTitle", "Top 10 Rated Restaurants");
-    model.addAttribute("listDescription", "The highest rated restaurants from What's For Lunch.");
+  @GetMapping(value = "/wfl/top-liked")
+  public String getWhatsForLunchTopLikedPage(Model model) {
+    model.addAttribute("socialTitle", "CB | Top 10 Liked Restaurants");
+    model.addAttribute("socialUrl", PUBLIC_ROOT + "/wfl/top-liked");
+    model.addAttribute("listMode", "top-liked");
+    model.addAttribute("listTitle", "Top 10 Liked Restaurants");
+    model.addAttribute("listDescription", "The restaurants with the highest member approval from What's For Lunch.");
     return "wfl-list.html";
+  }
+
+  /** Permanently redirects the legacy top-rated route to the canonical public list. */
+  @GetMapping(value = "/wfl/top-rated")
+  public ResponseEntity<Void> legacyTopRated() {
+    return ResponseEntity.status(HttpStatus.PERMANENT_REDIRECT)
+        .location(URI.create("/wfl/top-liked"))
+        .build();
   }
 
   /**

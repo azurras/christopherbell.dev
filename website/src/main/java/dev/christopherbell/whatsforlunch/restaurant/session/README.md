@@ -19,7 +19,7 @@ Owns shared What's For Lunch sessions.
 - Sessions are active for 24 hours, archived read-only for 30 additional days,
   and removed through the `deleteOn` TTL index. Reset audit history retains the
   latest 100 entries and an all-time count.
-- Session list hydration batches restaurant, rating, and favorite reads across
+- Session list hydration batches restaurant, vote, and favorite reads across
   the entire bounded 25-session page.
 
 ## Update This Doc

@@ -15,13 +15,14 @@ import dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteR
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
-import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRating;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVote;
+import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVoteValue;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionCreateRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionDetail;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionVoteRequest;
-import dev.christopherbell.whatsforlunch.restaurant.rating.RestaurantRatingRepository;
+import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -52,7 +53,7 @@ public class WhatsForLunchSessionService {
   private final PermissionService permissionService;
   private final RestaurantMapper restaurantMapper;
   private final RestaurantFavoriteRepository restaurantFavoriteRepository;
-  private final RestaurantRatingRepository restaurantRatingRepository;
+  private final RestaurantVoteRepository restaurantVoteRepository;
   private final RestaurantRepository restaurantRepository;
   private final WhatsForLunchSessionMutationStore mutations;
   private final WhatsForLunchSessionRepository sessionRepository;
@@ -270,7 +271,7 @@ public class WhatsForLunchSessionService {
       String selfId,
       List<Restaurant> restaurants
   ) {
-    return toDetailFromHydratedRestaurants(session, selfId, toRatedDetails(restaurants, selfId));
+    return toDetailFromHydratedRestaurants(session, selfId, toVoteDetails(restaurants, selfId));
   }
 
   private List<WhatsForLunchSessionDetail> toDetails(
@@ -289,7 +290,7 @@ public class WhatsForLunchSessionService {
     var restaurantsById = new LinkedHashMap<String, Restaurant>();
     restaurantRepository.findAllById(restaurantIds)
         .forEach(restaurant -> restaurantsById.put(restaurant.getId(), restaurant));
-    var detailsById = toRatedDetails(restaurantIds.stream()
+    var detailsById = toVoteDetails(restaurantIds.stream()
         .map(restaurantsById::get)
         .filter(java.util.Objects::nonNull)
         .toList(), selfId).stream()
@@ -351,7 +352,7 @@ public class WhatsForLunchSessionService {
         .build();
   }
 
-  private List<RestaurantDetail> toRatedDetails(List<Restaurant> restaurants, String selfId) {
+  private List<RestaurantDetail> toVoteDetails(List<Restaurant> restaurants, String selfId) {
     var details = restaurants.stream()
         .map(restaurantMapper::toRestaurantDetail)
         .toList();
@@ -361,18 +362,20 @@ public class WhatsForLunchSessionService {
         .map(RestaurantDetail::getId)
         .filter(id -> id != null && !id.isBlank())
         .toList();
-    if (restaurantIds.isEmpty() || restaurantRatingRepository == null) {
+    if (restaurantIds.isEmpty() || restaurantVoteRepository == null) {
       return details;
     }
     details.forEach(detail -> {
-      detail.setRatingCount(0);
-      detail.setRatingSum(0);
+      detail.setUpVotes(0);
+      detail.setDownVotes(0);
+      detail.setVoteCount(0);
+      detail.setMyVote(null);
       detail.setMyFavorite(false);
     });
-    var ratingsByRestaurantId = Optional.ofNullable(restaurantRatingRepository.findByRestaurantIdIn(restaurantIds))
+    var votesByRestaurantId = Optional.ofNullable(restaurantVoteRepository.findByRestaurantIdIn(restaurantIds))
         .orElseGet(List::of)
         .stream()
-        .collect(Collectors.groupingBy(RestaurantRating::getRestaurantId));
+        .collect(Collectors.groupingBy(RestaurantVote::getRestaurantId));
     var favoriteIds = restaurantFavoriteRepository == null
         ? java.util.Set.<String>of()
         : Optional.ofNullable(restaurantFavoriteRepository.findByRestaurantIdInAndAccountId(restaurantIds, selfId))
@@ -381,18 +384,17 @@ public class WhatsForLunchSessionService {
             .map(RestaurantFavorite::getRestaurantId)
             .collect(Collectors.toSet());
     details.forEach(detail -> {
-      var ratings = ratingsByRestaurantId.getOrDefault(detail.getId(), List.of());
-      detail.setRatingCount(ratings.size());
-      detail.setRatingSum(ratings.stream()
-          .map(RestaurantRating::getRating)
-          .filter(rating -> rating != null)
-          .mapToInt(Integer::intValue)
-          .sum());
-      ratings.stream()
-          .filter(rating -> selfId.equals(rating.getAccountId()))
+      var votes = votesByRestaurantId.getOrDefault(detail.getId(), List.of());
+      int upVotes = (int) votes.stream().filter(vote -> vote.getVote() == RestaurantVoteValue.UP).count();
+      int downVotes = (int) votes.stream().filter(vote -> vote.getVote() == RestaurantVoteValue.DOWN).count();
+      detail.setUpVotes(upVotes);
+      detail.setDownVotes(downVotes);
+      detail.setVoteCount(upVotes + downVotes);
+      votes.stream()
+          .filter(vote -> selfId.equals(vote.getAccountId()))
           .findFirst()
-          .map(RestaurantRating::getRating)
-          .ifPresent(detail::setMyRating);
+          .map(RestaurantVote::getVote)
+          .ifPresent(detail::setMyVote);
       detail.setMyFavorite(favoriteIds.contains(detail.getId()));
     });
     return details;

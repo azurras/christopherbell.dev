@@ -80,29 +80,6 @@ function Invoke-ProductionRollback {
     }
 }
 
-function Get-NativeMongoDumpArguments {
-    param([Parameter(Mandatory)][string]$Archive)
-    @('--uri=mongodb://127.0.0.1:27017','--db=christopherbell',"--archive=$Archive",'--gzip')
-}
-
-function Get-NativeMongoRestoreDryRunArguments {
-    param([Parameter(Mandatory)][string]$Archive)
-    @('--uri=mongodb://127.0.0.1:27017',"--archive=$Archive",'--gzip','--dryRun')
-}
-
-function New-ProductionBackup {
-    $config = Read-ProductionConfig
-    New-Item -ItemType Directory -Force $config.backupRoot | Out-Null
-    $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
-    $archive = Join-Path $config.backupRoot "christopherbell-native-$stamp.archive.gz"
-    Invoke-CheckedProcess (Join-Path $config.mongoToolsPath 'mongodump.exe') (Get-NativeMongoDumpArguments $archive) $config.repositoryPath | Out-Null
-    if (-not (Test-Path $archive) -or (Get-Item $archive).Length -eq 0) { throw 'mongodump failed or created an empty archive.' }
-    Invoke-CheckedProcess (Join-Path $config.mongoToolsPath 'mongorestore.exe') (Get-NativeMongoRestoreDryRunArguments $archive) $config.repositoryPath | Out-Null
-    [ordered]@{ archive=$archive; sha256=(Get-FileHash $archive -Algorithm SHA256).Hash; createdAt=(Get-Date).ToUniversalTime().ToString('o') } |
-        ConvertTo-Json | Set-Content "$archive.sha256.json" -Encoding utf8
-    return $archive
-}
-
 function Watch-ProductionLogs {
     $config = Read-ProductionConfig
     $log = Get-ChildItem (Join-Path $config.programDataRoot 'logs') -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
@@ -211,4 +188,4 @@ function Test-ProductionStartup {
     }
 }
 
-Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,Get-NativeMongoDumpArguments,Get-NativeMongoRestoreDryRunArguments,New-ProductionBackup,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases,Assert-AutoDeployTaskContract,Test-ProductionStartup
+Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases,Assert-AutoDeployTaskContract,Test-ProductionStartup

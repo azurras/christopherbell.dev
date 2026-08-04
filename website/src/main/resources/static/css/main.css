@@ -1605,6 +1605,47 @@ body {
     color: rgba(23, 32, 42, 0.72);
 }
 
+.wfl-list-card .lunch-vote-summary {
+    overflow-wrap: anywhere;
+}
+
+.wfl-list-card .lunch-vote-control {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.wfl-list-card .lunch-vote-button {
+    min-width: 2.75rem;
+    min-height: 2.5rem;
+    border: 1px solid rgba(23, 32, 42, 0.28);
+    border-radius: 0.35rem;
+    background: #ffffff;
+    color: #244323;
+}
+
+.wfl-list-card .lunch-vote-button:hover {
+    border-color: #4f7d4d;
+    background: #eef6ed;
+}
+
+.wfl-list-card .lunch-vote-button:focus-visible {
+    outline: 3px solid #4f7d4d;
+    outline-offset: 2px;
+}
+
+.wfl-list-card .lunch-vote-button[aria-pressed="true"] {
+    border-color: #4f7d4d;
+    background: #dcebd9;
+    color: #244323;
+    font-weight: 800;
+}
+
+.wfl-list-card .lunch-vote-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
 .lunch-toolbar {
     width: 100%;
     display: grid;
@@ -1901,47 +1942,6 @@ body {
     font-size: 0.9rem;
     font-weight: 700;
     overflow-wrap: anywhere;
-}
-
-.lunch-rating-summary {
-    margin-bottom: 0.45rem;
-    font-size: 0.9rem;
-    font-weight: 700;
-}
-
-.lunch-rating-summary p {
-    margin: 0 0 0.15rem;
-}
-
-.lunch-rating-shell {
-    display: grid;
-    justify-items: start;
-    gap: 0.5rem;
-    margin-bottom: 0.65rem;
-}
-
-.lunch-rating-control {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-}
-
-.lunch-rating-button {
-    width: 2rem;
-    height: 2rem;
-    border: 1px solid rgba(23, 32, 42, 0.18);
-    border-radius: 999px;
-    background: #ffffff;
-    color: rgba(23, 32, 42, 0.78);
-    font-weight: 800;
-}
-
-.lunch-rating-button:hover,
-.lunch-rating-button:focus-visible,
-.lunch-rating-button.active {
-    border-color: #4f7d4d;
-    background: #4f7d4d;
-    color: #ffffff;
 }
 
 .lunch-pick-body p,
