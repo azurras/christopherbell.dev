@@ -373,7 +373,7 @@ function renderPicks(picks) {
         <p>${toolbarText}</p>
         <p class="lunch-weighting-note">Member approval influences the draw. Every eligible restaurant stays in the mix.</p>
       </div>
-      <button type="button" class="btn btn-primary lunch-location-refresh lunch-primary-refresh" ${activeSession && !activeSession.canChangeRestaurants ? 'disabled title="Only the active session host can change the picks"' : ''}>Try 3 more</button>
+      <button type="button" class="btn btn-primary lunch-location-refresh lunch-primary-refresh" ${!sessionRecoveryController.canRequestNearbyPicks() ? 'disabled title="Only the active session host can change the picks"' : ''}>Try 3 more</button>
     </div>
     ${controlsMarkup()}
     <div class="lunch-picks">${picks.map(restaurantCard).join('')}</div>
@@ -531,12 +531,77 @@ async function savePreferences() {
   }
 }
 
-async function loadNearbyPicks() {
-  if (activeSession) {
-    await refreshSharedSessionPicks();
-    return;
+export function createSessionRecoveryController({
+  getActiveSession,
+  setActiveSession,
+  clearStoredSession,
+  stopPolling,
+  loadSession,
+  refreshSharedSession,
+  loadSoloSession,
+}) {
+  function clearInactiveRestoredSession() {
+    clearStoredSession();
+    setActiveSession(null);
+    stopPolling();
   }
-  return loadSoloSession({ forceNew: true });
+
+  async function restoreStoredSession(sessionId) {
+    if (!sessionId) return false;
+    try {
+      await loadSession(sessionId, { join: false, storeSession: true });
+      const session = getActiveSession();
+      if (session && session.active !== false) return true;
+    } catch (_) {
+      // Stored sessions already fall back to normal initialization on lookup failure.
+    }
+    clearInactiveRestoredSession();
+    return false;
+  }
+
+  async function loadExplicitSession(sessionId) {
+    try {
+      await loadSession(sessionId, { join: false, storeSession: true });
+    } catch (error) {
+      if (error?.status !== 404) throw error;
+      await loadSession(sessionId, { join: true, storeSession: true });
+    }
+  }
+
+  function canRequestNearbyPicks() {
+    const session = getActiveSession();
+    return !session || session.active === false || session.canChangeRestaurants === true;
+  }
+
+  async function requestNearbyPicks() {
+    const session = getActiveSession();
+    if (session && session.active !== false) {
+      await refreshSharedSession();
+      return;
+    }
+    return loadSoloSession({ forceNew: true });
+  }
+
+  return {
+    canRequestNearbyPicks,
+    loadExplicitSession,
+    requestNearbyPicks,
+    restoreStoredSession,
+  };
+}
+
+const sessionRecoveryController = createSessionRecoveryController({
+  getActiveSession: () => activeSession,
+  setActiveSession: session => { activeSession = session; },
+  clearStoredSession: clearStoredMemberSession,
+  stopPolling: stopSessionPolling,
+  loadSession,
+  refreshSharedSession: refreshSharedSessionPicks,
+  loadSoloSession,
+});
+
+async function loadNearbyPicks() {
+  return sessionRecoveryController.requestNearbyPicks();
 }
 
 async function fetchNearbyPicks() {
@@ -589,15 +654,7 @@ async function updateSessionRestaurants(picks) {
 }
 
 async function loadStoredMemberSession() {
-  const storedSessionId = getStoredMemberSessionId();
-  if (!storedSessionId) return false;
-  try {
-    await loadSession(storedSessionId, { join: false, storeSession: true });
-    return true;
-  } catch (_) {
-    clearStoredMemberSession();
-    return false;
-  }
+  return sessionRecoveryController.restoreStoredSession(getStoredMemberSessionId());
 }
 
 async function loadStoredAnonymousSession() {
@@ -699,7 +756,7 @@ async function loadSession(sessionId, { join = true, storeSession = false } = {}
 
 async function loadSharedSession(sessionId) {
   try {
-    await loadSession(sessionId, { join: true, storeSession: true });
+    await sessionRecoveryController.loadExplicitSession(sessionId);
   } catch (err) {
     renderError(err);
   }
@@ -750,7 +807,7 @@ async function refreshSharedSessionPicks() {
 }
 
 function startSessionPolling() {
-  if (!activeSession?.id || !isLoggedIn || sessionPollId) return;
+  if (!activeSession?.id || activeSession.active === false || !isLoggedIn || sessionPollId) return;
   sessionPollId = window.setInterval(refreshActiveSession, SESSION_POLL_INTERVAL_MS);
 }
 

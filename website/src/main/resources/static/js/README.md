@@ -68,9 +68,12 @@ Owns browser-side behavior for server-rendered pages.
   restaurant/vote changes, links vote usernames to public profiles, lets session-link visitors join after authentication,
   lets signed-in users set `UP` or `DOWN` restaurant votes with accessible thumb
   controls, lets signed-in users favorite restaurants, links cards to restaurant profile pages, replaces
-  the card list with a loading wheel while "Try 3 more" fetches new picks, and
-  shows archived shared sessions as read-only, permits only the host to request
-  new shared picks, and only re-queries when the user clicks "Try 3 more", applies filters, changes
+  the card list with a loading wheel while "Try 3 more" fetches new picks, shows
+  explicitly opened archived shared sessions as read-only, discards archived
+  sessions restored implicitly from saved browser state, starts fresh picks when
+  selection controls are used from an archive, permits only the host to request
+  new picks in an active shared session, and only re-queries when the user clicks
+  "Try 3 more", applies filters, changes
   ZIP/location, or an admin deletes a restaurant.
 - Restaurant profiles render their complete public content and validated
   HTTP(S) website links on the server. `restaurant-profile.js` makes no
