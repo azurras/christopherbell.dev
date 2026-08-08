@@ -6,6 +6,7 @@ import com.tngtech.archunit.core.domain.JavaClasses;
 import dev.christopherbell.Application;
 import org.junit.jupiter.api.Test;
 import org.springframework.modulith.core.ApplicationModules;
+import org.springframework.modulith.docs.Documenter;
 
 class ModularMonolithArchitectureTest {
   private static final ApplicationModules MODULES = ApplicationModules.of(Application.class);
@@ -33,5 +34,12 @@ class ModularMonolithArchitectureTest {
   @Test
   void businessDependenciesOnOrchestrationAreasDoNotGrow() {
     LEGACY_RULES.frozenOrchestrationDirectionRule().check(PRODUCTION_CLASSES);
+  }
+
+  @Test
+  void writesReviewableModuleDocumentation() {
+    new Documenter(MODULES)
+        .writeModulesAsPlantUml()
+        .writeModuleCanvases();
   }
 }
