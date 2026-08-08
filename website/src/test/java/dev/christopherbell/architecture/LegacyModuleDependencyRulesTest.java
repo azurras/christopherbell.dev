@@ -26,7 +26,24 @@ class LegacyModuleDependencyRulesTest {
   }
 
   @Test
-  void rejectsBusinessDependenciesOnOrchestrationAreas() {
+  void rejectsInternalPackagesBelowPublishedApi() {
+    var details = RULES.crossAreaAccessRule().evaluate(FIXTURES).getFailureReport().getDetails();
+
+    assertThat(details)
+        .anyMatch(detail -> detail.contains("alpha -> beta")
+            && detail.contains("Secret"));
+  }
+
+  @Test
+  void allowsPublishedOrchestrationApiAcrossAreas() {
+    var details = RULES.crossAreaAccessRule().evaluate(FIXTURES).getFailureReport().getDetails();
+
+    assertThat(details)
+        .noneMatch(detail -> detail.contains("OrchestrationDependency"));
+  }
+
+  @Test
+  void rejectsBusinessDependenciesOnPublishedOrchestrationApis() {
     var details =
         RULES.orchestrationDirectionRule().evaluate(FIXTURES).getFailureReport().getDetails();
 

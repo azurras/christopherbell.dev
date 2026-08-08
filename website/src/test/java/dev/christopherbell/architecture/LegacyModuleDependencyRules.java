@@ -133,7 +133,7 @@ final class LegacyModuleDependencyRules {
     }
 
     var apiPackage = rootPackage + "." + physicalArea.get() + ".api";
-    return packageName.equals(apiPackage) || packageName.startsWith(apiPackage + ".");
+    return packageName.equals(apiPackage);
   }
 
   private Optional<AccessViolation> violation(Dependency dependency, ViolationKind kind) {
