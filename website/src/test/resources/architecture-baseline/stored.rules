@@ -1,0 +1,4 @@
+#
+#Sat Aug 08 12:04:14 CDT 2026
+classes\ that\ reside\ in\ a\ package\ 'dev.christopherbell..'\ should\ access\ only\ its\ own\ area\ or\ another\ area's\ published\ api=e847d3fd-3e97-4258-ac91-4674dc7531ae
+classes\ that\ reside\ in\ a\ package\ 'dev.christopherbell..'\ should\ not\ depend\ on\ an\ orchestration\ area\ from\ a\ business\ area=d43885c7-3445-4783-9d92-9fd489c02033

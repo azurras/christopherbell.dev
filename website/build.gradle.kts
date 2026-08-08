@@ -20,6 +20,9 @@ plugins {
 }
 
 dependencyManagement {
+    imports {
+        mavenBom("org.springframework.modulith:spring-modulith-bom:2.1.0")
+    }
     dependencies {
         dependency("net.bytebuddy:byte-buddy:1.18.11")
         dependency("net.bytebuddy:byte-buddy-agent:1.18.11")
@@ -74,10 +77,23 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.security:spring-security-test")
+    testImplementation("org.springframework.modulith:spring-modulith-starter-test")
     testImplementation(testFixtures(project(":cbell-lib")))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testAnnotationProcessor("org.projectlombok:lombok:1.18.46")
     testCompileOnly("org.projectlombok:lombok:1.18.46")
+}
+
+val forwardedArchitectureTestSystemProperties = listOf(
+    "archunit.freeze.store.default.allowStoreCreation",
+    "archunit.freeze.store.default.allowStoreUpdate")
+
+tasks.withType<Test>().configureEach {
+    forwardedArchitectureTestSystemProperties.forEach { propertyName ->
+        providers.systemProperty(propertyName).orNull?.let { value ->
+            systemProperty(propertyName, value)
+        }
+    }
 }
 
 springBoot {

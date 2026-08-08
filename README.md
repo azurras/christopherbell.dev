@@ -202,21 +202,37 @@ Set `NODE_EXE=/path/to/node` when Node is not on `PATH`.
 
 ## Backend Architecture
 
-Backend code is organized by feature, not by technical layer. For example,
-`post`, `account`, `vehicle`, and `whatsforlunch` each own their controller,
-service, repository, mapper, models, and package docs.
+`website` is one Spring Boot deployable organized as a modular monolith. Business
+capabilities own their controllers, application/domain behavior, repositories,
+persistence documents, and package documentation. `cbell-lib` contains only
+domain-neutral behavior with multiple demonstrated consumers.
 
-Common pattern inside a feature:
+Capabilities migrate to closed Spring Modulith modules incrementally. A migrated
+module exposes cross-module commands, queries, identifiers, result DTOs, semantic
+failures, and non-critical events only through a named `api` package. Repositories,
+Mongo documents, implementation services, mappers, and internal DTOs are never
+module APIs. `permission` is account-owned. `view`, `admin`, and Spring bootstrap
+may orchestrate module APIs; business modules may not depend on those layers.
 
-- `*Controller` defines HTTP endpoints.
-- `*Service` owns business rules.
-- `*Repository` owns MongoDB access.
-- `*Mapper` converts between persistence models and API DTOs.
-- `model/` contains entities, request DTOs, response DTOs, and enums.
-- `README.md` explains the feature's technical behavior.
+Run the architecture gates with:
 
-Cross-cutting web infrastructure lives in `configuration`. Server-rendered page
-routes live in `view`.
+~~~shell
+./gradlew :website:test --tests 'dev.christopherbell.architecture.*'
+~~~
+
+The checked-in ArchUnit store freezes legacy cross-area accesses. Normal test and
+CI runs cannot create or update it. After a reviewed boundary repair, reduce the
+store explicitly and inspect the diff before committing:
+
+~~~shell
+./gradlew :website:test \
+  --tests dev.christopherbell.architecture.ModularMonolithArchitectureTest \
+  '-Darchunit.freeze.store.default.allowStoreUpdate=true'
+git diff -- website/src/test/resources/architecture-baseline
+~~~
+
+Accept only removed violations. Module diagrams and canvases are generated under
+`website/build/spring-modulith-docs/` and are review artifacts, not tracked files.
 
 ## Frontend Architecture
 

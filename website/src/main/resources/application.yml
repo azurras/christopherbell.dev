@@ -1,4 +1,6 @@
 spring:
+  modulith:
+    detection-strategy: explicitly-annotated
   web:
     resources:
       cache:
