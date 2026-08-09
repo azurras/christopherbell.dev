@@ -290,13 +290,14 @@ immediately.
 .\prod.cmd releases
 .\prod.cmd restart
 .\prod.cmd backup
+.\prod.cmd mongo-inventory
 .\prod.cmd rollback -WhatIf
 .\prod.cmd rollback
 .\prod.cmd verify-startup
 ```
 
 Equivalent Makefile targets include `prod-status`, `prod-deploy`,
-`prod-backup`, and `prod-verify-startup`.
+`prod-backup`, `prod-mongo-inventory`, and `prod-verify-startup`.
 
 ## Shared-Folder Operations
 
@@ -503,6 +504,35 @@ Get-Service MongoDB,ChristopherBellDev,ChristopherBellMediaWorker,cloudflared |
 
 Do not print service command lines because the cloudflared service registration
 contains its tunnel credential.
+
+## MongoDB Collection Inventory
+
+Run the fixed, metadata-only inventory locally on the production host:
+
+```powershell
+.\prod.cmd mongo-inventory |
+  Set-Content -LiteralPath .\mongo-collection-inventory.json -Encoding utf8
+$inventory = Get-Content -LiteralPath .\mongo-collection-inventory.json -Raw |
+  ConvertFrom-Json
+```
+
+The command connects only to `mongodb://127.0.0.1:27017/admin`, selects the
+`christopherbell` database inside the audited script, and returns collection
+names/types, allowlisted collection options, counts, storage/index sizes, and
+index definitions. It excludes `system.*` names and never reads document
+bodies. Delete the local JSON after the comparison if it is not being retained
+as a reviewed test-report attachment.
+
+Compare the returned names with the checked-in
+`docs/operations/mongodb-collection-catalog.md`. A source-only name may be an
+unused feature that has never materialized. A live-only or empty name is an
+unreviewed extra, not permission to drop it. If output is incomplete, malformed,
+or for a different database, stop and discard it.
+
+Collection cleanup requires a separate approved plan with a current compressed
+backup, SHA-256, restore validation, exact-namespace backup, impact report,
+one-at-a-time removal, rollback retention, and Mongo-backed website verification.
+This command cannot rename, merge, drop, compact, repair, or clean collections.
 
 ## Native MongoDB Backup and Restore
 
