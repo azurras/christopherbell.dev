@@ -21,6 +21,8 @@ Owns vehicle storage, VIN decoding, and vehicle data enrichment.
 - `randomvin.importing` owns RandomVIN client access, import state, and minimal vehicle creation.
   VIN source bodies are bounded at 4 KiB and remain covered by the configured
   request deadline through full-body completion.
+- NHTSA and RandomVIN import state share `vehicle_import_state`; startup
+  validation requires their configured `_id` values to remain distinct.
 - `randomvin.policy` owns robots.txt policy evaluation for RandomVIN collection.
   Robots responses are bounded at 256 KiB and an oversized response follows the
   existing fail-closed fetch-failure policy. A body timeout follows the same

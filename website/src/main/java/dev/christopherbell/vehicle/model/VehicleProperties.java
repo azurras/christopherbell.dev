@@ -28,6 +28,16 @@ public class VehicleProperties {
   @Valid
   private VinDecoder vinDecoder = new VinDecoder();
 
+  /** Keeps the two document shapes in the shared import-state collection collision-free. */
+  @AssertTrue
+  public boolean isImportStateIdsDistinct() {
+    var nhtsaStateId = nhtsaVin == null ? null : nhtsaVin.getStateId();
+    var randomVinStateId = randomVin == null ? null : randomVin.getStateId();
+    return nhtsaStateId == null
+        || randomVinStateId == null
+        || !nhtsaStateId.equals(randomVinStateId);
+  }
+
   @Data
   public static class NhtsaVin {
     private boolean enabled;

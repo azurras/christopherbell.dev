@@ -164,13 +164,46 @@ function Get-ProductionMongoCollectionInventoryScript {
     @'
 const target = db.getSiblingDB('christopherbell');
 const has = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
-const numberOrNull = (value) => typeof value === 'number' ? value : null;
+const numberOrNull = (value) => {
+  const number = typeof value === 'number'
+      ? value
+      : value !== null && typeof value === 'object' && typeof value.toNumber === 'function'
+          ? value.toNumber()
+          : NaN;
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+};
+const safeMetadataInteger = (value, field) => {
+  const number = numberOrNull(value);
+  if (number === null) {
+    throw new Error(`invalid numeric metadata for ${field}`);
+  }
+  return number;
+};
+const redacted = '[redacted]';
+const redactMetadataLiterals = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(redactMetadataLiterals);
+  }
+  if (value !== null && typeof value === 'object') {
+    const result = {};
+    for (const [key, nested] of Object.entries(value)) {
+      result[key] = redactMetadataLiterals(nested);
+    }
+    return result;
+  }
+  return redacted;
+};
 const safeOptions = (options) => {
   const result = {};
   for (const key of ['capped', 'size', 'max', 'validator', 'validationLevel',
-                     'validationAction', 'collation']) {
+                     'validationAction', 'collation', 'timeseries',
+                     'expireAfterSeconds']) {
     if (has(options, key)) {
-      result[key] = options[key];
+      result[key] = key === 'validator'
+          ? redactMetadataLiterals(options[key])
+          : key === 'expireAfterSeconds'
+              ? safeMetadataInteger(options[key], key)
+              : options[key];
     }
   }
   return result;
@@ -182,7 +215,7 @@ const safeIndex = (index) => ({
   sparse: index.sparse === true,
   expireAfterSeconds: has(index, 'expireAfterSeconds') ? index.expireAfterSeconds : null,
   partialFilterExpression: has(index, 'partialFilterExpression')
-      ? index.partialFilterExpression
+      ? redactMetadataLiterals(index.partialFilterExpression)
       : null
 });
 const collections = target.getCollectionInfos()
@@ -204,7 +237,7 @@ const collections = target.getCollectionInfos()
         name: info.name,
         type: info.type,
         options: safeOptions(info.options),
-        count: numberOrNull(stats.count),
+        count: info.type === 'timeseries' ? null : numberOrNull(stats.count),
         sizeBytes: numberOrNull(stats.size),
         storageSizeBytes: numberOrNull(stats.storageSize),
         totalIndexSizeBytes: numberOrNull(stats.totalIndexSize),
@@ -279,11 +312,38 @@ function Copy-ProductionMongoCollectionInventoryMetadataValue {
     }
     Assert-ProductionMongoCollectionInventoryObject -Value $Value -Path $Path
     $result = [ordered]@{}
-    foreach ($property in @($Value.PSObject.Properties | Sort-Object Name)) {
+    foreach ($property in @($Value.PSObject.Properties)) {
         $result[$property.Name] = Copy-ProductionMongoCollectionInventoryMetadataValue `
             -Value $property.Value -Path "$Path.$($property.Name)"
     }
     return [pscustomobject]$result
+}
+
+function Protect-ProductionMongoCollectionInventoryMetadataLiterals {
+    param([object]$Value, [string]$Path)
+
+    if ($Value -is [Array]) {
+        $result = [Collections.Generic.List[object]]::new()
+        for ($index = 0; $index -lt $Value.Count; $index++) {
+            [void]$result.Add((Protect-ProductionMongoCollectionInventoryMetadataLiterals `
+                -Value $Value[$index] -Path "$Path[$index]"))
+        }
+        Write-Output -NoEnumerate $result.ToArray()
+        return
+    }
+    if ($null -ne $Value -and $Value -is [pscustomobject]) {
+        $result = [ordered]@{}
+        foreach ($property in @($Value.PSObject.Properties)) {
+            $result[$property.Name] = Protect-ProductionMongoCollectionInventoryMetadataLiterals `
+                -Value $property.Value -Path "$Path.$($property.Name)"
+        }
+        return [pscustomobject]$result
+    }
+    if ($null -ne $Value -and $Value -isnot [bool] -and $Value -isnot [string] -and
+        -not (Test-ProductionMongoCollectionInventoryNumber $Value)) {
+        throw "MongoDB collection inventory $Path is invalid."
+    }
+    return '[redacted]'
 }
 
 function Convert-ProductionMongoCollectionInventoryNumber {
@@ -301,6 +361,49 @@ function Convert-ProductionMongoCollectionInventoryNumber {
         throw "MongoDB collection inventory $Path is invalid."
     }
     return $Value
+}
+
+function Convert-ProductionMongoCollectionInventoryTimeSeriesOptions {
+    param([object]$Value)
+
+    Assert-ProductionMongoCollectionInventoryPropertySet -Value $Value -Path 'options.timeseries' `
+        -Allowed @('timeField','metaField','granularity','bucketMaxSpanSeconds','bucketRoundingSeconds') `
+        -Required @('timeField')
+    if ($Value.timeField -isnot [string] -or [string]::IsNullOrWhiteSpace($Value.timeField)) {
+        throw 'MongoDB collection inventory options.timeseries.timeField is invalid.'
+    }
+    $result = [ordered]@{ timeField = $Value.timeField }
+    $names = @($Value.PSObject.Properties | ForEach-Object Name)
+    if ($names -contains 'metaField') {
+        if ($Value.metaField -isnot [string] -or [string]::IsNullOrWhiteSpace($Value.metaField) -or
+            $Value.metaField -eq $Value.timeField) {
+            throw 'MongoDB collection inventory options.timeseries.metaField is invalid.'
+        }
+        $result['metaField'] = $Value.metaField
+    }
+    if ($names -contains 'granularity') {
+        if ($Value.granularity -isnot [string] -or
+            $Value.granularity -notin @('seconds','minutes','hours')) {
+            throw 'MongoDB collection inventory options.timeseries.granularity is invalid.'
+        }
+        $result['granularity'] = $Value.granularity
+    }
+    foreach ($option in 'bucketMaxSpanSeconds','bucketRoundingSeconds') {
+        if ($names -contains $option) {
+            $number = Convert-ProductionMongoCollectionInventoryNumber `
+                $Value.PSObject.Properties[$option].Value "options.timeseries.$option" $false
+            if ([double]$number -lt 1 -or [double]$number -gt 31536000) {
+                throw "MongoDB collection inventory options.timeseries.$option is invalid."
+            }
+            $result[$option] = $number
+        }
+    }
+    if ($names -contains 'bucketRoundingSeconds' -and
+        $names -contains 'bucketMaxSpanSeconds' -and
+        [double]$result.bucketRoundingSeconds -ne [double]$result.bucketMaxSpanSeconds) {
+        throw 'MongoDB collection inventory time-series bucket intervals must match.'
+    }
+    return [pscustomobject]$result
 }
 
 function ConvertFrom-ProductionMongoCollectionInventory {
@@ -356,18 +459,28 @@ function ConvertFrom-ProductionMongoCollectionInventory {
         if ($collection.name -isnot [string] -or
             [string]::IsNullOrWhiteSpace($collection.name) -or
             $collection.type -isnot [string] -or
-            $collection.type -notin @('collection','view')) {
+            $collection.type -notin @('collection','view','timeseries')) {
             throw 'MongoDB collection inventory contains an invalid collection.'
         }
         if ($collection.name -like 'system.*') {
             throw 'MongoDB collection inventory must exclude system collections.'
         }
         Assert-ProductionMongoCollectionInventoryPropertySet -Value $collection.options -Path 'options' `
-            -Allowed @('capped','size','max','validator','validationLevel','validationAction','collation') `
+            -Allowed @('capped','size','max','validator','validationLevel','validationAction','collation',
+                'timeseries','expireAfterSeconds') `
             -Required @()
+        $optionNames = @($collection.options.PSObject.Properties | ForEach-Object Name)
+        if ($collection.type -eq 'timeseries' -and $optionNames -notcontains 'timeseries') {
+            throw 'MongoDB collection inventory time-series options are missing.'
+        }
+        if ($collection.type -ne 'timeseries' -and
+            ($optionNames -contains 'timeseries' -or $optionNames -contains 'expireAfterSeconds')) {
+            throw 'MongoDB collection inventory time-series options are invalid for this collection type.'
+        }
         $canonicalOptions = [ordered]@{}
-        foreach ($option in 'capped','size','max','validator','validationLevel','validationAction','collation') {
-            if (@($collection.options.PSObject.Properties | ForEach-Object Name) -contains $option) {
+        foreach ($option in 'capped','size','max','validator','validationLevel','validationAction','collation',
+            'timeseries','expireAfterSeconds') {
+            if ($optionNames -contains $option) {
                 $value = $collection.options.PSObject.Properties[$option].Value
                 switch ($option) {
                     'capped' {
@@ -377,7 +490,8 @@ function ConvertFrom-ProductionMongoCollectionInventory {
                     'max' { $value = Convert-ProductionMongoCollectionInventoryNumber $value 'options.max' $false }
                     'validator' {
                         Assert-ProductionMongoCollectionInventoryObject -Value $value -Path 'options.validator'
-                        $value = Copy-ProductionMongoCollectionInventoryMetadataValue $value 'options.validator'
+                        $value = Protect-ProductionMongoCollectionInventoryMetadataLiterals `
+                            $value 'options.validator'
                     }
                     'validationLevel' {
                         if ($value -isnot [string]) { throw 'MongoDB collection inventory options are invalid.' }
@@ -389,12 +503,20 @@ function ConvertFrom-ProductionMongoCollectionInventory {
                         Assert-ProductionMongoCollectionInventoryObject -Value $value -Path 'options.collation'
                         $value = Copy-ProductionMongoCollectionInventoryMetadataValue $value 'options.collation'
                     }
+                    'timeseries' {
+                        $value = Convert-ProductionMongoCollectionInventoryTimeSeriesOptions $value
+                    }
+                    'expireAfterSeconds' {
+                        $value = Convert-ProductionMongoCollectionInventoryNumber `
+                            $value 'options.expireAfterSeconds' $false
+                    }
                 }
                 $canonicalOptions[$option] = $value
             }
         }
         $allowNullStatistics = $collection.type -eq 'view'
-        $count = Convert-ProductionMongoCollectionInventoryNumber $collection.count 'collection.count' $allowNullStatistics
+        $allowNullCount = $collection.type -in @('view','timeseries')
+        $count = Convert-ProductionMongoCollectionInventoryNumber $collection.count 'collection.count' $allowNullCount
         $sizeBytes = Convert-ProductionMongoCollectionInventoryNumber $collection.sizeBytes 'collection.sizeBytes' $allowNullStatistics
         $storageSizeBytes = Convert-ProductionMongoCollectionInventoryNumber $collection.storageSizeBytes 'collection.storageSizeBytes' $allowNullStatistics
         $totalIndexSizeBytes = Convert-ProductionMongoCollectionInventoryNumber $collection.totalIndexSizeBytes 'collection.totalIndexSizeBytes' $allowNullStatistics
@@ -402,6 +524,9 @@ function ConvertFrom-ProductionMongoCollectionInventory {
             ($null -ne $count -or $null -ne $sizeBytes -or $null -ne $storageSizeBytes -or
                 $null -ne $totalIndexSizeBytes)) {
             throw 'MongoDB collection inventory views must have null statistics and no indexes.'
+        }
+        if ($collection.type -eq 'timeseries' -and $null -ne $count) {
+            throw 'MongoDB collection inventory time-series collections must have a null count.'
         }
         if ($collection.indexes -isnot [Array]) {
             throw 'MongoDB collection inventory indexes are invalid.'
@@ -437,6 +562,8 @@ function ConvertFrom-ProductionMongoCollectionInventory {
                     -Path 'index.partialFilterExpression'
                 $partialFilterExpression = Copy-ProductionMongoCollectionInventoryMetadataValue `
                     $index.partialFilterExpression 'index.partialFilterExpression'
+                $partialFilterExpression = Protect-ProductionMongoCollectionInventoryMetadataLiterals `
+                    $partialFilterExpression 'index.partialFilterExpression'
             }
             if (-not $uniqueIndexNames.Add($index.name)) {
                 throw 'MongoDB collection inventory index names must be unique.'

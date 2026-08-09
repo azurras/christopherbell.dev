@@ -3,7 +3,9 @@
 This catalog is the source of truth for physical collection ownership in the
 `christopherbell` database. Logical groups do not merge storage. A
 `legacy-named` entry remains active under its physical name until a separately
-approved migration proves compatibility and rollback.
+approved migration proves compatibility and rollback. `orphan-candidate` and
+`system-managed` classify reviewed non-source rows; they are not counted as
+source-backed mappings and never authorize cleanup.
 
 The catalog describes source expectations. Use `prod.cmd mongo-inventory` for
 metadata-only live comparison. A live-only name is an unreviewed extra, not
@@ -53,7 +55,7 @@ permission to drop it. Never infer disposability from an empty count.
 | `shared_folder_upload_sessions` | Shared-folder upload sessions | sharedfolder and `SharedFolderUploadSession`; manual V012 access | job | Bounded resumable uploads with terminal TTL | Owner/state, expiry, and terminal TTL indexes | confidential | active |
 | `vehicles` | Vehicles | vehicle and `Vehicle` | entity | One durable vehicle document per VIN | Unique VIN | user | active |
 | `vehicle_vin_decode_cache` | VIN decode cache | vehicle and `VehicleVinDecodeCache` | cache | One expiring provider response per VIN | VIN `_id` and V003 expiry index | public-reference | active |
-| `vehicle_import_state` | Vehicle import state | vehicle and both VIN import-state mappings | singleton-state | One collision-proof key per import provider | Provider-specific `_id` keys | internal | active |
+| `vehicle_import_state` | Vehicle import state | vehicle and `NhtsaVinImportState`, `RandomVinImportState` | singleton-state | One startup-validated key per import provider: `nhtsa` and `randomvin` by default | Provider-specific `_id` keys; equal configured keys fail startup | internal | active |
 | `restaurant_import_previews` | Restaurant import previews | whatsforlunch and `RestaurantImportPreviewDocument` | lease | Short-lived reviewed-import authorization | V002 actor, expiry, and consumed-state indexes | security | active |
 | `whatsforlunch_daily_picks` | Daily lunch picks | whatsforlunch and `DailyLunchPicks` | cache | One durable generated result per lunch date | Date-derived `_id` | user | active |
 | `whatsforlunch` | Restaurants | whatsforlunch and `Restaurant`; manual inventory/dedupe access | entity | Durable restaurant catalog | Normalized name, source, location, and search indexes | public-reference | legacy-named |
@@ -62,6 +64,65 @@ permission to drop it. Never infer disposability from an empty count.
 | `whatsforlunch_ratings` | Restaurant votes | whatsforlunch and `RestaurantVote`; manual query/deletion access | edge | Per-account thumbs vote per restaurant | Unique restaurant/account pair plus account index | user | legacy-named |
 | `whatsforlunch_preferences` | Lunch preferences | whatsforlunch and `WhatsForLunchPreference`; manual deletion access | preference | One document per account | Account `_id` | user | active |
 | `whatsforlunch_sessions` | Lunch sessions | whatsforlunch and `WhatsForLunchSession`; manual mutation/deletion access | entity | Collaborative sessions with terminal absolute-expiry TTL | Short code, creator, state, archive, and TTL indexes | user | active |
+
+Manual Owner Provenance
+-----------------------
+
+This owner registry is intentionally explicit because Spring mapping metadata
+cannot discover every `MongoTemplate` store, aggregation, migration, or
+cross-collection lookup. The architecture gate scans current `MongoTemplate`
+consumers and requires every collection-owning class below (or a narrow,
+non-collection infrastructure classification). Feature packages continue to
+own their collection names locally.
+
+| Manual owner type | Physical names |
+| --- | --- |
+| `dev.christopherbell.account.AdminAccountQueryService` | `accounts` |
+| `dev.christopherbell.account.auth.MongoAccountLoginStore` | `accounts` |
+| `dev.christopherbell.account.deletion.MongoAccountDeletionOperations` | `account_follows`, `account_trust_relationships`, `accounts`, `admin_activity`, `browser_sessions`, `conversation_archive_states`, `hidden_post_threads`, `messages`, `notification_delivery_guards`, `notification_preferences`, `notification_rate_limits`, `notifications`, `post_likes`, `post_reports`, `posts`, `shared_folder_audit`, `shared_folder_recycle_items`, `whatsforlunch_favorites`, `whatsforlunch_preferences`, `whatsforlunch_ratings`, `whatsforlunch_sessions` |
+| `dev.christopherbell.account.follow.AccountFollowStore` | `account_follows` |
+| `dev.christopherbell.admin.activity.AdminActivityQueryService` | `admin_activity` |
+| `dev.christopherbell.admin.commandcenter.action.MongoPendingActionStore` | `command_center_pending_actions` |
+| `dev.christopherbell.configuration.mongo.migration.MigrationStateStore` | `application_migrations` |
+| `dev.christopherbell.configuration.mongo.migration.V001EnsureMigrationInfrastructure` | `application_leases`, `application_migrations` |
+| `dev.christopherbell.configuration.mongo.migration.V002EnsureRestaurantImportPreviewIndexes` | `restaurant_import_previews` |
+| `dev.christopherbell.configuration.mongo.migration.V003EnsureVinPreviewCollectorIndexes` | `post_link_preview_cache`, `scheduled_collector_runs`, `vehicle_vin_decode_cache` |
+| `dev.christopherbell.configuration.mongo.migration.V004EnsureVoidDiscoveryIndexes` | `posts` |
+| `dev.christopherbell.configuration.mongo.migration.V005EnsureVoidPeopleDiscoveryIndexes` | `account_trust_relationships`, `posts` |
+| `dev.christopherbell.configuration.mongo.migration.V006EnsureFederationActorIndex` | `accounts` |
+| `dev.christopherbell.configuration.mongo.migration.V007EnsureFederationOutboundIndexes` | `federation_delivery_jobs`, `posts` |
+| `dev.christopherbell.configuration.mongo.migration.V008RemoveAccountApprovalFields` | `accounts` |
+| `dev.christopherbell.configuration.mongo.migration.V009MoveSocialRelationshipsToEdges` | `account_follows`, `accounts`, `post_likes`, `posts` |
+| `dev.christopherbell.configuration.mongo.migration.V010BackfillPostExpirationMetrics` | `posts` |
+| `dev.christopherbell.configuration.mongo.migration.V011HardenWhatsForLunchData` | `whatsforlunch`, `whatsforlunch_sessions` |
+| `dev.christopherbell.configuration.mongo.migration.V012RetainSharedFolderWork` | `shared_folder_media_jobs`, `shared_folder_radio`, `shared_folder_upload_sessions` |
+| `dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes` | `whatsforlunch_ratings` |
+| `dev.christopherbell.configuration.security.browser.MongoBrowserSessionActivityStore` | `browser_sessions` |
+| `dev.christopherbell.configuration.security.browser.MongoBrowserSessionAuthenticationStore` | `accounts`, `browser_sessions` |
+| `dev.christopherbell.federation.discovery.FederationOutboxQueryRepository` | `posts` |
+| `dev.christopherbell.federation.outbound.FederationDeliveryJobRepository` | `federation_delivery_jobs`, `federation_scan_state`, `posts` |
+| `dev.christopherbell.message.conversation.ConversationArchiveService` | `conversation_archive_states`, `messages` |
+| `dev.christopherbell.message.conversation.ConversationQueryRepository` | `messages` |
+| `dev.christopherbell.music.catalog.MusicCatalog` | `music_tracks` |
+| `dev.christopherbell.music.library.MusicLibraryService` | `music_playlists`, `music_tracks` |
+| `dev.christopherbell.music.security.MusicAccessAuditQueryService` | `music_access_attempts` |
+| `dev.christopherbell.music.security.MusicAccessAuditRecorder` | `music_access_attempts` |
+| `dev.christopherbell.notification.delivery.NotificationFanoutGuard` | `notification_delivery_guards`, `notification_rate_limits` |
+| `dev.christopherbell.notification.inbox.NotificationQueryRepository` | `notifications` |
+| `dev.christopherbell.post.discovery.VoidDiscoveryQueryRepository` | `posts` |
+| `dev.christopherbell.post.discovery.VoidPeopleDiscoveryQueryRepository` | `posts` |
+| `dev.christopherbell.post.expiration.PostExpirationService` | `post_likes`, `posts` |
+| `dev.christopherbell.post.feed.PostEngagementQueryRepository` | `posts` |
+| `dev.christopherbell.post.feed.PostFeedQueryRepository` | `account_follows`, `posts` |
+| `dev.christopherbell.post.like.PostLikeStore` | `post_likes` |
+| `dev.christopherbell.report.query.ReportQueryService` | `post_reports` |
+| `dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService` | `shared_folder_audit` |
+| `dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore` | `shared_folder_maintenance_leases` |
+| `dev.christopherbell.whatsforlunch.restaurant.RestaurantDuplicateQueryRepository` | `whatsforlunch` |
+| `dev.christopherbell.whatsforlunch.restaurant.RestaurantInventoryQueryRepository` | `whatsforlunch` |
+| `dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewStore` | `restaurant_import_previews` |
+| `dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionMutationStore` | `whatsforlunch_sessions` |
+| `dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteQueryRepository` | `whatsforlunch_ratings` |
 
 Naming Rules
 ------------

@@ -437,7 +437,12 @@ Describe 'native Windows production operations' {
             $script | Should -Match 'getIndexes'
             $script | Should -Not -Match '\.find\s*\('
             $script | Should -Not -Match '\.aggregate\s*\('
-            $script | Should -Not -Match '\.(drop|renameCollection|compact|repairDatabase)\s*\('
+            $script | Should -Not -Match (
+                '\.(find|findOne|aggregate|watch|countDocuments|estimatedDocumentCount|distinct|' +
+                'mapReduce|insert|insertOne|insertMany|save|update|updateOne|updateMany|replaceOne|' +
+                'remove|deleteOne|deleteMany|findOneAndDelete|findOneAndReplace|findOneAndUpdate|' +
+                'bulkWrite|drop|renameCollection|compact|repairDatabase|createIndex|createIndexes|' +
+                'dropIndex|dropIndexes|createCollection|dropDatabase)\s*\(')
             $script | Should -Not -Match '\$(out|merge)'
         }
 
@@ -543,6 +548,112 @@ Describe 'native Windows production operations' {
                 'name','key','unique','sparse','expireAfterSeconds','partialFilterExpression')
         }
 
+        It 'preserves semantic compound index key order' {
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson {
+                    param($candidate)
+                    $candidate['collections'][0]['indexes'][0]['key'] = [ordered]@{
+                        z = 1
+                        a = -1
+                    }
+                })
+
+            @($inventory.collections[0].indexes[0].key.PSObject.Properties.Name) |
+                Should -Be @('z','a')
+        }
+
+        It 'redacts nested validator and partial-index scalar literals' {
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson {
+                    param($candidate)
+                    $candidate['collections'][0]['options']['validator'] = [ordered]@{
+                        '$jsonSchema' = [ordered]@{
+                            required = @('TOP-SECRET-VALIDATOR')
+                            properties = [ordered]@{
+                                accountToken = [ordered]@{ enum = @('TOP-SECRET-ENUM', 42, $true, $null) }
+                            }
+                        }
+                    }
+                    $candidate['collections'][0]['indexes'][0]['partialFilterExpression'] =
+                        [ordered]@{ accountToken = [ordered]@{ '$eq' = 'TOP-SECRET-PARTIAL' } }
+                })
+
+            $canonicalJson = $inventory | ConvertTo-Json -Depth 20 -Compress
+            $canonicalJson | Should -Not -Match 'TOP-SECRET'
+            $schema = $inventory.collections[0].options.validator.PSObject.Properties['$jsonSchema'].Value
+            @($schema.required) | Should -Be @('[redacted]')
+            @($schema.properties.accountToken.enum) |
+                Should -Be @('[redacted]','[redacted]','[redacted]','[redacted]')
+            $inventory.collections[0].indexes[0].partialFilterExpression.accountToken.PSObject.Properties['$eq'].Value |
+                Should -Be '[redacted]'
+        }
+
+        It 'accepts a strictly shaped time-series collection with statistics and indexes' {
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson {
+                    param($candidate)
+                    $collection = $candidate['collections'][0]
+                    $collection['name'] = 'weather_samples'
+                    $collection['type'] = 'timeseries'
+                    $collection['count'] = $null
+                    $collection['options'] = [ordered]@{
+                        timeseries = [ordered]@{
+                            timeField = 'observedAt'
+                            metaField = 'station'
+                            granularity = 'minutes'
+                            bucketMaxSpanSeconds = 86400
+                            bucketRoundingSeconds = 86400
+                        }
+                        expireAfterSeconds = 604800
+                    }
+                })
+
+            $inventory.collections[0].type | Should -Be 'timeseries'
+            @($inventory.collections[0].options.timeseries.PSObject.Properties.Name) |
+                Should -Be @('timeField','metaField','granularity','bucketMaxSpanSeconds','bucketRoundingSeconds')
+            $inventory.collections[0].count | Should -BeNullOrEmpty
+            $inventory.collections[0].indexes.Count | Should -Be 1
+        }
+
+        It 'rejects an unknown time-series option' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{ timeField = 'observedAt'; secretOption = 'no' }
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*unknown property*'
+        }
+
+        It 'rejects a blank time-series time field' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{ timeField = ' ' }
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*timeField*'
+        }
+
+        It 'rejects an invalid time-series granularity' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{ timeField = 'observedAt'; granularity = 'days' }
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*granularity*'
+        }
+
         It 'preserves nested metadata array cardinality during canonicalization' -TestCases @(
             @{ Name = 'empty'; Values = [object[]]@(); ExpectedCount = 0 }
             @{ Name = 'singleton'; Values = [object[]]@('only'); ExpectedCount = 1 }
@@ -561,7 +672,7 @@ Describe 'native Windows production operations' {
 
             ($actual -is [Array]) | Should -BeTrue
             $actual.Count | Should -Be $ExpectedCount
-            $actual | Should -Be $Values
+            $actual | Should -Be @($Values | ForEach-Object { '[redacted]' })
         }
 
         It 'rejects incomplete MongoDB inventory output' {

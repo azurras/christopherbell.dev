@@ -524,10 +524,16 @@ make prod-mongo-inventory
 
 The command connects only to `mongodb://127.0.0.1:27017/admin`, selects the
 `christopherbell` database inside the audited script, and returns collection
-names/types, allowlisted collection options, counts, storage/index sizes, and
-index definitions. It excludes `system.*` names and never reads document
-bodies. Delete the local JSON after the comparison if it is not being retained
-as a reviewed test-report attachment.
+names/types (including time-series namespaces), strictly allowlisted collection
+options, counts, storage/index sizes, and index definitions. Time-series counts
+are `null` because `collStats` does not expose a measurement count; their size
+and index metadata remain populated. Compound-index key order is preserved.
+Validator and partial-index object/array structure is kept,
+but every nested scalar literal is replaced with `[redacted]` inside `mongosh`
+before JSON is printed and is redacted again at the PowerShell trust boundary.
+It excludes `system.*` names and never reads document bodies. Delete the local
+JSON after the comparison if it is not being retained as a reviewed test-report
+attachment.
 
 Compare the returned names with the checked-in
 `docs/operations/mongodb-collection-catalog.md`. A source-only name may be an
