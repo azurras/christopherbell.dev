@@ -18,17 +18,17 @@ import org.springframework.web.server.ResponseStatusException;
 /** Owns optimistic mutations of the one global Music queue. */
 @Service
 public final class MusicQueueService {
-  private final MusicQueueStateRepository queues;
+  private final MusicRuntimeStateStore runtimeState;
   private final MusicCatalog catalog;
   private final MusicAccessService access;
   private final Clock clock;
 
   public MusicQueueService(
-      MusicQueueStateRepository queues,
+      MusicRuntimeStateStore runtimeState,
       MusicCatalog catalog,
       MusicAccessService access,
       Clock clock) {
-    this.queues = queues;
+    this.runtimeState = runtimeState;
     this.catalog = catalog;
     this.access = access;
     this.clock = clock;
@@ -116,12 +116,12 @@ public final class MusicQueueService {
   }
 
   private MusicQueueState load() {
-    return queues.findById(MusicQueueState.ID).orElseGet(MusicQueueState::empty);
+    return runtimeState.findQueue().orElseGet(MusicQueueState::empty);
   }
 
   private MusicQueueState save(MusicQueueState state) {
     try {
-      return queues.save(state);
+      return runtimeState.saveQueue(state);
     } catch (OptimisticLockingFailureException | DuplicateKeyException conflict) {
       throw conflict();
     }

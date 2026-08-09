@@ -21,19 +21,19 @@ class MusicQueueServiceTest {
 
   @Test
   void writerAddsToTheSingleGlobalQueueAtTheExactVersion() {
-    var queues = mock(MusicQueueStateRepository.class);
+    var runtimeState = mock(MusicRuntimeStateStore.class);
     var catalog = mock(MusicCatalog.class);
     var access = mock(MusicAccessService.class);
     MusicTrack track = track("song.mp3");
     when(access.requireWrite()).thenReturn(Account.builder().id("writer-1").build());
     when(catalog.findReady(track.id())).thenReturn(Optional.of(track));
-    when(queues.findById(MusicQueueState.ID)).thenReturn(Optional.empty());
-    when(queues.save(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+    when(runtimeState.findQueue()).thenReturn(Optional.empty());
+    when(runtimeState.saveQueue(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
       MusicQueueState state = invocation.getArgument(0);
       return new MusicQueueState(state.id(), state.entries(), 0L);
     });
     var service = new MusicQueueService(
-        queues, catalog, access,
+        runtimeState, catalog, access,
         Clock.fixed(Instant.parse("2026-07-28T12:00:00Z"), ZoneOffset.UTC));
 
     MusicQueueView result = service.add(track.id(), 0);
@@ -47,13 +47,13 @@ class MusicQueueServiceTest {
 
   @Test
   void staleWriterCannotOverwriteTheGlobalQueue() {
-    var queues = mock(MusicQueueStateRepository.class);
-    when(queues.findById(MusicQueueState.ID))
+    var runtimeState = mock(MusicRuntimeStateStore.class);
+    when(runtimeState.findQueue())
         .thenReturn(Optional.of(new MusicQueueState(MusicQueueState.ID, java.util.List.of(), 3L)));
     var access = mock(MusicAccessService.class);
     when(access.requireWrite()).thenReturn(Account.builder().id("writer-1").build());
     var service = new MusicQueueService(
-        queues, mock(MusicCatalog.class), access, Clock.systemUTC());
+        runtimeState, mock(MusicCatalog.class), access, Clock.systemUTC());
 
     assertThatThrownBy(() -> service.remove("missing", 3))
         .isInstanceOf(ResponseStatusException.class)
