@@ -39,6 +39,80 @@ Describe 'native Windows production operations' {
                     }
                 }
             }
+
+            function New-ProductionMongoInventoryJson {
+                param([scriptblock]$Mutate)
+
+                $inventory = [ordered]@{
+                    complete = $true
+                    database = 'christopherbell'
+                    generatedAt = '2026-08-09T12:00:00.000Z'
+                    collections = @(
+                        [ordered]@{
+                            name = 'accounts'
+                            type = 'collection'
+                            options = [ordered]@{}
+                            count = 1
+                            sizeBytes = 1
+                            storageSizeBytes = 1
+                            totalIndexSizeBytes = 1
+                            indexes = @(
+                                [ordered]@{
+                                    name = '_id_'
+                                    key = [ordered]@{ _id = 1 }
+                                    unique = $true
+                                    sparse = $false
+                                    expireAfterSeconds = $null
+                                    partialFilterExpression = $null
+                                }
+                            )
+                        }
+                    )
+                }
+                if ($null -ne $Mutate) {
+                    & $Mutate $inventory
+                }
+                return $inventory | ConvertTo-Json -Depth 20 -Compress
+            }
+
+            function Get-ProductionMongoInventoryScriptPolicyViolations {
+                param([string]$Script)
+
+                $violations = [Collections.Generic.List[string]]::new()
+                foreach ($requiredCall in 'getCollectionInfos','collStats','getIndexes') {
+                    if ($Script -notmatch $requiredCall) {
+                        [void]$violations.Add("Missing required metadata call: $requiredCall")
+                    }
+                }
+                if ($Script -match '\.find\s*\(') {
+                    [void]$violations.Add('Document find calls are forbidden.')
+                }
+                if ($Script -match '\.aggregate\s*\(') {
+                    [void]$violations.Add('Document aggregate calls are forbidden.')
+                }
+                if ($Script -match (
+                        '\.(find|findOne|aggregate|watch|countDocuments|estimatedDocumentCount|distinct|' +
+                        'mapReduce|insert|insertOne|insertMany|save|update|updateOne|updateMany|replaceOne|' +
+                        'remove|deleteOne|deleteMany|findOneAndDelete|findOneAndReplace|findOneAndUpdate|' +
+                        'bulkWrite|drop|renameCollection|compact|repairDatabase|createIndex|createIndexes|' +
+                        'dropIndex|dropIndexes|createCollection|dropDatabase)\s*\(')) {
+                    [void]$violations.Add('Document read or mutation calls are forbidden.')
+                }
+                if ($Script -match '\$(out|merge)') {
+                    [void]$violations.Add('Aggregation write stages are forbidden.')
+                }
+                $runCommandReferenceCount = [regex]::Matches(
+                    $Script,
+                    '\brunCommand\b').Count
+                $collStatsCommandCount = [regex]::Matches(
+                    $Script,
+                    'target\.runCommand\s*\(\s*\{\s*collStats\s*:\s*info\.name\s*\}\s*\)').Count
+                if ($runCommandReferenceCount -ne 1 -or $collStatsCommandCount -ne 1) {
+                    [void]$violations.Add(
+                        'Generic MongoDB commands must be the single audited collStats call.')
+                }
+                return $violations.ToArray()
+            }
         }
 
         It 'refuses rollback unless both release junctions exist' {
@@ -392,6 +466,464 @@ Describe 'native Windows production operations' {
         It 'rejects automatic deployment polling slower than one minute' {
             $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev'; autoDeployPollSeconds=61 }
             { Assert-AutoDeployTaskContract -Task (New-ValidStartupTask) -Config $config } | Should -Throw '*60 seconds*'
+        }
+
+        It 'builds a metadata-only MongoDB inventory script' {
+            $script = Get-ProductionMongoCollectionInventoryScript
+
+            @(Get-ProductionMongoInventoryScriptPolicyViolations -Script $script).Count |
+                Should -Be 0
+        }
+
+        It 'rejects a generic MongoDB command that is not the audited collStats call' {
+            $unsafeScript = (Get-ProductionMongoCollectionInventoryScript).Replace(
+                'target.runCommand({ collStats: info.name })',
+                'target.runCommand({ drop: info.name })')
+
+            $unsafeScript | Should -Match 'target\.runCommand\(\{ drop: info\.name \}\)'
+            @(Get-ProductionMongoInventoryScriptPolicyViolations -Script $unsafeScript).Count |
+                Should -BeGreaterThan 0
+        }
+
+        It 'represents views without collection statistics or indexes' {
+            $script = Get-ProductionMongoCollectionInventoryScript
+
+            $script | Should -Match (
+                '(?s)const stats = info.type === ''view''\s*\?\s*\{ ok: 1, count: null, size: null, storageSize: null, totalIndexSize: null \}\s*:\s*target\.runCommand')
+            $script | Should -Match (
+                'const indexes = info.type === ''view''\s*\?\s*\[\]')
+        }
+
+        It 'invokes mongosh against only the fixed loopback production database' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    mongoShellExe = 'C:\tools\mongosh.exe'
+                    repositoryPath = 'C:\repo'
+                }
+            }
+            Mock Invoke-CheckedProcess {
+                '{"complete":true,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[]}'
+            }
+
+            $inventory = Get-ProductionMongoCollectionInventory
+
+            $inventory.complete | Should -BeTrue
+            $inventory.database | Should -Be 'christopherbell'
+            Should -Invoke Invoke-CheckedProcess -Times 1 -Exactly -ParameterFilter {
+                $FilePath -eq 'C:\tools\mongosh.exe' -and
+                $WorkingDirectory -eq 'C:\repo' -and
+                $ArgumentList.Count -eq 5 -and
+                $ArgumentList[0] -eq '--quiet' -and
+                $ArgumentList[1] -eq '--norc' -and
+                $ArgumentList[2] -eq 'mongodb://127.0.0.1:27017/admin' -and
+                $ArgumentList[3] -eq '--eval'
+            }
+        }
+
+        It 'rejects unallowlisted properties at every MongoDB inventory level' -TestCases @(
+            @{ Name = 'root'; Mutate = { param($inventory) $inventory['document'] = @{ secret = 'no' } } }
+            @{ Name = 'collection'; Mutate = { param($inventory) $inventory['collections'][0]['document'] = @{ secret = 'no' } } }
+            @{ Name = 'options'; Mutate = { param($inventory) $inventory['collections'][0]['options']['secret'] = 'no' } }
+            @{ Name = 'index'; Mutate = { param($inventory) $inventory['collections'][0]['indexes'][0]['document'] = @{ secret = 'no' } } }
+        ) {
+            param($Name, $Mutate)
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json (New-ProductionMongoInventoryJson $Mutate) } |
+                Should -Throw '*unknown property*'
+        }
+
+        It 'rejects malformed scalar and array types at every MongoDB inventory level' -TestCases @(
+            @{ Name = 'root'; Mutate = { param($inventory) $inventory['complete'] = 'true' } }
+            @{ Name = 'collections'; Mutate = { param($inventory) $inventory['collections'] = [ordered]@{} } }
+            @{ Name = 'collection'; Mutate = { param($inventory) $inventory['collections'][0]['name'] = 1 } }
+            @{ Name = 'options'; Mutate = { param($inventory) $inventory['collections'][0]['options'] = @() } }
+            @{ Name = 'index'; Mutate = { param($inventory) $inventory['collections'][0]['indexes'][0]['unique'] = 'true' } }
+        ) {
+            param($Name, $Mutate)
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json (New-ProductionMongoInventoryJson $Mutate) } |
+                Should -Throw '*invalid*'
+        }
+
+        It 'rejects invalid view metadata and malformed index ordering' -TestCases @(
+            @{ Name = 'view statistics'; Mutate = {
+                    param($inventory)
+                    $collection = $inventory['collections'][0]
+                    $collection['type'] = 'view'
+                    $collection['indexes'] = @()
+                }
+            }
+            @{ Name = 'duplicate indexes'; Mutate = {
+                    param($inventory)
+                    $inventory['collections'][0]['indexes'] += [ordered]@{
+                        name = '_id_'; key = [ordered]@{ email = 1 }; unique = $false; sparse = $false
+                        expireAfterSeconds = $null; partialFilterExpression = $null
+                    }
+                }
+            }
+            @{ Name = 'unsorted indexes'; Mutate = {
+                    param($inventory)
+                    $inventory['collections'][0]['indexes'] = @(
+                        [ordered]@{ name = 'z'; key = [ordered]@{ z = 1 }; unique = $false; sparse = $false; expireAfterSeconds = $null; partialFilterExpression = $null }
+                        [ordered]@{ name = 'a'; key = [ordered]@{ a = 1 }; unique = $false; sparse = $false; expireAfterSeconds = $null; partialFilterExpression = $null }
+                    )
+                }
+            }
+        ) {
+            param($Name, $Mutate)
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json (New-ProductionMongoInventoryJson $Mutate) } |
+                Should -Throw '*must*'
+        }
+
+        It 'returns a canonical allowlisted MongoDB inventory object' {
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson)
+
+            @($inventory.PSObject.Properties.Name) | Should -Be @('complete','database','generatedAt','collections')
+            @($inventory.collections[0].PSObject.Properties.Name) | Should -Be @(
+                'name','type','options','count','sizeBytes','storageSizeBytes','totalIndexSizeBytes','indexes')
+            @($inventory.collections[0].indexes[0].PSObject.Properties.Name) | Should -Be @(
+                'name','key','unique','sparse','expireAfterSeconds','partialFilterExpression')
+        }
+
+        It 'preserves semantic compound index key order' {
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson {
+                    param($candidate)
+                    $candidate['collections'][0]['indexes'][0]['key'] = [ordered]@{
+                        z = 1
+                        a = -1
+                    }
+                })
+
+            @($inventory.collections[0].indexes[0].key.PSObject.Properties.Name) |
+                Should -Be @('z','a')
+        }
+
+        It 'redacts nested validator and partial-index scalar literals' {
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson {
+                    param($candidate)
+                    $candidate['collections'][0]['options']['validator'] = [ordered]@{
+                        '$jsonSchema' = [ordered]@{
+                            required = @('TOP-SECRET-VALIDATOR')
+                            properties = [ordered]@{
+                                accountToken = [ordered]@{ enum = @('TOP-SECRET-ENUM', 42, $true, $null) }
+                            }
+                        }
+                    }
+                    $candidate['collections'][0]['indexes'][0]['partialFilterExpression'] =
+                        [ordered]@{ accountToken = [ordered]@{ '$eq' = 'TOP-SECRET-PARTIAL' } }
+                })
+
+            $canonicalJson = $inventory | ConvertTo-Json -Depth 20 -Compress
+            $canonicalJson | Should -Not -Match 'TOP-SECRET'
+            $schema = $inventory.collections[0].options.validator.PSObject.Properties['$jsonSchema'].Value
+            @($schema.required) | Should -Be @('[redacted]')
+            @($schema.properties.accountToken.enum) |
+                Should -Be @('[redacted]','[redacted]','[redacted]','[redacted]')
+            $inventory.collections[0].indexes[0].partialFilterExpression.accountToken.PSObject.Properties['$eq'].Value |
+                Should -Be '[redacted]'
+        }
+
+        It 'accepts a strictly shaped time-series collection with statistics and indexes' {
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson {
+                    param($candidate)
+                    $collection = $candidate['collections'][0]
+                    $collection['name'] = 'weather_samples'
+                    $collection['type'] = 'timeseries'
+                    $collection['count'] = $null
+                    $collection['options'] = [ordered]@{
+                        timeseries = [ordered]@{
+                            timeField = 'observedAt'
+                            metaField = 'station'
+                            granularity = 'minutes'
+                            bucketMaxSpanSeconds = 86400
+                            bucketRoundingSeconds = 86400
+                        }
+                        expireAfterSeconds = 604800
+                    }
+                })
+
+            $inventory.collections[0].type | Should -Be 'timeseries'
+            @($inventory.collections[0].options.timeseries.PSObject.Properties.Name) |
+                Should -Be @('timeField','metaField','granularity','bucketMaxSpanSeconds','bucketRoundingSeconds')
+            $inventory.collections[0].count | Should -BeNullOrEmpty
+            $inventory.collections[0].indexes.Count | Should -Be 1
+        }
+
+        It 'rejects a fractional time-series maximum bucket span' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['count'] = $null
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{
+                        timeField = 'observedAt'
+                        bucketMaxSpanSeconds = 1.5
+                    }
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*bucketMaxSpanSeconds*'
+        }
+
+        It 'rejects a fractional time-series bucket rounding interval' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['count'] = $null
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{
+                        timeField = 'observedAt'
+                        bucketRoundingSeconds = 1.5
+                    }
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*bucketRoundingSeconds*'
+        }
+
+        It 'rejects fractional time-series expiration seconds' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['count'] = $null
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{ timeField = 'observedAt' }
+                    expireAfterSeconds = 1.5
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*expireAfterSeconds*'
+        }
+
+        It 'rejects fractional index expiration seconds' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['indexes'][0]['expireAfterSeconds'] = 1.5
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*expireAfterSeconds*'
+        }
+
+        It 'rejects fractional capped collection size metadata' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['options']['size'] = 1.5
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*options.size*'
+        }
+
+        It 'rejects fractional capped collection document limits' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['options']['max'] = 1.5
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*options.max*'
+        }
+
+        It 'rejects integer metadata beyond the JSON safe range' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['indexes'][0]['expireAfterSeconds'] =
+                    [long]9007199254740992
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*expireAfterSeconds*'
+        }
+
+        It 'rejects exponent-form fractional integer metadata before decimal rounding' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['indexes'][0]['expireAfterSeconds'] = 42
+            }
+            $json = $json.Replace(
+                '"expireAfterSeconds":42',
+                '"expireAfterSeconds":9.999999999999999e14')
+
+            $json.Contains('"expireAfterSeconds":9.999999999999999e14') |
+                Should -BeTrue
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*index.expireAfterSeconds*'
+        }
+
+        It 'accepts exponent-form metadata at the maximum safe integer' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['indexes'][0]['expireAfterSeconds'] = 42
+            }
+            $json = $json.Replace(
+                '"expireAfterSeconds":42',
+                '"expireAfterSeconds":9.007199254740991e15')
+
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json $json
+
+            $inventory.collections[0].indexes[0].expireAfterSeconds |
+                Should -Be 9007199254740991
+        }
+
+        It 'rejects exponent-form unsafe integer metadata before decimal rounding' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['indexes'][0]['expireAfterSeconds'] = 42
+            }
+            $json = $json.Replace(
+                '"expireAfterSeconds":42',
+                '"expireAfterSeconds":9.007199254740992e15')
+
+            $json.Contains('"expireAfterSeconds":9.007199254740992e15') |
+                Should -BeTrue
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*index.expireAfterSeconds*'
+        }
+
+        It 'preserves valid collation strength and neighboring fields' {
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson {
+                    param($candidate)
+                    $candidate['collections'][0]['options']['collation'] = [ordered]@{
+                        locale = 'en'
+                        strength = 5
+                        caseLevel = $true
+                        alternate = 'shifted'
+                    }
+                })
+            $collation = $inventory.collections[0].options.collation
+
+            @($collation.PSObject.Properties.Name) |
+                Should -Be @('locale','strength','caseLevel','alternate')
+            $collation.locale | Should -Be 'en'
+            $collation.strength | Should -Be 5
+            $collation.caseLevel | Should -BeTrue
+            $collation.alternate | Should -Be 'shifted'
+        }
+
+        It 'rejects invalid collation strength: <Name>' -TestCases @(
+            @{ Name = 'fractional'; JsonValue = '1.5'; Message = '*options.collation.strength*' }
+            @{ Name = 'negative'; JsonValue = '-1'; Message = '*options.collation.strength*' }
+            @{ Name = 'zero'; JsonValue = '0'; Message = '*options.collation.strength*' }
+            @{ Name = 'above maximum'; JsonValue = '6'; Message = '*options.collation.strength*' }
+            @{ Name = 'string'; JsonValue = '"2"'; Message = '*options.collation.strength*' }
+            @{ Name = 'non-finite exponent'; JsonValue = '1e309'; Message = $null }
+        ) {
+            param($Name, $JsonValue, $Message)
+
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['options']['collation'] = [ordered]@{
+                    locale = 'en'
+                    strength = 1
+                }
+            }
+            $json = $json.Replace('"strength":1', '"strength":' + $JsonValue)
+            $json.Contains('"strength":' + $JsonValue) | Should -BeTrue
+
+            if ($null -eq $Message) {
+                { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                    Should -Throw
+            } else {
+                { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                    Should -Throw $Message
+            }
+        }
+
+        It 'rejects an unknown time-series option' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{ timeField = 'observedAt'; secretOption = 'no' }
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*unknown property*'
+        }
+
+        It 'rejects a blank time-series time field' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{ timeField = ' ' }
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*timeField*'
+        }
+
+        It 'rejects an invalid time-series granularity' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{ timeField = 'observedAt'; granularity = 'days' }
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*granularity*'
+        }
+
+        It 'preserves nested metadata array cardinality during canonicalization' -TestCases @(
+            @{ Name = 'empty'; Values = [object[]]@(); ExpectedCount = 0 }
+            @{ Name = 'singleton'; Values = [object[]]@('only'); ExpectedCount = 1 }
+            @{ Name = 'multiple'; Values = [object[]]@('first','second'); ExpectedCount = 2 }
+        ) {
+            param($Name, $Values, $ExpectedCount)
+
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson {
+                    param($candidate)
+                    $candidate['collections'][0]['options']['validator'] = [ordered]@{
+                        allowedValues = $Values
+                    }
+                })
+            $actual = $inventory.collections[0].options.validator.allowedValues
+
+            ($actual -is [Array]) | Should -BeTrue
+            $actual.Count | Should -Be $ExpectedCount
+            $actual | Should -Be @($Values | ForEach-Object { '[redacted]' })
+        }
+
+        It 'rejects incomplete MongoDB inventory output' {
+            $json = '{"complete":false,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[]}'
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*complete*'
+        }
+
+        It 'rejects malformed, wrong-database, duplicate, and unsorted inventory output' {
+            { ConvertFrom-ProductionMongoCollectionInventory -Json 'not-json' } |
+                Should -Throw '*valid JSON*'
+            $wrongDatabase = '{"complete":true,"database":"admin","generatedAt":"2026-08-09T12:00:00.000Z","collections":[]}'
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $wrongDatabase } |
+                Should -Throw '*christopherbell*'
+            $missingCollections = '{"complete":true,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z"}'
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $missingCollections } |
+                Should -Throw '*collections*'
+            $systemCollection = '{"complete":true,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[{"name":"system.profile","type":"collection","options":{},"count":0,"sizeBytes":0,"storageSizeBytes":0,"totalIndexSizeBytes":0,"indexes":[]}]}'
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $systemCollection } |
+                Should -Throw '*system*'
+            $duplicates = '{"complete":true,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[{"name":"accounts","type":"collection","options":{},"count":1,"sizeBytes":1,"storageSizeBytes":1,"totalIndexSizeBytes":1,"indexes":[]},{"name":"accounts","type":"collection","options":{},"count":1,"sizeBytes":1,"storageSizeBytes":1,"totalIndexSizeBytes":1,"indexes":[]}]}'
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $duplicates } |
+                Should -Throw '*unique*'
+            $unsorted = '{"complete":true,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[{"name":"posts","type":"collection","options":{},"count":1,"sizeBytes":1,"storageSizeBytes":1,"totalIndexSizeBytes":1,"indexes":[]},{"name":"accounts","type":"collection","options":{},"count":1,"sizeBytes":1,"storageSizeBytes":1,"totalIndexSizeBytes":1,"indexes":[]}]}'
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $unsorted } |
+                Should -Throw '*sorted*'
         }
 
         It 'uses attached IPv4 URI and archive arguments for native backups' {

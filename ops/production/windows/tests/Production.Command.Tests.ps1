@@ -99,6 +99,30 @@ Describe 'native Windows production command surface' {
         $log.pattern | Should -BeNullOrEmpty
     }
 
+    It 'writes exactly one JSON document for MongoDB inventory' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $makefile = Get-Content (Join-Path $root 'Makefile') -Raw
+        $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
+        Mock Get-ProductionMongoCollectionInventory {
+            [pscustomobject]@{
+                complete = $true
+                database = 'christopherbell'
+                generatedAt = '2026-08-09T12:00:00.000Z'
+                collections = @()
+            }
+        }
+        $Error.Clear()
+
+        $output = @(Invoke-ProductionCommand -Command 'mongo-inventory')
+
+        $output | Should -HaveCount 1
+        $Error | Should -BeNullOrEmpty
+        $parsed = $output[0] | ConvertFrom-Json -ErrorAction Stop
+        $parsed.complete | Should -BeTrue
+        $parsed.database | Should -Be 'christopherbell'
+        $makefile | Should -Match '\bprod-mongo-inventory\b'
+    }
+
     It 'rejects unknown commands' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         & pwsh.exe -NoLogo -NoProfile -File (Join-Path $root 'ops\production\windows\prod.ps1') unknown-command 2>$null

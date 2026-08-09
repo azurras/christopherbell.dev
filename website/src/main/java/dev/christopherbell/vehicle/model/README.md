@@ -9,7 +9,8 @@ Owns vehicle persistence, VIN decode, and data collection API records.
   `VehicleVinBatchRequest` carry write/decode input.
 - `VehicleDetail`, `VehicleVinDecodeResponse`, and `VehicleDataCollectionState`
   are API response shapes.
-- `VehicleProperties` binds NHTSA and RandomVIN configuration.
+- `VehicleProperties` binds NHTSA and RandomVIN configuration and rejects equal
+  import-state IDs before either provider can use the shared collection.
 - `VehicleVinDecodeCache` stores cached VIN decode responses.
 
 ## Design Notes

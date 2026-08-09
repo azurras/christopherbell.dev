@@ -457,6 +457,7 @@ Common operations:
 .\prod.cmd releases
 .\prod.cmd rollback
 .\prod.cmd backup
+.\prod.cmd mongo-inventory
 .\prod.cmd auto-status
 .\prod.cmd verify-startup
 ```
@@ -484,12 +485,18 @@ Public crawler and availability contracts:
   unversioned paths use a bounded one-hour cache. Relative ES-module imports
   stay within the same versioned namespace.
 
-### MongoDB Backups and Restores
+### MongoDB Backups, Catalog, and Restores
 
 Use the [Windows production runbook](docs/operations/windows-production.md) and
 [MongoDB backup and restore runbook](docs/operations/mongodb-backup-restore.md).
 Migration authoring and interrupted-start recovery are documented in the
 [MongoDB migration runbook](docs/operations/mongodb-migrations.md).
+
+Use the [MongoDB collection catalog][mongodb-collection-catalog] to understand
+physical ownership and `prod.cmd mongo-inventory` for a metadata-only live
+comparison.
+
+[mongodb-collection-catalog]: docs/operations/mongodb-collection-catalog.md
 
 ## Troubleshooting
 

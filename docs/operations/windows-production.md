@@ -290,13 +290,14 @@ immediately.
 .\prod.cmd releases
 .\prod.cmd restart
 .\prod.cmd backup
+.\prod.cmd mongo-inventory
 .\prod.cmd rollback -WhatIf
 .\prod.cmd rollback
 .\prod.cmd verify-startup
 ```
 
 Equivalent Makefile targets include `prod-status`, `prod-deploy`,
-`prod-backup`, and `prod-verify-startup`.
+`prod-backup`, `prod-mongo-inventory`, and `prod-verify-startup`.
 
 ## Shared-Folder Operations
 
@@ -503,6 +504,51 @@ Get-Service MongoDB,ChristopherBellDev,ChristopherBellMediaWorker,cloudflared |
 
 Do not print service command lines because the cloudflared service registration
 contains its tunnel credential.
+
+## MongoDB Collection Inventory
+
+Run the fixed, metadata-only inventory locally on the production host:
+
+```powershell
+.\prod.cmd mongo-inventory |
+  Set-Content -LiteralPath .\mongo-collection-inventory.json -Encoding utf8
+$inventory = Get-Content -LiteralPath .\mongo-collection-inventory.json -Raw |
+  ConvertFrom-Json
+```
+
+With GNU Make, run the identical inventory command:
+
+```powershell
+make prod-mongo-inventory
+```
+
+The command connects only to `mongodb://127.0.0.1:27017/admin`, selects the
+`christopherbell` database inside the audited script, and returns collection
+names/types (including time-series namespaces), strictly allowlisted collection
+options, counts, storage/index sizes, and index definitions. Time-series counts
+are `null` because `collStats` does not expose a measurement count; their size
+and index metadata remain populated. Compound-index key order is preserved.
+Integer-only collection metadata, including capped size/count limits,
+collation strength (1 through 5), time-series bucket intervals, and TTL
+seconds, rejects fractional and JSON-unsafe values at the PowerShell trust
+boundary.
+Validator and partial-index object/array structure is kept,
+but every nested scalar literal is replaced with `[redacted]` inside `mongosh`
+before JSON is printed and is redacted again at the PowerShell trust boundary.
+It excludes `system.*` names and never reads document bodies. Delete the local
+JSON after the comparison if it is not being retained as a reviewed test-report
+attachment.
+
+Compare the returned names with the checked-in
+`docs/operations/mongodb-collection-catalog.md`. A source-only name may be an
+unused feature that has never materialized. A live-only or empty name is an
+unreviewed extra, not permission to drop it. If output is incomplete, malformed,
+or for a different database, stop and discard it.
+
+Collection cleanup requires a separate approved plan with a current compressed
+backup, SHA-256, restore validation, exact-namespace backup, impact report,
+one-at-a-time removal, rollback retention, and Mongo-backed website verification.
+This command cannot rename, merge, drop, compact, repair, or clean collections.
 
 ## Native MongoDB Backup and Restore
 
