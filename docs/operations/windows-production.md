@@ -516,6 +516,12 @@ $inventory = Get-Content -LiteralPath .\mongo-collection-inventory.json -Raw |
   ConvertFrom-Json
 ```
 
+With GNU Make, run the identical inventory command:
+
+```powershell
+make prod-mongo-inventory
+```
+
 The command connects only to `mongodb://127.0.0.1:27017/admin`, selects the
 `christopherbell` database inside the audited script, and returns collection
 names/types, allowlisted collection options, counts, storage/index sizes, and
