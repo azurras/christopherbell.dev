@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -17,9 +19,11 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 class MusicRadioServiceTest {
   private static final Instant NOW = Instant.parse("2026-07-28T12:00:00Z");
@@ -36,11 +40,22 @@ class MusicRadioServiceTest {
         "queue-1", queued.id(), queued.observedToken(), "writer-1", NOW.minusSeconds(5));
     when(queue.loadForRadio()).thenReturn(
         new MusicQueueState(MusicQueueState.ID, List.of(entry), 1L));
+    var consumedQueueEntries = new ArrayList<String>();
+    doAnswer(invocation -> {
+      consumedQueueEntries.add(invocation.getArgument(0));
+      return null;
+    }).when(queue).consumeForRadio(anyString());
     var runtimeState = mock(MusicRuntimeStateStore.class);
     when(runtimeState.findRadio()).thenReturn(Optional.empty());
     when(runtimeState.saveRadio(any())).thenAnswer(invocation -> invocation.getArgument(0));
     var history = mock(MusicRadioHistoryRepository.class);
     when(history.findTop100ByOrderByStationSequenceDesc()).thenReturn(List.of());
+    var savedHistory = new ArrayList<MusicRadioHistoryEvent>();
+    when(history.save(any())).thenAnswer(invocation -> {
+      MusicRadioHistoryEvent event = invocation.getArgument(0);
+      savedHistory.add(event);
+      return event;
+    });
 
     MusicRadioSnapshot result = service(
         catalog, runtimeState, history, queue, mockSelector()).current();
@@ -48,6 +63,11 @@ class MusicRadioServiceTest {
     assertThat(result.source()).isEqualTo(MusicRadioState.Source.QUEUE);
     assertThat(result.trackId()).isEqualTo(queued.id());
     assertThat(result.positionSeconds()).isZero();
+    assertThat(consumedQueueEntries).containsExactly("queue-1");
+    assertThat(savedHistory).singleElement().satisfies(event -> {
+      assertThat(event.id()).isEqualTo("station:1");
+      assertThat(event.outcome()).isEqualTo(MusicRadioHistoryEvent.Outcome.PLAYED);
+    });
   }
 
   @Test
@@ -65,10 +85,24 @@ class MusicRadioServiceTest {
         10, MusicRadioState.Source.RADIO, null, 1L);
     var runtimeState = mock(MusicRuntimeStateStore.class);
     when(runtimeState.findRadio()).thenReturn(Optional.of(initial));
-    when(runtimeState.saveRadio(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    var savedStates = new ArrayList<MusicRadioState>();
+    when(runtimeState.saveRadio(any())).thenAnswer(invocation -> {
+      MusicRadioState state = invocation.getArgument(0);
+      savedStates.add(state);
+      return new MusicRadioState(
+          state.id(), state.stationSequence(), state.trackId(), state.observedToken(),
+          state.startedAt(), state.durationSeconds(), state.source(), state.queueEntryId(),
+          Math.incrementExact(state.version()));
+    });
     var history = mock(MusicRadioHistoryRepository.class);
     when(history.findTop100ByOrderByStationSequenceDesc()).thenReturn(List.of());
     when(history.existsById("station:1")).thenReturn(true);
+    var savedHistory = new ArrayList<MusicRadioHistoryEvent>();
+    when(history.save(any())).thenAnswer(invocation -> {
+      MusicRadioHistoryEvent event = invocation.getArgument(0);
+      savedHistory.add(event);
+      return event;
+    });
     var queue = mock(MusicQueueService.class);
     when(queue.loadForRadio()).thenReturn(MusicQueueState.empty());
     var selector = mockSelector();
@@ -80,6 +114,51 @@ class MusicRadioServiceTest {
     assertThat(result.trackId()).isEqualTo(c.id());
     assertThat(result.startedAt()).isEqualTo(NOW.minusSeconds(5));
     assertThat(result.positionSeconds()).isEqualTo(5);
+    assertThat(savedStates).extracting(MusicRadioState::version).containsExactly(1L, 2L);
+    assertThat(savedHistory).extracting(MusicRadioHistoryEvent::id)
+        .containsExactly("station:2", "station:3");
+    assertThat(savedHistory).extracting(MusicRadioHistoryEvent::outcome)
+        .containsOnly(MusicRadioHistoryEvent.Outcome.PLAYED);
+  }
+
+  @Test
+  void radioContentionReloadsTheWinningStateWithoutLosingSideEffects() {
+    MusicTrack winner = track("winner.mp3", "Winner");
+    var catalog = mock(MusicCatalog.class);
+    when(catalog.radioCandidates(10_000)).thenReturn(List.of(winner));
+    when(catalog.findReady(winner.id())).thenReturn(Optional.of(winner));
+    MusicRadioState winningState = new MusicRadioState(
+        MusicRadioState.ID, 4, winner.id(), winner.observedToken(), NOW,
+        winner.durationSeconds(), MusicRadioState.Source.RADIO, null, 4L);
+    var runtimeState = mock(MusicRuntimeStateStore.class);
+    when(runtimeState.findRadio())
+        .thenReturn(Optional.empty())
+        .thenReturn(Optional.of(winningState));
+    when(runtimeState.saveRadio(any())).thenThrow(new OptimisticLockingFailureException("stale"));
+    var history = mock(MusicRadioHistoryRepository.class);
+    when(history.findTop100ByOrderByStationSequenceDesc()).thenReturn(List.of());
+    var savedHistory = new ArrayList<MusicRadioHistoryEvent>();
+    when(history.save(any())).thenAnswer(invocation -> {
+      MusicRadioHistoryEvent event = invocation.getArgument(0);
+      savedHistory.add(event);
+      return event;
+    });
+    var queue = mock(MusicQueueService.class);
+    when(queue.loadForRadio()).thenReturn(MusicQueueState.empty());
+    var consumedQueueEntries = new ArrayList<String>();
+    doAnswer(invocation -> {
+      consumedQueueEntries.add(invocation.getArgument(0));
+      return null;
+    }).when(queue).consumeForRadio(anyString());
+    var selector = mockSelector();
+    when(selector.select(anyList(), anyList(), nullable(String.class))).thenReturn(winner);
+
+    MusicRadioSnapshot result = service(catalog, runtimeState, history, queue, selector).current();
+
+    assertThat(result.stationSequence()).isEqualTo(winningState.stationSequence());
+    assertThat(result.trackId()).isEqualTo(winner.id());
+    assertThat(savedHistory).isEmpty();
+    assertThat(consumedQueueEntries).isEmpty();
   }
 
   private MusicRadioService service(
