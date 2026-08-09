@@ -14,29 +14,40 @@ foreach ($module in 'Production.Deploy','Production.SharedFolder','Production.In
     Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
 }
 
-$handlers = @{
-    help = { Show-ProductionHelp }
-    install = { Install-ProductionRuntime -WhatIf:$WhatIf -CloudflareTokenPath $CloudflareTokenPath }
-    deploy = { Invoke-ProductionDeploy -WhatIf:$WhatIf }
-    status = { Get-ProductionStatus }
-    logs = { Watch-ProductionLogs }
-    restart = { Restart-ProductionService -Verify }
-    releases = { Get-ProductionReleases }
-    rollback = { Invoke-ProductionRollback -WhatIf:$WhatIf }
-    backup = { New-ProductionBackup }
-    'mongo-inventory' = {
-        Get-ProductionMongoCollectionInventory | ConvertTo-Json -Depth 100
+function Invoke-ProductionCommand {
+    param(
+        [Parameter(Mandatory)][string]$Command,
+        [switch]$WhatIf,
+        [string]$CloudflareTokenPath
+    )
+
+    $handlers = @{
+        help = { Show-ProductionHelp }
+        install = { Install-ProductionRuntime -WhatIf:$WhatIf -CloudflareTokenPath $CloudflareTokenPath }
+        deploy = { Invoke-ProductionDeploy -WhatIf:$WhatIf }
+        status = { Get-ProductionStatus }
+        logs = { Watch-ProductionLogs }
+        restart = { Restart-ProductionService -Verify }
+        releases = { Get-ProductionReleases }
+        rollback = { Invoke-ProductionRollback -WhatIf:$WhatIf }
+        backup = { New-ProductionBackup }
+        'mongo-inventory' = {
+            Get-ProductionMongoCollectionInventory | ConvertTo-Json -Depth 100
+        }
+        'verify-startup' = { Test-ProductionStartup }
+        uninstall = { Uninstall-ProductionRuntime -WhatIf:$WhatIf }
+        'auto-install' = { Install-AutoDeployTask -WhatIf:$WhatIf }
+        'auto-deploy' = { Start-AutoDeployLoop }
+        'auto-status' = { Get-AutoDeployStatus }
+        'auto-remove' = { Remove-AutoDeployTask -WhatIf:$WhatIf }
+        'sensor-install' = { Install-PawnIoProvider -WhatIf:$WhatIf }
+        'sensor-status' = { Get-ProductionSensorStatus }
+        'sensor-enable' = { Set-ProductionSensorState -Enabled $true -WhatIf:$WhatIf }
+        'sensor-disable' = { Set-ProductionSensorState -Enabled $false -WhatIf:$WhatIf }
     }
-    'verify-startup' = { Test-ProductionStartup }
-    uninstall = { Uninstall-ProductionRuntime -WhatIf:$WhatIf }
-    'auto-install' = { Install-AutoDeployTask -WhatIf:$WhatIf }
-    'auto-deploy' = { Start-AutoDeployLoop }
-    'auto-status' = { Get-AutoDeployStatus }
-    'auto-remove' = { Remove-AutoDeployTask -WhatIf:$WhatIf }
-    'sensor-install' = { Install-PawnIoProvider -WhatIf:$WhatIf }
-    'sensor-status' = { Get-ProductionSensorStatus }
-    'sensor-enable' = { Set-ProductionSensorState -Enabled $true -WhatIf:$WhatIf }
-    'sensor-disable' = { Set-ProductionSensorState -Enabled $false -WhatIf:$WhatIf }
+
+    & $handlers[$Command]
 }
 
-& $handlers[$Command]
+Invoke-ProductionCommand -Command $Command -WhatIf:$WhatIf `
+    -CloudflareTokenPath $CloudflareTokenPath

@@ -220,6 +220,88 @@ print(JSON.stringify({
 '@
 }
 
+function Test-ProductionMongoCollectionInventoryNumber {
+    param([object]$Value)
+
+    return $Value -is [byte] -or $Value -is [sbyte] -or
+        $Value -is [int16] -or $Value -is [uint16] -or
+        $Value -is [int32] -or $Value -is [uint32] -or
+        $Value -is [int64] -or $Value -is [uint64] -or
+        $Value -is [single] -or $Value -is [double] -or
+        $Value -is [decimal]
+}
+
+function Assert-ProductionMongoCollectionInventoryObject {
+    param([object]$Value, [string]$Path)
+
+    if ($null -eq $Value -or $Value -isnot [pscustomobject]) {
+        throw "MongoDB collection inventory $Path is invalid."
+    }
+}
+
+function Assert-ProductionMongoCollectionInventoryPropertySet {
+    param(
+        [object]$Value,
+        [string]$Path,
+        [string[]]$Allowed,
+        [string[]]$Required
+    )
+
+    Assert-ProductionMongoCollectionInventoryObject -Value $Value -Path $Path
+    $names = @($Value.PSObject.Properties | ForEach-Object Name)
+    foreach ($name in $names) {
+        if ($Allowed -notcontains $name) {
+            throw "MongoDB collection inventory $Path contains an unknown property: $name"
+        }
+    }
+    foreach ($name in $Required) {
+        if ($names -notcontains $name) {
+            throw "MongoDB collection inventory $Path is missing property: $name"
+        }
+    }
+}
+
+function Copy-ProductionMongoCollectionInventoryMetadataValue {
+    param([object]$Value, [string]$Path)
+
+    if ($null -eq $Value -or $Value -is [bool] -or $Value -is [string] -or
+        (Test-ProductionMongoCollectionInventoryNumber $Value)) {
+        return $Value
+    }
+    if ($Value -is [Array]) {
+        $result = [Collections.Generic.List[object]]::new()
+        for ($index = 0; $index -lt $Value.Count; $index++) {
+            [void]$result.Add((Copy-ProductionMongoCollectionInventoryMetadataValue `
+                -Value $Value[$index] -Path "$Path[$index]"))
+        }
+        return $result.ToArray()
+    }
+    Assert-ProductionMongoCollectionInventoryObject -Value $Value -Path $Path
+    $result = [ordered]@{}
+    foreach ($property in @($Value.PSObject.Properties | Sort-Object Name)) {
+        $result[$property.Name] = Copy-ProductionMongoCollectionInventoryMetadataValue `
+            -Value $property.Value -Path "$Path.$($property.Name)"
+    }
+    return [pscustomobject]$result
+}
+
+function Convert-ProductionMongoCollectionInventoryNumber {
+    param([object]$Value, [string]$Path, [bool]$AllowNull)
+
+    if ($null -eq $Value) {
+        if ($AllowNull) {
+            return $null
+        }
+        throw "MongoDB collection inventory $Path is invalid."
+    }
+    if (-not (Test-ProductionMongoCollectionInventoryNumber $Value) -or
+        [double]$Value -lt 0 -or [double]::IsInfinity([double]$Value) -or
+        [double]::IsNaN([double]$Value)) {
+        throw "MongoDB collection inventory $Path is invalid."
+    }
+    return $Value
+}
+
 function ConvertFrom-ProductionMongoCollectionInventory {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Json)
@@ -231,55 +313,159 @@ function ConvertFrom-ProductionMongoCollectionInventory {
             'MongoDB collection inventory did not return valid JSON.',
             $_.Exception)
     }
-    if ($inventory.PSObject.Properties.Name -notcontains 'complete' -or
-        $inventory.complete -ne $true) {
+    Assert-ProductionMongoCollectionInventoryPropertySet -Value $inventory -Path 'root' `
+        -Allowed @('complete','database','generatedAt','collections') `
+        -Required @('complete','database','generatedAt','collections')
+    if ($inventory.complete -isnot [bool]) {
+        throw 'MongoDB collection inventory complete is invalid.'
+    }
+    if ($inventory.complete -ne $true) {
         throw 'MongoDB collection inventory is not complete.'
     }
-    if ([string]$inventory.database -ne 'christopherbell') {
+    if ($inventory.database -isnot [string] -or
+        $inventory.database -ne 'christopherbell') {
         throw 'MongoDB collection inventory must target christopherbell.'
     }
     $generatedAt = [DateTimeOffset]::MinValue
-    if (-not [DateTimeOffset]::TryParse(
-        [string]$inventory.generatedAt,
-        [Globalization.CultureInfo]::InvariantCulture,
-        [Globalization.DateTimeStyles]::AssumeUniversal,
-        [ref]$generatedAt)) {
+    if ($inventory.generatedAt -is [DateTimeOffset]) {
+        $generatedAt = [DateTimeOffset]$inventory.generatedAt
+    } elseif ($inventory.generatedAt -is [DateTime]) {
+        $generatedAt = [DateTimeOffset]$inventory.generatedAt
+    } elseif ($inventory.generatedAt -is [string] -and
+        [DateTimeOffset]::TryParse(
+            $inventory.generatedAt,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal,
+            [ref]$generatedAt)) {
+    } else {
         throw 'MongoDB collection inventory generatedAt is invalid.'
     }
-    if ($inventory.PSObject.Properties.Name -notcontains 'collections') {
-        throw 'MongoDB collection inventory collections are missing.'
+    if ($inventory.collections -isnot [Array]) {
+        throw 'MongoDB collection inventory collections are invalid.'
     }
     $names = [Collections.Generic.List[string]]::new()
     $uniqueNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    foreach ($collection in @($inventory.collections)) {
-        if ([string]::IsNullOrWhiteSpace([string]$collection.name) -or
-            [string]$collection.type -notin @('collection','view')) {
+    $canonicalCollections = [Collections.Generic.List[object]]::new()
+    foreach ($collection in $inventory.collections) {
+        Assert-ProductionMongoCollectionInventoryPropertySet -Value $collection -Path 'collection' `
+            -Allowed @('name','type','options','count','sizeBytes','storageSizeBytes',
+                'totalIndexSizeBytes','indexes') `
+            -Required @('name','type','options','count','sizeBytes','storageSizeBytes',
+                'totalIndexSizeBytes','indexes')
+        if ($collection.name -isnot [string] -or
+            [string]::IsNullOrWhiteSpace($collection.name) -or
+            $collection.type -isnot [string] -or
+            $collection.type -notin @('collection','view')) {
             throw 'MongoDB collection inventory contains an invalid collection.'
         }
-        if ([string]$collection.name -like 'system.*') {
+        if ($collection.name -like 'system.*') {
             throw 'MongoDB collection inventory must exclude system collections.'
         }
-        foreach ($property in 'options','count','sizeBytes','storageSizeBytes',
-            'totalIndexSizeBytes','indexes') {
-            if ($collection.PSObject.Properties.Name -notcontains $property) {
-                throw "MongoDB collection inventory is missing collection property: $property"
+        Assert-ProductionMongoCollectionInventoryPropertySet -Value $collection.options -Path 'options' `
+            -Allowed @('capped','size','max','validator','validationLevel','validationAction','collation') `
+            -Required @()
+        $canonicalOptions = [ordered]@{}
+        foreach ($option in 'capped','size','max','validator','validationLevel','validationAction','collation') {
+            if (@($collection.options.PSObject.Properties | ForEach-Object Name) -contains $option) {
+                $value = $collection.options.PSObject.Properties[$option].Value
+                switch ($option) {
+                    'capped' {
+                        if ($value -isnot [bool]) { throw 'MongoDB collection inventory options are invalid.' }
+                    }
+                    'size' { $value = Convert-ProductionMongoCollectionInventoryNumber $value 'options.size' $false }
+                    'max' { $value = Convert-ProductionMongoCollectionInventoryNumber $value 'options.max' $false }
+                    'validator' {
+                        Assert-ProductionMongoCollectionInventoryObject -Value $value -Path 'options.validator'
+                        $value = Copy-ProductionMongoCollectionInventoryMetadataValue $value 'options.validator'
+                    }
+                    'validationLevel' {
+                        if ($value -isnot [string]) { throw 'MongoDB collection inventory options are invalid.' }
+                    }
+                    'validationAction' {
+                        if ($value -isnot [string]) { throw 'MongoDB collection inventory options are invalid.' }
+                    }
+                    'collation' {
+                        Assert-ProductionMongoCollectionInventoryObject -Value $value -Path 'options.collation'
+                        $value = Copy-ProductionMongoCollectionInventoryMetadataValue $value 'options.collation'
+                    }
+                }
+                $canonicalOptions[$option] = $value
             }
         }
-        $name = [string]$collection.name
+        $allowNullStatistics = $collection.type -eq 'view'
+        $count = Convert-ProductionMongoCollectionInventoryNumber $collection.count 'collection.count' $allowNullStatistics
+        $sizeBytes = Convert-ProductionMongoCollectionInventoryNumber $collection.sizeBytes 'collection.sizeBytes' $allowNullStatistics
+        $storageSizeBytes = Convert-ProductionMongoCollectionInventoryNumber $collection.storageSizeBytes 'collection.storageSizeBytes' $allowNullStatistics
+        $totalIndexSizeBytes = Convert-ProductionMongoCollectionInventoryNumber $collection.totalIndexSizeBytes 'collection.totalIndexSizeBytes' $allowNullStatistics
+        if ($collection.type -eq 'view' -and
+            ($null -ne $count -or $null -ne $sizeBytes -or $null -ne $storageSizeBytes -or
+                $null -ne $totalIndexSizeBytes)) {
+            throw 'MongoDB collection inventory views must have null statistics and no indexes.'
+        }
+        if ($collection.indexes -isnot [Array]) {
+            throw 'MongoDB collection inventory indexes are invalid.'
+        }
+        if ($collection.type -eq 'view' -and $collection.indexes.Count -ne 0) {
+            throw 'MongoDB collection inventory views must have null statistics and no indexes.'
+        }
+        $name = $collection.name
         if (-not $uniqueNames.Add($name)) {
             throw 'MongoDB collection inventory names must be unique.'
         }
         [void]$names.Add($name)
-        foreach ($index in @($collection.indexes)) {
-            $indexProperties = @(
-                'name','key','unique','sparse','expireAfterSeconds','partialFilterExpression')
-            if (@($indexProperties | Where-Object {
-                    $index.PSObject.Properties.Name -notcontains $_
-                }).Count -gt 0 -or
-                [string]::IsNullOrWhiteSpace([string]$index.name) -or $null -eq $index.key) {
+        $indexNames = [Collections.Generic.List[string]]::new()
+        $uniqueIndexNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        $canonicalIndexes = [Collections.Generic.List[object]]::new()
+        foreach ($index in $collection.indexes) {
+            Assert-ProductionMongoCollectionInventoryPropertySet -Value $index -Path 'index' `
+                -Allowed @('name','key','unique','sparse','expireAfterSeconds','partialFilterExpression') `
+                -Required @('name','key','unique','sparse','expireAfterSeconds','partialFilterExpression')
+            if ($index.name -isnot [string] -or [string]::IsNullOrWhiteSpace($index.name) -or
+                $index.unique -isnot [bool] -or $index.sparse -isnot [bool]) {
                 throw 'MongoDB collection inventory contains an invalid index.'
             }
+            Assert-ProductionMongoCollectionInventoryObject -Value $index.key -Path 'index.key'
+            if (@($index.key.PSObject.Properties).Count -eq 0) {
+                throw 'MongoDB collection inventory contains an invalid index.'
+            }
+            $expireAfterSeconds = Convert-ProductionMongoCollectionInventoryNumber `
+                $index.expireAfterSeconds 'index.expireAfterSeconds' $true
+            $partialFilterExpression = $null
+            if ($null -ne $index.partialFilterExpression) {
+                Assert-ProductionMongoCollectionInventoryObject -Value $index.partialFilterExpression `
+                    -Path 'index.partialFilterExpression'
+                $partialFilterExpression = Copy-ProductionMongoCollectionInventoryMetadataValue `
+                    $index.partialFilterExpression 'index.partialFilterExpression'
+            }
+            if (-not $uniqueIndexNames.Add($index.name)) {
+                throw 'MongoDB collection inventory index names must be unique.'
+            }
+            [void]$indexNames.Add($index.name)
+            [void]$canonicalIndexes.Add([pscustomobject][ordered]@{
+                name = $index.name
+                key = Copy-ProductionMongoCollectionInventoryMetadataValue $index.key 'index.key'
+                unique = $index.unique
+                sparse = $index.sparse
+                expireAfterSeconds = $expireAfterSeconds
+                partialFilterExpression = $partialFilterExpression
+            })
         }
+        [string[]]$sortedIndexNames = $indexNames.ToArray()
+        [Array]::Sort($sortedIndexNames, [StringComparer]::Ordinal)
+        if ([string]::Join([char]0, $indexNames.ToArray()) -cne
+            [string]::Join([char]0, $sortedIndexNames)) {
+            throw 'MongoDB collection inventory index names must be sorted.'
+        }
+        [void]$canonicalCollections.Add([pscustomobject][ordered]@{
+            name = $name
+            type = $collection.type
+            options = [pscustomobject]$canonicalOptions
+            count = $count
+            sizeBytes = $sizeBytes
+            storageSizeBytes = $storageSizeBytes
+            totalIndexSizeBytes = $totalIndexSizeBytes
+            indexes = $canonicalIndexes.ToArray()
+        })
     }
     [string[]]$sortedNames = $names.ToArray()
     [Array]::Sort($sortedNames, [StringComparer]::Ordinal)
@@ -287,7 +473,12 @@ function ConvertFrom-ProductionMongoCollectionInventory {
         [string]::Join([char]0, $sortedNames)) {
         throw 'MongoDB collection inventory names must be sorted.'
     }
-    return $inventory
+    return [pscustomobject][ordered]@{
+        complete = $true
+        database = 'christopherbell'
+        generatedAt = $generatedAt.UtcDateTime.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+        collections = $canonicalCollections.ToArray()
+    }
 }
 
 function Get-ProductionMongoCollectionInventory {
@@ -296,6 +487,7 @@ function Get-ProductionMongoCollectionInventory {
         -FilePath $config.mongoShellExe `
         -ArgumentList @(
             '--quiet'
+            '--norc'
             'mongodb://127.0.0.1:27017/admin'
             '--eval'
             (Get-ProductionMongoCollectionInventoryScript)

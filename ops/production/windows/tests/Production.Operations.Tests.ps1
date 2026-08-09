@@ -39,6 +39,41 @@ Describe 'native Windows production operations' {
                     }
                 }
             }
+
+            function New-ProductionMongoInventoryJson {
+                param([scriptblock]$Mutate)
+
+                $inventory = [ordered]@{
+                    complete = $true
+                    database = 'christopherbell'
+                    generatedAt = '2026-08-09T12:00:00.000Z'
+                    collections = @(
+                        [ordered]@{
+                            name = 'accounts'
+                            type = 'collection'
+                            options = [ordered]@{}
+                            count = 1
+                            sizeBytes = 1
+                            storageSizeBytes = 1
+                            totalIndexSizeBytes = 1
+                            indexes = @(
+                                [ordered]@{
+                                    name = '_id_'
+                                    key = [ordered]@{ _id = 1 }
+                                    unique = $true
+                                    sparse = $false
+                                    expireAfterSeconds = $null
+                                    partialFilterExpression = $null
+                                }
+                            )
+                        }
+                    )
+                }
+                if ($null -ne $Mutate) {
+                    & $Mutate $inventory
+                }
+                return $inventory | ConvertTo-Json -Depth 20 -Compress
+            }
         }
 
         It 'refuses rollback unless both release junctions exist' {
@@ -433,11 +468,79 @@ Describe 'native Windows production operations' {
             Should -Invoke Invoke-CheckedProcess -Times 1 -Exactly -ParameterFilter {
                 $FilePath -eq 'C:\tools\mongosh.exe' -and
                 $WorkingDirectory -eq 'C:\repo' -and
-                $ArgumentList.Count -eq 4 -and
+                $ArgumentList.Count -eq 5 -and
                 $ArgumentList[0] -eq '--quiet' -and
-                $ArgumentList[1] -eq 'mongodb://127.0.0.1:27017/admin' -and
-                $ArgumentList[2] -eq '--eval'
+                $ArgumentList[1] -eq '--norc' -and
+                $ArgumentList[2] -eq 'mongodb://127.0.0.1:27017/admin' -and
+                $ArgumentList[3] -eq '--eval'
             }
+        }
+
+        It 'rejects unallowlisted properties at every MongoDB inventory level' -TestCases @(
+            @{ Name = 'root'; Mutate = { param($inventory) $inventory['document'] = @{ secret = 'no' } } }
+            @{ Name = 'collection'; Mutate = { param($inventory) $inventory['collections'][0]['document'] = @{ secret = 'no' } } }
+            @{ Name = 'options'; Mutate = { param($inventory) $inventory['collections'][0]['options']['secret'] = 'no' } }
+            @{ Name = 'index'; Mutate = { param($inventory) $inventory['collections'][0]['indexes'][0]['document'] = @{ secret = 'no' } } }
+        ) {
+            param($Name, $Mutate)
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json (New-ProductionMongoInventoryJson $Mutate) } |
+                Should -Throw '*unknown property*'
+        }
+
+        It 'rejects malformed scalar and array types at every MongoDB inventory level' -TestCases @(
+            @{ Name = 'root'; Mutate = { param($inventory) $inventory['complete'] = 'true' } }
+            @{ Name = 'collections'; Mutate = { param($inventory) $inventory['collections'] = [ordered]@{} } }
+            @{ Name = 'collection'; Mutate = { param($inventory) $inventory['collections'][0]['name'] = 1 } }
+            @{ Name = 'options'; Mutate = { param($inventory) $inventory['collections'][0]['options'] = @() } }
+            @{ Name = 'index'; Mutate = { param($inventory) $inventory['collections'][0]['indexes'][0]['unique'] = 'true' } }
+        ) {
+            param($Name, $Mutate)
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json (New-ProductionMongoInventoryJson $Mutate) } |
+                Should -Throw '*invalid*'
+        }
+
+        It 'rejects invalid view metadata and malformed index ordering' -TestCases @(
+            @{ Name = 'view statistics'; Mutate = {
+                    param($inventory)
+                    $collection = $inventory['collections'][0]
+                    $collection['type'] = 'view'
+                    $collection['indexes'] = @()
+                }
+            }
+            @{ Name = 'duplicate indexes'; Mutate = {
+                    param($inventory)
+                    $inventory['collections'][0]['indexes'] += [ordered]@{
+                        name = '_id_'; key = [ordered]@{ email = 1 }; unique = $false; sparse = $false
+                        expireAfterSeconds = $null; partialFilterExpression = $null
+                    }
+                }
+            }
+            @{ Name = 'unsorted indexes'; Mutate = {
+                    param($inventory)
+                    $inventory['collections'][0]['indexes'] = @(
+                        [ordered]@{ name = 'z'; key = [ordered]@{ z = 1 }; unique = $false; sparse = $false; expireAfterSeconds = $null; partialFilterExpression = $null }
+                        [ordered]@{ name = 'a'; key = [ordered]@{ a = 1 }; unique = $false; sparse = $false; expireAfterSeconds = $null; partialFilterExpression = $null }
+                    )
+                }
+            }
+        ) {
+            param($Name, $Mutate)
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json (New-ProductionMongoInventoryJson $Mutate) } |
+                Should -Throw '*must*'
+        }
+
+        It 'returns a canonical allowlisted MongoDB inventory object' {
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson)
+
+            @($inventory.PSObject.Properties.Name) | Should -Be @('complete','database','generatedAt','collections')
+            @($inventory.collections[0].PSObject.Properties.Name) | Should -Be @(
+                'name','type','options','count','sizeBytes','storageSizeBytes','totalIndexSizeBytes','indexes')
+            @($inventory.collections[0].indexes[0].PSObject.Properties.Name) | Should -Be @(
+                'name','key','unique','sparse','expireAfterSeconds','partialFilterExpression')
         }
 
         It 'rejects incomplete MongoDB inventory output' {
