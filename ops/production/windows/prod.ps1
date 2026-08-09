@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('help','install','deploy','status','logs','restart','releases','rollback','backup','verify-startup','uninstall','auto-install','auto-deploy','auto-status','auto-remove','sensor-install','sensor-status','sensor-enable','sensor-disable')]
+    [ValidateSet('help','install','deploy','status','logs','restart','releases','rollback','backup','mongo-inventory','verify-startup','uninstall','auto-install','auto-deploy','auto-status','auto-remove','sensor-install','sensor-status','sensor-enable','sensor-disable')]
     [string]$Command = 'help',
     [switch]$WhatIf,
     [string]$CloudflareTokenPath
@@ -24,6 +24,9 @@ $handlers = @{
     releases = { Get-ProductionReleases }
     rollback = { Invoke-ProductionRollback -WhatIf:$WhatIf }
     backup = { New-ProductionBackup }
+    'mongo-inventory' = {
+        Get-ProductionMongoCollectionInventory | ConvertTo-Json -Depth 100
+    }
     'verify-startup' = { Test-ProductionStartup }
     uninstall = { Uninstall-ProductionRuntime -WhatIf:$WhatIf }
     'auto-install' = { Install-AutoDeployTask -WhatIf:$WhatIf }

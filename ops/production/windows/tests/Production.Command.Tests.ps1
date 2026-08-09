@@ -99,6 +99,19 @@ Describe 'native Windows production command surface' {
         $log.pattern | Should -BeNullOrEmpty
     }
 
+    It 'exposes MongoDB inventory as one JSON-producing command' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $script = Get-Content (Join-Path $root 'ops\production\windows\prod.ps1') -Raw
+        $makefile = Get-Content (Join-Path $root 'Makefile') -Raw
+        $help = & pwsh.exe -NoLogo -NoProfile -File (
+            Join-Path $root 'ops\production\windows\prod.ps1') help
+
+        ($help -join "`n") | Should -Match '\bmongo-inventory\b'
+        $script | Should -Match "'mongo-inventory'\s*=\s*\{"
+        $script | Should -Match 'Get-ProductionMongoCollectionInventory\s*\|\s*ConvertTo-Json -Depth 100'
+        $makefile | Should -Match '\bprod-mongo-inventory\b'
+    }
+
     It 'rejects unknown commands' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         & pwsh.exe -NoLogo -NoProfile -File (Join-Path $root 'ops\production\windows\prod.ps1') unknown-command 2>$null

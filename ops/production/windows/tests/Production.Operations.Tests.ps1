@@ -394,6 +394,79 @@ Describe 'native Windows production operations' {
             { Assert-AutoDeployTaskContract -Task (New-ValidStartupTask) -Config $config } | Should -Throw '*60 seconds*'
         }
 
+        It 'builds a metadata-only MongoDB inventory script' {
+            $script = Get-ProductionMongoCollectionInventoryScript
+
+            $script | Should -Match 'getCollectionInfos'
+            $script | Should -Match 'collStats'
+            $script | Should -Match 'getIndexes'
+            $script | Should -Not -Match '\.find\s*\('
+            $script | Should -Not -Match '\.aggregate\s*\('
+            $script | Should -Not -Match '\.(drop|renameCollection|compact|repairDatabase)\s*\('
+            $script | Should -Not -Match '\$(out|merge)'
+        }
+
+        It 'represents views without collection statistics or indexes' {
+            $script = Get-ProductionMongoCollectionInventoryScript
+
+            $script | Should -Match (
+                '(?s)const stats = info.type === ''view''\s*\?\s*\{ ok: 1, count: null, size: null, storageSize: null, totalIndexSize: null \}\s*:\s*target\.runCommand')
+            $script | Should -Match (
+                'const indexes = info.type === ''view''\s*\?\s*\[\]')
+        }
+
+        It 'invokes mongosh against only the fixed loopback production database' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    mongoShellExe = 'C:\tools\mongosh.exe'
+                    repositoryPath = 'C:\repo'
+                }
+            }
+            Mock Invoke-CheckedProcess {
+                '{"complete":true,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[]}'
+            }
+
+            $inventory = Get-ProductionMongoCollectionInventory
+
+            $inventory.complete | Should -BeTrue
+            $inventory.database | Should -Be 'christopherbell'
+            Should -Invoke Invoke-CheckedProcess -Times 1 -Exactly -ParameterFilter {
+                $FilePath -eq 'C:\tools\mongosh.exe' -and
+                $WorkingDirectory -eq 'C:\repo' -and
+                $ArgumentList.Count -eq 4 -and
+                $ArgumentList[0] -eq '--quiet' -and
+                $ArgumentList[1] -eq 'mongodb://127.0.0.1:27017/admin' -and
+                $ArgumentList[2] -eq '--eval'
+            }
+        }
+
+        It 'rejects incomplete MongoDB inventory output' {
+            $json = '{"complete":false,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[]}'
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*complete*'
+        }
+
+        It 'rejects malformed, wrong-database, duplicate, and unsorted inventory output' {
+            { ConvertFrom-ProductionMongoCollectionInventory -Json 'not-json' } |
+                Should -Throw '*valid JSON*'
+            $wrongDatabase = '{"complete":true,"database":"admin","generatedAt":"2026-08-09T12:00:00.000Z","collections":[]}'
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $wrongDatabase } |
+                Should -Throw '*christopherbell*'
+            $missingCollections = '{"complete":true,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z"}'
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $missingCollections } |
+                Should -Throw '*collections*'
+            $systemCollection = '{"complete":true,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[{"name":"system.profile","type":"collection","options":{},"count":0,"sizeBytes":0,"storageSizeBytes":0,"totalIndexSizeBytes":0,"indexes":[]}]}'
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $systemCollection } |
+                Should -Throw '*system*'
+            $duplicates = '{"complete":true,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[{"name":"accounts","type":"collection","options":{},"count":1,"sizeBytes":1,"storageSizeBytes":1,"totalIndexSizeBytes":1,"indexes":[]},{"name":"accounts","type":"collection","options":{},"count":1,"sizeBytes":1,"storageSizeBytes":1,"totalIndexSizeBytes":1,"indexes":[]}]}'
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $duplicates } |
+                Should -Throw '*unique*'
+            $unsorted = '{"complete":true,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[{"name":"posts","type":"collection","options":{},"count":1,"sizeBytes":1,"storageSizeBytes":1,"totalIndexSizeBytes":1,"indexes":[]},{"name":"accounts","type":"collection","options":{},"count":1,"sizeBytes":1,"storageSizeBytes":1,"totalIndexSizeBytes":1,"indexes":[]}]}'
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $unsorted } |
+                Should -Throw '*sorted*'
+        }
+
         It 'uses attached IPv4 URI and archive arguments for native backups' {
             $dump = Get-NativeMongoDumpArguments 'A:\backups\native.archive.gz'
             $restore = Get-NativeMongoRestoreDryRunArguments 'A:\backups\native.archive.gz'

@@ -160,6 +160,150 @@ function Assert-AutoDeployTaskContract {
     }
 }
 
+function Get-ProductionMongoCollectionInventoryScript {
+    @'
+const target = db.getSiblingDB('christopherbell');
+const has = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
+const numberOrNull = (value) => typeof value === 'number' ? value : null;
+const safeOptions = (options) => {
+  const result = {};
+  for (const key of ['capped', 'size', 'max', 'validator', 'validationLevel',
+                     'validationAction', 'collation']) {
+    if (has(options, key)) {
+      result[key] = options[key];
+    }
+  }
+  return result;
+};
+const safeIndex = (index) => ({
+  name: index.name,
+  key: index.key,
+  unique: index.unique === true,
+  sparse: index.sparse === true,
+  expireAfterSeconds: has(index, 'expireAfterSeconds') ? index.expireAfterSeconds : null,
+  partialFilterExpression: has(index, 'partialFilterExpression')
+      ? index.partialFilterExpression
+      : null
+});
+const collections = target.getCollectionInfos()
+    .filter((info) => !info.name.startsWith('system.'))
+    .sort((left, right) => left.name === right.name ? 0 : left.name < right.name ? -1 : 1)
+    .map((info) => {
+      const stats = info.type === 'view'
+          ? { ok: 1, count: null, size: null, storageSize: null, totalIndexSize: null }
+          : target.runCommand({ collStats: info.name });
+      if (stats.ok !== 1) {
+        throw new Error(`collStats failed for ${info.name}`);
+      }
+      const indexes = info.type === 'view'
+          ? []
+          : target.getCollection(info.name).getIndexes()
+              .map(safeIndex)
+              .sort((left, right) => left.name === right.name ? 0 : left.name < right.name ? -1 : 1);
+      return {
+        name: info.name,
+        type: info.type,
+        options: safeOptions(info.options),
+        count: numberOrNull(stats.count),
+        sizeBytes: numberOrNull(stats.size),
+        storageSizeBytes: numberOrNull(stats.storageSize),
+        totalIndexSizeBytes: numberOrNull(stats.totalIndexSize),
+        indexes
+      };
+    });
+print(JSON.stringify({
+  complete: true,
+  database: target.getName(),
+  generatedAt: new Date().toISOString(),
+  collections
+}));
+'@
+}
+
+function ConvertFrom-ProductionMongoCollectionInventory {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Json)
+
+    try {
+        $inventory = $Json | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw [IO.InvalidDataException]::new(
+            'MongoDB collection inventory did not return valid JSON.',
+            $_.Exception)
+    }
+    if ($inventory.PSObject.Properties.Name -notcontains 'complete' -or
+        $inventory.complete -ne $true) {
+        throw 'MongoDB collection inventory is not complete.'
+    }
+    if ([string]$inventory.database -ne 'christopherbell') {
+        throw 'MongoDB collection inventory must target christopherbell.'
+    }
+    $generatedAt = [DateTimeOffset]::MinValue
+    if (-not [DateTimeOffset]::TryParse(
+        [string]$inventory.generatedAt,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::AssumeUniversal,
+        [ref]$generatedAt)) {
+        throw 'MongoDB collection inventory generatedAt is invalid.'
+    }
+    if ($inventory.PSObject.Properties.Name -notcontains 'collections') {
+        throw 'MongoDB collection inventory collections are missing.'
+    }
+    $names = [Collections.Generic.List[string]]::new()
+    $uniqueNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($collection in @($inventory.collections)) {
+        if ([string]::IsNullOrWhiteSpace([string]$collection.name) -or
+            [string]$collection.type -notin @('collection','view')) {
+            throw 'MongoDB collection inventory contains an invalid collection.'
+        }
+        if ([string]$collection.name -like 'system.*') {
+            throw 'MongoDB collection inventory must exclude system collections.'
+        }
+        foreach ($property in 'options','count','sizeBytes','storageSizeBytes',
+            'totalIndexSizeBytes','indexes') {
+            if ($collection.PSObject.Properties.Name -notcontains $property) {
+                throw "MongoDB collection inventory is missing collection property: $property"
+            }
+        }
+        $name = [string]$collection.name
+        if (-not $uniqueNames.Add($name)) {
+            throw 'MongoDB collection inventory names must be unique.'
+        }
+        [void]$names.Add($name)
+        foreach ($index in @($collection.indexes)) {
+            $indexProperties = @(
+                'name','key','unique','sparse','expireAfterSeconds','partialFilterExpression')
+            if (@($indexProperties | Where-Object {
+                    $index.PSObject.Properties.Name -notcontains $_
+                }).Count -gt 0 -or
+                [string]::IsNullOrWhiteSpace([string]$index.name) -or $null -eq $index.key) {
+                throw 'MongoDB collection inventory contains an invalid index.'
+            }
+        }
+    }
+    [string[]]$sortedNames = $names.ToArray()
+    [Array]::Sort($sortedNames, [StringComparer]::Ordinal)
+    if ([string]::Join([char]0, $names.ToArray()) -cne
+        [string]::Join([char]0, $sortedNames)) {
+        throw 'MongoDB collection inventory names must be sorted.'
+    }
+    return $inventory
+}
+
+function Get-ProductionMongoCollectionInventory {
+    $config = Read-ProductionConfig
+    $json = Invoke-CheckedProcess `
+        -FilePath $config.mongoShellExe `
+        -ArgumentList @(
+            '--quiet'
+            'mongodb://127.0.0.1:27017/admin'
+            '--eval'
+            (Get-ProductionMongoCollectionInventoryScript)
+        ) `
+        -WorkingDirectory $config.repositoryPath
+    ConvertFrom-ProductionMongoCollectionInventory -Json $json
+}
+
 function Test-ProductionStartup {
     $config = Read-ProductionConfig
     foreach ($name in 'MongoDB','ChristopherBellDev','cloudflared') {
@@ -188,4 +332,4 @@ function Test-ProductionStartup {
     }
 }
 
-Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases,Assert-AutoDeployTaskContract,Test-ProductionStartup
+Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases,Assert-AutoDeployTaskContract,Get-ProductionMongoCollectionInventory,Test-ProductionStartup
