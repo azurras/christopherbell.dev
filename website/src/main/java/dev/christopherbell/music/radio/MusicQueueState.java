@@ -4,10 +4,8 @@ import java.time.Instant;
 import java.util.List;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** One optimistic, globally ordered Music queue with no per-user silo. */
-@Document("music_queue_state")
 public record MusicQueueState(
     @Id String id,
     List<Entry> entries,
