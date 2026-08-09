@@ -37,6 +37,12 @@ class MusicRuntimeStateDocumentTest {
   }
 
   @Test
+  void rejectsMissingQueueEntries() {
+    assertThatThrownBy(() -> new MusicRuntimeStateDocument.QueuePayload(null))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
   void rejectsMixedIdentityKindAndPayload() {
     var queue = new MusicRuntimeStateDocument.QueuePayload(List.of());
     var radio = new MusicRuntimeStateDocument.RadioPayload(

@@ -56,7 +56,10 @@ public record MusicRuntimeStateDocument(
 
   public record QueuePayload(List<MusicQueueState.Entry> entries) {
     public QueuePayload {
-      entries = entries == null ? List.of() : List.copyOf(entries);
+      if (entries == null) {
+        throw new IllegalArgumentException("Music queue payload entries are required.");
+      }
+      entries = List.copyOf(entries);
       new MusicQueueState(MusicQueueState.ID, entries, null);
     }
   }
