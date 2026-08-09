@@ -3,28 +3,31 @@ package dev.christopherbell.configuration.mongo.migration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
-import dev.christopherbell.music.radio.MusicQueueState;
-import dev.christopherbell.music.radio.MusicRadioState;
-import dev.christopherbell.music.radio.MusicRuntimeStateDocument;
+import com.mongodb.client.MongoCollection;
 import java.time.Instant;
-import java.util.Collection;
+import java.util.Date;
 import java.util.List;
+import java.util.stream.Stream;
+import org.bson.Document;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Query;
 
 @ExtendWith(MockitoExtension.class)
 class V014ConsolidateMusicRuntimeStateTest {
@@ -33,7 +36,13 @@ class V014ConsolidateMusicRuntimeStateTest {
   private static final String TARGET = "music_runtime_state";
 
   @Mock private MongoTemplate mongo;
-  @Captor private ArgumentCaptor<Collection<MusicRuntimeStateDocument>> inserted;
+  @Mock private MongoCollection<Document> targetCollection;
+  @Captor private ArgumentCaptor<List<Document>> inserted;
+
+  @BeforeEach
+  void exposeRawTargetCollection() {
+    lenient().when(mongo.getCollection(TARGET)).thenReturn(targetCollection);
+  }
 
   @Test
   void exposesImmutableMigrationIdentity() {
@@ -46,35 +55,32 @@ class V014ConsolidateMusicRuntimeStateTest {
   }
 
   @Test
-  void copiesValidatedSourcesInTargetOrderAndPreservesLogicalStateAndVersions() {
-    var queue = queue(4L);
-    var radio = radio(9L);
-    var expectedQueue = queueDocument(queue);
-    var expectedRadio = radioDocument(radio);
+  void copiesValidatedRawSourcesInTargetOrderWithoutChangingVersions() {
+    var queue = queueSource(4L);
+    var radio = radioSource(9L);
+    var expectedQueue = queueTarget(4L);
+    var expectedRadio = radioTarget(9L);
     validSources(queue, radio);
-    when(mongo.findAll(MusicRuntimeStateDocument.class, TARGET))
+    when(mongo.findAll(Document.class, TARGET))
         .thenReturn(List.of())
         .thenReturn(List.of(expectedQueue, expectedRadio));
 
     new V014ConsolidateMusicRuntimeState().apply(mongo);
 
-    verify(mongo).insert(inserted.capture(), eq(TARGET));
+    verify(targetCollection).insertMany(inserted.capture());
     assertThat(inserted.getValue()).containsExactly(expectedQueue, expectedRadio);
-    verify(mongo).count(any(Query.class), eq(LEGACY_QUEUE));
-    verify(mongo).count(any(Query.class), eq(LEGACY_RADIO));
-    verify(mongo).findById("global", MusicQueueState.class, LEGACY_QUEUE);
-    verify(mongo).findById("global", MusicRadioState.class, LEGACY_RADIO);
-    verify(mongo, times(2)).findAll(MusicRuntimeStateDocument.class, TARGET);
-    verifyNoMoreInteractions(mongo);
+    verify(mongo).findAll(Document.class, LEGACY_QUEUE);
+    verify(mongo).findAll(Document.class, LEGACY_RADIO);
+    verify(mongo, times(2)).findAll(Document.class, TARGET);
+    verify(mongo).getCollection(TARGET);
+    verifyNoMoreInteractions(mongo, targetCollection);
   }
 
   @Test
-  void acceptsOnlyACompleteEquivalentDestinationRegardlessOfReadOrder() {
-    var queue = queue(4L);
-    var radio = radio(9L);
-    validSources(queue, radio);
-    when(mongo.findAll(MusicRuntimeStateDocument.class, TARGET))
-        .thenReturn(List.of(radioDocument(radio), queueDocument(queue)));
+  void acceptsOnlyACompleteEquivalentRawDestinationRegardlessOfReadOrder() {
+    validSources(queueSource(4L), radioSource(9L));
+    when(mongo.findAll(Document.class, TARGET))
+        .thenReturn(List.of(radioTarget(9L), queueTarget(4L)));
 
     assertThatCode(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
         .doesNotThrowAnyException();
@@ -83,215 +89,228 @@ class V014ConsolidateMusicRuntimeStateTest {
   }
 
   @Test
-  void rejectsPartialDestinationBeforeWriting() {
-    var queue = queue(4L);
-    var radio = radio(9L);
-    validSources(queue, radio);
-    when(mongo.findAll(MusicRuntimeStateDocument.class, TARGET))
-        .thenReturn(List.of(queueDocument(queue)));
-
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("destination");
-
-    verifyNoTargetInsert();
-  }
-
-  @Test
-  void rejectsDuplicateDestinationIdentityBeforeWriting() {
-    var queue = queue(4L);
-    var radio = radio(9L);
-    validSources(queue, radio);
-    when(mongo.findAll(MusicRuntimeStateDocument.class, TARGET))
-        .thenReturn(List.of(queueDocument(queue), queueDocument(queue)));
-
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("duplicate");
-
-    verifyNoTargetInsert();
-  }
-
-  @Test
-  void rejectsExtraDestinationStateBeforeWriting() {
-    var queue = queue(4L);
-    var radio = radio(9L);
-    validSources(queue, radio);
-    when(mongo.findAll(MusicRuntimeStateDocument.class, TARGET))
-        .thenReturn(List.of(
-            queueDocument(queue),
-            radioDocument(radio),
-            queueDocument(queue)));
-
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("destination");
-
-    verifyNoTargetInsert();
-  }
-
-  @Test
-  void rejectsDivergentDestinationPayloadOrVersionBeforeWriting() {
-    var queue = queue(4L);
-    var radio = radio(9L);
-    validSources(queue, radio);
-    when(mongo.findAll(MusicRuntimeStateDocument.class, TARGET))
-        .thenReturn(List.of(queueDocument(queue(5L)), radioDocument(radio)));
-
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("diverges");
-
-    verifyNoTargetInsert();
-  }
-
-  @Test
-  void propagatesMalformedDestinationMappingFailureBeforeWriting() {
-    var queue = queue(4L);
-    var radio = radio(9L);
-    validSources(queue, radio);
-    when(mongo.findAll(MusicRuntimeStateDocument.class, TARGET))
-        .thenThrow(new IllegalArgumentException("malformed destination"));
-
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("malformed destination");
-
-    verifyNoTargetInsert();
-  }
-
-  @Test
-  void rejectsMalformedNullDestinationDocumentBeforeWriting() {
-    var queue = queue(4L);
-    var radio = radio(9L);
-    validSources(queue, radio);
-    when(mongo.findAll(MusicRuntimeStateDocument.class, TARGET))
-        .thenReturn(java.util.Arrays.asList(queueDocument(queue), null));
-
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("malformed");
-
-    verifyNoTargetInsert();
-  }
-
-  @Test
-  void rejectsUnexpectedQueueCardinalityBeforeReadingOrWritingDestination() {
-    when(mongo.count(any(Query.class), eq(LEGACY_QUEUE))).thenReturn(2L);
-
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("cardinality");
-
-    verify(mongo, never()).findAll(MusicRuntimeStateDocument.class, TARGET);
-    verifyNoTargetInsert();
-  }
-
-  @Test
-  void rejectsUnexpectedRadioCardinalityBeforeReadingOrWritingDestination() {
-    var queue = queue(4L);
-    when(mongo.count(any(Query.class), eq(LEGACY_QUEUE))).thenReturn(1L);
-    when(mongo.findById("global", MusicQueueState.class, LEGACY_QUEUE)).thenReturn(queue);
-    when(mongo.count(any(Query.class), eq(LEGACY_RADIO))).thenReturn(0L);
-
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("cardinality");
-
-    verify(mongo, never()).findAll(MusicRuntimeStateDocument.class, TARGET);
-    verifyNoTargetInsert();
-  }
-
-  @Test
-  void rejectsUnexpectedLegacyIdentityBeforeReadingOrWritingDestination() {
-    when(mongo.count(any(Query.class), eq(LEGACY_QUEUE))).thenReturn(1L);
-    when(mongo.findById("global", MusicQueueState.class, LEGACY_QUEUE)).thenReturn(null);
-
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("identity");
-
-    verify(mongo, never()).findAll(MusicRuntimeStateDocument.class, TARGET);
-    verifyNoTargetInsert();
-  }
-
-  @Test
-  void propagatesMalformedSourceMappingFailureBeforeReadingOrWritingDestination() {
-    when(mongo.count(any(Query.class), eq(LEGACY_QUEUE))).thenReturn(1L);
-    when(mongo.findById("global", MusicQueueState.class, LEGACY_QUEUE))
-        .thenThrow(new IllegalArgumentException("malformed source"));
-
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("malformed source");
-
-    verify(mongo, never()).findAll(MusicRuntimeStateDocument.class, TARGET);
-    verifyNoTargetInsert();
-  }
-
-  @Test
-  void rejectsNonEquivalentReadbackAfterTheOnlyPermittedInsert() {
-    var queue = queue(4L);
-    var radio = radio(9L);
-    validSources(queue, radio);
-    when(mongo.findAll(MusicRuntimeStateDocument.class, TARGET))
+  void preservesAbsentVersionsAsAbsentRawFields() {
+    var expectedQueue = queueTarget(null);
+    var expectedRadio = radioTarget(null);
+    validSources(queueSource(null), radioSource(null));
+    when(mongo.findAll(Document.class, TARGET))
         .thenReturn(List.of())
-        .thenReturn(List.of(queueDocument(queue)));
+        .thenReturn(List.of(expectedQueue, expectedRadio));
+
+    new V014ConsolidateMusicRuntimeState().apply(mongo);
+
+    verify(targetCollection).insertMany(inserted.capture());
+    assertThat(inserted.getValue()).containsExactly(expectedQueue, expectedRadio)
+        .allSatisfy(document -> assertThat(document).doesNotContainKey("version"));
+  }
+
+  @Test
+  void rejectsPartialDuplicateExtraAndDivergentDestinationsBeforeWriting() {
+    assertInvalidDestination(List.of(queueTarget(4L)));
+    assertInvalidDestination(List.of(queueTarget(4L), queueTarget(4L)));
+    assertInvalidDestination(List.of(queueTarget(4L), radioTarget(9L), queueTarget(4L)));
+    assertInvalidDestination(List.of(queueTarget(5L), radioTarget(9L)));
+  }
+
+  @ParameterizedTest
+  @MethodSource("invalidVersions")
+  void rejectsFractionalOrWrongTypeSourceVersionBeforeWriting(Object invalidVersion) {
+    var queue = queueSource(4L).append("version", invalidVersion);
+
+    assertInvalidQueueSource(queue);
+  }
+
+  @ParameterizedTest
+  @MethodSource("invalidVersions")
+  void rejectsFractionalOrWrongTypeDestinationVersionBeforeWriting(Object invalidVersion) {
+    var queue = queueTarget(4L).append("version", invalidVersion);
+
+    assertInvalidDestination(List.of(queue, radioTarget(9L)));
+  }
+
+  @ParameterizedTest
+  @MethodSource("missingOrNullQueueEntries")
+  void rejectsMissingOrNullSourceQueueEntriesBeforeWriting(Document queue) {
+    assertInvalidQueueSource(queue);
+  }
+
+  @ParameterizedTest
+  @MethodSource("missingOrNullTargetQueueEntries")
+  void rejectsMissingOrNullDestinationQueueEntriesBeforeWriting(Document queue) {
+    assertInvalidDestination(List.of(queue, radioTarget(9L)));
+  }
+
+  @Test
+  void rejectsFractionalIntegralRadioFieldsInSourceAndDestinationBeforeWriting() {
+    var source = radioSource(9L).append("stationSequence", 3.5);
+    assertInvalidRadioSource(source);
+
+    var target = radioTarget(9L);
+    target.get("radio", Document.class).append("stationSequence", 3.5);
+    assertInvalidDestination(List.of(queueTarget(4L), target));
+  }
+
+  @Test
+  void rejectsUnknownSourceFieldsAndWrongTargetDiscriminatorBeforeWriting() {
+    assertInvalidQueueSource(queueSource(4L).append("unexpected", true));
+
+    assertInvalidDestination(List.of(
+        queueTarget(4L).append("kind", "RADIO"), radioTarget(9L)));
+  }
+
+  @Test
+  void rejectsDomainInvalidQueueEntryBeforeWriting() {
+    var queue = queueSource(4L);
+    queue.getList("entries", Document.class).getFirst().put("id", "");
+
+    assertInvalidQueueSource(queue);
+  }
+
+  @Test
+  void rejectsUnexpectedSourceCardinalityOrIdentityBeforeReadingDestination() {
+    when(mongo.findAll(Document.class, LEGACY_QUEUE))
+        .thenReturn(List.of(queueSource(4L), queueSource(4L)));
+
+    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("source", "cardinality");
+    verify(mongo, never()).findAll(Document.class, TARGET);
+    verifyNoTargetInsert();
+
+    org.mockito.Mockito.reset(mongo, targetCollection);
+    exposeRawTargetCollection();
+    when(mongo.findAll(Document.class, LEGACY_QUEUE))
+        .thenReturn(List.of(queueSource(4L).append("_id", "other")));
+    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("source", "identity");
+    verify(mongo, never()).findAll(Document.class, TARGET);
+    verifyNoTargetInsert();
+  }
+
+  @Test
+  void rejectsNonEquivalentRawReadbackAfterTheOnlyPermittedInsert() {
+    validSources(queueSource(4L), radioSource(9L));
+    when(mongo.findAll(Document.class, TARGET))
+        .thenReturn(List.of())
+        .thenReturn(List.of(queueTarget(4L)));
 
     assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("destination");
 
-    verify(mongo).insert(
-        org.mockito.ArgumentMatchers.<MusicRuntimeStateDocument>anyCollection(), eq(TARGET));
+    verify(targetCollection).insertMany(anyList());
   }
 
-  private void validSources(MusicQueueState queue, MusicRadioState radio) {
-    when(mongo.count(any(Query.class), eq(LEGACY_QUEUE))).thenReturn(1L);
-    when(mongo.count(any(Query.class), eq(LEGACY_RADIO))).thenReturn(1L);
-    when(mongo.findById("global", MusicQueueState.class, LEGACY_QUEUE)).thenReturn(queue);
-    when(mongo.findById("global", MusicRadioState.class, LEGACY_RADIO)).thenReturn(radio);
+  private void assertInvalidQueueSource(Document queue) {
+    when(mongo.findAll(Document.class, LEGACY_QUEUE)).thenReturn(List.of(queue));
+
+    assertInvalidSource();
+  }
+
+  private void assertInvalidRadioSource(Document radio) {
+    validSources(queueSource(4L), radio);
+
+    assertInvalidSource();
+  }
+
+  private void assertInvalidSource() {
+
+    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("source");
+
+    verify(mongo, never()).findAll(Document.class, TARGET);
+    verifyNoTargetInsert();
+  }
+
+  private void assertInvalidDestination(List<Document> documents) {
+    org.mockito.Mockito.reset(mongo, targetCollection);
+    exposeRawTargetCollection();
+    validSources(queueSource(4L), radioSource(9L));
+    when(mongo.findAll(Document.class, TARGET)).thenReturn(documents);
+
+    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("destination");
+
+    verifyNoTargetInsert();
+  }
+
+  private void validSources(Document queue, Document radio) {
+    when(mongo.findAll(Document.class, LEGACY_QUEUE)).thenReturn(List.of(queue));
+    when(mongo.findAll(Document.class, LEGACY_RADIO)).thenReturn(List.of(radio));
   }
 
   private void verifyNoTargetInsert() {
-    verify(mongo, never()).insert(
-        org.mockito.ArgumentMatchers.<MusicRuntimeStateDocument>anyCollection(), eq(TARGET));
+    verify(targetCollection, never()).insertMany(anyList());
   }
 
-  private static MusicQueueState queue(Long version) {
-    var entry = new MusicQueueState.Entry(
-        "entry-1", "track-queue", "token-queue", "account-1", Instant.EPOCH);
-    return new MusicQueueState("global", List.of(entry), version);
+  private static Stream<Object> invalidVersions() {
+    return Stream.of(4.5, "4");
   }
 
-  private static MusicRadioState radio(Long version) {
-    return new MusicRadioState(
-        "global", 3, "track-radio", "token-radio", Instant.EPOCH, 90,
-        MusicRadioState.Source.RADIO, null, version);
+  private static Stream<Arguments> missingOrNullQueueEntries() {
+    return Stream.of(
+        Arguments.of(new Document("_id", "global").append("version", 4L)),
+        Arguments.of(new Document("_id", "global")
+            .append("entries", null)
+            .append("version", 4L)));
   }
 
-  private static MusicRuntimeStateDocument queueDocument(MusicQueueState state) {
-    return new MusicRuntimeStateDocument(
-        "queue",
-        MusicRuntimeStateDocument.Kind.QUEUE,
-        new MusicRuntimeStateDocument.QueuePayload(state.entries()),
-        null,
-        state.version());
+  private static Stream<Arguments> missingOrNullTargetQueueEntries() {
+    return Stream.of(
+        Arguments.of(new Document("_id", "queue")
+            .append("kind", "QUEUE")
+            .append("queue", new Document())
+            .append("version", 4L)),
+        Arguments.of(new Document("_id", "queue")
+            .append("kind", "QUEUE")
+            .append("queue", new Document("entries", null))
+            .append("version", 4L)));
   }
 
-  private static MusicRuntimeStateDocument radioDocument(MusicRadioState state) {
-    return new MusicRuntimeStateDocument(
-        "radio",
-        MusicRuntimeStateDocument.Kind.RADIO,
-        null,
-        new MusicRuntimeStateDocument.RadioPayload(
-            state.stationSequence(),
-            state.trackId(),
-            state.observedToken(),
-            state.startedAt(),
-            state.durationSeconds(),
-            state.source(),
-            state.queueEntryId()),
-        state.version());
+  private static Document queueSource(Long version) {
+    var entry = new Document("id", "entry-1")
+        .append("trackId", "track-queue")
+        .append("observedToken", "token-queue")
+        .append("enqueuedByAccountId", "account-1")
+        .append("enqueuedAt", Date.from(Instant.EPOCH));
+    var document = new Document("_id", "global").append("entries", List.of(entry));
+    return withVersion(document, version);
+  }
+
+  private static Document radioSource(Long version) {
+    var document = new Document("_id", "global")
+        .append("stationSequence", 3L)
+        .append("trackId", "track-radio")
+        .append("observedToken", "token-radio")
+        .append("startedAt", Date.from(Instant.EPOCH))
+        .append("durationSeconds", 90.0)
+        .append("source", "RADIO");
+    return withVersion(document, version);
+  }
+
+  private static Document queueTarget(Long version) {
+    var document = new Document("_id", "queue")
+        .append("kind", "QUEUE")
+        .append("queue", new Document("entries", queueSource(null).getList("entries", Document.class)));
+    return withVersion(document, version);
+  }
+
+  private static Document radioTarget(Long version) {
+    var source = radioSource(null);
+    source.remove("_id");
+    var document = new Document("_id", "radio")
+        .append("kind", "RADIO")
+        .append("radio", source);
+    return withVersion(document, version);
+  }
+
+  private static Document withVersion(Document document, Long version) {
+    if (version != null) {
+      document.append("version", version);
+    }
+    return document;
   }
 }
