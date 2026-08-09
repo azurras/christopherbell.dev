@@ -370,16 +370,46 @@ function Convert-ProductionMongoCollectionInventoryInteger {
     if ($null -eq $number) {
         return $null
     }
+    if ($number -is [single] -or $number -is [double]) {
+        $floatingPointNumber = [double]$number
+        if ([Math]::Truncate($floatingPointNumber) -ne $floatingPointNumber -or
+            $floatingPointNumber -gt [double]9007199254740991) {
+            throw "MongoDB collection inventory $Path is invalid."
+        }
+        return $number
+    }
     try {
-        $integer = [decimal]$number
+        $exactNumber = [decimal]$number
     } catch {
         throw "MongoDB collection inventory $Path is invalid."
     }
-    if ([decimal]::Truncate($integer) -ne $integer -or
-        $integer -gt [decimal]9007199254740991) {
+    if ([decimal]::Truncate($exactNumber) -ne $exactNumber -or
+        $exactNumber -gt [decimal]9007199254740991) {
         throw "MongoDB collection inventory $Path is invalid."
     }
     return $number
+}
+
+function Convert-ProductionMongoCollectionInventoryCollation {
+    param([object]$Value)
+
+    Assert-ProductionMongoCollectionInventoryObject -Value $Value -Path 'options.collation'
+    $result = [ordered]@{}
+    foreach ($property in @($Value.PSObject.Properties)) {
+        $path = "options.collation.$($property.Name)"
+        if ($property.Name -ceq 'strength') {
+            $strength = Convert-ProductionMongoCollectionInventoryInteger `
+                $property.Value $path $false
+            if ([double]$strength -lt 1 -or [double]$strength -gt 5) {
+                throw "MongoDB collection inventory $path is invalid."
+            }
+            $result[$property.Name] = $strength
+        } else {
+            $result[$property.Name] = Copy-ProductionMongoCollectionInventoryMetadataValue `
+                $property.Value $path
+        }
+    }
+    return [pscustomobject]$result
 }
 
 function Convert-ProductionMongoCollectionInventoryTimeSeriesOptions {
@@ -519,8 +549,7 @@ function ConvertFrom-ProductionMongoCollectionInventory {
                         if ($value -isnot [string]) { throw 'MongoDB collection inventory options are invalid.' }
                     }
                     'collation' {
-                        Assert-ProductionMongoCollectionInventoryObject -Value $value -Path 'options.collation'
-                        $value = Copy-ProductionMongoCollectionInventoryMetadataValue $value 'options.collation'
+                        $value = Convert-ProductionMongoCollectionInventoryCollation $value
                     }
                     'timeseries' {
                         $value = Convert-ProductionMongoCollectionInventoryTimeSeriesOptions $value

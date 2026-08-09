@@ -744,6 +744,101 @@ Describe 'native Windows production operations' {
                 Should -Throw '*expireAfterSeconds*'
         }
 
+        It 'rejects exponent-form fractional integer metadata before decimal rounding' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['indexes'][0]['expireAfterSeconds'] = 42
+            }
+            $json = $json.Replace(
+                '"expireAfterSeconds":42',
+                '"expireAfterSeconds":9.999999999999999e14')
+
+            $json.Contains('"expireAfterSeconds":9.999999999999999e14') |
+                Should -BeTrue
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*index.expireAfterSeconds*'
+        }
+
+        It 'accepts exponent-form metadata at the maximum safe integer' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['indexes'][0]['expireAfterSeconds'] = 42
+            }
+            $json = $json.Replace(
+                '"expireAfterSeconds":42',
+                '"expireAfterSeconds":9.007199254740991e15')
+
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json $json
+
+            $inventory.collections[0].indexes[0].expireAfterSeconds |
+                Should -Be 9007199254740991
+        }
+
+        It 'rejects exponent-form unsafe integer metadata before decimal rounding' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['indexes'][0]['expireAfterSeconds'] = 42
+            }
+            $json = $json.Replace(
+                '"expireAfterSeconds":42',
+                '"expireAfterSeconds":9.007199254740992e15')
+
+            $json.Contains('"expireAfterSeconds":9.007199254740992e15') |
+                Should -BeTrue
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*index.expireAfterSeconds*'
+        }
+
+        It 'preserves valid collation strength and neighboring fields' {
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson {
+                    param($candidate)
+                    $candidate['collections'][0]['options']['collation'] = [ordered]@{
+                        locale = 'en'
+                        strength = 5
+                        caseLevel = $true
+                        alternate = 'shifted'
+                    }
+                })
+            $collation = $inventory.collections[0].options.collation
+
+            @($collation.PSObject.Properties.Name) |
+                Should -Be @('locale','strength','caseLevel','alternate')
+            $collation.locale | Should -Be 'en'
+            $collation.strength | Should -Be 5
+            $collation.caseLevel | Should -BeTrue
+            $collation.alternate | Should -Be 'shifted'
+        }
+
+        It 'rejects invalid collation strength: <Name>' -TestCases @(
+            @{ Name = 'fractional'; JsonValue = '1.5'; Message = '*options.collation.strength*' }
+            @{ Name = 'negative'; JsonValue = '-1'; Message = '*options.collation.strength*' }
+            @{ Name = 'zero'; JsonValue = '0'; Message = '*options.collation.strength*' }
+            @{ Name = 'above maximum'; JsonValue = '6'; Message = '*options.collation.strength*' }
+            @{ Name = 'string'; JsonValue = '"2"'; Message = '*options.collation.strength*' }
+            @{ Name = 'non-finite exponent'; JsonValue = '1e309'; Message = $null }
+        ) {
+            param($Name, $JsonValue, $Message)
+
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['options']['collation'] = [ordered]@{
+                    locale = 'en'
+                    strength = 1
+                }
+            }
+            $json = $json.Replace('"strength":1', '"strength":' + $JsonValue)
+            $json.Contains('"strength":' + $JsonValue) | Should -BeTrue
+
+            if ($null -eq $Message) {
+                { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                    Should -Throw
+            } else {
+                { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                    Should -Throw $Message
+            }
+        }
+
         It 'rejects an unknown time-series option' {
             $json = New-ProductionMongoInventoryJson {
                 param($candidate)
