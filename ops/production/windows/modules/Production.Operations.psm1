@@ -363,6 +363,25 @@ function Convert-ProductionMongoCollectionInventoryNumber {
     return $Value
 }
 
+function Convert-ProductionMongoCollectionInventoryInteger {
+    param([object]$Value, [string]$Path, [bool]$AllowNull)
+
+    $number = Convert-ProductionMongoCollectionInventoryNumber $Value $Path $AllowNull
+    if ($null -eq $number) {
+        return $null
+    }
+    try {
+        $integer = [decimal]$number
+    } catch {
+        throw "MongoDB collection inventory $Path is invalid."
+    }
+    if ([decimal]::Truncate($integer) -ne $integer -or
+        $integer -gt [decimal]9007199254740991) {
+        throw "MongoDB collection inventory $Path is invalid."
+    }
+    return $number
+}
+
 function Convert-ProductionMongoCollectionInventoryTimeSeriesOptions {
     param([object]$Value)
 
@@ -390,7 +409,7 @@ function Convert-ProductionMongoCollectionInventoryTimeSeriesOptions {
     }
     foreach ($option in 'bucketMaxSpanSeconds','bucketRoundingSeconds') {
         if ($names -contains $option) {
-            $number = Convert-ProductionMongoCollectionInventoryNumber `
+            $number = Convert-ProductionMongoCollectionInventoryInteger `
                 $Value.PSObject.Properties[$option].Value "options.timeseries.$option" $false
             if ([double]$number -lt 1 -or [double]$number -gt 31536000) {
                 throw "MongoDB collection inventory options.timeseries.$option is invalid."
@@ -486,8 +505,8 @@ function ConvertFrom-ProductionMongoCollectionInventory {
                     'capped' {
                         if ($value -isnot [bool]) { throw 'MongoDB collection inventory options are invalid.' }
                     }
-                    'size' { $value = Convert-ProductionMongoCollectionInventoryNumber $value 'options.size' $false }
-                    'max' { $value = Convert-ProductionMongoCollectionInventoryNumber $value 'options.max' $false }
+                    'size' { $value = Convert-ProductionMongoCollectionInventoryInteger $value 'options.size' $false }
+                    'max' { $value = Convert-ProductionMongoCollectionInventoryInteger $value 'options.max' $false }
                     'validator' {
                         Assert-ProductionMongoCollectionInventoryObject -Value $value -Path 'options.validator'
                         $value = Protect-ProductionMongoCollectionInventoryMetadataLiterals `
@@ -507,7 +526,7 @@ function ConvertFrom-ProductionMongoCollectionInventory {
                         $value = Convert-ProductionMongoCollectionInventoryTimeSeriesOptions $value
                     }
                     'expireAfterSeconds' {
-                        $value = Convert-ProductionMongoCollectionInventoryNumber `
+                        $value = Convert-ProductionMongoCollectionInventoryInteger `
                             $value 'options.expireAfterSeconds' $false
                     }
                 }
@@ -554,7 +573,7 @@ function ConvertFrom-ProductionMongoCollectionInventory {
             if (@($index.key.PSObject.Properties).Count -eq 0) {
                 throw 'MongoDB collection inventory contains an invalid index.'
             }
-            $expireAfterSeconds = Convert-ProductionMongoCollectionInventoryNumber `
+            $expireAfterSeconds = Convert-ProductionMongoCollectionInventoryInteger `
                 $index.expireAfterSeconds 'index.expireAfterSeconds' $true
             $partialFilterExpression = $null
             if ($null -ne $index.partialFilterExpression) {

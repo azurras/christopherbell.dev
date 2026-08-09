@@ -74,6 +74,45 @@ Describe 'native Windows production operations' {
                 }
                 return $inventory | ConvertTo-Json -Depth 20 -Compress
             }
+
+            function Get-ProductionMongoInventoryScriptPolicyViolations {
+                param([string]$Script)
+
+                $violations = [Collections.Generic.List[string]]::new()
+                foreach ($requiredCall in 'getCollectionInfos','collStats','getIndexes') {
+                    if ($Script -notmatch $requiredCall) {
+                        [void]$violations.Add("Missing required metadata call: $requiredCall")
+                    }
+                }
+                if ($Script -match '\.find\s*\(') {
+                    [void]$violations.Add('Document find calls are forbidden.')
+                }
+                if ($Script -match '\.aggregate\s*\(') {
+                    [void]$violations.Add('Document aggregate calls are forbidden.')
+                }
+                if ($Script -match (
+                        '\.(find|findOne|aggregate|watch|countDocuments|estimatedDocumentCount|distinct|' +
+                        'mapReduce|insert|insertOne|insertMany|save|update|updateOne|updateMany|replaceOne|' +
+                        'remove|deleteOne|deleteMany|findOneAndDelete|findOneAndReplace|findOneAndUpdate|' +
+                        'bulkWrite|drop|renameCollection|compact|repairDatabase|createIndex|createIndexes|' +
+                        'dropIndex|dropIndexes|createCollection|dropDatabase)\s*\(')) {
+                    [void]$violations.Add('Document read or mutation calls are forbidden.')
+                }
+                if ($Script -match '\$(out|merge)') {
+                    [void]$violations.Add('Aggregation write stages are forbidden.')
+                }
+                $runCommandReferenceCount = [regex]::Matches(
+                    $Script,
+                    '\brunCommand\b').Count
+                $collStatsCommandCount = [regex]::Matches(
+                    $Script,
+                    'target\.runCommand\s*\(\s*\{\s*collStats\s*:\s*info\.name\s*\}\s*\)').Count
+                if ($runCommandReferenceCount -ne 1 -or $collStatsCommandCount -ne 1) {
+                    [void]$violations.Add(
+                        'Generic MongoDB commands must be the single audited collStats call.')
+                }
+                return $violations.ToArray()
+            }
         }
 
         It 'refuses rollback unless both release junctions exist' {
@@ -432,18 +471,18 @@ Describe 'native Windows production operations' {
         It 'builds a metadata-only MongoDB inventory script' {
             $script = Get-ProductionMongoCollectionInventoryScript
 
-            $script | Should -Match 'getCollectionInfos'
-            $script | Should -Match 'collStats'
-            $script | Should -Match 'getIndexes'
-            $script | Should -Not -Match '\.find\s*\('
-            $script | Should -Not -Match '\.aggregate\s*\('
-            $script | Should -Not -Match (
-                '\.(find|findOne|aggregate|watch|countDocuments|estimatedDocumentCount|distinct|' +
-                'mapReduce|insert|insertOne|insertMany|save|update|updateOne|updateMany|replaceOne|' +
-                'remove|deleteOne|deleteMany|findOneAndDelete|findOneAndReplace|findOneAndUpdate|' +
-                'bulkWrite|drop|renameCollection|compact|repairDatabase|createIndex|createIndexes|' +
-                'dropIndex|dropIndexes|createCollection|dropDatabase)\s*\(')
-            $script | Should -Not -Match '\$(out|merge)'
+            @(Get-ProductionMongoInventoryScriptPolicyViolations -Script $script).Count |
+                Should -Be 0
+        }
+
+        It 'rejects a generic MongoDB command that is not the audited collStats call' {
+            $unsafeScript = (Get-ProductionMongoCollectionInventoryScript).Replace(
+                'target.runCommand({ collStats: info.name })',
+                'target.runCommand({ drop: info.name })')
+
+            $unsafeScript | Should -Match 'target\.runCommand\(\{ drop: info\.name \}\)'
+            @(Get-ProductionMongoInventoryScriptPolicyViolations -Script $unsafeScript).Count |
+                Should -BeGreaterThan 0
         }
 
         It 'represents views without collection statistics or indexes' {
@@ -613,6 +652,96 @@ Describe 'native Windows production operations' {
                 Should -Be @('timeField','metaField','granularity','bucketMaxSpanSeconds','bucketRoundingSeconds')
             $inventory.collections[0].count | Should -BeNullOrEmpty
             $inventory.collections[0].indexes.Count | Should -Be 1
+        }
+
+        It 'rejects a fractional time-series maximum bucket span' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['count'] = $null
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{
+                        timeField = 'observedAt'
+                        bucketMaxSpanSeconds = 1.5
+                    }
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*bucketMaxSpanSeconds*'
+        }
+
+        It 'rejects a fractional time-series bucket rounding interval' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['count'] = $null
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{
+                        timeField = 'observedAt'
+                        bucketRoundingSeconds = 1.5
+                    }
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*bucketRoundingSeconds*'
+        }
+
+        It 'rejects fractional time-series expiration seconds' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['type'] = 'timeseries'
+                $candidate['collections'][0]['count'] = $null
+                $candidate['collections'][0]['options'] = [ordered]@{
+                    timeseries = [ordered]@{ timeField = 'observedAt' }
+                    expireAfterSeconds = 1.5
+                }
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*expireAfterSeconds*'
+        }
+
+        It 'rejects fractional index expiration seconds' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['indexes'][0]['expireAfterSeconds'] = 1.5
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*expireAfterSeconds*'
+        }
+
+        It 'rejects fractional capped collection size metadata' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['options']['size'] = 1.5
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*options.size*'
+        }
+
+        It 'rejects fractional capped collection document limits' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['options']['max'] = 1.5
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*options.max*'
+        }
+
+        It 'rejects integer metadata beyond the JSON safe range' {
+            $json = New-ProductionMongoInventoryJson {
+                param($candidate)
+                $candidate['collections'][0]['indexes'][0]['expireAfterSeconds'] =
+                    [long]9007199254740992
+            }
+
+            { ConvertFrom-ProductionMongoCollectionInventory -Json $json } |
+                Should -Throw '*expireAfterSeconds*'
         }
 
         It 'rejects an unknown time-series option' {

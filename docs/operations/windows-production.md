@@ -528,6 +528,9 @@ names/types (including time-series namespaces), strictly allowlisted collection
 options, counts, storage/index sizes, and index definitions. Time-series counts
 are `null` because `collStats` does not expose a measurement count; their size
 and index metadata remain populated. Compound-index key order is preserved.
+Integer-only collection metadata, including capped size/count limits,
+time-series bucket intervals, and TTL seconds, rejects fractional and
+JSON-unsafe values at the PowerShell trust boundary.
 Validator and partial-index object/array structure is kept,
 but every nested scalar literal is replaced with `[redacted]` inside `mongosh`
 before JSON is printed and is redacted again at the PowerShell trust boundary.
