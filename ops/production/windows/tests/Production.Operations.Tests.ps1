@@ -543,6 +543,27 @@ Describe 'native Windows production operations' {
                 'name','key','unique','sparse','expireAfterSeconds','partialFilterExpression')
         }
 
+        It 'preserves nested metadata array cardinality during canonicalization' -TestCases @(
+            @{ Name = 'empty'; Values = [object[]]@(); ExpectedCount = 0 }
+            @{ Name = 'singleton'; Values = [object[]]@('only'); ExpectedCount = 1 }
+            @{ Name = 'multiple'; Values = [object[]]@('first','second'); ExpectedCount = 2 }
+        ) {
+            param($Name, $Values, $ExpectedCount)
+
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory -Json (
+                New-ProductionMongoInventoryJson {
+                    param($candidate)
+                    $candidate['collections'][0]['options']['validator'] = [ordered]@{
+                        allowedValues = $Values
+                    }
+                })
+            $actual = $inventory.collections[0].options.validator.allowedValues
+
+            ($actual -is [Array]) | Should -BeTrue
+            $actual.Count | Should -Be $ExpectedCount
+            $actual | Should -Be $Values
+        }
+
         It 'rejects incomplete MongoDB inventory output' {
             $json = '{"complete":false,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[]}'
 

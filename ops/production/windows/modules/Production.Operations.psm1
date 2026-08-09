@@ -274,7 +274,8 @@ function Copy-ProductionMongoCollectionInventoryMetadataValue {
             [void]$result.Add((Copy-ProductionMongoCollectionInventoryMetadataValue `
                 -Value $Value[$index] -Path "$Path[$index]"))
         }
-        return $result.ToArray()
+        Write-Output -NoEnumerate $result.ToArray()
+        return
     }
     Assert-ProductionMongoCollectionInventoryObject -Value $Value -Path $Path
     $result = [ordered]@{}
