@@ -1,10 +1,191 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.WriterStart.psm1') -Force
 
+Describe 'production fixed root boundary' {
+    InModuleScope Production.WriterStart {
+        It 'captures stable native identity and final path for an ordinary directory' {
+            $root = Join-Path $TestDrive 'native-fixed-root'
+            New-Item -ItemType Directory -Path $root | Out-Null
+
+            $first = Get-ProductionFixedRootDirectoryIdentity -Path $root
+            $second = Get-ProductionFixedRootDirectoryIdentity -Path $root
+
+            $first.ReparsePoint | Should -BeFalse
+            $first.NativeFinalPath | Should -BeExactly ([IO.Path]::GetFullPath($root))
+            $first.VolumeSerialNumber | Should -Be $second.VolumeSerialNumber
+            $first.FileIndex | Should -Be $second.FileIndex
+        }
+
+        It 'returns only the fixed canonical root and lock boundary after stable readback' {
+            $root = Join-Path $TestDrive 'guarded-fixed-root'
+            $locks = Join-Path $root 'locks'
+            New-Item -ItemType Directory -Path $locks -Force | Out-Null
+            $config = [pscustomobject]@{ programDataRoot=$root.ToUpperInvariant() }
+            Mock Assert-ProductionFixedRootDirectoryAcl { }
+            Mock Get-ProductionFixedRootDirectoryIdentity {
+                $canonical = [IO.Path]::GetFullPath($Path)
+                [pscustomobject]@{
+                    NativeFinalPath=$canonical
+                    VolumeSerialNumber=7
+                    FileIndex=if ($canonical.EndsWith('\locks')) { 22 } else { 11 }
+                    ReparsePoint=$false
+                }
+            }
+
+            $boundary = Assert-ProductionFixedRootBoundary `
+                -Config $config -FixedRoot $root
+
+            $boundary.Root | Should -BeExactly ([IO.Path]::GetFullPath($root))
+            $boundary.Locks | Should -BeExactly ([IO.Path]::GetFullPath($locks))
+            $boundary.LockPath | Should -BeExactly (
+                [IO.Path]::GetFullPath((Join-Path $locks 'deploy.lock')))
+            $boundary.RootIdentity.FileIndex | Should -Be 11
+            $boundary.LocksIdentity.FileIndex | Should -Be 22
+            $config.programDataRoot | Should -BeExactly $boundary.Root
+        }
+
+        It 'rejects <Failure> with guarded-install guidance' -ForEach @(
+            @{ Failure='root reparse traversal'; Mode='root-reparse' },
+            @{ Failure='locks reparse traversal'; Mode='locks-reparse' },
+            @{ Failure='root ACL mismatch'; Mode='root-acl' },
+            @{ Failure='locks ACL mismatch'; Mode='locks-acl' },
+            @{ Failure='root final path mismatch'; Mode='root-final' },
+            @{ Failure='locks final path mismatch'; Mode='locks-final' },
+            @{ Failure='root reparse identity'; Mode='root-identity-reparse' },
+            @{ Failure='root identity replacement'; Mode='root-identity-change' },
+            @{ Failure='locks identity replacement'; Mode='locks-identity-change' }
+        ) {
+            $root = Join-Path $TestDrive "fixed-root-$Mode"
+            $locks = Join-Path $root 'locks'
+            New-Item -ItemType Directory -Path $locks -Force | Out-Null
+            $config = [pscustomobject]@{ programDataRoot=$root }
+            $script:identityReads = @{}
+            Mock Assert-ProductionWriterStartPathNotReparseTraversal {
+                $canonical = [IO.Path]::GetFullPath($Path)
+                if (($Mode -eq 'root-reparse' -and $canonical -eq [IO.Path]::GetFullPath($root)) -or
+                    ($Mode -eq 'locks-reparse' -and $canonical -eq [IO.Path]::GetFullPath($locks))) {
+                    throw 'simulated reparse traversal'
+                }
+                $canonical
+            }
+            Mock Assert-ProductionFixedRootDirectoryAcl {
+                $canonical = [IO.Path]::GetFullPath($Path)
+                if (($Mode -eq 'root-acl' -and $canonical -eq [IO.Path]::GetFullPath($root)) -or
+                    ($Mode -eq 'locks-acl' -and $canonical -eq [IO.Path]::GetFullPath($locks))) {
+                    throw 'simulated exact ACL mismatch'
+                }
+            }
+            Mock Get-ProductionFixedRootDirectoryIdentity {
+                $canonical = [IO.Path]::GetFullPath($Path)
+                $key = $canonical.ToLowerInvariant()
+                $read = 1 + [int]$script:identityReads[$key]
+                $script:identityReads[$key] = $read
+                $isLocks = $canonical -eq [IO.Path]::GetFullPath($locks)
+                $fileIndex = if ($isLocks) { 22 } else { 11 }
+                if (($Mode -eq 'root-identity-change' -and -not $isLocks -and $read -gt 1) -or
+                    ($Mode -eq 'locks-identity-change' -and $isLocks -and $read -gt 1)) {
+                    $fileIndex++
+                }
+                $final = if (($Mode -eq 'root-final' -and -not $isLocks) -or
+                    ($Mode -eq 'locks-final' -and $isLocks)) {
+                    Join-Path $TestDrive 'redirect-target'
+                } else { $canonical }
+                [pscustomobject]@{
+                    NativeFinalPath=[IO.Path]::GetFullPath($final)
+                    VolumeSerialNumber=7
+                    FileIndex=$fileIndex
+                    ReparsePoint=($Mode -eq 'root-identity-reparse' -and -not $isLocks)
+                }
+            }
+
+            { Assert-ProductionFixedRootBoundary `
+                    -Config $config -FixedRoot $root } |
+                Should -Throw '*Run guarded prod install before retrying*'
+        }
+
+        It 'acquires only the asserted fixed lock and rechecks the same identities under lock' {
+            $root = Join-Path $TestDrive 'locked-fixed-root'
+            $lockPath = Join-Path $root 'locks\deploy.lock'
+            $boundary = [pscustomobject]@{
+                Root=[IO.Path]::GetFullPath($root)
+                Locks=[IO.Path]::GetFullPath((Join-Path $root 'locks'))
+                LockPath=[IO.Path]::GetFullPath($lockPath)
+                RootIdentity=[pscustomobject]@{ VolumeSerialNumber=7; FileIndex=11 }
+                LocksIdentity=[pscustomobject]@{ VolumeSerialNumber=7; FileIndex=22 }
+            }
+            $config = [pscustomobject]@{ programDataRoot=$root }
+            $lock = [IO.MemoryStream]::new()
+            $script:boundaryAssertions = 0
+            Mock Assert-ProductionFixedRootBoundary {
+                $script:boundaryAssertions++
+                if ($script:boundaryAssertions -eq 2 -and $ExpectedBoundary -ne $boundary) {
+                    throw 'expected identity boundary was not rechecked'
+                }
+                $boundary
+            }
+            Mock Enter-DeploymentLock {
+                if ($LockPath -cne $boundary.LockPath) {
+                    throw 'config-derived lock path reached'
+                }
+                $lock
+            }
+
+            $guard = Enter-ProductionFixedRootDeploymentLock `
+                -Config $config -FixedRoot $root
+
+            [object]::ReferenceEquals($guard.Lock, $lock) | Should -BeTrue
+            [object]::ReferenceEquals($guard.Boundary, $boundary) | Should -BeTrue
+            $script:boundaryAssertions | Should -Be 2
+            $guard.Lock.Dispose()
+        }
+
+        It 'rejects a configured alternate root before any boundary read' {
+            $fixedRoot = Join-Path $TestDrive 'fixed-root'
+            $alternateRoot = Join-Path $TestDrive 'alternate-root'
+            $config = [pscustomobject]@{ programDataRoot=$alternateRoot }
+            Mock Get-Acl { throw 'boundary ACL must not be read' }
+
+            { Assert-ProductionFixedRootBoundary `
+                    -Config $config -FixedRoot $fixedRoot } |
+                Should -Throw '*Run guarded prod install before retrying*'
+
+            Should -Invoke Get-Acl -Times 0
+        }
+
+        It 'rejects non-fully-qualified configured root syntax before any boundary read' `
+                -ForEach @(
+            @{ ConfiguredRoot='C:ProgramData\christopherbell.dev' }
+            @{ ConfiguredRoot='relative\production' }
+            @{ ConfiguredRoot='\\server\share\christopherbell.dev' }
+            @{ ConfiguredRoot='\\?\C:\ProgramData\christopherbell.dev' }
+        ) {
+            $config = [pscustomobject]@{ programDataRoot=$ConfiguredRoot }
+            Mock Get-Acl { throw 'boundary ACL must not be read' }
+            $failure = $null
+
+            try {
+                Assert-ProductionFixedRootBoundary `
+                    -Config $config `
+                    -FixedRoot 'C:\ProgramData\christopherbell.dev' | Out-Null
+            } catch {
+                $failure = $_.Exception
+            }
+
+            $failure | Should -Not -BeNullOrEmpty
+            $failure.InnerException.Message |
+                Should -Be 'Configured production root must use a fully qualified local drive path.'
+            Should -Invoke Get-Acl -Times 0 -Exactly
+        }
+    }
+}
+
 Describe 'production writer-start schema boundary' {
     InModuleScope Production.WriterStart {
         BeforeEach {
             $script:config = [pscustomobject]@{ programDataRoot=$TestDrive; mongoShellExe='mongosh.exe' }
+            Mock Assert-ProductionFixedRootBoundary {
+                [pscustomobject]@{ Root=$TestDrive }
+            }
             Mock Protect-ProductionPath {}
             Mock Assert-ProtectedProductionPath { $true }
             Mock Protect-ProductionWriterStartServiceDirectory { }
@@ -21,6 +202,22 @@ Describe 'production writer-start schema boundary' {
             } | ConvertTo-Json | Set-Content -LiteralPath $markerPath
         }
 
+        It 'rejects an unsafe fixed root before release, marker, or authorization reads' {
+            $fixedRoot = Join-Path $TestDrive 'trusted-fixed-root'
+            Mock Assert-ProductionFixedRootBoundary { throw 'guarded fixed root required' }
+            Mock Read-ProductionReleaseIdentity { throw 'release read must not run' }
+            Mock Read-ProductionMusicSchemaDirection { throw 'marker read must not run' }
+            Mock Use-ProductionWriterStartAuthorization { throw 'authorization read must not run' }
+
+            { Assert-ProductionWriterStartAllowed `
+                    -Config $script:config -FixedRoot $fixedRoot } |
+                Should -Throw '*guarded fixed root required*'
+
+            Should -Invoke Read-ProductionReleaseIdentity -Times 0
+            Should -Invoke Read-ProductionMusicSchemaDirection -Times 0
+            Should -Invoke Use-ProductionWriterStartAuthorization -Times 0
+        }
+
         It 'allows only the exact release bound by a stable target marker' {
             Mock Read-ProductionReleaseIdentity {
                 [pscustomobject]@{ sha='1111111111111111111111111111111111111111'; musicSchema='TARGET' }
@@ -33,7 +230,8 @@ Describe 'production writer-start schema boundary' {
                 }
             }
 
-            { Assert-ProductionWriterStartAllowed -Config $script:config } |
+            { Assert-ProductionWriterStartAllowed `
+                    -Config $script:config -FixedRoot $TestDrive } |
                 Should -Not -Throw
         }
 
@@ -49,7 +247,8 @@ Describe 'production writer-start schema boundary' {
                 }
             }
 
-            { Assert-ProductionWriterStartAllowed -Config $script:config } |
+            { Assert-ProductionWriterStartAllowed `
+                    -Config $script:config -FixedRoot $TestDrive } |
                 Should -Throw '*incompatible*blocked*'
         }
 
@@ -60,7 +259,8 @@ Describe 'production writer-start schema boundary' {
             Mock Read-ProductionMusicSchemaDirection { $null }
             Mock Get-ProductionMusicMigrationActivationForWriterStart { $false }
 
-            { Assert-ProductionWriterStartAllowed -Config $script:config } |
+            { Assert-ProductionWriterStartAllowed `
+                    -Config $script:config -FixedRoot $TestDrive } |
                 Should -Not -Throw
         }
 
@@ -77,7 +277,8 @@ Describe 'production writer-start schema boundary' {
                 Mock Get-ProductionMusicMigrationActivationForWriterStart { throw 'unknown' }
             }
 
-            { Assert-ProductionWriterStartAllowed -Config $script:config } | Should -Throw
+            { Assert-ProductionWriterStartAllowed `
+                    -Config $script:config -FixedRoot $TestDrive } | Should -Throw
         }
 
         It 'consumes an exact pending start authorization once' {
@@ -215,26 +416,34 @@ Describe 'production writer-start schema boundary' {
                     [Security.AccessControl.FileSystemRights]::Synchronize)
         }
 
-        It 'hashes, protects, and verifies WinSW and its service XML in the committed bundle' {
+        It 'upgrades a compatible base Automatic host to the complete Manual v2 bundle' {
             $root = Join-Path $TestDrive 'complete-host-boundary'
             $source = Join-Path $root 'source'
             $service = Join-Path $root 'service'
             New-Item -ItemType Directory -Path $source,$service -Force | Out-Null
             $launcher = Join-Path $source 'Start-ChristopherBellDev.ps1'
             $module = Join-Path $source 'Production.WriterStart.psm1'
-            $winSw = Join-Path $service 'ChristopherBellDev.exe'
-            $serviceXml = Join-Path $service 'ChristopherBellDev.xml'
+            $sourceWinSw = Join-Path $source 'ChristopherBellDev.exe'
+            $sourceServiceXml = Join-Path $source 'ChristopherBellDev.xml'
+            $installedWinSw = Join-Path $service 'ChristopherBellDev.exe'
+            $installedServiceXml = Join-Path $service 'ChristopherBellDev.xml'
             'launcher' | Set-Content $launcher
             'module' | Set-Content $module
-            'winsw' | Set-Content $winSw
-            'service xml' | Set-Content $serviceXml
-            $winSwSha = (Get-FileHash $winSw -Algorithm SHA256).Hash.ToLowerInvariant()
-            $xmlSha = (Get-FileHash $serviceXml -Algorithm SHA256).Hash.ToLowerInvariant()
+            'pinned winsw' | Set-Content $sourceWinSw
+            'pinned winsw' | Set-Content $installedWinSw
+            '<service><startmode>Manual</startmode></service>' |
+                Set-Content $sourceServiceXml
+            '<service><startmode>Automatic</startmode></service>' |
+                Set-Content $installedServiceXml
+            $winSwSha = (Get-FileHash $sourceWinSw -Algorithm SHA256).Hash.ToLowerInvariant()
+            $xmlSha = (Get-FileHash $sourceServiceXml -Algorithm SHA256).Hash.ToLowerInvariant()
 
             $result = Publish-ProductionWriterStartGuardBundle `
                 -Config ([pscustomobject]@{ programDataRoot=$root }) `
                 -SourceLauncherPath $launcher `
                 -SourceModulePath $module `
+                -SourceWinSwPath $sourceWinSw `
+                -SourceServiceXmlPath $sourceServiceXml `
                 -ExpectedWinSwSha256 $winSwSha `
                 -ExpectedServiceXmlSha256 $xmlSha
 
@@ -249,11 +458,12 @@ Describe 'production writer-start schema boundary' {
                 -ExpectedModuleSha256 $result.moduleSha256 `
                 -ExpectedWinSwSha256 $winSwSha `
                 -ExpectedServiceXmlSha256 $xmlSha | Out-Null
+            Get-Content $installedServiceXml -Raw | Should -Match '<startmode>Manual</startmode>'
             Should -Invoke Protect-ProductionPath -ParameterFilter {
-                $Path -eq $winSw
+                $Path -eq $installedWinSw
             }
             Should -Invoke Protect-ProductionPath -ParameterFilter {
-                $Path -eq $serviceXml
+                $Path -eq $installedServiceXml
             }
         }
 
@@ -444,6 +654,74 @@ Describe 'production writer-start schema boundary' {
                 Should -BeFalse
         }
 
+        It 'keeps the five-file host uncommitted at publication checkpoint <Checkpoint>' `
+                -ForEach @(
+            @{ Checkpoint=1 },
+            @{ Checkpoint=2 },
+            @{ Checkpoint=3 },
+            @{ Checkpoint=4 },
+            @{ Checkpoint=5 }
+        ) {
+            $root = Join-Path $TestDrive "five-file-checkpoint-$Checkpoint"
+            $source = Join-Path $root 'source'
+            $service = Join-Path $root 'service'
+            New-Item -ItemType Directory -Path $source,$service -Force | Out-Null
+            $launcher = Join-Path $source 'Start-ChristopherBellDev.ps1'
+            $module = Join-Path $source 'Production.WriterStart.psm1'
+            $winSw = Join-Path $source 'ChristopherBellDev.exe'
+            $serviceXml = Join-Path $source 'ChristopherBellDev.xml'
+            'new guarded launcher' | Set-Content $launcher
+            'new guarded module' | Set-Content $module
+            'pinned winsw' | Set-Content $winSw
+            '<service><startmode>Manual</startmode></service>' | Set-Content $serviceXml
+            foreach ($name in @(
+                'Start-ChristopherBellDev.ps1',
+                'Production.WriterStart.psm1',
+                'ChristopherBellDev.exe',
+                'ChristopherBellDev.xml')) {
+                "old $name" | Set-Content (Join-Path $service $name)
+            }
+            [ordered]@{
+                version=2
+                launcherSha256=('1' * 64)
+                moduleSha256=('2' * 64)
+                winSwSha256=('3' * 64)
+                serviceXmlSha256=('4' * 64)
+            } | ConvertTo-Json | Set-Content (
+                Join-Path $service 'Production.WriterStart.bundle.json')
+            $winSwSha = (Get-FileHash $winSw -Algorithm SHA256).Hash.ToLowerInvariant()
+            $xmlSha = (Get-FileHash $serviceXml -Algorithm SHA256).Hash.ToLowerInvariant()
+            $script:publishMove = 0
+            Mock Publish-ProductionWriterStartGuardFile {
+                $script:publishMove++
+                if ($script:publishMove -eq $Checkpoint) {
+                    throw "simulated publication checkpoint $Checkpoint"
+                }
+                Copy-Item -LiteralPath $Source -Destination $Destination -Force
+            }
+
+            { Publish-ProductionWriterStartGuardBundle `
+                    -Config ([pscustomobject]@{ programDataRoot=$root }) `
+                    -SourceLauncherPath $launcher `
+                    -SourceModulePath $module `
+                    -SourceWinSwPath $winSw `
+                    -SourceServiceXmlPath $serviceXml `
+                    -ExpectedWinSwSha256 $winSwSha `
+                    -ExpectedServiceXmlSha256 $xmlSha } |
+                Should -Throw "*publication checkpoint $Checkpoint*"
+
+            Test-Path (Join-Path $service 'Production.WriterStart.bundle.json') |
+                Should -BeFalse
+            { Assert-ProductionWriterStartGuardBundle `
+                    -Config ([pscustomobject]@{ programDataRoot=$root }) `
+                    -ExpectedLauncherSha256 (
+                        (Get-FileHash $launcher -Algorithm SHA256).Hash.ToLowerInvariant()) `
+                    -ExpectedModuleSha256 (
+                        (Get-FileHash $module -Algorithm SHA256).Hash.ToLowerInvariant()) `
+                    -ExpectedWinSwSha256 $winSwSha `
+                    -ExpectedServiceXmlSha256 $xmlSha } | Should -Throw
+        }
+
         It 'consumes and rejects expired, wrong-release, and wrong-state authorizations' -ForEach @(
             @{ Kind='expired' }, @{ Kind='release' }, @{ Kind='state' }
         ) {
@@ -513,14 +791,21 @@ Describe 'production writer-start schema boundary' {
         $scriptText | Should -Match 'Assert-InstalledWriterStartGuardNotReparse'
         $scriptText.IndexOf('Assert-InstalledWriterStartGuardNotReparse -Path $root') |
             Should -BeLessThan $scriptText.IndexOf('config\deploy.json')
-        $scriptText.IndexOf('Assert-InstalledWriterStartGuardAcl -Path $serviceRoot') |
-            Should -BeLessThan $scriptText.IndexOf('config\deploy.json')
         $serviceDirectoryAcl = $scriptText.IndexOf(
             'Assert-InstalledWriterStartServiceDirectoryAcl -Path')
         $serviceDirectoryAcl | Should -BeGreaterOrEqual 0
         $serviceDirectoryAcl | Should -BeLessThan $scriptText.IndexOf('Import-Module')
         $scriptText.IndexOf('Get-FileHash') |
             Should -BeLessThan $scriptText.IndexOf('Import-Module')
+        $scriptText.IndexOf('Import-Module') |
+            Should -BeLessThan $scriptText.IndexOf('config\deploy.json')
+        $fixedBoundary = $scriptText.IndexOf(
+            'Assert-ProductionFixedRootBoundary -Config $config -FixedRoot $root')
+        $fixedBoundary | Should -BeGreaterThan $scriptText.IndexOf('Import-Module')
+        $fixedBoundary | Should -BeLessThan $scriptText.IndexOf(
+            'Assert-ProductionWriterStartAllowed')
+        $scriptText | Should -Match (
+            'Assert-ProductionWriterStartAllowed -Config \$config -FixedRoot \$root')
         $scriptText.IndexOf('Assert-ProductionWriterStartAllowed') |
             Should -BeLessThan $scriptText.IndexOf('& $config.javaExe')
         $winsw | Should -Match 'Start-ChristopherBellDev\.ps1'

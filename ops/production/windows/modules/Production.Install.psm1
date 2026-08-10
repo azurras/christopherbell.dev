@@ -537,6 +537,51 @@ function Install-WinSwBinary {
     return $binary
 }
 
+function Get-ProductionWinSwBundleSource {
+    param([Parameter(Mandatory)][string]$ServiceRoot)
+
+    $installed = Join-Path $ServiceRoot 'ChristopherBellDev.exe'
+    Assert-ProductionWebsiteServiceDestinationNotReparse -Path $installed
+    if (Test-Path -LiteralPath $installed -PathType Leaf) {
+        $installedHash = (Get-FileHash `
+            -LiteralPath $installed `
+            -Algorithm SHA256 `
+            -ErrorAction Stop).Hash
+        if ($installedHash -ceq $script:WinSwSha256) {
+            return [pscustomobject][ordered]@{
+                Path = $installed
+                Temporary = $false
+            }
+        }
+    }
+
+    $source = Join-Path $ServiceRoot (
+        '.winsw-source-' + [guid]::NewGuid().ToString('N') + '.exe')
+    Assert-ProductionWebsiteServiceDestinationNotReparse -Path $source
+    try {
+        Invoke-WebRequest $script:WinSwUri -OutFile $source
+        if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -cne
+                $script:WinSwSha256) {
+            throw 'WinSW SHA-256 verification failed.'
+        }
+        Protect-ProductionPath -Path $source
+        Assert-ProtectedProductionPath -Path $source | Out-Null
+        if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -cne
+                $script:WinSwSha256) {
+            throw 'Protected WinSW source SHA-256 verification failed.'
+        }
+        return [pscustomobject][ordered]@{
+            Path = $source
+            Temporary = $true
+        }
+    } catch {
+        if (Test-Path -LiteralPath $source) {
+            Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
+        }
+        throw
+    }
+}
+
 function Assert-ProductionWebsiteServiceDestinationNotReparse {
     param([Parameter(Mandatory)][string]$Path)
 
@@ -714,54 +759,11 @@ function Assert-ProductionInstallRootDirectoryAcl {
     )
 
     Assert-ProductionInstallPathTraversal -Path $Path
-    if (-not $PSBoundParameters.ContainsKey('SecurityDescriptor')) {
-        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
-        $SecurityDescriptor =
-            [Security.AccessControl.RawSecurityDescriptor]::new(
-                $acl.GetSecurityDescriptorBinaryForm(), 0)
+    $arguments = @{ Path=$Path }
+    if ($PSBoundParameters.ContainsKey('SecurityDescriptor')) {
+        $arguments.SecurityDescriptor = $SecurityDescriptor
     }
-    $protectedFlag =
-        [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected
-    if (($SecurityDescriptor.ControlFlags -band $protectedFlag) -eq 0) {
-        throw "Install root ACL inheritance must be protected: $Path"
-    }
-    $administrators = 'S-1-5-32-544'
-    if ($null -eq $SecurityDescriptor.Owner -or
-        $SecurityDescriptor.Owner.Value -cne $administrators) {
-        throw "Install root ACL owner must be Builtin Administrators: $Path"
-    }
-    $aces = @($SecurityDescriptor.DiscretionaryAcl)
-    if ($aces.Count -ne 2) {
-        throw "Install root ACL must have exactly two explicit ACEs: $Path"
-    }
-    $system = 'S-1-5-18'
-    $systemAces = @($aces | Where-Object {
-            $_ -is [Security.AccessControl.CommonAce] -and
-            $_.AceType -eq [Security.AccessControl.AceType]::AccessAllowed -and
-            $_.SecurityIdentifier.Value -ceq $system
-        })
-    $administratorAces = @($aces | Where-Object {
-            $_ -is [Security.AccessControl.CommonAce] -and
-            $_.AceType -eq [Security.AccessControl.AceType]::AccessAllowed -and
-            $_.SecurityIdentifier.Value -ceq $administrators
-        })
-    if ($systemAces.Count -ne 1 -or $administratorAces.Count -ne 1) {
-        throw (
-            "Install root ACL must have one SYSTEM and one Administrators allow ACE: $Path")
-    }
-    $fullControl = [int][Security.AccessControl.FileSystemRights]::FullControl
-    $inheritance =
-        [int][Security.AccessControl.AceFlags]::ContainerInherit -bor
-        [int][Security.AccessControl.AceFlags]::ObjectInherit
-    foreach ($ace in @($systemAces[0],$administratorAces[0])) {
-        if ([int]$ace.AccessMask -ne $fullControl) {
-            throw "Install root ACEs must grant exact FullControl rights: $Path"
-        }
-        if ([int]$ace.AceFlags -ne $inheritance) {
-            throw (
-                "Install root ACEs must use exact inheritance and propagation: $Path")
-        }
-    }
+    Assert-ProductionFixedRootDirectoryAcl @arguments
 }
 
 function Assert-ProductionInstallProtectedDirectoryState {
@@ -1157,22 +1159,36 @@ function Invoke-ProductionWinSwServiceInstall {
 function Publish-ProductionWebsiteWriterStartBundle {
     param(
         [Parameter(Mandatory)]$Configuration,
+        [Parameter(Mandatory)][string]$SourceWinSwPath,
+        [Parameter(Mandatory)][string]$SourceServiceXmlPath,
         [Parameter(Mandatory)][string]$WinSwSha,
         [Parameter(Mandatory)][string]$ServiceXmlSha
     )
 
     $writerStartModule = Get-Module Production.WriterStart -ErrorAction Stop
     & $writerStartModule {
-        param($Value, $Launcher, $ModulePath, $ExpectedWinSw, $ExpectedServiceXml)
+        param(
+            $Value,
+            $Launcher,
+            $ModulePath,
+            $SourceWinSw,
+            $SourceServiceXml,
+            $ExpectedWinSw,
+            $ExpectedServiceXml
+        )
         Publish-ProductionWriterStartGuardBundle `
             -Config $Value `
             -SourceLauncherPath $Launcher `
             -SourceModulePath $ModulePath `
+            -SourceWinSwPath $SourceWinSw `
+            -SourceServiceXmlPath $SourceServiceXml `
             -ExpectedWinSwSha256 $ExpectedWinSw `
             -ExpectedServiceXmlSha256 $ExpectedServiceXml | Out-Null
     } $Configuration `
         (Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1') `
         (Join-Path $PSScriptRoot 'Production.WriterStart.psm1') `
+        $SourceWinSwPath `
+        $SourceServiceXmlPath `
         $WinSwSha `
         $ServiceXmlSha
 }
@@ -1207,18 +1223,27 @@ function Install-WebsiteService {
     }
     $service = Protect-ProductionWebsiteServiceDirectory -Configuration $Configuration
     Set-ProductionMongoServiceInstallPolicy
-    $binary = Install-WinSwBinary -ServiceRoot $service
     $sourceXml = Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml'
     Assert-ProductionWebsiteServiceXmlSafeRegistration -Path $sourceXml
-    $installedXml = Join-Path $service 'ChristopherBellDev.xml'
-    Assert-ProductionWebsiteServiceDestinationNotReparse -Path $installedXml
-    Copy-Item $sourceXml $installedXml -Force
     $winSwSha = Get-ProductionWinSwSha256
     $serviceXmlSha = (Get-FileHash -LiteralPath $sourceXml -Algorithm SHA256).Hash.ToLowerInvariant()
-    Publish-ProductionWebsiteWriterStartBundle `
-        -Configuration $Configuration `
-        -WinSwSha $winSwSha `
-        -ServiceXmlSha $serviceXmlSha
+    $winSwSource = Get-ProductionWinSwBundleSource -ServiceRoot $service
+    try {
+        Publish-ProductionWebsiteWriterStartBundle `
+            -Configuration $Configuration `
+            -SourceWinSwPath $winSwSource.Path `
+            -SourceServiceXmlPath $sourceXml `
+            -WinSwSha $winSwSha `
+            -ServiceXmlSha $serviceXmlSha
+    } finally {
+        if ($winSwSource.Temporary -and
+            (Test-Path -LiteralPath $winSwSource.Path -PathType Leaf)) {
+            Assert-ProductionWebsiteServiceDestinationNotReparse `
+                -Path $winSwSource.Path
+            Remove-Item -LiteralPath $winSwSource.Path -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $binary = Join-Path $service 'ChristopherBellDev.exe'
     if (-not (Get-ProductionWebsiteServiceOrNull)) {
         Invoke-ProductionWinSwServiceInstall -Binary $binary
         if (-not (Get-ProductionWebsiteServiceOrNull)) {
@@ -1268,6 +1293,10 @@ function Invoke-ProductionRuntimeInstallAtRoot {
             $config = Read-ProductionConfig (Join-Path $root 'config\deploy.json')
             Assert-ProductionConfiguredRootBoundary `
                 -Configuration $config -Boundary $boundary
+            Assert-ProductionFixedRootBoundary `
+                -Config $config `
+                -FixedRoot $root `
+                -ExpectedBoundary $boundary | Out-Null
             $productionPort = [int]$config.productionPort
             Read-ProductionEnvironment (Join-Path $root 'config\app.env') | Out-Null
             Protect-ProductionSecrets $root

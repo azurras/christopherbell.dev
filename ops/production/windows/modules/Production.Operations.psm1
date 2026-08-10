@@ -1,5 +1,18 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
+
+function Enter-OperationsFixedRootDeploymentLock {
+    param([Parameter(Mandatory)]$Config)
+
+    Enter-ProductionFixedRootDeploymentLock `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+}
 
 function Invoke-MusicReverseCopyUnderHeldLock {
     param([Parameter(Mandatory)]$Config)
@@ -57,8 +70,10 @@ function Get-ProductionStatus {
 function Invoke-ProductionRollback {
     [CmdletBinding()]
     param([switch]$WhatIf)
-    $config = Read-ProductionConfig
-    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-OperationsFixedRootDeploymentLock -Config $config
+    $lock = $guard.Lock
     try {
         $currentPath = Join-Path $config.programDataRoot 'current'
         $previousPath = Join-Path $config.programDataRoot 'previous'
@@ -235,8 +250,10 @@ function Watch-ProductionLogs {
 function Restart-ProductionService {
     [CmdletBinding()]
     param([switch]$Verify)
-    $config = Read-ProductionConfig
-    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-OperationsFixedRootDeploymentLock -Config $config
+    $lock = $guard.Lock
     try {
         $direction = Read-ProductionMusicSchemaDirection -Config $config
         if ($direction) {
@@ -281,8 +298,10 @@ function Invoke-ProductionMigrationAwareRollback {
     if (-not $Confirm) {
         throw 'Migration-aware Music rollback requires explicit confirmation.'
     }
-    $config = Read-ProductionConfig
-    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-OperationsFixedRootDeploymentLock -Config $config
+    $lock = $guard.Lock
     $copy = $null
     try {
         $direction = Read-ProductionMusicSchemaDirection -Config $config

@@ -17,6 +17,9 @@ legacy-port parser gaps in a second separate follow-up commit.
 Fix Round 3 closes the exact install-root ACL and native replacement-race evidence gaps in a
 third separate follow-up commit.
 
+Fix Round 4 closes the final whole-branch integration review's universal fixed-root gate and
+base WinSW/XML upgrade blockers in a fourth separate follow-up commit.
+
 ## Outcomes
 
 - The deploy-lock-held pre-guard upgrade sets `ChristopherBellDev` to `Disabled` and verifies the
@@ -78,6 +81,28 @@ third separate follow-up commit.
   no website service is registered rather than inventing a disappearance cause.
 - Sensor configuration compares canonical Windows roots with
   `StringComparison.OrdinalIgnoreCase`.
+- `Production.WriterStart` now owns the singular fixed-root boundary assertion. It requires
+  `config.programDataRoot` to equal the caller-trusted fixed root with `OrdinalIgnoreCase`,
+  rejects reparse traversal, verifies exact root and `locks` ACLs, proves native final paths and
+  volume/file identities are stable, and rechecks both identities after acquiring only the fixed
+  `deploy.lock`. Failures use exact guarded-install guidance; only `prod install` bootstraps or
+  repairs the boundary.
+- The installed launcher verifies the literal fixed root, service directory, exact version-2
+  manifest, and launcher/module/WinSW/XML hashes before importing the manifest-pinned module or
+  reading configuration. It then invokes the singular root/locks assertion and rejects an
+  alternate configured root before marker, authorization, environment, current-JAR, or JVM
+  effects.
+- Manual deploy, target confirmation, direct candidate start, release switch, reconciliation,
+  generic and migration-aware rollback, restart, automatic deploy, auto-task installation, sensor
+  mutation, and the internal reverse-copy primitive now use the same trusted fixed-root assertion
+  or guarded fixed-lock helper before marker, database, candidate, junction, state, log, or service
+  effects. Public sensor commands no longer accept caller-selected root or config paths.
+- Guard publication now stages and protects the pinned WinSW executable, exact current Manual
+  service XML, launcher, module, and manifest. The four host inputs publish first and the
+  manifest is the commit point. Deploy accepts only the hash-compatible installed WinSW as its
+  source; install can stage a freshly downloaded pinned WinSW without overwriting an incompatible
+  installed host before publication. A base-era Automatic XML is upgraded while the service is
+  Disabled, stopped, and recovery-suspended.
 
 ## TDD and Review
 
@@ -104,6 +129,12 @@ third separate follow-up commit.
   contract on both hosts.
 - The launcher ordering test now requires the actual
   `Assert-InstalledWriterStartServiceDirectoryAcl` call to exist before comparing its position.
+- Fix Round 4 RED tests reproduced config-derived deploy locks, alternate-root marker/database/
+  junction/service effects, unsafe auto-deploy error logging, direct start seams without the
+  fixed boundary, a caller-selected sensor root, inability to upgrade base Automatic XML, and an
+  old manifest surviving partial five-file publication. Each went GREEN through the singular
+  assertion, fixed-lock helper, trusted public command provenance, explicit host sources, and
+  manifest invalidation/last publication.
 
 ## Verification
 
@@ -125,6 +156,20 @@ third separate follow-up commit.
   0 errors; both hosts also parsed the WinSW XML successfully. `git diff --check` passed.
 - Module-resolution probes using production import order found the new Deploy-to-Install and
   Install-to-Deploy commands at runtime.
+- Fix Round 4 full PowerShell 7 production suite: 546 discovered, 519 passed, 0 failed, 27
+  skipped. The final WriterStart/Install/Sensors/Deploy/Operations focus discovered 328 tests,
+  passed 326, failed 0, and skipped the 2 opt-in ACL tests. After the public sensor provenance
+  self-review fix, the complete Sensors module discovered and passed 28 tests with 0 failures.
+- Fix Round 4 approved Windows PowerShell 5.1 WriterStart/Install/Operations: 231 discovered,
+  229 passed, 0 failed, 2 skipped. The exact new universal-boundary, launcher, base XML,
+  five-file crash, auto-deploy, sensor, and reverse-copy selection discovered 399 tests, selected
+  25, passed 25, and failed 0.
+- Fix Round 4 parsed all 15 changed PowerShell files with 0 errors on PowerShell 7 and Windows
+  PowerShell 5.1. Both hosts parsed the service XML with exact `Manual` start mode.
+- Independent review reported no Critical findings. Its Important finding that drive-relative
+  roots could reach the native boundary is closed by requiring local fully qualified drive roots;
+  the four-input relative/drive-relative/UNC/device matrix passes on both hosts. Its Minor launcher
+  ordering-test false positive is closed by asserting the searched call exists before ordering it.
 
 ## ACL Evidence and Scope
 
@@ -149,5 +194,10 @@ third separate follow-up commit.
   configuration was changed. Fix Round 2 performed read-only `Get-Acl` inspection of `C:\` and
   `C:\ProgramData` to verify the fixed-parent replacement-control model; all mutation/integration
   tests used owned disposable paths. Fix Round 3 did not inspect or mutate any production resource.
+  Fix Round 4 likewise touched no production resource.
+- Fix Round 4 reran both real ACL opt-ins on PowerShell 7 and Windows PowerShell 5.1. Each host
+  failed only at the explicit elevation precondition before creating its disposable root; writer
+  and install residue deltas were both zero. Elevated PS7 and PS5.1 NTFS ACL application/readback
+  plus native file-identity success remains the mandatory Task 7 gate.
 - The unrelated modified `gradlew.bat` and untracked `testResults.xml` remain preserved and are
   excluded from this task's commit.

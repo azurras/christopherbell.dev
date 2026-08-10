@@ -1,4 +1,5 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.WriterStart.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Sensors.psm1') -Force
 
@@ -13,7 +14,58 @@ Describe 'PawnIO sensor provider operations' {
             Mock Protect-ProductionPath {}
             Mock Protect-ProductionTree {}
             Mock Assert-ProtectedProductionTree {}
+            Mock Read-ProductionConfig {
+                Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+            }
+            Mock Assert-ProductionFixedRootBoundary {
+                [pscustomobject]@{ LockPath = Join-Path $TestDrive 'locks\deploy.lock' }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{
+                    Lock = Enter-DeploymentLock -LockPath (Join-Path $TestDrive 'locks\deploy.lock')
+                }
+            }
             Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+        }
+
+        It 'keeps fixed production-root provenance out of the public sensor API' {
+            (Get-Command Set-ProductionSensorState).Parameters.Keys |
+                Should -Not -Contain 'ConfigPath'
+            (Get-Command Set-ProductionSensorState).Parameters.Keys |
+                Should -Not -Contain 'FixedRoot'
+            (Get-Command Install-PawnIoProvider).Parameters.Keys |
+                Should -Not -Contain 'Root'
+        }
+
+        It 'rejects an alternate sensor config before lock, config mutation, or service effects' {
+            $fixedRoot = 'C:\ProgramData\christopherbell.dev'
+            $configPath = Join-Path $fixedRoot 'config\deploy.json'
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot = 'C:\attacker-controlled'
+                    productionPort = 8080
+                    sensorLibrariesEnabled = $false
+                }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                if ($FixedRoot -cne 'C:\ProgramData\christopherbell.dev') {
+                    throw 'wrong fixed root reached'
+                }
+                throw ('Production root boundary is not guarded. ' +
+                    'Run guarded prod install before retrying.')
+            }
+            Mock Enter-DeploymentLock { throw 'unsafe lock was reached' }
+            Mock Write-ProductionSensorConfig { throw 'config mutation was reached' }
+            Mock Restart-Service { throw 'service was reached' }
+
+            {
+                Set-ProductionSensorStateAtRoot `
+                    -Enabled $false `
+                    -FixedRoot $fixedRoot
+            } | Should -Throw '*Run guarded prod install before retrying*'
+            Should -Invoke Enter-DeploymentLock -Times 0 -Exactly
+            Should -Invoke Write-ProductionSensorConfig -Times 0 -Exactly
+            Should -Invoke Restart-Service -Times 0 -Exactly
         }
 
         It 'rejects an installer whose hash or signer thumbprint differs' {
@@ -30,19 +82,19 @@ Describe 'PawnIO sensor provider operations' {
             Mock Invoke-WebRequest { 'installer' | Set-Content -LiteralPath $OutFile }
             Mock Assert-PawnIoInstaller {}
             Mock Start-Process { [pscustomobject]@{ ExitCode=3010 } }
-            Mock Set-ProductionSensorState {}
-            { Install-PawnIoProvider -Root $TestDrive } | Should -Throw '*reboot required*'
-            Should -Invoke Set-ProductionSensorState -ParameterFilter { -not $Enabled }
+            Mock Set-ProductionSensorStateAtRoot {}
+            { Install-PawnIoProviderAtRoot -Root $TestDrive } | Should -Throw '*reboot required*'
+            Should -Invoke Set-ProductionSensorStateAtRoot -ParameterFilter { -not $Enabled }
         }
 
         It 'never enables sensors as part of a successful install' {
             Mock Invoke-WebRequest { 'installer' | Set-Content -LiteralPath $OutFile }
             Mock Assert-PawnIoInstaller {}
             Mock Start-Process { [pscustomobject]@{ ExitCode=0 } }
-            Mock Set-ProductionSensorState {}
+            Mock Set-ProductionSensorStateAtRoot {}
             Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
-            Install-PawnIoProvider -Root $TestDrive
-            Should -Invoke Set-ProductionSensorState -Times 1 -ParameterFilter { -not $Enabled }
+            Install-PawnIoProviderAtRoot -Root $TestDrive
+            Should -Invoke Set-ProductionSensorStateAtRoot -Times 1 -ParameterFilter { -not $Enabled }
             Should -Invoke Start-MpScan -Times 2
         }
 
@@ -50,10 +102,10 @@ Describe 'PawnIO sensor provider operations' {
             Mock Invoke-WebRequest { 'installer' | Set-Content -LiteralPath $OutFile }
             Mock Assert-PawnIoInstaller {}
             Mock Start-Process { [pscustomobject]@{ ExitCode=0 } }
-            Mock Set-ProductionSensorState {}
+            Mock Set-ProductionSensorStateAtRoot {}
             Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
 
-            Install-PawnIoProvider -Root $TestDrive
+            Install-PawnIoProviderAtRoot -Root $TestDrive
 
             Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
                 $ArgumentList.Count -eq 2 -and
@@ -74,10 +126,10 @@ Describe 'PawnIO sensor provider operations' {
             }
             Mock Assert-PawnIoInstaller {}
             Mock Start-Process { [pscustomobject]@{ ExitCode=0 } }
-            Mock Set-ProductionSensorState {}
+            Mock Set-ProductionSensorStateAtRoot {}
             Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
 
-            Install-PawnIoProvider -Root $TestDrive
+            Install-PawnIoProviderAtRoot -Root $TestDrive
 
             $script:protectedPaths[0] | Should -Be ([IO.Path]::GetFullPath($TestDrive))
             $relative = [IO.Path]::GetRelativePath($TestDrive, $script:downloadPath)
@@ -88,7 +140,8 @@ Describe 'PawnIO sensor provider operations' {
         }
 
         It 'fails enablement closed and restores false when endpoint verification fails' {
-            $configPath = Join-Path $TestDrive 'deploy.json'
+            $configPath = Join-Path $TestDrive 'config\deploy.json'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $configPath) -Force | Out-Null
             @{ productionPort=8080; sensorLibrariesEnabled=$false } | ConvertTo-Json | Set-Content $configPath
             Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
             $script:endpointAttempts = 0
@@ -96,7 +149,7 @@ Describe 'PawnIO sensor provider operations' {
                 $script:endpointAttempts++
                 if ($script:endpointAttempts -eq 1) { throw 'endpoint failed' }
             }
-            { Set-ProductionSensorState -Enabled $true -ConfigPath $configPath } | Should -Throw '*endpoint failed*'
+            { Set-ProductionSensorStateAtRoot -Enabled $true -FixedRoot $TestDrive } | Should -Throw '*endpoint failed*'
             (Get-Content $configPath -Raw | ConvertFrom-Json).sensorLibrariesEnabled | Should -BeFalse
             Should -Invoke Restart-Service -Times 2 -ParameterFilter { $Name -eq 'ChristopherBellDev' }
             Should -Invoke Enter-DeploymentLock -Times 1 -Exactly
@@ -116,7 +169,7 @@ Describe 'PawnIO sensor provider operations' {
             Mock Restart-Service { [void]$events.Add('restart') }
             Mock Test-ProductionEndpoints { [void]$events.Add('health') }
 
-            Set-ProductionSensorState -Enabled $true -ConfigPath $configPath
+            Set-ProductionSensorStateAtRoot -Enabled $true -FixedRoot $TestDrive
 
             $events | Should -Be @('lock:acquire','config','restart','health','lock:release')
         }
@@ -131,7 +184,7 @@ Describe 'PawnIO sensor provider operations' {
             Mock Write-ProductionSensorConfig { throw 'config must not change' }
             Mock Restart-Service { throw 'service must not restart' }
 
-            { Set-ProductionSensorState -Enabled $true -ConfigPath $configPath } |
+            { Set-ProductionSensorStateAtRoot -Enabled $true -FixedRoot $TestDrive } |
                 Should -Throw '*lock contended*'
             Should -Invoke Write-ProductionSensorConfig -Times 0
             Should -Invoke Restart-Service -Times 0
@@ -147,7 +200,7 @@ Describe 'PawnIO sensor provider operations' {
                 sensorLibrariesEnabled = $false
             } | ConvertTo-Json | Set-Content $configPath
 
-            { Set-ProductionSensorState -Enabled $false -ConfigPath $configPath } |
+            { Set-ProductionSensorStateAtRoot -Enabled $false -FixedRoot $TestDrive } |
                 Should -Not -Throw
 
             Should -Invoke Restart-Service -Times 1 -Exactly
@@ -169,7 +222,7 @@ Describe 'PawnIO sensor provider operations' {
                 if ($script:restartAttempt -eq 1) { throw 'restart failed' }
             }
 
-            { Set-ProductionSensorState -Enabled $false -ConfigPath $configPath } |
+            { Set-ProductionSensorStateAtRoot -Enabled $false -FixedRoot $TestDrive } |
                 Should -Throw '*restart failed*'
 
             (Get-Content $configPath -Raw | ConvertFrom-Json).sensorLibrariesEnabled |

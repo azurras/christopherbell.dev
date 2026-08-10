@@ -1,5 +1,6 @@
 $moduleRoot = Join-Path $PSScriptRoot '..\modules'
 Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $moduleRoot 'Production.WriterStart.psm1') -Global -Force
 Import-Module (Join-Path $moduleRoot 'Production.MusicRuntime.psm1') -Force
 
 BeforeAll {
@@ -596,6 +597,41 @@ Describe 'Music runtime rollback operation' {
         BeforeEach {
             $script:lastDeploymentLock = New-TestDeploymentLock
             Mock Enter-DeploymentLock { $script:lastDeploymentLock }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{
+                    Lock = Enter-DeploymentLock `
+                        -LockPath 'C:\ProgramData\christopherbell.dev\locks\deploy.lock'
+                }
+            }
+        }
+
+        It 'rejects an alternate rollback root before lock, service, backup, or database effects' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot = 'C:\attacker-controlled'
+                    mongoShellExe = 'C:\attacker-controlled\mongosh.exe'
+                    repositoryPath = 'C:\attacker-controlled\repository'
+                }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                if ($FixedRoot -cne 'C:\ProgramData\christopherbell.dev') {
+                    throw 'wrong fixed root reached'
+                }
+                throw ('Production root boundary is not guarded. ' +
+                    'Run guarded prod install before retrying.')
+            }
+            Mock Enter-DeploymentLock { throw 'unsafe lock was reached' }
+            Mock Get-Service { throw 'service was reached' }
+            Mock New-ProductionBackup { throw 'backup was reached' }
+            Mock Invoke-CheckedProcess { throw 'database was reached' }
+
+            { Invoke-ProductionMusicRuntimeStateRollback -Confirm } |
+                Should -Throw '*Run guarded prod install before retrying*'
+            Should -Invoke Enter-ProductionFixedRootDeploymentLock -Times 1 -Exactly
+            Should -Invoke Enter-DeploymentLock -Times 0 -Exactly
+            Should -Invoke Get-Service -Times 0 -Exactly
+            Should -Invoke New-ProductionBackup -Times 0 -Exactly
+            Should -Invoke Invoke-CheckedProcess -Times 0 -Exactly
         }
 
         It 'generates a fixed reverse-copy script without destructive collection operations' {
@@ -699,7 +735,7 @@ Describe 'Music runtime rollback operation' {
 
             $events | Should -Be @('lock-acquire','service-check','lock-release')
             Should -Invoke Enter-DeploymentLock -Times 1 -Exactly -ParameterFilter {
-                $LockPath -eq 'C:\production\locks\deploy.lock'
+                $LockPath -eq 'C:\ProgramData\christopherbell.dev\locks\deploy.lock'
             }
         }
 

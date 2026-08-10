@@ -78,8 +78,6 @@ try {
     Assert-InstalledWriterStartGuardNotReparse -Path $root
     Assert-InstalledWriterStartGuardNotReparse -Path $serviceRoot
     Assert-InstalledWriterStartServiceDirectoryAcl -Path $serviceRoot
-    $config = Get-Content -LiteralPath (Join-Path $root 'config\deploy.json') -Raw |
-        ConvertFrom-Json
     foreach ($path in @($PSCommandPath,$modulePath,$manifestPath,$winSwPath,$serviceXmlPath)) {
         Assert-InstalledWriterStartGuardNotReparse -Path $path
         Assert-InstalledWriterStartGuardAcl -Path $path
@@ -118,7 +116,10 @@ try {
         $_.Exception)
 }
 Import-Module $modulePath -Force
-Assert-ProductionWriterStartAllowed -Config $config
+$config = Get-Content -LiteralPath (Join-Path $root 'config\deploy.json') -Raw |
+    ConvertFrom-Json
+Assert-ProductionFixedRootBoundary -Config $config -FixedRoot $root | Out-Null
+Assert-ProductionWriterStartAllowed -Config $config -FixedRoot $root
 $sensorProperty = $config.PSObject.Properties['sensorLibrariesEnabled']
 if (-not $sensorProperty -or $sensorProperty.Value -isnot [bool]) {
     throw 'deploy.json sensorLibrariesEnabled must be a Boolean.'

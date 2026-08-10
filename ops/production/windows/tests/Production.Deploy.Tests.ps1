@@ -1,10 +1,21 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.WriterStart.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.MusicRuntime.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
 
 Describe 'native Windows deployment' {
     InModuleScope Production.Deploy {
         BeforeEach {
+            Mock Assert-ProductionFixedRootBoundary {
+                [pscustomobject]@{ Root='C:\ProgramData\christopherbell.dev' }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{
+                    Lock = Enter-DeploymentLock `
+                        -LockPath 'C:\ProgramData\christopherbell.dev\locks\deploy.lock'
+                }
+            }
             Mock Read-ProductionMusicSchemaDirection {
                 [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$target; legacyRelease=$legacy }
             }
@@ -185,6 +196,99 @@ Describe 'native Windows deployment' {
                 Assert-ProductionWebsiteRecoveryPolicy `
                     -Policy Normal -QueryOutput $queryOutput
             } | Should -Not -Throw
+        }
+
+        It 'rejects an alternate deploy root before lock, marker, database, candidate, junction, or service effects' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot='C:\attacker-controlled-root'
+                    productionPort=8080
+                }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                if ($FixedRoot -cne 'C:\ProgramData\christopherbell.dev') {
+                    throw 'trusted fixed-root provenance was not used'
+                }
+                throw 'Production root boundary is not guarded. Run guarded prod install before retrying.'
+            }
+            Mock Enter-DeploymentLock { throw 'unsafe config-derived lock was reached' }
+            Mock Read-ProductionMusicSchemaDirection { throw 'marker read must not run' }
+            Mock New-ProductionBackup { throw 'database effect must not run' }
+            Mock Invoke-CandidateReleaseValidation { throw 'candidate effect must not run' }
+            Mock Set-AtomicJunction { throw 'junction effect must not run' }
+            Mock Start-Service { throw 'service effect must not run' }
+
+            { Invoke-ProductionDeploy } |
+                Should -Throw '*Run guarded prod install before retrying*'
+
+            Should -Invoke Enter-DeploymentLock -Times 0
+            Should -Invoke Read-ProductionMusicSchemaDirection -Times 0
+            Should -Invoke New-ProductionBackup -Times 0
+            Should -Invoke Invoke-CandidateReleaseValidation -Times 0
+            Should -Invoke Set-AtomicJunction -Times 0
+            Should -Invoke Start-Service -Times 0
+        }
+
+        It 'rejects an alternate root before every direct writer start seam' -TestCases @(
+            @{
+                Seam = 'candidate process'
+                Invoke = {
+                    Start-ProductionJar `
+                        -Config $config `
+                        -Release 'C:\attacker-controlled\releases\0123456789abcdef0123456789abcdef01234567' `
+                        -Port 8081 `
+                        -Profiles 'prod'
+                }
+            }
+            @{
+                Seam = 'release switch'
+                Invoke = {
+                    Switch-ProductionRelease `
+                        -Config $config `
+                        -Release 'C:\attacker-controlled\releases\0123456789abcdef0123456789abcdef01234567'
+                }
+            }
+            @{
+                Seam = 'reconciliation switch'
+                Invoke = {
+                    Switch-ProductionReleaseAfterMusicReconciliation `
+                        -Config $config `
+                        -Release 'C:\attacker-controlled\releases\0123456789abcdef0123456789abcdef01234567' `
+                        -Sha '0123456789abcdef0123456789abcdef01234567' `
+                        -Direction ([pscustomobject]@{
+                            legacyRelease = '89abcdef0123456789abcdef0123456789abcdef'
+                        })
+                }
+            }
+        ) {
+            param($Seam, $Invoke)
+
+            $config = [pscustomobject]@{
+                programDataRoot = 'C:\attacker-controlled'
+                productionPort = 8080
+            }
+            Mock Assert-ProductionFixedRootBoundary {
+                if ($FixedRoot -cne 'C:\ProgramData\christopherbell.dev') {
+                    throw "wrong fixed root reached for $Seam"
+                }
+                throw ('Production root boundary is not guarded. ' +
+                    'Run guarded prod install before retrying.')
+            }
+            Mock Assert-ReleasePath { throw 'release was reached' }
+            Mock Read-ProductionEnvironment { throw 'environment was reached' }
+            Mock Get-JunctionTarget { throw 'junction was reached' }
+            Mock Set-AtomicJunction { throw 'junction mutation was reached' }
+            Mock Invoke-ProductionMusicRuntimeReconciliationNoLock { throw 'database was reached' }
+            Mock Start-Service { throw 'service was reached' }
+
+            { & $Invoke } | Should -Throw '*Run guarded prod install before retrying*'
+            Should -Invoke Assert-ProductionFixedRootBoundary -Times 1 -Exactly
+            Should -Invoke Assert-ReleasePath -Times 0 -Exactly
+            Should -Invoke Read-ProductionEnvironment -Times 0 -Exactly
+            Should -Invoke Get-JunctionTarget -Times 0 -Exactly
+            Should -Invoke Set-AtomicJunction -Times 0 -Exactly
+            Should -Invoke Invoke-ProductionMusicRuntimeReconciliationNoLock -Times 0 -Exactly
+            Should -Invoke Start-Service -Times 0 -Exactly
         }
 
         It 'sets and verifies the exact website service startup type' -ForEach @(
@@ -1181,6 +1285,53 @@ Describe 'native Windows deployment' {
             $events | Should -Be @(
                 'startup:Disabled','stop-suspended','bundle-verified','startup:Automatic')
             Should -Invoke Start-Service -Times 0
+        }
+
+        It 'publishes the current Manual XML over a compatible base service bundle' {
+            $config = [pscustomobject]@{
+                programDataRoot = 'C:\data'
+                productionPort = 8080
+            }
+            $expectedWinSw = 'a' * 64
+            Mock Get-ProductionWinSwSha256 { $expectedWinSw }
+            Mock Publish-ProductionWriterStartGuardBundle { } `
+                -ModuleName Production.WriterStart
+            Mock Assert-ProductionWebsiteServiceBoundary { }
+
+            Install-CoordinatedProductionWriterStartGuardBundle -Config $config
+
+            Should -Invoke Publish-ProductionWriterStartGuardBundle `
+                -Times 1 `
+                -Exactly `
+                -ModuleName Production.WriterStart `
+                -ParameterFilter {
+                    $SourceWinSwPath -eq 'C:\data\service\ChristopherBellDev.exe' -and
+                    $SourceServiceXmlPath -like '*service\ChristopherBellDev.xml' -and
+                    $ExpectedWinSwSha256 -eq $expectedWinSw -and
+                    $ExpectedServiceXmlSha256 -match '^[0-9a-f]{64}$'
+                }
+        }
+
+        It 'refuses a guard upgrade on an unsafe root before changing the service' {
+            $config = [pscustomobject]@{
+                programDataRoot = 'C:\attacker-controlled'
+                productionPort = 8080
+            }
+            Mock Assert-ProductionFixedRootBoundary {
+                throw ('Production root boundary is not guarded. ' +
+                    'Run guarded prod install before retrying.')
+            }
+            Mock Set-ProductionWebsiteStartupType { throw 'startup type was reached' }
+            Mock Stop-ProductionWebsiteService { throw 'service stop was reached' }
+            Mock Install-CoordinatedProductionWriterStartGuardBundle {
+                throw 'publication was reached'
+            }
+
+            { & $script:ensureGuardImplementation -Config $config } |
+                Should -Throw '*Run guarded prod install before retrying*'
+            Should -Invoke Set-ProductionWebsiteStartupType -Times 0 -Exactly
+            Should -Invoke Stop-ProductionWebsiteService -Times 0 -Exactly
+            Should -Invoke Install-CoordinatedProductionWriterStartGuardBundle -Times 0 -Exactly
         }
 
         It 'keeps a pre-guard service Disabled across publication failure' -ForEach @(

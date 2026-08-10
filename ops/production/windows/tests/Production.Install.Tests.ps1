@@ -29,6 +29,46 @@ Describe 'native Windows service installer' {
             Should -Throw '*installed WinSW SHA-256 verification failed*'
     }
 
+    It 'stages a pinned WinSW source without replacing an incompatible installed binary' {
+        InModuleScope Production.Install {
+            $serviceRoot = Join-Path $TestDrive 'winsw-source-staging'
+            New-Item -ItemType Directory -Path $serviceRoot | Out-Null
+            $installed = Join-Path $serviceRoot 'ChristopherBellDev.exe'
+            'incompatible-installed-winsw' | Set-Content -LiteralPath $installed
+            Mock Invoke-WebRequest {
+                'pinned-download' | Set-Content -LiteralPath $OutFile
+            }
+            Mock Get-FileHash {
+                [pscustomobject]@{
+                    Hash = if ($LiteralPath -eq $installed) {
+                        'BAD'
+                    } else {
+                        $script:WinSwSha256
+                    }
+                }
+            }
+            Mock Protect-ProductionPath { }
+            Mock Assert-ProtectedProductionPath { }
+
+            $source = Get-ProductionWinSwBundleSource -ServiceRoot $serviceRoot
+            try {
+                $source.Temporary | Should -BeTrue
+                $source.Path | Should -Match '\.winsw-source-[0-9a-f]{32}\.exe$'
+                Get-Content -LiteralPath $installed -Raw |
+                    Should -Match 'incompatible-installed-winsw'
+                Should -Invoke Invoke-WebRequest -Times 1 -Exactly
+                Should -Invoke Protect-ProductionPath -Times 1 -Exactly `
+                    -ParameterFilter { $Path -eq $source.Path }
+                Should -Invoke Assert-ProtectedProductionPath -Times 1 -Exactly `
+                    -ParameterFilter { $Path -eq $source.Path }
+            } finally {
+                if (Test-Path -LiteralPath $source.Path) {
+                    Remove-Item -LiteralPath $source.Path -Force
+                }
+            }
+        }
+    }
+
     It 'rejects a pre-existing reparse service-host destination' {
         InModuleScope Production.Install {
             Mock Get-Item {
@@ -154,8 +194,9 @@ Describe 'native Windows service installer' {
 
         $protect | Should -BeGreaterThan -1
         $protect | Should -BeLessThan $module.IndexOf(
-            'Install-WinSwBinary -ServiceRoot $service')
-        $protect | Should -BeLessThan $module.IndexOf('Copy-Item $sourceXml $installedXml')
+            'Get-ProductionWinSwBundleSource -ServiceRoot $service')
+        $protect | Should -BeLessThan $module.IndexOf(
+            'Assert-ProductionWebsiteServiceXmlSafeRegistration -Path $sourceXml')
     }
 
     It 'binds the validated config to the locked root before config-derived effects' {
@@ -165,10 +206,14 @@ Describe 'native Windows service installer' {
             'function Invoke-ProductionRuntimeInstallAtRoot'))
         $read = $runtime.IndexOf('$config = Read-ProductionConfig')
         $bind = $runtime.IndexOf('Assert-ProductionConfiguredRootBoundary')
+        $universal = $runtime.IndexOf('Assert-ProductionFixedRootBoundary')
 
         $read | Should -BeGreaterOrEqual 0
         $bind | Should -BeGreaterThan $read
+        $universal | Should -BeGreaterThan $bind
         $bind | Should -BeLessThan $runtime.IndexOf(
+            'Read-ProductionEnvironment')
+        $universal | Should -BeLessThan $runtime.IndexOf(
             'Read-ProductionEnvironment')
         $bind | Should -BeLessThan $runtime.IndexOf(
             'Protect-ProductionWebsiteServiceDirectory')
@@ -242,8 +287,11 @@ Describe 'native Windows service installer' {
             $state = [pscustomobject]@{ ServiceRegistered=$false }
             Mock Protect-ProductionWebsiteServiceDirectory { $serviceRoot }
             Mock Set-ProductionMongoServiceInstallPolicy { }
-            Mock Install-WinSwBinary {
-                Join-Path $serviceRoot 'ChristopherBellDev.exe'
+            Mock Get-ProductionWinSwBundleSource {
+                [pscustomobject]@{
+                    Path = Join-Path $serviceRoot 'ChristopherBellDev.exe'
+                    Temporary = $false
+                }
             }
             Mock Copy-Item { }
             Mock Publish-ProductionWebsiteWriterStartBundle {
@@ -289,6 +337,46 @@ Describe 'native Windows service installer' {
         }
     }
 
+    It 'upgrades a base Automatic XML only through the five-file bundle publisher' {
+        InModuleScope Production.Install {
+            $serviceRoot = Join-Path $TestDrive 'base-service-upgrade'
+            New-Item -ItemType Directory -Path $serviceRoot -Force | Out-Null
+            $installedWinSw = Join-Path $serviceRoot 'ChristopherBellDev.exe'
+            $installedXml = Join-Path $serviceRoot 'ChristopherBellDev.xml'
+            'compatible-winsw' | Set-Content -LiteralPath $installedWinSw
+            '<service><startmode>Automatic</startmode></service>' |
+                Set-Content -LiteralPath $installedXml
+            $state = [pscustomobject]@{ ServiceRegistered=$false }
+            Mock Protect-ProductionWebsiteServiceDirectory { $serviceRoot }
+            Mock Set-ProductionMongoServiceInstallPolicy { }
+            Mock Get-ProductionWinSwBundleSource {
+                [pscustomobject]@{ Path=$installedWinSw; Temporary=$false }
+            }
+            Mock Publish-ProductionWebsiteWriterStartBundle {
+                $script:publishedWinSw = $SourceWinSwPath
+                $script:publishedXml = $SourceServiceXmlPath
+            }
+            Mock Copy-Item { throw 'service inputs must be published atomically' }
+            Mock Get-ProductionWebsiteServiceOrNull {
+                [pscustomobject]@{ Status='Stopped' }
+            }
+            Mock Set-ProductionWebsiteStartupType { }
+            Mock Set-ProductionWebsiteServiceInstallPolicy { }
+            Mock Assert-ProductionWebsiteServiceBoundary { }
+
+            Install-WebsiteService `
+                -Root $TestDrive `
+                -Configuration ([pscustomobject]@{ programDataRoot=$TestDrive }) `
+                -RegistrationState $state
+
+            $script:publishedWinSw | Should -Be $installedWinSw
+            [xml]$published = Get-Content -LiteralPath $script:publishedXml -Raw
+            [string]$published.service.startmode | Should -Be 'Manual'
+            Get-Content -LiteralPath $installedXml -Raw | Should -Match 'Automatic'
+            Should -Invoke Copy-Item -Times 0 -Exactly
+        }
+    }
+
     It 'rejects an invalid registration tracker before any service installation effect' {
         InModuleScope Production.Install {
             Mock Protect-ProductionWebsiteServiceDirectory {
@@ -320,8 +408,11 @@ Describe 'native Windows service installer' {
             $state = [pscustomobject]@{ ServiceRegistered=$false }
             Mock Protect-ProductionWebsiteServiceDirectory { $serviceRoot }
             Mock Set-ProductionMongoServiceInstallPolicy { }
-            Mock Install-WinSwBinary {
-                Join-Path $serviceRoot 'ChristopherBellDev.exe'
+            Mock Get-ProductionWinSwBundleSource {
+                [pscustomobject]@{
+                    Path = Join-Path $serviceRoot 'ChristopherBellDev.exe'
+                    Temporary = $false
+                }
             }
             Mock Copy-Item { }
             Mock Publish-ProductionWebsiteWriterStartBundle {
@@ -942,6 +1033,7 @@ Describe 'native runtime reinstall lifecycle' {
             Mock Install-ConfigurationExamples { }
             Mock Read-ProductionConfig { $script:config }
             Mock Assert-ProductionConfiguredRootBoundary { }
+            Mock Assert-ProductionFixedRootBoundary { }
             Mock Read-ProductionWebsiteStopPort { [int]$script:config.productionPort }
             Mock Read-ProductionEnvironment { @{} }
             Mock Protect-ProductionSecrets { }
@@ -1393,6 +1485,7 @@ Describe 'legacy native runtime reinstall upgrade' {
                 }
             }
             Mock Assert-ProductionDeploymentLockBoundary { }
+            Mock Assert-ProductionFixedRootBoundary { }
             Mock Assert-ProductionInstallProtectedDirectoryState { }
             Mock Enter-DeploymentLock {
                 $lock = [pscustomobject]@{}

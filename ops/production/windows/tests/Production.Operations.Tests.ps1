@@ -1,4 +1,5 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.WriterStart.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.MusicRuntime.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Sensors.psm1') -Global -Force
@@ -7,10 +8,58 @@ Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Operations.psm1') 
 Describe 'native Windows production operations' {
     InModuleScope Production.Operations {
         BeforeEach {
+            Mock Assert-ProductionFixedRootBoundary {
+                [pscustomobject]@{ Root='C:\ProgramData\christopherbell.dev' }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{
+                    Lock = Enter-DeploymentLock `
+                        -LockPath 'C:\ProgramData\christopherbell.dev\locks\deploy.lock'
+                }
+            }
             Mock Get-ProductionMusicMigrationActivationNoLock { $false }
             Mock Restore-CoordinatedProductionWebsiteRecoveryPolicy { }
             Mock Ensure-CoordinatedProductionWriterStartGuard { }
             Mock Revoke-CoordinatedProductionWriterStart { }
+        }
+
+        It 'rejects an alternate root before rollback, restart, or service effects' -TestCases @(
+            @{ Operation = 'generic rollback'; Invoke = { Invoke-ProductionRollback -WhatIf } }
+            @{ Operation = 'dedicated rollback'; Invoke = { Invoke-ProductionMigrationAwareRollback -Confirm } }
+            @{ Operation = 'restart'; Invoke = { Restart-ProductionService -Verify } }
+        ) {
+            param($Operation, $Invoke)
+
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot = 'C:\attacker-controlled'
+                    productionPort = 8080
+                }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                if ($FixedRoot -cne 'C:\ProgramData\christopherbell.dev') {
+                    throw "wrong fixed root reached for $Operation"
+                }
+                throw ('Production root boundary is not guarded. ' +
+                    'Run guarded prod install before retrying.')
+            }
+            Mock Enter-DeploymentLock { throw 'unsafe config-derived lock was reached' }
+            Mock Read-ProductionMusicSchemaDirection { throw 'marker was reached' }
+            Mock Invoke-MusicReverseCopyUnderHeldLock { throw 'database was reached' }
+            Mock Get-JunctionTarget { throw 'junction was reached' }
+            Mock Set-AtomicJunction { throw 'junction mutation was reached' }
+            Mock Restart-Service { throw 'service restart was reached' }
+            Mock Start-Service { throw 'service start was reached' }
+
+            { & $Invoke } | Should -Throw '*Run guarded prod install before retrying*'
+            Should -Invoke Enter-ProductionFixedRootDeploymentLock -Times 1 -Exactly
+            Should -Invoke Enter-DeploymentLock -Times 0 -Exactly
+            Should -Invoke Read-ProductionMusicSchemaDirection -Times 0 -Exactly
+            Should -Invoke Invoke-MusicReverseCopyUnderHeldLock -Times 0 -Exactly
+            Should -Invoke Get-JunctionTarget -Times 0 -Exactly
+            Should -Invoke Set-AtomicJunction -Times 0 -Exactly
+            Should -Invoke Restart-Service -Times 0 -Exactly
+            Should -Invoke Start-Service -Times 0 -Exactly
         }
         BeforeAll {
             function New-ValidStartupTask {

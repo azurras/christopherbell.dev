@@ -1,5 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
 Import-Module (Join-Path $PSScriptRoot 'Production.WriterStart.psm1') -Global -Force
 
 function Get-ProductionMusicRuntimeRollbackScript {
@@ -737,9 +738,16 @@ function Invoke-ProductionMusicRuntimeStateRollback {
         }
     }
     if (-not $Confirm) { throw 'Music runtime rollback requires explicit confirmation.' }
-    $config = Read-ProductionConfig
-    $lock = Enter-DeploymentLock `
-        -LockPath (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-ProductionFixedRootDeploymentLock `
+        -Config $config `
+        -FixedRoot $script:FixedProductionRoot `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+    $lock = $guard.Lock
     try {
         Invoke-ProductionMusicRuntimeReverseCopyNoLock -Config $config
     } finally {

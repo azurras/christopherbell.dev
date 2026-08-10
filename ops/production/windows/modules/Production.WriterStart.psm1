@@ -14,6 +14,164 @@ $script:AuthorizationPurposes = @(
     'LEGACY_RESTORE'
 )
 
+if (-not ('ChristopherBell.Dev.ProductionFixedRootNativeDirectory' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace ChristopherBell.Dev
+{
+    public sealed class ProductionFixedRootDirectoryIdentity
+    {
+        public string NativeFinalPath { get; set; }
+        public uint VolumeSerialNumber { get; set; }
+        public ulong FileIndex { get; set; }
+        public bool ReparsePoint { get; set; }
+    }
+
+    public static class ProductionFixedRootNativeDirectory
+    {
+        private const uint FileReadAttributes = 0x80;
+        private const uint FileShareRead = 0x1;
+        private const uint FileShareWrite = 0x2;
+        private const uint FileShareDelete = 0x4;
+        private const uint OpenExisting = 3;
+        private const uint FileFlagBackupSemantics = 0x02000000;
+        private const uint FileFlagOpenReparsePoint = 0x00200000;
+        private const uint FileAttributeReparsePoint = 0x400;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileTime
+        {
+            public uint LowDateTime;
+            public uint HighDateTime;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ByHandleFileInformation
+        {
+            public uint FileAttributes;
+            public FileTime CreationTime;
+            public FileTime LastAccessTime;
+            public FileTime LastWriteTime;
+            public uint VolumeSerialNumber;
+            public uint FileSizeHigh;
+            public uint FileSizeLow;
+            public uint NumberOfLinks;
+            public uint FileIndexHigh;
+            public uint FileIndexLow;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateFileW(
+            string fileName,
+            uint desiredAccess,
+            uint shareMode,
+            IntPtr securityAttributes,
+            uint creationDisposition,
+            uint flagsAndAttributes,
+            IntPtr templateFile);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFinalPathNameByHandleW(
+            IntPtr file,
+            StringBuilder filePath,
+            uint filePathLength,
+            uint flags);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandle(
+            IntPtr file,
+            out ByHandleFileInformation fileInformation);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        public static ProductionFixedRootDirectoryIdentity GetIdentity(string path)
+        {
+            IntPtr handle = CreateFileW(
+                path,
+                FileReadAttributes,
+                FileShareRead | FileShareWrite | FileShareDelete,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle == new IntPtr(-1))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Fixed production directory identity could not be opened.");
+            }
+            try
+            {
+                ByHandleFileInformation information;
+                if (!GetFileInformationByHandle(handle, out information))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Fixed production directory identity could not be read.");
+                }
+                StringBuilder finalPath = new StringBuilder(1024);
+                uint length = GetFinalPathNameByHandleW(
+                    handle, finalPath, (uint)finalPath.Capacity, 0);
+                if (length == 0)
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Fixed production directory final path could not be read.");
+                }
+                if (length >= finalPath.Capacity)
+                {
+                    finalPath = new StringBuilder((int)length + 1);
+                    length = GetFinalPathNameByHandleW(
+                        handle, finalPath, (uint)finalPath.Capacity, 0);
+                    if (length == 0 || length >= finalPath.Capacity)
+                    {
+                        throw new Win32Exception(Marshal.GetLastWin32Error(),
+                            "Fixed production directory final path could not be read.");
+                    }
+                }
+                return new ProductionFixedRootDirectoryIdentity
+                {
+                    NativeFinalPath = NormalizeFinalPath(finalPath.ToString()),
+                    VolumeSerialNumber = information.VolumeSerialNumber,
+                    FileIndex = ((ulong)information.FileIndexHigh << 32) |
+                        information.FileIndexLow,
+                    ReparsePoint =
+                        (information.FileAttributes & FileAttributeReparsePoint) != 0
+                };
+            }
+            finally
+            {
+                CloseHandle(handle);
+            }
+        }
+
+        private static string NormalizeFinalPath(string path)
+        {
+            const string uncPrefix = @"\\?\UNC\";
+            const string localPrefix = @"\\?\";
+            if (path.StartsWith(uncPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return @"\\" + path.Substring(uncPrefix.Length);
+            }
+            if (path.StartsWith(localPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return path.Substring(localPrefix.Length);
+            }
+            return path;
+        }
+    }
+}
+'@
+}
+
+function Get-ProductionFixedRootDirectoryIdentity {
+    param([Parameter(Mandatory)][string]$Path)
+
+    [ChristopherBell.Dev.ProductionFixedRootNativeDirectory]::GetIdentity($Path)
+}
+
 function Get-ProductionMusicSchemaDirectionPath {
     param([Parameter(Mandatory)]$Config)
     Join-Path $Config.programDataRoot 'state\music-runtime-schema-direction.json'
@@ -47,6 +205,230 @@ function Assert-ProductionWriterStartPathNotReparseTraversal {
         }
     }
     return $fullPath
+}
+
+function Assert-ProductionFixedRootDirectoryAcl {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Security.AccessControl.RawSecurityDescriptor]$SecurityDescriptor
+    )
+
+    Assert-ProductionWriterStartPathNotReparseTraversal -Path $Path | Out-Null
+    if (-not $PSBoundParameters.ContainsKey('SecurityDescriptor')) {
+        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+        $SecurityDescriptor =
+            [Security.AccessControl.RawSecurityDescriptor]::new(
+                $acl.GetSecurityDescriptorBinaryForm(), 0)
+    }
+    $protectedFlag =
+        [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected
+    if (($SecurityDescriptor.ControlFlags -band $protectedFlag) -eq 0) {
+        throw "Production root ACL inheritance must be protected: $Path"
+    }
+    $administrators = 'S-1-5-32-544'
+    if ($null -eq $SecurityDescriptor.Owner -or
+        $SecurityDescriptor.Owner.Value -cne $administrators) {
+        throw "Production root ACL owner must be Builtin Administrators: $Path"
+    }
+    $aces = @($SecurityDescriptor.DiscretionaryAcl)
+    if ($aces.Count -ne 2) {
+        throw "Production root ACL must have exactly two explicit ACEs: $Path"
+    }
+    $system = 'S-1-5-18'
+    $systemAces = @($aces | Where-Object {
+            $_ -is [Security.AccessControl.CommonAce] -and
+            $_.AceType -eq [Security.AccessControl.AceType]::AccessAllowed -and
+            $_.SecurityIdentifier.Value -ceq $system
+        })
+    $administratorAces = @($aces | Where-Object {
+            $_ -is [Security.AccessControl.CommonAce] -and
+            $_.AceType -eq [Security.AccessControl.AceType]::AccessAllowed -and
+            $_.SecurityIdentifier.Value -ceq $administrators
+        })
+    if ($systemAces.Count -ne 1 -or $administratorAces.Count -ne 1) {
+        throw (
+            'Production root ACL must have one SYSTEM and one Administrators allow ACE: ' +
+            $Path)
+    }
+    $fullControl = [int][Security.AccessControl.FileSystemRights]::FullControl
+    $inheritance =
+        [int][Security.AccessControl.AceFlags]::ContainerInherit -bor
+        [int][Security.AccessControl.AceFlags]::ObjectInherit
+    foreach ($ace in @($systemAces[0],$administratorAces[0])) {
+        if ([int]$ace.AccessMask -ne $fullControl) {
+            throw "Production root ACEs must grant exact FullControl rights: $Path"
+        }
+        if ([int]$ace.AceFlags -ne $inheritance) {
+            throw (
+                "Production root ACEs must use exact inheritance and propagation: $Path")
+        }
+    }
+}
+
+function Test-ProductionFixedRootDirectoryIdentityEqual {
+    param(
+        [Parameter(Mandatory)]$Expected,
+        [Parameter(Mandatory)]$Actual
+    )
+
+    [uint32]$Expected.VolumeSerialNumber -eq
+        [uint32]$Actual.VolumeSerialNumber -and
+        [uint64]$Expected.FileIndex -eq [uint64]$Actual.FileIndex -and
+        [string]::Equals(
+            [IO.Path]::GetFullPath([string]$Expected.NativeFinalPath),
+            [IO.Path]::GetFullPath([string]$Actual.NativeFinalPath),
+            [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Assert-ProductionFixedRootDirectoryState {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        $ExpectedIdentity
+    )
+
+    $canonical = Assert-ProductionWriterStartPathNotReparseTraversal -Path $Path
+    $first = Get-ProductionFixedRootDirectoryIdentity -Path $canonical
+    if ($first.ReparsePoint -or -not [string]::Equals(
+            [IO.Path]::GetFullPath([string]$first.NativeFinalPath),
+            $canonical,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Production root directory identity is unsafe: $canonical"
+    }
+    if ($PSBoundParameters.ContainsKey('ExpectedIdentity') -and
+        -not (Test-ProductionFixedRootDirectoryIdentityEqual `
+            -Expected $ExpectedIdentity -Actual $first)) {
+        throw "Production root directory identity changed: $canonical"
+    }
+    Assert-ProductionFixedRootDirectoryAcl -Path $canonical
+    $second = Get-ProductionFixedRootDirectoryIdentity -Path $canonical
+    if ($second.ReparsePoint -or
+        -not (Test-ProductionFixedRootDirectoryIdentityEqual `
+            -Expected $first -Actual $second)) {
+        throw "Production root directory identity changed during verification: $canonical"
+    }
+    return $second
+}
+
+function Assert-ProductionFixedRootBoundary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$FixedRoot,
+        $ExpectedBoundary
+    )
+
+    try {
+        if ($FixedRoot -cnotmatch '^[A-Za-z]:[\\/]') {
+            throw 'Fixed production root must use a fully qualified local drive path.'
+        }
+        $fixed = [IO.Path]::GetFullPath($FixedRoot)
+        $property = $Config.PSObject.Properties['programDataRoot']
+        if (-not $property -or $property.Value -isnot [string] -or
+            [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+            throw 'Configured production root is missing or malformed.'
+        }
+        $configuredValue = [string]$property.Value
+        if ($configuredValue -cnotmatch '^[A-Za-z]:[\\/]') {
+            throw ('Configured production root must use a fully qualified ' +
+                'local drive path.')
+        }
+        $configuredPathRoot = [IO.Path]::GetPathRoot($configuredValue)
+        foreach ($segment in $configuredValue.Substring($configuredPathRoot.Length) -split '[\\/]') {
+            if ($segment -in @('.','..')) {
+                throw 'Configured production root must not contain relative traversal.'
+            }
+        }
+        $configured = [IO.Path]::GetFullPath($configuredValue)
+        if (-not [string]::Equals(
+                $configured, $fixed, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Configured production root does not match the fixed production root.'
+        }
+        $locks = [IO.Path]::GetFullPath((Join-Path $fixed 'locks'))
+        $lockPath = [IO.Path]::GetFullPath((Join-Path $locks 'deploy.lock'))
+        if (-not [string]::Equals(
+                [IO.Path]::GetFullPath((Split-Path -Parent $locks)),
+                $fixed,
+                [StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals(
+                [IO.Path]::GetFullPath((Split-Path -Parent $lockPath)),
+                $locks,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Fixed production lock path escaped the fixed root.'
+        }
+        if ($PSBoundParameters.ContainsKey('ExpectedBoundary')) {
+            foreach ($name in 'Root','Locks','LockPath','RootIdentity','LocksIdentity') {
+                if (-not $ExpectedBoundary.PSObject.Properties[$name]) {
+                    throw 'Expected fixed production boundary is malformed.'
+                }
+            }
+            if (-not [string]::Equals(
+                    [string]$ExpectedBoundary.Root, $fixed,
+                    [StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals(
+                    [string]$ExpectedBoundary.Locks, $locks,
+                    [StringComparison]::OrdinalIgnoreCase) -or
+                -not [string]::Equals(
+                    [string]$ExpectedBoundary.LockPath, $lockPath,
+                    [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Expected fixed production boundary paths changed.'
+            }
+        }
+        $rootArguments = @{ Path=$fixed }
+        $locksArguments = @{ Path=$locks }
+        if ($PSBoundParameters.ContainsKey('ExpectedBoundary')) {
+            $rootArguments.ExpectedIdentity = $ExpectedBoundary.RootIdentity
+            $locksArguments.ExpectedIdentity = $ExpectedBoundary.LocksIdentity
+        }
+        $rootIdentity = Assert-ProductionFixedRootDirectoryState @rootArguments
+        $locksIdentity = Assert-ProductionFixedRootDirectoryState @locksArguments
+        Assert-ProductionFixedRootDirectoryState `
+            -Path $fixed -ExpectedIdentity $rootIdentity | Out-Null
+        Assert-ProductionFixedRootDirectoryState `
+            -Path $locks -ExpectedIdentity $locksIdentity | Out-Null
+        $Config.programDataRoot = $fixed
+        return [pscustomobject][ordered]@{
+            Root = $fixed
+            Locks = $locks
+            LockPath = $lockPath
+            RootIdentity = $rootIdentity
+            LocksIdentity = $locksIdentity
+        }
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            'Production root boundary is not guarded. Run guarded prod install before retrying.',
+            $_.Exception)
+    }
+}
+
+function Enter-ProductionFixedRootDeploymentLock {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$FixedRoot,
+        [scriptblock]$EnterLockAction
+    )
+
+    $boundary = Assert-ProductionFixedRootBoundary `
+        -Config $Config -FixedRoot $FixedRoot
+    $lock = if ($PSBoundParameters.ContainsKey('EnterLockAction')) {
+        & $EnterLockAction $boundary.LockPath
+    } else {
+        Enter-DeploymentLock -LockPath $boundary.LockPath
+    }
+    try {
+        $lockedBoundary = Assert-ProductionFixedRootBoundary `
+            -Config $Config `
+            -FixedRoot $FixedRoot `
+            -ExpectedBoundary $boundary
+        return [pscustomobject][ordered]@{
+            Lock = $lock
+            Boundary = $lockedBoundary
+        }
+    } catch {
+        $lock.Dispose()
+        throw
+    }
 }
 
 function Get-CanonicalProductionWriterStartServiceRoot {
@@ -301,6 +683,8 @@ function Publish-ProductionWriterStartGuardBundle {
         [Parameter(Mandatory)]$Config,
         [Parameter(Mandatory)][string]$SourceLauncherPath,
         [Parameter(Mandatory)][string]$SourceModulePath,
+        [string]$SourceWinSwPath,
+        [string]$SourceServiceXmlPath,
         [ValidatePattern('^[0-9a-f]{64}$')]
         [string]$ExpectedWinSwSha256,
         [ValidatePattern('^[0-9a-f]{64}$')]
@@ -310,6 +694,12 @@ function Publish-ProductionWriterStartGuardBundle {
     $hasServiceXml = -not [string]::IsNullOrWhiteSpace($ExpectedServiceXmlSha256)
     if ($hasWinSw -ne $hasServiceXml) {
         throw 'Writer-start host boundary hashes must be supplied together.'
+    }
+    $hasSourceWinSw = -not [string]::IsNullOrWhiteSpace($SourceWinSwPath)
+    $hasSourceServiceXml = -not [string]::IsNullOrWhiteSpace($SourceServiceXmlPath)
+    if ($hasSourceWinSw -ne $hasSourceServiceXml -or
+        $hasSourceWinSw -and -not $hasWinSw) {
+        throw 'Writer-start host boundary sources and hashes must be supplied together.'
     }
     foreach ($source in @($SourceLauncherPath,$SourceModulePath)) {
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
@@ -327,6 +717,10 @@ function Publish-ProductionWriterStartGuardBundle {
     $installedManifest = Join-Path $serviceRoot 'Production.WriterStart.bundle.json'
     $installedWinSw = Join-Path $serviceRoot 'ChristopherBellDev.exe'
     $installedServiceXml = Join-Path $serviceRoot 'ChristopherBellDev.xml'
+    if ($hasWinSw -and -not $hasSourceWinSw) {
+        $SourceWinSwPath = $installedWinSw
+        $SourceServiceXmlPath = $installedServiceXml
+    }
     $destinations = @($installedLauncher,$installedModule,$installedManifest)
     if ($hasWinSw) { $destinations += @($installedWinSw,$installedServiceXml) }
     foreach ($destination in $destinations) {
@@ -336,17 +730,18 @@ function Publish-ProductionWriterStartGuardBundle {
         }
     }
     if ($hasWinSw) {
-        if (-not (Test-Path -LiteralPath $installedWinSw -PathType Leaf) -or
-            -not (Test-Path -LiteralPath $installedServiceXml -PathType Leaf) -or
-            (Get-FileHash -LiteralPath $installedWinSw -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
-                $ExpectedWinSwSha256 -or
-            (Get-FileHash -LiteralPath $installedServiceXml -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
-                $ExpectedServiceXmlSha256) {
-            throw 'Installed writer-start service host SHA-256 verification failed.'
+        foreach ($source in @($SourceWinSwPath,$SourceServiceXmlPath)) {
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+                throw 'Writer-start host boundary source file is missing.'
+            }
+            Assert-ProductionWriterStartPathNotReparseTraversal -Path $source |
+                Out-Null
         }
-        foreach ($path in @($installedWinSw,$installedServiceXml)) {
-            Protect-ProductionPath -Path $path
-            Assert-ProtectedProductionPath -Path $path | Out-Null
+        if ((Get-FileHash -LiteralPath $SourceWinSwPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
+                $ExpectedWinSwSha256 -or
+            (Get-FileHash -LiteralPath $SourceServiceXmlPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
+                $ExpectedServiceXmlSha256) {
+            throw 'Writer-start service host source SHA-256 verification failed.'
         }
     }
     $launcherSha = (Get-FileHash -LiteralPath $SourceLauncherPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -357,8 +752,14 @@ function Publish-ProductionWriterStartGuardBundle {
         $stagedLauncher = Join-Path $staging 'Start-ChristopherBellDev.ps1'
         $stagedModule = Join-Path $staging 'Production.WriterStart.psm1'
         $stagedManifest = Join-Path $staging 'Production.WriterStart.bundle.json'
+        $stagedWinSw = Join-Path $staging 'ChristopherBellDev.exe'
+        $stagedServiceXml = Join-Path $staging 'ChristopherBellDev.xml'
         Copy-Item -LiteralPath $SourceLauncherPath -Destination $stagedLauncher
         Copy-Item -LiteralPath $SourceModulePath -Destination $stagedModule
+        if ($hasWinSw) {
+            Copy-Item -LiteralPath $SourceWinSwPath -Destination $stagedWinSw
+            Copy-Item -LiteralPath $SourceServiceXmlPath -Destination $stagedServiceXml
+        }
         $manifest = [ordered]@{
             version = if ($hasWinSw) { 2 } else { 1 }
             launcherSha256 = $launcherSha
@@ -369,27 +770,50 @@ function Publish-ProductionWriterStartGuardBundle {
             $manifest.serviceXmlSha256 = $ExpectedServiceXmlSha256
         }
         $manifest | ConvertTo-Json | Set-Content -LiteralPath $stagedManifest -Encoding utf8
-        foreach ($path in @($staging,$stagedLauncher,$stagedModule,$stagedManifest)) {
+        $stagedPaths = @($staging,$stagedLauncher,$stagedModule,$stagedManifest)
+        if ($hasWinSw) { $stagedPaths += @($stagedWinSw,$stagedServiceXml) }
+        foreach ($path in $stagedPaths) {
             Protect-ProductionPath -Path $path
             Assert-ProtectedProductionPath -Path $path | Out-Null
         }
         if ((Get-FileHash $stagedLauncher -Algorithm SHA256).Hash.ToLowerInvariant() -cne $launcherSha -or
-            (Get-FileHash $stagedModule -Algorithm SHA256).Hash.ToLowerInvariant() -cne $moduleSha) {
+            (Get-FileHash $stagedModule -Algorithm SHA256).Hash.ToLowerInvariant() -cne $moduleSha -or
+            ($hasWinSw -and (
+                (Get-FileHash $stagedWinSw -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                    $ExpectedWinSwSha256 -or
+                (Get-FileHash $stagedServiceXml -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                    $ExpectedServiceXmlSha256))) {
             throw 'Staged writer-start guard SHA-256 verification failed.'
         }
 
-        # Publishing the launcher first makes every partial upgrade fail closed against the
-        # absent or old manifest. The manifest is the atomic commit point for the pair.
+        if (Test-Path -LiteralPath $installedManifest) {
+            Remove-Item -LiteralPath $installedManifest -Force -ErrorAction Stop
+            if (Test-Path -LiteralPath $installedManifest) {
+                throw 'Installed writer-start guard manifest invalidation was not verified.'
+            }
+        }
+        # Publishing executable inputs first makes every partial upgrade fail closed against the
+        # absent or old manifest. The manifest is the atomic commit point for all five files.
         Publish-ProductionWriterStartGuardFile `
             -Source $stagedLauncher `
             -Destination $installedLauncher
         Publish-ProductionWriterStartGuardFile `
             -Source $stagedModule `
             -Destination $installedModule
+        if ($hasWinSw) {
+            Publish-ProductionWriterStartGuardFile `
+                -Source $stagedWinSw `
+                -Destination $installedWinSw
+            Publish-ProductionWriterStartGuardFile `
+                -Source $stagedServiceXml `
+                -Destination $installedServiceXml
+        }
         Publish-ProductionWriterStartGuardFile `
             -Source $stagedManifest `
             -Destination $installedManifest
-        foreach ($path in @($installedLauncher,$installedModule,$installedManifest)) {
+        $installedPaths = @($installedLauncher,$installedModule,$installedManifest)
+        if ($hasWinSw) { $installedPaths += @($installedWinSw,$installedServiceXml) }
+        foreach ($path in $installedPaths) {
             Protect-ProductionPath -Path $path
         }
         $assertArguments = @{
@@ -726,7 +1150,13 @@ function Use-ProductionWriterStartAuthorization {
 }
 
 function Assert-ProductionWriterStartAllowed {
-    param([Parameter(Mandatory)]$Config)
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$FixedRoot
+    )
+
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config -FixedRoot $FixedRoot | Out-Null
     $release = Read-ProductionReleaseIdentity -Config $Config
     $marker = Read-ProductionMusicSchemaDirection -Config $Config
     if (-not $marker) {
@@ -754,4 +1184,9 @@ function Assert-ProductionWriterStartAllowed {
     throw 'The active release is incompatible with the Music schema-direction marker; writer start is blocked.'
 }
 
-Export-ModuleMember -Function Get-ProductionMusicSchemaDirectionPath,Read-ProductionMusicSchemaDirection,Write-ProductionMusicSchemaDirection,Assert-ProductionWriterStartAllowed,Get-ProductionMusicMigrationActivationForWriterStart,Read-ProductionReleaseIdentity
+Export-ModuleMember -Function `
+    Assert-ProductionFixedRootDirectoryAcl,Assert-ProductionFixedRootBoundary,`
+    Enter-ProductionFixedRootDeploymentLock,Get-ProductionMusicSchemaDirectionPath,`
+    Read-ProductionMusicSchemaDirection,Write-ProductionMusicSchemaDirection,`
+    Assert-ProductionWriterStartAllowed,Get-ProductionMusicMigrationActivationForWriterStart,`
+    Read-ProductionReleaseIdentity

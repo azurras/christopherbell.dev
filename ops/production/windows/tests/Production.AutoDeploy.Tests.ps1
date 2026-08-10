@@ -1,4 +1,5 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.WriterStart.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.MusicRuntime.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
@@ -7,6 +8,17 @@ Import-Module (Join-Path $PSScriptRoot '..\modules\Production.AutoDeploy.psm1') 
 Describe 'automatic origin main deployment' {
     BeforeEach {
         $script:config = [pscustomobject]@{ programDataRoot=$TestDrive; repositoryPath=$TestDrive; remote='origin'; branch='main'; autoDeployFailureBackoffSeconds=900 }
+        Mock Assert-ProductionFixedRootBoundary {
+            [pscustomobject]@{
+                Root = 'C:\ProgramData\christopherbell.dev'
+                LockPath = Join-Path $TestDrive 'deploy.lock'
+            }
+        } -ModuleName Production.AutoDeploy
+        Mock Enter-ProductionFixedRootDeploymentLock {
+            [pscustomobject]@{
+                Lock = Enter-DeploymentLock -LockPath (Join-Path $TestDrive 'deploy.lock')
+            }
+        } -ModuleName Production.AutoDeploy
         Mock Assert-ProductionPathNotReparse {} -ModuleName Production.AutoDeploy
         Mock Assert-ProductionTreeNotReparse {} -ModuleName Production.AutoDeploy
         Mock Protect-ProductionPath {} -ModuleName Production.AutoDeploy
@@ -15,6 +27,56 @@ Describe 'automatic origin main deployment' {
         Mock Read-ProductionMusicSchemaDirection {
             [pscustomobject]@{ state='TARGET_ACTIVE' }
         } -ModuleName Production.AutoDeploy
+    }
+
+    It 'rejects an alternate root before auto state, marker, remote, or deploy effects' {
+        $alternateConfig = [pscustomobject]@{
+            programDataRoot = 'C:\attacker-controlled'
+            repositoryPath = 'C:\attacker-controlled\repository'
+            remote = 'origin'
+            branch = 'main'
+            autoDeployFailureBackoffSeconds = 900
+        }
+        Mock Assert-ProductionFixedRootBoundary {
+            if ($FixedRoot -cne 'C:\ProgramData\christopherbell.dev') {
+                throw 'wrong fixed root reached'
+            }
+            throw ('Production root boundary is not guarded. ' +
+                'Run guarded prod install before retrying.')
+        } -ModuleName Production.AutoDeploy
+        Mock Read-AutoDeployState { throw 'auto state was reached' } -ModuleName Production.AutoDeploy
+        Mock Read-ProductionMusicSchemaDirection { throw 'marker was reached' } -ModuleName Production.AutoDeploy
+        Mock Get-RemoteMainSha { throw 'remote was reached' } -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy { throw 'deploy was reached' } -ModuleName Production.AutoDeploy
+
+        { Invoke-AutoDeployOnce $alternateConfig } |
+            Should -Throw '*Run guarded prod install before retrying*'
+        Should -Invoke Assert-ProductionFixedRootBoundary -Times 1 -Exactly `
+            -ModuleName Production.AutoDeploy
+        Should -Invoke Read-AutoDeployState -Times 0 -Exactly -ModuleName Production.AutoDeploy
+        Should -Invoke Read-ProductionMusicSchemaDirection -Times 0 -Exactly `
+            -ModuleName Production.AutoDeploy
+        Should -Invoke Get-RemoteMainSha -Times 0 -Exactly -ModuleName Production.AutoDeploy
+        Should -Invoke Invoke-ProductionDeploy -Times 0 -Exactly -ModuleName Production.AutoDeploy
+    }
+
+    It 'does not write an auto-deploy error log when the configured root is unsafe' {
+        InModuleScope Production.AutoDeploy {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\attacker-controlled' }
+            }
+            Mock Assert-ProductionFixedRootBoundary {
+                throw ('Production root boundary is not guarded. ' +
+                    'Run guarded prod install before retrying.')
+            }
+            Mock Invoke-AutoDeployOnce { throw 'auto deploy was reached' }
+            Mock Add-Content { throw 'unsafe log write was reached' }
+
+            { Start-AutoDeployLoop } |
+                Should -Throw '*Run guarded prod install before retrying*'
+            Should -Invoke Invoke-AutoDeployOnce -Times 0 -Exactly
+            Should -Invoke Add-Content -Times 0 -Exactly
+        }
     }
 
     It 'refuses automatic deploy before remote access while legacy reconciliation is required' {
@@ -94,6 +156,9 @@ Describe 'automatic origin main deployment' {
                 Mock Assert-Administrator {}
                 Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive; autoDeployPollSeconds=60 } }
                 Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+                Mock Enter-ProductionFixedRootDeploymentLock {
+                    [pscustomobject]@{ Lock=[IO.MemoryStream]::new() }
+                }
                 Mock New-Item {}
                 Mock Copy-Item {}
                 $script:existingTaskStopped = $false
@@ -140,6 +205,9 @@ Describe 'automatic origin main deployment' {
             Mock Assert-Administrator {}
             Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive; autoDeployPollSeconds=60 } }
             Mock Enter-DeploymentLock { throw 'A production deployment is already running.' }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                throw 'A production deployment is already running.'
+            }
             Mock New-Item {}
             Mock Copy-Item {}
             Mock Stop-ScheduledTask {}
@@ -158,6 +226,9 @@ Describe 'automatic origin main deployment' {
             Mock Assert-Administrator {}
             Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive; autoDeployPollSeconds=60 } }
             Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{ Lock=[IO.MemoryStream]::new() }
+            }
             Mock New-Item {}
             Mock Copy-Item {}
             Mock Stop-ScheduledTask {}
@@ -185,6 +256,9 @@ Describe 'automatic origin main deployment' {
             Mock Assert-Administrator {}
             Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot=$TestDrive; autoDeployPollSeconds=60 } }
             Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{ Lock=[IO.MemoryStream]::new() }
+            }
             Mock Stop-ScheduledTask { $script:events.Add('stop') }
             Mock Get-ScheduledTask { [pscustomobject]@{ State='Ready' } }
             Mock Test-Path { $true }

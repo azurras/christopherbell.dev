@@ -1,5 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
 function New-AutoDeployState {
     [pscustomobject][ordered]@{ lastCheckedAt=$null; remoteSha=$null; attemptedSha=$null; successfulSha=$null; failedSha=$null; failedAt=$null; error=$null }
 }
@@ -43,6 +44,9 @@ function Get-ActiveReleaseSha {
 
 function Invoke-AutoDeployOnce {
     param($Config = (Read-ProductionConfig))
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
     $state = Read-AutoDeployState $Config
     $direction = Read-ProductionMusicSchemaDirection -Config $Config
     if (-not $direction) {
@@ -89,10 +93,14 @@ function Invoke-AutoDeployOnce {
 }
 
 function Start-AutoDeployLoop {
-    $config = Read-ProductionConfig
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    Assert-ProductionFixedRootBoundary `
+        -Config $config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
     try { Invoke-AutoDeployOnce $config }
     catch {
-        $log = Join-Path $config.programDataRoot 'logs\auto-deploy-errors.log'
+        $log = Join-Path $script:FixedProductionRoot 'logs\auto-deploy-errors.log'
         "$(Get-Date -Format o) $($_.Exception.Message)" | Add-Content -LiteralPath $log
         throw
     }
@@ -110,9 +118,17 @@ function Install-AutoDeployTask {
     [CmdletBinding()]
     param([switch]$WhatIf)
     Assert-Administrator
-    $config = Read-ProductionConfig
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
     if ($WhatIf) { Write-Output 'Would register and start the ChristopherBellAutoDeploy startup task.'; return }
-    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    $guard = Enter-ProductionFixedRootDeploymentLock `
+        -Config $config `
+        -FixedRoot $script:FixedProductionRoot `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+    $lock = $guard.Lock
     try {
         $tools = Join-Path $config.programDataRoot 'tools'
         Assert-ProductionPathNotReparse -Path $config.programDataRoot | Out-Null

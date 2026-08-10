@@ -14,6 +14,7 @@ $script:ProductionSmokePaths = @(
     '/nodeinfo/2.1'
 )
 $script:CandidateDatabasePattern = '^cbell_candidate_[0-9a-f]{12}_[0-9a-f]{24}$'
+$script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
 
 function Grant-CoordinatedProductionWriterStart {
     param($Config, [string]$MarkerState, [string]$Release, [string]$Purpose)
@@ -39,18 +40,29 @@ function Install-CoordinatedProductionWriterStartGuardBundle {
     $launcher = Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1'
     $modulePath = Join-Path $PSScriptRoot 'Production.WriterStart.psm1'
     $serviceXml = Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml'
+    $installedWinSw = Join-Path $Config.programDataRoot 'service\ChristopherBellDev.exe'
     $winSwSha = Get-ProductionWinSwSha256
     $serviceXmlSha = (Get-FileHash -LiteralPath $serviceXml -Algorithm SHA256).Hash.ToLowerInvariant()
     $writerStartModule = Get-Module Production.WriterStart -ErrorAction Stop
     & $writerStartModule {
-        param($Value, $Launcher, $ModulePath, $ExpectedWinSw, $ExpectedServiceXml)
+        param(
+            $Value,
+            $Launcher,
+            $ModulePath,
+            $SourceWinSw,
+            $SourceServiceXml,
+            $ExpectedWinSw,
+            $ExpectedServiceXml
+        )
         Publish-ProductionWriterStartGuardBundle `
             -Config $Value `
             -SourceLauncherPath $Launcher `
             -SourceModulePath $ModulePath `
+            -SourceWinSwPath $SourceWinSw `
+            -SourceServiceXmlPath $SourceServiceXml `
             -ExpectedWinSwSha256 $ExpectedWinSw `
             -ExpectedServiceXmlSha256 $ExpectedServiceXml
-    } $Config $launcher $modulePath $winSwSha $serviceXmlSha
+    } $Config $launcher $modulePath $installedWinSw $serviceXml $winSwSha $serviceXmlSha
     Assert-ProductionWebsiteServiceBoundary `
         -Root $Config.programDataRoot -Configuration $Config
 }
@@ -82,6 +94,9 @@ function Set-ProductionWebsiteStartupType {
 
 function Ensure-ProductionWriterStartGuardUnderHeldLock {
     param([Parameter(Mandatory)]$Config)
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
     Set-ProductionWebsiteStartupType -StartupType Disabled
     try {
         Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
@@ -180,6 +195,9 @@ function New-ReleaseFromOriginMain {
 
 function Start-ProductionJar {
     param($Config, [Parameter(Mandatory)][string]$Release, [int]$Port, [string]$Profiles, [hashtable]$AdditionalEnvironment = @{})
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
     $release = Assert-ReleasePath $Config $Release
     $jar = Join-Path $release 'app.jar'
     if (-not (Test-Path -LiteralPath $jar -PathType Leaf)) { throw "Missing release JAR: $jar" }
@@ -665,6 +683,9 @@ function Switch-ProductionRelease {
         [switch]$KeepRecoverySuspended,
         [switch]$WriterAlreadyStopped
     )
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
     $release = Assert-ReleasePath $Config $Release
     $currentPath = Join-Path $Config.programDataRoot 'current'
     $previousPath = Join-Path $Config.programDataRoot 'previous'
@@ -780,6 +801,9 @@ function Switch-ProductionReleaseAfterMusicReconciliation {
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Sha,
         [Parameter(Mandatory)]$Direction
     )
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
     $release = Assert-ReleasePath $Config $Release
     $currentPath = Join-Path $Config.programDataRoot 'current'
     $previousPath = Join-Path $Config.programDataRoot 'previous'
@@ -830,8 +854,16 @@ function Invoke-ProductionDeploy {
         [switch]$MusicSchemaCutover,
         [switch]$Automatic
     )
-    $config = Read-ProductionConfig
-    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-ProductionFixedRootDeploymentLock `
+        -Config $config `
+        -FixedRoot $script:FixedProductionRoot `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+    $lock = $guard.Lock
     try {
         $direction = Read-ProductionMusicSchemaDirection -Config $config
         if (-not $direction) {
@@ -993,8 +1025,16 @@ function Confirm-ProductionMusicTargetActive {
     if (-not $MigrationVerified) {
         throw 'Target schema-direction initialization requires explicit verified migration confirmation.'
     }
-    $config = Read-ProductionConfig
-    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-ProductionFixedRootDeploymentLock `
+        -Config $config `
+        -FixedRoot $script:FixedProductionRoot `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+    $lock = $guard.Lock
     try {
         $existing = Read-ProductionMusicSchemaDirection -Config $config
         if (-not $existing) {
