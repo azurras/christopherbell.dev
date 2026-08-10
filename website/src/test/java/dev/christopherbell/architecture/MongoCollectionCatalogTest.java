@@ -42,8 +42,9 @@ class MongoCollectionCatalogTest {
   private static final Set<String> VALID_SENSITIVITY = Set.of(
       "audit", "confidential", "internal", "public-reference", "security", "user");
   private static final Set<String> VALID_STATUSES = Set.of(
-      "active", "legacy-named", "orphan-candidate", "system-managed");
-  private static final Set<String> SOURCE_BACKED_STATUSES = Set.of("active", "legacy-named");
+      "active", "legacy-named", "rollback-retained", "orphan-candidate", "system-managed");
+  private static final Set<String> SOURCE_BACKED_STATUSES = Set.of(
+      "active", "legacy-named", "rollback-retained");
   private static final Map<String, Set<String>> APPROVED_SHARED_DOCUMENT_MAPPINGS = Map.of(
       "vehicle_import_state", Set.of(
           "dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState",
@@ -90,6 +91,8 @@ class MongoCollectionCatalogTest {
           "shared_folder_media_jobs", "shared_folder_radio", "shared_folder_upload_sessions"),
       manualOwner("dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes",
           "whatsforlunch_ratings"),
+      manualOwner("dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState",
+          "music_queue_state", "music_radio_state", "music_runtime_state"),
       manualOwner("dev.christopherbell.configuration.security.browser.MongoBrowserSessionActivityStore",
           "browser_sessions"),
       manualOwner("dev.christopherbell.configuration.security.browser.MongoBrowserSessionAuthenticationStore",
@@ -102,6 +105,8 @@ class MongoCollectionCatalogTest {
       manualOwner("dev.christopherbell.message.conversation.ConversationQueryRepository", "messages"),
       manualOwner("dev.christopherbell.music.catalog.MusicCatalog", "music_tracks"),
       manualOwner("dev.christopherbell.music.library.MusicLibraryService", "music_playlists", "music_tracks"),
+      manualOwner("dev.christopherbell.music.radio.MusicRuntimeStateStore",
+          "music_runtime_state"),
       manualOwner("dev.christopherbell.music.security.MusicAccessAuditQueryService", "music_access_attempts"),
       manualOwner("dev.christopherbell.music.security.MusicAccessAuditRecorder", "music_access_attempts"),
       manualOwner("dev.christopherbell.notification.delivery.NotificationFanoutGuard",
@@ -174,8 +179,23 @@ class MongoCollectionCatalogTest {
   void everySourceBackedCollectionIsCatalogedSeparatelyFromClassifiedEntries() throws IOException {
     var expected = sourceBackedCollectionNames();
 
-    assertThat(expected).hasSize(51);
+    assertThat(expected).hasSize(52);
     assertSourceCoverage(readCatalog(), expected);
+  }
+
+  @Test
+  void musicRuntimeStateLifecycleHasExactStatusMembership() throws IOException {
+    var statusesByPhysicalName = readCatalog().stream()
+        .collect(Collectors.toMap(CatalogEntry::physicalName, CatalogEntry::status));
+
+    assertThat(statusesByPhysicalName)
+        .containsEntry("music_queue_state", "rollback-retained")
+        .containsEntry("music_radio_state", "rollback-retained")
+        .containsEntry("music_runtime_state", "active");
+    assertThat(statusesByPhysicalName.entrySet().stream()
+        .filter(entry -> entry.getValue().equals("rollback-retained"))
+        .map(Map.Entry::getKey))
+        .containsExactlyInAnyOrder("music_queue_state", "music_radio_state");
   }
 
   @Test

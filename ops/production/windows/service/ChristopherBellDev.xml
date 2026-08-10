@@ -6,7 +6,7 @@
   <arguments>-NoLogo -NoProfile -ExecutionPolicy Bypass -File "%BASE%\Start-ChristopherBellDev.ps1"</arguments>
   <workingdirectory>C:\ProgramData\christopherbell.dev\current</workingdirectory>
   <depend>MongoDB</depend>
-  <startmode>Automatic</startmode>
+  <startmode>Manual</startmode>
   <stoptimeout>30sec</stoptimeout>
   <onfailure action="restart" delay="10 sec" />
   <onfailure action="restart" delay="30 sec" />

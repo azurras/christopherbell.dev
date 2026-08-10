@@ -14,6 +14,127 @@ $script:ProductionSmokePaths = @(
     '/nodeinfo/2.1'
 )
 $script:CandidateDatabasePattern = '^cbell_candidate_[0-9a-f]{12}_[0-9a-f]{24}$'
+$script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
+
+function Grant-CoordinatedProductionWriterStart {
+    param($Config, [string]$MarkerState, [string]$Release, [string]$Purpose)
+    $module = Get-Module Production.WriterStart -ErrorAction Stop
+    & $module {
+        param($Value, $State, $Sha, $Reason)
+        Grant-ProductionWriterStartAuthorization `
+            -Config $Value -MarkerState $State -Release $Sha -Purpose $Reason
+    } $Config $MarkerState $Release $Purpose
+}
+
+function Revoke-CoordinatedProductionWriterStart {
+    param($Config, [Parameter(Mandatory)]$Authorization)
+    $module = Get-Module Production.WriterStart -ErrorAction Stop
+    & $module {
+        param($Value, $Token)
+        Revoke-ProductionWriterStartAuthorization -Config $Value -Authorization $Token
+    } $Config $Authorization
+}
+
+function Install-CoordinatedProductionWriterStartGuardBundle {
+    param([Parameter(Mandatory)]$Config)
+    $launcher = Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1'
+    $modulePath = Join-Path $PSScriptRoot 'Production.WriterStart.psm1'
+    $serviceXml = Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml'
+    $installedWinSw = Join-Path $Config.programDataRoot 'service\ChristopherBellDev.exe'
+    $winSwSha = Get-ProductionWinSwSha256
+    $serviceXmlSha = (Get-FileHash -LiteralPath $serviceXml -Algorithm SHA256).Hash.ToLowerInvariant()
+    $writerStartModule = Get-Module Production.WriterStart -ErrorAction Stop
+    & $writerStartModule {
+        param(
+            $Value,
+            $Launcher,
+            $ModulePath,
+            $SourceWinSw,
+            $SourceServiceXml,
+            $ExpectedWinSw,
+            $ExpectedServiceXml
+        )
+        Publish-ProductionWriterStartGuardBundle `
+            -Config $Value `
+            -SourceLauncherPath $Launcher `
+            -SourceModulePath $ModulePath `
+            -SourceWinSwPath $SourceWinSw `
+            -SourceServiceXmlPath $SourceServiceXml `
+            -ExpectedWinSwSha256 $ExpectedWinSw `
+            -ExpectedServiceXmlSha256 $ExpectedServiceXml
+    } $Config $launcher $modulePath $installedWinSw $serviceXml $winSwSha $serviceXmlSha
+    Assert-ProductionWebsiteServiceBoundary `
+        -Root $Config.programDataRoot -Configuration $Config
+}
+
+function Set-ProductionWebsiteStartupType {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Automatic','Disabled')]
+        [string]$StartupType
+    )
+
+    try {
+        Set-Service -Name 'ChristopherBellDev' -StartupType $StartupType -ErrorAction Stop
+        $services = @(
+            Get-CimInstance -ClassName Win32_Service `
+                -Filter "Name='ChristopherBellDev'" -ErrorAction Stop
+        )
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            "Failed to set and verify website service startup type $StartupType.",
+            $_.Exception)
+    }
+    $expectedMode = if ($StartupType -eq 'Automatic') { 'Auto' } else { 'Disabled' }
+    if ($services.Count -ne 1 -or [string]$services[0].StartMode -cne $expectedMode) {
+        throw "Website service startup type $StartupType was not verified."
+    }
+}
+
+function Ensure-ProductionWriterStartGuardUnderHeldLock {
+    param([Parameter(Mandatory)]$Config)
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
+    Set-ProductionWebsiteStartupType -StartupType Disabled
+    try {
+        Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
+            -KeepRecoverySuspended
+        Install-CoordinatedProductionWriterStartGuardBundle -Config $Config | Out-Null
+        Set-ProductionWebsiteStartupType -StartupType Automatic
+    } catch {
+        $guardFailure = $_.Exception
+        try {
+            Set-ProductionWebsiteStartupType -StartupType Disabled
+        } catch {
+            throw [System.AggregateException]::new(
+                'Writer-start guard installation failed and Disabled startup containment could not be verified.',
+                [System.Exception[]]@($guardFailure, $_.Exception))
+        }
+        throw $guardFailure
+    }
+}
+
+function Read-ProductionReleaseMusicSchema {
+    param([Parameter(Mandatory)][string]$Release,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Sha)
+    try {
+        $value = Get-Content -LiteralPath (Join-Path $Release 'release.json') -Raw `
+            -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $names = @($value.PSObject.Properties.Name)
+        if (-not ($names -ccontains 'sha') -or -not ($names -ccontains 'musicSchema') -or
+            $value.sha -isnot [string] -or [string]$value.sha -cne $Sha -or
+            $value.musicSchema -isnot [string] -or
+            [string]$value.musicSchema -cnotin @('LEGACY','TARGET')) {
+            throw 'Invalid release schema metadata.'
+        }
+        return [string]$value.musicSchema
+    } catch {
+        throw [System.IO.InvalidDataException]::new(
+            'Release Music schema metadata is invalid.', $_.Exception)
+    }
+}
 function Resolve-OriginMainRelease {
     param($Config)
     $fetchArguments = Get-TrustedGitArguments $Config.repositoryPath @('fetch','--prune',$Config.remote,$Config.branch)
@@ -45,7 +166,15 @@ function New-ReleaseFromOriginMain {
         if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
         New-Item -ItemType Directory -Force $staging | Out-Null
         Copy-Item -LiteralPath $jars[0].FullName -Destination (Join-Path $staging 'app.jar')
-        [ordered]@{ sha=$Sha; source="$($Config.remote)/$($Config.branch)"; builtAt=(Get-Date).ToUniversalTime().ToString('o') } |
+        $musicSchema = if (Test-Path -LiteralPath (Join-Path $worktree `
+                'website\src\main\java\dev\christopherbell\configuration\mongo\migration\V014ConsolidateMusicRuntimeState.java') `
+                -PathType Leaf) { 'TARGET' } else { 'LEGACY' }
+        [ordered]@{
+            sha=$Sha
+            source="$($Config.remote)/$($Config.branch)"
+            builtAt=(Get-Date).ToUniversalTime().ToString('o')
+            musicSchema=$musicSchema
+        } |
             ConvertTo-Json | Set-Content (Join-Path $staging 'release.json') -Encoding utf8
         Move-Item -LiteralPath $staging -Destination $release
         return $release
@@ -66,6 +195,9 @@ function New-ReleaseFromOriginMain {
 
 function Start-ProductionJar {
     param($Config, [Parameter(Mandatory)][string]$Release, [int]$Port, [string]$Profiles, [hashtable]$AdditionalEnvironment = @{})
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
     $release = Assert-ReleasePath $Config $Release
     $jar = Join-Path $release 'app.jar'
     if (-not (Test-Path -LiteralPath $jar -PathType Leaf)) { throw "Missing release JAR: $jar" }
@@ -475,7 +607,8 @@ function Stop-ProductionWebsiteService {
         [ValidateRange(1,60000)]
         [int]$PortTimeoutMilliseconds = 10000,
         [ValidateRange(1,60000)]
-        [int]$RecoveryCommandTimeoutMilliseconds = 5000
+        [int]$RecoveryCommandTimeoutMilliseconds = 5000,
+        [switch]$KeepRecoverySuspended
     )
 
     $operationFailure = $null
@@ -516,7 +649,7 @@ function Stop-ProductionWebsiteService {
             }
         }
     } finally {
-        if ($suspensionAttempted) {
+        if ($suspensionAttempted -and -not $KeepRecoverySuspended) {
             try {
                 Set-ProductionWebsiteRecoveryPolicy `
                     -Policy Normal `
@@ -539,26 +672,72 @@ function Stop-ProductionWebsiteService {
 }
 
 function Switch-ProductionRelease {
-    param($Config, [Parameter(Mandatory)][string]$Release)
+    param(
+        $Config,
+        [Parameter(Mandatory)][string]$Release,
+        [ValidateSet('TARGET_ACTIVE','TARGET_CUTOVER_IN_PROGRESS','LEGACY_ACTIVE_RECONCILIATION_REQUIRED')]
+        [string]$AuthorizationMarkerState,
+        [ValidateSet('TARGET_CUTOVER','TARGET_DEPLOY','TARGET_RECONCILIATION','LEGACY_ROLLBACK','LEGACY_RESTORE')]
+        [string]$AuthorizationPurpose,
+        [ValidatePattern('^$|^[0-9a-f]{40}$')][string]$AuthorizationRelease = '',
+        [switch]$KeepRecoverySuspended,
+        [switch]$WriterAlreadyStopped
+    )
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
     $release = Assert-ReleasePath $Config $Release
     $currentPath = Join-Path $Config.programDataRoot 'current'
     $previousPath = Join-Path $Config.programDataRoot 'previous'
     $old = Get-JunctionTarget $currentPath
-    Stop-ProductionWebsiteService -ProductionPort $Config.productionPort
+    if ($WriterAlreadyStopped) {
+        Assert-ProductionWebsiteStopped -ProductionPort $Config.productionPort
+    } else {
+        Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
+            -KeepRecoverySuspended:$KeepRecoverySuspended
+    }
     $liveMigrationStarted = $false
     try {
         if ($old) { Set-AtomicJunction $Config $previousPath $old }
         Set-AtomicJunction $Config $currentPath $release
         $liveMigrationStarted = $true
-        Start-Service ChristopherBellDev
-        Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
-        Test-ProductionPublicEndpoints -Config $Config | Out-Null
+        $authorization = $null
+        if ($AuthorizationPurpose) {
+            $authorization = Grant-CoordinatedProductionWriterStart -Config $Config `
+                -MarkerState $AuthorizationMarkerState `
+                -Release $AuthorizationRelease `
+                -Purpose $AuthorizationPurpose
+        }
+        $startFailure = $null
+        try {
+            Start-Service ChristopherBellDev
+            Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
+            Test-ProductionPublicEndpoints -Config $Config | Out-Null
+        } catch {
+            $startFailure = $_.Exception
+        } finally {
+            if ($authorization) {
+                try {
+                    Revoke-CoordinatedProductionWriterStart `
+                        -Config $Config -Authorization $authorization
+                } catch {
+                    if ($startFailure) {
+                        throw [System.AggregateException]::new(
+                            'Writer start and pending authorization cleanup both failed.',
+                            [System.Exception[]]@($startFailure, $_.Exception))
+                    }
+                    throw
+                }
+            }
+        }
+        if ($startFailure) { throw $startFailure }
     } catch {
         $deploymentFailure = $_.Exception
         if ($liveMigrationStarted) {
             $stopFailure = $null
             try {
-                Stop-ProductionWebsiteService -ProductionPort $Config.productionPort
+                Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
+                    -KeepRecoverySuspended:$KeepRecoverySuspended
             } catch {
                 $stopFailure = $_.Exception
             }
@@ -573,7 +752,8 @@ function Switch-ProductionRelease {
         }
         if ($old) {
             try {
-                Stop-ProductionWebsiteService -ProductionPort $Config.productionPort
+                Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
+                    -KeepRecoverySuspended:$KeepRecoverySuspended
                 Set-AtomicJunction $Config $currentPath $old
                 Start-Service ChristopherBellDev
                 Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
@@ -594,28 +774,347 @@ function Remove-ExpiredReleases {
         Get-JunctionTarget (Join-Path $Config.programDataRoot 'current')
         Get-JunctionTarget (Join-Path $Config.programDataRoot 'previous')
     ) | Where-Object { $_ }
+    $direction = Read-ProductionMusicSchemaDirection -Config $Config
+    $protectedReleaseNames = @()
+    if ($direction) {
+        $protected += Join-Path $Config.programDataRoot "releases\$($direction.targetRelease)"
+        $protected += Join-Path $Config.programDataRoot "releases\$($direction.legacyRelease)"
+        $protectedReleaseNames = @(
+            [string]$direction.targetRelease,
+            [string]$direction.legacyRelease)
+    }
     $releases = @(Get-ChildItem (Join-Path $Config.programDataRoot 'releases') -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending)
     $kept = 0
     foreach ($release in $releases) {
-        if ($protected -contains $release.FullName -or $kept -lt [int]$Config.releaseRetention) { $kept++; continue }
+        if ($protected -contains $release.FullName -or
+            $protectedReleaseNames -ccontains $release.Name -or
+            $kept -lt [int]$Config.releaseRetention) { $kept++; continue }
         Assert-ReleasePath $Config $release.FullName | Out-Null
         Remove-Item -LiteralPath $release.FullName -Recurse -Force
     }
 }
 
+function Switch-ProductionReleaseAfterMusicReconciliation {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Release,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Sha,
+        [Parameter(Mandatory)]$Direction
+    )
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
+    $release = Assert-ReleasePath $Config $Release
+    $currentPath = Join-Path $Config.programDataRoot 'current'
+    $previousPath = Join-Path $Config.programDataRoot 'previous'
+    $old = Get-JunctionTarget $currentPath
+    if (-not $old -or (Split-Path -Leaf $old) -cne [string]$Direction.legacyRelease) {
+        throw 'The active release does not match the legacy Music schema-direction marker.'
+    }
+
+    Ensure-ProductionWriterStartGuardUnderHeldLock -Config $Config | Out-Null
+    $copy = $null
+    try {
+        $copy = Invoke-ProductionMusicRuntimeReconciliationNoLock -Config $Config
+        Set-AtomicJunction $Config $previousPath $old
+        Set-AtomicJunction $Config $currentPath $release
+        Write-ProductionMusicSchemaDirection `
+            -Config $Config `
+            -State TARGET_ACTIVE `
+            -TargetRelease $Sha `
+            -LegacyRelease ([string]$Direction.legacyRelease)
+        Start-Service ChristopherBellDev
+        Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
+        Test-ProductionPublicEndpoints -Config $Config | Out-Null
+        Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+    } catch {
+        $deploymentFailure = $_.Exception
+        if ($copy -and $copy.backup) {
+            $deploymentFailure = [System.InvalidOperationException]::new(
+                "Music runtime reconciliation deployment failed; retained backup: $($copy.backup)",
+                $deploymentFailure)
+        }
+        try {
+            Stop-ProductionWebsiteService -ProductionPort $Config.productionPort -KeepRecoverySuspended
+        } catch {
+            throw [System.AggregateException]::new(
+                'Music runtime reconciliation deployment failed and the writer stop postcondition also failed.',
+                [System.Exception[]]@($deploymentFailure, $_.Exception))
+        }
+        throw [System.InvalidOperationException]::new(
+            'Music runtime reconciliation deployment failed; the writer remains stopped.',
+            $deploymentFailure)
+    }
+}
+
 function Invoke-ProductionDeploy {
     [CmdletBinding()]
-    param([switch]$WhatIf)
-    $config = Read-ProductionConfig
-    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    param(
+        [switch]$WhatIf,
+        [switch]$MusicSchemaCutover,
+        [switch]$Automatic
+    )
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-ProductionFixedRootDeploymentLock `
+        -Config $config `
+        -FixedRoot $script:FixedProductionRoot `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+    $lock = $guard.Lock
     try {
+        $direction = Read-ProductionMusicSchemaDirection -Config $config
+        if (-not $direction) {
+            try {
+                $migrationActive = Get-ProductionMusicMigrationActivationNoLock -Config $config
+            } catch {
+                throw [System.InvalidOperationException]::new(
+                    'Deploy is blocked because the Music schema-direction marker is absent and migration activation is unknown.',
+                    $_.Exception)
+            }
+            if ($migrationActive) {
+                throw ('Deploy is blocked because the Music schema-direction marker is absent after ' +
+                    'migration activation. Restore the protected marker before retrying.')
+            }
+            if ($Automatic) {
+                throw ('Automatic deployment is blocked because the Music schema-direction marker is absent. ' +
+                    'Run the protected first-cutover deploy interactively.')
+            }
+        }
+        if ($direction -and
+            [string]$direction.state -eq 'TARGET_CUTOVER_IN_PROGRESS') {
+            throw ('Deploy is blocked because the first Music schema cutover is incomplete. ' +
+                'Keep the writer stopped and complete bounded recovery under deploy.lock.')
+        }
+        if ($MusicSchemaCutover -and $direction) {
+            throw 'First Music schema cutover requires an absent schema-direction marker.'
+        }
+        if ($Automatic -and $direction -and
+            [string]$direction.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+            throw ('Automatic deployment is blocked while legacy Music runtime state requires reconciliation. ' +
+                'Run the protected deploy command interactively.')
+        }
+        $legacyRelease = if ($MusicSchemaCutover) {
+            Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
+        } else { $null }
+        if ($MusicSchemaCutover) {
+            if (-not $legacyRelease) {
+                throw 'First Music schema cutover requires an active legacy release.'
+            }
+            Assert-ReleasePath $config $legacyRelease | Out-Null
+            if ((Split-Path -Leaf $legacyRelease) -notmatch '^[0-9a-f]{40}$') {
+                throw 'First Music schema cutover legacy release identity is invalid.'
+            }
+            $legacyMetadataPath = Join-Path $legacyRelease 'release.json'
+            $legacyMetadata = if (Test-Path -LiteralPath $legacyMetadataPath -PathType Leaf) {
+                Get-Content -LiteralPath $legacyMetadataPath -Raw | ConvertFrom-Json
+            } else { $null }
+            if ($legacyMetadata -and
+                $legacyMetadata.PSObject.Properties.Name -ccontains 'musicSchema' -and
+                [string]$legacyMetadata.musicSchema -cne 'LEGACY') {
+                throw 'First Music schema cutover requires a proven legacy active release.'
+            }
+        } elseif ($direction -and [string]$direction.state -eq 'TARGET_ACTIVE') {
+            $active = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
+            if (-not $active -or (Split-Path -Leaf $active) -cne [string]$direction.targetRelease) {
+                throw 'The active release does not match the target Music schema-direction marker.'
+            }
+        }
         $sha = Resolve-OriginMainRelease $config
         if ($WhatIf) { Write-Output "Would deploy $($config.remote)/$($config.branch) at $sha"; return }
         $release = New-ReleaseFromOriginMain $config $sha
+        $releaseMusicSchema = Read-ProductionReleaseMusicSchema -Release $release -Sha $sha
+        if (-not $direction -and -not $MusicSchemaCutover) {
+            if ($releaseMusicSchema -cne 'LEGACY') {
+                throw ('A target-schema release requires the protected first-cutover path with ' +
+                    '-MusicSchemaCutover.')
+            }
+        } elseif ($releaseMusicSchema -cne 'TARGET') {
+            throw 'Schema-sensitive deploy requires an exact target-schema release.'
+        }
         Invoke-CandidateReleaseValidation -Config $config -Release $release -Sha $sha
-        Switch-ProductionRelease $config $release
+        if ($direction -and [string]$direction.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+            Switch-ProductionReleaseAfterMusicReconciliation `
+                -Config $config `
+                -Release $release `
+                -Sha $sha `
+                -Direction $direction
+        } else {
+            if ($MusicSchemaCutover) {
+                $legacySha = Split-Path -Leaf $legacyRelease
+                Ensure-ProductionWriterStartGuardUnderHeldLock -Config $config | Out-Null
+                Write-ProductionMusicSchemaDirection `
+                    -Config $config `
+                    -State TARGET_CUTOVER_IN_PROGRESS `
+                    -TargetRelease $sha `
+                    -LegacyRelease $legacySha
+                try {
+                    Switch-ProductionRelease $config $release `
+                        -AuthorizationMarkerState TARGET_CUTOVER_IN_PROGRESS `
+                        -AuthorizationPurpose TARGET_CUTOVER `
+                        -AuthorizationRelease $sha `
+                        -KeepRecoverySuspended `
+                        -WriterAlreadyStopped
+                    Write-ProductionMusicSchemaDirection `
+                        -Config $config `
+                        -State TARGET_ACTIVE `
+                        -TargetRelease $sha `
+                        -LegacyRelease $legacySha
+                    Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+                } catch {
+                    $cutoverFailure = $_.Exception
+                    try {
+                        Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                            -KeepRecoverySuspended
+                    } catch {
+                        throw [System.AggregateException]::new(
+                            'First Music schema cutover failed and the writer stop postcondition also failed.',
+                            [System.Exception[]]@($cutoverFailure, $_.Exception))
+                    }
+                    throw [System.InvalidOperationException]::new(
+                        'First Music schema cutover failed; the writer remains stopped and direction is pending.',
+                        $cutoverFailure)
+                }
+            } elseif ($direction -and [string]$direction.state -eq 'TARGET_ACTIVE') {
+                try {
+                    Ensure-ProductionWriterStartGuardUnderHeldLock -Config $config | Out-Null
+                    Switch-ProductionRelease $config $release `
+                        -AuthorizationMarkerState TARGET_ACTIVE `
+                        -AuthorizationPurpose TARGET_DEPLOY `
+                        -AuthorizationRelease $sha `
+                        -KeepRecoverySuspended `
+                        -WriterAlreadyStopped
+                    Write-ProductionMusicSchemaDirection `
+                        -Config $config `
+                        -State TARGET_ACTIVE `
+                        -TargetRelease $sha `
+                        -LegacyRelease ([string]$direction.legacyRelease)
+                    Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+                } catch {
+                    $failure = $_.Exception
+                    try {
+                        Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                            -KeepRecoverySuspended
+                    } catch {
+                        throw [System.AggregateException]::new(
+                            'Target deployment failed and the writer stop postcondition also failed.',
+                            [System.Exception[]]@($failure, $_.Exception))
+                    }
+                    throw [System.InvalidOperationException]::new(
+                        'Target deployment failed; the writer remains stopped.', $failure)
+                }
+            } else {
+                Switch-ProductionRelease $config $release
+            }
+        }
         Remove-ExpiredReleases $config
     } finally { $lock.Dispose() }
 }
 
-Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,New-ReleaseFromOriginMain,Start-ProductionJar,Test-ProductionEndpoints,Test-ProductionPublicEndpoints,Test-CandidateRelease,Stop-ProductionWebsiteService,Switch-ProductionRelease,Remove-ExpiredReleases
+function Confirm-ProductionMusicTargetActive {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')]
+        [string]$TargetRelease,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')]
+        [string]$LegacyRelease,
+        [Parameter(Mandatory)][switch]$MigrationVerified
+    )
+    if (-not $MigrationVerified) {
+        throw 'Target schema-direction initialization requires explicit verified migration confirmation.'
+    }
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-ProductionFixedRootDeploymentLock `
+        -Config $config `
+        -FixedRoot $script:FixedProductionRoot `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+    $lock = $guard.Lock
+    try {
+        $existing = Read-ProductionMusicSchemaDirection -Config $config
+        if (-not $existing) {
+            throw 'Target schema direction cannot be confirmed without a protected marker.'
+        }
+        if ([string]$existing.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+            throw 'Target schema direction cannot be confirmed while legacy reconciliation is required.'
+        }
+        if ([string]$existing.targetRelease -cne $TargetRelease -or
+            [string]$existing.legacyRelease -cne $LegacyRelease) {
+            throw 'Target schema-direction confirmation does not match the protected marker.'
+        }
+        $current = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
+        $previous = Get-JunctionTarget (Join-Path $config.programDataRoot 'previous')
+        if (-not $current -or -not $previous -or
+            (Split-Path -Leaf $current) -cne $TargetRelease -or
+            (Split-Path -Leaf $previous) -cne $LegacyRelease) {
+            throw 'Target schema-direction release identity does not match active junctions.'
+        }
+        $resuming = [string]$existing.state -eq 'TARGET_CUTOVER_IN_PROGRESS'
+        try {
+            if ($resuming) {
+                Ensure-ProductionWriterStartGuardUnderHeldLock -Config $config | Out-Null
+                $authorization = Grant-CoordinatedProductionWriterStart -Config $config `
+                    -MarkerState TARGET_CUTOVER_IN_PROGRESS `
+                    -Release $TargetRelease `
+                    -Purpose TARGET_CUTOVER
+                $startFailure = $null
+                try {
+                    Start-Service ChristopherBellDev
+                    Test-ProductionEndpoints -Config $config -Port $config.productionPort
+                    Test-ProductionPublicEndpoints -Config $config | Out-Null
+                } catch {
+                    $startFailure = $_.Exception
+                } finally {
+                    if ($authorization) {
+                        try {
+                            Revoke-CoordinatedProductionWriterStart `
+                                -Config $config -Authorization $authorization
+                        } catch {
+                            if ($startFailure) {
+                                throw [System.AggregateException]::new(
+                                    'Pending cutover start and authorization cleanup both failed.',
+                                    [System.Exception[]]@($startFailure, $_.Exception))
+                            }
+                            throw
+                        }
+                    }
+                }
+                if ($startFailure) { throw $startFailure }
+            } else {
+                Test-ProductionEndpoints -Config $config -Port $config.productionPort
+                Test-ProductionPublicEndpoints -Config $config | Out-Null
+            }
+            Write-ProductionMusicSchemaDirection `
+                -Config $config `
+                -State TARGET_ACTIVE `
+                -TargetRelease $TargetRelease `
+                -LegacyRelease $LegacyRelease
+            Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+        } catch {
+            $confirmationFailure = $_.Exception
+            if ($resuming) {
+                try {
+                    Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                        -KeepRecoverySuspended
+                } catch {
+                    throw [System.AggregateException]::new(
+                        'Pending Music cutover confirmation failed and the writer stop postcondition also failed.',
+                        [System.Exception[]]@($confirmationFailure, $_.Exception))
+                }
+                throw [System.InvalidOperationException]::new(
+                    'Pending Music cutover confirmation failed; the writer remains stopped.',
+                    $confirmationFailure)
+            }
+            throw $confirmationFailure
+        }
+    } finally {
+        $lock.Dispose()
+    }
+}
+
+Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,New-ReleaseFromOriginMain,Start-ProductionJar,Test-ProductionEndpoints,Test-ProductionPublicEndpoints,Test-CandidateRelease,Stop-ProductionWebsiteService,Set-ProductionWebsiteStartupType,Switch-ProductionRelease,Switch-ProductionReleaseAfterMusicReconciliation,Remove-ExpiredReleases,Confirm-ProductionMusicTargetActive

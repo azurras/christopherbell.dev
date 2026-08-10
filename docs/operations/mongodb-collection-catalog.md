@@ -1,11 +1,11 @@
 # MongoDB Collection Catalog
 
 This catalog is the source of truth for physical collection ownership in the
-`christopherbell` database. Logical groups do not merge storage. A
-`legacy-named` entry remains active under its physical name until a separately
-approved migration proves compatibility and rollback. `orphan-candidate` and
-`system-managed` classify reviewed non-source rows; they are not counted as
-source-backed mappings and never authorize cleanup.
+`christopherbell` database. `legacy-named` remains active under a historical
+name. `rollback-retained` is source-backed data intentionally preserved during
+an approved migration observation window; it never authorizes cleanup.
+`orphan-candidate` and `system-managed` classify reviewed non-source rows and
+also never authorize cleanup.
 
 The catalog describes source expectations. Use `prod.cmd mongo-inventory` for
 metadata-only live comparison. A live-only name is an unreviewed extra, not
@@ -33,9 +33,10 @@ permission to drop it. Never infer disposability from an empty count.
 | `music_tracks` | Music tracks | music and `MusicTrack` | entity | One catalog row per observed track revision | Unique path plus artist, album, and genre indexes | user | active |
 | `music_playlists` | Music playlists | music and `MusicPlaylist` | entity | One durable document per playlist | Unique normalized name | user | active |
 | `music_metadata_edits` | Music metadata edits | music and `MusicMetadataEdit` | audit | Per-track edit history with application-managed expiry | Track and expiry indexes | audit | active |
-| `music_queue_state` | Music queue state | music and `MusicQueueState` | singleton-state | One global optimistic queue document | `_id` fixed key and optimistic version | user | active |
+| `music_queue_state` | Legacy Music queue state | music migration and `MusicQueueState` | singleton-state | One immutable rollback copy retained for seven days after cutover | `_id` fixed key and optimistic version | user | rollback-retained |
 | `music_radio_history` | Music radio history | music and `MusicRadioHistoryEvent` | event-history | Append-only playback history | Station sequence and occurrence-time indexes | user | active |
-| `music_radio_state` | Music radio state | music and `MusicRadioState` | singleton-state | One global optimistic station document | `_id` fixed key and optimistic version | user | active |
+| `music_radio_state` | Legacy Music radio state | music migration and `MusicRadioState` | singleton-state | One immutable rollback copy retained for seven days after cutover | `_id` fixed key and optimistic version | user | rollback-retained |
+| `music_runtime_state` | Music runtime state | music and `MusicRuntimeStateDocument`; `MusicRuntimeStateStore` | singleton-state | Exactly queue and radio documents with independent optimistic versions | Collision-proof `_id` values `queue` and `radio` | user | active |
 | `music_access_attempts` | Music access attempts | music and `MusicAccessAttempt` | audit | Short-lived bounded security attempts | Absolute-expiry TTL | security | active |
 | `notification_delivery_guards` | Notification delivery guards | notification and `NotificationDeliveryGuard`; manual deletion access | lease | Short-lived unique fanout claims | `_id` dedupe key and absolute-expiry TTL | internal | active |
 | `notification_rate_limits` | Notification rate limits | notification and `NotificationRateLimit`; manual deletion access | singleton-state | Short-lived fixed-window counters | `_id` scope key and absolute-expiry TTL | internal | active |
@@ -97,6 +98,7 @@ own their collection names locally.
 | `dev.christopherbell.configuration.mongo.migration.V011HardenWhatsForLunchData` | `whatsforlunch`, `whatsforlunch_sessions` |
 | `dev.christopherbell.configuration.mongo.migration.V012RetainSharedFolderWork` | `shared_folder_media_jobs`, `shared_folder_radio`, `shared_folder_upload_sessions` |
 | `dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes` | `whatsforlunch_ratings` |
+| `dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState` | `music_queue_state`, `music_radio_state`, `music_runtime_state` |
 | `dev.christopherbell.configuration.security.browser.MongoBrowserSessionActivityStore` | `browser_sessions` |
 | `dev.christopherbell.configuration.security.browser.MongoBrowserSessionAuthenticationStore` | `accounts`, `browser_sessions` |
 | `dev.christopherbell.federation.discovery.FederationOutboxQueryRepository` | `posts` |
@@ -105,6 +107,7 @@ own their collection names locally.
 | `dev.christopherbell.message.conversation.ConversationQueryRepository` | `messages` |
 | `dev.christopherbell.music.catalog.MusicCatalog` | `music_tracks` |
 | `dev.christopherbell.music.library.MusicLibraryService` | `music_playlists`, `music_tracks` |
+| `dev.christopherbell.music.radio.MusicRuntimeStateStore` | `music_runtime_state` |
 | `dev.christopherbell.music.security.MusicAccessAuditQueryService` | `music_access_attempts` |
 | `dev.christopherbell.music.security.MusicAccessAuditRecorder` | `music_access_attempts` |
 | `dev.christopherbell.notification.delivery.NotificationFanoutGuard` | `notification_delivery_guards`, `notification_rate_limits` |

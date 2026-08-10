@@ -215,7 +215,14 @@ function New-ProductionBackup {
 function Enter-DeploymentLock {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$LockPath)
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LockPath) | Out-Null
+    $lockDirectory = Split-Path -Parent $LockPath
+    if (-not (Test-Path -LiteralPath $lockDirectory -PathType Container)) {
+        throw "Missing deployment lock directory: $lockDirectory"
+    }
+    Assert-ProductionPathNotReparse -Path $lockDirectory | Out-Null
+    if (Test-Path -LiteralPath $LockPath) {
+        Assert-ProductionPathNotReparse -Path $LockPath | Out-Null
+    }
     try { return [IO.File]::Open($LockPath, 'OpenOrCreate', 'ReadWrite', 'None') }
     catch [IO.IOException] { throw 'Another production operation is already running.' }
 }
@@ -521,9 +528,14 @@ function Show-ProductionHelp {
 Usage: prod.cmd <command> [-WhatIf]
 
 Commands: install, deploy, status, logs, restart, releases, rollback, backup,
-          mongo-inventory, verify-startup, uninstall, auto-install, auto-deploy,
-          auto-status, auto-remove, sensor-install, sensor-status,
-          sensor-enable, sensor-disable
+          mongo-inventory, music-runtime-rollback, verify-startup, uninstall,
+          auto-install, auto-deploy, auto-status, auto-remove, sensor-install,
+          sensor-status, sensor-enable, sensor-disable
+
+Use -WhatIf to preview music-runtime-rollback. Confirmed execution requires
+-ConfirmMusicRuntimeRollback and uses the single-lock coordinated binary rollback boundary.
+The first target-schema deployment is manual only and requires
+prod.cmd deploy -MusicSchemaCutover. Automatic deployment never initiates first cutover.
 '@ | Write-Output
 }
 

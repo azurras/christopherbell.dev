@@ -1,16 +1,19 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('help','install','deploy','status','logs','restart','releases','rollback','backup','mongo-inventory','verify-startup','uninstall','auto-install','auto-deploy','auto-status','auto-remove','sensor-install','sensor-status','sensor-enable','sensor-disable')]
+    [ValidateSet('help','install','deploy','status','logs','restart','releases','rollback','backup','mongo-inventory','music-runtime-rollback','verify-startup','uninstall','auto-install','auto-deploy','auto-status','auto-remove','sensor-install','sensor-status','sensor-enable','sensor-disable')]
     [string]$Command = 'help',
     [switch]$WhatIf,
+    [switch]$MusicSchemaCutover,
+    [switch]$ConfirmMusicRuntimeRollback,
     [string]$CloudflareTokenPath
 )
 
 $ErrorActionPreference = 'Stop'
 $moduleRoot = Join-Path $PSScriptRoot 'modules'
 Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
-foreach ($module in 'Production.Deploy','Production.SharedFolder','Production.Install','Production.Sensors','Production.Operations','Production.AutoDeploy') {
+Import-Module (Join-Path $moduleRoot 'Production.WriterStart.psm1') -Global -Force
+foreach ($module in 'Production.MusicRuntime','Production.Deploy','Production.SharedFolder','Production.Install','Production.Sensors','Production.Operations','Production.AutoDeploy') {
     Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
 }
 
@@ -18,13 +21,19 @@ function Invoke-ProductionCommand {
     param(
         [Parameter(Mandatory)][string]$Command,
         [switch]$WhatIf,
+        [switch]$MusicSchemaCutover,
+        [switch]$ConfirmMusicRuntimeRollback,
         [string]$CloudflareTokenPath
     )
 
     $handlers = @{
         help = { Show-ProductionHelp }
         install = { Install-ProductionRuntime -WhatIf:$WhatIf -CloudflareTokenPath $CloudflareTokenPath }
-        deploy = { Invoke-ProductionDeploy -WhatIf:$WhatIf }
+        deploy = {
+            Invoke-ProductionDeploy `
+                -WhatIf:$WhatIf `
+                -MusicSchemaCutover:$MusicSchemaCutover
+        }
         status = { Get-ProductionStatus }
         logs = { Watch-ProductionLogs }
         restart = { Restart-ProductionService -Verify }
@@ -33,6 +42,15 @@ function Invoke-ProductionCommand {
         backup = { New-ProductionBackup }
         'mongo-inventory' = {
             Get-ProductionMongoCollectionInventory | ConvertTo-Json -Depth 100
+        }
+        'music-runtime-rollback' = {
+            if (-not $WhatIf -and -not $ConfirmMusicRuntimeRollback) {
+                throw 'Music runtime rollback requires explicit confirmation.'
+            } else {
+                Invoke-ProductionMigrationAwareRollback `
+                    -Confirm:$ConfirmMusicRuntimeRollback `
+                    -WhatIf:$WhatIf
+            }
         }
         'verify-startup' = { Test-ProductionStartup }
         uninstall = { Uninstall-ProductionRuntime -WhatIf:$WhatIf }
@@ -50,4 +68,6 @@ function Invoke-ProductionCommand {
 }
 
 Invoke-ProductionCommand -Command $Command -WhatIf:$WhatIf `
+    -MusicSchemaCutover:$MusicSchemaCutover `
+    -ConfirmMusicRuntimeRollback:$ConfirmMusicRuntimeRollback `
     -CloudflareTokenPath $CloudflareTokenPath

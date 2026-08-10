@@ -15,25 +15,28 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 class MusicQueueServiceTest {
 
   @Test
   void writerAddsToTheSingleGlobalQueueAtTheExactVersion() {
-    var queues = mock(MusicQueueStateRepository.class);
+    var runtimeState = mock(MusicRuntimeStateStore.class);
     var catalog = mock(MusicCatalog.class);
     var access = mock(MusicAccessService.class);
     MusicTrack track = track("song.mp3");
     when(access.requireWrite()).thenReturn(Account.builder().id("writer-1").build());
     when(catalog.findReady(track.id())).thenReturn(Optional.of(track));
-    when(queues.findById(MusicQueueState.ID)).thenReturn(Optional.empty());
-    when(queues.save(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+    when(runtimeState.findQueue()).thenReturn(Optional.empty());
+    when(runtimeState.saveQueue(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
       MusicQueueState state = invocation.getArgument(0);
       return new MusicQueueState(state.id(), state.entries(), 0L);
     });
     var service = new MusicQueueService(
-        queues, catalog, access,
+        runtimeState, catalog, access,
         Clock.fixed(Instant.parse("2026-07-28T12:00:00Z"), ZoneOffset.UTC));
 
     MusicQueueView result = service.add(track.id(), 0);
@@ -47,17 +50,45 @@ class MusicQueueServiceTest {
 
   @Test
   void staleWriterCannotOverwriteTheGlobalQueue() {
-    var queues = mock(MusicQueueStateRepository.class);
-    when(queues.findById(MusicQueueState.ID))
+    var runtimeState = mock(MusicRuntimeStateStore.class);
+    when(runtimeState.findQueue())
         .thenReturn(Optional.of(new MusicQueueState(MusicQueueState.ID, java.util.List.of(), 3L)));
     var access = mock(MusicAccessService.class);
     when(access.requireWrite()).thenReturn(Account.builder().id("writer-1").build());
     var service = new MusicQueueService(
-        queues, mock(MusicCatalog.class), access, Clock.systemUTC());
+        runtimeState, mock(MusicCatalog.class), access, Clock.systemUTC());
 
     assertThatThrownBy(() -> service.remove("missing", 3))
         .isInstanceOf(ResponseStatusException.class)
         .hasMessageContaining("409 CONFLICT");
+  }
+
+  @Test
+  void optimisticQueueSaveContentionMapsToConflict() {
+    assertSaveContentionMapsToConflict(new OptimisticLockingFailureException("stale queue"));
+  }
+
+  @Test
+  void duplicateQueueSaveContentionMapsToConflict() {
+    assertSaveContentionMapsToConflict(new DuplicateKeyException("duplicate queue"));
+  }
+
+  private void assertSaveContentionMapsToConflict(RuntimeException failure) {
+    MusicTrack track = track("song.mp3");
+    var runtimeState = mock(MusicRuntimeStateStore.class);
+    when(runtimeState.findQueue()).thenReturn(Optional.empty());
+    when(runtimeState.saveQueue(org.mockito.ArgumentMatchers.any())).thenThrow(failure);
+    var catalog = mock(MusicCatalog.class);
+    when(catalog.findReady(track.id())).thenReturn(Optional.of(track));
+    var access = mock(MusicAccessService.class);
+    when(access.requireWrite()).thenReturn(Account.builder().id("writer-1").build());
+    var service = new MusicQueueService(runtimeState, catalog, access, Clock.systemUTC());
+
+    assertThatThrownBy(() -> service.add(track.id(), 0))
+        .isInstanceOfSatisfying(ResponseStatusException.class, contention -> {
+          assertThat(contention.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+          assertThat(contention.getReason()).isEqualTo("Music queue changed. Refresh and retry.");
+        });
   }
 
   private MusicTrack track(String path) {

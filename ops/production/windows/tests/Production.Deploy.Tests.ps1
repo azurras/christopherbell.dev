@@ -1,9 +1,31 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.WriterStart.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.MusicRuntime.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
 
 Describe 'native Windows deployment' {
     InModuleScope Production.Deploy {
+        BeforeEach {
+            Mock Assert-ProductionFixedRootBoundary {
+                [pscustomobject]@{ Root='C:\ProgramData\christopherbell.dev' }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{
+                    Lock = Enter-DeploymentLock `
+                        -LockPath 'C:\ProgramData\christopherbell.dev\locks\deploy.lock'
+                }
+            }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$target; legacyRelease=$legacy }
+            }
+            Mock Read-ProductionReleaseMusicSchema { 'TARGET' }
+            Mock Ensure-ProductionWriterStartGuardUnderHeldLock { }
+            Mock Revoke-CoordinatedProductionWriterStart { }
+        }
         BeforeAll {
+            $script:ensureGuardImplementation =
+                (Get-Command Ensure-ProductionWriterStartGuardUnderHeldLock).ScriptBlock
             function New-ServiceStateStub {
                 param(
                     [string]$Status = 'Stopped',
@@ -174,6 +196,127 @@ Describe 'native Windows deployment' {
                 Assert-ProductionWebsiteRecoveryPolicy `
                     -Policy Normal -QueryOutput $queryOutput
             } | Should -Not -Throw
+        }
+
+        It 'rejects an alternate deploy root before lock, marker, database, candidate, junction, or service effects' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot='C:\attacker-controlled-root'
+                    productionPort=8080
+                }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                if ($FixedRoot -cne 'C:\ProgramData\christopherbell.dev') {
+                    throw 'trusted fixed-root provenance was not used'
+                }
+                throw 'Production root boundary is not guarded. Run guarded prod install before retrying.'
+            }
+            Mock Enter-DeploymentLock { throw 'unsafe config-derived lock was reached' }
+            Mock Read-ProductionMusicSchemaDirection { throw 'marker read must not run' }
+            Mock New-ProductionBackup { throw 'database effect must not run' }
+            Mock Invoke-CandidateReleaseValidation { throw 'candidate effect must not run' }
+            Mock Set-AtomicJunction { throw 'junction effect must not run' }
+            Mock Start-Service { throw 'service effect must not run' }
+
+            { Invoke-ProductionDeploy } |
+                Should -Throw '*Run guarded prod install before retrying*'
+
+            Should -Invoke Enter-DeploymentLock -Times 0
+            Should -Invoke Read-ProductionMusicSchemaDirection -Times 0
+            Should -Invoke New-ProductionBackup -Times 0
+            Should -Invoke Invoke-CandidateReleaseValidation -Times 0
+            Should -Invoke Set-AtomicJunction -Times 0
+            Should -Invoke Start-Service -Times 0
+        }
+
+        It 'rejects an alternate root before every direct writer start seam' -TestCases @(
+            @{
+                Seam = 'candidate process'
+                Invoke = {
+                    Start-ProductionJar `
+                        -Config $config `
+                        -Release 'C:\attacker-controlled\releases\0123456789abcdef0123456789abcdef01234567' `
+                        -Port 8081 `
+                        -Profiles 'prod'
+                }
+            }
+            @{
+                Seam = 'release switch'
+                Invoke = {
+                    Switch-ProductionRelease `
+                        -Config $config `
+                        -Release 'C:\attacker-controlled\releases\0123456789abcdef0123456789abcdef01234567'
+                }
+            }
+            @{
+                Seam = 'reconciliation switch'
+                Invoke = {
+                    Switch-ProductionReleaseAfterMusicReconciliation `
+                        -Config $config `
+                        -Release 'C:\attacker-controlled\releases\0123456789abcdef0123456789abcdef01234567' `
+                        -Sha '0123456789abcdef0123456789abcdef01234567' `
+                        -Direction ([pscustomobject]@{
+                            legacyRelease = '89abcdef0123456789abcdef0123456789abcdef'
+                        })
+                }
+            }
+        ) {
+            param($Seam, $Invoke)
+
+            $config = [pscustomobject]@{
+                programDataRoot = 'C:\attacker-controlled'
+                productionPort = 8080
+            }
+            Mock Assert-ProductionFixedRootBoundary {
+                if ($FixedRoot -cne 'C:\ProgramData\christopherbell.dev') {
+                    throw "wrong fixed root reached for $Seam"
+                }
+                throw ('Production root boundary is not guarded. ' +
+                    'Run guarded prod install before retrying.')
+            }
+            Mock Assert-ReleasePath { throw 'release was reached' }
+            Mock Read-ProductionEnvironment { throw 'environment was reached' }
+            Mock Get-JunctionTarget { throw 'junction was reached' }
+            Mock Set-AtomicJunction { throw 'junction mutation was reached' }
+            Mock Invoke-ProductionMusicRuntimeReconciliationNoLock { throw 'database was reached' }
+            Mock Start-Service { throw 'service was reached' }
+
+            { & $Invoke } | Should -Throw '*Run guarded prod install before retrying*'
+            Should -Invoke Assert-ProductionFixedRootBoundary -Times 1 -Exactly
+            Should -Invoke Assert-ReleasePath -Times 0 -Exactly
+            Should -Invoke Read-ProductionEnvironment -Times 0 -Exactly
+            Should -Invoke Get-JunctionTarget -Times 0 -Exactly
+            Should -Invoke Set-AtomicJunction -Times 0 -Exactly
+            Should -Invoke Invoke-ProductionMusicRuntimeReconciliationNoLock -Times 0 -Exactly
+            Should -Invoke Start-Service -Times 0 -Exactly
+        }
+
+        It 'sets and verifies the exact website service startup type' -ForEach @(
+            @{ StartupType='Disabled'; ExpectedMode='Disabled' },
+            @{ StartupType='Automatic'; ExpectedMode='Auto' }
+        ) {
+            $script:actualStartMode = if ($StartupType -eq 'Disabled') { 'Auto' } else { 'Disabled' }
+            Mock Set-Service {
+                $script:actualStartMode = if ($StartupType -eq 'Disabled') { 'Disabled' } else { 'Auto' }
+            }
+            Mock Get-CimInstance {
+                [pscustomobject]@{ Name='ChristopherBellDev'; StartMode=$script:actualStartMode }
+            }
+
+            { Set-ProductionWebsiteStartupType -StartupType $StartupType } |
+                Should -Not -Throw
+
+            $script:actualStartMode | Should -Be $ExpectedMode
+        }
+
+        It 'fails before publication when the Disabled startup type cannot be verified' {
+            Mock Set-Service { }
+            Mock Get-CimInstance {
+                [pscustomobject]@{ Name='ChristopherBellDev'; StartMode='Auto' }
+            }
+
+            { Set-ProductionWebsiteStartupType -StartupType Disabled } |
+                Should -Throw '*startup type*Disabled*not verified*'
         }
 
         It 'rejects contradictory duplicate reset-period fields' {
@@ -850,18 +993,438 @@ Describe 'native Windows deployment' {
             $script:deployEvents = [System.Collections.Generic.List[string]]::new()
             Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; remote='origin'; branch='main' } }
             Mock Enter-DeploymentLock { $lock }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='TARGET_ACTIVE'
+                    targetRelease='1111111111111111111111111111111111111111'
+                    legacyRelease='2222222222222222222222222222222222222222'
+                }
+            }
             Mock Resolve-OriginMainRelease { '0123456789abcdef0123456789abcdef01234567' }
             Mock New-ReleaseFromOriginMain { 'C:\data\releases\new' }
+            Mock Get-JunctionTarget { 'C:\data\releases\1111111111111111111111111111111111111111' }
             Mock Invoke-CandidateReleaseValidation { [void]$script:deployEvents.Add('candidate-cleaned') }
             Mock Switch-ProductionRelease { [void]$script:deployEvents.Add('live-writer-stop-and-cutover') }
+            Mock Write-ProductionMusicSchemaDirection { }
+            Mock Set-ProductionWebsiteRecoveryPolicy { [void]$script:deployEvents.Add('recovery-normal') }
             Mock Remove-ExpiredReleases { }
 
             Invoke-ProductionDeploy
 
-            $script:deployEvents | Should -Be @('candidate-cleaned', 'live-writer-stop-and-cutover')
+            $script:deployEvents | Should -Be @(
+                'candidate-cleaned', 'live-writer-stop-and-cutover', 'recovery-normal')
             Should -Invoke Invoke-CandidateReleaseValidation -Times 1 -Exactly -ParameterFilter {
                 $Sha -eq '0123456789abcdef0123456789abcdef01234567'
             }
+        }
+
+        It 'keeps recovery suspended for a caller-owned schema transition' {
+            $policies = [Collections.Generic.List[string]]::new()
+            Mock Set-ProductionWebsiteRecoveryPolicy { [void]$policies.Add($Policy) }
+            Mock Stop-Service { }
+            Mock Assert-ProductionWebsiteStopped { }
+
+            Stop-ProductionWebsiteService -ProductionPort 8080 `
+                -PortTimeoutMilliseconds 1 `
+                -KeepRecoverySuspended
+
+            $policies | Should -Be @('Suspended')
+        }
+
+        It 'refuses normal deploy before remote access when schema direction is absent' {
+            $lock = [IO.MemoryStream]::new()
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data' } }
+            Mock Enter-DeploymentLock { $lock }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Get-ProductionMusicMigrationActivationNoLock { throw 'unknown' }
+            Mock Resolve-OriginMainRelease { throw 'remote must not be read' }
+
+            { Invoke-ProductionDeploy } | Should -Throw '*marker is absent*'
+
+            Should -Invoke Resolve-OriginMainRelease -Times 0
+        }
+
+        It 'permits a proven inactive fresh legacy deploy without creating a marker' {
+            $legacy = '1111111111111111111111111111111111111111'
+            $next = '2222222222222222222222222222222222222222'
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; remote='origin'; branch='main' }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Get-ProductionMusicMigrationActivationNoLock { $false }
+            Mock Resolve-OriginMainRelease { $next }
+            Mock New-ReleaseFromOriginMain { "C:\data\releases\$next" }
+            Mock Read-ProductionReleaseMusicSchema { 'LEGACY' }
+            Mock Invoke-CandidateReleaseValidation { }
+            Mock Switch-ProductionRelease { }
+            Mock Remove-ExpiredReleases { }
+            Mock Write-ProductionMusicSchemaDirection { throw 'marker must remain absent' }
+
+            Invoke-ProductionDeploy
+
+            Should -Invoke Switch-ProductionRelease -Times 1
+            Should -Invoke Write-ProductionMusicSchemaDirection -Times 0
+        }
+
+        It 'holds one deploy lock through legacy reconciliation, switch, marker, start, and health' {
+            $events = [System.Collections.Generic.List[string]]::new()
+            $lock = [pscustomobject]@{ }
+            $lock | Add-Member ScriptMethod Dispose { [void]$events.Add('lock:release') }
+            $legacy = '1111111111111111111111111111111111111111'
+            $target = '2222222222222222222222222222222222222222'
+            $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8443; remote='origin'; branch='main' }
+            Mock Read-ProductionConfig { $config }
+            Mock Enter-DeploymentLock { [void]$events.Add('lock:acquire'); $lock }
+            Mock Read-ProductionMusicSchemaDirection { [pscustomobject]@{ state='LEGACY_ACTIVE_RECONCILIATION_REQUIRED'; targetRelease=$target; legacyRelease=$legacy } }
+            Mock Resolve-OriginMainRelease { $target }
+            Mock New-ReleaseFromOriginMain { "C:\data\releases\$target" }
+            Mock Invoke-CandidateReleaseValidation { [void]$events.Add('candidate') }
+            Mock Assert-ReleasePath { $Release }
+            Mock Get-JunctionTarget { "C:\data\releases\$legacy" }
+            Mock Ensure-ProductionWriterStartGuardUnderHeldLock {
+                [void]$events.Add('stop-and-guard')
+            }
+            Mock Invoke-ProductionMusicRuntimeReconciliationNoLock { [void]$events.Add('reconcile') }
+            Mock Set-AtomicJunction { [void]$events.Add("junction:$([IO.Path]::GetFileName($Path))") }
+            Mock Write-ProductionMusicSchemaDirection { [void]$events.Add("marker:$State") }
+            Mock Start-Service { [void]$events.Add('start') }
+            Mock Test-ProductionEndpoints { [void]$events.Add('health') }
+            Mock Test-ProductionPublicEndpoints { [void]$events.Add('public-health') }
+            Mock Set-ProductionWebsiteRecoveryPolicy { [void]$events.Add('recovery-normal') }
+            Mock Remove-ExpiredReleases { [void]$events.Add('cleanup') }
+
+            Invoke-ProductionDeploy
+
+            $events | Should -Be @(
+                'lock:acquire','candidate','stop-and-guard','reconcile','junction:previous','junction:current',
+                'marker:TARGET_ACTIVE','start','health','public-health','recovery-normal',
+                'cleanup','lock:release')
+        }
+
+        It 'keeps the writer stopped and marker legacy when reconciliation fails' {
+            $lock = [IO.MemoryStream]::new()
+            $legacy = '1111111111111111111111111111111111111111'
+            $target = '2222222222222222222222222222222222222222'
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8443; remote='origin'; branch='main' } }
+            Mock Enter-DeploymentLock { $lock }
+            Mock Read-ProductionMusicSchemaDirection { [pscustomobject]@{ state='LEGACY_ACTIVE_RECONCILIATION_REQUIRED'; targetRelease=$target; legacyRelease=$legacy } }
+            Mock Resolve-OriginMainRelease { $target }
+            Mock New-ReleaseFromOriginMain { "C:\data\releases\$target" }
+            Mock Invoke-CandidateReleaseValidation { }
+            Mock Assert-ReleasePath { $Release }
+            Mock Get-JunctionTarget { "C:\data\releases\$legacy" }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Invoke-ProductionMusicRuntimeReconciliationNoLock { throw 'reconcile failed' }
+            Mock Set-AtomicJunction { }
+            Mock Write-ProductionMusicSchemaDirection { }
+            Mock Start-Service { }
+            Mock Grant-CoordinatedProductionWriterStart { }
+
+            { Invoke-ProductionDeploy } | Should -Throw '*writer remains stopped*'
+
+            Should -Invoke Ensure-ProductionWriterStartGuardUnderHeldLock -Times 1
+            Should -Invoke Stop-ProductionWebsiteService -Times 1
+            Should -Invoke Set-AtomicJunction -Times 0
+            Should -Invoke Write-ProductionMusicSchemaDirection -Times 0
+            Should -Invoke Start-Service -Times 0
+        }
+
+        It 'rechecks automatic mode under deploy.lock and never reconciles after a legacy race' {
+            $legacy = '1111111111111111111111111111111111111111'
+            $target = '2222222222222222222222222222222222222222'
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data' } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
+                    targetRelease=$target
+                    legacyRelease=$legacy
+                }
+            }
+            Mock Resolve-OriginMainRelease { throw 'remote must not be read' }
+            Mock Invoke-ProductionMusicRuntimeReconciliationNoLock { throw 'must not reconcile' }
+
+            { Invoke-ProductionDeploy -Automatic } | Should -Throw '*Automatic deployment is blocked*'
+            Should -Invoke Resolve-OriginMainRelease -Times 0
+            Should -Invoke Invoke-ProductionMusicRuntimeReconciliationNoLock -Times 0
+        }
+
+        It 'protects marker-owned target and legacy releases from expiry cleanup' {
+            $root = Join-Path $TestDrive 'retention'
+            $releases = Join-Path $root 'releases'
+            New-Item -ItemType Directory -Path $releases -Force | Out-Null
+            $target = '1' * 40
+            $legacy = '2' * 40
+            foreach ($name in @($target,$legacy,('3' * 40))) {
+                New-Item -ItemType Directory -Path (Join-Path $releases $name) | Out-Null
+            }
+            $config = [pscustomobject]@{ programDataRoot=$root; releaseRetention=0 }
+            Mock Get-JunctionTarget { $null }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$target; legacyRelease=$legacy }
+            }
+            Mock Assert-ReleasePath { $Path }
+
+            Remove-ExpiredReleases -Config $config
+
+            Test-Path (Join-Path $releases $target) | Should -BeTrue
+            Test-Path (Join-Path $releases $legacy) | Should -BeTrue
+            Test-Path (Join-Path $releases ('3' * 40)) | Should -BeFalse
+        }
+
+        It 'initializes target direction only after explicit verified cutover under deploy lock' {
+            $events = [System.Collections.Generic.List[string]]::new()
+            $target = '2222222222222222222222222222222222222222'
+            $legacy = '1111111111111111111111111111111111111111'
+            $lock = [pscustomobject]@{ }
+            $lock | Add-Member ScriptMethod Dispose { [void]$events.Add('lock:release') }
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8443 } }
+            Mock Enter-DeploymentLock { [void]$events.Add('lock:acquire'); $lock }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$target; legacyRelease=$legacy }
+            }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*previous') { "C:\data\releases\$legacy" }
+                else { "C:\data\releases\$target" }
+            }
+            Mock Test-ProductionEndpoints { [void]$events.Add('health') }
+            Mock Test-ProductionPublicEndpoints { [void]$events.Add('public-health') }
+            Mock Write-ProductionMusicSchemaDirection { [void]$events.Add("marker:$State") }
+            Mock Set-ProductionWebsiteRecoveryPolicy { [void]$events.Add('recovery-normal') }
+
+            Confirm-ProductionMusicTargetActive `
+                -TargetRelease $target `
+                -LegacyRelease $legacy `
+                -MigrationVerified
+
+            $events | Should -Be @(
+                'lock:acquire','health','public-health','marker:TARGET_ACTIVE',
+                'recovery-normal','lock:release')
+        }
+
+        It 'resumes a pending exact target cutover only under lock and stops again on failure' {
+            $target = '2222222222222222222222222222222222222222'
+            $legacy = '1111111111111111111111111111111111111111'
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_CUTOVER_IN_PROGRESS'; targetRelease=$target; legacyRelease=$legacy }
+            }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*previous') { "C:\data\releases\$legacy" }
+                else { "C:\data\releases\$target" }
+            }
+            Mock Start-Service { }
+            Mock Grant-CoordinatedProductionWriterStart { }
+            Mock Test-ProductionEndpoints { throw 'health failed' }
+            Mock Test-ProductionPublicEndpoints { }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Write-ProductionMusicSchemaDirection { }
+
+            {
+                Confirm-ProductionMusicTargetActive `
+                    -TargetRelease $target `
+                    -LegacyRelease $legacy `
+                    -MigrationVerified
+            } | Should -Throw '*writer remains stopped*'
+
+            Should -Invoke Start-Service -Times 1
+            Should -Invoke Stop-ProductionWebsiteService -Times 1
+            Should -Invoke Write-ProductionMusicSchemaDirection -Times 0
+        }
+
+        It 'initializes target direction before releasing the first migration cutover lock' {
+            $events = [System.Collections.Generic.List[string]]::new()
+            $target = '2222222222222222222222222222222222222222'
+            $legacy = '1111111111111111111111111111111111111111'
+            $lock = [pscustomobject]@{ }
+            $lock | Add-Member ScriptMethod Dispose { [void]$events.Add('lock:release') }
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; remote='origin'; branch='main' } }
+            Mock Enter-DeploymentLock { [void]$events.Add('lock:acquire'); $lock }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Get-ProductionMusicMigrationActivationNoLock { $false }
+            Mock Assert-ReleasePath { $Path }
+            Mock Resolve-OriginMainRelease { $target }
+            Mock New-ReleaseFromOriginMain { "C:\data\releases\$target" }
+            Mock Invoke-CandidateReleaseValidation { [void]$events.Add('candidate') }
+            Mock Ensure-ProductionWriterStartGuardUnderHeldLock {
+                [void]$events.Add('guard-upgrade')
+            }
+            Mock Switch-ProductionRelease { [void]$events.Add('switch-and-health') }
+            Mock Get-JunctionTarget { "C:\data\releases\$legacy" }
+            Mock Write-ProductionMusicSchemaDirection { [void]$events.Add("marker:$State") }
+            Mock Set-ProductionWebsiteRecoveryPolicy { [void]$events.Add('recovery-normal') }
+            Mock Remove-ExpiredReleases { [void]$events.Add('cleanup') }
+
+            Invoke-ProductionDeploy -MusicSchemaCutover
+
+            $events | Should -Be @(
+                'lock:acquire','candidate','guard-upgrade','marker:TARGET_CUTOVER_IN_PROGRESS',
+                'switch-and-health','marker:TARGET_ACTIVE','recovery-normal',
+                'cleanup','lock:release')
+        }
+
+        It 'disables a pre-guard service before publication and restores Automatic only after verification' {
+            $events = [Collections.Generic.List[string]]::new()
+            $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            Mock Set-ProductionWebsiteStartupType {
+                [void]$events.Add("startup:$StartupType")
+            }
+            Mock Stop-ProductionWebsiteService {
+                if (-not $KeepRecoverySuspended) { throw 'recovery was not suspended' }
+                [void]$events.Add('stop-suspended')
+            }
+            Mock Install-CoordinatedProductionWriterStartGuardBundle {
+                [void]$events.Add('bundle-verified')
+            }
+            Mock Start-Service { throw 'writer must not start during guard upgrade' }
+
+            & $script:ensureGuardImplementation -Config $config
+
+            $events | Should -Be @(
+                'startup:Disabled','stop-suspended','bundle-verified','startup:Automatic')
+            Should -Invoke Start-Service -Times 0
+        }
+
+        It 'publishes the current Manual XML over a compatible base service bundle' {
+            $config = [pscustomobject]@{
+                programDataRoot = 'C:\data'
+                productionPort = 8080
+            }
+            $expectedWinSw = 'a' * 64
+            Mock Get-ProductionWinSwSha256 { $expectedWinSw }
+            Mock Publish-ProductionWriterStartGuardBundle { } `
+                -ModuleName Production.WriterStart
+            Mock Assert-ProductionWebsiteServiceBoundary { }
+
+            Install-CoordinatedProductionWriterStartGuardBundle -Config $config
+
+            Should -Invoke Publish-ProductionWriterStartGuardBundle `
+                -Times 1 `
+                -Exactly `
+                -ModuleName Production.WriterStart `
+                -ParameterFilter {
+                    $SourceWinSwPath -eq 'C:\data\service\ChristopherBellDev.exe' -and
+                    $SourceServiceXmlPath -like '*service\ChristopherBellDev.xml' -and
+                    $ExpectedWinSwSha256 -eq $expectedWinSw -and
+                    $ExpectedServiceXmlSha256 -match '^[0-9a-f]{64}$'
+                }
+        }
+
+        It 'refuses a guard upgrade on an unsafe root before changing the service' {
+            $config = [pscustomobject]@{
+                programDataRoot = 'C:\attacker-controlled'
+                productionPort = 8080
+            }
+            Mock Assert-ProductionFixedRootBoundary {
+                throw ('Production root boundary is not guarded. ' +
+                    'Run guarded prod install before retrying.')
+            }
+            Mock Set-ProductionWebsiteStartupType { throw 'startup type was reached' }
+            Mock Stop-ProductionWebsiteService { throw 'service stop was reached' }
+            Mock Install-CoordinatedProductionWriterStartGuardBundle {
+                throw 'publication was reached'
+            }
+
+            { & $script:ensureGuardImplementation -Config $config } |
+                Should -Throw '*Run guarded prod install before retrying*'
+            Should -Invoke Set-ProductionWebsiteStartupType -Times 0 -Exactly
+            Should -Invoke Stop-ProductionWebsiteService -Times 0 -Exactly
+            Should -Invoke Install-CoordinatedProductionWriterStartGuardBundle -Times 0 -Exactly
+        }
+
+        It 'keeps a pre-guard service Disabled across publication failure' -ForEach @(
+            @{ Failure='staging failed' },
+            @{ Failure='first guard file publication failed' },
+            @{ Failure='publisher process died after first file' }
+        ) {
+            $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            $script:startupType = 'Automatic'
+            Mock Set-ProductionWebsiteStartupType {
+                $script:startupType = $StartupType
+            }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Install-CoordinatedProductionWriterStartGuardBundle {
+                throw $Failure
+            }
+            Mock Start-Service { throw 'writer must not start' }
+
+            { & $script:ensureGuardImplementation -Config $config } |
+                Should -Throw "*$Failure*"
+
+            $script:startupType | Should -Be 'Disabled'
+            Should -Invoke Stop-ProductionWebsiteService -ParameterFilter {
+                $KeepRecoverySuspended
+            }
+            Should -Invoke Set-ProductionWebsiteStartupType -Times 0 -ParameterFilter {
+                $StartupType -eq 'Automatic'
+            }
+            Should -Invoke Start-Service -Times 0
+        }
+
+        It 'does not stop or publish when Disabled startup verification fails' {
+            $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            Mock Set-ProductionWebsiteStartupType { throw 'Disabled startup type was not verified' }
+            Mock Stop-ProductionWebsiteService { throw 'stop must not run' }
+            Mock Install-CoordinatedProductionWriterStartGuardBundle {
+                throw 'publication must not run'
+            }
+
+            { & $script:ensureGuardImplementation -Config $config } |
+                Should -Throw '*Disabled startup type was not verified*'
+
+            Should -Invoke Stop-ProductionWebsiteService -Times 0
+            Should -Invoke Install-CoordinatedProductionWriterStartGuardBundle -Times 0
+        }
+
+        It 're-disables the service when Automatic restoration cannot be verified' {
+            $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            $script:startupType = 'Automatic'
+            Mock Set-ProductionWebsiteStartupType {
+                if ($StartupType -eq 'Automatic') {
+                    $script:startupType = 'Automatic'
+                    throw 'Automatic startup type was not verified'
+                }
+                $script:startupType = 'Disabled'
+            }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Install-CoordinatedProductionWriterStartGuardBundle { }
+
+            { & $script:ensureGuardImplementation -Config $config } |
+                Should -Throw '*Automatic startup type was not verified*'
+
+            $script:startupType | Should -Be 'Disabled'
+            Should -Invoke Set-ProductionWebsiteStartupType -Times 2 -ParameterFilter {
+                $StartupType -eq 'Disabled'
+            }
+        }
+
+        It 'stops the target writer and retains pending direction when cutover marker finalization fails' {
+            $target = '2222222222222222222222222222222222222222'
+            $legacy = '1111111111111111111111111111111111111111'
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080; remote='origin'; branch='main' } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Get-ProductionMusicMigrationActivationNoLock { $false }
+            Mock Assert-ReleasePath { $Path }
+            Mock Get-JunctionTarget { "C:\data\releases\$legacy" }
+            Mock Resolve-OriginMainRelease { $target }
+            Mock New-ReleaseFromOriginMain { "C:\data\releases\$target" }
+            Mock Invoke-CandidateReleaseValidation { }
+            Mock Switch-ProductionRelease { }
+            Mock Write-ProductionMusicSchemaDirection {
+                if ($State -eq 'TARGET_ACTIVE') { throw 'final marker failed' }
+            }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Remove-ExpiredReleases { }
+
+            { Invoke-ProductionDeploy -MusicSchemaCutover } | Should -Throw '*writer remains stopped*'
+
+            Should -Invoke Write-ProductionMusicSchemaDirection -Times 1 -ParameterFilter {
+                $State -eq 'TARGET_CUTOVER_IN_PROGRESS'
+            }
+            Should -Invoke Stop-ProductionWebsiteService -Times 1
         }
     }
 }

@@ -1,5 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
 function New-AutoDeployState {
     [pscustomobject][ordered]@{ lastCheckedAt=$null; remoteSha=$null; attemptedSha=$null; successfulSha=$null; failedSha=$null; failedAt=$null; error=$null }
 }
@@ -43,7 +44,23 @@ function Get-ActiveReleaseSha {
 
 function Invoke-AutoDeployOnce {
     param($Config = (Read-ProductionConfig))
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
     $state = Read-AutoDeployState $Config
+    $direction = Read-ProductionMusicSchemaDirection -Config $Config
+    if (-not $direction) {
+        throw ('Automatic deployment is blocked because the Music schema-direction marker is absent. ' +
+            'Run the protected first-cutover deploy interactively.')
+    }
+    if ([string]$direction.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+        throw ('Automatic deployment is blocked while legacy Music runtime state requires reconciliation. ' +
+            'Run the protected deploy command interactively to reconcile before a target writer starts.')
+    }
+    if ([string]$direction.state -ne 'TARGET_ACTIVE') {
+        throw ('Automatic deployment is blocked because the first Music schema cutover is incomplete. ' +
+            'Complete bounded recovery interactively.')
+    }
     $remote = Get-RemoteMainSha $Config
     $now = (Get-Date).ToUniversalTime()
     $state.lastCheckedAt = $now.ToString('o')
@@ -61,7 +78,7 @@ function Invoke-AutoDeployOnce {
     $state.attemptedSha = $remote
     Write-AutoDeployState $Config $state
     try {
-        Invoke-ProductionDeploy
+        Invoke-ProductionDeploy -Automatic
         $active = Get-ActiveReleaseSha $Config
         if (-not $active) { throw 'Deployment completed without valid active release metadata.' }
         $state.successfulSha = $active
@@ -76,10 +93,14 @@ function Invoke-AutoDeployOnce {
 }
 
 function Start-AutoDeployLoop {
-    $config = Read-ProductionConfig
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    Assert-ProductionFixedRootBoundary `
+        -Config $config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
     try { Invoke-AutoDeployOnce $config }
     catch {
-        $log = Join-Path $config.programDataRoot 'logs\auto-deploy-errors.log'
+        $log = Join-Path $script:FixedProductionRoot 'logs\auto-deploy-errors.log'
         "$(Get-Date -Format o) $($_.Exception.Message)" | Add-Content -LiteralPath $log
         throw
     }
@@ -97,9 +118,17 @@ function Install-AutoDeployTask {
     [CmdletBinding()]
     param([switch]$WhatIf)
     Assert-Administrator
-    $config = Read-ProductionConfig
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
     if ($WhatIf) { Write-Output 'Would register and start the ChristopherBellAutoDeploy startup task.'; return }
-    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    $guard = Enter-ProductionFixedRootDeploymentLock `
+        -Config $config `
+        -FixedRoot $script:FixedProductionRoot `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+    $lock = $guard.Lock
     try {
         $tools = Join-Path $config.programDataRoot 'tools'
         Assert-ProductionPathNotReparse -Path $config.programDataRoot | Out-Null

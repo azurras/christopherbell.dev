@@ -3,10 +3,8 @@ package dev.christopherbell.music.radio;
 import java.time.Instant;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Durable identity and trusted catalog duration for the one global Music station. */
-@Document("music_radio_state")
 public record MusicRadioState(
     @Id String id,
     long stationSequence,

@@ -1,5 +1,57 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
+
+function Enter-OperationsFixedRootDeploymentLock {
+    param([Parameter(Mandatory)]$Config)
+
+    Enter-ProductionFixedRootDeploymentLock `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+}
+
+function Invoke-MusicReverseCopyUnderHeldLock {
+    param([Parameter(Mandatory)]$Config)
+    $module = Get-Module Production.MusicRuntime -ErrorAction Stop
+    & $module { param($Value) Invoke-ProductionMusicRuntimeReverseCopyNoLock -Config $Value } $Config
+}
+
+function Grant-CoordinatedProductionWriterStart {
+    param($Config, [string]$MarkerState, [string]$Release, [string]$Purpose)
+    $module = Get-Module Production.WriterStart -ErrorAction Stop
+    & $module {
+        param($Value, $State, $Sha, $Reason)
+        Grant-ProductionWriterStartAuthorization `
+            -Config $Value -MarkerState $State -Release $Sha -Purpose $Reason
+    } $Config $MarkerState $Release $Purpose
+}
+
+function Revoke-CoordinatedProductionWriterStart {
+    param($Config, [Parameter(Mandatory)]$Authorization)
+    $module = Get-Module Production.WriterStart -ErrorAction Stop
+    & $module {
+        param($Value, $Token)
+        Revoke-ProductionWriterStartAuthorization -Config $Value -Authorization $Token
+    } $Config $Authorization
+}
+
+function Ensure-CoordinatedProductionWriterStartGuard {
+    param([Parameter(Mandatory)]$Config)
+    $module = Get-Module Production.Deploy -ErrorAction Stop
+    & $module {
+        param($Value)
+        Ensure-ProductionWriterStartGuardUnderHeldLock -Config $Value | Out-Null
+    } $Config
+}
+
+function Restore-CoordinatedProductionWebsiteRecoveryPolicy {
+    $module = Get-Module Production.Deploy -ErrorAction Stop
+    & $module { Set-ProductionWebsiteRecoveryPolicy -Policy Normal }
+}
 function Get-ProductionStatus {
     $config = Read-ProductionConfig
     $website = Get-Service ChristopherBellDev -ErrorAction SilentlyContinue
@@ -18,8 +70,10 @@ function Get-ProductionStatus {
 function Invoke-ProductionRollback {
     [CmdletBinding()]
     param([switch]$WhatIf)
-    $config = Read-ProductionConfig
-    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-OperationsFixedRootDeploymentLock -Config $config
+    $lock = $guard.Lock
     try {
         $currentPath = Join-Path $config.programDataRoot 'current'
         $previousPath = Join-Path $config.programDataRoot 'previous'
@@ -30,21 +84,126 @@ function Invoke-ProductionRollback {
         }
         Assert-ReleasePath $config $current | Out-Null
         Assert-ReleasePath $config $previous | Out-Null
+        $direction = Read-ProductionMusicSchemaDirection -Config $config
+        if ($direction -and
+            [string]$direction.state -eq 'TARGET_CUTOVER_IN_PROGRESS') {
+            throw ('Production rollback is blocked because the first Music schema cutover is incomplete. ' +
+                'Keep the writer stopped and complete bounded recovery under deploy.lock.')
+        }
+        if ($direction -and
+            [string]$direction.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+            throw ('Production rollback is blocked because the legacy Music schema is active. ' +
+                'Deploy a target-schema release to run locked reconciliation.')
+        }
         if ($WhatIf) {
             Write-Output "Would roll back from $current to $previous"
             return
         }
 
-        Stop-ProductionWebsiteService -ProductionPort $config.productionPort
+        if (-not $direction -and
+            (Get-ProductionMusicMigrationActivationNoLock -Config $config)) {
+            throw ('Music runtime migration is active but the schema-direction marker is absent; ' +
+                'rollback is blocked. Restore or initialize the protected marker before retrying.')
+        }
+
+        if ($direction -and [string]$direction.state -eq 'TARGET_ACTIVE') {
+            $targetSha = Split-Path -Leaf $current
+            $previousSha = Split-Path -Leaf $previous
+            if ($targetSha -cne [string]$direction.targetRelease) {
+                throw 'Music runtime schema-direction release identity does not match the active release.'
+            }
+            if ($previousSha -ceq [string]$direction.legacyRelease) {
+                throw ('Generic rollback cannot start the retained legacy Music writer or reverse-copy state. ' +
+                    'Use prod.cmd music-runtime-rollback -ConfirmMusicRuntimeRollback.')
+            }
+            Ensure-CoordinatedProductionWriterStartGuard -Config $config
+            try {
+                Set-AtomicJunction $config $currentPath $previous
+                Set-AtomicJunction $config $previousPath $current
+                $authorization = Grant-CoordinatedProductionWriterStart -Config $config `
+                    -MarkerState TARGET_ACTIVE `
+                    -Release $previousSha `
+                    -Purpose TARGET_DEPLOY
+                $startFailure = $null
+                try {
+                    Start-Service ChristopherBellDev
+                    Test-ProductionEndpoints $config $config.productionPort
+                    Test-ProductionPublicEndpoints -Config $config | Out-Null
+                } catch {
+                    $startFailure = $_.Exception
+                } finally {
+                    if ($authorization) {
+                        try {
+                            Revoke-CoordinatedProductionWriterStart `
+                                -Config $config -Authorization $authorization
+                        } catch {
+                            if ($startFailure) {
+                                throw [System.AggregateException]::new(
+                                    'Target rollback start and authorization cleanup both failed.',
+                                    [System.Exception[]]@($startFailure, $_.Exception))
+                            }
+                            throw
+                        }
+                    }
+                }
+                if ($startFailure) { throw $startFailure }
+                Write-ProductionMusicSchemaDirection `
+                    -Config $config `
+                    -State TARGET_ACTIVE `
+                    -TargetRelease $previousSha `
+                    -LegacyRelease ([string]$direction.legacyRelease)
+                Restore-CoordinatedProductionWebsiteRecoveryPolicy
+                return
+            } catch {
+                $failure = $_.Exception
+                try {
+                    Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                        -KeepRecoverySuspended
+                } catch {
+                    throw [System.AggregateException]::new(
+                        'Migration-aware rollback failed and the writer stop postcondition also failed.',
+                        [System.Exception[]]@($failure, $_.Exception))
+                }
+                throw [System.InvalidOperationException]::new(
+                    'Target-schema binary rollback failed; the writer remains stopped.',
+                    $failure)
+            }
+        }
+
+        Stop-ProductionWebsiteService -ProductionPort $config.productionPort -KeepRecoverySuspended
+        $ordinaryRollbackHealthy = $false
         try {
             Set-AtomicJunction $config $currentPath $previous
             Set-AtomicJunction $config $previousPath $current
             Start-Service ChristopherBellDev
             Test-ProductionEndpoints $config $config.productionPort
+            $ordinaryRollbackHealthy = $true
+            Restore-CoordinatedProductionWebsiteRecoveryPolicy
         } catch {
             $rollbackFailure = $_.Exception
+            $stopFailure = $null
             try {
-                Stop-ProductionWebsiteService -ProductionPort $config.productionPort
+                Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                    -KeepRecoverySuspended
+            } catch {
+                $stopFailure = $_.Exception
+            }
+            if ($ordinaryRollbackHealthy) {
+                if ($stopFailure) {
+                    throw [System.AggregateException]::new(
+                        'Ordinary rollback recovery restoration and fail-closed stop both failed.',
+                        [System.Exception[]]@($rollbackFailure, $stopFailure))
+                }
+                throw [System.InvalidOperationException]::new(
+                    'Ordinary rollback recovery restoration failed; the writer remains stopped.',
+                    $rollbackFailure)
+            }
+            if ($stopFailure) {
+                throw [System.AggregateException]::new(
+                    'Production rollback and fail-closed stop both failed.',
+                    [System.Exception[]]@($rollbackFailure, $stopFailure))
+            }
+            try {
                 $junctionRestoreFailures = [System.Collections.Generic.List[System.Exception]]::new()
                 try {
                     Set-AtomicJunction $config $currentPath $current
@@ -68,6 +227,7 @@ function Invoke-ProductionRollback {
                 }
                 Start-Service ChristopherBellDev
                 Test-ProductionEndpoints $config $config.productionPort
+                Restore-CoordinatedProductionWebsiteRecoveryPolicy
             } catch {
                 throw [System.AggregateException]::new(
                     'Production rollback and release restoration both failed.',
@@ -90,9 +250,133 @@ function Watch-ProductionLogs {
 function Restart-ProductionService {
     [CmdletBinding()]
     param([switch]$Verify)
-    $config = Read-ProductionConfig
-    Restart-Service ChristopherBellDev
-    if ($Verify) { Test-ProductionEndpoints $config $config.productionPort }
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-OperationsFixedRootDeploymentLock -Config $config
+    $lock = $guard.Lock
+    try {
+        $direction = Read-ProductionMusicSchemaDirection -Config $config
+        if ($direction) {
+            if ([string]$direction.state -eq 'TARGET_CUTOVER_IN_PROGRESS') {
+                throw ('Manual restart is blocked because the first Music schema cutover is incomplete. ' +
+                    'Complete bounded recovery under deploy.lock.')
+            }
+            if ([string]$direction.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+                throw ('Manual restart is blocked while legacy Music runtime state requires reconciliation. ' +
+                    'Use the protected interactive deploy to reconcile before a target writer starts.')
+            }
+            $current = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
+            $activeSha = if ($current) { Split-Path -Leaf $current } else { '' }
+            $expectedSha = if ([string]$direction.state -eq 'TARGET_ACTIVE') {
+                [string]$direction.targetRelease
+            } else {
+                [string]$direction.legacyRelease
+            }
+            if ($activeSha -cne $expectedSha) {
+                throw ('The active binary contradicts the Music runtime schema-direction marker; ' +
+                    'manual restart is blocked. Use protected deploy or rollback orchestration.')
+            }
+        }
+        Restart-Service ChristopherBellDev
+        if ($Verify) { Test-ProductionEndpoints $config $config.productionPort }
+    } finally {
+        $lock.Dispose()
+    }
+}
+
+function Invoke-ProductionMigrationAwareRollback {
+    [CmdletBinding()]
+    param([switch]$Confirm, [switch]$WhatIf)
+    if ($WhatIf) {
+        return [pscustomobject][ordered]@{
+            operation = 'target-to-legacy-migration-aware-rollback'
+            mutates = $false
+            requiresExplicitConfirmation = $true
+            singleDeploymentLock = $true
+        }
+    }
+    if (-not $Confirm) {
+        throw 'Migration-aware Music rollback requires explicit confirmation.'
+    }
+    $config = Read-ProductionConfig (
+        Join-Path $script:FixedProductionRoot 'config\deploy.json')
+    $guard = Enter-OperationsFixedRootDeploymentLock -Config $config
+    $lock = $guard.Lock
+    $copy = $null
+    try {
+        $direction = Read-ProductionMusicSchemaDirection -Config $config
+        if (-not $direction -or [string]$direction.state -ne 'TARGET_ACTIVE') {
+            throw 'Migration-aware Music rollback requires exact TARGET_ACTIVE schema direction.'
+        }
+        $currentPath = Join-Path $config.programDataRoot 'current'
+        $previousPath = Join-Path $config.programDataRoot 'previous'
+        $current = Get-JunctionTarget $currentPath
+        $legacy = Join-Path $config.programDataRoot "releases\$($direction.legacyRelease)"
+        Assert-ReleasePath $config $legacy | Out-Null
+        if (-not $current -or
+            (Split-Path -Leaf $current) -cne [string]$direction.targetRelease) {
+            throw 'The active target release does not match the Music schema-direction marker.'
+        }
+        Ensure-CoordinatedProductionWriterStartGuard -Config $config
+        try {
+            $copy = Invoke-MusicReverseCopyUnderHeldLock -Config $config
+            Set-AtomicJunction $config $previousPath $current
+            Set-AtomicJunction $config $currentPath $legacy
+            $authorization = Grant-CoordinatedProductionWriterStart -Config $config `
+                -MarkerState TARGET_ACTIVE `
+                -Release ([string]$direction.legacyRelease) `
+                -Purpose LEGACY_ROLLBACK
+            $startFailure = $null
+            try {
+                Start-Service ChristopherBellDev
+                Test-ProductionEndpoints $config $config.productionPort
+                Test-ProductionPublicEndpoints -Config $config | Out-Null
+            } catch {
+                $startFailure = $_.Exception
+            } finally {
+                if ($authorization) {
+                    try {
+                        Revoke-CoordinatedProductionWriterStart `
+                            -Config $config -Authorization $authorization
+                    } catch {
+                        if ($startFailure) {
+                            throw [System.AggregateException]::new(
+                                'Migration-aware rollback start and authorization cleanup both failed.',
+                                [System.Exception[]]@($startFailure, $_.Exception))
+                        }
+                        throw
+                    }
+                }
+            }
+            if ($startFailure) { throw $startFailure }
+            Write-ProductionMusicSchemaDirection `
+                -Config $config `
+                -State LEGACY_ACTIVE_RECONCILIATION_REQUIRED `
+                -TargetRelease ([string]$direction.targetRelease) `
+                -LegacyRelease ([string]$direction.legacyRelease)
+            Restore-CoordinatedProductionWebsiteRecoveryPolicy
+            return $copy
+        } catch {
+            $failure = $_.Exception
+            if ($copy -and $copy.backup) {
+                $failure = [System.InvalidOperationException]::new(
+                    "Migration-aware Music rollback failed; retained backup: $($copy.backup)",
+                    $failure)
+            }
+            try {
+                Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                    -KeepRecoverySuspended
+            } catch {
+                throw [System.AggregateException]::new(
+                    'Migration-aware Music rollback failed and the writer stop postcondition also failed.',
+                    [System.Exception[]]@($failure, $_.Exception))
+            }
+            throw [System.InvalidOperationException]::new(
+                'Migration-aware Music rollback failed; the writer remains stopped.', $failure)
+        }
+    } finally {
+        $lock.Dispose()
+    }
 }
 
 function Get-ProductionReleases {
@@ -700,4 +984,4 @@ function Test-ProductionStartup {
     }
 }
 
-Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases,Assert-AutoDeployTaskContract,Get-ProductionMongoCollectionInventory,Test-ProductionStartup
+Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,Invoke-ProductionMigrationAwareRollback,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases,Assert-AutoDeployTaskContract,Get-ProductionMongoCollectionInventory,Test-ProductionStartup

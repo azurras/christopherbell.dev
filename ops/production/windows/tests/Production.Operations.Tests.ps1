@@ -1,10 +1,66 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.WriterStart.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.MusicRuntime.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Sensors.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Operations.psm1') -Force
 
 Describe 'native Windows production operations' {
     InModuleScope Production.Operations {
+        BeforeEach {
+            Mock Assert-ProductionFixedRootBoundary {
+                [pscustomobject]@{ Root='C:\ProgramData\christopherbell.dev' }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{
+                    Lock = Enter-DeploymentLock `
+                        -LockPath 'C:\ProgramData\christopherbell.dev\locks\deploy.lock'
+                }
+            }
+            Mock Get-ProductionMusicMigrationActivationNoLock { $false }
+            Mock Restore-CoordinatedProductionWebsiteRecoveryPolicy { }
+            Mock Ensure-CoordinatedProductionWriterStartGuard { }
+            Mock Revoke-CoordinatedProductionWriterStart { }
+        }
+
+        It 'rejects an alternate root before rollback, restart, or service effects' -TestCases @(
+            @{ Operation = 'generic rollback'; Invoke = { Invoke-ProductionRollback -WhatIf } }
+            @{ Operation = 'dedicated rollback'; Invoke = { Invoke-ProductionMigrationAwareRollback -Confirm } }
+            @{ Operation = 'restart'; Invoke = { Restart-ProductionService -Verify } }
+        ) {
+            param($Operation, $Invoke)
+
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    programDataRoot = 'C:\attacker-controlled'
+                    productionPort = 8080
+                }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                if ($FixedRoot -cne 'C:\ProgramData\christopherbell.dev') {
+                    throw "wrong fixed root reached for $Operation"
+                }
+                throw ('Production root boundary is not guarded. ' +
+                    'Run guarded prod install before retrying.')
+            }
+            Mock Enter-DeploymentLock { throw 'unsafe config-derived lock was reached' }
+            Mock Read-ProductionMusicSchemaDirection { throw 'marker was reached' }
+            Mock Invoke-MusicReverseCopyUnderHeldLock { throw 'database was reached' }
+            Mock Get-JunctionTarget { throw 'junction was reached' }
+            Mock Set-AtomicJunction { throw 'junction mutation was reached' }
+            Mock Restart-Service { throw 'service restart was reached' }
+            Mock Start-Service { throw 'service start was reached' }
+
+            { & $Invoke } | Should -Throw '*Run guarded prod install before retrying*'
+            Should -Invoke Enter-ProductionFixedRootDeploymentLock -Times 1 -Exactly
+            Should -Invoke Enter-DeploymentLock -Times 0 -Exactly
+            Should -Invoke Read-ProductionMusicSchemaDirection -Times 0 -Exactly
+            Should -Invoke Invoke-MusicReverseCopyUnderHeldLock -Times 0 -Exactly
+            Should -Invoke Get-JunctionTarget -Times 0 -Exactly
+            Should -Invoke Set-AtomicJunction -Times 0 -Exactly
+            Should -Invoke Restart-Service -Times 0 -Exactly
+            Should -Invoke Start-Service -Times 0 -Exactly
+        }
         BeforeAll {
             function New-ValidStartupTask {
                 param([string]$ProgramDataRoot = 'C:\ProgramData\christopherbell.dev')
@@ -120,6 +176,279 @@ Describe 'native Windows production operations' {
             Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
             Mock Get-JunctionTarget { $null }
             { Invoke-ProductionRollback -WhatIf } | Should -Throw '*Both current and previous*'
+        }
+
+        It 'holds one deploy lock through migration-aware reverse copy switch start and health' {
+            $targetSha = '0123456789abcdef0123456789abcdef01234567'
+            $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
+            $events = [Collections.Generic.List[string]]::new()
+            $lock = [pscustomobject]@{ }
+            $lock | Add-Member ScriptMethod Dispose { [void]$events.Add('lock-release') }
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock {
+                [void]$events.Add('lock-acquire')
+                $lock
+            }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { return "C:\data\releases\$targetSha" }
+                return "C:\data\releases\$legacySha"
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='TARGET_ACTIVE'
+                    targetRelease=$targetSha
+                    legacyRelease=$legacySha
+                }
+            }
+            Mock Ensure-CoordinatedProductionWriterStartGuard {
+                [void]$events.Add('writer-stop-and-guard')
+            }
+            Mock Write-ProductionMusicSchemaDirection {
+                [void]$events.Add("marker:$State")
+            }
+            Mock Invoke-MusicReverseCopyUnderHeldLock {
+                [void]$events.Add('reverse-copy')
+                [pscustomobject]@{ backup='C:\backup\music.zip' }
+            }
+            Mock Set-AtomicJunction { [void]$events.Add("switch:$Path") }
+            Mock Grant-CoordinatedProductionWriterStart { [void]$events.Add('authorize') }
+            Mock Start-Service { [void]$events.Add('writer-start') }
+            Mock Test-ProductionEndpoints { [void]$events.Add('health') }
+            Mock Test-ProductionPublicEndpoints { [void]$events.Add('public-health') }
+            Mock Restore-CoordinatedProductionWebsiteRecoveryPolicy {
+                [void]$events.Add('recovery-normal')
+            }
+
+            Invoke-ProductionMigrationAwareRollback -Confirm
+
+            $events | Should -Be @(
+                'lock-acquire','writer-stop-and-guard','reverse-copy',
+                'switch:C:\data\previous','switch:C:\data\current','authorize',
+                'writer-start','health','public-health',
+                'marker:LEGACY_ACTIVE_RECONCILIATION_REQUIRED','recovery-normal','lock-release')
+            Should -Invoke Enter-DeploymentLock -Times 1 -Exactly
+        }
+
+        It 'fails closed and releases the single rollback lock when <phase> fails' -TestCases @(
+            @{ phase='marker' }
+            @{ phase='reverse-copy' }
+            @{ phase='switch' }
+            @{ phase='start' }
+            @{ phase='health' }
+        ) {
+            param($phase)
+            $targetSha = '0123456789abcdef0123456789abcdef01234567'
+            $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
+            $script:released = $false
+            $lock = [pscustomobject]@{ }
+            $lock | Add-Member ScriptMethod Dispose { $script:released = $true }
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
+            Mock Enter-DeploymentLock { $lock }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { "C:\data\releases\$targetSha" }
+                else { "C:\data\releases\$legacySha" }
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$targetSha; legacyRelease=$legacySha }
+            }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Write-ProductionMusicSchemaDirection { if ($phase -eq 'marker') { throw 'marker failed' } }
+            Mock Invoke-MusicReverseCopyUnderHeldLock {
+                if ($phase -eq 'reverse-copy') { throw 'reverse failed' }
+                [pscustomobject]@{ backup='C:\backup\music.zip' }
+            }
+            Mock Set-AtomicJunction { if ($phase -eq 'switch') { throw 'switch failed' } }
+            Mock Grant-CoordinatedProductionWriterStart { }
+            Mock Start-Service { if ($phase -eq 'start') { throw 'start failed' } }
+            Mock Test-ProductionEndpoints { if ($phase -eq 'health') { throw 'health failed' } }
+            Mock Test-ProductionPublicEndpoints { }
+
+            { Invoke-ProductionMigrationAwareRollback -Confirm } | Should -Throw '*writer remains stopped*'
+
+            $script:released | Should -BeTrue
+            Should -Invoke Enter-DeploymentLock -Times 1
+            Should -Invoke Ensure-CoordinatedProductionWriterStartGuard -Times 1
+            Should -Invoke Stop-ProductionWebsiteService -Times 1
+            Should -Invoke Restore-CoordinatedProductionWebsiteRecoveryPolicy -Times 0
+        }
+
+        It 'allows no rollback effect when the single deploy lock contends' {
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data' } }
+            Mock Enter-DeploymentLock { throw 'lock contended' }
+            Mock Get-JunctionTarget { throw 'junction must not be read' }
+            Mock Stop-ProductionWebsiteService { throw 'writer must not be stopped' }
+
+            { Invoke-ProductionMigrationAwareRollback -Confirm } | Should -Throw '*lock contended*'
+
+            Should -Invoke Get-JunctionTarget -Times 0
+            Should -Invoke Stop-ProductionWebsiteService -Times 0
+        }
+
+        It 'upgrades the installed guard before reverse copy and keeps recovery suspended throughout' {
+            $targetSha = '0123456789abcdef0123456789abcdef01234567'
+            $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
+            $events = [Collections.Generic.List[string]]::new()
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='TARGET_ACTIVE'; targetRelease=$targetSha; legacyRelease=$legacySha
+                }
+            }
+            Mock Get-JunctionTarget { "C:\data\releases\$targetSha" }
+            Mock Assert-ReleasePath { $Path }
+            Mock Ensure-CoordinatedProductionWriterStartGuard {
+                [void]$events.Add('guard-verified')
+            }
+            Mock Stop-ProductionWebsiteService { [void]$events.Add('stop') }
+            Mock Invoke-MusicReverseCopyUnderHeldLock { [void]$events.Add('copy') }
+            Mock Set-AtomicJunction { }
+            Mock Grant-CoordinatedProductionWriterStart {
+                [void]$events.Add('authorize')
+                [pscustomobject]@{ nonce='a' * 32; issuerPid=$PID; issuerStartTimeUtcTicks=1 }
+            }
+            Mock Revoke-CoordinatedProductionWriterStart { [void]$events.Add('revoke') }
+            Mock Start-Service { [void]$events.Add('start') }
+            Mock Test-ProductionEndpoints { }
+            Mock Test-ProductionPublicEndpoints { }
+            Mock Write-ProductionMusicSchemaDirection { }
+            Mock Restore-CoordinatedProductionWebsiteRecoveryPolicy { [void]$events.Add('normal') }
+
+            Invoke-ProductionMigrationAwareRollback -Confirm
+
+            $events | Should -Be @(
+                'guard-verified','copy','authorize','start','revoke','normal')
+        }
+
+        It 'revokes pending start authorization when start fails before claim' {
+            $targetSha = '0123456789abcdef0123456789abcdef01234567'
+            $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
+            $authorization = [pscustomobject]@{
+                nonce='a' * 32; issuerPid=$PID; issuerStartTimeUtcTicks=1
+            }
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='TARGET_ACTIVE'; targetRelease=$targetSha; legacyRelease=$legacySha
+                }
+            }
+            Mock Get-JunctionTarget { "C:\data\releases\$targetSha" }
+            Mock Assert-ReleasePath { $Path }
+            Mock Ensure-CoordinatedProductionWriterStartGuard { }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Invoke-MusicReverseCopyUnderHeldLock { }
+            Mock Set-AtomicJunction { }
+            Mock Grant-CoordinatedProductionWriterStart { $authorization }
+            Mock Revoke-CoordinatedProductionWriterStart { }
+            Mock Start-Service { throw 'start failed before claim' }
+
+            { Invoke-ProductionMigrationAwareRollback -Confirm } |
+                Should -Throw '*writer remains stopped*'
+
+            Should -Invoke Revoke-CoordinatedProductionWriterStart -Times 1 -Exactly `
+                -ParameterFilter { $Authorization -eq $authorization }
+        }
+
+        It 'prevents a simulated recovery start and data effect during reverse copy' {
+            $targetSha = '0123456789abcdef0123456789abcdef01234567'
+            $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
+            $script:recoverySuspended = $false
+            $script:recoveryStarts = 0
+            $script:recoveryDataEffects = 0
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='TARGET_ACTIVE'; targetRelease=$targetSha; legacyRelease=$legacySha
+                }
+            }
+            Mock Get-JunctionTarget { "C:\data\releases\$targetSha" }
+            Mock Assert-ReleasePath { $Path }
+            Mock Ensure-CoordinatedProductionWriterStartGuard {
+                $script:recoverySuspended = $true
+            }
+            Mock Invoke-MusicReverseCopyUnderHeldLock {
+                if (-not $script:recoverySuspended) {
+                    $script:recoveryStarts++
+                    $script:recoveryDataEffects++
+                }
+                throw 'copy interrupted'
+            }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Start-Service { $script:recoveryStarts++ }
+
+            { Invoke-ProductionMigrationAwareRollback -Confirm } |
+                Should -Throw '*writer remains stopped*'
+
+            $script:recoveryStarts | Should -Be 0
+            $script:recoveryDataEffects | Should -Be 0
+        }
+
+        It 'fails closed before writer stop when schema migration is active but marker is absent' {
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { 'C:\data\releases\current' }
+                else { 'C:\data\releases\previous' }
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Get-ProductionMusicMigrationActivationNoLock { $true }
+            Mock Stop-ProductionWebsiteService { }
+
+            { Invoke-ProductionRollback } | Should -Throw '*marker is absent*'
+
+            Should -Invoke Stop-ProductionWebsiteService -Times 0
+        }
+
+        It 'refuses generic target-to-legacy rollback with exact confirmed-command guidance' {
+            $targetSha = '0123456789abcdef0123456789abcdef01234567'
+            $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { "C:\data\releases\$targetSha" }
+                else { "C:\data\releases\$legacySha" }
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$targetSha; legacyRelease=$legacySha }
+            }
+            Mock Stop-ProductionWebsiteService { throw 'must not stop' }
+
+            { Invoke-ProductionRollback } |
+                Should -Throw '*prod.cmd music-runtime-rollback -ConfirmMusicRuntimeRollback*'
+            Should -Invoke Stop-ProductionWebsiteService -Times 0
+        }
+
+        It 'refuses a manual restart when the active binary contradicts schema direction' {
+            $lock = [IO.MemoryStream]::new()
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8443 } }
+            Mock Enter-DeploymentLock { $lock }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
+                    targetRelease='2222222222222222222222222222222222222222'
+                    legacyRelease='1111111111111111111111111111111111111111'
+                }
+            }
+            Mock Get-JunctionTarget { 'C:\data\releases\2222222222222222222222222222222222222222' }
+            Mock Restart-Service { }
+
+            { Restart-ProductionService -Verify } | Should -Throw '*reconciliation*'
+
+            Should -Invoke Restart-Service -Times 0
         }
 
         It 'uses the controlled stop for rollback and restoration' {
@@ -316,6 +645,67 @@ Describe 'native Windows production operations' {
 
             Should -Invoke Set-AtomicJunction -Times 0
             Should -Invoke Start-Service -Times 0
+        }
+
+        It 'restores normal recovery after a healthy ordinary compatible rollback while locked' {
+            $events = [Collections.Generic.List[string]]::new()
+            $lock = [pscustomobject]@{}
+            $lock | Add-Member ScriptMethod Dispose { [void]$events.Add('unlock') }
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock { [void]$events.Add('lock'); $lock }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { 'C:\data\releases\current' }
+                else { 'C:\data\releases\previous' }
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Stop-ProductionWebsiteService { [void]$events.Add('stop') }
+            Mock Set-AtomicJunction { [void]$events.Add('switch') }
+            Mock Start-Service { [void]$events.Add('start') }
+            Mock Test-ProductionEndpoints { [void]$events.Add('health') }
+            Mock Restore-CoordinatedProductionWebsiteRecoveryPolicy {
+                [void]$events.Add('normal')
+            }
+
+            Invoke-ProductionRollback
+
+            $events[-3..-1] | Should -Be @('health','normal','unlock')
+        }
+
+        It 'stops fail closed when ordinary rollback recovery restoration fails' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { 'C:\data\releases\current' }
+                else { 'C:\data\releases\previous' }
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Set-AtomicJunction { }
+            Mock Start-Service { }
+            Mock Test-ProductionEndpoints { }
+            Mock Restore-CoordinatedProductionWebsiteRecoveryPolicy {
+                throw 'normal recovery restore failed'
+            }
+
+            $failure = try {
+                Invoke-ProductionRollback
+                $null
+            } catch {
+                $_.Exception
+            }
+
+            $failure.Message | Should -Match 'writer remains stopped'
+            $failure.InnerException.Message | Should -Be 'normal recovery restore failed'
+            Should -Invoke Stop-ProductionWebsiteService -Times 2 -Exactly
+            Should -Invoke Stop-ProductionWebsiteService -ParameterFilter {
+                $KeepRecoverySuspended
+            }
         }
 
         It 'reports cloudflared with native website and MongoDB services' {

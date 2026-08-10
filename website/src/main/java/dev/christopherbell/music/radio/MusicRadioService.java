@@ -27,7 +27,7 @@ public final class MusicRadioService {
   private final MusicProperties musicProperties;
   private final MusicRadioProperties radioProperties;
   private final MusicCatalog catalog;
-  private final MusicRadioRepository states;
+  private final MusicRuntimeStateStore runtimeState;
   private final MusicRadioHistoryRepository history;
   private final MusicQueueService queue;
   private final MusicRadioSelector selector;
@@ -41,7 +41,7 @@ public final class MusicRadioService {
       MusicProperties musicProperties,
       MusicRadioProperties radioProperties,
       MusicCatalog catalog,
-      MusicRadioRepository states,
+      MusicRuntimeStateStore runtimeState,
       MusicRadioHistoryRepository history,
       MusicQueueService queue,
       MusicRadioSelector selector,
@@ -51,7 +51,7 @@ public final class MusicRadioService {
     this.musicProperties = musicProperties;
     this.radioProperties = radioProperties;
     this.catalog = catalog;
-    this.states = states;
+    this.runtimeState = runtimeState;
     this.history = history;
     this.queue = queue;
     this.selector = selector;
@@ -79,7 +79,7 @@ public final class MusicRadioService {
       Instant now = clock.instant();
       if (!leases.tryAcquire(
           LEASE_NAME, leaseOwner, now, now.plus(radioProperties.leaseDuration()))) {
-        return snapshot(states.findById(MusicRadioState.ID).orElse(null), now);
+        return snapshot(runtimeState.findRadio().orElse(null), now);
       }
       try {
         return transitionOwned(now);
@@ -90,7 +90,7 @@ public final class MusicRadioService {
   }
 
   private MusicRadioSnapshot transitionOwned(Instant now) {
-    MusicRadioState state = states.findById(MusicRadioState.ID).orElse(null);
+    MusicRadioState state = runtimeState.findRadio().orElse(null);
     if (state != null && state.source() == MusicRadioState.Source.QUEUE) {
       queue.consumeForRadio(state.queueEntryId());
     }
@@ -127,9 +127,9 @@ public final class MusicRadioService {
           selected.queueEntryId(),
           state == null ? null : state.version());
       try {
-        state = states.save(replacement);
+        state = runtimeState.saveRadio(replacement);
       } catch (OptimisticLockingFailureException | DuplicateKeyException contention) {
-        return snapshot(states.findById(MusicRadioState.ID).orElse(null), now);
+        return snapshot(runtimeState.findRadio().orElse(null), now);
       }
       MusicRadioHistoryEvent played = played(state, selected.track());
       saveHistoryOnce(played);

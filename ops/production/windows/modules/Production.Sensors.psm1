@@ -4,6 +4,7 @@ $script:PawnIoUri = 'https://github.com/namazso/PawnIO.Setup/releases/download/2
 $script:PawnIoSha256 = '1F519A22E47187F70A1379A48CA604981C4FCF694F4E65B734AAA74A9FBA3032'
 $script:PawnIoSignerThumbprint = 'F380DCC9F706E2756A5047B832FFE719E1BC35F5'
 $script:PawnIoVersion = '2.2.0.0'
+$script:FixedProductionRoot = 'C:\ProgramData\christopherbell.dev'
 $script:PawnIoRegistryPaths = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO',
     'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO')
@@ -324,40 +325,87 @@ function Write-ProductionSensorConfig {
     }
 }
 
+function Set-ProductionSensorStateAtRoot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][bool]$Enabled,
+        [Parameter(Mandatory)][string]$FixedRoot,
+        [switch]$WhatIf
+    )
+    Assert-SensorAdministrator
+    if ($WhatIf) { Write-Output "Would set sensorLibrariesEnabled=$($Enabled.ToString().ToLowerInvariant()) and verify ChristopherBellDev."; return }
+    $root = [IO.Path]::GetFullPath($FixedRoot)
+    $expectedConfigPath = [IO.Path]::GetFullPath(
+        (Join-Path $root 'config\deploy.json'))
+    $config = Read-ProductionConfig -Path $expectedConfigPath
+    $guard = Enter-ProductionFixedRootDeploymentLock `
+        -Config $config `
+        -FixedRoot $root `
+        -EnterLockAction {
+            param($LockPath)
+            Enter-DeploymentLock -LockPath $LockPath
+        }
+    $lock = $guard.Lock
+    try {
+        $config = Read-ProductionConfig -Path $expectedConfigPath
+        $sensorProperty = $config.PSObject.Properties['sensorLibrariesEnabled']
+        if (-not $sensorProperty -or $sensorProperty.Value -isnot [bool]) {
+            throw 'sensorLibrariesEnabled must be a Boolean.'
+        }
+        if ($config.PSObject.Properties.Name -ccontains 'programDataRoot' -and
+            -not [string]::Equals(
+                [IO.Path]::GetFullPath([string]$config.programDataRoot),
+                $root,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Sensor configuration root does not match the locked production root.'
+        }
+        $previous = $sensorProperty.Value
+        if ($Enabled) { Assert-NoActiveSensorThreat; Assert-PawnIoInstallation | Out-Null }
+        Write-ProductionSensorConfig -Path $expectedConfigPath -Enabled $Enabled
+        try {
+            Restart-Service -Name ChristopherBellDev
+            $updated = Get-Content -LiteralPath $expectedConfigPath -Raw | ConvertFrom-Json
+            Test-ProductionEndpoints $updated ([int]$updated.productionPort)
+        } catch {
+            $failure = $_.Exception
+            try {
+                Write-ProductionSensorConfig -Path $expectedConfigPath -Enabled $previous
+                Restart-Service -Name ChristopherBellDev
+                $restored = Get-Content -LiteralPath $expectedConfigPath -Raw | ConvertFrom-Json
+                Test-ProductionEndpoints $restored ([int]$restored.productionPort)
+            } catch {
+                throw [System.AggregateException]::new(
+                    'Sensor state change and guarded rollback both failed.',
+                    [System.Exception[]]@($failure, $_.Exception))
+            }
+            throw $failure
+        }
+    } finally {
+        $lock.Dispose()
+    }
+}
+
 function Set-ProductionSensorState {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][bool]$Enabled,
-        [string]$ConfigPath = 'C:\ProgramData\christopherbell.dev\config\deploy.json',
         [switch]$WhatIf
     )
-    Assert-SensorAdministrator
-    if ($Enabled) { Assert-NoActiveSensorThreat; Assert-PawnIoInstallation | Out-Null }
-    if ($WhatIf) { Write-Output "Would set sensorLibrariesEnabled=$($Enabled.ToString().ToLowerInvariant()) and verify ChristopherBellDev."; return }
-    $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-    $sensorProperty = $config.PSObject.Properties['sensorLibrariesEnabled']
-    if (-not $sensorProperty -or $sensorProperty.Value -isnot [bool]) {
-        throw 'sensorLibrariesEnabled must be a Boolean.'
-    }
-    $previous = $sensorProperty.Value
-    Write-ProductionSensorConfig -Path $ConfigPath -Enabled $Enabled
-    try {
-        Restart-Service -Name ChristopherBellDev
-        $updated = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-        Test-ProductionEndpoints $updated ([int]$updated.productionPort)
-    } catch {
-        Write-ProductionSensorConfig -Path $ConfigPath -Enabled $previous
-        Restart-Service -Name ChristopherBellDev
-        throw
-    }
+
+    Set-ProductionSensorStateAtRoot `
+        -Enabled $Enabled `
+        -FixedRoot $script:FixedProductionRoot `
+        -WhatIf:$WhatIf
 }
 
-function Install-PawnIoProvider {
+function Install-PawnIoProviderAtRoot {
     [CmdletBinding()]
-    param([string]$Root = 'C:\ProgramData\christopherbell.dev', [switch]$WhatIf)
+    param([Parameter(Mandatory)][string]$Root, [switch]$WhatIf)
     Assert-SensorAdministrator
-    $configPath = Join-Path $Root 'config\deploy.json'
-    Set-ProductionSensorState -Enabled $false -ConfigPath $configPath -WhatIf:$WhatIf
+    Set-ProductionSensorStateAtRoot `
+        -Enabled $false `
+        -FixedRoot $Root `
+        -WhatIf:$WhatIf
     if ($WhatIf) { Write-Output 'Would download, verify, Defender-scan, and install PawnIO 2.2.0 without enabling sensors.'; return }
     Protect-ProductionPath -Path $Root
     $directory = Join-Path $Root 'sensors'
@@ -388,6 +436,15 @@ function Install-PawnIoProvider {
             Remove-Item -LiteralPath $staging -Recurse -Force
         }
     }
+}
+
+function Install-PawnIoProvider {
+    [CmdletBinding()]
+    param([switch]$WhatIf)
+
+    Install-PawnIoProviderAtRoot `
+        -Root $script:FixedProductionRoot `
+        -WhatIf:$WhatIf
 }
 
 function Get-ProductionSensorStatus {
