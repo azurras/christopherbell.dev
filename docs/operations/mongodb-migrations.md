@@ -66,14 +66,17 @@ preview the fixed database and three namespaces:
 ```
 
 After confirming that preview, run the bounded operation with
-`-ConfirmMusicRuntimeRollback`. It creates a fresh full backup, verifies the archive against its
-SHA-256 sidecar, rechecks that the writer remains stopped, validates the exact raw BSON shapes,
-and replaces only the two retained `_id: "global"` documents. It then proves both readbacks are
-equivalent to the current queue/radio destination state. It never drops, deletes, or renames a
-collection and emits only bounded metadata.
+`-ConfirmMusicRuntimeRollback`. It acquires the fixed production `locks\deploy.lock`, creates a
+fresh full backup, verifies the archive against its SHA-256 sidecar, rechecks that the writer
+remains stopped, validates the exact raw BSON shapes, and replaces only the two retained
+`_id: "global"` documents. It holds the lock until output validation and failure handling finish,
+then proves both readbacks are equivalent to the current queue/radio destination state. It never
+drops, deletes, or renames a collection and emits only bounded metadata.
 
 Keep the service stopped if any gate, replacement, or readback check fails. Preserve the reported
-backup and failure cause, and obtain approval before attempting a broader production restore.
+backup, allowlisted phase/error code, and failure cause, and obtain approval before attempting a
+broader production restore. Do not manually restart the service while this operation or another
+deployment command owns `deploy.lock`.
 
 Keep the website service stopped throughout this investigation. Do not start
 the prior release as a diagnostic step after the live migration boundary.

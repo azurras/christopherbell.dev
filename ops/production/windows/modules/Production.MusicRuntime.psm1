@@ -7,6 +7,14 @@ const target = db.getSiblingDB('christopherbell');
 const destination = target.getCollection('music_runtime_state');
 const queueSource = target.getCollection('music_queue_state');
 const radioSource = target.getCollection('music_radio_state');
+let rollbackPhase = 'preflight';
+const rollbackErrorCodes = {
+  'preflight': 'PREFLIGHT_FAILED',
+  'queue-replacement': 'QUEUE_REPLACEMENT_FAILED',
+  'radio-replacement': 'RADIO_REPLACEMENT_FAILED',
+  'readback': 'READBACK_FAILED'
+};
+try {
 const has = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const exactKeys = (value, required, optional) => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -140,14 +148,17 @@ const radioLegacy = {
 if (has(radio.radio, 'queueEntryId')) radioLegacy.queueEntryId = radio.radio.queueEntryId;
 if (has(radio, 'version')) radioLegacy.version = radio.version;
 if (has(existingRadio, '_class')) radioLegacy._class = existingRadio._class;
+rollbackPhase = 'queue-replacement';
 const queueResult = queueSource.replaceOne({ _id: 'global' }, queueLegacy);
 if (exactCount(queueResult.matchedCount) !== '1') {
   throw new Error('legacy queue replacement failed');
 }
+rollbackPhase = 'radio-replacement';
 const radioResult = radioSource.replaceOne({ _id: 'global' }, radioLegacy);
 if (exactCount(radioResult.matchedCount) !== '1') {
   throw new Error('legacy radio replacement failed');
 }
+rollbackPhase = 'readback';
 const canonical = (value) => EJSON.stringify(value, {relaxed: false});
 const queueReadback = queueSource.findOne({ _id: 'global' });
 const radioReadback = radioSource.findOne({ _id: 'global' });
@@ -163,6 +174,13 @@ print(JSON.stringify({
   destinationCount: 2,
   restoredCollections: ['music_queue_state', 'music_radio_state']
 }));
+} catch (failure) {
+  print(JSON.stringify({
+    complete: false,
+    phase: rollbackPhase,
+    errorCode: rollbackErrorCodes[rollbackPhase]
+  }));
+}
 '@
 }
 
@@ -249,6 +267,28 @@ function ConvertFrom-ProductionMusicRuntimeRollback {
     try {
         $value = $Json | ConvertFrom-Json -ErrorAction Stop
         $names = @($value.PSObject.Properties.Name)
+        if ($value.complete -is [bool] -and $value.complete -eq $false) {
+            $failureNames = @('complete','phase','errorCode')
+            $failureCodes = @{
+                'preflight' = 'PREFLIGHT_FAILED'
+                'queue-replacement' = 'QUEUE_REPLACEMENT_FAILED'
+                'radio-replacement' = 'RADIO_REPLACEMENT_FAILED'
+                'readback' = 'READBACK_FAILED'
+            }
+            if ($names.Count -ne 3 -or
+                @($failureNames | Where-Object { $_ -notin $names }).Count -ne 0 -or
+                $value.phase -isnot [string] -or
+                $value.errorCode -isnot [string] -or
+                -not $failureCodes.ContainsKey([string]$value.phase) -or
+                [string]$value.errorCode -cne $failureCodes[[string]$value.phase]) {
+                throw 'Invalid rollback failure metadata.'
+            }
+            $phaseFailure = [InvalidOperationException]::new(
+                'Music runtime rollback script reported an allowlisted failure.')
+            $phaseFailure.Data['MusicRuntimePhase'] = [string]$value.phase
+            $phaseFailure.Data['MusicRuntimeErrorCode'] = [string]$value.errorCode
+            throw $phaseFailure
+        }
         $expectedNames = @('complete','database','destinationCount','restoredCollections')
         $unexpectedNames = @($names | Where-Object { $_ -notin $expectedNames })
         $missingNames = @($expectedNames | Where-Object { $_ -notin $names })
@@ -274,10 +314,41 @@ function ConvertFrom-ProductionMusicRuntimeRollback {
             restoredCollections = @('music_queue_state','music_radio_state')
         }
     } catch {
-        throw [IO.InvalidDataException]::new(
-            'Music runtime rollback returned invalid metadata.',
-            $_.Exception)
+        if ($_.Exception.Data.Contains('MusicRuntimePhase') -and
+            $_.Exception.Data.Contains('MusicRuntimeErrorCode')) {
+            throw $_.Exception
+        }
+        $metadataFailure = [IO.InvalidDataException]::new(
+            'Music runtime rollback returned invalid metadata.')
+        $metadataFailure.Data['MusicRuntimePhase'] = 'metadata'
+        $metadataFailure.Data['MusicRuntimeErrorCode'] = 'METADATA_INVALID'
+        throw $metadataFailure
     }
+}
+
+function New-ProductionMusicRuntimePostBackupFailure {
+    param(
+        [Parameter(Mandatory)][string]$Phase,
+        [Parameter(Mandatory)][string]$ErrorCode,
+        [Parameter(Mandatory)][string]$Archive,
+        [Parameter(Mandatory)][System.Exception]$Cause
+    )
+
+    $allowed = @{
+        'writer-check' = 'WRITER_NOT_STOPPED'
+        'process' = 'MONGOSH_PROCESS_FAILED'
+        'preflight' = 'PREFLIGHT_FAILED'
+        'queue-replacement' = 'QUEUE_REPLACEMENT_FAILED'
+        'radio-replacement' = 'RADIO_REPLACEMENT_FAILED'
+        'readback' = 'READBACK_FAILED'
+        'metadata' = 'METADATA_INVALID'
+    }
+    if (-not $allowed.ContainsKey($Phase) -or $allowed[$Phase] -cne $ErrorCode) {
+        throw 'Music runtime rollback received an invalid internal failure phase.'
+    }
+    return [InvalidOperationException]::new(
+        "Music runtime rollback failed [phase=$Phase,error=$ErrorCode]; retained backup: $Archive",
+        $Cause)
 }
 
 function Assert-ProductionMusicRuntimeWriterStopped {
@@ -311,28 +382,64 @@ function Invoke-ProductionMusicRuntimeStateRollback {
     }
 
     $config = Read-ProductionConfig
-    Assert-ProductionMusicRuntimeWriterStopped `
-        -FailureMessage 'ChristopherBellDev must be stopped before Music runtime rollback.'
-    $operationStartedAt = Get-Date
-    $backup = New-ProductionBackup
-    Assert-ProductionMusicRuntimeBackup `
-        -Archive $backup `
-        -OperationStartedAt $operationStartedAt
-    Assert-ProductionMusicRuntimeWriterStopped `
-        -FailureMessage 'ChristopherBellDev must remain stopped during Music runtime rollback.'
-    $json = Invoke-CheckedProcess `
-        -FilePath $config.mongoShellExe `
-        -ArgumentList @(
-            '--quiet'
-            '--norc'
-            'mongodb://127.0.0.1:27017/admin'
-            '--eval'
-            (Get-ProductionMusicRuntimeRollbackScript)
-        ) `
-        -WorkingDirectory $config.repositoryPath
-    $result = ConvertFrom-ProductionMusicRuntimeRollback -Json $json
-    $result | Add-Member -NotePropertyName backup -NotePropertyValue $backup
-    return $result
+    $lock = Enter-DeploymentLock `
+        -LockPath (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    try {
+        Assert-ProductionMusicRuntimeWriterStopped `
+            -FailureMessage 'ChristopherBellDev must be stopped before Music runtime rollback.'
+        $operationStartedAt = Get-Date
+        $backup = New-ProductionBackup
+        Assert-ProductionMusicRuntimeBackup `
+            -Archive $backup `
+            -OperationStartedAt $operationStartedAt
+        try {
+            Assert-ProductionMusicRuntimeWriterStopped `
+                -FailureMessage 'ChristopherBellDev must remain stopped during Music runtime rollback.'
+        } catch {
+            throw (New-ProductionMusicRuntimePostBackupFailure `
+                -Phase 'writer-check' `
+                -ErrorCode 'WRITER_NOT_STOPPED' `
+                -Archive $backup `
+                -Cause $_.Exception)
+        }
+        try {
+            $json = Invoke-CheckedProcess `
+                -FilePath $config.mongoShellExe `
+                -ArgumentList @(
+                    '--quiet'
+                    '--norc'
+                    'mongodb://127.0.0.1:27017/admin'
+                    '--eval'
+                    (Get-ProductionMusicRuntimeRollbackScript)
+                ) `
+                -WorkingDirectory $config.repositoryPath
+        } catch {
+            throw (New-ProductionMusicRuntimePostBackupFailure `
+                -Phase 'process' `
+                -ErrorCode 'MONGOSH_PROCESS_FAILED' `
+                -Archive $backup `
+                -Cause $_.Exception)
+        }
+        try {
+            $result = ConvertFrom-ProductionMusicRuntimeRollback -Json $json
+        } catch {
+            $phase = if ($_.Exception.Data.Contains('MusicRuntimePhase')) {
+                [string]$_.Exception.Data['MusicRuntimePhase']
+            } else { 'metadata' }
+            $errorCode = if ($_.Exception.Data.Contains('MusicRuntimeErrorCode')) {
+                [string]$_.Exception.Data['MusicRuntimeErrorCode']
+            } else { 'METADATA_INVALID' }
+            throw (New-ProductionMusicRuntimePostBackupFailure `
+                -Phase $phase `
+                -ErrorCode $errorCode `
+                -Archive $backup `
+                -Cause $_.Exception)
+        }
+        $result | Add-Member -NotePropertyName backup -NotePropertyValue $backup
+        return $result
+    } finally {
+        $lock.Dispose()
+    }
 }
 
 Export-ModuleMember -Function `

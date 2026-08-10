@@ -2,6 +2,186 @@ $moduleRoot = Join-Path $PSScriptRoot '..\modules'
 Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $moduleRoot 'Production.MusicRuntime.psm1') -Force
 
+BeforeAll {
+function Assert-DisposableMusicRuntimeMongoUri {
+    param(
+        [Parameter(Mandatory)][string]$UriText,
+        [Parameter(Mandatory)][string]$MarkerPath
+    )
+
+    try {
+        $match = [regex]::Match(
+            $UriText,
+            '^mongodb://(127\.0\.0\.1|localhost):([0-9]{1,5})/admin$',
+            [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        $uri = $null
+        if (-not $match.Success -or
+            -not [uri]::TryCreate($UriText, [UriKind]::Absolute, [ref]$uri) -or
+            $uri.Scheme -cne 'mongodb' -or
+            -not [string]::IsNullOrEmpty($uri.UserInfo) -or
+            $uri.Host -notin @('127.0.0.1','localhost') -or
+            $uri.AbsolutePath -cne '/admin' -or
+            -not [string]::IsNullOrEmpty($uri.Query) -or
+            -not [string]::IsNullOrEmpty($uri.Fragment)) {
+            throw 'URI shape is unsafe.'
+        }
+        $port = 0
+        if (-not [int]::TryParse($match.Groups[2].Value, [ref]$port) -or
+            $port -lt 1 -or $port -gt 65535 -or $port -eq 27017 -or
+            $uri.Port -ne $port) {
+            throw 'URI port is unsafe.'
+        }
+        if ([string]::IsNullOrWhiteSpace($MarkerPath) -or
+            -not (Test-Path -LiteralPath $MarkerPath -PathType Leaf)) {
+            throw 'Disposable ownership marker is missing.'
+        }
+        $marker = Get-Content -LiteralPath $MarkerPath -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+        $names = @($marker.PSObject.Properties.Name)
+        if ($names.Count -ne 4 -or
+            @('uri','port','processId','dataPath').Where({ $_ -notin $names }).Count -ne 0 -or
+            $marker.uri -isnot [string] -or [string]$marker.uri -cne $UriText -or
+            ($marker.port -isnot [int] -and $marker.port -isnot [long]) -or
+            [int]$marker.port -ne $port -or
+            ($marker.processId -isnot [int] -and $marker.processId -isnot [long]) -or
+            [long]$marker.processId -lt 1 -or
+            $marker.dataPath -isnot [string] -or
+            -not (Test-Path -LiteralPath $marker.dataPath -PathType Container)) {
+            throw 'Disposable ownership marker is invalid.'
+        }
+        $dataPath = [IO.Path]::GetFullPath([string]$marker.dataPath)
+        $markerParent = [IO.Path]::GetFullPath((Split-Path -Parent $MarkerPath))
+        if (-not $markerParent.Equals($dataPath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Disposable ownership marker is outside its data path.'
+        }
+        $process = Get-Process -Id ([int]$marker.processId) -ErrorAction Stop
+        if ([string]$process.ProcessName -cne 'mongod') {
+            throw 'Disposable ownership process is invalid.'
+        }
+        $listeners = @(Get-NetTCPConnection `
+            -LocalPort $port `
+            -State Listen `
+            -ErrorAction Stop)
+        if ($listeners.Count -lt 1 -or
+            @($listeners | Where-Object {
+                [int]$_.OwningProcess -ne [int]$marker.processId -or
+                [string]$_.LocalAddress -notin @('127.0.0.1','::1')
+            }).Count -ne 0) {
+            throw 'Disposable ownership listener is invalid.'
+        }
+        return [pscustomobject][ordered]@{
+            uri = $UriText
+            port = $port
+            processId = [int]$marker.processId
+            dataPath = $dataPath
+        }
+    } catch {
+        throw 'Disposable MongoDB URI is unsafe.'
+    }
+}
+
+function Invoke-ValidatedDisposableMusicRuntimeAction {
+    param(
+        [Parameter(Mandatory)][string]$UriText,
+        [Parameter(Mandatory)][string]$MarkerPath,
+        [Parameter(Mandatory)][scriptblock]$Action
+    )
+
+    $context = Assert-DisposableMusicRuntimeMongoUri `
+        -UriText $UriText `
+        -MarkerPath $MarkerPath
+    & $Action
+    return $context
+}
+}
+
+Describe 'Music runtime disposable MongoDB URI safety' {
+    It 'rejects unsafe URI <Name> before invoking the Mongo action' -TestCases @(
+        @{ Name = 'production port'; Uri = 'mongodb://127.0.0.1:27017/admin' }
+        @{ Name = 'omitted port'; Uri = 'mongodb://127.0.0.1/admin' }
+        @{ Name = 'malformed input'; Uri = 'not a mongodb uri' }
+        @{ Name = 'remote host'; Uri = 'mongodb://db.example.test:27159/admin' }
+        @{ Name = 'userinfo'; Uri = 'mongodb://operator:secret@127.0.0.1:27159/admin' }
+        @{ Name = 'ambiguous hosts'; Uri = 'mongodb://127.0.0.1:27159,localhost:27160/admin' }
+    ) {
+        param($Name, $Uri)
+        $script:mongoActionInvoked = $false
+
+        {
+            Invoke-ValidatedDisposableMusicRuntimeAction `
+                -UriText $Uri `
+                -MarkerPath (Join-Path $TestDrive 'missing-marker.json') `
+                -Action { $script:mongoActionInvoked = $true }
+        } | Should -Throw 'Disposable MongoDB URI is unsafe.'
+
+        $script:mongoActionInvoked | Should -BeFalse
+    }
+
+    It 'accepts a marker-owned credential-free loopback URI with an explicit non-production port' {
+        $uri = 'mongodb://localhost:27159/admin'
+        $dataPath = Join-Path $TestDrive 'owned-mongo-data'
+        $markerPath = Join-Path $dataPath 'codex-disposable-mongo.json'
+        New-Item -ItemType Directory -Path $dataPath | Out-Null
+        [ordered]@{
+            uri = $uri
+            port = 27159
+            processId = 4242
+            dataPath = $dataPath
+        } | ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding utf8
+        Mock Get-Process { [pscustomobject]@{ Id = 4242; ProcessName = 'mongod' } }
+        Mock Get-NetTCPConnection {
+            [pscustomobject]@{
+                LocalAddress = '127.0.0.1'
+                LocalPort = 27159
+                OwningProcess = 4242
+                State = 'Listen'
+            }
+        }
+        $script:mongoActionInvoked = $false
+
+        $context = Invoke-ValidatedDisposableMusicRuntimeAction `
+            -UriText $uri `
+            -MarkerPath $markerPath `
+            -Action { $script:mongoActionInvoked = $true }
+
+        $script:mongoActionInvoked | Should -BeTrue
+        $context.uri | Should -Be $uri
+        $context.port | Should -Be 27159
+    }
+
+    It 'rejects a marker whose mongod process does not own the loopback listener' {
+        $uri = 'mongodb://127.0.0.1:27159/admin'
+        $dataPath = Join-Path $TestDrive 'stale-mongo-data'
+        $markerPath = Join-Path $dataPath 'codex-disposable-mongo.json'
+        New-Item -ItemType Directory -Path $dataPath | Out-Null
+        [ordered]@{
+            uri = $uri
+            port = 27159
+            processId = 4242
+            dataPath = $dataPath
+        } | ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding utf8
+        Mock Get-Process { [pscustomobject]@{ Id = 4242; ProcessName = 'mongod' } }
+        Mock Get-NetTCPConnection {
+            [pscustomobject]@{
+                LocalAddress = '127.0.0.1'
+                LocalPort = 27159
+                OwningProcess = 9999
+                State = 'Listen'
+            }
+        }
+        $script:mongoActionInvoked = $false
+
+        {
+            Invoke-ValidatedDisposableMusicRuntimeAction `
+                -UriText $uri `
+                -MarkerPath $markerPath `
+                -Action { $script:mongoActionInvoked = $true }
+        } | Should -Throw 'Disposable MongoDB URI is unsafe.'
+
+        $script:mongoActionInvoked | Should -BeFalse
+    }
+}
+
 Describe 'Music runtime rollback operation' {
     InModuleScope Production.MusicRuntime {
         BeforeAll {
@@ -20,6 +200,27 @@ Describe 'Music runtime rollback operation' {
                 } | ConvertTo-Json | Set-Content -LiteralPath "$archive.sha256.json" -Encoding utf8
                 return $archive
             }
+
+            function New-TestDeploymentLock {
+                param([Collections.Generic.List[string]]$Events)
+
+                $lock = [pscustomobject]@{
+                    disposed = $false
+                    events = $Events
+                }
+                $lock | Add-Member -MemberType ScriptMethod -Name Dispose -Value {
+                    $this.disposed = $true
+                    if ($null -ne $this.events) {
+                        [void]$this.events.Add('lock-release')
+                    }
+                }
+                return $lock
+            }
+        }
+
+        BeforeEach {
+            $script:lastDeploymentLock = New-TestDeploymentLock
+            Mock Enter-DeploymentLock { $script:lastDeploymentLock }
         }
 
         It 'generates a fixed reverse-copy script without destructive collection operations' {
@@ -33,6 +234,14 @@ Describe 'Music runtime rollback operation' {
             $script | Should -Not -Match '\.(drop|dropDatabase|deleteOne|deleteMany|remove|renameCollection)\s*\('
             $script | Should -Not -Match 'runCommand\s*\(\s*\{\s*(drop|renameCollection)'
             $script | Should -Not -Match 'getCollectionNames|listCollections|\$out|\$merge'
+            foreach ($failure in @(
+                @{ Phase = 'preflight'; Code = 'PREFLIGHT_FAILED' }
+                @{ Phase = 'queue-replacement'; Code = 'QUEUE_REPLACEMENT_FAILED' }
+                @{ Phase = 'radio-replacement'; Code = 'RADIO_REPLACEMENT_FAILED' }
+                @{ Phase = 'readback'; Code = 'READBACK_FAILED' }
+            )) {
+                $script | Should -Match ([regex]::Escape("'$($failure.Phase)': '$($failure.Code)'"))
+            }
         }
 
         It 'returns a no-write exact preview without reading protected configuration' {
@@ -67,6 +276,7 @@ Describe 'Music runtime rollback operation' {
                 [pscustomobject]@{
                     mongoShellExe = 'C:\tools\mongosh.exe'
                     repositoryPath = 'C:\repo'
+                    programDataRoot = 'C:\production'
                 }
             }
             Mock Get-Service { [pscustomobject]@{ Status = 'Running' } }
@@ -75,6 +285,57 @@ Describe 'Music runtime rollback operation' {
 
             { Invoke-ProductionMusicRuntimeStateRollback -Confirm } |
                 Should -Throw '*must be stopped*'
+            Should -Invoke New-ProductionBackup -Times 0
+            Should -Invoke Invoke-CheckedProcess -Times 0
+            $script:lastDeploymentLock.disposed | Should -BeTrue
+        }
+
+        It 'acquires the fixed deploy lock before inspecting the writer' {
+            $events = [Collections.Generic.List[string]]::new()
+            $lock = New-TestDeploymentLock -Events $events
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    mongoShellExe = 'C:\tools\mongosh.exe'
+                    repositoryPath = 'C:\repo'
+                    programDataRoot = 'C:\production'
+                }
+            }
+            Mock Enter-DeploymentLock {
+                [void]$events.Add('lock-acquire')
+                $lock
+            }
+            Mock Get-Service {
+                [void]$events.Add('service-check')
+                [pscustomobject]@{ Status = 'Running' }
+            }
+            Mock New-ProductionBackup { throw 'must not run' }
+
+            { Invoke-ProductionMusicRuntimeStateRollback -Confirm } |
+                Should -Throw '*must be stopped*'
+
+            $events | Should -Be @('lock-acquire','service-check','lock-release')
+            Should -Invoke Enter-DeploymentLock -Times 1 -Exactly -ParameterFilter {
+                $LockPath -eq 'C:\production\locks\deploy.lock'
+            }
+        }
+
+        It 'allows no service backup or Mongo effect when deploy lock acquisition contends' {
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    mongoShellExe = 'C:\tools\mongosh.exe'
+                    repositoryPath = 'C:\repo'
+                    programDataRoot = 'C:\production'
+                }
+            }
+            Mock Enter-DeploymentLock { throw 'Another production operation is already running.' }
+            Mock Get-Service { throw 'must not run' }
+            Mock New-ProductionBackup { throw 'must not run' }
+            Mock Invoke-CheckedProcess { throw 'must not run' }
+
+            { Invoke-ProductionMusicRuntimeStateRollback -Confirm } |
+                Should -Throw 'Another production operation is already running.'
+
+            Should -Invoke Get-Service -Times 0
             Should -Invoke New-ProductionBackup -Times 0
             Should -Invoke Invoke-CheckedProcess -Times 0
         }
@@ -86,6 +347,7 @@ Describe 'Music runtime rollback operation' {
                 [pscustomobject]@{
                     mongoShellExe = 'C:\tools\mongosh.exe'
                     repositoryPath = 'C:\repo'
+                    programDataRoot = 'C:\production'
                 }
             }
             Mock Get-Service { [pscustomobject]@{ Status = 'Stopped' } }
@@ -107,6 +369,7 @@ Describe 'Music runtime rollback operation' {
                 [pscustomobject]@{
                     mongoShellExe = 'C:\tools\mongosh.exe'
                     repositoryPath = 'C:\repo'
+                    programDataRoot = 'C:\production'
                 }
             }
             Mock Get-Service { [pscustomobject]@{ Status = 'Stopped' } }
@@ -126,6 +389,7 @@ Describe 'Music runtime rollback operation' {
                 [pscustomobject]@{
                     mongoShellExe = 'C:\tools\mongosh.exe'
                     repositoryPath = 'C:\repo'
+                    programDataRoot = 'C:\production'
                 }
             }
             Mock Get-Service { [pscustomobject]@{ Status = 'Stopped' } }
@@ -144,6 +408,7 @@ Describe 'Music runtime rollback operation' {
                 [pscustomobject]@{
                     mongoShellExe = 'C:\tools\mongosh.exe'
                     repositoryPath = 'C:\repo'
+                    programDataRoot = 'C:\production'
                 }
             }
             Mock Get-Service {
@@ -156,21 +421,40 @@ Describe 'Music runtime rollback operation' {
             Mock New-ProductionBackup { $archive }
             Mock Invoke-CheckedProcess { throw 'must not run' }
 
-            { Invoke-ProductionMusicRuntimeStateRollback -Confirm } |
-                Should -Throw '*must remain stopped*'
+            $failure = $null
+            try {
+                Invoke-ProductionMusicRuntimeStateRollback -Confirm
+            } catch {
+                $failure = $_.Exception
+            }
+
+            $failure.Message | Should -Match 'phase=writer-check'
+            $failure.Message | Should -Match 'error=WRITER_NOT_STOPPED'
+            $failure.Message | Should -Match ([regex]::Escape($archive))
+            $failure.InnerException.Message | Should -Match 'must remain stopped'
             Should -Invoke Invoke-CheckedProcess -Times 0
+            $script:lastDeploymentLock.disposed | Should -BeTrue
         }
 
         It 'backs up and verifies before fixed-loopback mongosh then returns bounded metadata' {
             $archive = New-VerifiedTestBackup -Name 'success.archive.gz'
             $script:events = [Collections.Generic.List[string]]::new()
+            $lock = New-TestDeploymentLock -Events $script:events
             Mock Read-ProductionConfig {
                 [pscustomobject]@{
                     mongoShellExe = 'C:\tools\mongosh.exe'
                     repositoryPath = 'C:\repo'
+                    programDataRoot = 'C:\production'
                 }
             }
-            Mock Get-Service { [pscustomobject]@{ Status = 'Stopped' } }
+            Mock Enter-DeploymentLock {
+                [void]$script:events.Add('lock-acquire')
+                $lock
+            }
+            Mock Get-Service {
+                [void]$script:events.Add('service-check')
+                [pscustomobject]@{ Status = 'Stopped' }
+            }
             Mock New-ProductionBackup {
                 [void]$script:events.Add('backup')
                 $archive
@@ -196,7 +480,9 @@ Describe 'Music runtime rollback operation' {
 
             $result = Invoke-ProductionMusicRuntimeStateRollback -Confirm
 
-            $script:events | Should -Be @('backup','checksum','mongosh')
+            $script:events | Should -Be @(
+                'lock-acquire','service-check','backup','checksum',
+                'service-check','mongosh','lock-release')
             @($result.PSObject.Properties.Name) | Should -Be @(
                 'complete','database','destinationCount','restoredCollections','backup')
             $result.complete | Should -BeTrue
@@ -217,6 +503,105 @@ Describe 'Music runtime rollback operation' {
                 $ArgumentList[2] -eq 'mongodb://127.0.0.1:27017/admin' -and
                 $ArgumentList[3] -eq '--eval'
             }
+        }
+
+        It 'releases the deploy lock and redacts a native process failure after verified backup' {
+            $archive = New-VerifiedTestBackup -Name 'process-failure.archive.gz'
+            $sensitive = 'mongodb://operator:secret@remote.example:27017/private-track-token'
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    mongoShellExe = 'C:\tools\mongosh.exe'
+                    repositoryPath = 'C:\repo'
+                    programDataRoot = 'C:\production'
+                }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status = 'Stopped' } }
+            Mock New-ProductionBackup { $archive }
+            Mock Invoke-CheckedProcess { throw $sensitive }
+
+            $failure = $null
+            try {
+                Invoke-ProductionMusicRuntimeStateRollback -Confirm
+            } catch {
+                $failure = $_.Exception
+            }
+
+            $failure.Message | Should -Match 'phase=process'
+            $failure.Message | Should -Match 'error=MONGOSH_PROCESS_FAILED'
+            $failure.Message | Should -Match ([regex]::Escape($archive))
+            $failure.Message | Should -Not -Match 'secret|remote|private-track-token|27017'
+            $failure.InnerException.Message | Should -Be $sensitive
+            $script:lastDeploymentLock.disposed | Should -BeTrue
+        }
+
+        It 'reports allowlisted generated-script failure phase <Phase>' -TestCases @(
+            @{ Phase = 'preflight'; ErrorCode = 'PREFLIGHT_FAILED' }
+            @{ Phase = 'queue-replacement'; ErrorCode = 'QUEUE_REPLACEMENT_FAILED' }
+            @{ Phase = 'radio-replacement'; ErrorCode = 'RADIO_REPLACEMENT_FAILED' }
+            @{ Phase = 'readback'; ErrorCode = 'READBACK_FAILED' }
+        ) {
+            param($Phase, $ErrorCode)
+            $archive = New-VerifiedTestBackup -Name "$Phase.archive.gz"
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    mongoShellExe = 'C:\tools\mongosh.exe'
+                    repositoryPath = 'C:\repo'
+                    programDataRoot = 'C:\production'
+                }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status = 'Stopped' } }
+            Mock New-ProductionBackup { $archive }
+            Mock Invoke-CheckedProcess {
+                [ordered]@{
+                    complete = $false
+                    phase = $Phase
+                    errorCode = $ErrorCode
+                } | ConvertTo-Json -Compress
+            }
+
+            $failure = $null
+            try {
+                Invoke-ProductionMusicRuntimeStateRollback -Confirm
+            } catch {
+                $failure = $_.Exception
+            }
+
+            $failure.Message | Should -Match "phase=$([regex]::Escape($Phase))"
+            $failure.Message | Should -Match "error=$ErrorCode"
+            $failure.Message | Should -Match ([regex]::Escape($archive))
+            $failure.InnerException | Should -Not -BeNullOrEmpty
+            $script:lastDeploymentLock.disposed | Should -BeTrue
+        }
+
+        It 'reports and redacts malformed metadata after verified backup' {
+            $archive = New-VerifiedTestBackup -Name 'metadata-failure.archive.gz'
+            $sensitive = 'private-bson-track-token'
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{
+                    mongoShellExe = 'C:\tools\mongosh.exe'
+                    repositoryPath = 'C:\repo'
+                    programDataRoot = 'C:\production'
+                }
+            }
+            Mock Get-Service { [pscustomobject]@{ Status = 'Stopped' } }
+            Mock New-ProductionBackup { $archive }
+            Mock Invoke-CheckedProcess { "{invalid:$sensitive}" }
+
+            $failure = $null
+            try {
+                Invoke-ProductionMusicRuntimeStateRollback -Confirm
+            } catch {
+                $failure = $_.Exception
+            }
+
+            $failure.Message | Should -Match 'phase=metadata'
+            $failure.Message | Should -Match 'error=METADATA_INVALID'
+            $failure.Message | Should -Match ([regex]::Escape($archive))
+            $failure.Message | Should -Not -Match $sensitive
+            $failure.InnerException.Message | Should -Be (
+                'Music runtime rollback returned invalid metadata.')
+            $failure.ToString() | Should -Not -Match $sensitive
+            $script:lastDeploymentLock.disposed | Should -BeTrue
         }
 
         It 'rejects malformed command metadata without echoing document content' {
@@ -253,6 +638,9 @@ Describe 'Music runtime rollback operation' {
 Describe 'Music runtime rollback disposable MongoDB boundary' -Skip:(
     [string]::IsNullOrWhiteSpace($env:MUSIC_RUNTIME_ROLLBACK_TEST_URI)) {
     BeforeAll {
+        $disposableContext = Assert-DisposableMusicRuntimeMongoUri `
+            -UriText $env:MUSIC_RUNTIME_ROLLBACK_TEST_URI `
+            -MarkerPath $env:MUSIC_RUNTIME_ROLLBACK_TEST_MARKER
         $moduleRoot = Join-Path $PSScriptRoot '..\modules'
         $mongoShell = if ([string]::IsNullOrWhiteSpace($env:MONGOSH_EXE)) {
             (Get-Command mongosh.exe -ErrorAction Stop).Source
@@ -263,7 +651,7 @@ Describe 'Music runtime rollback disposable MongoDB boundary' -Skip:(
         function Invoke-DisposableMusicRuntimeMongo {
             param([Parameter(Mandatory)][string]$Script)
 
-            $output = & $mongoShell --quiet --norc $env:MUSIC_RUNTIME_ROLLBACK_TEST_URI `
+            $output = & $mongoShell --quiet --norc $disposableContext.uri `
                 --eval $Script 2>&1
             if ($LASTEXITCODE -ne 0) {
                 throw 'Disposable MongoDB script failed.'
@@ -304,9 +692,17 @@ target.getCollection('music_radio_state').insertOne({_id:'global',stationSequenc
     It 'reverse-copies exact valid state and proves lossless optional-field preservation' {
         Set-DisposableValidMusicRuntimeState
 
-        $output = Invoke-DisposableMusicRuntimeMongo `
-            -Script (Get-ProductionMusicRuntimeRollbackScript)
-        $metadata = $output[-1] | ConvertFrom-Json -ErrorAction Stop
+        $json = Invoke-CheckedProcess `
+            -FilePath $mongoShell `
+            -ArgumentList @(
+                '--quiet'
+                '--norc'
+                $disposableContext.uri
+                '--eval'
+                (Get-ProductionMusicRuntimeRollbackScript)
+            ) `
+            -WorkingDirectory $PSScriptRoot
+        $metadata = $json | ConvertFrom-Json -ErrorAction Stop
         $metadata.complete | Should -BeTrue
         $metadata.restoredCollections | Should -Be @(
             'music_queue_state','music_radio_state')
@@ -337,9 +733,12 @@ db.getSiblingDB('christopherbell').music_runtime_state.updateOne(
   {_id:'queue'}, {$set:{unexpected:'private-value'}});
 '@
 
-        { Invoke-DisposableMusicRuntimeMongo `
-            -Script (Get-ProductionMusicRuntimeRollbackScript) } |
-            Should -Throw 'Disposable MongoDB script failed.'
+        $failureOutput = Invoke-DisposableMusicRuntimeMongo `
+            -Script (Get-ProductionMusicRuntimeRollbackScript)
+        $failureMetadata = $failureOutput[-1] | ConvertFrom-Json -ErrorAction Stop
+        $failureMetadata.complete | Should -BeFalse
+        $failureMetadata.phase | Should -Be 'preflight'
+        $failureMetadata.errorCode | Should -Be 'PREFLIGHT_FAILED'
 
         $proof = Invoke-DisposableMusicRuntimeMongo -Script @'
 const target = db.getSiblingDB('christopherbell');
@@ -355,9 +754,12 @@ print(JSON.stringify({
     It 'rejects conflicting retained legacy shape before changing either singleton' {
         Set-DisposableValidMusicRuntimeState -LegacyQueueSuffix ",unexpected:'private-value'"
 
-        { Invoke-DisposableMusicRuntimeMongo `
-            -Script (Get-ProductionMusicRuntimeRollbackScript) } |
-            Should -Throw 'Disposable MongoDB script failed.'
+        $failureOutput = Invoke-DisposableMusicRuntimeMongo `
+            -Script (Get-ProductionMusicRuntimeRollbackScript)
+        $failureMetadata = $failureOutput[-1] | ConvertFrom-Json -ErrorAction Stop
+        $failureMetadata.complete | Should -BeFalse
+        $failureMetadata.phase | Should -Be 'preflight'
+        $failureMetadata.errorCode | Should -Be 'PREFLIGHT_FAILED'
 
         $proof = Invoke-DisposableMusicRuntimeMongo -Script @'
 const target = db.getSiblingDB('christopherbell');
