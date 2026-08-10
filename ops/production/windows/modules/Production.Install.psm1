@@ -136,8 +136,16 @@ function Install-WinSwBinary {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ServiceRoot)
     $binary = Join-Path $ServiceRoot 'ChristopherBellDev.exe'
-    if (Test-Path -LiteralPath $binary -PathType Leaf) { return $binary }
+    Assert-ProductionWebsiteServiceDestinationNotReparse -Path $binary
+    if (Test-Path -LiteralPath $binary -PathType Leaf) {
+        if ((Get-FileHash -LiteralPath $binary -Algorithm SHA256 -ErrorAction Stop).Hash -cne
+            $script:WinSwSha256) {
+            throw 'Existing installed WinSW SHA-256 verification failed.'
+        }
+        return $binary
+    }
     $download = "$binary.download"
+    Assert-ProductionWebsiteServiceDestinationNotReparse -Path $download
     Invoke-WebRequest $script:WinSwUri -OutFile $download
     if ((Get-FileHash $download -Algorithm SHA256).Hash -ne $script:WinSwSha256) {
         Remove-Item -LiteralPath $download -Force
@@ -145,6 +153,102 @@ function Install-WinSwBinary {
     }
     Move-Item -LiteralPath $download -Destination $binary
     return $binary
+}
+
+function Assert-ProductionWebsiteServiceDestinationNotReparse {
+    param([Parameter(Mandatory)][string]$Path)
+
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    } catch [System.Management.Automation.ItemNotFoundException] {
+        return
+    }
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "Production service-host destination must not be a reparse point: $Path"
+    }
+}
+
+function Get-ProductionWinSwSha256 {
+    $script:WinSwSha256.ToLowerInvariant()
+}
+
+function Get-ProductionWebsiteServiceOrNull {
+    try {
+        return Get-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+    } catch {
+        $missingServiceErrorId =
+            'NoServiceFoundForGivenName,Microsoft.PowerShell.Commands.GetServiceCommand'
+        if ($_.FullyQualifiedErrorId -eq $missingServiceErrorId) { return $null }
+        throw
+    }
+}
+
+function Initialize-ProductionDeploymentLockDirectory {
+    param([Parameter(Mandatory)][string]$Root)
+
+    New-Item -ItemType Directory -Path $Root -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $Root 'locks') -Force | Out-Null
+}
+
+function Assert-ProductionWebsiteServiceBinding {
+    param([Parameter(Mandatory)][string]$Root)
+
+    $serviceRoot = [IO.Path]::GetFullPath((Join-Path $Root 'service'))
+    $expectedBinary = [IO.Path]::GetFullPath(
+        (Join-Path $serviceRoot 'ChristopherBellDev.exe'))
+    $services = @(
+        Get-CimInstance -ClassName Win32_Service `
+            -Filter "Name='ChristopherBellDev'" -ErrorAction Stop
+    )
+    if ($services.Count -ne 1) {
+        throw 'ChristopherBellDev service registration was not verified.'
+    }
+    $actualBinary = [IO.Path]::GetFullPath(
+        (Get-ServiceExecutablePath -PathName ([string]$services[0].PathName)))
+    if (-not [string]::Equals(
+            $actualBinary, $expectedBinary, [StringComparison]::OrdinalIgnoreCase) -or
+        [string]$services[0].StartName -cne 'LocalSystem') {
+        throw 'ChristopherBellDev service binding was not verified.'
+    }
+}
+
+function Assert-ProductionWebsiteServiceBoundary {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)]$Configuration
+    )
+
+    $sourceLauncher = Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1'
+    $sourceModule = Join-Path $PSScriptRoot 'Production.WriterStart.psm1'
+    $sourceXml = Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml'
+    $writerStartModule = Get-Module Production.WriterStart -ErrorAction Stop
+    & $writerStartModule {
+        param($Value, $LauncherSha, $ModuleSha, $WinSwSha, $ServiceXmlSha)
+        Assert-ProductionWriterStartGuardBundle `
+            -Config $Value `
+            -ExpectedLauncherSha256 $LauncherSha `
+            -ExpectedModuleSha256 $ModuleSha `
+            -ExpectedWinSwSha256 $WinSwSha `
+            -ExpectedServiceXmlSha256 $ServiceXmlSha | Out-Null
+    } $Configuration `
+        (Get-FileHash -LiteralPath $sourceLauncher -Algorithm SHA256).Hash.ToLowerInvariant() `
+        (Get-FileHash -LiteralPath $sourceModule -Algorithm SHA256).Hash.ToLowerInvariant() `
+        (Get-ProductionWinSwSha256) `
+        (Get-FileHash -LiteralPath $sourceXml -Algorithm SHA256).Hash.ToLowerInvariant()
+    Assert-ProductionWebsiteServiceBinding -Root $Root
+}
+
+function Protect-ProductionWebsiteServiceDirectory {
+    param([Parameter(Mandatory)]$Configuration)
+
+    $writerStartModule = Get-Module Production.WriterStart -ErrorAction Stop
+    & $writerStartModule {
+        param($Value)
+        $serviceRoot = Get-CanonicalProductionWriterStartServiceRoot -Config $Value
+        Protect-ProductionWriterStartServiceDirectory -Path $serviceRoot
+        Assert-ProductionWriterStartServiceDirectory -Path $serviceRoot
+        return $serviceRoot
+    } $Configuration
 }
 
 function Install-WebsiteService {
@@ -155,30 +259,42 @@ function Install-WebsiteService {
     )
 
     $null = $Configuration
+    $service = Protect-ProductionWebsiteServiceDirectory -Configuration $Configuration
     Set-Service MongoDB -StartupType Automatic
     & sc.exe failure MongoDB reset= 3600 actions= restart/10000/restart/30000 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure MongoDB service recovery.' }
-    $service = Join-Path $Root 'service'
     $binary = Install-WinSwBinary -ServiceRoot $service
-    Copy-Item (Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml') $service -Force
+    $sourceXml = Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml'
+    $installedXml = Join-Path $service 'ChristopherBellDev.xml'
+    Assert-ProductionWebsiteServiceDestinationNotReparse -Path $installedXml
+    Copy-Item $sourceXml $installedXml -Force
+    $winSwSha = Get-ProductionWinSwSha256
+    $serviceXmlSha = (Get-FileHash -LiteralPath $sourceXml -Algorithm SHA256).Hash.ToLowerInvariant()
     $writerStartModule = Get-Module Production.WriterStart -ErrorAction Stop
     & $writerStartModule {
-        param($Value, $Launcher, $ModulePath)
+        param($Value, $Launcher, $ModulePath, $ExpectedWinSw, $ExpectedServiceXml)
         Publish-ProductionWriterStartGuardBundle `
             -Config $Value `
             -SourceLauncherPath $Launcher `
-            -SourceModulePath $ModulePath | Out-Null
+            -SourceModulePath $ModulePath `
+            -ExpectedWinSwSha256 $ExpectedWinSw `
+            -ExpectedServiceXmlSha256 $ExpectedServiceXml | Out-Null
     } $Configuration `
         (Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1') `
-        (Join-Path $PSScriptRoot 'Production.WriterStart.psm1')
-    if (-not (Get-Service ChristopherBellDev -ErrorAction SilentlyContinue)) {
+        (Join-Path $PSScriptRoot 'Production.WriterStart.psm1') `
+        $winSwSha `
+        $serviceXmlSha
+    if (-not (Get-ProductionWebsiteServiceOrNull)) {
         & $binary install | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'WinSW service installation failed.' }
     }
-    & sc.exe config ChristopherBellDev start= auto depend= MongoDB | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Failed to configure the website service.' }
+    & sc.exe config ChristopherBellDev start= disabled depend= MongoDB | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to keep the website service Disabled during installation.'
+    }
     & sc.exe failure ChristopherBellDev reset= 3600 actions= restart/10000/restart/30000 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure website service recovery.' }
+    Assert-ProductionWebsiteServiceBoundary -Root $Root -Configuration $Configuration
 }
 
 function Install-ProductionRuntime {
@@ -190,20 +306,98 @@ function Install-ProductionRuntime {
         Write-Output "Would install the website runtime and restricted shared media worker under $root."
         return
     }
-    New-ProductionDirectories $root
-    Install-ConfigurationExamples $root
-    $config = Read-ProductionConfig (Join-Path $root 'config\deploy.json')
-    Read-ProductionEnvironment (Join-Path $root 'config\app.env') | Out-Null
-    Protect-ProductionSecrets $root
-    Install-CloudflaredService -Executable $config.cloudflaredExe -TokenPath $CloudflareTokenPath
+    Initialize-ProductionDeploymentLockDirectory -Root $root
     $lock = Enter-DeploymentLock (Join-Path $root 'locks\deploy.lock')
     try {
-        if (Get-Service ChristopherBellDev -ErrorAction SilentlyContinue) {
-            Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
-                -KeepRecoverySuspended
+        $priorService = $null
+        $wasRunning = $false
+        $config = $null
+        $productionPort = 8080
+        $websiteInstallStarted = $false
+        try {
+            $priorService = Get-ProductionWebsiteServiceOrNull
+            if ($priorService) {
+                Set-ProductionWebsiteStartupType -StartupType Disabled
+                $priorStatus = [string]$priorService.Status
+                if ($priorStatus -notin @('Running','Stopped')) {
+                    throw 'ChristopherBellDev must be Running or Stopped before installation.'
+                }
+                $wasRunning = $priorStatus -eq 'Running'
+                $config = Read-ProductionConfig (Join-Path $root 'config\deploy.json')
+                $productionPort = [int]$config.productionPort
+                Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                    -KeepRecoverySuspended
+            }
+            New-ProductionDirectories $root
+            Install-ConfigurationExamples $root
+            $config = Read-ProductionConfig (Join-Path $root 'config\deploy.json')
+            $productionPort = [int]$config.productionPort
+            Read-ProductionEnvironment (Join-Path $root 'config\app.env') | Out-Null
+            Protect-ProductionSecrets $root
+            Install-CloudflaredService `
+                -Executable $config.cloudflaredExe -TokenPath $CloudflareTokenPath
+            $websiteInstallStarted = $true
+            Install-WebsiteService -Root $root -Configuration $config
+            Install-SharedFolderRuntime -ProductionRoot $root -Configuration $config
+            Assert-ProductionWebsiteServiceBoundary -Root $root -Configuration $config
+            Set-ProductionWebsiteStartupType -StartupType Automatic
+            if ($wasRunning) {
+                Start-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+                Test-ProductionEndpoints -Config $config -Port $config.productionPort
+                Test-ProductionPublicEndpoints -Config $config | Out-Null
+            }
+        } catch {
+            $installFailure = $_.Exception
+            $containmentFailures = [Collections.Generic.List[System.Exception]]::new()
+            $installedService = $null
+            try {
+                $installedService = Get-ProductionWebsiteServiceOrNull
+            } catch {
+                [void]$containmentFailures.Add($_.Exception)
+            }
+            if ($installedService) {
+                try {
+                    Set-ProductionWebsiteStartupType -StartupType Disabled
+                } catch {
+                    [void]$containmentFailures.Add($_.Exception)
+                }
+                try {
+                    Stop-ProductionWebsiteService -ProductionPort $productionPort `
+                        -KeepRecoverySuspended
+                } catch {
+                    [void]$containmentFailures.Add($_.Exception)
+                }
+                try {
+                    $containedService = Get-ProductionWebsiteServiceOrNull
+                    if (-not $containedService -or
+                        [string]$containedService.Status -cne 'Stopped') {
+                        throw 'ChristopherBellDev stopped containment was not verified.'
+                    }
+                } catch {
+                    [void]$containmentFailures.Add($_.Exception)
+                }
+            } elseif ($priorService -or $websiteInstallStarted) {
+                [void]$containmentFailures.Add(
+                    [System.InvalidOperationException]::new(
+                        'ChristopherBellDev disappeared before containment could be verified.'))
+            }
+            if ($containmentFailures.Count -gt 0) {
+                $causes = [Collections.Generic.List[System.Exception]]::new()
+                [void]$causes.Add($installFailure)
+                foreach ($failure in $containmentFailures) { [void]$causes.Add($failure) }
+                throw [System.AggregateException]::new(
+                    'Production runtime installation failed and website containment could not be verified.',
+                    [System.Exception[]]$causes.ToArray())
+            }
+            $containment = if ($installedService) {
+                'the website remains stopped and Disabled'
+            } else {
+                'no website service is registered'
+            }
+            throw [System.InvalidOperationException]::new(
+                "Production runtime installation failed; $containment`: $($installFailure.Message)",
+                $installFailure)
         }
-        Install-WebsiteService -Root $root -Configuration $config
-        Install-SharedFolderRuntime -ProductionRoot $root -Configuration $config
     } finally {
         $lock.Dispose()
     }
@@ -222,4 +416,4 @@ function Uninstall-ProductionRuntime {
     }
 }
 
-Export-ModuleMember -Function Assert-Administrator,New-ProductionDirectories,Install-ConfigurationExamples,Protect-ProductionSecrets,Assert-CloudflaredExecutable,Get-ServiceExecutablePath,Assert-CloudflaredServiceBinding,Install-CloudflaredService,Install-WinSwBinary,Install-WebsiteService,Install-ProductionRuntime,Uninstall-ProductionRuntime
+Export-ModuleMember -Function Assert-Administrator,New-ProductionDirectories,Install-ConfigurationExamples,Protect-ProductionSecrets,Assert-CloudflaredExecutable,Get-ServiceExecutablePath,Assert-CloudflaredServiceBinding,Install-CloudflaredService,Install-WinSwBinary,Get-ProductionWinSwSha256,Assert-ProductionWebsiteServiceBoundary,Install-WebsiteService,Install-ProductionRuntime,Uninstall-ProductionRuntime

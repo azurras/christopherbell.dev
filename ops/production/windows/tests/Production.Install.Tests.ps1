@@ -1,17 +1,47 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.WriterStart.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.SharedFolder.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Force
 
 Describe 'native Windows service installer' {
-    It 'reuses an existing WinSW binary instead of replacing a running service executable' {
+    It 'reuses an existing WinSW binary only after its pinned digest is verified' {
         $serviceRoot = Join-Path $TestDrive 'service'
         New-Item -ItemType Directory -Path $serviceRoot | Out-Null
         'existing-winsw' | Set-Content (Join-Path $serviceRoot 'ChristopherBellDev.exe')
+        Mock Get-FileHash {
+            [pscustomobject]@{ Hash='05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA' }
+        } -ModuleName Production.Install
         Mock Invoke-WebRequest { throw 'WinSW should not be downloaded again.' }
 
         Install-WinSwBinary -ServiceRoot $serviceRoot
 
         Get-Content (Join-Path $serviceRoot 'ChristopherBellDev.exe') -Raw | Should -Match 'existing-winsw'
         Should -Invoke Invoke-WebRequest -Times 0
+    }
+
+    It 'rejects an existing WinSW binary whose digest is not pinned' {
+        $serviceRoot = Join-Path $TestDrive 'untrusted-service'
+        New-Item -ItemType Directory -Path $serviceRoot | Out-Null
+        'untrusted-winsw' | Set-Content (Join-Path $serviceRoot 'ChristopherBellDev.exe')
+
+        { Install-WinSwBinary -ServiceRoot $serviceRoot } |
+            Should -Throw '*installed WinSW SHA-256 verification failed*'
+    }
+
+    It 'rejects a pre-existing reparse service-host destination' {
+        InModuleScope Production.Install {
+            Mock Get-Item {
+                [pscustomobject]@{
+                    Attributes=[IO.FileAttributes]::ReparsePoint
+                    FullName=$Path
+                }
+            }
+
+            { Assert-ProductionWebsiteServiceDestinationNotReparse `
+                    -Path 'C:\service\ChristopherBellDev.xml' } |
+                Should -Throw '*service-host destination must not be a reparse point*'
+        }
     }
 
     It 'preserves an existing secret environment file' {
@@ -97,7 +127,7 @@ Describe 'native Windows service installer' {
 
         $module | Should -Match 'function Install-WebsiteService'
         $module | Should -Match 'Set-Service MongoDB -StartupType Automatic'
-        $module | Should -Match 'sc\.exe config ChristopherBellDev start= auto depend= MongoDB'
+        $module | Should -Match 'sc\.exe config ChristopherBellDev start= disabled depend= MongoDB'
         $module | Should -Match 'Install-SharedFolderRuntime -ProductionRoot \$root -Configuration \$config'
     }
 
@@ -108,6 +138,215 @@ Describe 'native Windows service installer' {
         $module | Should -Not -Match (
             "Copy-Item\s+\(Join-Path\s+\`$PSScriptRoot\s+'\.\.\\service\\" +
             "Start-ChristopherBellDev\.ps1'\)")
+    }
+
+    It 'protects the canonical service directory before staging WinSW or service XML' {
+        $module = Get-Content (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Raw
+        $protect = $module.IndexOf(
+            'Protect-ProductionWebsiteServiceDirectory -Configuration $Configuration')
+
+        $protect | Should -BeGreaterThan -1
+        $protect | Should -BeLessThan $module.IndexOf(
+            'Install-WinSwBinary -ServiceRoot $service')
+        $protect | Should -BeLessThan $module.IndexOf('Copy-Item $sourceXml $installedXml')
+    }
+
+    It 'rejects a reparse service directory before any service-host file write' {
+        InModuleScope Production.Install {
+            $root = Join-Path $TestDrive 'installer-reparse-root'
+            $target = Join-Path $TestDrive 'installer-reparse-target'
+            New-Item -ItemType Directory -Path $root,$target -Force | Out-Null
+            $service = Join-Path $root 'service'
+            New-Item -ItemType Junction -Path $service -Target $target | Out-Null
+            Mock Install-WinSwBinary { throw 'WinSW write must not run' }
+            Mock Copy-Item { throw 'XML write must not run' }
+            try {
+                { Install-WebsiteService `
+                        -Root $root `
+                        -Configuration ([pscustomobject]@{ programDataRoot=$root }) } |
+                    Should -Throw '*reparse*'
+                Should -Invoke Install-WinSwBinary -Times 0
+                Should -Invoke Copy-Item -Times 0
+                @(Get-ChildItem -LiteralPath $target -Force).Count | Should -Be 0
+            } finally {
+                if (Test-Path -LiteralPath $service) {
+                    Remove-Item -LiteralPath $service -Force
+                }
+            }
+        }
+    }
+
+    It 'accepts only the exact LocalSystem website service executable binding' {
+        InModuleScope Production.Install {
+            $root = Join-Path $TestDrive 'binding-root'
+            $binary = Join-Path $root 'service\ChristopherBellDev.exe'
+            Mock Get-CimInstance {
+                [pscustomobject]@{ PathName="`"$($binary.ToLowerInvariant())`""; StartName='LocalSystem' }
+            }
+
+            { Assert-ProductionWebsiteServiceBinding -Root $root } | Should -Not -Throw
+        }
+    }
+
+    It 'rejects an unsafe website service executable or identity binding' -ForEach @(
+        @{ PathName='C:\Other\ChristopherBellDev.exe'; StartName='LocalSystem' },
+        @{ PathName=$null; StartName='LocalService' }
+    ) {
+        InModuleScope Production.Install -Parameters @{
+            UnsafePathName=$PathName
+            UnsafeStartName=$StartName
+        } {
+            param($UnsafePathName,$UnsafeStartName)
+            $root = Join-Path $TestDrive 'unsafe-binding-root'
+            $expected = Join-Path $root 'service\ChristopherBellDev.exe'
+            $actual = if ($UnsafePathName) { $UnsafePathName } else { $expected }
+            Mock Get-CimInstance {
+                [pscustomobject]@{ PathName=$actual; StartName=$UnsafeStartName }
+            }
+
+            { Assert-ProductionWebsiteServiceBinding -Root $root } |
+                Should -Throw '*binding was not verified*'
+        }
+    }
+}
+
+Describe 'native runtime reinstall lifecycle' {
+    InModuleScope Production.Install {
+        BeforeEach {
+            $script:events = [Collections.Generic.List[string]]::new()
+            $script:serviceStatus = 'Stopped'
+            $script:startupType = 'Automatic'
+            $script:config = [pscustomobject]@{
+                programDataRoot = 'C:\ProgramData\christopherbell.dev'
+                productionPort = 8080
+                cloudflaredExe = 'C:\cloudflared.exe'
+            }
+            $script:lock = [pscustomobject]@{}
+            $script:lock | Add-Member ScriptMethod Dispose {
+                [void]$script:events.Add('lock:release')
+            }
+            Mock Assert-Administrator { }
+            Mock Initialize-ProductionDeploymentLockDirectory { }
+            Mock New-ProductionDirectories { }
+            Mock Install-ConfigurationExamples { }
+            Mock Read-ProductionConfig { $script:config }
+            Mock Read-ProductionEnvironment { @{} }
+            Mock Protect-ProductionSecrets { }
+            Mock Install-CloudflaredService { }
+            Mock Enter-DeploymentLock {
+                [void]$script:events.Add('lock:acquire')
+                $script:lock
+            }
+            Mock Get-ProductionWebsiteServiceOrNull {
+                [void]$script:events.Add("state:$script:serviceStatus")
+                [pscustomobject]@{ Name='ChristopherBellDev'; Status=$script:serviceStatus }
+            }
+            Mock Set-ProductionWebsiteStartupType {
+                $script:startupType = $StartupType
+                [void]$script:events.Add("startup:$StartupType")
+            }
+            Mock Stop-ProductionWebsiteService {
+                $script:serviceStatus = 'Stopped'
+                [void]$script:events.Add('stop')
+            }
+            Mock Install-WebsiteService { [void]$script:events.Add('website-install') }
+            Mock Install-SharedFolderRuntime { [void]$script:events.Add('shared-install') }
+            Mock Assert-ProductionWebsiteServiceBoundary {
+                [void]$script:events.Add('boundary-verified')
+            }
+            Mock Start-Service {
+                $script:serviceStatus = 'Running'
+                [void]$script:events.Add('start')
+            }
+            Mock Test-ProductionEndpoints { [void]$script:events.Add('health') }
+            Mock Test-ProductionPublicEndpoints { [void]$script:events.Add('public-health') }
+        }
+
+        It 'captures a running service under deploy.lock then restarts and health-checks it' {
+            $script:serviceStatus = 'Running'
+
+            Install-ProductionRuntime
+
+            $script:events | Should -Be @(
+                'lock:acquire','state:Running','startup:Disabled','stop',
+                'website-install','shared-install','boundary-verified','startup:Automatic',
+                'start','health','public-health','lock:release')
+            $script:startupType | Should -Be 'Automatic'
+            $script:serviceStatus | Should -Be 'Running'
+        }
+
+        It 'preserves an intentionally stopped service after successful reinstall' {
+            Install-ProductionRuntime
+
+            $script:startupType | Should -Be 'Automatic'
+            $script:serviceStatus | Should -Be 'Stopped'
+            Should -Invoke Start-Service -Times 0
+            Should -Invoke Test-ProductionEndpoints -Times 0
+            Should -Invoke Test-ProductionPublicEndpoints -Times 0
+        }
+
+        It 'leaves reinstall failure stopped and Disabled with the original cause' {
+            $script:serviceStatus = 'Running'
+            Mock Install-SharedFolderRuntime { throw 'shared runtime failed' }
+
+            { Install-ProductionRuntime } |
+                Should -Throw '*shared runtime failed*'
+
+            $script:startupType | Should -Be 'Disabled'
+            $script:serviceStatus | Should -Be 'Stopped'
+            Should -Invoke Start-Service -Times 0
+            Should -Invoke Set-ProductionWebsiteStartupType -ParameterFilter {
+                $StartupType -eq 'Disabled'
+            }
+        }
+
+        It 'contains a transitional prior state before rejecting installation' {
+            $script:serviceStatus = 'StartPending'
+
+            { Install-ProductionRuntime } | Should -Throw '*Running or Stopped*'
+
+            $script:startupType | Should -Be 'Disabled'
+            $script:serviceStatus | Should -Be 'Stopped'
+            Should -Invoke Set-ProductionWebsiteStartupType -ParameterFilter {
+                $StartupType -eq 'Disabled'
+            }
+            Should -Invoke Stop-ProductionWebsiteService
+            Should -Invoke Install-WebsiteService -Times 0
+        }
+
+        It 'disables and stops a running writer before early installation effects' {
+            $script:serviceStatus = 'Running'
+            Mock New-ProductionDirectories {
+                [void]$script:events.Add('directories')
+                throw 'directory installation failed'
+            }
+
+            { Install-ProductionRuntime } | Should -Throw '*directory installation failed*'
+
+            $script:events.IndexOf('lock:acquire') |
+                Should -BeLessThan $script:events.IndexOf('state:Running')
+            $script:events.IndexOf('startup:Disabled') |
+                Should -BeLessThan $script:events.IndexOf('directories')
+            $script:events.IndexOf('stop') |
+                Should -BeLessThan $script:events.IndexOf('directories')
+            $script:startupType | Should -Be 'Disabled'
+            $script:serviceStatus | Should -Be 'Stopped'
+        }
+
+        It 'preserves SCM discovery failures as containment causes' {
+            Mock Get-ProductionWebsiteServiceOrNull { throw 'SCM query denied' }
+
+            $caught = $null
+            try {
+                Install-ProductionRuntime
+            } catch {
+                $caught = $_.Exception
+            }
+
+            $caught | Should -BeOfType ([System.AggregateException])
+            @($caught.InnerExceptions.Message) | Should -Contain 'SCM query denied'
+            $caught.Message | Should -Match 'containment could not be verified'
+        }
     }
 }
 

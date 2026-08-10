@@ -38,21 +38,67 @@ function Install-CoordinatedProductionWriterStartGuardBundle {
     param([Parameter(Mandatory)]$Config)
     $launcher = Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1'
     $modulePath = Join-Path $PSScriptRoot 'Production.WriterStart.psm1'
+    $serviceXml = Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml'
+    $winSwSha = Get-ProductionWinSwSha256
+    $serviceXmlSha = (Get-FileHash -LiteralPath $serviceXml -Algorithm SHA256).Hash.ToLowerInvariant()
     $writerStartModule = Get-Module Production.WriterStart -ErrorAction Stop
     & $writerStartModule {
-        param($Value, $Launcher, $ModulePath)
+        param($Value, $Launcher, $ModulePath, $ExpectedWinSw, $ExpectedServiceXml)
         Publish-ProductionWriterStartGuardBundle `
             -Config $Value `
             -SourceLauncherPath $Launcher `
-            -SourceModulePath $ModulePath
-    } $Config $launcher $modulePath
+            -SourceModulePath $ModulePath `
+            -ExpectedWinSwSha256 $ExpectedWinSw `
+            -ExpectedServiceXmlSha256 $ExpectedServiceXml
+    } $Config $launcher $modulePath $winSwSha $serviceXmlSha
+    Assert-ProductionWebsiteServiceBoundary `
+        -Root $Config.programDataRoot -Configuration $Config
+}
+
+function Set-ProductionWebsiteStartupType {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Automatic','Disabled')]
+        [string]$StartupType
+    )
+
+    try {
+        Set-Service -Name 'ChristopherBellDev' -StartupType $StartupType -ErrorAction Stop
+        $services = @(
+            Get-CimInstance -ClassName Win32_Service `
+                -Filter "Name='ChristopherBellDev'" -ErrorAction Stop
+        )
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            "Failed to set and verify website service startup type $StartupType.",
+            $_.Exception)
+    }
+    $expectedMode = if ($StartupType -eq 'Automatic') { 'Auto' } else { 'Disabled' }
+    if ($services.Count -ne 1 -or [string]$services[0].StartMode -cne $expectedMode) {
+        throw "Website service startup type $StartupType was not verified."
+    }
 }
 
 function Ensure-ProductionWriterStartGuardUnderHeldLock {
     param([Parameter(Mandatory)]$Config)
-    Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
-        -KeepRecoverySuspended
-    Install-CoordinatedProductionWriterStartGuardBundle -Config $Config
+    Set-ProductionWebsiteStartupType -StartupType Disabled
+    try {
+        Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
+            -KeepRecoverySuspended
+        Install-CoordinatedProductionWriterStartGuardBundle -Config $Config | Out-Null
+        Set-ProductionWebsiteStartupType -StartupType Automatic
+    } catch {
+        $guardFailure = $_.Exception
+        try {
+            Set-ProductionWebsiteStartupType -StartupType Disabled
+        } catch {
+            throw [System.AggregateException]::new(
+                'Writer-start guard installation failed and Disabled startup containment could not be verified.',
+                [System.Exception[]]@($guardFailure, $_.Exception))
+        }
+        throw $guardFailure
+    }
 }
 
 function Read-ProductionReleaseMusicSchema {
@@ -1031,4 +1077,4 @@ function Confirm-ProductionMusicTargetActive {
     }
 }
 
-Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,New-ReleaseFromOriginMain,Start-ProductionJar,Test-ProductionEndpoints,Test-ProductionPublicEndpoints,Test-CandidateRelease,Stop-ProductionWebsiteService,Switch-ProductionRelease,Switch-ProductionReleaseAfterMusicReconciliation,Remove-ExpiredReleases,Confirm-ProductionMusicTargetActive
+Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,New-ReleaseFromOriginMain,Start-ProductionJar,Test-ProductionEndpoints,Test-ProductionPublicEndpoints,Test-CandidateRelease,Stop-ProductionWebsiteService,Set-ProductionWebsiteStartupType,Switch-ProductionRelease,Switch-ProductionReleaseAfterMusicReconciliation,Remove-ExpiredReleases,Confirm-ProductionMusicTargetActive

@@ -29,6 +29,120 @@ function Get-ProductionWriterStartGuardManifestPath {
     Join-Path $Config.programDataRoot 'service\Production.WriterStart.bundle.json'
 }
 
+function Assert-ProductionWriterStartPathNotReparseTraversal {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $pathRoot = [IO.Path]::GetPathRoot($fullPath)
+    if ([string]::IsNullOrWhiteSpace($pathRoot)) {
+        throw 'Writer-start guard path must be an absolute Windows path.'
+    }
+    $current = $pathRoot
+    $relative = $fullPath.Substring($pathRoot.Length)
+    foreach ($segment in @($relative -split '[\\/]' | Where-Object { $_ })) {
+        $current = [IO.Path]::Combine($current, $segment)
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Writer-start guard path traversal contains a reparse point: $current"
+        }
+    }
+    return $fullPath
+}
+
+function Get-CanonicalProductionWriterStartServiceRoot {
+    param([Parameter(Mandatory)]$Config)
+
+    $configuredRoot = [string]$Config.programDataRoot
+    if ([string]::IsNullOrWhiteSpace($configuredRoot)) {
+        throw 'Writer-start guard production root is missing.'
+    }
+    $productionRoot = Assert-ProductionWriterStartPathNotReparseTraversal `
+        -Path ([IO.Path]::GetFullPath($configuredRoot))
+    $serviceRoot = [IO.Path]::GetFullPath((Join-Path $productionRoot 'service'))
+    if (-not [string]::Equals(
+            [IO.Path]::GetFullPath((Split-Path -Parent $serviceRoot)),
+            $productionRoot,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Writer-start guard service directory escaped the production root.'
+    }
+    return $serviceRoot
+}
+
+function New-ProductionWriterStartServiceDirectoryAcl {
+    [CmdletBinding()]
+    param()
+
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $localService = [Security.Principal.SecurityIdentifier]::new('S-1-5-19')
+    $acl.SetOwner($administrators)
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    foreach ($identity in @($system,$administrators)) {
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+            $identity,
+            [Security.AccessControl.FileSystemRights]::FullControl,
+            [Security.AccessControl.InheritanceFlags]::None,
+            [Security.AccessControl.PropagationFlags]::None,
+            $allow)
+        [void]$acl.AddAccessRule($rule)
+    }
+    $localServiceRule = [Security.AccessControl.FileSystemAccessRule]::new(
+        $localService,
+        [Security.AccessControl.FileSystemRights]::ReadAndExecute,
+        [Security.AccessControl.InheritanceFlags]::None,
+        [Security.AccessControl.PropagationFlags]::None,
+        $allow)
+    [void]$acl.AddAccessRule($localServiceRule)
+    return $acl
+}
+
+function Assert-ProductionWriterStartServiceDirectory {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    Assert-ProductionWriterStartPathNotReparseTraversal -Path $Path | Out-Null
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    $rules = @($acl.GetAccessRules(
+        $true, $false, [Security.Principal.SecurityIdentifier]))
+    if (-not $acl.AreAccessRulesProtected -or
+        @('S-1-5-18','S-1-5-32-544') -notcontains $owner -or
+        $rules.Count -ne 3) {
+        throw 'Writer-start service directory ACL is not protected and compatible.'
+    }
+    $expected = @{
+        'S-1-5-18' = [Security.AccessControl.FileSystemRights]::FullControl
+        'S-1-5-32-544' = [Security.AccessControl.FileSystemRights]::FullControl
+        'S-1-5-19' = (
+            [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
+            [Security.AccessControl.FileSystemRights]::Synchronize)
+    }
+    $seen = @{}
+    foreach ($rule in $rules) {
+        $identity = $rule.IdentityReference.Value
+        if (-not $expected.ContainsKey($identity) -or $seen.ContainsKey($identity) -or
+            $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+            $rule.InheritanceFlags -ne [Security.AccessControl.InheritanceFlags]::None -or
+            $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None -or
+            $rule.FileSystemRights -ne $expected[$identity]) {
+            throw 'Writer-start service directory ACL grants unexpected access.'
+        }
+        $seen[$identity] = $true
+    }
+}
+
+function Protect-ProductionWriterStartServiceDirectory {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    Assert-ProductionWriterStartPathNotReparseTraversal -Path $Path | Out-Null
+    Set-Acl -LiteralPath $Path `
+        -AclObject (New-ProductionWriterStartServiceDirectoryAcl) -ErrorAction Stop
+    Assert-ProductionWriterStartServiceDirectory -Path $Path
+}
+
 function Assert-ExactJsonProperties {
     param($Value, [string[]]$Expected, [string]$Label)
     $actual = @($Value.PSObject.Properties.Name)
@@ -70,21 +184,40 @@ function Read-ProductionWriterStartGuardManifest {
     try {
         $value = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
             ConvertFrom-Json -ErrorAction Stop
-        Assert-ExactJsonProperties $value @(
-            'version','launcherSha256','moduleSha256') 'Writer-start guard manifest'
+        $version = if ($value.version -is [int] -or $value.version -is [long]) {
+            [int]$value.version
+        } else {
+            0
+        }
+        $expectedProperties = if ($version -eq 2) {
+            @('version','launcherSha256','moduleSha256','winSwSha256','serviceXmlSha256')
+        } else {
+            @('version','launcherSha256','moduleSha256')
+        }
+        Assert-ExactJsonProperties $value $expectedProperties 'Writer-start guard manifest'
         if (($value.version -isnot [int] -and $value.version -isnot [long]) -or
-            [int]$value.version -ne 1 -or
+            $version -notin @(1,2) -or
             $value.launcherSha256 -isnot [string] -or
             [string]$value.launcherSha256 -cnotmatch '^[0-9a-f]{64}$' -or
             $value.moduleSha256 -isnot [string] -or
-            [string]$value.moduleSha256 -cnotmatch '^[0-9a-f]{64}$') {
+            [string]$value.moduleSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            ($version -eq 2 -and (
+                $value.winSwSha256 -isnot [string] -or
+                [string]$value.winSwSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                $value.serviceXmlSha256 -isnot [string] -or
+                [string]$value.serviceXmlSha256 -cnotmatch '^[0-9a-f]{64}$'))) {
             throw 'Invalid writer-start guard manifest.'
         }
-        [pscustomobject][ordered]@{
-            version = 1
+        $manifest = [ordered]@{
+            version = $version
             launcherSha256 = [string]$value.launcherSha256
             moduleSha256 = [string]$value.moduleSha256
         }
+        if ($version -eq 2) {
+            $manifest.winSwSha256 = [string]$value.winSwSha256
+            $manifest.serviceXmlSha256 = [string]$value.serviceXmlSha256
+        }
+        [pscustomobject]$manifest
     } catch {
         throw [System.IO.InvalidDataException]::new(
             'Installed writer-start guard manifest is invalid.', $_.Exception)
@@ -97,14 +230,28 @@ function Assert-ProductionWriterStartGuardBundle {
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')]
         [string]$ExpectedLauncherSha256,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')]
-        [string]$ExpectedModuleSha256
+        [string]$ExpectedModuleSha256,
+        [ValidatePattern('^[0-9a-f]{64}$')]
+        [string]$ExpectedWinSwSha256,
+        [ValidatePattern('^[0-9a-f]{64}$')]
+        [string]$ExpectedServiceXmlSha256
     )
-    $serviceRoot = Join-Path $Config.programDataRoot 'service'
+    $hasWinSw = -not [string]::IsNullOrWhiteSpace($ExpectedWinSwSha256)
+    $hasServiceXml = -not [string]::IsNullOrWhiteSpace($ExpectedServiceXmlSha256)
+    if ($hasWinSw -ne $hasServiceXml) {
+        throw 'Writer-start host boundary hashes must be supplied together.'
+    }
+    $serviceRoot = Get-CanonicalProductionWriterStartServiceRoot -Config $Config
+    Assert-ProductionWriterStartPathNotReparseTraversal -Path $serviceRoot | Out-Null
     $launcher = Join-Path $serviceRoot 'Start-ChristopherBellDev.ps1'
     $module = Join-Path $serviceRoot 'Production.WriterStart.psm1'
+    $winSw = Join-Path $serviceRoot 'ChristopherBellDev.exe'
+    $serviceXml = Join-Path $serviceRoot 'ChristopherBellDev.xml'
     $manifestPath = Get-ProductionWriterStartGuardManifestPath -Config $Config
     $manifest = Read-ProductionWriterStartGuardManifest -Config $Config
-    if ($manifest.launcherSha256 -cne $ExpectedLauncherSha256 -or
+    if (($hasWinSw -and [int]$manifest.version -ne 2) -or
+        (-not $hasWinSw -and [int]$manifest.version -ne 1) -or
+        $manifest.launcherSha256 -cne $ExpectedLauncherSha256 -or
         $manifest.moduleSha256 -cne $ExpectedModuleSha256 -or
         (Get-FileHash -LiteralPath $launcher -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
             $ExpectedLauncherSha256 -or
@@ -112,13 +259,20 @@ function Assert-ProductionWriterStartGuardBundle {
             $ExpectedModuleSha256) {
         throw 'Installed writer-start guard SHA-256 verification failed.'
     }
-    if (Get-Command Assert-ProductionPathNotReparse -ErrorAction SilentlyContinue) {
-        Assert-ProductionPathNotReparse -Path $serviceRoot | Out-Null
+    if ($hasWinSw -and (
+            $manifest.winSwSha256 -cne $ExpectedWinSwSha256 -or
+            $manifest.serviceXmlSha256 -cne $ExpectedServiceXmlSha256 -or
+            (Get-FileHash -LiteralPath $winSw -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
+                $ExpectedWinSwSha256 -or
+            (Get-FileHash -LiteralPath $serviceXml -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
+                $ExpectedServiceXmlSha256)) {
+        throw 'Installed writer-start service host SHA-256 verification failed.'
     }
-    foreach ($path in @($launcher,$module,$manifestPath)) {
-        if (Get-Command Assert-ProtectedProductionPath -ErrorAction SilentlyContinue) {
-            Assert-ProtectedProductionPath -Path $path | Out-Null
-        }
+    Assert-ProductionWriterStartServiceDirectory -Path $serviceRoot
+    $protectedFiles = @($launcher,$module,$manifestPath)
+    if ($hasWinSw) { $protectedFiles += @($winSw,$serviceXml) }
+    foreach ($path in $protectedFiles) {
+        Assert-ProtectedProductionPath -Path $path | Out-Null
     }
     return $manifest
 }
@@ -146,20 +300,54 @@ function Publish-ProductionWriterStartGuardBundle {
     param(
         [Parameter(Mandatory)]$Config,
         [Parameter(Mandatory)][string]$SourceLauncherPath,
-        [Parameter(Mandatory)][string]$SourceModulePath
+        [Parameter(Mandatory)][string]$SourceModulePath,
+        [ValidatePattern('^[0-9a-f]{64}$')]
+        [string]$ExpectedWinSwSha256,
+        [ValidatePattern('^[0-9a-f]{64}$')]
+        [string]$ExpectedServiceXmlSha256
     )
+    $hasWinSw = -not [string]::IsNullOrWhiteSpace($ExpectedWinSwSha256)
+    $hasServiceXml = -not [string]::IsNullOrWhiteSpace($ExpectedServiceXmlSha256)
+    if ($hasWinSw -ne $hasServiceXml) {
+        throw 'Writer-start host boundary hashes must be supplied together.'
+    }
     foreach ($source in @($SourceLauncherPath,$SourceModulePath)) {
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
             throw 'Writer-start guard source file is missing.'
         }
-        if (Get-Command Assert-ProductionPathNotReparse -ErrorAction SilentlyContinue) {
-            Assert-ProductionPathNotReparse -Path $source | Out-Null
+        Assert-ProductionPathNotReparse -Path $source | Out-Null
+    }
+    $serviceRoot = Get-CanonicalProductionWriterStartServiceRoot -Config $Config
+    New-Item -ItemType Directory -Path $serviceRoot -Force | Out-Null
+    Assert-ProductionWriterStartPathNotReparseTraversal -Path $serviceRoot | Out-Null
+    Protect-ProductionWriterStartServiceDirectory -Path $serviceRoot
+    Assert-ProductionWriterStartServiceDirectory -Path $serviceRoot
+    $installedLauncher = Join-Path $serviceRoot 'Start-ChristopherBellDev.ps1'
+    $installedModule = Join-Path $serviceRoot 'Production.WriterStart.psm1'
+    $installedManifest = Join-Path $serviceRoot 'Production.WriterStart.bundle.json'
+    $installedWinSw = Join-Path $serviceRoot 'ChristopherBellDev.exe'
+    $installedServiceXml = Join-Path $serviceRoot 'ChristopherBellDev.xml'
+    $destinations = @($installedLauncher,$installedModule,$installedManifest)
+    if ($hasWinSw) { $destinations += @($installedWinSw,$installedServiceXml) }
+    foreach ($destination in $destinations) {
+        if (Test-Path -LiteralPath $destination) {
+            Assert-ProductionWriterStartPathNotReparseTraversal -Path $destination |
+                Out-Null
         }
     }
-    $serviceRoot = Join-Path $Config.programDataRoot 'service'
-    New-Item -ItemType Directory -Path $serviceRoot -Force | Out-Null
-    if (Get-Command Assert-ProductionPathNotReparse -ErrorAction SilentlyContinue) {
-        Assert-ProductionPathNotReparse -Path $serviceRoot | Out-Null
+    if ($hasWinSw) {
+        if (-not (Test-Path -LiteralPath $installedWinSw -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $installedServiceXml -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $installedWinSw -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
+                $ExpectedWinSwSha256 -or
+            (Get-FileHash -LiteralPath $installedServiceXml -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
+                $ExpectedServiceXmlSha256) {
+            throw 'Installed writer-start service host SHA-256 verification failed.'
+        }
+        foreach ($path in @($installedWinSw,$installedServiceXml)) {
+            Protect-ProductionPath -Path $path
+            Assert-ProtectedProductionPath -Path $path | Out-Null
+        }
     }
     $launcherSha = (Get-FileHash -LiteralPath $SourceLauncherPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $moduleSha = (Get-FileHash -LiteralPath $SourceModulePath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -171,16 +359,19 @@ function Publish-ProductionWriterStartGuardBundle {
         $stagedManifest = Join-Path $staging 'Production.WriterStart.bundle.json'
         Copy-Item -LiteralPath $SourceLauncherPath -Destination $stagedLauncher
         Copy-Item -LiteralPath $SourceModulePath -Destination $stagedModule
-        [ordered]@{
-            version = 1
+        $manifest = [ordered]@{
+            version = if ($hasWinSw) { 2 } else { 1 }
             launcherSha256 = $launcherSha
             moduleSha256 = $moduleSha
-        } | ConvertTo-Json | Set-Content -LiteralPath $stagedManifest -Encoding utf8
+        }
+        if ($hasWinSw) {
+            $manifest.winSwSha256 = $ExpectedWinSwSha256
+            $manifest.serviceXmlSha256 = $ExpectedServiceXmlSha256
+        }
+        $manifest | ConvertTo-Json | Set-Content -LiteralPath $stagedManifest -Encoding utf8
         foreach ($path in @($staging,$stagedLauncher,$stagedModule,$stagedManifest)) {
-            if (Get-Command Protect-ProductionPath -ErrorAction SilentlyContinue) {
-                Protect-ProductionPath -Path $path
-                Assert-ProtectedProductionPath -Path $path | Out-Null
-            }
+            Protect-ProductionPath -Path $path
+            Assert-ProtectedProductionPath -Path $path | Out-Null
         }
         if ((Get-FileHash $stagedLauncher -Algorithm SHA256).Hash.ToLowerInvariant() -cne $launcherSha -or
             (Get-FileHash $stagedModule -Algorithm SHA256).Hash.ToLowerInvariant() -cne $moduleSha) {
@@ -191,24 +382,26 @@ function Publish-ProductionWriterStartGuardBundle {
         # absent or old manifest. The manifest is the atomic commit point for the pair.
         Publish-ProductionWriterStartGuardFile `
             -Source $stagedLauncher `
-            -Destination (Join-Path $serviceRoot 'Start-ChristopherBellDev.ps1')
+            -Destination $installedLauncher
         Publish-ProductionWriterStartGuardFile `
             -Source $stagedModule `
-            -Destination (Join-Path $serviceRoot 'Production.WriterStart.psm1')
+            -Destination $installedModule
         Publish-ProductionWriterStartGuardFile `
             -Source $stagedManifest `
-            -Destination (Get-ProductionWriterStartGuardManifestPath -Config $Config)
-        foreach ($path in @(
-            (Join-Path $serviceRoot 'Start-ChristopherBellDev.ps1'),
-            (Join-Path $serviceRoot 'Production.WriterStart.psm1'),
-            (Get-ProductionWriterStartGuardManifestPath -Config $Config))) {
-            if (Get-Command Protect-ProductionPath -ErrorAction SilentlyContinue) {
-                Protect-ProductionPath -Path $path
-            }
+            -Destination $installedManifest
+        foreach ($path in @($installedLauncher,$installedModule,$installedManifest)) {
+            Protect-ProductionPath -Path $path
         }
-        Assert-ProductionWriterStartGuardBundle -Config $Config `
-            -ExpectedLauncherSha256 $launcherSha `
-            -ExpectedModuleSha256 $moduleSha | Out-Null
+        $assertArguments = @{
+            Config = $Config
+            ExpectedLauncherSha256 = $launcherSha
+            ExpectedModuleSha256 = $moduleSha
+        }
+        if ($hasWinSw) {
+            $assertArguments.ExpectedWinSwSha256 = $ExpectedWinSwSha256
+            $assertArguments.ExpectedServiceXmlSha256 = $ExpectedServiceXmlSha256
+        }
+        Assert-ProductionWriterStartGuardBundle @assertArguments | Out-Null
         [pscustomobject][ordered]@{
             launcherSha256 = $launcherSha
             moduleSha256 = $moduleSha

@@ -7,6 +7,8 @@ Describe 'production writer-start schema boundary' {
             $script:config = [pscustomobject]@{ programDataRoot=$TestDrive; mongoShellExe='mongosh.exe' }
             Mock Protect-ProductionPath {}
             Mock Assert-ProtectedProductionPath { $true }
+            Mock Protect-ProductionWriterStartServiceDirectory { }
+            Mock Assert-ProductionWriterStartServiceDirectory { }
             $markerPath = Get-ProductionMusicSchemaDirectionPath -Config $script:config
             New-Item -ItemType Directory -Path (Split-Path -Parent $markerPath) -Force |
                 Out-Null
@@ -197,6 +199,174 @@ Describe 'production writer-start schema boundary' {
             Test-Path (Join-Path $service 'Production.WriterStart.bundle.json') | Should -BeTrue
         }
 
+        It 'defines the exact shared-compatible protected service-directory ACL' {
+            $acl = New-ProductionWriterStartServiceDirectoryAcl
+            $rules = @($acl.GetAccessRules(
+                $true,
+                $false,
+                [Security.Principal.SecurityIdentifier]))
+
+            $acl.AreAccessRulesProtected | Should -BeTrue
+            @($rules.IdentityReference.Value | Sort-Object) | Should -Be @(
+                'S-1-5-18','S-1-5-19','S-1-5-32-544')
+            ($rules | Where-Object IdentityReference -eq 'S-1-5-19').FileSystemRights |
+                Should -Be (
+                    [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
+                    [Security.AccessControl.FileSystemRights]::Synchronize)
+        }
+
+        It 'hashes, protects, and verifies WinSW and its service XML in the committed bundle' {
+            $root = Join-Path $TestDrive 'complete-host-boundary'
+            $source = Join-Path $root 'source'
+            $service = Join-Path $root 'service'
+            New-Item -ItemType Directory -Path $source,$service -Force | Out-Null
+            $launcher = Join-Path $source 'Start-ChristopherBellDev.ps1'
+            $module = Join-Path $source 'Production.WriterStart.psm1'
+            $winSw = Join-Path $service 'ChristopherBellDev.exe'
+            $serviceXml = Join-Path $service 'ChristopherBellDev.xml'
+            'launcher' | Set-Content $launcher
+            'module' | Set-Content $module
+            'winsw' | Set-Content $winSw
+            'service xml' | Set-Content $serviceXml
+            $winSwSha = (Get-FileHash $winSw -Algorithm SHA256).Hash.ToLowerInvariant()
+            $xmlSha = (Get-FileHash $serviceXml -Algorithm SHA256).Hash.ToLowerInvariant()
+
+            $result = Publish-ProductionWriterStartGuardBundle `
+                -Config ([pscustomobject]@{ programDataRoot=$root }) `
+                -SourceLauncherPath $launcher `
+                -SourceModulePath $module `
+                -ExpectedWinSwSha256 $winSwSha `
+                -ExpectedServiceXmlSha256 $xmlSha
+
+            $manifest = Get-Content (Join-Path $service 'Production.WriterStart.bundle.json') `
+                -Raw | ConvertFrom-Json
+            $manifest.version | Should -Be 2
+            $manifest.winSwSha256 | Should -Be $winSwSha
+            $manifest.serviceXmlSha256 | Should -Be $xmlSha
+            Assert-ProductionWriterStartGuardBundle `
+                -Config ([pscustomobject]@{ programDataRoot=$root }) `
+                -ExpectedLauncherSha256 $result.launcherSha256 `
+                -ExpectedModuleSha256 $result.moduleSha256 `
+                -ExpectedWinSwSha256 $winSwSha `
+                -ExpectedServiceXmlSha256 $xmlSha | Out-Null
+            Should -Invoke Protect-ProductionPath -ParameterFilter {
+                $Path -eq $winSw
+            }
+            Should -Invoke Protect-ProductionPath -ParameterFilter {
+                $Path -eq $serviceXml
+            }
+        }
+
+        It 'protects and verifies the canonical service directory before staging' {
+            $root = Join-Path $TestDrive 'protected-parent'
+            $source = Join-Path $root 'source'
+            $service = Join-Path $root 'service'
+            New-Item -ItemType Directory -Path $source -Force | Out-Null
+            $launcher = Join-Path $source 'Start-ChristopherBellDev.ps1'
+            $module = Join-Path $source 'Production.WriterStart.psm1'
+            'launcher' | Set-Content $launcher
+            'module' | Set-Content $module
+            $events = [Collections.Generic.List[string]]::new()
+            Mock Protect-ProductionWriterStartServiceDirectory {
+                [void]$events.Add("protect:$([IO.Path]::GetFullPath($Path))")
+            }
+            Mock Assert-ProductionWriterStartServiceDirectory {
+                [void]$events.Add("verify:$([IO.Path]::GetFullPath($Path))")
+            }
+            Mock Protect-ProductionPath {
+                [void]$events.Add("protect:$([IO.Path]::GetFullPath($Path))")
+            }
+            Mock Assert-ProtectedProductionPath {
+                [void]$events.Add("verify:$([IO.Path]::GetFullPath($Path))")
+            }
+
+            Publish-ProductionWriterStartGuardBundle `
+                -Config ([pscustomobject]@{ programDataRoot=$root }) `
+                -SourceLauncherPath $launcher `
+                -SourceModulePath $module | Out-Null
+
+            $canonicalService = [IO.Path]::GetFullPath($service)
+            $events[0] | Should -Be "protect:$canonicalService"
+            $events[1] | Should -Be "verify:$canonicalService"
+        }
+
+        It 'rejects an installed bundle when its parent service directory ACL is unprotected' {
+            $root = Join-Path $TestDrive 'unprotected-parent'
+            $source = Join-Path $root 'source'
+            New-Item -ItemType Directory -Path $source -Force | Out-Null
+            $launcher = Join-Path $source 'Start-ChristopherBellDev.ps1'
+            $module = Join-Path $source 'Production.WriterStart.psm1'
+            'launcher' | Set-Content $launcher
+            'module' | Set-Content $module
+            $config = [pscustomobject]@{ programDataRoot=$root }
+            $result = Publish-ProductionWriterStartGuardBundle `
+                -Config $config -SourceLauncherPath $launcher -SourceModulePath $module
+            $service = [IO.Path]::GetFullPath((Join-Path $root 'service'))
+            Mock Assert-ProductionWriterStartServiceDirectory {
+                throw 'service directory ACL is unprotected'
+            }
+
+            { Assert-ProductionWriterStartGuardBundle `
+                    -Config $config `
+                    -ExpectedLauncherSha256 $result.launcherSha256 `
+                    -ExpectedModuleSha256 $result.moduleSha256 } |
+                Should -Throw '*service directory ACL is unprotected*'
+        }
+
+        It 'rejects a production root reached through a reparse point' {
+            $target = Join-Path $TestDrive 'reparse-target'
+            $alias = Join-Path $TestDrive 'reparse-alias'
+            $source = Join-Path $TestDrive 'reparse-source'
+            New-Item -ItemType Directory -Path $target,$source -Force | Out-Null
+            New-Item -ItemType Junction -Path $alias -Target $target | Out-Null
+            $launcher = Join-Path $source 'Start-ChristopherBellDev.ps1'
+            $module = Join-Path $source 'Production.WriterStart.psm1'
+            'launcher' | Set-Content $launcher
+            'module' | Set-Content $module
+            try {
+                { Publish-ProductionWriterStartGuardBundle `
+                        -Config ([pscustomobject]@{ programDataRoot=$alias }) `
+                        -SourceLauncherPath $launcher `
+                        -SourceModulePath $module } | Should -Throw '*reparse*'
+            } finally {
+                if (Test-Path -LiteralPath $alias) {
+                    Remove-Item -LiteralPath $alias -Force
+                }
+            }
+        }
+
+        It 'rejects an existing installed reparse destination before publication' {
+            $root = Join-Path $TestDrive 'installed-reparse'
+            $source = Join-Path $root 'source'
+            $service = Join-Path $root 'service'
+            New-Item -ItemType Directory -Path $source,$service -Force | Out-Null
+            $launcher = Join-Path $source 'Start-ChristopherBellDev.ps1'
+            $module = Join-Path $source 'Production.WriterStart.psm1'
+            $installedLauncher = Join-Path $service 'Start-ChristopherBellDev.ps1'
+            'new launcher' | Set-Content $launcher
+            'new module' | Set-Content $module
+            'old launcher' | Set-Content $installedLauncher
+            Mock Assert-ProductionWriterStartPathNotReparseTraversal {
+                $canonical = [IO.Path]::GetFullPath($Path)
+                if ([string]::Equals(
+                        $canonical,
+                        [IO.Path]::GetFullPath($installedLauncher),
+                        [StringComparison]::OrdinalIgnoreCase)) {
+                    throw 'installed destination is a reparse point'
+                }
+                return $canonical
+            }
+
+            { Publish-ProductionWriterStartGuardBundle `
+                    -Config ([pscustomobject]@{ programDataRoot=$root }) `
+                    -SourceLauncherPath $launcher `
+                    -SourceModulePath $module } | Should -Throw '*installed destination is a reparse point*'
+
+            Get-Content $installedLauncher -Raw | Should -Match 'old launcher'
+            Test-Path (Join-Path $service 'Production.WriterStart.bundle.json') |
+                Should -BeFalse
+        }
+
         It 'does not publish any guard file when staged ACL verification fails' {
             $source = Join-Path $TestDrive 'failed-source'
             $failedRoot = Join-Path $TestDrive 'failed-root'
@@ -334,8 +504,17 @@ Describe 'production writer-start schema boundary' {
 
         $scriptText | Should -Match 'Assert-ProductionWriterStartAllowed -Config \$config'
         $scriptText | Should -Match 'Production\.WriterStart\.bundle\.json'
+        $scriptText | Should -Match 'ChristopherBellDev\.exe'
+        $scriptText | Should -Match 'ChristopherBellDev\.xml'
+        $scriptText | Should -Match 'winSwSha256'
+        $scriptText | Should -Match 'serviceXmlSha256'
         $scriptText | Should -Match 'Get-FileHash'
         $scriptText | Should -Match 'Assert-InstalledWriterStartGuardAcl'
+        $scriptText | Should -Match 'Assert-InstalledWriterStartGuardNotReparse'
+        $scriptText.IndexOf('Assert-InstalledWriterStartGuardNotReparse -Path $root') |
+            Should -BeLessThan $scriptText.IndexOf('config\deploy.json')
+        $scriptText.IndexOf('Assert-InstalledWriterStartGuardAcl -Path $serviceRoot') |
+            Should -BeLessThan $scriptText.IndexOf('config\deploy.json')
         $scriptText.IndexOf('Assert-InstalledWriterStartGuardAcl -Path') |
             Should -BeLessThan $scriptText.IndexOf('Import-Module')
         $scriptText.IndexOf('Get-FileHash') |
@@ -344,5 +523,62 @@ Describe 'production writer-start schema boundary' {
             Should -BeLessThan $scriptText.IndexOf('& $config.javaExe')
         $winsw | Should -Match 'Start-ChristopherBellDev\.ps1'
         $winsw | Should -Match '<onfailure action="restart"'
+    }
+}
+
+Describe 'production writer-start real Windows ACL boundary' {
+    It 'protects the disposable service directory and complete installed service boundary' `
+            -Skip:($env:CBELL_RUN_WRITER_START_ACL_TESTS -ne '1') {
+        InModuleScope Production.WriterStart {
+            $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+            $principal = [Security.Principal.WindowsPrincipal]$identity
+            if (-not $principal.IsInRole(
+                    [Security.Principal.WindowsBuiltInRole]::Administrator)) {
+                throw 'Real writer-start ACL integration requires elevated PowerShell.'
+            }
+            $root = Join-Path ([IO.Path]::GetTempPath()) (
+                'cbell-writer-start-acl-' + [guid]::NewGuid().ToString('N'))
+            $source = Join-Path $root 'source'
+            $service = Join-Path $root 'service'
+            New-Item -ItemType Directory -Path $source,$service -Force | Out-Null
+            $launcher = Join-Path $source 'Start-ChristopherBellDev.ps1'
+            $module = Join-Path $source 'Production.WriterStart.psm1'
+            $winSw = Join-Path $service 'ChristopherBellDev.exe'
+            $serviceXml = Join-Path $service 'ChristopherBellDev.xml'
+            'launcher' | Set-Content $launcher
+            'module' | Set-Content $module
+            'winsw' | Set-Content $winSw
+            'service xml' | Set-Content $serviceXml
+            try {
+                $config = [pscustomobject]@{ programDataRoot=$root }
+                $winSwSha = (Get-FileHash $winSw -Algorithm SHA256).Hash.ToLowerInvariant()
+                $serviceXmlSha = (Get-FileHash $serviceXml -Algorithm SHA256).Hash.ToLowerInvariant()
+                $result = Publish-ProductionWriterStartGuardBundle `
+                    -Config $config `
+                    -SourceLauncherPath $launcher `
+                    -SourceModulePath $module `
+                    -ExpectedWinSwSha256 $winSwSha `
+                    -ExpectedServiceXmlSha256 $serviceXmlSha
+                Assert-ProductionWriterStartGuardBundle `
+                    -Config $config `
+                    -ExpectedLauncherSha256 $result.launcherSha256 `
+                    -ExpectedModuleSha256 $result.moduleSha256 `
+                    -ExpectedWinSwSha256 $winSwSha `
+                    -ExpectedServiceXmlSha256 $serviceXmlSha | Out-Null
+                Assert-ProductionWriterStartServiceDirectory -Path $service
+                foreach ($name in @(
+                    'ChristopherBellDev.exe',
+                    'ChristopherBellDev.xml',
+                    'Start-ChristopherBellDev.ps1',
+                    'Production.WriterStart.psm1',
+                    'Production.WriterStart.bundle.json')) {
+                    Assert-ProtectedProductionPath -Path (Join-Path $service $name)
+                }
+            } finally {
+                if (Test-Path -LiteralPath $root) {
+                    Remove-Item -LiteralPath $root -Recurse -Force
+                }
+            }
+        }
     }
 }

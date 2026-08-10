@@ -137,6 +137,22 @@ Describe 'PawnIO sensor provider operations' {
             Should -Invoke Restart-Service -Times 0
         }
 
+        It 'accepts the locked production root when only Windows path casing differs' {
+            $configPath = Join-Path $TestDrive 'config\deploy.json'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $configPath) -Force |
+                Out-Null
+            @{
+                programDataRoot = $TestDrive.ToUpperInvariant()
+                productionPort = 8080
+                sensorLibrariesEnabled = $false
+            } | ConvertTo-Json | Set-Content $configPath
+
+            { Set-ProductionSensorState -Enabled $false -ConfigPath $configPath } |
+                Should -Not -Throw
+
+            Should -Invoke Restart-Service -Times 1 -Exactly
+        }
+
         It 'captures sensor rollback state only after lock acquisition' {
             $configPath = Join-Path $TestDrive 'config\deploy.json'
             New-Item -ItemType Directory -Path (Split-Path -Parent $configPath) -Force | Out-Null

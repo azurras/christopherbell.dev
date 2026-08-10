@@ -187,6 +187,34 @@ Describe 'native Windows deployment' {
             } | Should -Not -Throw
         }
 
+        It 'sets and verifies the exact website service startup type' -ForEach @(
+            @{ StartupType='Disabled'; ExpectedMode='Disabled' },
+            @{ StartupType='Automatic'; ExpectedMode='Auto' }
+        ) {
+            $script:actualStartMode = if ($StartupType -eq 'Disabled') { 'Auto' } else { 'Disabled' }
+            Mock Set-Service {
+                $script:actualStartMode = if ($StartupType -eq 'Disabled') { 'Disabled' } else { 'Auto' }
+            }
+            Mock Get-CimInstance {
+                [pscustomobject]@{ Name='ChristopherBellDev'; StartMode=$script:actualStartMode }
+            }
+
+            { Set-ProductionWebsiteStartupType -StartupType $StartupType } |
+                Should -Not -Throw
+
+            $script:actualStartMode | Should -Be $ExpectedMode
+        }
+
+        It 'fails before publication when the Disabled startup type cannot be verified' {
+            Mock Set-Service { }
+            Mock Get-CimInstance {
+                [pscustomobject]@{ Name='ChristopherBellDev'; StartMode='Auto' }
+            }
+
+            { Set-ProductionWebsiteStartupType -StartupType Disabled } |
+                Should -Throw '*startup type*Disabled*not verified*'
+        }
+
         It 'rejects contradictory duplicate reset-period fields' {
             $queryOutput = @(
                 New-RecoveryPolicyQueryOutput -Policy Suspended
@@ -1133,9 +1161,12 @@ Describe 'native Windows deployment' {
                 'cleanup','lock:release')
         }
 
-        It 'stops with recovery suspended before installing and verifying the guard bundle' {
+        It 'disables a pre-guard service before publication and restores Automatic only after verification' {
             $events = [Collections.Generic.List[string]]::new()
             $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            Mock Set-ProductionWebsiteStartupType {
+                [void]$events.Add("startup:$StartupType")
+            }
             Mock Stop-ProductionWebsiteService {
                 if (-not $KeepRecoverySuspended) { throw 'recovery was not suspended' }
                 [void]$events.Add('stop-suspended')
@@ -1147,25 +1178,75 @@ Describe 'native Windows deployment' {
 
             & $script:ensureGuardImplementation -Config $config
 
-            $events | Should -Be @('stop-suspended','bundle-verified')
+            $events | Should -Be @(
+                'startup:Disabled','stop-suspended','bundle-verified','startup:Automatic')
             Should -Invoke Start-Service -Times 0
         }
 
-        It 'leaves the writer stopped when guard bundle verification fails' {
+        It 'keeps a pre-guard service Disabled across publication failure' -ForEach @(
+            @{ Failure='staging failed' },
+            @{ Failure='first guard file publication failed' },
+            @{ Failure='publisher process died after first file' }
+        ) {
             $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            $script:startupType = 'Automatic'
+            Mock Set-ProductionWebsiteStartupType {
+                $script:startupType = $StartupType
+            }
             Mock Stop-ProductionWebsiteService { }
             Mock Install-CoordinatedProductionWriterStartGuardBundle {
-                throw 'installed guard hash mismatch'
+                throw $Failure
             }
             Mock Start-Service { throw 'writer must not start' }
 
             { & $script:ensureGuardImplementation -Config $config } |
-                Should -Throw '*hash mismatch*'
+                Should -Throw "*$Failure*"
 
+            $script:startupType | Should -Be 'Disabled'
             Should -Invoke Stop-ProductionWebsiteService -ParameterFilter {
                 $KeepRecoverySuspended
             }
+            Should -Invoke Set-ProductionWebsiteStartupType -Times 0 -ParameterFilter {
+                $StartupType -eq 'Automatic'
+            }
             Should -Invoke Start-Service -Times 0
+        }
+
+        It 'does not stop or publish when Disabled startup verification fails' {
+            $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            Mock Set-ProductionWebsiteStartupType { throw 'Disabled startup type was not verified' }
+            Mock Stop-ProductionWebsiteService { throw 'stop must not run' }
+            Mock Install-CoordinatedProductionWriterStartGuardBundle {
+                throw 'publication must not run'
+            }
+
+            { & $script:ensureGuardImplementation -Config $config } |
+                Should -Throw '*Disabled startup type was not verified*'
+
+            Should -Invoke Stop-ProductionWebsiteService -Times 0
+            Should -Invoke Install-CoordinatedProductionWriterStartGuardBundle -Times 0
+        }
+
+        It 're-disables the service when Automatic restoration cannot be verified' {
+            $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            $script:startupType = 'Automatic'
+            Mock Set-ProductionWebsiteStartupType {
+                if ($StartupType -eq 'Automatic') {
+                    $script:startupType = 'Automatic'
+                    throw 'Automatic startup type was not verified'
+                }
+                $script:startupType = 'Disabled'
+            }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Install-CoordinatedProductionWriterStartGuardBundle { }
+
+            { & $script:ensureGuardImplementation -Config $config } |
+                Should -Throw '*Automatic startup type was not verified*'
+
+            $script:startupType | Should -Be 'Disabled'
+            Should -Invoke Set-ProductionWebsiteStartupType -Times 2 -ParameterFilter {
+                $StartupType -eq 'Disabled'
+            }
         }
 
         It 'stops the target writer and retains pending direction when cutover marker finalization fails' {

@@ -343,7 +343,10 @@ function Set-ProductionSensorState {
             throw 'sensorLibrariesEnabled must be a Boolean.'
         }
         if ($config.PSObject.Properties.Name -ccontains 'programDataRoot' -and
-            [IO.Path]::GetFullPath([string]$config.programDataRoot) -cne $root) {
+            -not [string]::Equals(
+                [IO.Path]::GetFullPath([string]$config.programDataRoot),
+                $root,
+                [StringComparison]::OrdinalIgnoreCase)) {
             throw 'Sensor configuration root does not match the locked production root.'
         }
         $previous = $sensorProperty.Value
