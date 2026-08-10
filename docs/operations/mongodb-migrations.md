@@ -53,6 +53,28 @@ startup. Correct the underlying failure first. Confirm no deployment is active
 and that the lease is absent or expired. If the operation was not safely
 idempotent, restore the pre-deployment backup instead of editing migration state.
 
+### Music runtime-state rollback exception
+
+Migration 014 leaves both legacy collections intact, but the new release writes only
+`music_runtime_state`. A binary rollback therefore requires reverse-copying the latest queue
+and radio state before the prior release starts. This is an emergency compatibility operation,
+not a routine application rollback step. Keep the `ChristopherBellDev` writer stopped and first
+preview the fixed database and three namespaces:
+
+```powershell
+.\prod.cmd music-runtime-rollback -WhatIf
+```
+
+After confirming that preview, run the bounded operation with
+`-ConfirmMusicRuntimeRollback`. It creates a fresh full backup, verifies the archive against its
+SHA-256 sidecar, rechecks that the writer remains stopped, validates the exact raw BSON shapes,
+and replaces only the two retained `_id: "global"` documents. It then proves both readbacks are
+equivalent to the current queue/radio destination state. It never drops, deletes, or renames a
+collection and emits only bounded metadata.
+
+Keep the service stopped if any gate, replacement, or readback check fails. Preserve the reported
+backup and failure cause, and obtain approval before attempting a broader production restore.
+
 Keep the website service stopped throughout this investigation. Do not start
 the prior release as a diagnostic step after the live migration boundary.
 

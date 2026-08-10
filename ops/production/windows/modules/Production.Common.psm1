@@ -521,9 +521,12 @@ function Show-ProductionHelp {
 Usage: prod.cmd <command> [-WhatIf]
 
 Commands: install, deploy, status, logs, restart, releases, rollback, backup,
-          mongo-inventory, verify-startup, uninstall, auto-install, auto-deploy,
-          auto-status, auto-remove, sensor-install, sensor-status,
-          sensor-enable, sensor-disable
+          mongo-inventory, music-runtime-rollback, verify-startup, uninstall,
+          auto-install, auto-deploy, auto-status, auto-remove, sensor-install,
+          sensor-status, sensor-enable, sensor-disable
+
+music-runtime-rollback previews by default. Actual reverse-copy additionally requires
+-ConfirmMusicRuntimeRollback and a stopped ChristopherBellDev service.
 '@ | Write-Output
 }
 

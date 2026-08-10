@@ -13,6 +13,7 @@ Describe 'native Windows production command surface' {
         ($output -join "`n") | Should -Match 'sensor-status'
         ($output -join "`n") | Should -Match 'sensor-enable'
         ($output -join "`n") | Should -Match 'sensor-disable'
+        ($output -join "`n") | Should -Match 'music-runtime-rollback'
         $LASTEXITCODE | Should -Be 0
     }
 
@@ -33,13 +34,15 @@ Describe 'native Windows production command surface' {
     It 'keeps every command handler exported after loading all modules' {
         $moduleRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\modules')).Path
         Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
-        foreach ($module in 'Production.Deploy','Production.SharedFolder','Production.Install','Production.Operations','Production.AutoDeploy','Production.Sensors') {
+        foreach ($module in 'Production.Deploy','Production.SharedFolder','Production.Install','Production.Operations','Production.MusicRuntime','Production.AutoDeploy','Production.Sensors') {
             Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
         }
 
         foreach ($command in 'Invoke-ProductionDeploy','Install-ProductionRuntime','Get-ProductionStatus','Install-AutoDeployTask','Show-ProductionHelp') {
             Get-Command $command -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
+        Get-Command Invoke-ProductionMusicRuntimeStateRollback -ErrorAction SilentlyContinue |
+            Should -Not -BeNullOrEmpty
         foreach ($command in 'Install-PawnIoProvider','Get-ProductionSensorStatus','Set-ProductionSensorState') {
             Get-Command $command -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
@@ -121,6 +124,22 @@ Describe 'native Windows production command surface' {
         $parsed.complete | Should -BeTrue
         $parsed.database | Should -Be 'christopherbell'
         $makefile | Should -Match '\bprod-mongo-inventory\b'
+    }
+
+    It 'routes only the bounded Music runtime rollback switches' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
+        Mock Invoke-ProductionMusicRuntimeStateRollback {
+            [pscustomobject]@{ complete = $true }
+        }
+
+        $null = Invoke-ProductionCommand `
+            -Command 'music-runtime-rollback' `
+            -WhatIf `
+            -ConfirmMusicRuntimeRollback
+
+        Should -Invoke Invoke-ProductionMusicRuntimeStateRollback -Times 1 -Exactly `
+            -ParameterFilter { $WhatIf -and $Confirm }
     }
 
     It 'rejects unknown commands' {
