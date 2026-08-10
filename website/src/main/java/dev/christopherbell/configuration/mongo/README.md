@@ -22,6 +22,7 @@ recovery rules.
 
 Consolidated runtime adapters must use `KindScopedMongoOperations` instead of
 accessing a consolidated collection through `MongoTemplate`, `MongoRepository`,
-or `MongoCollection` directly. `DomainDocumentKind` is the approval boundary for
-the exact physical collection, lower-case logical kind, schema version, and Java
-mapping type.
+or `MongoCollection` directly. `DomainDocumentKindRegistry` is the immutable
+approval boundary associating each exact lower-case logical kind with one
+physical collection; it is the only supported way to construct
+`DomainDocumentKind` metadata with a schema version and Java mapping type.

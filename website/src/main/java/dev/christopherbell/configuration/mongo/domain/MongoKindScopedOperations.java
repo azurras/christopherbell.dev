@@ -79,6 +79,9 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
     var mappedLegacyId = NamespacedMongoId.require(bsonId, kind.kind()).legacyId();
     var existing = findEnvelopeById(mappedLegacyId);
     if (existing == null) {
+      if (codec.isVersioned() && codec.version(candidate) != null) {
+        throw stale();
+      }
       return insertEnvelope(codec.initializeVersion(candidate), codec.isVersioned());
     }
     codec.decode(existing);
@@ -101,11 +104,15 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
 
   @Override
   public UpdateResult updateFirst(Query domainQuery, Update domainUpdate) {
-    return mongo.updateFirst(
-        fieldMapper.mapQuery(domainQuery),
-        fieldMapper.mapUpdate(domainUpdate),
-        Document.class,
-        kind.collection());
+    try {
+      return mongo.updateFirst(
+          fieldMapper.mapQuery(domainQuery),
+          fieldMapper.mapUpdate(domainUpdate),
+          Document.class,
+          kind.collection());
+    } catch (DuplicateKeyException failure) {
+      throw duplicate();
+    }
   }
 
   @Override
@@ -126,13 +133,17 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   }
 
   private Document replace(Query query, Document candidate) {
-    return mongo.findAndReplace(
-        query,
-        candidate,
-        FindAndReplaceOptions.options().returnNew(),
-        Document.class,
-        kind.collection(),
-        Document.class);
+    try {
+      return mongo.findAndReplace(
+          query,
+          candidate,
+          FindAndReplaceOptions.options().returnNew(),
+          Document.class,
+          kind.collection(),
+          Document.class);
+    } catch (DuplicateKeyException failure) {
+      throw duplicate();
+    }
   }
 
   private T insertEnvelope(Document candidate, boolean contentionIsStale) {
@@ -142,7 +153,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
       if (contentionIsStale) {
         throw stale();
       }
-      throw new DuplicateKeyException(DUPLICATE_MESSAGE);
+      throw duplicate();
     }
   }
 
@@ -172,5 +183,9 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
 
   private static OptimisticLockingFailureException stale() {
     return new OptimisticLockingFailureException(STALE_MESSAGE);
+  }
+
+  private static DuplicateKeyException duplicate() {
+    return new DuplicateKeyException(DUPLICATE_MESSAGE);
   }
 }

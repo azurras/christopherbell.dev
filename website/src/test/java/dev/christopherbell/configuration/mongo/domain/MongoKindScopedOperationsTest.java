@@ -5,12 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.bson.Document;
 import org.bson.types.Decimal128;
@@ -36,7 +38,8 @@ import org.springframework.data.mongodb.core.query.Update;
 
 class MongoKindScopedOperationsTest {
   private static final DomainDocumentKind<SampleDocument> KIND =
-      new DomainDocumentKind<>("content", "sample_kind", 1, SampleDocument.class);
+      DomainDocumentKindRegistry.of(Map.of("sample_kind", "content"))
+          .require("sample_kind", 1, SampleDocument.class);
 
   private MongoTemplate mongo;
   private MongoKindScopedOperations<SampleDocument> operations;
@@ -175,6 +178,22 @@ class MongoKindScopedOperationsTest {
   }
 
   @Test
+  void missingVersionedDocumentRejectsANonnullVersionWithoutReinsertingIt() {
+    var stale = new SampleDocument(
+        "deleted-id", "stale", 1L, new Decimal128(1L), 3L);
+    when(mongo.findOne(any(Query.class), eq(Document.class), eq("content")))
+        .thenReturn(null);
+    when(mongo.insert(any(Document.class), eq("content")))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    assertThatThrownBy(() -> operations.save(stale))
+        .isInstanceOf(OptimisticLockingFailureException.class)
+        .hasMessage("Mongo domain document was changed by another writer.")
+        .hasNoCause();
+    verify(mongo, never()).insert(any(Document.class), eq("content"));
+  }
+
+  @Test
   void malformedConversionFailureRedactsTheEntireCauseChain() {
     var malformed = new Document(
         "_id", NamespacedMongoId.of(KIND.kind(), "legacy-id").toBson())
@@ -225,6 +244,45 @@ class MongoKindScopedOperationsTest {
         .hasNoCause()
         .satisfies(failure -> assertThat(stackTrace(failure))
             .doesNotContain("secret-id", "payload"));
+  }
+
+  @Test
+  void duplicateReplacementFailureRetainsTypeWithoutLeakingTheDriverMessage() {
+    var value = new SampleDocument(
+        "legacy-id", "Ada", 1L, new Decimal128(1L), 3L);
+    var stored = envelope(value);
+    when(mongo.findOne(any(Query.class), eq(Document.class), eq("content")))
+        .thenReturn(stored);
+    when(mongo.findAndReplace(
+        any(Query.class),
+        any(Document.class),
+        any(FindAndReplaceOptions.class),
+        eq(Document.class),
+        eq("content"),
+        eq(Document.class)))
+        .thenThrow(new DuplicateKeyException("duplicate secret-replacement payload"));
+
+    assertThatThrownBy(() -> operations.save(value))
+        .isInstanceOf(DuplicateKeyException.class)
+        .hasMessage("Mongo domain identity already exists.")
+        .hasNoCause()
+        .satisfies(failure -> assertThat(stackTrace(failure))
+            .doesNotContain("secret-replacement", "payload"));
+  }
+
+  @Test
+  void duplicateUpdateFailureRetainsTypeWithoutLeakingTheDriverMessage() {
+    when(mongo.updateFirst(any(Query.class), any(Update.class), eq(Document.class), eq("content")))
+        .thenThrow(new DuplicateKeyException("duplicate secret-update payload"));
+
+    assertThatThrownBy(() -> operations.updateFirst(
+        Query.query(Criteria.where("displayName").is("Ada")),
+        Update.update("displayName", "Grace")))
+        .isInstanceOf(DuplicateKeyException.class)
+        .hasMessage("Mongo domain identity already exists.")
+        .hasNoCause()
+        .satisfies(failure -> assertThat(stackTrace(failure))
+            .doesNotContain("secret-update", "payload"));
   }
 
   private Document envelope(SampleDocument value) {

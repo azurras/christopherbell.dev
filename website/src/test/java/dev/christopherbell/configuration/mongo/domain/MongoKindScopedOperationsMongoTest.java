@@ -166,9 +166,24 @@ class MongoKindScopedOperationsMongoTest {
         });
   }
 
+  @Test
+  void staleVersionedSaveCannotRecreateAConcurrentlyDeletedDocument() {
+    mongo = template("delete-version");
+    var operations = operations("sample_delete_version");
+    var stale = operations.insert(new SampleDocument(
+        "same-id", "initial", 7L, Decimal128.parse("2.50"), null));
+
+    operations.remove(Query.query(Criteria.where("id").is("same-id")));
+
+    assertThatThrownBy(() -> operations.save(stale))
+        .isInstanceOf(OptimisticLockingFailureException.class);
+    assertThat(operations.findById("same-id")).isEmpty();
+  }
+
   private MongoKindScopedOperations<SampleDocument> operations(String kind) {
+    var registry = DomainDocumentKindRegistry.of(Map.of(kind, "content"));
     return new MongoKindScopedOperations<>(
-        mongo, new DomainDocumentKind<>("content", kind, 1, SampleDocument.class));
+        mongo, registry.require(kind, 1, SampleDocument.class));
   }
 
   private static MongoTemplate template(String purpose) {

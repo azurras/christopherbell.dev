@@ -6,7 +6,7 @@ import org.bson.Document;
 /** Collision-proof physical identity retaining the exact legacy BSON identity value. */
 public record NamespacedMongoId(String kind, Object legacyId) {
   public NamespacedMongoId {
-    if (!DomainDocumentKind.isCanonicalName(kind) || legacyId == null) {
+    if (!DomainDocumentKindRegistry.isCanonicalName(kind) || legacyId == null) {
       throw new IllegalArgumentException("Namespaced Mongo identity is incomplete.");
     }
   }
