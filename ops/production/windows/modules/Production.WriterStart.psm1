@@ -461,11 +461,14 @@ function New-ProductionWriterStartServiceDirectoryAcl {
     $localService = [Security.Principal.SecurityIdentifier]::new('S-1-5-19')
     $acl.SetOwner($administrators)
     $allow = [Security.AccessControl.AccessControlType]::Allow
+    $inheritance = [Security.AccessControl.InheritanceFlags](
+        [int][Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [int][Security.AccessControl.InheritanceFlags]::ObjectInherit)
     foreach ($identity in @($system,$administrators)) {
         $rule = [Security.AccessControl.FileSystemAccessRule]::new(
             $identity,
             [Security.AccessControl.FileSystemRights]::FullControl,
-            [Security.AccessControl.InheritanceFlags]::None,
+            $inheritance,
             [Security.AccessControl.PropagationFlags]::None,
             $allow)
         [void]$acl.AddAccessRule($rule)
@@ -473,7 +476,7 @@ function New-ProductionWriterStartServiceDirectoryAcl {
     $localServiceRule = [Security.AccessControl.FileSystemAccessRule]::new(
         $localService,
         [Security.AccessControl.FileSystemRights]::ReadAndExecute,
-        [Security.AccessControl.InheritanceFlags]::None,
+        $inheritance,
         [Security.AccessControl.PropagationFlags]::None,
         $allow)
     [void]$acl.AddAccessRule($localServiceRule)
@@ -501,12 +504,15 @@ function Assert-ProductionWriterStartServiceDirectory {
             [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
             [Security.AccessControl.FileSystemRights]::Synchronize)
     }
+    $expectedInheritance = [Security.AccessControl.InheritanceFlags](
+        [int][Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [int][Security.AccessControl.InheritanceFlags]::ObjectInherit)
     $seen = @{}
     foreach ($rule in $rules) {
         $identity = $rule.IdentityReference.Value
         if (-not $expected.ContainsKey($identity) -or $seen.ContainsKey($identity) -or
             $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
-            $rule.InheritanceFlags -ne [Security.AccessControl.InheritanceFlags]::None -or
+            $rule.InheritanceFlags -ne $expectedInheritance -or
             $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None -or
             $rule.FileSystemRights -ne $expected[$identity]) {
             throw 'Writer-start service directory ACL grants unexpected access.'
@@ -523,6 +529,111 @@ function Protect-ProductionWriterStartServiceDirectory {
     Set-Acl -LiteralPath $Path `
         -AclObject (New-ProductionWriterStartServiceDirectoryAcl) -ErrorAction Stop
     Assert-ProductionWriterStartServiceDirectory -Path $Path
+}
+
+function New-ProductionWriterStartServiceFileAcl {
+    [CmdletBinding()]
+    param()
+
+    $acl = [Security.AccessControl.FileSecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $administrators = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $localService = [Security.Principal.SecurityIdentifier]::new('S-1-5-19')
+    $acl.SetOwner($administrators)
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    foreach ($identity in @($system,$administrators)) {
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+            $identity,
+            [Security.AccessControl.FileSystemRights]::FullControl,
+            [Security.AccessControl.InheritanceFlags]::None,
+            [Security.AccessControl.PropagationFlags]::None,
+            $allow)
+        [void]$acl.AddAccessRule($rule)
+    }
+    $localServiceRights =
+        [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
+        [Security.AccessControl.FileSystemRights]::Synchronize
+    $localServiceRule = [Security.AccessControl.FileSystemAccessRule]::new(
+        $localService,
+        $localServiceRights,
+        [Security.AccessControl.InheritanceFlags]::None,
+        [Security.AccessControl.PropagationFlags]::None,
+        $allow)
+    [void]$acl.AddAccessRule($localServiceRule)
+    return $acl
+}
+
+function Assert-ProductionWriterStartServiceFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Security.AccessControl.RawSecurityDescriptor]$SecurityDescriptor
+    )
+
+    Assert-ProductionWriterStartPathNotReparseTraversal -Path $Path | Out-Null
+    if (-not $PSBoundParameters.ContainsKey('SecurityDescriptor')) {
+        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+        $SecurityDescriptor = [Security.AccessControl.RawSecurityDescriptor]::new(
+            $acl.GetSecurityDescriptorBinaryForm(), 0)
+    }
+    $protectedFlag =
+        [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected
+    if (($SecurityDescriptor.ControlFlags -band $protectedFlag) -eq 0) {
+        throw "Writer-start service file ACL inheritance must be protected: $Path"
+    }
+    $administrators = 'S-1-5-32-544'
+    if ($null -eq $SecurityDescriptor.Owner -or
+        $SecurityDescriptor.Owner.Value -cne $administrators) {
+        throw "Writer-start service file ACL owner must be Builtin Administrators: $Path"
+    }
+    $aces = @($SecurityDescriptor.DiscretionaryAcl)
+    if ($aces.Count -ne 3) {
+        throw "Writer-start service file ACL must have exactly three explicit ACEs: $Path"
+    }
+    $expectedIdentities = @('S-1-5-18',$administrators,'S-1-5-19')
+    $exactAces = @{}
+    foreach ($identity in $expectedIdentities) {
+        $matching = @($aces | Where-Object {
+                $_ -is [Security.AccessControl.CommonAce] -and
+                $_.AceType -eq [Security.AccessControl.AceType]::AccessAllowed -and
+                $_.SecurityIdentifier.Value -ceq $identity
+            })
+        if ($matching.Count -ne 1) {
+            throw ('Writer-start service file ACL must have one SYSTEM, one ' +
+                "Administrators, and one LocalService allow ACE: $Path")
+        }
+        $exactAces[$identity] = $matching[0]
+    }
+    foreach ($ace in $exactAces.Values) {
+        if ([int]$ace.AceFlags -ne [int][Security.AccessControl.AceFlags]::None) {
+            throw "Writer-start service file ACEs must not inherit or propagate: $Path"
+        }
+    }
+    $fullControl = [int][Security.AccessControl.FileSystemRights]::FullControl
+    foreach ($identity in @('S-1-5-18',$administrators)) {
+        if ([int]$exactAces[$identity].AccessMask -ne $fullControl) {
+            throw ('Writer-start service file SYSTEM and Administrators must have ' +
+                "exact FullControl rights: $Path")
+        }
+    }
+    $localServiceRights = [int](
+        [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
+        [Security.AccessControl.FileSystemRights]::Synchronize)
+    if ([int]$exactAces['S-1-5-19'].AccessMask -ne $localServiceRights) {
+        throw ('Writer-start service file LocalService must have exact ' +
+            "ReadAndExecute and Synchronize rights: $Path")
+    }
+}
+
+function Protect-ProductionWriterStartServiceFile {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    Assert-ProductionWriterStartPathNotReparseTraversal -Path $Path | Out-Null
+    Set-Acl -LiteralPath $Path `
+        -AclObject (New-ProductionWriterStartServiceFileAcl) -ErrorAction Stop
+    Assert-ProductionWriterStartServiceFile -Path $Path
 }
 
 function Assert-ExactJsonProperties {
@@ -654,7 +765,7 @@ function Assert-ProductionWriterStartGuardBundle {
     $protectedFiles = @($launcher,$module,$manifestPath)
     if ($hasWinSw) { $protectedFiles += @($winSw,$serviceXml) }
     foreach ($path in $protectedFiles) {
-        Assert-ProtectedProductionPath -Path $path | Out-Null
+        Assert-ProductionWriterStartServiceFile -Path $path
     }
     return $manifest
 }
@@ -770,11 +881,12 @@ function Publish-ProductionWriterStartGuardBundle {
             $manifest.serviceXmlSha256 = $ExpectedServiceXmlSha256
         }
         $manifest | ConvertTo-Json | Set-Content -LiteralPath $stagedManifest -Encoding utf8
-        $stagedPaths = @($staging,$stagedLauncher,$stagedModule,$stagedManifest)
-        if ($hasWinSw) { $stagedPaths += @($stagedWinSw,$stagedServiceXml) }
-        foreach ($path in $stagedPaths) {
-            Protect-ProductionPath -Path $path
-            Assert-ProtectedProductionPath -Path $path | Out-Null
+        Protect-ProductionPath -Path $staging
+        Assert-ProtectedProductionPath -Path $staging | Out-Null
+        $stagedFiles = @($stagedLauncher,$stagedModule,$stagedManifest)
+        if ($hasWinSw) { $stagedFiles += @($stagedWinSw,$stagedServiceXml) }
+        foreach ($path in $stagedFiles) {
+            Protect-ProductionWriterStartServiceFile -Path $path
         }
         if ((Get-FileHash $stagedLauncher -Algorithm SHA256).Hash.ToLowerInvariant() -cne $launcherSha -or
             (Get-FileHash $stagedModule -Algorithm SHA256).Hash.ToLowerInvariant() -cne $moduleSha -or
@@ -797,24 +909,32 @@ function Publish-ProductionWriterStartGuardBundle {
         Publish-ProductionWriterStartGuardFile `
             -Source $stagedLauncher `
             -Destination $installedLauncher
+        Protect-ProductionWriterStartServiceFile -Path $installedLauncher
         Publish-ProductionWriterStartGuardFile `
             -Source $stagedModule `
             -Destination $installedModule
+        Protect-ProductionWriterStartServiceFile -Path $installedModule
         if ($hasWinSw) {
             Publish-ProductionWriterStartGuardFile `
                 -Source $stagedWinSw `
                 -Destination $installedWinSw
+            Protect-ProductionWriterStartServiceFile -Path $installedWinSw
             Publish-ProductionWriterStartGuardFile `
                 -Source $stagedServiceXml `
                 -Destination $installedServiceXml
+            Protect-ProductionWriterStartServiceFile -Path $installedServiceXml
         }
-        Publish-ProductionWriterStartGuardFile `
-            -Source $stagedManifest `
-            -Destination $installedManifest
-        $installedPaths = @($installedLauncher,$installedModule,$installedManifest)
-        if ($hasWinSw) { $installedPaths += @($installedWinSw,$installedServiceXml) }
-        foreach ($path in $installedPaths) {
-            Protect-ProductionPath -Path $path
+        try {
+            Publish-ProductionWriterStartGuardFile `
+                -Source $stagedManifest `
+                -Destination $installedManifest
+            Protect-ProductionWriterStartServiceFile -Path $installedManifest
+        } catch {
+            if (Test-Path -LiteralPath $installedManifest -PathType Leaf) {
+                Remove-Item -LiteralPath $installedManifest -Force `
+                    -ErrorAction SilentlyContinue
+            }
+            throw
         }
         $assertArguments = @{
             Config = $Config
