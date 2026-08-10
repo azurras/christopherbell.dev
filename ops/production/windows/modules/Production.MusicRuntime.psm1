@@ -1,6 +1,95 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Get-ProductionMusicSchemaDirectionPath {
+    param([Parameter(Mandatory)]$Config)
+
+    return Join-Path $Config.programDataRoot 'state\music-runtime-schema-direction.json'
+}
+
+function Read-ProductionMusicSchemaDirection {
+    param([Parameter(Mandatory)]$Config)
+
+    $path = Get-ProductionMusicSchemaDirectionPath -Config $Config
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        $value = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+        $names = @($value.PSObject.Properties.Name)
+        $expected = @(
+            'version','state','updatedAtEpochMillis','targetRelease','legacyRelease')
+        if ($names.Count -ne $expected.Count -or
+            @($expected | Where-Object { $_ -notin $names }).Count -ne 0 -or
+            ($value.version -isnot [int] -and $value.version -isnot [long]) -or
+            [int]$value.version -ne 1 -or
+            $value.state -isnot [string] -or
+            [string]$value.state -notin @(
+                'TARGET_ACTIVE','TARGET_CUTOVER_IN_PROGRESS',
+                'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') -or
+            ($value.updatedAtEpochMillis -isnot [int] -and
+                $value.updatedAtEpochMillis -isnot [long]) -or
+            [long]$value.updatedAtEpochMillis -lt 1 -or
+            $value.targetRelease -isnot [string] -or
+            [string]$value.targetRelease -notmatch '^[0-9a-f]{40}$' -or
+            $value.legacyRelease -isnot [string] -or
+            [string]$value.legacyRelease -notmatch '^[0-9a-f]{40}$') {
+            throw 'Invalid marker.'
+        }
+        return [pscustomobject][ordered]@{
+            version = 1
+            state = [string]$value.state
+            updatedAtEpochMillis = [long]$value.updatedAtEpochMillis
+            targetRelease = [string]$value.targetRelease
+            legacyRelease = [string]$value.legacyRelease
+        }
+    } catch {
+        throw [System.IO.InvalidDataException]::new(
+            'Music runtime schema-direction marker is invalid.')
+    }
+}
+
+function Write-ProductionMusicSchemaDirection {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]
+        [ValidateSet(
+            'TARGET_ACTIVE',
+            'TARGET_CUTOVER_IN_PROGRESS',
+            'LEGACY_ACTIVE_RECONCILIATION_REQUIRED')]
+        [string]$State,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')]
+        [string]$TargetRelease,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')]
+        [string]$LegacyRelease
+    )
+
+    $path = Get-ProductionMusicSchemaDirectionPath -Config $Config
+    $parent = Split-Path -Parent $path
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    Protect-ProductionPath -Path $parent
+    Assert-ProtectedProductionPath -Path $parent | Out-Null
+    $temporary = "$path.$PID.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [ordered]@{
+            version = 1
+            state = $State
+            updatedAtEpochMillis = [DateTimeOffset]::new(
+                (Get-Date).ToUniversalTime()).ToUnixTimeMilliseconds()
+            targetRelease = $TargetRelease
+            legacyRelease = $LegacyRelease
+        } | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding utf8
+        Protect-ProductionPath -Path $temporary
+        Assert-ProtectedProductionPath -Path $temporary | Out-Null
+        Move-Item -LiteralPath $temporary -Destination $path -Force
+        Protect-ProductionPath -Path $path
+        Assert-ProtectedProductionPath -Path $path | Out-Null
+    } finally {
+        if (Test-Path -LiteralPath $temporary) {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Get-ProductionMusicRuntimeRollbackScript {
     @'
 const target = db.getSiblingDB('christopherbell');
@@ -95,6 +184,7 @@ const documents = destination.find({ _id: { $in: ['queue', 'radio'] } }).toArray
 if (documents.length !== 2 || exactCount(destination.countDocuments({})) !== '2') {
   throw new Error('music runtime destination must contain exactly two documents');
 }
+
 const queue = documents.find((value) => value._id === 'queue');
 const radio = documents.find((value) => value._id === 'radio');
 if (!queue || !exactKeys(queue, ['_id', 'kind', 'queue'], ['version', '_class']) ||
@@ -184,13 +274,199 @@ print(JSON.stringify({
 '@
 }
 
+function Get-ProductionMusicMigrationActivationNoLock {
+    param([Parameter(Mandatory)]$Config)
+
+    $script = @'
+const target = db.getSiblingDB('christopherbell');
+const migrationCount = target.getCollection('application_migrations')
+  .countDocuments({_id:'014-consolidate-music-runtime-state'});
+const destinationCount = target.getCollection('music_runtime_state').countDocuments({});
+print(JSON.stringify({active:migrationCount !== 0 || destinationCount !== 0}));
+'@
+    try {
+        $json = Invoke-CheckedProcess `
+            -FilePath $Config.mongoShellExe `
+            -ArgumentList @(
+                '--quiet','--norc','mongodb://127.0.0.1:27017/admin','--eval',$script) `
+            -WorkingDirectory $Config.repositoryPath
+        $value = $json | ConvertFrom-Json -ErrorAction Stop
+        $names = @($value.PSObject.Properties.Name)
+        if ($names.Count -ne 1 -or $names[0] -cne 'active' -or
+            $value.active -isnot [bool]) {
+            throw 'Invalid activation metadata.'
+        }
+        return [bool]$value.active
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            'Music runtime migration activation could not be proven; rollback is blocked.')
+    }
+}
+
+
+function Get-ProductionMusicRuntimeReconciliationScript {
+    @'
+const target = db.getSiblingDB('christopherbell');
+const destination = target.getCollection('music_runtime_state');
+const queueSource = target.getCollection('music_queue_state');
+const radioSource = target.getCollection('music_radio_state');
+let reconciliationPhase = 'preflight';
+const reconciliationErrorCodes = {
+  'preflight':'PREFLIGHT_FAILED',
+  'queue-replacement':'QUEUE_REPLACEMENT_FAILED',
+  'radio-replacement':'RADIO_REPLACEMENT_FAILED',
+  'readback':'READBACK_FAILED'
+};
+try {
+const has = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+const exactKeys = (value, required, optional) => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return required.every((key) => has(value, key)) &&
+      keys.every((key) => required.includes(key) || optional.includes(key));
+};
+const validText = (value, maximum) => typeof value === 'string' &&
+    value.trim().length !== 0 && value.length <= maximum;
+const exactDate = (value) => value instanceof Date && !Number.isNaN(value.valueOf());
+const exactLong = (value) => value !== null && typeof value === 'object' &&
+    typeof value.toString === 'function' && /^-?[0-9]+$/.test(value.toString());
+const exactDouble = (value) => {
+  const encoded = EJSON.serialize(value, {relaxed:false});
+  return encoded !== null && typeof encoded === 'object' &&
+      typeof encoded.$numberDouble === 'string' &&
+      Number.isFinite(Number(encoded.$numberDouble));
+};
+const documents = (collection) => collection.find({}).toArray();
+const queueDocuments = documents(queueSource);
+const radioDocuments = documents(radioSource);
+const destinationDocuments = documents(destination);
+if (queueDocuments.length > 1 || radioDocuments.length > 1 ||
+    destinationDocuments.length > 2) {
+  throw new Error('music runtime reconciliation cardinality is invalid');
+}
+const queue = queueDocuments[0] || null;
+const radio = radioDocuments[0] || null;
+const byId = new Map(destinationDocuments.map((document) => [document._id, document]));
+if (byId.size !== destinationDocuments.length ||
+    [...byId.keys()].some((id) => id !== 'queue' && id !== 'radio')) {
+  throw new Error('music runtime reconciliation destination identity is invalid');
+}
+const targetClass = 'dev.christopherbell.music.radio.MusicRuntimeStateDocument';
+const queueClass = 'dev.christopherbell.music.radio.MusicQueueState';
+const radioClass = 'dev.christopherbell.music.radio.MusicRadioState';
+const validVersion = (document) => !has(document, 'version') ||
+    (exactLong(document.version) && !document.version.toString().startsWith('-'));
+const validClass = (document, expected) => !has(document, '_class') ||
+    document._class === expected;
+const validEntry = (entry) => exactKeys(entry,
+    ['id','trackId','observedToken','enqueuedByAccountId','enqueuedAt'], []) &&
+    validText(entry.id, 100) && validText(entry.trackId, 128) &&
+    validText(entry.observedToken, 128) && validText(entry.enqueuedByAccountId, 128) &&
+    exactDate(entry.enqueuedAt);
+const validEntries = (entries) => Array.isArray(entries) && entries.length <= 1000 &&
+    entries.every(validEntry) && new Set(entries.map((entry) => entry.id)).size === entries.length;
+const validRadioPayload = (value) =>
+    exactLong(value.stationSequence) &&
+    !value.stationSequence.toString().startsWith('-') && value.stationSequence.toString() !== '0' &&
+    validText(value.trackId, 128) && validText(value.observedToken, 128) &&
+    exactDate(value.startedAt) && exactDouble(value.durationSeconds) &&
+    value.durationSeconds > 0 && value.durationSeconds <= 86400 &&
+    ((value.source === 'QUEUE' && has(value, 'queueEntryId') &&
+        validText(value.queueEntryId, 100)) ||
+     (value.source === 'RADIO' && !has(value, 'queueEntryId')));
+const validQueue = queue === null ||
+    (exactKeys(queue, ['_id','entries'], ['version','_class']) &&
+     queue._id === 'global' && validEntries(queue.entries) && validVersion(queue) &&
+     validClass(queue, queueClass));
+const validRadio = radio === null ||
+    (exactKeys(radio, ['_id','stationSequence','trackId','observedToken','startedAt',
+      'durationSeconds','source'], ['queueEntryId','version','_class']) &&
+     radio._id === 'global' && validRadioPayload(radio) &&
+     validVersion(radio) && validClass(radio, radioClass));
+if (!validQueue || !validRadio) {
+  throw new Error('music runtime reconciliation legacy shape is invalid');
+}
+const validTargetQueue = !byId.has('queue') ||
+    (exactKeys(byId.get('queue'), ['_id','kind','queue'], ['version','_class']) &&
+     byId.get('queue')._id === 'queue' && byId.get('queue').kind === 'QUEUE' &&
+     validVersion(byId.get('queue')) && validClass(byId.get('queue'), targetClass) &&
+     exactKeys(byId.get('queue').queue, ['entries'], []) &&
+     validEntries(byId.get('queue').queue.entries));
+const validTargetRadio = !byId.has('radio') ||
+    (exactKeys(byId.get('radio'), ['_id','kind','radio'], ['version','_class']) &&
+     byId.get('radio')._id === 'radio' && byId.get('radio').kind === 'RADIO' &&
+     validVersion(byId.get('radio')) && validClass(byId.get('radio'), targetClass) &&
+     validRadioPayload(byId.get('radio').radio));
+if (!validTargetQueue || !validTargetRadio) {
+  throw new Error('music runtime reconciliation target shape is invalid');
+}
+if ((queue === null && byId.has('queue')) || (radio === null && byId.has('radio'))) {
+  throw new Error('music runtime reconciliation absence conflicts with destination');
+}
+const withMetadata = (document, source, existing) => {
+  if (has(source, 'version')) document.version = source.version;
+  if (existing && has(existing, '_class')) {
+    if (existing._class !== targetClass) {
+      throw new Error('music runtime reconciliation target class is invalid');
+    }
+    document._class = existing._class;
+  }
+  return document;
+};
+let queueTarget = null;
+let radioTarget = null;
+if (queue !== null) {
+  queueTarget = withMetadata(
+    {_id:'queue',kind:'QUEUE',queue:{entries:queue.entries}},
+    queue, byId.get('queue'));
+  reconciliationPhase = 'queue-replacement';
+  destination.replaceOne({_id:'queue'}, queueTarget, {upsert:true});
+}
+if (radio !== null) {
+  const payload = {
+    stationSequence:radio.stationSequence,
+    trackId:radio.trackId,
+    observedToken:radio.observedToken,
+    startedAt:radio.startedAt,
+    durationSeconds:radio.durationSeconds,
+    source:radio.source
+  };
+  if (has(radio, 'queueEntryId')) payload.queueEntryId = radio.queueEntryId;
+  radioTarget = withMetadata({_id:'radio',kind:'RADIO',radio:payload},
+    radio, byId.get('radio'));
+  reconciliationPhase = 'radio-replacement';
+  destination.replaceOne({_id:'radio'}, radioTarget, {upsert:true});
+}
+reconciliationPhase = 'readback';
+const canonical = (value) => EJSON.stringify(value, {relaxed:false});
+if ((queueTarget !== null && canonical(destination.findOne({_id:'queue'})) !== canonical(queueTarget)) ||
+    (radioTarget !== null && canonical(destination.findOne({_id:'radio'})) !== canonical(radioTarget)) ||
+    destination.countDocuments({}) !== (queueTarget !== null ? 1 : 0) + (radioTarget !== null ? 1 : 0)) {
+  throw new Error('music runtime reconciliation readback failed');
+}
+print(JSON.stringify({
+  complete:true,
+  database:'christopherbell',
+  destinationCount:(queueTarget !== null ? 1 : 0) + (radioTarget !== null ? 1 : 0),
+  sourcePresence:{queue:queue !== null,radio:radio !== null}
+}));
+} catch (failure) {
+  print(JSON.stringify({
+    complete:false,
+    phase:reconciliationPhase,
+    errorCode:reconciliationErrorCodes[reconciliationPhase]
+  }));
+}
+'@
+}
+
 function New-ProductionMusicRuntimeRollbackFailure {
     param(
         [Parameter(Mandatory)][string]$Message,
         [Parameter(Mandatory)][System.Exception]$Cause
     )
 
-    return [InvalidOperationException]::new($Message, $Cause)
+    return [System.InvalidOperationException]::new($Message, $Cause)
 }
 
 function Assert-ProductionMusicRuntimeBackup {
@@ -283,7 +559,7 @@ function ConvertFrom-ProductionMusicRuntimeRollback {
                 [string]$value.errorCode -cne $failureCodes[[string]$value.phase]) {
                 throw 'Invalid rollback failure metadata.'
             }
-            $phaseFailure = [InvalidOperationException]::new(
+            $phaseFailure = [System.InvalidOperationException]::new(
                 'Music runtime rollback script reported an allowlisted failure.')
             $phaseFailure.Data['MusicRuntimePhase'] = [string]$value.phase
             $phaseFailure.Data['MusicRuntimeErrorCode'] = [string]$value.errorCode
@@ -318,7 +594,7 @@ function ConvertFrom-ProductionMusicRuntimeRollback {
             $_.Exception.Data.Contains('MusicRuntimeErrorCode')) {
             throw $_.Exception
         }
-        $metadataFailure = [IO.InvalidDataException]::new(
+        $metadataFailure = [System.IO.InvalidDataException]::new(
             'Music runtime rollback returned invalid metadata.')
         $metadataFailure.Data['MusicRuntimePhase'] = 'metadata'
         $metadataFailure.Data['MusicRuntimeErrorCode'] = 'METADATA_INVALID'
@@ -346,7 +622,7 @@ function New-ProductionMusicRuntimePostBackupFailure {
     if (-not $allowed.ContainsKey($Phase) -or $allowed[$Phase] -cne $ErrorCode) {
         throw 'Music runtime rollback received an invalid internal failure phase.'
     }
-    return [InvalidOperationException]::new(
+    return [System.InvalidOperationException]::new(
         "Music runtime rollback failed [phase=$Phase,error=$ErrorCode]; retained backup: $Archive",
         $Cause)
 }
@@ -357,6 +633,157 @@ function Assert-ProductionMusicRuntimeWriterStopped {
     $service = Get-Service -Name 'ChristopherBellDev' -ErrorAction Stop
     if ([string]$service.Status -cne 'Stopped') {
         throw $FailureMessage
+    }
+}
+
+function Invoke-ProductionMusicRuntimeReverseCopyNoLock {
+    param([Parameter(Mandatory)]$Config)
+
+    Assert-ProductionMusicRuntimeWriterStopped `
+        -FailureMessage 'ChristopherBellDev must be stopped before Music runtime rollback.'
+    $operationStartedAt = Get-Date
+    $backup = New-ProductionBackup
+    Assert-ProductionMusicRuntimeBackup `
+        -Archive $backup `
+        -OperationStartedAt $operationStartedAt
+    try {
+        Assert-ProductionMusicRuntimeWriterStopped `
+            -FailureMessage 'ChristopherBellDev must remain stopped during Music runtime rollback.'
+    } catch {
+        throw (New-ProductionMusicRuntimePostBackupFailure `
+            -Phase 'writer-check' `
+            -ErrorCode 'WRITER_NOT_STOPPED' `
+            -Archive $backup `
+            -Cause $_.Exception)
+    }
+    try {
+        $json = Invoke-CheckedProcess `
+            -FilePath $Config.mongoShellExe `
+            -ArgumentList @(
+                '--quiet'
+                '--norc'
+                'mongodb://127.0.0.1:27017/admin'
+                '--eval'
+                (Get-ProductionMusicRuntimeRollbackScript)
+            ) `
+            -WorkingDirectory $Config.repositoryPath
+    } catch {
+        throw (New-ProductionMusicRuntimePostBackupFailure `
+            -Phase 'process' `
+            -ErrorCode 'MONGOSH_PROCESS_FAILED' `
+            -Archive $backup `
+            -Cause $_.Exception)
+    }
+    try {
+        $result = ConvertFrom-ProductionMusicRuntimeRollback -Json $json
+    } catch {
+        $phase = if ($_.Exception.Data.Contains('MusicRuntimePhase')) {
+            [string]$_.Exception.Data['MusicRuntimePhase']
+        } else { 'metadata' }
+        $errorCode = if ($_.Exception.Data.Contains('MusicRuntimeErrorCode')) {
+            [string]$_.Exception.Data['MusicRuntimeErrorCode']
+        } else { 'METADATA_INVALID' }
+        throw (New-ProductionMusicRuntimePostBackupFailure `
+            -Phase $phase `
+            -ErrorCode $errorCode `
+            -Archive $backup `
+            -Cause $_.Exception)
+    }
+    $result | Add-Member -NotePropertyName backup -NotePropertyValue $backup
+    return $result
+}
+
+function Invoke-ProductionMusicRuntimeReconciliationNoLock {
+    param([Parameter(Mandatory)]$Config)
+
+    Assert-ProductionMusicRuntimeWriterStopped `
+        -FailureMessage 'ChristopherBellDev must be stopped before Music runtime reconciliation.'
+    $operationStartedAt = Get-Date
+    $backup = New-ProductionBackup
+    Assert-ProductionMusicRuntimeBackup `
+        -Archive $backup `
+        -OperationStartedAt $operationStartedAt
+    try {
+        Assert-ProductionMusicRuntimeWriterStopped `
+            -FailureMessage 'ChristopherBellDev must remain stopped during Music runtime reconciliation.'
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            "Music runtime reconciliation failed [phase=writer-check,error=WRITER_NOT_STOPPED]; retained backup: $backup",
+            $_.Exception)
+    }
+    try {
+        $json = Invoke-CheckedProcess `
+            -FilePath $Config.mongoShellExe `
+            -ArgumentList @(
+                '--quiet','--norc','mongodb://127.0.0.1:27017/admin','--eval',
+                (Get-ProductionMusicRuntimeReconciliationScript)) `
+            -WorkingDirectory $Config.repositoryPath
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            "Music runtime reconciliation failed [phase=process,error=MONGOSH_PROCESS_FAILED]; retained backup: $backup",
+            $_.Exception)
+    }
+    try {
+        $value = $json | ConvertFrom-Json -ErrorAction Stop
+        $names = @($value.PSObject.Properties.Name)
+        if ($value.complete -is [bool] -and -not $value.complete) {
+            $failures = @{
+                'preflight' = 'PREFLIGHT_FAILED'
+                'queue-replacement' = 'QUEUE_REPLACEMENT_FAILED'
+                'radio-replacement' = 'RADIO_REPLACEMENT_FAILED'
+                'readback' = 'READBACK_FAILED'
+            }
+            if ($names.Count -ne 3 -or
+                @(@('complete','phase','errorCode') |
+                    Where-Object { $_ -notin $names }).Count -ne 0 -or
+                $value.phase -isnot [string] -or
+                $value.errorCode -isnot [string] -or
+                -not $failures.ContainsKey([string]$value.phase) -or
+                [string]$value.errorCode -cne $failures[[string]$value.phase]) {
+                throw 'Invalid failure metadata.'
+            }
+            $phaseFailure = [System.InvalidOperationException]::new(
+                'Music runtime reconciliation script reported an allowlisted failure.')
+            $phaseFailure.Data['MusicRuntimePhase'] = [string]$value.phase
+            $phaseFailure.Data['MusicRuntimeErrorCode'] = [string]$value.errorCode
+            throw $phaseFailure
+        }
+        $presenceNames = @($value.sourcePresence.PSObject.Properties.Name)
+        if ($names.Count -ne 4 -or
+            @(@('complete','database','destinationCount','sourcePresence') |
+                Where-Object { $_ -notin $names }).Count -ne 0 -or
+            $value.complete -isnot [bool] -or -not $value.complete -or
+            [string]$value.database -cne 'christopherbell' -or
+            ($value.destinationCount -isnot [int] -and
+                $value.destinationCount -isnot [long]) -or
+            $presenceNames.Count -ne 2 -or
+            @(@('queue','radio') | Where-Object { $_ -notin $presenceNames }).Count -ne 0 -or
+            $value.sourcePresence.queue -isnot [bool] -or
+            $value.sourcePresence.radio -isnot [bool] -or
+            [int]$value.destinationCount -ne
+                ([int]$value.sourcePresence.queue + [int]$value.sourcePresence.radio)) {
+            throw 'Invalid metadata.'
+        }
+    } catch {
+        $phase = if ($_.Exception.Data.Contains('MusicRuntimePhase')) {
+            [string]$_.Exception.Data['MusicRuntimePhase']
+        } else { 'metadata' }
+        $errorCode = if ($_.Exception.Data.Contains('MusicRuntimeErrorCode')) {
+            [string]$_.Exception.Data['MusicRuntimeErrorCode']
+        } else { 'METADATA_INVALID' }
+        throw [System.InvalidOperationException]::new(
+            "Music runtime reconciliation failed [phase=$phase,error=$errorCode]; retained backup: $backup",
+            $_.Exception)
+    }
+    return [pscustomobject][ordered]@{
+        complete = $true
+        database = 'christopherbell'
+        destinationCount = [int]$value.destinationCount
+        sourcePresence = [pscustomobject][ordered]@{
+            queue = [bool]$value.sourcePresence.queue
+            radio = [bool]$value.sourcePresence.radio
+        }
+        backup = $backup
     }
 }
 
@@ -385,62 +812,14 @@ function Invoke-ProductionMusicRuntimeStateRollback {
     $lock = Enter-DeploymentLock `
         -LockPath (Join-Path $config.programDataRoot 'locks\deploy.lock')
     try {
-        Assert-ProductionMusicRuntimeWriterStopped `
-            -FailureMessage 'ChristopherBellDev must be stopped before Music runtime rollback.'
-        $operationStartedAt = Get-Date
-        $backup = New-ProductionBackup
-        Assert-ProductionMusicRuntimeBackup `
-            -Archive $backup `
-            -OperationStartedAt $operationStartedAt
-        try {
-            Assert-ProductionMusicRuntimeWriterStopped `
-                -FailureMessage 'ChristopherBellDev must remain stopped during Music runtime rollback.'
-        } catch {
-            throw (New-ProductionMusicRuntimePostBackupFailure `
-                -Phase 'writer-check' `
-                -ErrorCode 'WRITER_NOT_STOPPED' `
-                -Archive $backup `
-                -Cause $_.Exception)
-        }
-        try {
-            $json = Invoke-CheckedProcess `
-                -FilePath $config.mongoShellExe `
-                -ArgumentList @(
-                    '--quiet'
-                    '--norc'
-                    'mongodb://127.0.0.1:27017/admin'
-                    '--eval'
-                    (Get-ProductionMusicRuntimeRollbackScript)
-                ) `
-                -WorkingDirectory $config.repositoryPath
-        } catch {
-            throw (New-ProductionMusicRuntimePostBackupFailure `
-                -Phase 'process' `
-                -ErrorCode 'MONGOSH_PROCESS_FAILED' `
-                -Archive $backup `
-                -Cause $_.Exception)
-        }
-        try {
-            $result = ConvertFrom-ProductionMusicRuntimeRollback -Json $json
-        } catch {
-            $phase = if ($_.Exception.Data.Contains('MusicRuntimePhase')) {
-                [string]$_.Exception.Data['MusicRuntimePhase']
-            } else { 'metadata' }
-            $errorCode = if ($_.Exception.Data.Contains('MusicRuntimeErrorCode')) {
-                [string]$_.Exception.Data['MusicRuntimeErrorCode']
-            } else { 'METADATA_INVALID' }
-            throw (New-ProductionMusicRuntimePostBackupFailure `
-                -Phase $phase `
-                -ErrorCode $errorCode `
-                -Archive $backup `
-                -Cause $_.Exception)
-        }
-        $result | Add-Member -NotePropertyName backup -NotePropertyValue $backup
-        return $result
+        return Invoke-ProductionMusicRuntimeReverseCopyNoLock -Config $config
     } finally {
         $lock.Dispose()
     }
 }
 
 Export-ModuleMember -Function `
-    Get-ProductionMusicRuntimeRollbackScript,Invoke-ProductionMusicRuntimeStateRollback
+    Get-ProductionMusicRuntimeRollbackScript,Invoke-ProductionMusicRuntimeStateRollback,`
+    Invoke-ProductionMusicRuntimeReverseCopyNoLock,Read-ProductionMusicSchemaDirection,`
+    Write-ProductionMusicSchemaDirection,Get-ProductionMusicRuntimeReconciliationScript,`
+    Invoke-ProductionMusicRuntimeReconciliationNoLock,Get-ProductionMusicMigrationActivationNoLock

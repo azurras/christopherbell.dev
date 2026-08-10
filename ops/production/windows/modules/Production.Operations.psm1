@@ -30,9 +30,62 @@ function Invoke-ProductionRollback {
         }
         Assert-ReleasePath $config $current | Out-Null
         Assert-ReleasePath $config $previous | Out-Null
+        $direction = Read-ProductionMusicSchemaDirection -Config $config
+        if ($direction -and
+            [string]$direction.state -eq 'TARGET_CUTOVER_IN_PROGRESS') {
+            throw ('Production rollback is blocked because the first Music schema cutover is incomplete. ' +
+                'Keep the writer stopped and complete bounded recovery under deploy.lock.')
+        }
+        if ($direction -and
+            [string]$direction.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+            throw ('Production rollback is blocked because the legacy Music schema is active. ' +
+                'Deploy a target-schema release to run locked reconciliation.')
+        }
         if ($WhatIf) {
             Write-Output "Would roll back from $current to $previous"
             return
+        }
+
+        if (-not $direction -and
+            (Get-ProductionMusicMigrationActivationNoLock -Config $config)) {
+            throw ('Music runtime migration is active but the schema-direction marker is absent; ' +
+                'rollback is blocked. Restore or initialize the protected marker before retrying.')
+        }
+
+        if ($direction -and [string]$direction.state -eq 'TARGET_ACTIVE') {
+            $targetSha = Split-Path -Leaf $current
+            $legacySha = Split-Path -Leaf $previous
+            if ($targetSha -cne [string]$direction.targetRelease -or
+                $legacySha -cne [string]$direction.legacyRelease) {
+                throw 'Music runtime schema-direction release identity does not match rollback junctions.'
+            }
+            Stop-ProductionWebsiteService -ProductionPort $config.productionPort
+            try {
+                Write-ProductionMusicSchemaDirection `
+                    -Config $config `
+                    -State LEGACY_ACTIVE_RECONCILIATION_REQUIRED `
+                    -TargetRelease $targetSha `
+                    -LegacyRelease $legacySha
+                Invoke-ProductionMusicRuntimeReverseCopyNoLock -Config $config | Out-Null
+                Set-AtomicJunction $config $currentPath $previous
+                Set-AtomicJunction $config $previousPath $current
+                Start-Service ChristopherBellDev
+                Test-ProductionEndpoints $config $config.productionPort
+                Test-ProductionPublicEndpoints -Config $config | Out-Null
+                return
+            } catch {
+                $failure = $_.Exception
+                try {
+                    Stop-ProductionWebsiteService -ProductionPort $config.productionPort
+                } catch {
+                    throw [System.AggregateException]::new(
+                        'Migration-aware rollback failed and the writer stop postcondition also failed.',
+                        [System.Exception[]]@($failure, $_.Exception))
+                }
+                throw [System.InvalidOperationException]::new(
+                    'Migration-aware rollback failed; the writer remains stopped.',
+                    $failure)
+            }
         }
 
         Stop-ProductionWebsiteService -ProductionPort $config.productionPort
@@ -91,8 +144,31 @@ function Restart-ProductionService {
     [CmdletBinding()]
     param([switch]$Verify)
     $config = Read-ProductionConfig
-    Restart-Service ChristopherBellDev
-    if ($Verify) { Test-ProductionEndpoints $config $config.productionPort }
+    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    try {
+        $direction = Read-ProductionMusicSchemaDirection -Config $config
+        if ($direction) {
+            if ([string]$direction.state -eq 'TARGET_CUTOVER_IN_PROGRESS') {
+                throw ('Manual restart is blocked because the first Music schema cutover is incomplete. ' +
+                    'Complete bounded recovery under deploy.lock.')
+            }
+            $current = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
+            $activeSha = if ($current) { Split-Path -Leaf $current } else { '' }
+            $expectedSha = if ([string]$direction.state -eq 'TARGET_ACTIVE') {
+                [string]$direction.targetRelease
+            } else {
+                [string]$direction.legacyRelease
+            }
+            if ($activeSha -cne $expectedSha) {
+                throw ('The active binary contradicts the Music runtime schema-direction marker; ' +
+                    'manual restart is blocked. Use protected deploy or rollback orchestration.')
+            }
+        }
+        Restart-Service ChristopherBellDev
+        if ($Verify) { Test-ProductionEndpoints $config $config.productionPort }
+    } finally {
+        $lock.Dispose()
+    }
 }
 
 function Get-ProductionReleases {

@@ -525,8 +525,8 @@ Commands: install, deploy, status, logs, restart, releases, rollback, backup,
           auto-install, auto-deploy, auto-status, auto-remove, sensor-install,
           sensor-status, sensor-enable, sensor-disable
 
-music-runtime-rollback previews by default. Actual reverse-copy additionally requires
--ConfirmMusicRuntimeRollback and a stopped ChristopherBellDev service.
+Use -WhatIf to preview music-runtime-rollback. Confirmed execution requires
+-ConfirmMusicRuntimeRollback and uses the single-lock coordinated binary rollback boundary.
 '@ | Write-Output
 }
 

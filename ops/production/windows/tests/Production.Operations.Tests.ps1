@@ -1,10 +1,14 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.MusicRuntime.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Sensors.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Operations.psm1') -Force
 
 Describe 'native Windows production operations' {
     InModuleScope Production.Operations {
+        BeforeEach {
+            Mock Get-ProductionMusicMigrationActivationNoLock { $false }
+        }
         BeforeAll {
             function New-ValidStartupTask {
                 param([string]$ProgramDataRoot = 'C:\ProgramData\christopherbell.dev')
@@ -120,6 +124,139 @@ Describe 'native Windows production operations' {
             Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
             Mock Get-JunctionTarget { $null }
             { Invoke-ProductionRollback -WhatIf } | Should -Throw '*Both current and previous*'
+        }
+
+        It 'holds one deploy lock through migration-aware reverse copy switch start and health' {
+            $targetSha = '0123456789abcdef0123456789abcdef01234567'
+            $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
+            $events = [Collections.Generic.List[string]]::new()
+            $lock = [pscustomobject]@{ }
+            $lock | Add-Member ScriptMethod Dispose { [void]$events.Add('lock-release') }
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock {
+                [void]$events.Add('lock-acquire')
+                $lock
+            }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { return "C:\data\releases\$targetSha" }
+                return "C:\data\releases\$legacySha"
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='TARGET_ACTIVE'
+                    targetRelease=$targetSha
+                    legacyRelease=$legacySha
+                }
+            }
+            Mock Stop-ProductionWebsiteService { [void]$events.Add('writer-stop') }
+            Mock Write-ProductionMusicSchemaDirection {
+                [void]$events.Add("marker:$State")
+            }
+            Mock Invoke-ProductionMusicRuntimeReverseCopyNoLock {
+                [void]$events.Add('reverse-copy')
+            }
+            Mock Set-AtomicJunction { [void]$events.Add("switch:$Path") }
+            Mock Start-Service { [void]$events.Add('writer-start') }
+            Mock Test-ProductionEndpoints { [void]$events.Add('health') }
+            Mock Test-ProductionPublicEndpoints { [void]$events.Add('public-health') }
+
+            Invoke-ProductionRollback
+
+            $events | Should -Be @(
+                'lock-acquire','writer-stop',
+                'marker:LEGACY_ACTIVE_RECONCILIATION_REQUIRED','reverse-copy',
+                'switch:C:\data\current','switch:C:\data\previous',
+                'writer-start','health','public-health','lock-release')
+            Should -Invoke Enter-DeploymentLock -Times 1 -Exactly
+        }
+
+        It 'fails closed and releases the single rollback lock when <phase> fails' -TestCases @(
+            @{ phase='marker' }
+            @{ phase='reverse-copy' }
+            @{ phase='switch' }
+            @{ phase='start' }
+            @{ phase='health' }
+        ) {
+            param($phase)
+            $targetSha = '0123456789abcdef0123456789abcdef01234567'
+            $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
+            $script:released = $false
+            $lock = [pscustomobject]@{ }
+            $lock | Add-Member ScriptMethod Dispose { $script:released = $true }
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
+            Mock Enter-DeploymentLock { $lock }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { "C:\data\releases\$targetSha" }
+                else { "C:\data\releases\$legacySha" }
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$targetSha; legacyRelease=$legacySha }
+            }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Write-ProductionMusicSchemaDirection { if ($phase -eq 'marker') { throw 'marker failed' } }
+            Mock Invoke-ProductionMusicRuntimeReverseCopyNoLock { if ($phase -eq 'reverse-copy') { throw 'reverse failed' } }
+            Mock Set-AtomicJunction { if ($phase -eq 'switch') { throw 'switch failed' } }
+            Mock Start-Service { if ($phase -eq 'start') { throw 'start failed' } }
+            Mock Test-ProductionEndpoints { if ($phase -eq 'health') { throw 'health failed' } }
+            Mock Test-ProductionPublicEndpoints { }
+
+            { Invoke-ProductionRollback } | Should -Throw '*writer remains stopped*'
+
+            $script:released | Should -BeTrue
+            Should -Invoke Enter-DeploymentLock -Times 1
+            Should -Invoke Stop-ProductionWebsiteService -Times 2
+        }
+
+        It 'allows no rollback effect when the single deploy lock contends' {
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data' } }
+            Mock Enter-DeploymentLock { throw 'lock contended' }
+            Mock Get-JunctionTarget { throw 'junction must not be read' }
+            Mock Stop-ProductionWebsiteService { throw 'writer must not be stopped' }
+
+            { Invoke-ProductionRollback } | Should -Throw '*lock contended*'
+
+            Should -Invoke Get-JunctionTarget -Times 0
+            Should -Invoke Stop-ProductionWebsiteService -Times 0
+        }
+
+        It 'fails closed before writer stop when schema migration is active but marker is absent' {
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { 'C:\data\releases\current' }
+                else { 'C:\data\releases\previous' }
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Get-ProductionMusicMigrationActivationNoLock { $true }
+            Mock Stop-ProductionWebsiteService { }
+
+            { Invoke-ProductionRollback } | Should -Throw '*marker is absent*'
+
+            Should -Invoke Stop-ProductionWebsiteService -Times 0
+        }
+
+        It 'refuses a manual restart when the active binary contradicts schema direction' {
+            $lock = [IO.MemoryStream]::new()
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8443 } }
+            Mock Enter-DeploymentLock { $lock }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
+                    targetRelease='2222222222222222222222222222222222222222'
+                    legacyRelease='1111111111111111111111111111111111111111'
+                }
+            }
+            Mock Get-JunctionTarget { 'C:\data\releases\2222222222222222222222222222222222222222' }
+            Mock Restart-Service { }
+
+            { Restart-ProductionService -Verify } | Should -Throw '*contradicts*schema-direction*'
+
+            Should -Invoke Restart-Service -Times 0
         }
 
         It 'uses the controlled stop for rollback and restoration' {

@@ -44,6 +44,19 @@ function Get-ActiveReleaseSha {
 function Invoke-AutoDeployOnce {
     param($Config = (Read-ProductionConfig))
     $state = Read-AutoDeployState $Config
+    $direction = Read-ProductionMusicSchemaDirection -Config $Config
+    if (-not $direction) {
+        throw ('Automatic deployment is blocked because the Music schema-direction marker is absent. ' +
+            'Run the protected first-cutover deploy interactively.')
+    }
+    if ([string]$direction.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+        throw ('Automatic deployment is blocked while legacy Music runtime state requires reconciliation. ' +
+            'Run the protected deploy command interactively to reconcile before a target writer starts.')
+    }
+    if ([string]$direction.state -ne 'TARGET_ACTIVE') {
+        throw ('Automatic deployment is blocked because the first Music schema cutover is incomplete. ' +
+            'Complete bounded recovery interactively.')
+    }
     $remote = Get-RemoteMainSha $Config
     $now = (Get-Date).ToUniversalTime()
     $state.lastCheckedAt = $now.ToString('o')

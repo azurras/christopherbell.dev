@@ -1,4 +1,5 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.MusicRuntime.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.AutoDeploy.psm1') -Force
@@ -11,6 +12,31 @@ Describe 'automatic origin main deployment' {
         Mock Protect-ProductionPath {} -ModuleName Production.AutoDeploy
         Mock Protect-ProductionTree {} -ModuleName Production.AutoDeploy
         Mock Assert-ProtectedProductionTree {} -ModuleName Production.AutoDeploy
+        Mock Read-ProductionMusicSchemaDirection {
+            [pscustomobject]@{ state='TARGET_ACTIVE' }
+        } -ModuleName Production.AutoDeploy
+    }
+
+    It 'refuses automatic deploy before remote access while legacy reconciliation is required' {
+        Mock Read-ProductionMusicSchemaDirection {
+            [pscustomobject]@{ state='LEGACY_ACTIVE_RECONCILIATION_REQUIRED' }
+        } -ModuleName Production.AutoDeploy
+        Mock Get-RemoteMainSha { throw 'remote must not be read' } -ModuleName Production.AutoDeploy
+        Mock Invoke-ProductionDeploy { throw 'deploy must not run' } -ModuleName Production.AutoDeploy
+
+        { Invoke-AutoDeployOnce $config } | Should -Throw '*blocked*legacy*reconciliation*'
+
+        Should -Invoke Get-RemoteMainSha -Times 0 -ModuleName Production.AutoDeploy
+        Should -Invoke Invoke-ProductionDeploy -Times 0 -ModuleName Production.AutoDeploy
+    }
+
+    It 'refuses automatic deploy before remote access when schema direction is absent' {
+        Mock Read-ProductionMusicSchemaDirection { $null } -ModuleName Production.AutoDeploy
+        Mock Get-RemoteMainSha { throw 'remote must not be read' } -ModuleName Production.AutoDeploy
+
+        { Invoke-AutoDeployOnce $config } | Should -Throw '*marker is absent*'
+
+        Should -Invoke Get-RemoteMainSha -Times 0 -ModuleName Production.AutoDeploy
     }
 
     It 'does not deploy when the remote SHA is already active' {

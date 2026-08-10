@@ -547,6 +547,50 @@ Describe 'Music runtime rollback operation' {
             }
         }
 
+        It 'treats an absent schema-direction marker as migration not activated' {
+            $config = [pscustomobject]@{ programDataRoot = $TestDrive }
+
+            Read-ProductionMusicSchemaDirection -Config $config |
+                Should -BeNullOrEmpty
+        }
+
+        It 'rejects malformed schema-direction state without echoing marker content' {
+            $config = [pscustomobject]@{ programDataRoot = $TestDrive }
+            $stateRoot = Join-Path $TestDrive 'state'
+            $path = Join-Path $stateRoot 'music-runtime-schema-direction.json'
+            New-Item -ItemType Directory -Path $stateRoot | Out-Null
+            '{"version":1,"state":"UNSAFE","private":"secret-track-token"}' |
+                Set-Content -LiteralPath $path -Encoding utf8
+
+            $failure = $null
+            try { Read-ProductionMusicSchemaDirection -Config $config }
+            catch { $failure = $_.Exception }
+
+            $failure.Message | Should -Be 'Music runtime schema-direction marker is invalid.'
+            $failure.ToString() | Should -Not -Match 'secret-track-token|UNSAFE'
+        }
+
+        It 'atomically protects and replaces the bounded schema-direction marker' {
+            $config = [pscustomobject]@{ programDataRoot = $TestDrive }
+            $events = [Collections.Generic.List[string]]::new()
+            Mock Protect-ProductionPath { [void]$events.Add("protect:$Path") }
+            Mock Assert-ProtectedProductionPath { [void]$events.Add("verify:$Path") }
+
+            Write-ProductionMusicSchemaDirection `
+                -Config $config `
+                -State TARGET_ACTIVE `
+                -TargetRelease '0123456789abcdef0123456789abcdef01234567' `
+                -LegacyRelease '89abcdef0123456789abcdef0123456789abcdef'
+
+            $value = Read-ProductionMusicSchemaDirection -Config $config
+            $value.state | Should -Be 'TARGET_ACTIVE'
+            @($value.PSObject.Properties.Name) | Should -Be @(
+                'version','state','updatedAtEpochMillis','targetRelease','legacyRelease')
+            ($events -join '|') | Should -Match 'protect:.*\.tmp\|verify:.*\.tmp'
+            @(Get-ChildItem (Join-Path $TestDrive 'state') -Filter '*.tmp') |
+                Should -BeNullOrEmpty
+        }
+
         BeforeEach {
             $script:lastDeploymentLock = New-TestDeploymentLock
             Mock Enter-DeploymentLock { $script:lastDeploymentLock }
@@ -571,6 +615,15 @@ Describe 'Music runtime rollback operation' {
             )) {
                 $script | Should -Match ([regex]::Escape("'$($failure.Phase)': '$($failure.Code)'"))
             }
+        }
+
+        It 'generates an exact optional legacy-to-target reconciliation script without deletion' {
+            $script = Get-ProductionMusicRuntimeReconciliationScript
+
+            ([regex]::Matches($script, '\.replaceOne\s*\(')).Count | Should -Be 2
+            $script | Should -Not -Match '\.(drop|dropDatabase|deleteOne|deleteMany|remove|renameCollection)\s*\('
+            $script | Should -Match 'sourcePresence'
+            $script | Should -Match "getCollection\('music_runtime_state'\)"
         }
 
         It 'returns a no-write exact preview without reading protected configuration' {
@@ -1093,6 +1146,70 @@ print(JSON.stringify({
 '@
         ($proof | ConvertFrom-Json).queueUnchanged | Should -BeTrue
         ($proof | ConvertFrom-Json).radioUnchanged | Should -BeTrue
+    }
+
+    It 'reconciles exact retained legacy presence queue=<Queue> radio=<Radio>' -TestCases @(
+        @{ Queue=$true; Radio=$true }
+        @{ Queue=$true; Radio=$false }
+        @{ Queue=$false; Radio=$true }
+        @{ Queue=$false; Radio=$false }
+    ) {
+        param($Queue, $Radio)
+        $fixture = "const target=db.getSiblingDB('christopherbell');"
+        if ($Queue) {
+            $fixture += "target.music_queue_state.insertOne({_id:'global',entries:[{id:'entry-2',trackId:'legacy-track',observedToken:'legacy-token',enqueuedByAccountId:'account-2',enqueuedAt:new Date('2026-08-09T13:00:00Z')}],version:NumberLong('12')});"
+        }
+        if ($Radio) {
+            $fixture += "target.music_radio_state.insertOne({_id:'global',stationSequence:NumberLong('13'),trackId:'legacy-radio',observedToken:'legacy-radio-token',startedAt:new Date('2026-08-09T13:01:00Z'),durationSeconds:91.5,source:'RADIO',version:NumberLong('14')});"
+        }
+        $null = Invoke-DisposableMusicRuntimeMongo -Script $fixture
+
+        $metadata = Invoke-DisposableMusicRuntimeMongo `
+            -Script (Get-ProductionMusicRuntimeReconciliationScript) |
+            ConvertFrom-Json -ErrorAction Stop
+
+        $metadata.complete | Should -BeTrue
+        [bool]$metadata.sourcePresence.queue | Should -Be $Queue
+        [bool]$metadata.sourcePresence.radio | Should -Be $Radio
+        [int]$metadata.destinationCount | Should -Be ([int]$Queue + [int]$Radio)
+
+        $proof = Invoke-DisposableMusicRuntimeMongo -Script @'
+const target=db.getSiblingDB('christopherbell');
+const queue=target.music_runtime_state.findOne({_id:'queue'});
+const radio=target.music_runtime_state.findOne({_id:'radio'});
+print(JSON.stringify({
+  queuePresent:queue !== null,
+  radioPresent:radio !== null,
+  queueExact:queue === null || (queue.kind === 'QUEUE' && queue.queue.entries[0].trackId === 'legacy-track' && queue.version.toString() === '12'),
+  radioExact:radio === null || (radio.kind === 'RADIO' && radio.radio.trackId === 'legacy-radio' && radio.version.toString() === '14')
+}));
+'@ | ConvertFrom-Json -ErrorAction Stop
+        [bool]$proof.queuePresent | Should -Be $Queue
+        [bool]$proof.radioPresent | Should -Be $Radio
+        $proof.queueExact | Should -BeTrue
+        $proof.radioExact | Should -BeTrue
+    }
+
+    It 'rejects an absent legacy singleton conflicting with retained target state before mutation' {
+        $null = Invoke-DisposableMusicRuntimeMongo -Script @'
+const target=db.getSiblingDB('christopherbell');
+target.music_runtime_state.insertOne({_id:'queue',kind:'QUEUE',queue:{entries:[]}});
+target.music_radio_state.insertOne({_id:'global',stationSequence:NumberLong('1'),trackId:'legacy-radio',observedToken:'token',startedAt:new Date('2026-08-09T13:01:00Z'),durationSeconds:91.5,source:'RADIO'});
+'@
+
+        $metadata = Invoke-DisposableMusicRuntimeMongo `
+            -Script (Get-ProductionMusicRuntimeReconciliationScript) |
+            ConvertFrom-Json -ErrorAction Stop
+
+        $metadata.complete | Should -BeFalse
+        $metadata.phase | Should -Be 'preflight'
+        $metadata.errorCode | Should -Be 'PREFLIGHT_FAILED'
+        $proof = Invoke-DisposableMusicRuntimeMongo -Script @'
+const target=db.getSiblingDB('christopherbell');
+print(JSON.stringify({queueCount:target.music_runtime_state.countDocuments({_id:'queue'}),radioCount:target.music_runtime_state.countDocuments({_id:'radio'})}));
+'@ | ConvertFrom-Json -ErrorAction Stop
+        [int]$proof.queueCount | Should -Be 1
+        [int]$proof.radioCount | Should -Be 0
     }
 
     It 'rejects changed server process identity before destructive fixture mutation' {

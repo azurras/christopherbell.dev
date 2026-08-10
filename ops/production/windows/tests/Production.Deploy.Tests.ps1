@@ -1,8 +1,14 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Production.MusicRuntime.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') -Force
 
 Describe 'native Windows deployment' {
     InModuleScope Production.Deploy {
+        BeforeEach {
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$target; legacyRelease=$legacy }
+            }
+        }
         BeforeAll {
             function New-ServiceStateStub {
                 param(
@@ -850,10 +856,18 @@ Describe 'native Windows deployment' {
             $script:deployEvents = [System.Collections.Generic.List[string]]::new()
             Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; remote='origin'; branch='main' } }
             Mock Enter-DeploymentLock { $lock }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='TARGET_ACTIVE'
+                    targetRelease='1111111111111111111111111111111111111111'
+                    legacyRelease='2222222222222222222222222222222222222222'
+                }
+            }
             Mock Resolve-OriginMainRelease { '0123456789abcdef0123456789abcdef01234567' }
             Mock New-ReleaseFromOriginMain { 'C:\data\releases\new' }
             Mock Invoke-CandidateReleaseValidation { [void]$script:deployEvents.Add('candidate-cleaned') }
             Mock Switch-ProductionRelease { [void]$script:deployEvents.Add('live-writer-stop-and-cutover') }
+            Mock Write-ProductionMusicSchemaDirection { }
             Mock Remove-ExpiredReleases { }
 
             Invoke-ProductionDeploy
@@ -862,6 +876,184 @@ Describe 'native Windows deployment' {
             Should -Invoke Invoke-CandidateReleaseValidation -Times 1 -Exactly -ParameterFilter {
                 $Sha -eq '0123456789abcdef0123456789abcdef01234567'
             }
+        }
+
+        It 'refuses normal deploy before remote access when schema direction is absent' {
+            $lock = [IO.MemoryStream]::new()
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data' } }
+            Mock Enter-DeploymentLock { $lock }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Resolve-OriginMainRelease { throw 'remote must not be read' }
+
+            { Invoke-ProductionDeploy } | Should -Throw '*marker is absent*'
+
+            Should -Invoke Resolve-OriginMainRelease -Times 0
+        }
+
+        It 'holds one deploy lock through legacy reconciliation, switch, marker, start, and health' {
+            $events = [System.Collections.Generic.List[string]]::new()
+            $lock = [pscustomobject]@{ }
+            $lock | Add-Member ScriptMethod Dispose { [void]$events.Add('lock:release') }
+            $legacy = '1111111111111111111111111111111111111111'
+            $target = '2222222222222222222222222222222222222222'
+            $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8443; remote='origin'; branch='main' }
+            Mock Read-ProductionConfig { $config }
+            Mock Enter-DeploymentLock { [void]$events.Add('lock:acquire'); $lock }
+            Mock Read-ProductionMusicSchemaDirection { [pscustomobject]@{ state='LEGACY_ACTIVE_RECONCILIATION_REQUIRED'; targetRelease=$target; legacyRelease=$legacy } }
+            Mock Resolve-OriginMainRelease { $target }
+            Mock New-ReleaseFromOriginMain { "C:\data\releases\$target" }
+            Mock Invoke-CandidateReleaseValidation { [void]$events.Add('candidate') }
+            Mock Assert-ReleasePath { $Release }
+            Mock Get-JunctionTarget { "C:\data\releases\$legacy" }
+            Mock Stop-ProductionWebsiteService { [void]$events.Add('stop') }
+            Mock Invoke-ProductionMusicRuntimeReconciliationNoLock { [void]$events.Add('reconcile') }
+            Mock Set-AtomicJunction { [void]$events.Add("junction:$([IO.Path]::GetFileName($Path))") }
+            Mock Write-ProductionMusicSchemaDirection { [void]$events.Add("marker:$State") }
+            Mock Start-Service { [void]$events.Add('start') }
+            Mock Test-ProductionEndpoints { [void]$events.Add('health') }
+            Mock Test-ProductionPublicEndpoints { [void]$events.Add('public-health') }
+            Mock Remove-ExpiredReleases { [void]$events.Add('cleanup') }
+
+            Invoke-ProductionDeploy
+
+            $events | Should -Be @(
+                'lock:acquire','candidate','stop','reconcile','junction:previous','junction:current',
+                'marker:TARGET_ACTIVE','start','health','public-health','cleanup','lock:release')
+        }
+
+        It 'keeps the writer stopped and marker legacy when reconciliation fails' {
+            $lock = [IO.MemoryStream]::new()
+            $legacy = '1111111111111111111111111111111111111111'
+            $target = '2222222222222222222222222222222222222222'
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8443; remote='origin'; branch='main' } }
+            Mock Enter-DeploymentLock { $lock }
+            Mock Read-ProductionMusicSchemaDirection { [pscustomobject]@{ state='LEGACY_ACTIVE_RECONCILIATION_REQUIRED'; targetRelease=$target; legacyRelease=$legacy } }
+            Mock Resolve-OriginMainRelease { $target }
+            Mock New-ReleaseFromOriginMain { "C:\data\releases\$target" }
+            Mock Invoke-CandidateReleaseValidation { }
+            Mock Assert-ReleasePath { $Release }
+            Mock Get-JunctionTarget { "C:\data\releases\$legacy" }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Invoke-ProductionMusicRuntimeReconciliationNoLock { throw 'reconcile failed' }
+            Mock Set-AtomicJunction { }
+            Mock Write-ProductionMusicSchemaDirection { }
+            Mock Start-Service { }
+
+            { Invoke-ProductionDeploy } | Should -Throw '*writer remains stopped*'
+
+            Should -Invoke Stop-ProductionWebsiteService -Times 2
+            Should -Invoke Set-AtomicJunction -Times 0
+            Should -Invoke Write-ProductionMusicSchemaDirection -Times 0
+            Should -Invoke Start-Service -Times 0
+        }
+
+        It 'initializes target direction only after explicit verified cutover under deploy lock' {
+            $events = [System.Collections.Generic.List[string]]::new()
+            $target = '2222222222222222222222222222222222222222'
+            $legacy = '1111111111111111111111111111111111111111'
+            $lock = [pscustomobject]@{ }
+            $lock | Add-Member ScriptMethod Dispose { [void]$events.Add('lock:release') }
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8443 } }
+            Mock Enter-DeploymentLock { [void]$events.Add('lock:acquire'); $lock }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$target; legacyRelease=$legacy }
+            }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*previous') { "C:\data\releases\$legacy" }
+                else { "C:\data\releases\$target" }
+            }
+            Mock Test-ProductionEndpoints { [void]$events.Add('health') }
+            Mock Test-ProductionPublicEndpoints { [void]$events.Add('public-health') }
+            Mock Write-ProductionMusicSchemaDirection { [void]$events.Add("marker:$State") }
+
+            Confirm-ProductionMusicTargetActive `
+                -TargetRelease $target `
+                -LegacyRelease $legacy `
+                -MigrationVerified
+
+            $events | Should -Be @(
+                'lock:acquire','health','public-health','marker:TARGET_ACTIVE','lock:release')
+        }
+
+        It 'resumes a pending exact target cutover only under lock and stops again on failure' {
+            $target = '2222222222222222222222222222222222222222'
+            $legacy = '1111111111111111111111111111111111111111'
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_CUTOVER_IN_PROGRESS'; targetRelease=$target; legacyRelease=$legacy }
+            }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*previous') { "C:\data\releases\$legacy" }
+                else { "C:\data\releases\$target" }
+            }
+            Mock Start-Service { }
+            Mock Test-ProductionEndpoints { throw 'health failed' }
+            Mock Test-ProductionPublicEndpoints { }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Write-ProductionMusicSchemaDirection { }
+
+            {
+                Confirm-ProductionMusicTargetActive `
+                    -TargetRelease $target `
+                    -LegacyRelease $legacy `
+                    -MigrationVerified
+            } | Should -Throw '*writer remains stopped*'
+
+            Should -Invoke Start-Service -Times 1
+            Should -Invoke Stop-ProductionWebsiteService -Times 1
+            Should -Invoke Write-ProductionMusicSchemaDirection -Times 0
+        }
+
+        It 'initializes target direction before releasing the first migration cutover lock' {
+            $events = [System.Collections.Generic.List[string]]::new()
+            $target = '2222222222222222222222222222222222222222'
+            $legacy = '1111111111111111111111111111111111111111'
+            $lock = [pscustomobject]@{ }
+            $lock | Add-Member ScriptMethod Dispose { [void]$events.Add('lock:release') }
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; remote='origin'; branch='main' } }
+            Mock Enter-DeploymentLock { [void]$events.Add('lock:acquire'); $lock }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Assert-ReleasePath { $Path }
+            Mock Resolve-OriginMainRelease { $target }
+            Mock New-ReleaseFromOriginMain { "C:\data\releases\$target" }
+            Mock Invoke-CandidateReleaseValidation { [void]$events.Add('candidate') }
+            Mock Switch-ProductionRelease { [void]$events.Add('switch-and-health') }
+            Mock Get-JunctionTarget { "C:\data\releases\$legacy" }
+            Mock Write-ProductionMusicSchemaDirection { [void]$events.Add("marker:$State") }
+            Mock Remove-ExpiredReleases { [void]$events.Add('cleanup') }
+
+            Invoke-ProductionDeploy -MusicSchemaCutover
+
+            $events | Should -Be @(
+                'lock:acquire','candidate','marker:TARGET_CUTOVER_IN_PROGRESS',
+                'switch-and-health','marker:TARGET_ACTIVE','cleanup','lock:release')
+        }
+
+        It 'stops the target writer and retains pending direction when cutover marker finalization fails' {
+            $target = '2222222222222222222222222222222222222222'
+            $legacy = '1111111111111111111111111111111111111111'
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080; remote='origin'; branch='main' } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection { $null }
+            Mock Assert-ReleasePath { $Path }
+            Mock Get-JunctionTarget { "C:\data\releases\$legacy" }
+            Mock Resolve-OriginMainRelease { $target }
+            Mock New-ReleaseFromOriginMain { "C:\data\releases\$target" }
+            Mock Invoke-CandidateReleaseValidation { }
+            Mock Switch-ProductionRelease { }
+            Mock Write-ProductionMusicSchemaDirection {
+                if ($State -eq 'TARGET_ACTIVE') { throw 'final marker failed' }
+            }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Remove-ExpiredReleases { }
+
+            { Invoke-ProductionDeploy -MusicSchemaCutover } | Should -Throw '*writer remains stopped*'
+
+            Should -Invoke Write-ProductionMusicSchemaDirection -Times 1 -ParameterFilter {
+                $State -eq 'TARGET_CUTOVER_IN_PROGRESS'
+            }
+            Should -Invoke Stop-ProductionWebsiteService -Times 1
         }
     }
 }

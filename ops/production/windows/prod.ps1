@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $moduleRoot = Join-Path $PSScriptRoot 'modules'
 Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
-foreach ($module in 'Production.Deploy','Production.SharedFolder','Production.Install','Production.Sensors','Production.Operations','Production.MusicRuntime','Production.AutoDeploy') {
+foreach ($module in 'Production.MusicRuntime','Production.Deploy','Production.SharedFolder','Production.Install','Production.Sensors','Production.Operations','Production.AutoDeploy') {
     Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
 }
 
@@ -37,9 +37,15 @@ function Invoke-ProductionCommand {
             Get-ProductionMongoCollectionInventory | ConvertTo-Json -Depth 100
         }
         'music-runtime-rollback' = {
-            Invoke-ProductionMusicRuntimeStateRollback `
-                -Confirm:$ConfirmMusicRuntimeRollback `
-                -WhatIf:$WhatIf
+            if ($WhatIf) {
+                Invoke-ProductionMusicRuntimeStateRollback `
+                    -Confirm:$ConfirmMusicRuntimeRollback `
+                    -WhatIf
+            } elseif (-not $ConfirmMusicRuntimeRollback) {
+                throw 'Music runtime rollback requires explicit confirmation.'
+            } else {
+                Invoke-ProductionRollback
+            }
         }
         'verify-startup' = { Test-ProductionStartup }
         uninstall = { Uninstall-ProductionRuntime -WhatIf:$WhatIf }

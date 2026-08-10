@@ -65,13 +65,30 @@ preview the fixed database and three namespaces:
 .\prod.cmd music-runtime-rollback -WhatIf
 ```
 
-After confirming that preview, run the bounded operation with
-`-ConfirmMusicRuntimeRollback`. It acquires the fixed production `locks\deploy.lock`, creates a
-fresh full backup, verifies the archive against its SHA-256 sidecar, rechecks that the writer
-remains stopped, validates the exact raw BSON shapes, and replaces only the two retained
-`_id: "global"` documents. It holds the lock until output validation and failure handling finish,
-then proves both readbacks are equivalent to the current queue/radio destination state. It never
-drops, deletes, or renames a collection and emits only bounded metadata.
+After confirming that preview, run the command with `-ConfirmMusicRuntimeRollback`. The dispatcher
+routes confirmed execution through the coordinated binary rollback boundary; do not run a separate
+reverse-copy followed by `rollback`. One acquisition of the fixed production `locks\deploy.lock`
+is retained while the writer is stopped, a fresh full backup and SHA-256 sidecar are verified, the
+exact singleton BSON is reverse-copied and read back, the release junctions are switched, and the
+legacy writer is started and health-checked. Before reverse-copy, the protected atomic
+schema-direction marker becomes `LEGACY_ACTIVE_RECONCILIATION_REQUIRED`, so a crash or later
+failure cannot permit the target direction to be assumed. No step drops, deletes, or renames a
+collection.
+
+While reconciliation is required, automatic deployment and manual restart are blocked. An
+interactive `deploy` validates its candidate, stops the legacy writer under the same deploy lock,
+creates and verifies a new backup, copies each currently present legacy singleton forward with
+exact raw-shape and readback validation, switches to the target release, changes the marker to
+`TARGET_ACTIVE`, and only then starts the target writer. Queue-only, radio-only, both-present, and
+both-absent states are valid; a retained destination singleton that conflicts with an absent legacy
+singleton fails closed. Task 6 must invoke the protected deploy with `-MusicSchemaCutover`; after
+the new release and migration pass health verification, that same still-held deploy lock is used
+to change the pre-start `TARGET_CUTOVER_IN_PROGRESS` marker to `TARGET_ACTIVE` with the exact
+current and previous release identities before any other deployment or rollback command can run.
+The pending state blocks deploy, auto-deploy, rollback, and manual restart after a crash or failed
+final marker write. `Confirm-ProductionMusicTargetActive` is the bounded
+repair/confirmation seam for an already verified cutover, not a replacement for the single-lock
+first-cutover path.
 
 Keep the service stopped if any gate, replacement, or readback check fails. Preserve the reported
 backup, allowlisted phase/error code, and failure cause, and obtain approval before attempting a

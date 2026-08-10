@@ -142,6 +142,20 @@ Describe 'native Windows production command surface' {
             -ParameterFilter { $WhatIf -and $Confirm }
     }
 
+    It 'routes confirmed Music rollback through the coordinated binary rollback boundary' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
+        Mock Invoke-ProductionRollback { }
+        Mock Invoke-ProductionMusicRuntimeStateRollback { throw 'separate reverse copy is unsafe' }
+
+        Invoke-ProductionCommand `
+            -Command 'music-runtime-rollback' `
+            -ConfirmMusicRuntimeRollback
+
+        Should -Invoke Invoke-ProductionRollback -Times 1 -Exactly
+        Should -Invoke Invoke-ProductionMusicRuntimeStateRollback -Times 0
+    }
+
     It 'rejects unknown commands' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         & pwsh.exe -NoLogo -NoProfile -File (Join-Path $root 'ops\production\windows\prod.ps1') unknown-command 2>$null
