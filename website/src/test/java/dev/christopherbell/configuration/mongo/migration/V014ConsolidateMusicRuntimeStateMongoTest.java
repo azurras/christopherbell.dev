@@ -60,6 +60,138 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
   }
 
   @Test
+  void migratesNoRuntimeStateWhenBothLegacySingletonsAreAbsent() {
+    var mongo = template("neither-present");
+
+    assertThatCode(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .doesNotThrowAnyException();
+
+    assertThat(mongo.collectionExists("music_runtime_state")).isFalse();
+  }
+
+  @Test
+  void migratesOnlyThePresentQueueSingleton() {
+    var mongo = template("queue-only");
+    mongo.getCollection("music_queue_state").insertOne(queueSource(4L));
+
+    new V014ConsolidateMusicRuntimeState().apply(mongo);
+
+    assertThat(targets(mongo)).extracting(document -> document.getString("_id"))
+        .containsExactly("queue");
+    assertThat(target(mongo, "queue").get("version")).isEqualTo(4L);
+  }
+
+  @Test
+  void migratesOnlyThePresentRadioSingleton() {
+    var mongo = template("radio-only");
+    mongo.getCollection("music_radio_state").insertOne(radioSource(9L));
+
+    new V014ConsolidateMusicRuntimeState().apply(mongo);
+
+    assertThat(targets(mongo)).extracting(document -> document.getString("_id"))
+        .containsExactly("radio");
+    assertThat(target(mongo, "radio").get("version")).isEqualTo(9L);
+  }
+
+  @Test
+  void rejectsPartialTargetMembershipWithoutCompletingIt() {
+    var mongo = template("partial-target");
+    insertSources(mongo, 4L, 9L);
+    mongo.getCollection("music_runtime_state").insertOne(queueTarget(4L));
+
+    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("destination");
+
+    assertThat(targets(mongo)).extracting(document -> document.getString("_id"))
+        .containsExactly("queue");
+  }
+
+  @Test
+  void rejectsExtraTargetForAnAbsentSourceWithoutChangingTargets() {
+    var mongo = template("extra-target");
+    mongo.getCollection("music_queue_state").insertOne(queueSource(4L));
+    mongo.getCollection("music_runtime_state").insertMany(List.of(
+        queueTarget(4L),
+        radioTarget(9L)));
+
+    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("destination");
+
+    assertThat(targets(mongo)).extracting(document -> document.getString("_id"))
+        .containsExactly("queue", "radio");
+  }
+
+  @Test
+  void rejectsMoreThanOneLegacySingletonBeforeCreatingTargets() {
+    var mongo = template("duplicate-source");
+    mongo.getCollection("music_queue_state").insertMany(List.of(
+        queueSource(4L),
+        new Document(queueSource(5L)).append("_id", "duplicate")));
+
+    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("source", "cardinality");
+
+    assertThat(mongo.collectionExists("music_runtime_state")).isFalse();
+  }
+
+  @Test
+  void ordinaryVersionedSavesLockAndIsolateQueueAndRadioDocuments() {
+    var mongo = template("ordinary-versioning");
+    insertSources(mongo, 4L, 9L);
+    new V014ConsolidateMusicRuntimeState().apply(mongo);
+    var store = new MusicRuntimeStateStore(mongo);
+    var winningSnapshot = store.findQueue().orElseThrow();
+    var staleSnapshot = store.findQueue().orElseThrow();
+    var winningEntry = entry("ordinary-winner");
+    var staleEntry = entry("ordinary-stale");
+
+    var savedQueue = store.saveQueue(new MusicQueueState(
+        MusicQueueState.ID, List.of(winningEntry), winningSnapshot.version()));
+
+    assertThat(savedQueue.version()).isEqualTo(5L);
+    assertThatThrownBy(() -> store.saveQueue(new MusicQueueState(
+        MusicQueueState.ID, List.of(staleEntry), staleSnapshot.version())))
+        .isInstanceOf(OptimisticLockingFailureException.class);
+    assertThat(store.findQueue().orElseThrow())
+        .satisfies(queue -> {
+          assertThat(queue.version()).isEqualTo(5L);
+          assertThat(queue.entries()).containsExactly(winningEntry);
+        });
+    assertThat(store.findRadio().orElseThrow())
+        .satisfies(radio -> {
+          assertThat(radio.version()).isEqualTo(9L);
+          assertThat(radio.trackId()).isEqualTo("track-radio");
+        });
+
+    var savedRadio = store.saveRadio(new MusicRadioState(
+        MusicRadioState.ID,
+        4L,
+        "track-radio-next",
+        "token-radio-next",
+        Instant.ofEpochSecond(10),
+        120.0,
+        MusicRadioState.Source.RADIO,
+        null,
+        9L));
+
+    assertThat(savedRadio.version()).isEqualTo(10L);
+    assertThat(store.findQueue().orElseThrow())
+        .satisfies(queue -> {
+          assertThat(queue.version()).isEqualTo(5L);
+          assertThat(queue.entries()).containsExactly(winningEntry);
+        });
+    assertThat(store.findRadio().orElseThrow())
+        .satisfies(radio -> {
+          assertThat(radio.version()).isEqualTo(10L);
+          assertThat(radio.stationSequence()).isEqualTo(4L);
+          assertThat(radio.trackId()).isEqualTo("track-radio-next");
+        });
+  }
+
+  @Test
   void migrationPreservesAbsentVersionUntilFirstAtomicRuntimeSave() {
     var mongo = template("absent-first-save");
     insertSources(mongo, null, null);
@@ -138,6 +270,10 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
         .first();
   }
 
+  private static List<Document> targets(MongoTemplate mongo) {
+    return mongo.getCollection("music_runtime_state").find().into(new java.util.ArrayList<>());
+  }
+
   private static Document queueSource(Object version) {
     var document = new Document("_id", "global").append("entries", List.of());
     if (version != null) {
@@ -154,6 +290,28 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
         .append("startedAt", Date.from(Instant.EPOCH))
         .append("durationSeconds", 90.0)
         .append("source", "RADIO");
+    if (version != null) {
+      document.append("version", version);
+    }
+    return document;
+  }
+
+  private static Document queueTarget(Long version) {
+    var document = new Document("_id", "queue")
+        .append("kind", "QUEUE")
+        .append("queue", new Document("entries", List.of()));
+    if (version != null) {
+      document.append("version", version);
+    }
+    return document;
+  }
+
+  private static Document radioTarget(Long version) {
+    var source = radioSource(null);
+    source.remove("_id");
+    var document = new Document("_id", "radio")
+        .append("kind", "RADIO")
+        .append("radio", source);
     if (version != null) {
       document.append("version", version);
     }

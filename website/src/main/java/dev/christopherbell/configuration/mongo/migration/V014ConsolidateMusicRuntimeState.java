@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -48,11 +49,19 @@ public final class V014ConsolidateMusicRuntimeState implements ApplicationMigrat
 
   @Override
   public void apply(MongoTemplate mongo) {
-    var queue = queueSource(requireSingleton(mongo, LEGACY_QUEUE));
-    var radio = radioSource(requireSingleton(mongo, LEGACY_RADIO));
-    List<Document> expected = List.of(queueTarget(queue), radioTarget(radio));
+    var queue = optionalSingleton(mongo, LEGACY_QUEUE)
+        .map(V014ConsolidateMusicRuntimeState::queueSource);
+    var radio = optionalSingleton(mongo, LEGACY_RADIO)
+        .map(V014ConsolidateMusicRuntimeState::radioSource);
+    var expected = new ArrayList<Document>(2);
+    queue.map(V014ConsolidateMusicRuntimeState::queueTarget).ifPresent(expected::add);
+    radio.map(V014ConsolidateMusicRuntimeState::radioTarget).ifPresent(expected::add);
     List<Document> existing = destination(mongo);
     if (!existing.isEmpty()) {
+      requireEquivalent(existing, queue, radio);
+      return;
+    }
+    if (expected.isEmpty()) {
       requireEquivalent(existing, queue, radio);
       return;
     }
@@ -61,12 +70,19 @@ public final class V014ConsolidateMusicRuntimeState implements ApplicationMigrat
     requireEquivalent(destination(mongo), queue, radio);
   }
 
-  private static Document requireSingleton(MongoTemplate mongo, String collection) {
+  private static Optional<Document> optionalSingleton(MongoTemplate mongo, String collection) {
     List<Document> documents = mongo.findAll(Document.class, collection);
-    if (documents.size() != 1) {
+    if (documents.size() > 1) {
       throw new IllegalStateException("Music runtime source has unexpected cardinality.");
     }
-    return documents.getFirst();
+    if (documents.isEmpty()) {
+      return Optional.empty();
+    }
+    Document document = documents.getFirst();
+    if (document == null) {
+      throw malformed("Music runtime source");
+    }
+    return Optional.of(document);
   }
 
   private static List<Document> destination(MongoTemplate mongo) {
@@ -203,8 +219,11 @@ public final class V014ConsolidateMusicRuntimeState implements ApplicationMigrat
   }
 
   private static void requireEquivalent(
-      List<Document> documents, MusicQueueState queue, MusicRadioState radio) {
-    if (documents.size() != 2) {
+      List<Document> documents,
+      Optional<MusicQueueState> queue,
+      Optional<MusicRadioState> radio) {
+    int expectedSize = (queue.isPresent() ? 1 : 0) + (radio.isPresent() ? 1 : 0);
+    if (documents.size() != expectedSize) {
       throw new IllegalStateException("Music runtime destination is partial or unexpected.");
     }
     var byId = new HashMap<String, Document>();
@@ -217,11 +236,15 @@ public final class V014ConsolidateMusicRuntimeState implements ApplicationMigrat
         throw new IllegalStateException("Music runtime destination has duplicate identities.");
       }
     }
-    Document targetQueue = byId.get(MusicRuntimeStateDocument.QUEUE_ID);
-    Document targetRadio = byId.get(MusicRuntimeStateDocument.RADIO_ID);
-    if (targetQueue == null || targetRadio == null
-        || !queue.equals(queueTargetState(targetQueue))
-        || !radio.equals(radioTargetState(targetRadio))) {
+    Document targetQueue = byId.remove(MusicRuntimeStateDocument.QUEUE_ID);
+    Document targetRadio = byId.remove(MusicRuntimeStateDocument.RADIO_ID);
+    boolean queueMatches = queue
+        .map(source -> targetQueue != null && source.equals(queueTargetState(targetQueue)))
+        .orElse(targetQueue == null);
+    boolean radioMatches = radio
+        .map(source -> targetRadio != null && source.equals(radioTargetState(targetRadio)))
+        .orElse(targetRadio == null);
+    if (!queueMatches || !radioMatches || !byId.isEmpty()) {
       throw new IllegalStateException("Music runtime destination diverges from its sources.");
     }
   }

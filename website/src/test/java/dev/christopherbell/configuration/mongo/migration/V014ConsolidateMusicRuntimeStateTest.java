@@ -104,6 +104,55 @@ class V014ConsolidateMusicRuntimeStateTest {
         .allSatisfy(document -> assertThat(document).doesNotContainKey("version"));
   }
 
+  @ParameterizedTest
+  @MethodSource("sourcePresenceCombinations")
+  void migratesEveryValidSourcePresenceCombination(
+      List<Document> queues, List<Document> radios, List<Document> expected) {
+    sources(queues, radios);
+    if (expected.isEmpty()) {
+      when(mongo.findAll(Document.class, TARGET)).thenReturn(List.of());
+    } else {
+      when(mongo.findAll(Document.class, TARGET))
+          .thenReturn(List.of())
+          .thenReturn(expected);
+    }
+
+    assertThatCode(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .doesNotThrowAnyException();
+
+    if (expected.isEmpty()) {
+      verifyNoTargetInsert();
+      verify(mongo, never()).getCollection(TARGET);
+    } else {
+      verify(targetCollection).insertMany(inserted.capture());
+      assertThat(inserted.getValue()).containsExactlyElementsOf(expected);
+    }
+  }
+
+  @ParameterizedTest
+  @MethodSource("sourcePresenceCombinations")
+  void acceptsOnlyTheExactEquivalentTargetMembershipForPresentSources(
+      List<Document> queues, List<Document> radios, List<Document> expected) {
+    sources(queues, radios);
+    when(mongo.findAll(Document.class, TARGET)).thenReturn(expected);
+
+    assertThatCode(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .doesNotThrowAnyException();
+
+    verifyNoTargetInsert();
+  }
+
+  @Test
+  void rejectsTargetMembershipThatDoesNotMatchPresentSources() {
+    assertInvalidMembership(
+        List.of(queueSource(4L)), List.of(), List.of(queueTarget(4L), radioTarget(9L)));
+    assertInvalidMembership(
+        List.of(), List.of(radioSource(9L)), List.of(queueTarget(4L), radioTarget(9L)));
+    assertInvalidMembership(List.of(), List.of(), List.of(queueTarget(4L)));
+    assertInvalidMembership(
+        List.of(queueSource(4L)), List.of(radioSource(9L)), List.of(queueTarget(4L)));
+  }
+
   @Test
   void rejectsPartialDuplicateExtraAndDivergentDestinationsBeforeWriting() {
     assertInvalidDestination(List.of(queueTarget(4L)));
@@ -189,6 +238,19 @@ class V014ConsolidateMusicRuntimeStateTest {
   }
 
   @Test
+  void rejectsMoreThanOneRadioSourceBeforeReadingDestination() {
+    sources(
+        List.of(),
+        List.of(radioSource(9L), radioSource(10L)));
+
+    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("source", "cardinality");
+    verify(mongo, never()).findAll(Document.class, TARGET);
+    verifyNoTargetInsert();
+  }
+
+  @Test
   void rejectsNonEquivalentRawReadbackAfterTheOnlyPermittedInsert() {
     validSources(queueSource(4L), radioSource(9L));
     when(mongo.findAll(Document.class, TARGET))
@@ -237,9 +299,27 @@ class V014ConsolidateMusicRuntimeStateTest {
     verifyNoTargetInsert();
   }
 
+  private void assertInvalidMembership(
+      List<Document> queues, List<Document> radios, List<Document> targets) {
+    org.mockito.Mockito.reset(mongo, targetCollection);
+    exposeRawTargetCollection();
+    sources(queues, radios);
+    when(mongo.findAll(Document.class, TARGET)).thenReturn(targets);
+
+    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("destination");
+
+    verifyNoTargetInsert();
+  }
+
   private void validSources(Document queue, Document radio) {
-    when(mongo.findAll(Document.class, LEGACY_QUEUE)).thenReturn(List.of(queue));
-    when(mongo.findAll(Document.class, LEGACY_RADIO)).thenReturn(List.of(radio));
+    sources(List.of(queue), List.of(radio));
+  }
+
+  private void sources(List<Document> queues, List<Document> radios) {
+    when(mongo.findAll(Document.class, LEGACY_QUEUE)).thenReturn(queues);
+    when(mongo.findAll(Document.class, LEGACY_RADIO)).thenReturn(radios);
   }
 
   private void verifyNoTargetInsert() {
@@ -248,6 +328,19 @@ class V014ConsolidateMusicRuntimeStateTest {
 
   private static Stream<Object> invalidVersions() {
     return Stream.of(4.5, "4");
+  }
+
+  private static Stream<Arguments> sourcePresenceCombinations() {
+    return Stream.of(
+        Arguments.of(List.of(), List.of(), List.of()),
+        Arguments.of(
+            List.of(queueSource(4L)), List.of(), List.of(queueTarget(4L))),
+        Arguments.of(
+            List.of(), List.of(radioSource(9L)), List.of(radioTarget(9L))),
+        Arguments.of(
+            List.of(queueSource(4L)),
+            List.of(radioSource(9L)),
+            List.of(queueTarget(4L), radioTarget(9L))));
   }
 
   private static Stream<Arguments> missingOrNullQueueEntries() {
