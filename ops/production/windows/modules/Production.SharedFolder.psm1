@@ -125,7 +125,7 @@ function New-SharedFolderWorkerServiceDirectoryAcl {
     $system = [Security.Principal.SecurityIdentifier]::new($script:SystemSid)
     $worker = [Security.Principal.SecurityIdentifier]::new($script:LocalServiceSid)
     $acl.SetOwner($administrators)
-    $inheritance = [Security.AccessControl.InheritanceFlags]::None
+    $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
     $propagation = [Security.AccessControl.PropagationFlags]::None
     $allow = [Security.AccessControl.AccessControlType]::Allow
     foreach ($identity in @($system, $administrators)) {
@@ -480,7 +480,10 @@ function Install-SharedFolderWorkerService {
             if (-not $service) { throw "Missing installed service: $Name" }
             return [string]$service.StartName
         },
-        [scriptblock]$ProtectPathAction = { param($Path) Protect-ProductionPath -Path $Path },
+        [scriptblock]$ProtectPathAction = {
+            param($Path)
+            Assert-ProductionPathNotReparse -Path $Path | Out-Null
+        },
         [scriptblock]$SetAclAction = { param($Path, $Acl) Set-Acl -LiteralPath $Path -AclObject $Acl }
     )
 
@@ -515,7 +518,10 @@ function Install-SharedFolderWorkerService {
             'Production.WriterStart.bundle.json'
         )) {
             $path = Join-Path $serviceRoot $websiteControlFile
-            if (Test-Path -LiteralPath $path -PathType Leaf) { & $ProtectPathAction $path }
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                & $ProtectPathAction $path
+                & $SetAclAction $path (New-SharedFolderWorkerFileAcl)
+            }
         }
         foreach ($workerFile in @(
             'ChristopherBellMediaWorker.exe',
