@@ -135,6 +135,7 @@ class MongoCollectionCatalogTest {
           "whatsforlunch_ratings"));
   private static final Set<String> MONGO_TEMPLATE_INFRASTRUCTURE_OWNERS = Set.of(
       "dev.christopherbell.admin.commandcenter.metrics.CommandCenterMetricsService",
+      "dev.christopherbell.configuration.mongo.domain.MongoKindScopedOperations",
       "dev.christopherbell.configuration.mongo.migration.ApplicationMigration",
       "dev.christopherbell.configuration.mongo.migration.MongoMigrationRunner",
       "dev.christopherbell.music.catalog.MusicCatalogConfiguration");
