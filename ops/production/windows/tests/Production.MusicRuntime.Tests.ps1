@@ -3,6 +3,63 @@ Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $moduleRoot 'Production.MusicRuntime.psm1') -Force
 
 BeforeAll {
+function Resolve-DisposableMusicRuntimePath {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][bool]$Directory
+    )
+
+    if (-not [IO.Path]::IsPathRooted($Path) -or
+        $Path -notmatch '^[A-Za-z]:[\\/]') {
+        throw 'Disposable ownership path must be absolute.'
+    }
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $pathRoot = [IO.Path]::GetPathRoot($fullPath)
+    $canonical = if ($fullPath.Equals(
+            $pathRoot,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        $pathRoot
+    } else {
+        $fullPath.TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar)
+    }
+    $item = Get-Item -LiteralPath $canonical -Force -ErrorAction Stop
+    if ([bool]$item.PSIsContainer -ne $Directory) {
+        throw 'Disposable ownership path has the wrong type.'
+    }
+    $current = $canonical
+    while (-not [string]::IsNullOrWhiteSpace($current)) {
+        $component = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if ($component.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Disposable ownership path contains a reparse point.'
+        }
+        $parent = [IO.Directory]::GetParent($current)
+        if ($null -eq $parent) { break }
+        $current = $parent.FullName
+    }
+    return [IO.Path]::GetFullPath([string]$item.FullName).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar)
+}
+
+function Test-DisposableMusicRuntimePathBelowRoot {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Root
+    )
+
+    return $Path.StartsWith(
+        $Root.TrimEnd('\') + [IO.Path]::DirectorySeparatorChar,
+        [StringComparison]::OrdinalIgnoreCase)
+}
+
+function ConvertTo-DisposableMusicRuntimeEpochMillis {
+    param([Parameter(Mandatory)][datetime]$Value)
+
+    return [DateTimeOffset]::new($Value.ToUniversalTime()).ToUnixTimeMilliseconds()
+}
+
 function Assert-DisposableMusicRuntimeMongoUri {
     param(
         [Parameter(Mandatory)][string]$UriText,
@@ -31,31 +88,63 @@ function Assert-DisposableMusicRuntimeMongoUri {
             $uri.Port -ne $port) {
             throw 'URI port is unsafe.'
         }
-        if ([string]::IsNullOrWhiteSpace($MarkerPath) -or
-            -not (Test-Path -LiteralPath $MarkerPath -PathType Leaf)) {
+        if ([string]::IsNullOrWhiteSpace($MarkerPath)) {
             throw 'Disposable ownership marker is missing.'
         }
-        $marker = Get-Content -LiteralPath $MarkerPath -Raw -ErrorAction Stop |
+        $canonicalMarker = Resolve-DisposableMusicRuntimePath `
+            -Path $MarkerPath `
+            -Directory $false
+        $marker = Get-Content -LiteralPath $canonicalMarker -Raw -ErrorAction Stop |
             ConvertFrom-Json -ErrorAction Stop
         $names = @($marker.PSObject.Properties.Name)
-        if ($names.Count -ne 4 -or
-            @('uri','port','processId','dataPath').Where({ $_ -notin $names }).Count -ne 0 -or
+        $expectedNames = @(
+            'uri','port','bindIp','processId','processStartTimeEpochMillis',
+            'mongoStartTimeEpochMillis','mongoStartupId','dataPath',
+            'disposableRoot')
+        if ($names.Count -ne $expectedNames.Count -or
+            @($expectedNames | Where-Object { $_ -notin $names }).Count -ne 0 -or
             $marker.uri -isnot [string] -or [string]$marker.uri -cne $UriText -or
             ($marker.port -isnot [int] -and $marker.port -isnot [long]) -or
             [int]$marker.port -ne $port -or
+            $marker.bindIp -isnot [string] -or
+            [string]$marker.bindIp -cne '127.0.0.1' -or
             ($marker.processId -isnot [int] -and $marker.processId -isnot [long]) -or
             [long]$marker.processId -lt 1 -or
+            ($marker.processStartTimeEpochMillis -isnot [int] -and
+                $marker.processStartTimeEpochMillis -isnot [long]) -or
+            [long]$marker.processStartTimeEpochMillis -lt 1 -or
+            ($marker.mongoStartTimeEpochMillis -isnot [int] -and
+                $marker.mongoStartTimeEpochMillis -isnot [long]) -or
+            [long]$marker.mongoStartTimeEpochMillis -lt 1 -or
+            $marker.mongoStartupId -isnot [string] -or
+            [string]::IsNullOrWhiteSpace([string]$marker.mongoStartupId) -or
             $marker.dataPath -isnot [string] -or
-            -not (Test-Path -LiteralPath $marker.dataPath -PathType Container)) {
+            $marker.disposableRoot -isnot [string]) {
             throw 'Disposable ownership marker is invalid.'
         }
-        $dataPath = [IO.Path]::GetFullPath([string]$marker.dataPath)
-        $markerParent = [IO.Path]::GetFullPath((Split-Path -Parent $MarkerPath))
-        if (-not $markerParent.Equals($dataPath, [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Disposable ownership marker is outside its data path.'
+        $ownedRoot = Resolve-DisposableMusicRuntimePath `
+            -Path ([string]$marker.disposableRoot) `
+            -Directory $true
+        if ($ownedRoot.Equals(
+                [IO.Path]::GetPathRoot($ownedRoot),
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Disposable ownership root must not be a filesystem root.'
+        }
+        $dataPath = Resolve-DisposableMusicRuntimePath `
+            -Path ([string]$marker.dataPath) `
+            -Directory $true
+        if (-not (Test-DisposableMusicRuntimePathBelowRoot `
+                -Path $canonicalMarker `
+                -Root $ownedRoot) -or
+            -not (Test-DisposableMusicRuntimePathBelowRoot `
+                -Path $dataPath `
+                -Root $ownedRoot)) {
+            throw 'Disposable ownership paths are outside their root.'
         }
         $process = Get-Process -Id ([int]$marker.processId) -ErrorAction Stop
-        if ([string]$process.ProcessName -cne 'mongod') {
+        if ([string]$process.ProcessName -cne 'mongod' -or
+            (ConvertTo-DisposableMusicRuntimeEpochMillis -Value $process.StartTime) -ne
+                [long]$marker.processStartTimeEpochMillis) {
             throw 'Disposable ownership process is invalid.'
         }
         $listeners = @(Get-NetTCPConnection `
@@ -72,12 +161,93 @@ function Assert-DisposableMusicRuntimeMongoUri {
         return [pscustomobject][ordered]@{
             uri = $UriText
             port = $port
+            bindIp = [string]$marker.bindIp
             processId = [int]$marker.processId
+            processStartTimeEpochMillis =
+                [long]$marker.processStartTimeEpochMillis
+            mongoStartTimeEpochMillis = [long]$marker.mongoStartTimeEpochMillis
+            mongoStartupId = [string]$marker.mongoStartupId
             dataPath = $dataPath
+            disposableRoot = $ownedRoot
+            markerPath = $canonicalMarker
         }
     } catch {
         throw 'Disposable MongoDB URI is unsafe.'
     }
+}
+
+function New-DisposableMusicRuntimeGuardedScript {
+    param(
+        [Parameter(Mandatory)][psobject]$Context,
+        [Parameter(Mandatory)][string]$Script
+    )
+
+    $expected = [ordered]@{
+        processId = [int]$Context.processId
+        mongoStartTimeEpochMillis = [long]$Context.mongoStartTimeEpochMillis
+        mongoStartupId = [string]$Context.mongoStartupId
+        port = [int]$Context.port
+        bindIp = [string]$Context.bindIp
+        dataPath = [string]$Context.dataPath
+    } | ConvertTo-Json -Compress
+    return @"
+const __disposableExpected = $expected;
+const __disposableFail = () => {
+  throw new Error('Disposable MongoDB server ownership changed.');
+};
+const __disposableAdmin = db.getSiblingDB('admin');
+const __disposableStatus = __disposableAdmin.runCommand({serverStatus: 1});
+const __disposableOptions = __disposableAdmin.runCommand({getCmdLineOpts: 1});
+const __disposableStartup = db.getSiblingDB('local')
+  .getCollection('startup_log')
+  .find({})
+  .sort({startTime: -1})
+  .limit(1)
+  .toArray()[0];
+const __disposableNumber = (value) => Number(value.toString());
+if (__disposableStatus.ok !== 1 ||
+    __disposableOptions.ok !== 1 ||
+    !__disposableStartup ||
+    !(__disposableStartup.startTime instanceof Date) ||
+    __disposableNumber(__disposableStatus.pid) !== __disposableExpected.processId ||
+    __disposableNumber(__disposableStartup.pid) !== __disposableExpected.processId ||
+    __disposableStartup._id !== __disposableExpected.mongoStartupId ||
+    __disposableStartup.startTime.valueOf() !==
+      __disposableExpected.mongoStartTimeEpochMillis ||
+    !__disposableOptions.parsed ||
+    !__disposableOptions.parsed.net ||
+    !__disposableOptions.parsed.storage ||
+    __disposableOptions.parsed.net.port !== __disposableExpected.port ||
+    __disposableOptions.parsed.net.bindIp !== __disposableExpected.bindIp ||
+    __disposableOptions.parsed.storage.dbPath !== __disposableExpected.dataPath) {
+  __disposableFail();
+}
+$Script
+"@
+}
+
+function Invoke-DisposableMusicRuntimeGuardedProcess {
+    param(
+        [Parameter(Mandatory)][string]$MongoShell,
+        [Parameter(Mandatory)][psobject]$Context,
+        [Parameter(Mandatory)][string]$Script,
+        [Parameter(Mandatory)][string]$WorkingDirectory
+    )
+
+    $guardedScript = New-DisposableMusicRuntimeGuardedScript `
+        -Context $Context `
+        -Script $Script
+    $output = Invoke-CheckedProcess `
+        -FilePath $MongoShell `
+        -ArgumentList @(
+            '--quiet'
+            '--norc'
+            $Context.uri
+            '--eval'
+            $guardedScript
+        ) `
+        -WorkingDirectory $WorkingDirectory
+    return $output.Trim()
 }
 
 function Invoke-ValidatedDisposableMusicRuntimeAction {
@@ -119,16 +289,30 @@ Describe 'Music runtime disposable MongoDB URI safety' {
 
     It 'accepts a marker-owned credential-free loopback URI with an explicit non-production port' {
         $uri = 'mongodb://localhost:27159/admin'
-        $dataPath = Join-Path $TestDrive 'owned-mongo-data'
-        $markerPath = Join-Path $dataPath 'codex-disposable-mongo.json'
+        $ownedRoot = Join-Path $TestDrive 'owned-mongo-root'
+        $dataPath = Join-Path $ownedRoot 'data'
+        $markerPath = Join-Path $ownedRoot 'codex-disposable-mongo.json'
+        $processStart = [datetime]'2026-08-09T12:00:00Z'
         New-Item -ItemType Directory -Path $dataPath | Out-Null
         [ordered]@{
             uri = $uri
             port = 27159
+            bindIp = '127.0.0.1'
             processId = 4242
+            processStartTimeEpochMillis =
+                (ConvertTo-DisposableMusicRuntimeEpochMillis -Value $processStart)
+            mongoStartTimeEpochMillis = 1786276801000
+            mongoStartupId = 'test-host-1786276801000'
             dataPath = $dataPath
+            disposableRoot = $ownedRoot
         } | ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding utf8
-        Mock Get-Process { [pscustomobject]@{ Id = 4242; ProcessName = 'mongod' } }
+        Mock Get-Process {
+            [pscustomobject]@{
+                Id = 4242
+                ProcessName = 'mongod'
+                StartTime = $processStart
+            }
+        }
         Mock Get-NetTCPConnection {
             [pscustomobject]@{
                 LocalAddress = '127.0.0.1'
@@ -147,25 +331,170 @@ Describe 'Music runtime disposable MongoDB URI safety' {
         $script:mongoActionInvoked | Should -BeTrue
         $context.uri | Should -Be $uri
         $context.port | Should -Be 27159
+        $context.processStartTimeEpochMillis | Should -Be 1786276800000
+        $context.mongoStartupId | Should -Be 'test-host-1786276801000'
+        $context.dataPath | Should -Be ([IO.Path]::GetFullPath($dataPath))
     }
 
     It 'rejects a marker whose mongod process does not own the loopback listener' {
         $uri = 'mongodb://127.0.0.1:27159/admin'
-        $dataPath = Join-Path $TestDrive 'stale-mongo-data'
-        $markerPath = Join-Path $dataPath 'codex-disposable-mongo.json'
+        $ownedRoot = Join-Path $TestDrive 'stale-mongo-root'
+        $dataPath = Join-Path $ownedRoot 'data'
+        $markerPath = Join-Path $ownedRoot 'codex-disposable-mongo.json'
+        $processStart = [datetime]'2026-08-09T12:00:00Z'
         New-Item -ItemType Directory -Path $dataPath | Out-Null
         [ordered]@{
             uri = $uri
             port = 27159
+            bindIp = '127.0.0.1'
             processId = 4242
+            processStartTimeEpochMillis = 1786276800000
+            mongoStartTimeEpochMillis = 1786276801000
+            mongoStartupId = 'test-host-1786276801000'
             dataPath = $dataPath
+            disposableRoot = $ownedRoot
         } | ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding utf8
-        Mock Get-Process { [pscustomobject]@{ Id = 4242; ProcessName = 'mongod' } }
+        Mock Get-Process {
+            [pscustomobject]@{
+                Id = 4242
+                ProcessName = 'mongod'
+                StartTime = $processStart
+            }
+        }
         Mock Get-NetTCPConnection {
             [pscustomobject]@{
                 LocalAddress = '127.0.0.1'
                 LocalPort = 27159
                 OwningProcess = 9999
+                State = 'Listen'
+            }
+        }
+        $script:mongoActionInvoked = $false
+
+        {
+            Invoke-ValidatedDisposableMusicRuntimeAction `
+                -UriText $uri `
+                -MarkerPath $markerPath `
+                -Action { $script:mongoActionInvoked = $true }
+        } | Should -Throw 'Disposable MongoDB URI is unsafe.'
+
+        $script:mongoActionInvoked | Should -BeFalse
+    }
+
+    It 'rejects process replacement after an earlier ownership validation' {
+        $uri = 'mongodb://127.0.0.1:27159/admin'
+        $ownedRoot = Join-Path $TestDrive 'replaced-process-root'
+        $dataPath = Join-Path $ownedRoot 'data'
+        $markerPath = Join-Path $ownedRoot 'codex-disposable-mongo.json'
+        $originalStart = [datetime]'2026-08-09T12:00:00Z'
+        $script:reportedProcessStart = $originalStart
+        New-Item -ItemType Directory -Path $dataPath | Out-Null
+        [ordered]@{
+            uri = $uri
+            port = 27159
+            bindIp = '127.0.0.1'
+            processId = 4242
+            processStartTimeEpochMillis = 1786276800000
+            mongoStartTimeEpochMillis = 1786276801000
+            mongoStartupId = 'test-host-1786276801000'
+            dataPath = $dataPath
+            disposableRoot = $ownedRoot
+        } | ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding utf8
+        Mock Get-Process {
+            [pscustomobject]@{
+                Id = 4242
+                ProcessName = 'mongod'
+                StartTime = $script:reportedProcessStart
+            }
+        }
+        Mock Get-NetTCPConnection {
+            [pscustomobject]@{
+                LocalAddress = '127.0.0.1'
+                LocalPort = 27159
+                OwningProcess = 4242
+                State = 'Listen'
+            }
+        }
+
+        $null = Assert-DisposableMusicRuntimeMongoUri `
+            -UriText $uri `
+            -MarkerPath $markerPath
+        $script:reportedProcessStart = $originalStart.AddSeconds(1)
+        $script:mongoActionInvoked = $false
+
+        {
+            Invoke-ValidatedDisposableMusicRuntimeAction `
+                -UriText $uri `
+                -MarkerPath $markerPath `
+                -Action { $script:mongoActionInvoked = $true }
+        } | Should -Throw 'Disposable MongoDB URI is unsafe.'
+
+        $script:mongoActionInvoked | Should -BeFalse
+    }
+
+    It 'rejects a reparse-backed data path before invoking the Mongo action' {
+        $uri = 'mongodb://127.0.0.1:27159/admin'
+        $ownedRoot = Join-Path $TestDrive 'reparse-root'
+        $realDataPath = Join-Path $TestDrive 'real-data'
+        $dataPath = Join-Path $ownedRoot 'linked-data'
+        $markerPath = Join-Path $ownedRoot 'codex-disposable-mongo.json'
+        New-Item -ItemType Directory -Path $ownedRoot | Out-Null
+        New-Item -ItemType Directory -Path $realDataPath | Out-Null
+        New-Item -ItemType Junction -Path $dataPath -Target $realDataPath | Out-Null
+        [ordered]@{
+            uri = $uri
+            port = 27159
+            bindIp = '127.0.0.1'
+            processId = 4242
+            processStartTimeEpochMillis = 1786276800000
+            mongoStartTimeEpochMillis = 1786276801000
+            mongoStartupId = 'test-host-1786276801000'
+            dataPath = $dataPath
+            disposableRoot = $ownedRoot
+        } | ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding utf8
+        Mock Get-Process { throw 'must not inspect process' }
+        $script:mongoActionInvoked = $false
+
+        {
+            Invoke-ValidatedDisposableMusicRuntimeAction `
+                -UriText $uri `
+                -MarkerPath $markerPath `
+                -Action { $script:mongoActionInvoked = $true }
+        } | Should -Throw 'Disposable MongoDB URI is unsafe.'
+
+        $script:mongoActionInvoked | Should -BeFalse
+        Should -Invoke Get-Process -Times 0
+    }
+
+    It 'rejects a filesystem root as the claimed disposable root' {
+        $uri = 'mongodb://127.0.0.1:27159/admin'
+        $dataPath = Join-Path $TestDrive 'root-claim-data'
+        $markerPath = Join-Path $TestDrive 'root-claim-marker.json'
+        $processStart = [datetime]'2026-08-09T12:00:00Z'
+        New-Item -ItemType Directory -Path $dataPath | Out-Null
+        [ordered]@{
+            uri = $uri
+            port = 27159
+            bindIp = '127.0.0.1'
+            processId = 4242
+            processStartTimeEpochMillis = 1786276800000
+            mongoStartTimeEpochMillis = 1786276801000
+            mongoStartupId = 'test-host-1786276801000'
+            dataPath = $dataPath
+            disposableRoot = [IO.Path]::GetPathRoot($TestDrive)
+        } | ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding utf8
+        Mock Get-Process {
+            [pscustomobject]@{
+                Id = 4242
+                ProcessName = 'mongod'
+                StartTime = $processStart
+            }
+        }
+        Mock Get-NetTCPConnection {
+            [pscustomobject]@{
+                LocalAddress = '127.0.0.1'
+                LocalPort = 27159
+                OwningProcess = 4242
                 State = 'Listen'
             }
         }
@@ -638,9 +967,8 @@ Describe 'Music runtime rollback operation' {
 Describe 'Music runtime rollback disposable MongoDB boundary' -Skip:(
     [string]::IsNullOrWhiteSpace($env:MUSIC_RUNTIME_ROLLBACK_TEST_URI)) {
     BeforeAll {
-        $disposableContext = Assert-DisposableMusicRuntimeMongoUri `
-            -UriText $env:MUSIC_RUNTIME_ROLLBACK_TEST_URI `
-            -MarkerPath $env:MUSIC_RUNTIME_ROLLBACK_TEST_MARKER
+        $disposableUri = $env:MUSIC_RUNTIME_ROLLBACK_TEST_URI
+        $disposableMarker = $env:MUSIC_RUNTIME_ROLLBACK_TEST_MARKER
         $moduleRoot = Join-Path $PSScriptRoot '..\modules'
         $mongoShell = if ([string]::IsNullOrWhiteSpace($env:MONGOSH_EXE)) {
             (Get-Command mongosh.exe -ErrorAction Stop).Source
@@ -651,12 +979,14 @@ Describe 'Music runtime rollback disposable MongoDB boundary' -Skip:(
         function Invoke-DisposableMusicRuntimeMongo {
             param([Parameter(Mandatory)][string]$Script)
 
-            $output = & $mongoShell --quiet --norc $disposableContext.uri `
-                --eval $Script 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                throw 'Disposable MongoDB script failed.'
-            }
-            return ,@($output)
+            $context = Assert-DisposableMusicRuntimeMongoUri `
+                -UriText $disposableUri `
+                -MarkerPath $disposableMarker
+            return Invoke-DisposableMusicRuntimeGuardedProcess `
+                -MongoShell $mongoShell `
+                -Context $context `
+                -Script $Script `
+                -WorkingDirectory $PSScriptRoot
         }
 
         function Reset-DisposableMusicRuntimeState {
@@ -665,6 +995,7 @@ const target = db.getSiblingDB('christopherbell');
 target.getCollection('music_runtime_state').deleteMany({});
 target.getCollection('music_queue_state').deleteMany({});
 target.getCollection('music_radio_state').deleteMany({});
+target.getCollection('ownership_guard_probe').deleteMany({});
 '@
             $null = Invoke-DisposableMusicRuntimeMongo -Script $script
         }
@@ -692,16 +1023,8 @@ target.getCollection('music_radio_state').insertOne({_id:'global',stationSequenc
     It 'reverse-copies exact valid state and proves lossless optional-field preservation' {
         Set-DisposableValidMusicRuntimeState
 
-        $json = Invoke-CheckedProcess `
-            -FilePath $mongoShell `
-            -ArgumentList @(
-                '--quiet'
-                '--norc'
-                $disposableContext.uri
-                '--eval'
-                (Get-ProductionMusicRuntimeRollbackScript)
-            ) `
-            -WorkingDirectory $PSScriptRoot
+        $json = Invoke-DisposableMusicRuntimeMongo `
+            -Script (Get-ProductionMusicRuntimeRollbackScript)
         $metadata = $json | ConvertFrom-Json -ErrorAction Stop
         $metadata.complete | Should -BeTrue
         $metadata.restoredCollections | Should -Be @(
@@ -721,7 +1044,7 @@ print(JSON.stringify({
   queueEntryIdCopied: radio.queueEntryId === 'entry-1'
 }));
 '@
-        $proof = $readback[-1] | ConvertFrom-Json -ErrorAction Stop
+        $proof = $readback | ConvertFrom-Json -ErrorAction Stop
         @($proof.PSObject.Properties.Value | Where-Object { $_ -ne $true }) |
             Should -BeNullOrEmpty
     }
@@ -735,7 +1058,7 @@ db.getSiblingDB('christopherbell').music_runtime_state.updateOne(
 
         $failureOutput = Invoke-DisposableMusicRuntimeMongo `
             -Script (Get-ProductionMusicRuntimeRollbackScript)
-        $failureMetadata = $failureOutput[-1] | ConvertFrom-Json -ErrorAction Stop
+        $failureMetadata = $failureOutput | ConvertFrom-Json -ErrorAction Stop
         $failureMetadata.complete | Should -BeFalse
         $failureMetadata.phase | Should -Be 'preflight'
         $failureMetadata.errorCode | Should -Be 'PREFLIGHT_FAILED'
@@ -747,8 +1070,8 @@ print(JSON.stringify({
   radioUnchanged: target.music_radio_state.findOne({_id:'global'}).trackId === 'track-old'
 }));
 '@
-        ($proof[-1] | ConvertFrom-Json).queueUnchanged | Should -BeTrue
-        ($proof[-1] | ConvertFrom-Json).radioUnchanged | Should -BeTrue
+        ($proof | ConvertFrom-Json).queueUnchanged | Should -BeTrue
+        ($proof | ConvertFrom-Json).radioUnchanged | Should -BeTrue
     }
 
     It 'rejects conflicting retained legacy shape before changing either singleton' {
@@ -756,7 +1079,7 @@ print(JSON.stringify({
 
         $failureOutput = Invoke-DisposableMusicRuntimeMongo `
             -Script (Get-ProductionMusicRuntimeRollbackScript)
-        $failureMetadata = $failureOutput[-1] | ConvertFrom-Json -ErrorAction Stop
+        $failureMetadata = $failureOutput | ConvertFrom-Json -ErrorAction Stop
         $failureMetadata.complete | Should -BeFalse
         $failureMetadata.phase | Should -Be 'preflight'
         $failureMetadata.errorCode | Should -Be 'PREFLIGHT_FAILED'
@@ -768,7 +1091,90 @@ print(JSON.stringify({
   radioUnchanged: target.music_radio_state.findOne({_id:'global'}).trackId === 'track-old'
 }));
 '@
-        ($proof[-1] | ConvertFrom-Json).queueUnchanged | Should -BeTrue
-        ($proof[-1] | ConvertFrom-Json).radioUnchanged | Should -BeTrue
+        ($proof | ConvertFrom-Json).queueUnchanged | Should -BeTrue
+        ($proof | ConvertFrom-Json).radioUnchanged | Should -BeTrue
+    }
+
+    It 'rejects changed server process identity before destructive fixture mutation' {
+        $null = Invoke-DisposableMusicRuntimeMongo -Script @'
+db.getSiblingDB('christopherbell').ownership_guard_probe.insertOne({_id:'sentinel'});
+'@
+        $context = Assert-DisposableMusicRuntimeMongoUri `
+            -UriText $disposableUri `
+            -MarkerPath $disposableMarker
+        $changedContext = $context.PSObject.Copy()
+        $changedContext.mongoStartupId = 'replacement-process-startup-id'
+
+        {
+            Invoke-DisposableMusicRuntimeGuardedProcess `
+                -MongoShell $mongoShell `
+                -Context $changedContext `
+                -Script @'
+db.getSiblingDB('christopherbell').ownership_guard_probe.deleteMany({});
+'@ `
+                -WorkingDirectory $PSScriptRoot
+        } | Should -Throw 'mongosh.exe exited with code *'
+
+        $proof = Invoke-DisposableMusicRuntimeMongo -Script @'
+print(db.getSiblingDB('christopherbell').ownership_guard_probe.countDocuments({}));
+'@
+        [int]$proof | Should -Be 1
+    }
+
+    It 'rejects changed server PID before destructive fixture mutation' {
+        $null = Invoke-DisposableMusicRuntimeMongo -Script @'
+db.getSiblingDB('christopherbell').ownership_guard_probe.insertOne({_id:'sentinel'});
+'@
+        $context = Assert-DisposableMusicRuntimeMongoUri `
+            -UriText $disposableUri `
+            -MarkerPath $disposableMarker
+        $changedContext = $context.PSObject.Copy()
+        $changedContext.processId++
+
+        {
+            Invoke-DisposableMusicRuntimeGuardedProcess `
+                -MongoShell $mongoShell `
+                -Context $changedContext `
+                -Script @'
+db.getSiblingDB('christopherbell').ownership_guard_probe.deleteMany({});
+'@ `
+                -WorkingDirectory $PSScriptRoot
+        } | Should -Throw 'mongosh.exe exited with code *'
+
+        $proof = Invoke-DisposableMusicRuntimeMongo -Script @'
+print(db.getSiblingDB('christopherbell').ownership_guard_probe.countDocuments({}));
+'@
+        [int]$proof | Should -Be 1
+    }
+
+    It 'rejects changed getCmdLineOpts <Name> before destructive fixture mutation' -TestCases @(
+        @{ Name = 'dbPath'; Property = 'dataPath'; Value = 'C:\wrong-disposable-db' }
+        @{ Name = 'bindIp'; Property = 'bindIp'; Value = '127.0.0.2' }
+        @{ Name = 'port'; Property = 'port'; Value = 27168 }
+    ) {
+        param($Name, $Property, $Value)
+        $null = Invoke-DisposableMusicRuntimeMongo -Script @'
+db.getSiblingDB('christopherbell').ownership_guard_probe.insertOne({_id:'sentinel'});
+'@
+        $context = Assert-DisposableMusicRuntimeMongoUri `
+            -UriText $disposableUri `
+            -MarkerPath $disposableMarker
+        $changedContext = $context.PSObject.Copy()
+        $changedContext.$Property = $Value
+
+        {
+            Invoke-DisposableMusicRuntimeGuardedProcess `
+                -MongoShell $mongoShell `
+                -Context $changedContext `
+                -Script @'
+db.getSiblingDB('christopherbell').ownership_guard_probe.deleteMany({});
+'@ `
+                -WorkingDirectory $PSScriptRoot
+        } | Should -Throw 'mongosh.exe exited with code *'
+
+        $proof = Invoke-DisposableMusicRuntimeMongo -Script @'
+print(db.getSiblingDB('christopherbell').ownership_guard_probe.countDocuments({}));
+'@
+        [int]$proof | Should -Be 1
     }
 }
