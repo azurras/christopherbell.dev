@@ -172,6 +172,12 @@ Run the full test suite:
 ./gradlew test
 ```
 
+> [!IMPORTANT]
+> Every automated or manual test that accesses MongoDB must use the database
+> named `test`. Never run tests against the local-development, staging,
+> production, or any other database. Verify the active database configuration
+> before starting a database-backed test.
+
 Run only the website tests:
 
 ```bash
