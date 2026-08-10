@@ -1095,13 +1095,15 @@ if ($replacement.Ffmpeg -ne $reused.Ffmpeg -or
         { Assert-PinnedMediaToolSet -ToolRoot $toolRoot } | Should -Throw '*hash verification*'
     }
 
-    It 'grants LocalService non-inheriting service-directory traversal before WinSW install' {
+    It 'applies shared writer-compatible ACLs before WinSW install' {
         $productionRoot = Join-Path $TestDrive 'worker-service-traversal'
         $serviceRoot = Join-Path $productionRoot 'service'
         New-Item -ItemType Directory -Path $serviceRoot -Force | Out-Null
         'winsw' | Set-Content (Join-Path $serviceRoot 'ChristopherBellDev.exe')
         'website xml' | Set-Content (Join-Path $serviceRoot 'ChristopherBellDev.xml')
         'website script' | Set-Content (Join-Path $serviceRoot 'Start-ChristopherBellDev.ps1')
+        'writer module' | Set-Content (Join-Path $serviceRoot 'Production.WriterStart.psm1')
+        'writer manifest' | Set-Content (Join-Path $serviceRoot 'Production.WriterStart.bundle.json')
         $requests = [Collections.Generic.List[object]]::new()
         $events = [Collections.Generic.List[string]]::new()
         $state = @{ Existing = $false }
@@ -1126,7 +1128,10 @@ if ($replacement.Ffmpeg -ne $reused.Ffmpeg -or
             -StopServiceAction { param($name) } `
             -SetServiceIdentityAction { param($name, $identity) } `
             -GetServiceIdentityAction { param($name) 'NT AUTHORITY\LocalService' } `
-            -ProtectPathAction { param($path) } `
+            -ProtectPathAction {
+                param($path)
+                $events.Add("preflight:$([IO.Path]::GetFileName($path))")
+            } `
             -SetAclAction {
                 param($path, $acl)
                 $requests.Add([pscustomobject]@{ Path = $path; Acl = $acl })
@@ -1142,16 +1147,80 @@ if ($replacement.Ffmpeg -ne $reused.Ffmpeg -or
             Should -Be 'S-1-5-32-544'
         $rules = @($acl.GetAccessRules(
             $true, $false, [Security.Principal.SecurityIdentifier]))
+        $rules.Count | Should -Be 3
+        foreach ($rule in $rules) {
+            $rule.AccessControlType |
+                Should -Be ([Security.AccessControl.AccessControlType]::Allow)
+            $rule.InheritanceFlags | Should -Be (
+                [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+                [Security.AccessControl.InheritanceFlags]::ObjectInherit)
+            $rule.PropagationFlags |
+                Should -Be ([Security.AccessControl.PropagationFlags]::None)
+        }
         $worker = $rules | Where-Object IdentityReference -eq 'S-1-5-19'
         ($worker.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadAndExecute) |
             Should -Be ([Security.AccessControl.FileSystemRights]::ReadAndExecute)
         ($worker.FileSystemRights -band [Security.AccessControl.FileSystemRights]::Modify) |
             Should -Not -Be ([Security.AccessControl.FileSystemRights]::Modify)
-        $worker.InheritanceFlags |
-            Should -Be ([Security.AccessControl.InheritanceFlags]::None)
+        $worker.InheritanceFlags | Should -Be (
+            [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+            [Security.AccessControl.InheritanceFlags]::ObjectInherit)
         $worker.PropagationFlags |
             Should -Be ([Security.AccessControl.PropagationFlags]::None)
+        $websiteControlFiles = @(
+            'ChristopherBellDev.exe',
+            'ChristopherBellDev.xml',
+            'Start-ChristopherBellDev.ps1',
+            'Production.WriterStart.psm1',
+            'Production.WriterStart.bundle.json')
+        $websiteRequests = @($requests | Where-Object {
+                $websiteControlFiles -contains [IO.Path]::GetFileName($_.Path)
+            })
+        $websiteRequests.Count | Should -Be $websiteControlFiles.Count
+        foreach ($request in $websiteRequests) {
+            $fileAcl = $request.Acl
+            $fileAcl.AreAccessRulesProtected | Should -BeTrue
+            $fileAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value |
+                Should -Be 'S-1-5-32-544'
+            $fileRules = @($fileAcl.GetAccessRules(
+                    $true, $false, [Security.Principal.SecurityIdentifier]))
+            $fileRules.Count | Should -Be 3
+            $fileRules.IdentityReference.Value | Should -Contain 'S-1-5-18'
+            $fileRules.IdentityReference.Value | Should -Contain 'S-1-5-19'
+            $fileRules.IdentityReference.Value | Should -Contain 'S-1-5-32-544'
+            foreach ($fileRule in $fileRules) {
+                $fileRule.AccessControlType |
+                    Should -Be ([Security.AccessControl.AccessControlType]::Allow)
+                $fileRule.InheritanceFlags |
+                    Should -Be ([Security.AccessControl.InheritanceFlags]::None)
+                $fileRule.PropagationFlags |
+                    Should -Be ([Security.AccessControl.PropagationFlags]::None)
+            }
+            ($fileRules | Where-Object IdentityReference -eq 'S-1-5-18').FileSystemRights |
+                Should -Be ([Security.AccessControl.FileSystemRights]::FullControl)
+            ($fileRules | Where-Object IdentityReference -eq 'S-1-5-32-544').FileSystemRights |
+                Should -Be ([Security.AccessControl.FileSystemRights]::FullControl)
+            ($fileRules | Where-Object IdentityReference -eq 'S-1-5-19').FileSystemRights |
+                Should -Be (
+                    [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
+                    [Security.AccessControl.FileSystemRights]::Synchronize)
+            $fileName = [IO.Path]::GetFileName($request.Path)
+            $events.IndexOf("preflight:$fileName") |
+                Should -BeLessThan ($events.IndexOf("acl:$fileName"))
+        }
         $events.IndexOf('acl:service') | Should -BeLessThan ($events.IndexOf('install'))
+    }
+
+    It 'uses a read-only reparse preflight before applying the exact writer file ACL' {
+        $parameter = (Get-Command Install-SharedFolderWorkerService).ScriptBlock.Ast.FindAll({
+                param($node)
+                $node -is [Management.Automation.Language.ParameterAst] -and
+                    $node.Name.VariablePath.UserPath -eq 'ProtectPathAction'
+            }, $true)
+        $defaultText = $parameter.DefaultValue.Extent.Text
+
+        $defaultText | Should -Match 'Assert-ProductionPathNotReparse'
+        $defaultText | Should -Not -Match 'Protect-ProductionPath'
     }
 
     It 'installs and reinstalls the worker through supported WinSW 2 commands' {
@@ -1404,6 +1473,7 @@ if ($replacement.Ffmpeg -ne $reused.Ffmpeg -or
         $state = @{ Existing = $true; Status = 'Running' }
         $commands = [Collections.Generic.List[string]]::new()
         $events = [Collections.Generic.List[string]]::new()
+        $setAclPaths = [Collections.Generic.List[string]]::new()
         $stopService = {
             param($name)
             $events.Add('stop')
@@ -1425,9 +1495,10 @@ if ($replacement.Ffmpeg -ne $reused.Ffmpeg -or
             -SetServiceIdentityAction { param($name, $identity) throw 'unexpected identity change' } `
             -GetServiceIdentityAction { param($name) throw 'unexpected identity read' } `
             -ProtectPathAction $protectPath `
-            -SetAclAction { param($path,$acl) } } |
+            -SetAclAction { param($path,$acl) $setAclPaths.Add($path) } } |
             Should -Throw '*simulated file protection failure*'
         $events | Should -Be @('stop','protect','stop')
+        $setAclPaths | Should -Be @($service)
         $commands.Count | Should -Be 0
         $state.Existing | Should -BeTrue
         $state.Status | Should -Be 'Stopped'
