@@ -12,6 +12,8 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.mongodb.client.MongoCollection;
+import dev.christopherbell.music.api.MusicRuntimeStateMigrationPort;
+import dev.christopherbell.music.radio.MusicRuntimeStateMigrationSupport;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
@@ -27,6 +29,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 @ExtendWith(MockitoExtension.class)
@@ -46,12 +49,26 @@ class V014ConsolidateMusicRuntimeStateTest {
 
   @Test
   void exposesImmutableMigrationIdentity() {
-    var migration = new V014ConsolidateMusicRuntimeState();
+    var migration = migration();
 
     assertThat(migration.id()).isEqualTo("014-consolidate-music-runtime-state");
     assertThat(migration.checksum())
         .isEqualTo("11a69bdd4556cfc38060ccdda5075fb9d6bc36f1cc414edd7b26cd61a74b5cbb");
     assertThat(migration.description()).isEqualTo("Consolidate Music queue and radio runtime state");
+  }
+
+  @Test
+  void springConstructsTheMigrationWithExactlyOneMusicPort() {
+    new ApplicationContextRunner()
+        .withUserConfiguration(
+            MusicRuntimeStateMigrationSupport.class,
+            V014ConsolidateMusicRuntimeState.class)
+        .run(context -> {
+          assertThat(context).hasSingleBean(MusicRuntimeStateMigrationPort.class);
+          assertThat(context).hasSingleBean(V014ConsolidateMusicRuntimeState.class);
+          assertThat(context.getBean(ApplicationMigration.class))
+              .isSameAs(context.getBean(V014ConsolidateMusicRuntimeState.class));
+        });
   }
 
   @Test
@@ -65,7 +82,7 @@ class V014ConsolidateMusicRuntimeStateTest {
         .thenReturn(List.of())
         .thenReturn(List.of(expectedQueue, expectedRadio));
 
-    new V014ConsolidateMusicRuntimeState().apply(mongo);
+    migration().apply(mongo);
 
     verify(targetCollection).insertMany(inserted.capture());
     assertThat(inserted.getValue()).containsExactly(expectedQueue, expectedRadio);
@@ -82,7 +99,7 @@ class V014ConsolidateMusicRuntimeStateTest {
     when(mongo.findAll(Document.class, TARGET))
         .thenReturn(List.of(radioTarget(9L), queueTarget(4L)));
 
-    assertThatCode(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatCode(() -> migration().apply(mongo))
         .doesNotThrowAnyException();
 
     verifyNoTargetInsert();
@@ -97,7 +114,7 @@ class V014ConsolidateMusicRuntimeStateTest {
         .thenReturn(List.of())
         .thenReturn(List.of(expectedQueue, expectedRadio));
 
-    new V014ConsolidateMusicRuntimeState().apply(mongo);
+    migration().apply(mongo);
 
     verify(targetCollection).insertMany(inserted.capture());
     assertThat(inserted.getValue()).containsExactly(expectedQueue, expectedRadio)
@@ -117,7 +134,7 @@ class V014ConsolidateMusicRuntimeStateTest {
           .thenReturn(expected);
     }
 
-    assertThatCode(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatCode(() -> migration().apply(mongo))
         .doesNotThrowAnyException();
 
     if (expected.isEmpty()) {
@@ -136,7 +153,7 @@ class V014ConsolidateMusicRuntimeStateTest {
     sources(queues, radios);
     when(mongo.findAll(Document.class, TARGET)).thenReturn(expected);
 
-    assertThatCode(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatCode(() -> migration().apply(mongo))
         .doesNotThrowAnyException();
 
     verifyNoTargetInsert();
@@ -220,7 +237,7 @@ class V014ConsolidateMusicRuntimeStateTest {
     when(mongo.findAll(Document.class, LEGACY_QUEUE))
         .thenReturn(List.of(queueSource(4L), queueSource(4L)));
 
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatThrownBy(() -> migration().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("source", "cardinality");
     verify(mongo, never()).findAll(Document.class, TARGET);
@@ -230,7 +247,7 @@ class V014ConsolidateMusicRuntimeStateTest {
     exposeRawTargetCollection();
     when(mongo.findAll(Document.class, LEGACY_QUEUE))
         .thenReturn(List.of(queueSource(4L).append("_id", "other")));
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatThrownBy(() -> migration().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("source", "identity");
     verify(mongo, never()).findAll(Document.class, TARGET);
@@ -243,7 +260,7 @@ class V014ConsolidateMusicRuntimeStateTest {
         List.of(),
         List.of(radioSource(9L), radioSource(10L)));
 
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatThrownBy(() -> migration().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("source", "cardinality");
     verify(mongo, never()).findAll(Document.class, TARGET);
@@ -257,7 +274,7 @@ class V014ConsolidateMusicRuntimeStateTest {
         .thenReturn(List.of())
         .thenReturn(List.of(queueTarget(4L)));
 
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatThrownBy(() -> migration().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("destination");
 
@@ -278,7 +295,7 @@ class V014ConsolidateMusicRuntimeStateTest {
 
   private void assertInvalidSource() {
 
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatThrownBy(() -> migration().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("source");
 
@@ -292,7 +309,7 @@ class V014ConsolidateMusicRuntimeStateTest {
     validSources(queueSource(4L), radioSource(9L));
     when(mongo.findAll(Document.class, TARGET)).thenReturn(documents);
 
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatThrownBy(() -> migration().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("destination");
 
@@ -306,7 +323,7 @@ class V014ConsolidateMusicRuntimeStateTest {
     sources(queues, radios);
     when(mongo.findAll(Document.class, TARGET)).thenReturn(targets);
 
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatThrownBy(() -> migration().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("destination");
 
@@ -324,6 +341,10 @@ class V014ConsolidateMusicRuntimeStateTest {
 
   private void verifyNoTargetInsert() {
     verify(targetCollection, never()).insertMany(anyList());
+  }
+
+  private static V014ConsolidateMusicRuntimeState migration() {
+    return new V014ConsolidateMusicRuntimeState(new MusicRuntimeStateMigrationSupport());
   }
 
   private static Stream<Object> invalidVersions() {

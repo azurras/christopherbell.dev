@@ -10,6 +10,7 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import dev.christopherbell.music.radio.MusicQueueState;
 import dev.christopherbell.music.radio.MusicRadioState;
+import dev.christopherbell.music.radio.MusicRuntimeStateMigrationSupport;
 import dev.christopherbell.music.radio.MusicRuntimeStateStore;
 import java.time.Instant;
 import java.util.Date;
@@ -52,7 +53,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     var mongo = template("nonzero");
     insertSources(mongo, 4L, 9L);
 
-    assertThatCode(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatCode(() -> migration().apply(mongo))
         .doesNotThrowAnyException();
 
     assertThat(target(mongo, "queue").get("version")).isEqualTo(4L);
@@ -63,7 +64,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
   void migratesNoRuntimeStateWhenBothLegacySingletonsAreAbsent() {
     var mongo = template("neither-present");
 
-    assertThatCode(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatCode(() -> migration().apply(mongo))
         .doesNotThrowAnyException();
 
     assertThat(mongo.collectionExists("music_runtime_state")).isFalse();
@@ -74,7 +75,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     var mongo = template("queue-only");
     mongo.getCollection("music_queue_state").insertOne(queueSource(4L));
 
-    new V014ConsolidateMusicRuntimeState().apply(mongo);
+    migration().apply(mongo);
 
     assertThat(targets(mongo)).extracting(document -> document.getString("_id"))
         .containsExactly("queue");
@@ -86,7 +87,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     var mongo = template("radio-only");
     mongo.getCollection("music_radio_state").insertOne(radioSource(9L));
 
-    new V014ConsolidateMusicRuntimeState().apply(mongo);
+    migration().apply(mongo);
 
     assertThat(targets(mongo)).extracting(document -> document.getString("_id"))
         .containsExactly("radio");
@@ -99,7 +100,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     insertSources(mongo, 4L, 9L);
     mongo.getCollection("music_runtime_state").insertOne(queueTarget(4L));
 
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatThrownBy(() -> migration().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("destination");
 
@@ -115,7 +116,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
         queueTarget(4L),
         radioTarget(9L)));
 
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatThrownBy(() -> migration().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("destination");
 
@@ -130,7 +131,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
         queueSource(4L),
         new Document(queueSource(5L)).append("_id", "duplicate")));
 
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatThrownBy(() -> migration().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("source", "cardinality");
 
@@ -141,7 +142,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
   void ordinaryVersionedSavesLockAndIsolateQueueAndRadioDocuments() {
     var mongo = template("ordinary-versioning");
     insertSources(mongo, 4L, 9L);
-    new V014ConsolidateMusicRuntimeState().apply(mongo);
+    migration().apply(mongo);
     var store = new MusicRuntimeStateStore(mongo);
     var winningSnapshot = store.findQueue().orElseThrow();
     var staleSnapshot = store.findQueue().orElseThrow();
@@ -195,7 +196,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
   void migrationPreservesAbsentVersionUntilFirstAtomicRuntimeSave() {
     var mongo = template("absent-first-save");
     insertSources(mongo, null, null);
-    new V014ConsolidateMusicRuntimeState().apply(mongo);
+    migration().apply(mongo);
 
     assertThat(target(mongo, "queue").containsKey("version")).isFalse();
     assertThat(target(mongo, "radio").containsKey("version")).isFalse();
@@ -212,7 +213,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
   void competingVersionlessSaveCannotOverwriteTheAtomicWinner() {
     var mongo = template("absent-contention");
     insertSources(mongo, null, null);
-    new V014ConsolidateMusicRuntimeState().apply(mongo);
+    migration().apply(mongo);
     var store = new MusicRuntimeStateStore(mongo);
     var firstSnapshot = store.findQueue().orElseThrow();
     var staleSnapshot = store.findQueue().orElseThrow();
@@ -246,7 +247,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     mongo.getCollection("music_queue_state").insertOne(queueSource(4.5));
     mongo.getCollection("music_radio_state").insertOne(radioSource(9L));
 
-    assertThatThrownBy(() -> new V014ConsolidateMusicRuntimeState().apply(mongo))
+    assertThatThrownBy(() -> migration().apply(mongo))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("source");
 
@@ -257,6 +258,10 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     String database = "v014_" + purpose + "_"
         + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     return new MongoTemplate(client, database);
+  }
+
+  private static V014ConsolidateMusicRuntimeState migration() {
+    return new V014ConsolidateMusicRuntimeState(new MusicRuntimeStateMigrationSupport());
   }
 
   private static void insertSources(MongoTemplate mongo, Long queueVersion, Long radioVersion) {
