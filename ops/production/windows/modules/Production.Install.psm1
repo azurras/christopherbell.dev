@@ -2,6 +2,376 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:WinSwUri = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe'
 $script:WinSwSha256 = '05B82D46AD331CC16BDC00DE5C6332C1EF818DF8CEEFCD49C726553209B3A0DA'
+$script:ProtectedProductionDirectorySddl =
+    'O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)'
+
+if (-not ('ChristopherBell.Dev.ProductionInstallNativeDirectory' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Text;
+
+namespace ChristopherBell.Dev
+{
+    public sealed class ProductionInstallDirectoryIdentity
+    {
+        public string NativeFinalPath { get; set; }
+        public uint VolumeSerialNumber { get; set; }
+        public ulong FileIndex { get; set; }
+        public bool ReparsePoint { get; set; }
+    }
+
+    public static class ProductionInstallNativeDirectory
+    {
+        private const uint FileReadAttributes = 0x80;
+        private const uint FileShareRead = 0x1;
+        private const uint FileShareWrite = 0x2;
+        private const uint FileShareDelete = 0x4;
+        private const uint OpenExisting = 3;
+        private const uint FileFlagBackupSemantics = 0x02000000;
+        private const uint FileFlagOpenReparsePoint = 0x00200000;
+        private const uint FileAttributeReparsePoint = 0x400;
+        private const uint MoveFileWriteThrough = 0x8;
+        private const uint DirectoryAllAccess = 0x001F01FF;
+        private const uint FileCreate = 2;
+        private const uint FileDirectoryFile = 0x1;
+        private const uint FileSynchronousIoNonAlert = 0x20;
+        private const uint ObjectCaseInsensitive = 0x40;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SecurityAttributes
+        {
+            public int Length;
+            public IntPtr SecurityDescriptor;
+            public bool InheritHandle;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileTime
+        {
+            public uint LowDateTime;
+            public uint HighDateTime;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ByHandleFileInformation
+        {
+            public uint FileAttributes;
+            public FileTime CreationTime;
+            public FileTime LastAccessTime;
+            public FileTime LastWriteTime;
+            public uint VolumeSerialNumber;
+            public uint FileSizeHigh;
+            public uint FileSizeLow;
+            public uint NumberOfLinks;
+            public uint FileIndexHigh;
+            public uint FileIndexLow;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct UnicodeString
+        {
+            public ushort Length;
+            public ushort MaximumLength;
+            public IntPtr Buffer;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ObjectAttributes
+        {
+            public int Length;
+            public IntPtr RootDirectory;
+            public IntPtr ObjectName;
+            public uint Attributes;
+            public IntPtr SecurityDescriptor;
+            public IntPtr SecurityQualityOfService;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IoStatusBlock
+        {
+            public IntPtr Status;
+            public IntPtr Information;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool CreateDirectoryW(
+            string path,
+            ref SecurityAttributes securityAttributes);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateFileW(
+            string fileName,
+            uint desiredAccess,
+            uint shareMode,
+            IntPtr securityAttributes,
+            uint creationDisposition,
+            uint flagsAndAttributes,
+            IntPtr templateFile);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFinalPathNameByHandleW(
+            IntPtr file,
+            StringBuilder filePath,
+            uint filePathLength,
+            uint flags);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandle(
+            IntPtr file,
+            out ByHandleFileInformation fileInformation);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool MoveFileExW(
+            string existingFileName,
+            string newFileName,
+            uint flags);
+
+        [DllImport("ntdll.dll")]
+        private static extern int NtCreateFile(
+            out IntPtr fileHandle,
+            uint desiredAccess,
+            ref ObjectAttributes objectAttributes,
+            out IoStatusBlock ioStatusBlock,
+            IntPtr allocationSize,
+            uint fileAttributes,
+            uint shareAccess,
+            uint createDisposition,
+            uint createOptions,
+            IntPtr eaBuffer,
+            uint eaLength);
+
+        [DllImport("ntdll.dll")]
+        private static extern uint RtlNtStatusToDosError(int status);
+
+        public static ProductionInstallDirectoryIdentity CreateProtectedDirectoryNew(
+            string path,
+            string sddl)
+        {
+            RawSecurityDescriptor security = new RawSecurityDescriptor(sddl);
+            byte[] descriptor = new byte[security.BinaryLength];
+            security.GetBinaryForm(descriptor, 0);
+            IntPtr descriptorBuffer = Marshal.AllocHGlobal(descriptor.Length);
+            try
+            {
+                Marshal.Copy(descriptor, 0, descriptorBuffer, descriptor.Length);
+                SecurityAttributes attributes = new SecurityAttributes();
+                attributes.Length = Marshal.SizeOf(typeof(SecurityAttributes));
+                attributes.SecurityDescriptor = descriptorBuffer;
+                attributes.InheritHandle = false;
+                if (!CreateDirectoryW(path, ref attributes))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Protected directory creation failed.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(descriptorBuffer);
+            }
+            return GetIdentity(path);
+        }
+
+        public static ProductionInstallDirectoryIdentity GetIdentity(string path)
+        {
+            IntPtr handle = OpenDirectoryIdentityHandle(path);
+            try
+            {
+                return GetIdentityFromHandle(handle);
+            }
+            finally
+            {
+                CloseHandle(handle);
+            }
+        }
+
+        public static ProductionInstallDirectoryIdentity CreateProtectedChildDirectoryNew(
+            string parentPath,
+            uint expectedVolumeSerialNumber,
+            ulong expectedFileIndex,
+            string childName,
+            string sddl)
+        {
+            if (String.IsNullOrEmpty(childName) || childName == "." || childName == ".." ||
+                childName.IndexOfAny(new char[] { '\\', '/' }) >= 0)
+            {
+                throw new ArgumentException("Protected child directory name is invalid.",
+                    "childName");
+            }
+            IntPtr parentHandle = OpenDirectoryIdentityHandle(parentPath);
+            try
+            {
+                ProductionInstallDirectoryIdentity parentIdentity =
+                    GetIdentityFromHandle(parentHandle);
+                if (parentIdentity.ReparsePoint ||
+                    parentIdentity.VolumeSerialNumber != expectedVolumeSerialNumber ||
+                    parentIdentity.FileIndex != expectedFileIndex)
+                {
+                    throw new InvalidOperationException(
+                        "Protected child parent identity changed before creation.");
+                }
+                return CreateProtectedChildDirectoryNew(
+                    parentHandle, childName, sddl);
+            }
+            finally
+            {
+                CloseHandle(parentHandle);
+            }
+        }
+
+        private static IntPtr OpenDirectoryIdentityHandle(string path)
+        {
+            IntPtr handle = CreateFileW(
+                path,
+                FileReadAttributes,
+                FileShareRead | FileShareWrite | FileShareDelete,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle == new IntPtr(-1))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Directory identity could not be opened.");
+            }
+            return handle;
+        }
+
+        private static ProductionInstallDirectoryIdentity GetIdentityFromHandle(
+            IntPtr handle)
+        {
+            ByHandleFileInformation information;
+            if (!GetFileInformationByHandle(handle, out information))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Directory identity could not be read.");
+            }
+            StringBuilder finalPath = new StringBuilder(1024);
+            uint length = GetFinalPathNameByHandleW(
+                handle, finalPath, (uint)finalPath.Capacity, 0);
+            if (length == 0)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Directory final path could not be read.");
+            }
+            if (length >= finalPath.Capacity)
+            {
+                finalPath = new StringBuilder((int)length + 1);
+                length = GetFinalPathNameByHandleW(
+                    handle, finalPath, (uint)finalPath.Capacity, 0);
+                if (length == 0 || length >= finalPath.Capacity)
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Directory final path could not be read.");
+                }
+            }
+            return new ProductionInstallDirectoryIdentity
+            {
+                NativeFinalPath = NormalizeFinalPath(finalPath.ToString()),
+                VolumeSerialNumber = information.VolumeSerialNumber,
+                FileIndex = ((ulong)information.FileIndexHigh << 32) |
+                    information.FileIndexLow,
+                ReparsePoint =
+                    (information.FileAttributes & FileAttributeReparsePoint) != 0
+            };
+        }
+
+        private static ProductionInstallDirectoryIdentity CreateProtectedChildDirectoryNew(
+            IntPtr parentHandle,
+            string childName,
+            string sddl)
+        {
+            RawSecurityDescriptor security = new RawSecurityDescriptor(sddl);
+            byte[] descriptor = new byte[security.BinaryLength];
+            security.GetBinaryForm(descriptor, 0);
+            IntPtr descriptorBuffer = Marshal.AllocHGlobal(descriptor.Length);
+            IntPtr nameBuffer = Marshal.StringToHGlobalUni(childName);
+            IntPtr unicodeBuffer = IntPtr.Zero;
+            IntPtr childHandle = IntPtr.Zero;
+            try
+            {
+                Marshal.Copy(descriptor, 0, descriptorBuffer, descriptor.Length);
+                UnicodeString unicodeName = new UnicodeString();
+                unicodeName.Length = checked((ushort)(childName.Length * 2));
+                unicodeName.MaximumLength = unicodeName.Length;
+                unicodeName.Buffer = nameBuffer;
+                unicodeBuffer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UnicodeString)));
+                Marshal.StructureToPtr(unicodeName, unicodeBuffer, false);
+                ObjectAttributes attributes = new ObjectAttributes();
+                attributes.Length = Marshal.SizeOf(typeof(ObjectAttributes));
+                attributes.RootDirectory = parentHandle;
+                attributes.ObjectName = unicodeBuffer;
+                attributes.Attributes = ObjectCaseInsensitive;
+                attributes.SecurityDescriptor = descriptorBuffer;
+                IoStatusBlock statusBlock;
+                int status = NtCreateFile(
+                    out childHandle,
+                    DirectoryAllAccess,
+                    ref attributes,
+                    out statusBlock,
+                    IntPtr.Zero,
+                    0,
+                    FileShareRead | FileShareWrite | FileShareDelete,
+                    FileCreate,
+                    FileDirectoryFile | FileSynchronousIoNonAlert |
+                        FileFlagOpenReparsePoint,
+                    IntPtr.Zero,
+                    0);
+                if (status < 0)
+                {
+                    throw new Win32Exception((int)RtlNtStatusToDosError(status),
+                        "Protected child directory creation failed.");
+                }
+                return GetIdentityFromHandle(childHandle);
+            }
+            finally
+            {
+                if (childHandle != IntPtr.Zero && childHandle != new IntPtr(-1))
+                {
+                    CloseHandle(childHandle);
+                }
+                if (unicodeBuffer != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(unicodeBuffer);
+                }
+                Marshal.FreeHGlobal(nameBuffer);
+                Marshal.FreeHGlobal(descriptorBuffer);
+            }
+        }
+
+        public static void MoveDirectoryNew(string source, string destination)
+        {
+            if (!MoveFileExW(source, destination, MoveFileWriteThrough))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Protected directory publication failed.");
+            }
+        }
+
+        private static string NormalizeFinalPath(string path)
+        {
+            const string uncPrefix = @"\\?\UNC\";
+            const string localPrefix = @"\\?\";
+            if (path.StartsWith(uncPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return @"\\" + path.Substring(uncPrefix.Length);
+            }
+            if (path.StartsWith(localPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return path.Substring(localPrefix.Length);
+            }
+            return path;
+        }
+    }
+}
+'@
+}
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -258,24 +628,254 @@ function Assert-ProductionInstallPathTraversal {
     }
 }
 
-function New-ProductionInstallDirectoryPath {
+function Get-ProductionInstallDirectoryIdentity {
     param([Parameter(Mandatory)][string]$Path)
 
-    $components = @(Get-ProductionInstallPathComponents -Path $Path)
-    for ($index = 0; $index -lt $components.Count; $index++) {
-        $component = $components[$index]
-        if (Test-Path -LiteralPath $component) {
-            Assert-ProductionInstallDirectory -Path $component | Out-Null
-            continue
+    return [ChristopherBell.Dev.ProductionInstallNativeDirectory]::GetIdentity($Path)
+}
+
+function Test-ProductionInstallDirectoryIdentityEqual {
+    param(
+        [Parameter(Mandatory)]$Expected,
+        [Parameter(Mandatory)]$Actual
+    )
+
+    return [uint32]$Expected.VolumeSerialNumber -eq
+        [uint32]$Actual.VolumeSerialNumber -and
+        [uint64]$Expected.FileIndex -eq [uint64]$Actual.FileIndex
+}
+
+function New-ProductionInstallProtectedDirectoryNative {
+    param([Parameter(Mandatory)][string]$Path)
+
+    return [ChristopherBell.Dev.ProductionInstallNativeDirectory]::
+        CreateProtectedDirectoryNew(
+            $Path,
+            $script:ProtectedProductionDirectorySddl)
+}
+
+function New-ProductionInstallProtectedChildDirectoryNative {
+    param(
+        [Parameter(Mandatory)][string]$ParentPath,
+        [Parameter(Mandatory)]$ParentIdentity,
+        [Parameter(Mandatory)][string]$ChildName
+    )
+
+    return [ChristopherBell.Dev.ProductionInstallNativeDirectory]::
+        CreateProtectedChildDirectoryNew(
+            $ParentPath,
+            [uint32]$ParentIdentity.VolumeSerialNumber,
+            [uint64]$ParentIdentity.FileIndex,
+            $ChildName,
+            $script:ProtectedProductionDirectorySddl)
+}
+
+function Move-ProductionInstallRootStageNew {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination
+    )
+
+    [ChristopherBell.Dev.ProductionInstallNativeDirectory]::
+        MoveDirectoryNew($Source, $Destination)
+}
+
+function Assert-ProductionInstallDirectoryIdentity {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]$ExpectedIdentity
+    )
+
+    $actual = Get-ProductionInstallDirectoryIdentity -Path $Path
+    if ($actual.ReparsePoint -or
+        -not (Test-ProductionInstallDirectoryIdentityEqual `
+            -Expected $ExpectedIdentity -Actual $actual)) {
+        throw "Production installation directory identity changed: $Path"
+    }
+    $expectedPath = Resolve-CanonicalProductionInstallPath -Path $Path
+    $actualPath = [IO.Path]::GetFullPath([string]$actual.NativeFinalPath)
+    if (-not [string]::Equals(
+            $expectedPath, $actualPath,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Production installation directory final path changed: $Path"
+    }
+    return $actual
+}
+
+function Assert-ProductionInstallProtectedDirectoryState {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]$ExpectedIdentity
+    )
+
+    Assert-ProductionInstallPathTraversal -Path $Path
+    $actual = Assert-ProductionInstallDirectoryIdentity `
+        -Path $Path -ExpectedIdentity $ExpectedIdentity
+    Assert-ProtectedProductionPath -Path $Path
+    return $actual
+}
+
+function Assert-ProductionInstallRootParentBoundary {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $canonicalParent = Resolve-CanonicalProductionInstallPath -Path $Path
+    Assert-ProductionInstallPathTraversal -Path $canonicalParent
+    $trusted = @(
+        'S-1-5-18',
+        'S-1-5-32-544',
+        'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $dangerous =
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    $genericAll = [long]268435456
+    foreach ($component in @(Get-ProductionInstallPathComponents `
+                -Path $canonicalParent)) {
+        $acl = Get-Acl -LiteralPath $component -ErrorAction Stop
+        $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+        $rawSecurity = [Security.AccessControl.RawSecurityDescriptor]::new(
+            $acl.GetSecurityDescriptorSddlForm(
+                [Security.AccessControl.AccessControlSections]::All))
+        $unsafe = -not $acl.AreAccessRulesProtected -or
+            $trusted -notcontains $owner -or
+            $null -eq $rawSecurity.DiscretionaryAcl
+        foreach ($rule in @($acl.GetAccessRules(
+                    $true,
+                    $true,
+                    [Security.Principal.SecurityIdentifier]))) {
+            if ($rule.AccessControlType -ne
+                    [Security.AccessControl.AccessControlType]::Allow -or
+                $trusted -contains $rule.IdentityReference.Value -or
+                ($rule.PropagationFlags -band
+                    [Security.AccessControl.PropagationFlags]::InheritOnly)) {
+                continue
+            }
+            $rightsValue = [long]$rule.FileSystemRights
+            if ($rightsValue -lt 0) { $rightsValue += [long]4294967296 }
+            if (($rule.FileSystemRights -band $dangerous) -ne 0 -or
+                ($rightsValue -band $genericAll) -ne 0) {
+                $unsafe = $true
+                break
+            }
         }
-        if ($index -eq 0) {
-            throw "Missing filesystem root for production installation: $component"
+        if ($unsafe) {
+            throw "Production install root parent grants untrusted replacement control: $component"
         }
-        $parent = $components[$index - 1]
-        Assert-ProductionInstallDirectory -Path $parent | Out-Null
-        New-Item -ItemType Directory -Path $component -ErrorAction Stop | Out-Null
-        Assert-ProductionInstallDirectory -Path $parent | Out-Null
-        Assert-ProductionInstallDirectory -Path $component | Out-Null
+    }
+    Assert-ProductionInstallPathTraversal -Path $canonicalParent
+    $identity = Get-ProductionInstallDirectoryIdentity -Path $canonicalParent
+    if ($identity.ReparsePoint) {
+        throw "Production install root parent must not be a reparse point: $canonicalParent"
+    }
+    return $identity
+}
+
+function Assert-ProductionInstallRootParentState {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]$ExpectedIdentity
+    )
+
+    $actual = Assert-ProductionInstallRootParentBoundary -Path $Path
+    if (-not (Test-ProductionInstallDirectoryIdentityEqual `
+            -Expected $ExpectedIdentity -Actual $actual)) {
+        throw "Production install root parent identity changed: $Path"
+    }
+    return $actual
+}
+
+function Remove-ProductionInstallRootStage {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]$ExpectedIdentity
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    Assert-ProductionInstallDirectoryIdentity `
+        -Path $Path -ExpectedIdentity $ExpectedIdentity | Out-Null
+    [IO.Directory]::Delete($Path, $false)
+    if (Test-Path -LiteralPath $Path) {
+        throw "Staged production root cleanup was not verified: $Path"
+    }
+}
+
+function Initialize-ProductionInstallRootBoundary {
+    param([Parameter(Mandatory)][string]$Root)
+
+    $canonicalRoot = Resolve-CanonicalProductionInstallPath -Path $Root
+    $parent = Resolve-CanonicalProductionInstallPath -Path (
+        Split-Path -Parent $canonicalRoot)
+    $parentIdentity = Assert-ProductionInstallRootParentBoundary -Path $parent
+    Assert-ProductionInstallPathTraversal -Path $canonicalRoot -LeafMayBeMissing
+    if (Test-Path -LiteralPath $canonicalRoot) {
+        $rootIdentity = Get-ProductionInstallDirectoryIdentity -Path $canonicalRoot
+        Assert-ProductionInstallProtectedDirectoryState `
+            -Path $canonicalRoot -ExpectedIdentity $rootIdentity | Out-Null
+        Assert-ProductionInstallRootParentState `
+            -Path $parent -ExpectedIdentity $parentIdentity | Out-Null
+        return [pscustomobject]@{
+            Root = $canonicalRoot
+            RootIdentity = $rootIdentity
+            Parent = $parent
+            ParentIdentity = $parentIdentity
+        }
+    }
+
+    $stage = Join-Path $parent (
+        '.production.install-{0}' -f ([guid]::NewGuid().ToString('N')))
+    $stageIdentity = $null
+    try {
+        $stageIdentity = New-ProductionInstallProtectedDirectoryNative -Path $stage
+        Assert-ProductionInstallProtectedDirectoryState `
+            -Path $stage -ExpectedIdentity $stageIdentity | Out-Null
+        Assert-ProductionInstallRootParentState `
+            -Path $parent -ExpectedIdentity $parentIdentity | Out-Null
+        try {
+            Move-ProductionInstallRootStageNew `
+                -Source $stage -Destination $canonicalRoot
+            $rootIdentity = $stageIdentity
+        } catch {
+            $publicationFailure = $_.Exception
+            if (-not (Test-Path -LiteralPath $canonicalRoot)) {
+                throw
+            }
+            try {
+                $rootIdentity = Get-ProductionInstallDirectoryIdentity `
+                    -Path $canonicalRoot
+                Assert-ProductionInstallProtectedDirectoryState `
+                    -Path $canonicalRoot -ExpectedIdentity $rootIdentity | Out-Null
+            } catch {
+                throw [AggregateException]::new(
+                    'Protected production root publication lost an unsafe creation race.',
+                    [Exception[]]@($publicationFailure, $_.Exception))
+            }
+        }
+        Assert-ProductionInstallProtectedDirectoryState `
+            -Path $canonicalRoot -ExpectedIdentity $rootIdentity | Out-Null
+        Assert-ProductionInstallRootParentState `
+            -Path $parent -ExpectedIdentity $parentIdentity | Out-Null
+        Remove-ProductionInstallRootStage `
+            -Path $stage -ExpectedIdentity $stageIdentity
+        return [pscustomobject]@{
+            Root = $canonicalRoot
+            RootIdentity = $rootIdentity
+            Parent = $parent
+            ParentIdentity = $parentIdentity
+        }
+    } catch {
+        $bootstrapFailure = $_.Exception
+        if ($null -ne $stageIdentity -and (Test-Path -LiteralPath $stage)) {
+            try {
+                Remove-ProductionInstallRootStage `
+                    -Path $stage -ExpectedIdentity $stageIdentity
+            } catch {
+                throw [AggregateException]::new(
+                    'Production root bootstrap failed and staged cleanup was not verified.',
+                    [Exception[]]@($bootstrapFailure, $_.Exception))
+            }
+        }
+        throw $bootstrapFailure
     }
 }
 
@@ -283,24 +883,42 @@ function Initialize-ProductionDeploymentLockDirectory {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Root)
 
-    $canonicalRoot = Resolve-CanonicalProductionInstallPath -Path $Root
+    $rootBoundary = Initialize-ProductionInstallRootBoundary -Root $Root
+    $canonicalRoot = $rootBoundary.Root
     $locks = Resolve-CanonicalProductionInstallPath -Path (Join-Path $canonicalRoot 'locks')
     $lockPath = [IO.Path]::GetFullPath((Join-Path $locks 'deploy.lock'))
-    New-ProductionInstallDirectoryPath -Path $locks
-    Assert-ProductionInstallPathTraversal -Path $locks
-    Assert-ProductionInstallPathTraversal -Path $lockPath -LeafMayBeMissing
-
-    Protect-ProductionPath -Path $canonicalRoot
-    Assert-ProductionInstallPathTraversal -Path $locks
-    Assert-ProtectedProductionPath -Path $canonicalRoot
-    Protect-ProductionPath -Path $locks
-    Assert-ProductionInstallPathTraversal -Path $locks
-    Assert-ProtectedProductionPath -Path $locks
+    Assert-ProductionInstallProtectedDirectoryState `
+        -Path $canonicalRoot -ExpectedIdentity $rootBoundary.RootIdentity | Out-Null
+    Assert-ProductionInstallPathTraversal -Path $locks -LeafMayBeMissing
+    if (Test-Path -LiteralPath $locks) {
+        $locksIdentity = Get-ProductionInstallDirectoryIdentity -Path $locks
+    } else {
+        try {
+            $locksIdentity = New-ProductionInstallProtectedChildDirectoryNative `
+                -ParentPath $canonicalRoot `
+                -ParentIdentity $rootBoundary.RootIdentity `
+                -ChildName 'locks'
+        } catch {
+            if (-not (Test-Path -LiteralPath $locks)) { throw }
+            $locksIdentity = Get-ProductionInstallDirectoryIdentity -Path $locks
+        }
+    }
+    Assert-ProductionInstallProtectedDirectoryState `
+        -Path $canonicalRoot -ExpectedIdentity $rootBoundary.RootIdentity | Out-Null
+    Assert-ProductionInstallProtectedDirectoryState `
+        -Path $locks -ExpectedIdentity $locksIdentity | Out-Null
+    Assert-ProductionInstallRootParentState `
+        -Path $rootBoundary.Parent `
+        -ExpectedIdentity $rootBoundary.ParentIdentity | Out-Null
     Assert-ProductionInstallPathTraversal -Path $lockPath -LeafMayBeMissing
 
     return [pscustomobject]@{
         Root = $canonicalRoot
+        RootIdentity = $rootBoundary.RootIdentity
+        Parent = $rootBoundary.Parent
+        ParentIdentity = $rootBoundary.ParentIdentity
         Locks = $locks
+        LocksIdentity = $locksIdentity
         LockPath = $lockPath
     }
 }
@@ -318,10 +936,43 @@ function Assert-ProductionDeploymentLockBoundary {
             [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Production deployment lock boundary path identity changed.'
     }
-    Assert-ProductionInstallPathTraversal -Path $Boundary.Locks
-    Assert-ProtectedProductionPath -Path $Boundary.Root
-    Assert-ProtectedProductionPath -Path $Boundary.Locks
+    Assert-ProductionInstallRootParentState `
+        -Path $Boundary.Parent -ExpectedIdentity $Boundary.ParentIdentity | Out-Null
+    Assert-ProductionInstallProtectedDirectoryState `
+        -Path $Boundary.Root -ExpectedIdentity $Boundary.RootIdentity | Out-Null
+    Assert-ProductionInstallProtectedDirectoryState `
+        -Path $Boundary.Locks -ExpectedIdentity $Boundary.LocksIdentity | Out-Null
     Assert-ProductionInstallPathTraversal -Path $Boundary.LockPath
+}
+
+function Assert-ProductionConfiguredRootBoundary {
+    param(
+        [Parameter(Mandatory)]$Configuration,
+        [Parameter(Mandatory)]$Boundary
+    )
+
+    $property = $Configuration.PSObject.Properties['programDataRoot']
+    if (-not $property -or $property.Value -isnot [string] -or
+        [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+        throw 'Configured production root is missing or malformed.'
+    }
+    $configuredValue = [string]$property.Value
+    $pathRoot = [IO.Path]::GetPathRoot($configuredValue)
+    foreach ($segment in $configuredValue.Substring($pathRoot.Length) -split '[\\/]') {
+        if ($segment -in @('.','..')) {
+            throw 'Configured production root must not contain relative path traversal.'
+        }
+    }
+    $configuredRoot = Resolve-CanonicalProductionInstallPath -Path $configuredValue
+    if (-not [string]::Equals(
+            $configuredRoot,
+            [string]$Boundary.Root,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Configured production root does not match the locked production boundary.'
+    }
+    Assert-ProductionInstallProtectedDirectoryState `
+        -Path $configuredRoot -ExpectedIdentity $Boundary.RootIdentity | Out-Null
+    $Configuration.programDataRoot = [string]$Boundary.Root
 }
 
 function Read-ProductionWebsiteStopPort {
@@ -334,8 +985,7 @@ function Read-ProductionWebsiteStopPort {
         $legacyConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
     } catch {
         throw [System.InvalidOperationException]::new(
-            'Legacy deploy config could not be parsed for a safe website stop.',
-            $_.Exception)
+            'Legacy deploy config could not be parsed for a safe website stop.')
     }
     $property = $legacyConfig.PSObject.Properties['productionPort']
     if (-not $property -or (
@@ -554,6 +1204,8 @@ function Invoke-ProductionRuntimeInstallAtRoot {
             Protect-ProductionSecrets $root
             Install-ConfigurationExamples $root
             $config = Read-ProductionConfig (Join-Path $root 'config\deploy.json')
+            Assert-ProductionConfiguredRootBoundary `
+                -Configuration $config -Boundary $boundary
             $productionPort = [int]$config.productionPort
             Read-ProductionEnvironment (Join-Path $root 'config\app.env') | Out-Null
             Protect-ProductionSecrets $root

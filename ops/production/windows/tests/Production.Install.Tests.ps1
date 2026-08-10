@@ -158,6 +158,24 @@ Describe 'native Windows service installer' {
         $protect | Should -BeLessThan $module.IndexOf('Copy-Item $sourceXml $installedXml')
     }
 
+    It 'binds the validated config to the locked root before config-derived effects' {
+        $module = Get-Content (
+            Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Raw
+        $runtime = $module.Substring($module.IndexOf(
+            'function Invoke-ProductionRuntimeInstallAtRoot'))
+        $read = $runtime.IndexOf('$config = Read-ProductionConfig')
+        $bind = $runtime.IndexOf('Assert-ProductionConfiguredRootBoundary')
+
+        $read | Should -BeGreaterOrEqual 0
+        $bind | Should -BeGreaterThan $read
+        $bind | Should -BeLessThan $runtime.IndexOf(
+            'Read-ProductionEnvironment')
+        $bind | Should -BeLessThan $runtime.IndexOf(
+            'Protect-ProductionWebsiteServiceDirectory')
+        $bind | Should -BeLessThan $runtime.IndexOf(
+            'Install-CloudflaredService')
+    }
+
     It 'rejects a reparse service directory before any service-host file write' {
         InModuleScope Production.Install {
             $root = Join-Path $TestDrive 'installer-reparse-root'
@@ -350,6 +368,37 @@ Describe 'production install root and lock bootstrap' {
     InModuleScope Production.Install {
         BeforeEach {
             $script:bootstrapEvents = [Collections.Generic.List[string]]::new()
+            Mock Get-ProductionInstallDirectoryIdentity {
+                $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+                [pscustomobject]@{
+                    NativeFinalPath = [IO.Path]::GetFullPath($Path)
+                    VolumeSerialNumber = [uint32]1
+                    FileIndex = [uint64]$item.CreationTimeUtc.Ticks
+                    ReparsePoint = [bool](
+                        $item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+                }
+            }
+            Mock Assert-ProductionInstallRootParentBoundary {
+                Get-ProductionInstallDirectoryIdentity -Path $Path
+            }
+            Mock Assert-ProductionInstallRootParentState {
+                Get-ProductionInstallDirectoryIdentity -Path $Path
+            }
+            Mock New-ProductionInstallProtectedDirectoryNative {
+                Microsoft.PowerShell.Management\New-Item `
+                    -ItemType Directory -Path $Path -ErrorAction Stop | Out-Null
+                Get-ProductionInstallDirectoryIdentity -Path $Path
+            }
+            Mock New-ProductionInstallProtectedChildDirectoryNative {
+                $child = Join-Path $ParentPath $ChildName
+                Microsoft.PowerShell.Management\New-Item `
+                    -ItemType Directory -Path $child -ErrorAction Stop | Out-Null
+                Get-ProductionInstallDirectoryIdentity -Path $child
+            }
+            Mock Move-ProductionInstallRootStageNew {
+                Move-Item -LiteralPath $Source -Destination $Destination `
+                    -ErrorAction Stop
+            }
             Mock Protect-ProductionPath {
                 [void]$script:bootstrapEvents.Add("protect:$Path")
             }
@@ -369,6 +418,92 @@ Describe 'production install root and lock bootstrap' {
                 throw 'publisher effect must not run'
             }
             Mock Enter-DeploymentLock { throw 'lock acquisition must not run' }
+        }
+
+        It 'rejects an existing unprotected normal root without repairing or descending into it' {
+            $root = Join-Path $TestDrive 'unprotected-existing-root'
+            New-Item -ItemType Directory -Path $root | Out-Null
+            'preserve-root' | Set-Content -LiteralPath (Join-Path $root 'sentinel.txt')
+            Mock Assert-ProtectedProductionPath {
+                if ($Path -eq $root) { throw 'existing production root is unprotected' }
+            }
+
+            { Invoke-ProductionRuntimeInstallAtRoot -Root $root } |
+                Should -Throw '*existing production root is unprotected*'
+
+            Should -Invoke Protect-ProductionPath -Times 0 -ParameterFilter {
+                $Path -eq $root
+            }
+            Should -Invoke Enter-DeploymentLock -Times 0
+            Test-Path -LiteralPath (Join-Path $root 'locks') | Should -BeFalse
+            Get-Content -LiteralPath (Join-Path $root 'sentinel.txt') -Raw |
+                Should -Match 'preserve-root'
+        }
+
+        It 'rejects an install parent that grants untrusted replacement control' {
+            Mock Assert-ProductionInstallRootParentBoundary {
+                throw 'Production install root parent grants untrusted replacement control'
+            }
+
+            { Assert-ProductionInstallRootParentBoundary -Path $TestDrive } |
+                Should -Throw '*replacement control*'
+        }
+
+        It 'does not create locks through a root replaced during child creation' {
+            $root = Join-Path $TestDrive 'child-race-root'
+            $target = Join-Path $TestDrive 'child-race-target'
+            New-Item -ItemType Directory -Path $root,$target | Out-Null
+            $sentinel = Join-Path $target 'sentinel.txt'
+            'redirect-target' | Set-Content -LiteralPath $sentinel
+            $targetAcl = (Get-Acl -LiteralPath $target).Sddl
+            $targetWriteTime = (Get-Item -LiteralPath $target).LastWriteTimeUtc.Ticks
+            Mock New-ProductionInstallProtectedChildDirectoryNative {
+                Remove-Item -LiteralPath $root
+                New-Item -ItemType Junction -Path $root -Target $target | Out-Null
+                [ChristopherBell.Dev.ProductionInstallNativeDirectory]::
+                    CreateProtectedChildDirectoryNew(
+                        $root,
+                        [uint32]$ParentIdentity.VolumeSerialNumber,
+                        [uint64]$ParentIdentity.FileIndex,
+                        $ChildName,
+                        $script:ProtectedProductionDirectorySddl)
+            }
+            try {
+                { Invoke-ProductionRuntimeInstallAtRoot -Root $root } |
+                    Should -Throw
+
+                Should -Invoke Enter-DeploymentLock -Times 0
+                Should -Invoke Get-ProductionWebsiteServiceOrNull -Times 0
+                Should -Invoke New-ProductionDirectories -Times 0
+                Test-Path -LiteralPath (Join-Path $target 'locks') | Should -BeFalse
+                Get-Content -LiteralPath $sentinel -Raw | Should -Match 'redirect-target'
+                (Get-Acl -LiteralPath $target).Sddl | Should -BeExactly $targetAcl
+                (Get-Item -LiteralPath $target).LastWriteTimeUtc.Ticks |
+                    Should -Be $targetWriteTime
+            } finally {
+                if (Test-Path -LiteralPath $root) {
+                    [IO.Directory]::Delete($root, $false)
+                }
+            }
+        }
+
+        It 'cleans a partial staged root when protection fails before publication' {
+            $parent = Join-Path $TestDrive 'partial-stage-parent'
+            $root = Join-Path $parent 'production'
+            New-Item -ItemType Directory -Path $parent | Out-Null
+            Mock Assert-ProtectedProductionPath {
+                if ((Split-Path -Leaf $Path) -like '.production.install-*') {
+                    throw 'staged root protection failed'
+                }
+            }
+
+            { Invoke-ProductionRuntimeInstallAtRoot -Root $root } |
+                Should -Throw '*staged root protection failed*'
+
+            Test-Path -LiteralPath $root | Should -BeFalse
+            @(Get-ChildItem -LiteralPath $parent -Force -Filter '.production.install-*').Count |
+                Should -Be 0
+            Should -Invoke Enter-DeploymentLock -Times 0
         }
 
         It 'rejects a disposable production-root junction before lock or downstream effect' {
@@ -391,7 +526,7 @@ Describe 'production install root and lock bootstrap' {
                 @(Get-ChildItem -LiteralPath $target -Force).Count | Should -Be 0
             } finally {
                 if (Test-Path -LiteralPath $root) {
-                    Remove-Item -LiteralPath $root -Force
+                    [IO.Directory]::Delete($root, $false)
                 }
             }
         }
@@ -425,8 +560,8 @@ Describe 'production install root and lock bootstrap' {
             $parent = Join-Path $TestDrive 'create-failure-parent'
             $root = Join-Path $parent 'production'
             New-Item -ItemType Directory -Path $parent | Out-Null
-            Mock New-Item { throw 'root component creation denied' } -ParameterFilter {
-                $Path -eq $root
+            Mock New-ProductionInstallProtectedDirectoryNative {
+                throw 'root component creation denied'
             }
 
             { Invoke-ProductionRuntimeInstallAtRoot -Root $root } |
@@ -443,7 +578,7 @@ Describe 'production install root and lock bootstrap' {
             New-Item -ItemType Directory -Path $root,$target | Out-Null
             $locks = Join-Path $root 'locks'
             New-Item -ItemType Directory -Path $locks | Out-Null
-            Mock Protect-ProductionPath {
+            Mock Assert-ProtectedProductionPath {
                 if ($Path -eq $root) {
                     Remove-Item -LiteralPath $locks
                     New-Item -ItemType Junction -Path $locks -Target $target | Out-Null
@@ -492,6 +627,143 @@ Describe 'production install root and lock bootstrap' {
                 }
             }
         }
+
+        It 'accepts a competing protected root creator and removes its unused stage' {
+            $parent = Join-Path $TestDrive 'benign-creator-parent'
+            $root = Join-Path $parent 'production'
+            New-Item -ItemType Directory -Path $parent | Out-Null
+            Mock Move-ProductionInstallRootStageNew {
+                New-Item -ItemType Directory -Path $Destination | Out-Null
+                throw 'destination already exists'
+            }
+
+            $boundary = Initialize-ProductionDeploymentLockDirectory -Root $root
+
+            $boundary.Root | Should -Be ([IO.Path]::GetFullPath($root))
+            Test-Path -LiteralPath (Join-Path $root 'locks') | Should -BeTrue
+            @(Get-ChildItem -LiteralPath $parent -Force `
+                -Filter '.production.install-*').Count | Should -Be 0
+        }
+
+        It 'uses a fresh unpredictable sibling name for each staged root attempt' {
+            $parent = Join-Path $TestDrive 'unique-stage-parent'
+            $root = Join-Path $parent 'production'
+            New-Item -ItemType Directory -Path $parent | Out-Null
+            $stages = [Collections.Generic.List[string]]::new()
+            Mock New-ProductionInstallProtectedDirectoryNative {
+                [void]$stages.Add($Path)
+                throw 'stop after capturing stage'
+            }
+
+            1..2 | ForEach-Object {
+                { Initialize-ProductionInstallRootBoundary -Root $root } |
+                    Should -Throw '*capturing stage*'
+            }
+
+            $stages.Count | Should -Be 2
+            $stages[0] | Should -Not -BeExactly $stages[1]
+            foreach ($stage in $stages) {
+                Split-Path -Leaf $stage |
+                    Should -Match '^\.production\.install-[0-9a-f]{32}$'
+            }
+        }
+
+        It 'rejects an unsafe root published by a racing creator without touching its target' {
+            $parent = Join-Path $TestDrive 'publish-race-parent'
+            $root = Join-Path $parent 'production'
+            $target = Join-Path $TestDrive 'publish-race-target'
+            New-Item -ItemType Directory -Path $parent,$target | Out-Null
+            $sentinel = Join-Path $target 'sentinel.txt'
+            'publish-target' | Set-Content -LiteralPath $sentinel
+            $targetAcl = (Get-Acl -LiteralPath $target).Sddl
+            $targetWriteTime = (Get-Item -LiteralPath $target).LastWriteTimeUtc.Ticks
+            Mock Move-ProductionInstallRootStageNew {
+                New-Item -ItemType Junction -Path $Destination -Target $target |
+                    Out-Null
+                throw 'destination already exists'
+            }
+            try {
+                { Invoke-ProductionRuntimeInstallAtRoot -Root $root } |
+                    Should -Throw '*unsafe creation race*'
+
+                Should -Invoke Enter-DeploymentLock -Times 0
+                Should -Invoke Get-ProductionWebsiteServiceOrNull -Times 0
+                Should -Invoke New-ProductionDirectories -Times 0
+                Get-Content -LiteralPath $sentinel -Raw |
+                    Should -Match 'publish-target'
+                @(Get-ChildItem -LiteralPath $target -Force).Count | Should -Be 1
+                (Get-Acl -LiteralPath $target).Sddl | Should -BeExactly $targetAcl
+                (Get-Item -LiteralPath $target).LastWriteTimeUtc.Ticks |
+                    Should -Be $targetWriteTime
+                @(Get-ChildItem -LiteralPath $parent -Force `
+                    -Filter '.production.install-*').Count | Should -Be 0
+            } finally {
+                if (Test-Path -LiteralPath $root) {
+                    [IO.Directory]::Delete($root, $false)
+                }
+            }
+        }
+    }
+}
+
+Describe 'production install root parent boundary' {
+    InModuleScope Production.Install {
+        It 'rejects a real disposable parent with untrusted replacement control' {
+            { Assert-ProductionInstallRootParentBoundary -Path $TestDrive } |
+                Should -Throw '*replacement control*'
+        }
+    }
+}
+
+Describe 'production install root real Windows ACL boundary' {
+    It 'publishes a protected disposable root before creating protected locks' `
+            -Skip:($env:CBELL_RUN_INSTALL_ROOT_ACL_TESTS -ne '1') {
+        InModuleScope Production.Install {
+            $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+            $principal = [Security.Principal.WindowsPrincipal]$identity
+            if (-not $principal.IsInRole(
+                    [Security.Principal.WindowsBuiltInRole]::Administrator)) {
+                throw 'Real install-root ACL integration requires elevated PowerShell.'
+            }
+            $parent = Join-Path ([IO.Path]::GetTempPath()) (
+                'cbell-install-root-acl-' + [guid]::NewGuid().ToString('N'))
+            $root = Join-Path $parent 'production'
+            $boundary = $null
+            New-Item -ItemType Directory -Path $parent -ErrorAction Stop |
+                Out-Null
+            try {
+                Protect-ProductionPath -Path $parent
+                $boundary = Initialize-ProductionDeploymentLockDirectory `
+                    -Root $root
+
+                Assert-ProductionInstallProtectedDirectoryState `
+                    -Path $boundary.Root `
+                    -ExpectedIdentity $boundary.RootIdentity | Out-Null
+                Assert-ProductionInstallProtectedDirectoryState `
+                    -Path $boundary.Locks `
+                    -ExpectedIdentity $boundary.LocksIdentity | Out-Null
+                @(Get-ChildItem -LiteralPath $parent -Force `
+                    -Filter '.production.install-*').Count | Should -Be 0
+            } finally {
+                if ($null -ne $boundary -and
+                    (Test-Path -LiteralPath $boundary.Locks)) {
+                    Assert-ProductionInstallDirectoryIdentity `
+                        -Path $boundary.Locks `
+                        -ExpectedIdentity $boundary.LocksIdentity | Out-Null
+                    [IO.Directory]::Delete($boundary.Locks, $false)
+                }
+                if ($null -ne $boundary -and
+                    (Test-Path -LiteralPath $boundary.Root)) {
+                    Assert-ProductionInstallDirectoryIdentity `
+                        -Path $boundary.Root `
+                        -ExpectedIdentity $boundary.RootIdentity | Out-Null
+                    [IO.Directory]::Delete($boundary.Root, $false)
+                }
+                if (Test-Path -LiteralPath $parent) {
+                    [IO.Directory]::Delete($parent, $false)
+                }
+            }
+        }
     }
 }
 
@@ -522,6 +794,7 @@ Describe 'native runtime reinstall lifecycle' {
             Mock New-ProductionDirectories { }
             Mock Install-ConfigurationExamples { }
             Mock Read-ProductionConfig { $script:config }
+            Mock Assert-ProductionConfiguredRootBoundary { }
             Mock Read-ProductionWebsiteStopPort { [int]$script:config.productionPort }
             Mock Read-ProductionEnvironment { @{} }
             Mock Protect-ProductionSecrets { }
@@ -597,6 +870,39 @@ Describe 'native runtime reinstall lifecycle' {
                 Should -BeLessThan $script:events.IndexOf('upgrade-defaults')
             $script:events.IndexOf('upgrade-defaults') |
                 Should -BeLessThan $script:events.IndexOf('full-config')
+        }
+
+        It 'rejects an alternate configured root before any config-derived installation effect' {
+            $alternateRoot = Join-Path $TestDrive 'alternate-configured-root'
+            New-Item -ItemType Directory -Path $alternateRoot | Out-Null
+            $sentinel = Join-Path $alternateRoot 'sentinel.txt'
+            'alternate-root' | Set-Content -LiteralPath $sentinel
+            $targetAcl = (Get-Acl -LiteralPath $alternateRoot).Sddl
+            $targetWriteTime = (Get-Item -LiteralPath $alternateRoot).LastWriteTimeUtc.Ticks
+            $script:config.programDataRoot = $alternateRoot
+            Mock Assert-ProductionConfiguredRootBoundary {
+                throw 'Configured production root does not match the locked production boundary.'
+            }
+            Mock Protect-ProductionWebsiteServiceDirectory {
+                throw 'configured service ACL effect must not run'
+            }
+            Mock Install-CloudflaredService {
+                throw 'configured cloudflared effect must not run'
+            }
+            Mock Install-WebsiteService {
+                throw 'configured website effect must not run'
+            }
+
+            { Install-ProductionRuntime } |
+                Should -Throw '*configured production root*locked*'
+
+            Should -Invoke Protect-ProductionWebsiteServiceDirectory -Times 0
+            Should -Invoke Install-CloudflaredService -Times 0
+            Should -Invoke Install-WebsiteService -Times 0
+            Get-Content -LiteralPath $sentinel -Raw | Should -Match 'alternate-root'
+            (Get-Acl -LiteralPath $alternateRoot).Sddl | Should -BeExactly $targetAcl
+            (Get-Item -LiteralPath $alternateRoot).LastWriteTimeUtc.Ticks |
+                Should -Be $targetWriteTime
         }
 
         It 'rejects a malformed legacy production port before any port-targeted stop' {
@@ -734,6 +1040,158 @@ Describe 'native runtime reinstall lifecycle' {
     }
 }
 
+Describe 'configured production root identity' {
+    InModuleScope Production.Install {
+        It 'rejects an alternate normal root before reading or changing that target' {
+            $lockedRoot = Join-Path $TestDrive 'locked-root'
+            $alternateRoot = Join-Path $TestDrive 'alternate-root'
+            New-Item -ItemType Directory -Path $lockedRoot,$alternateRoot |
+                Out-Null
+            $sentinel = Join-Path $alternateRoot 'sentinel.txt'
+            'alternate-root' | Set-Content -LiteralPath $sentinel
+            $targetAcl = (Get-Acl -LiteralPath $alternateRoot).Sddl
+            $targetWriteTime = (Get-Item -LiteralPath $alternateRoot).
+                LastWriteTimeUtc.Ticks
+            $configuration = [pscustomobject]@{
+                programDataRoot = $alternateRoot
+            }
+            $boundary = [pscustomobject]@{
+                Root = [IO.Path]::GetFullPath($lockedRoot)
+                RootIdentity = [pscustomobject]@{
+                    VolumeSerialNumber = 1
+                    FileIndex = 1
+                }
+            }
+            Mock Assert-ProductionInstallProtectedDirectoryState {
+                throw 'alternate target must not be inspected'
+            }
+
+            { Assert-ProductionConfiguredRootBoundary `
+                    -Configuration $configuration -Boundary $boundary } |
+                Should -Throw '*does not match the locked production boundary*'
+
+            Should -Invoke Assert-ProductionInstallProtectedDirectoryState `
+                -Times 0
+            Get-Content -LiteralPath $sentinel -Raw |
+                Should -Match 'alternate-root'
+            (Get-Acl -LiteralPath $alternateRoot).Sddl |
+                Should -BeExactly $targetAcl
+            (Get-Item -LiteralPath $alternateRoot).LastWriteTimeUtc.Ticks |
+                Should -Be $targetWriteTime
+        }
+
+        It 'matches the locked canonical root with ordinal Windows casing' {
+            $root = [IO.Path]::GetFullPath((Join-Path $TestDrive 'CaseRoot'))
+            $configuration = [pscustomobject]@{
+                programDataRoot = $root.ToUpperInvariant()
+            }
+            $identity = [pscustomobject]@{
+                VolumeSerialNumber = 1
+                FileIndex = 1
+            }
+            $boundary = [pscustomobject]@{
+                Root = $root.ToLowerInvariant()
+                RootIdentity = $identity
+            }
+            Mock Assert-ProductionInstallProtectedDirectoryState { }
+
+            Assert-ProductionConfiguredRootBoundary `
+                -Configuration $configuration -Boundary $boundary
+
+            $configuration.programDataRoot |
+                Should -BeExactly $boundary.Root
+            Should -Invoke Assert-ProductionInstallProtectedDirectoryState `
+                -Times 1 -ParameterFilter {
+                    $Path -eq $boundary.Root -and
+                    $ExpectedIdentity -eq $identity
+                }
+        }
+
+        It 'rejects relative traversal in the configured root before boundary use' {
+            $root = [IO.Path]::GetFullPath((Join-Path $TestDrive 'root'))
+            $configuration = [pscustomobject]@{
+                programDataRoot = Join-Path $root 'child\..'
+            }
+            $boundary = [pscustomobject]@{
+                Root = $root
+                RootIdentity = [pscustomobject]@{
+                    VolumeSerialNumber = 1
+                    FileIndex = 1
+                }
+            }
+            Mock Assert-ProductionInstallProtectedDirectoryState {
+                throw 'traversing config must not reach the boundary'
+            }
+
+            { Assert-ProductionConfiguredRootBoundary `
+                    -Configuration $configuration -Boundary $boundary } |
+                Should -Throw '*relative path traversal*'
+
+            Should -Invoke Assert-ProductionInstallProtectedDirectoryState `
+                -Times 0
+        }
+    }
+}
+
+Describe 'legacy website stop-port parser' {
+    InModuleScope Production.Install {
+        BeforeEach {
+            $script:legacyParserRoot = Join-Path $TestDrive 'legacy-parser-root'
+            $script:legacyParserConfig = Join-Path `
+                $script:legacyParserRoot 'config\deploy.json'
+            New-Item -ItemType Directory `
+                -Path (Split-Path -Parent $script:legacyParserConfig) -Force | Out-Null
+        }
+
+        It 'accepts only integral JSON number boundary values' -ForEach @(
+            @{ Json='1'; Expected=1 },
+            @{ Json='8080'; Expected=8080 },
+            @{ Json='65535'; Expected=65535 }
+        ) {
+            "{`"productionPort`":$Json}" |
+                Set-Content -LiteralPath $script:legacyParserConfig
+
+            Read-ProductionWebsiteStopPort -Root $script:legacyParserRoot |
+                Should -Be $Expected
+        }
+
+        It 'rejects a non-integral, missing, or out-of-range productionPort' -ForEach @(
+            @{ Json='{}' },
+            @{ Json='{"productionPort":null}' },
+            @{ Json='{"productionPort":"8080"}' },
+            @{ Json='{"productionPort":true}' },
+            @{ Json='{"productionPort":8080.0}' },
+            @{ Json='{"productionPort":[8080]}' },
+            @{ Json='{"productionPort":{"value":8080}}' },
+            @{ Json='{"productionPort":0}' },
+            @{ Json='{"productionPort":-1}' },
+            @{ Json='{"productionPort":65536}' }
+        ) {
+            $Json | Set-Content -LiteralPath $script:legacyParserConfig
+
+            { Read-ProductionWebsiteStopPort -Root $script:legacyParserRoot } |
+                Should -Throw '*Legacy deploy config productionPort*'
+        }
+
+        It 'redacts raw configuration when malformed JSON cannot be parsed' {
+            $secret = 'DO_NOT_LEAK_LEGACY_CONFIG_7d4266f5'
+            "{`"productionPort`":8080,`"apiToken`":`"$secret`"" |
+                Set-Content -LiteralPath $script:legacyParserConfig
+
+            $caught = $null
+            try {
+                Read-ProductionWebsiteStopPort -Root $script:legacyParserRoot | Out-Null
+            } catch {
+                $caught = $_.Exception
+            }
+
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.Message | Should -Match 'could not be parsed for a safe website stop'
+            $caught.ToString() | Should -Not -Match $secret
+        }
+    }
+}
+
 Describe 'legacy native runtime reinstall upgrade' {
     InModuleScope Production.Install {
         It 'stops a prior running writer then upgrades missing defaults and restores health' {
@@ -775,6 +1233,25 @@ Describe 'legacy native runtime reinstall upgrade' {
 
             $script:legacyEvents = [Collections.Generic.List[string]]::new()
             $script:legacyServiceStatus = 'Running'
+            Mock Initialize-ProductionDeploymentLockDirectory {
+                [pscustomobject]@{
+                    Root = [IO.Path]::GetFullPath($root)
+                    RootIdentity = [pscustomobject]@{
+                        VolumeSerialNumber = 1
+                        FileIndex = 1
+                    }
+                    Locks = [IO.Path]::GetFullPath((Join-Path $root 'locks'))
+                    LockPath = [IO.Path]::GetFullPath(
+                        (Join-Path $root 'locks\deploy.lock'))
+                }
+            }
+            Mock Assert-ProductionDeploymentLockBoundary { }
+            Mock Assert-ProductionInstallProtectedDirectoryState { }
+            Mock Enter-DeploymentLock {
+                $lock = [pscustomobject]@{}
+                $lock | Add-Member ScriptMethod Dispose { }
+                $lock
+            }
             Mock Protect-ProductionPath { }
             Mock Assert-ProtectedProductionPath { }
             Mock Protect-ProductionSecrets { }

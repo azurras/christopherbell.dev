@@ -11,6 +11,9 @@ Fix Round 1 closes the reviewer-identified root/lock bootstrap, legacy configura
 first-registration crash, launcher ordering-test, and exact containment-cause gaps in a separate
 follow-up commit.
 
+Fix Round 2 closes the remaining protected-root bootstrap, configured-root identity, and
+legacy-port parser gaps in a second separate follow-up commit.
+
 ## Outcomes
 
 - The deploy-lock-held pre-guard upgrade sets `ChristopherBellDev` to `Disabled` and verifies the
@@ -27,16 +30,33 @@ follow-up commit.
   before reading runtime configuration or starting Java. Install and deploy also verify that SCM
   is bound to the exact WinSW path under LocalSystem before restoring Automatic startup.
 - Before any configuration, cloudflared, WinSW, XML, or publisher effect, `prod install`
-  canonicalizes the fixed production root and deploy-lock path, inspects each existing ancestor,
-  creates missing root/locks components individually without `-Force`, rejects reparse points,
-  protects and verifies root/locks, acquires `deploy.lock`, and revalidates that boundary under
-  the held lock. Disposable root and locks junction targets remain untouched on rejection.
+  canonicalizes the fixed production root and deploy-lock path, rejects reparse traversal, and
+  verifies every existing ancestor's protected owner/DACL denies untrusted delete, ACL-control,
+  ownership, null-DACL, and generic-all replacement power. An existing production root must
+  already have the exact protected ACL; the installer never repairs or descends through an
+  untrusted normal root.
+- A missing root is created as an unpredictable sibling with its final protected security
+  descriptor in the create call, identity/reparse/ACL checked while unreferenced, and atomically
+  published with a same-parent no-replace rename. A benign competing protected creator is
+  accepted only after full verification; unsafe creation races fail closed, and identity-checked
+  partial stages are deleted non-recursively. Only after the root verifies does a handle-relative
+  native create establish protected `locks`, preventing a replaced visible root from redirecting
+  that write. Root, locks, parent, and `deploy.lock` are revalidated under the acquired lock.
+- Immediately after full configuration validation, the installer rejects relative/reparse
+  traversal and requires `programDataRoot` to equal the already locked canonical root with
+  `OrdinalIgnoreCase`, then rechecks the same root file identity and protected ACL before any
+  config-derived ACL, cloudflared, WinSW, XML, publisher, or registration effect. An alternate
+  normal configured root remains content-, metadata-, and ACL-unchanged.
 - An existing service is verified Disabled under lock, reads only a legacy-compatible validated
   `productionPort`, and stops before the defaults upgrader or full modern configuration validation.
   A real prior-Running legacy fixture missing `publicUrls`, `sensorLibrariesEnabled`, retention,
   and polling fields upgrades successfully and restores private/public health. A malformed port
   never reaches a port-targeted stop and failure containment verifies Disabled/Stopped through
   the bounded SCM-only fallback.
+- The legacy stop-port reader accepts only an integral JSON number in `1..65535`; missing, null,
+  strings, Booleans, fractional numbers, arrays, objects, and out-of-range values fail closed. Its
+  malformed-JSON exception deliberately omits the parser inner exception because Windows
+  PowerShell 5.1 otherwise embeds the raw configuration in `Exception.ToString()`.
 - A first installation registers from a pinned WinSW XML with `Manual` startup, observes the exact
   registration effect, and immediately establishes and verifies `Disabled`. Automatic startup is
   restored only after the complete guarded service and shared-runtime boundary verifies. Crashes
@@ -62,18 +82,26 @@ follow-up commit.
   replacement races, premature full validation of a legacy config, Automatic first registration,
   and false pre-registration disappearance reporting. PS5 then exposed the new .NET Core-only
   path API; the compatible fixed-drive predicate was verified on both PowerShell hosts.
+- Fix Round 2 RED tests reproduced repair of an unprotected existing root, locks creation through
+  a replaced root, incomplete protected-stage cleanup, and use of an alternate configured root.
+  Deterministic publish/child replacement tests preserve redirect-target content, ACL, and
+  metadata with zero downstream installation effects. Windows PowerShell 5.1 then supplied the
+  final RED by exposing the malformed JSON and secret text through the preserved parser inner
+  exception; removing only that unsafe inner cause made all direct parser cases GREEN.
 - The launcher ordering test now requires the actual
   `Assert-InstalledWriterStartServiceDirectoryAcl` call to exist before comparing its position.
 
 ## Verification
 
-- Focused PowerShell 7 Common/WriterStart/Install/Sensors/Deploy/Operations: 274 discovered,
-  273 passed, 0 failed, 1 skipped (the opt-in real ACL test).
-- Full PowerShell 7 production suite: 463 discovered, 437 passed, 0 failed, 26 skipped.
-- Approved Windows PowerShell 5.1 Common/Command/WriterStart/Install/Operations: 199 discovered,
-  198 passed, 0 failed, 1 skipped.
+- Focused PowerShell 7 Common/WriterStart/Install/Sensors/Deploy/Operations: 302 discovered,
+  300 passed, 0 failed, 2 skipped (the opt-in real ACL tests).
+- Full PowerShell 7 production suite: 491 discovered, 464 passed, 0 failed, 27 skipped.
+- Approved Windows PowerShell 5.1 Common/Command/WriterStart/Install/Operations: 227 discovered,
+  225 passed, 0 failed, 2 skipped.
 - Approved Windows PowerShell 5.1 exact Task 6 Deploy/Sensors selection: 89 discovered, 10 passed,
   0 failed, 0 skipped, 79 not run.
+- The real `Read-ProductionWebsiteStopPort` matrix passes all 14 cases on PowerShell 7 and Windows
+  PowerShell 5.1, including boundary values 1/8080/65535 and raw-config redaction.
 - PowerShell 7 and Windows PowerShell 5.1 parsers each parsed all 11 changed PowerShell files with
   0 errors; both hosts also parsed the WinSW XML successfully. `git diff --check` passed.
 - Module-resolution probes using production import order found the new Deploy-to-Install and
@@ -89,10 +117,17 @@ follow-up commit.
   `Real writer-start ACL integration requires elevated PowerShell`; each reported 0 new
   disposable-directory residue. This session is not elevated, so a successful real ACL
   application remains the Task 7 evidence gate. No ACL policy was weakened.
+- The new install-root opt-in ACL test likewise reserves only an owned
+  `%TEMP%\cbell-install-root-acl-<guid>` parent. Final PowerShell 7 and Windows PowerShell 5.1
+  attempts each discovered 74 Install tests, selected one, and failed before creating the parent
+  with `Real install-root ACL integration requires elevated PowerShell`; each reported 0 new
+  residue. Elevated native protected-create success remains a Task 7 gate.
 - One earlier non-elevated development attempt partially changed an owned disposable ACL before
   cleanup was denied. Access was restored only on that exact temporary path and the directory was
   deleted; the final elevation precondition prevents recurrence.
 - No production service, listener, ProgramData ACL, MongoDB data/schema, Java source, or production
-  configuration was read or changed.
+  configuration was changed. Fix Round 2 performed read-only `Get-Acl` inspection of `C:\` and
+  `C:\ProgramData` to verify the fixed-parent replacement-control model; all mutation/integration
+  tests used owned disposable paths.
 - The unrelated modified `gradlew.bat` and untracked `testResults.xml` remain preserved and are
   excluded from this task's commit.
