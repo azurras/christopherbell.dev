@@ -72,37 +72,60 @@ function Assert-InstalledWriterStartGuardAcl {
     }
 }
 function Assert-InstalledWriterStartServiceDirectoryAcl {
-    param([Parameter(Mandatory)][string]$Path)
-    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
-    $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
-    $rules = @($acl.GetAccessRules(
-        $true, $false, [Security.Principal.SecurityIdentifier]))
-    if (-not $acl.AreAccessRulesProtected -or
-        @('S-1-5-18','S-1-5-32-544') -notcontains $owner -or
-        $rules.Count -ne 3) {
-        throw 'Installed writer-start service directory ACL is not protected.'
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Security.AccessControl.RawSecurityDescriptor]$SecurityDescriptor
+    )
+    if (-not $PSBoundParameters.ContainsKey('SecurityDescriptor')) {
+        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+        $SecurityDescriptor = [Security.AccessControl.RawSecurityDescriptor]::new(
+            $acl.GetSecurityDescriptorBinaryForm(), 0)
     }
-    $expected = @{
-        'S-1-5-18' = [Security.AccessControl.FileSystemRights]::FullControl
-        'S-1-5-32-544' = [Security.AccessControl.FileSystemRights]::FullControl
-        'S-1-5-19' = (
-            [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
-            [Security.AccessControl.FileSystemRights]::Synchronize)
+    $protectedFlag =
+        [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected
+    if (($SecurityDescriptor.ControlFlags -band $protectedFlag) -eq 0) {
+        throw 'Installed writer-start service directory ACL inheritance is not protected.'
     }
-    $expectedInheritance = [Security.AccessControl.InheritanceFlags](
-        [int][Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
-        [int][Security.AccessControl.InheritanceFlags]::ObjectInherit)
-    $seen = @{}
-    foreach ($rule in $rules) {
-        $identity = $rule.IdentityReference.Value
-        if (-not $expected.ContainsKey($identity) -or $seen.ContainsKey($identity) -or
-            $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
-            $rule.InheritanceFlags -ne $expectedInheritance -or
-            $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None -or
-            $rule.FileSystemRights -ne $expected[$identity]) {
-            throw 'Installed writer-start service directory ACL grants untrusted access.'
+    $administrators = 'S-1-5-32-544'
+    if ($null -eq $SecurityDescriptor.Owner -or
+        $SecurityDescriptor.Owner.Value -cne $administrators) {
+        throw 'Installed writer-start service directory ACL owner is invalid.'
+    }
+    $aces = @($SecurityDescriptor.DiscretionaryAcl)
+    if ($aces.Count -ne 3) {
+        throw 'Installed writer-start service directory ACL must have exactly three ACEs.'
+    }
+    $expectedIdentities = @('S-1-5-18',$administrators,'S-1-5-19')
+    $exactAces = @{}
+    foreach ($identity in $expectedIdentities) {
+        $matching = @($aces | Where-Object {
+                $_ -is [Security.AccessControl.CommonAce] -and
+                $_.AceType -eq [Security.AccessControl.AceType]::AccessAllowed -and
+                $_.SecurityIdentifier.Value -ceq $identity
+            })
+        if ($matching.Count -ne 1) {
+            throw 'Installed writer-start service directory ACL principals are invalid.'
         }
-        $seen[$identity] = $true
+        $exactAces[$identity] = $matching[0]
+    }
+    $inheritance =
+        [int][Security.AccessControl.AceFlags]::ObjectInherit -bor
+        [int][Security.AccessControl.AceFlags]::ContainerInherit
+    foreach ($ace in $exactAces.Values) {
+        if ([int]$ace.AceFlags -ne $inheritance) {
+            throw 'Installed writer-start service directory ACL flags are invalid.'
+        }
+    }
+    $fullControl = [int][Security.AccessControl.FileSystemRights]::FullControl
+    if ([int]$exactAces['S-1-5-18'].AccessMask -ne $fullControl -or
+        [int]$exactAces[$administrators].AccessMask -ne $fullControl) {
+        throw 'Installed writer-start service directory privileged rights are invalid.'
+    }
+    $localServiceRights = [int](
+        [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
+        [Security.AccessControl.FileSystemRights]::Synchronize)
+    if ([int]$exactAces['S-1-5-19'].AccessMask -ne $localServiceRights) {
+        throw 'Installed writer-start service directory LocalService rights are invalid.'
     }
 }
 try {

@@ -1,6 +1,123 @@
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot '..\modules\Production.WriterStart.psm1') -Force
 
+function ConvertTo-TestWriterStartDirectoryAcl {
+    param(
+        [Parameter(Mandatory)]
+        [Security.AccessControl.RawSecurityDescriptor]$SecurityDescriptor
+    )
+
+    $bytes = [byte[]]::new($SecurityDescriptor.BinaryLength)
+    $SecurityDescriptor.GetBinaryForm($bytes, 0)
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetSecurityDescriptorBinaryForm($bytes)
+    return $acl
+}
+
+function New-TestWriterStartCallbackDirectoryDescriptor {
+    $aceFlags = [Security.AccessControl.AceFlags](
+        [int][Security.AccessControl.AceFlags]::ObjectInherit -bor
+        [int][Security.AccessControl.AceFlags]::ContainerInherit)
+    $allow = [Security.AccessControl.AceQualifier]::AccessAllowed
+    $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $administrators =
+        [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $localService = [Security.Principal.SecurityIdentifier]::new('S-1-5-19')
+    $dacl = [Security.AccessControl.RawAcl]::new(2, 3)
+    $dacl.InsertAce(0, [Security.AccessControl.CommonAce]::new(
+            $aceFlags,
+            $allow,
+            [int][Security.AccessControl.FileSystemRights]::FullControl,
+            $system,
+            $true,
+            [byte[]](1,2,3,4)))
+    $dacl.InsertAce(1, [Security.AccessControl.CommonAce]::new(
+            $aceFlags,
+            $allow,
+            [int][Security.AccessControl.FileSystemRights]::FullControl,
+            $administrators,
+            $false,
+            $null))
+    $dacl.InsertAce(2, [Security.AccessControl.CommonAce]::new(
+            $aceFlags,
+            $allow,
+            0x1200a9,
+            $localService,
+            $false,
+            $null))
+    $controlFlags = [Security.AccessControl.ControlFlags](
+        [int][Security.AccessControl.ControlFlags]::DiscretionaryAclPresent -bor
+        [int][Security.AccessControl.ControlFlags]::DiscretionaryAclProtected)
+    return [Security.AccessControl.RawSecurityDescriptor]::new(
+        $controlFlags,
+        $administrators,
+        $null,
+        $null,
+        $dacl)
+}
+
+$serviceDirectoryAclCases = @(
+    @{ Case='the exact descriptor'; Accepted=$true;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='SYSTEM as owner'; Accepted=$false;
+        Sddl='O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='unprotected inheritance'; Accepted=$false;
+        Sddl='O:BAD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='a null DACL'; Accepted=$false; Sddl='O:BAD:NO_ACCESS_CONTROL' },
+    @{ Case='an empty DACL'; Accepted=$false; Sddl='O:BAD:P' },
+    @{ Case='duplicate SYSTEM ACEs'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='duplicate Administrators ACEs'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='duplicate LocalService ACEs'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='a missing SYSTEM ACE'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='a missing Administrators ACE'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='a missing LocalService ACE'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)' },
+    @{ Case='an extra Users ACE'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)(A;OICI;FR;;;BU)' },
+    @{ Case='an inherited-flag Users ACE on a protected DACL'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)(A;OICIID;FR;;;BU)' },
+    @{ Case='an inherited-flag Everyone ACE on a protected DACL'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)(A;OICIID;FR;;;WD)' },
+    @{ Case='a LocalService deny ACE'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(D;OICI;0x1200a9;;;LS)' },
+    @{ Case='an object-specific SYSTEM allow ACE'; Accepted=$false;
+        Sddl='O:BAD:P(OA;OICI;FA;11111111-1111-1111-1111-111111111111;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='a callback SYSTEM allow ACE'; Accepted=$false; Callback=$true },
+    @{ Case='partial SYSTEM rights'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FR;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='partial Administrators rights'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FR;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='LocalService write rights'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1201bf;;;LS)' },
+    @{ Case='LocalService missing Synchronize'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x200a9;;;LS)' },
+    @{ Case='ObjectInherit-only flags'; Accepted=$false;
+        Sddl='O:BAD:P(A;OI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='ContainerInherit-only flags'; Accepted=$false;
+        Sddl='O:BAD:P(A;CI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='Inherited flags'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICIID;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='InheritOnly flags'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICIIO;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' },
+    @{ Case='NoPropagate flags'; Accepted=$false;
+        Sddl='O:BAD:P(A;OICINP;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;LS)' }
+)
+foreach ($case in $serviceDirectoryAclCases) {
+    $descriptor = if ($case.Callback) {
+        New-TestWriterStartCallbackDirectoryDescriptor
+    } else {
+        [Security.AccessControl.RawSecurityDescriptor]::new($case.Sddl)
+    }
+    $case.Descriptor = $descriptor
+    $case.AclObject = ConvertTo-TestWriterStartDirectoryAcl `
+        -SecurityDescriptor $descriptor
+}
+
 Describe 'production fixed root boundary' {
     InModuleScope Production.WriterStart {
         It 'captures stable native identity and final path for an ordinary directory' {
@@ -175,6 +292,93 @@ Describe 'production fixed root boundary' {
             $failure.InnerException.Message |
                 Should -Be 'Configured production root must use a fully qualified local drive path.'
             Should -Invoke Get-Acl -Times 0 -Exactly
+        }
+    }
+}
+
+Describe 'production writer-start exact service-directory ACL' {
+    InModuleScope Production.WriterStart -Parameters @{
+        Cases=$serviceDirectoryAclCases
+    } {
+        It 'publisher verifier handles <Case>' -ForEach $Cases {
+            $serviceDirectory = Join-Path $TestDrive 'exact-service-directory'
+            New-Item -ItemType Directory -Path $serviceDirectory -Force | Out-Null
+
+            $verification = {
+                Assert-ProductionWriterStartServiceDirectory `
+                    -Path $serviceDirectory `
+                    -SecurityDescriptor $Descriptor
+            }
+            if ($Accepted) {
+                $verification | Should -Not -Throw
+            } else {
+                $verification | Should -Throw
+            }
+        }
+
+        It 'publisher reads inherited-flag ACEs from the filesystem binary form' `
+                -ForEach @($Cases | Where-Object {
+                    $_.Case -ceq
+                        'an inherited-flag Users ACE on a protected DACL'
+                }) {
+            $serviceDirectory = Join-Path $TestDrive 'binary-service-directory'
+            New-Item -ItemType Directory -Path $serviceDirectory -Force | Out-Null
+            $script:serviceDirectoryAclFixture = $AclObject
+            Mock Get-Acl { $script:serviceDirectoryAclFixture }
+
+            { Assert-ProductionWriterStartServiceDirectory -Path $serviceDirectory } |
+                Should -Throw
+        }
+    }
+
+    Describe 'installed launcher verifier' {
+        BeforeAll {
+            $launcherPath =
+                Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1'
+            $tokens = $null
+            $errors = $null
+            $ast = [Management.Automation.Language.Parser]::ParseFile(
+                $launcherPath,
+                [ref]$tokens,
+                [ref]$errors)
+            $definition = $ast.FindAll({
+                    param($node)
+                    $node -is
+                        [Management.Automation.Language.FunctionDefinitionAst] -and
+                    $node.Name -ceq
+                        'Assert-InstalledWriterStartServiceDirectoryAcl'
+                }, $true)
+            @($definition).Count | Should -Be 1
+            $script:launcherServiceDirectoryAssertion =
+                [scriptblock]::Create($definition[0].Extent.Text)
+        }
+
+        It 'pre-import verifier handles <Case>' -ForEach $serviceDirectoryAclCases {
+            . $script:launcherServiceDirectoryAssertion
+
+            $verification = {
+                Assert-InstalledWriterStartServiceDirectoryAcl `
+                    -Path 'C:\guard\service' `
+                    -SecurityDescriptor $Descriptor
+            }
+            if ($Accepted) {
+                $verification | Should -Not -Throw
+            } else {
+                $verification | Should -Throw
+            }
+        }
+
+        It 'pre-import verifier reads inherited-flag ACEs from the filesystem binary form' `
+                -ForEach @($serviceDirectoryAclCases | Where-Object {
+                    $_.Case -ceq
+                        'an inherited-flag Users ACE on a protected DACL'
+                }) {
+            . $script:launcherServiceDirectoryAssertion
+            $script:launcherServiceDirectoryAclFixture = $AclObject
+            Mock Get-Acl { $script:launcherServiceDirectoryAclFixture }
+
+            { Assert-InstalledWriterStartServiceDirectoryAcl `
+                    -Path 'C:\guard\service' } | Should -Throw
         }
     }
 }
