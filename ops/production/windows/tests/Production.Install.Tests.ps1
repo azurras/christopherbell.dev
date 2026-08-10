@@ -127,8 +127,15 @@ Describe 'native Windows service installer' {
 
         $module | Should -Match 'function Install-WebsiteService'
         $module | Should -Match 'Set-Service MongoDB -StartupType Automatic'
-        $module | Should -Match 'sc\.exe config ChristopherBellDev start= disabled depend= MongoDB'
+        $module | Should -Match 'Set-ProductionWebsiteStartupType -StartupType Disabled'
         $module | Should -Match 'Install-SharedFolderRuntime -ProductionRoot \$root -Configuration \$config'
+    }
+
+    It 'registers the website service from a non-automatic WinSW definition' {
+        [xml]$service = Get-Content (
+            Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml') -Raw
+
+        [string]$service.service.startmode | Should -Be 'Manual'
     }
 
     It 'installs the launcher and WriterStart module only through the verified bundle publisher' {
@@ -208,6 +215,284 @@ Describe 'native Windows service installer' {
                 Should -Throw '*binding was not verified*'
         }
     }
+
+    It 'observes registration then immediately establishes and verifies Disabled startup' {
+        InModuleScope Production.Install {
+            $script:registrationEvents = [Collections.Generic.List[string]]::new()
+            $script:serviceRegistered = $false
+            $serviceRoot = Join-Path $TestDrive 'registration-service'
+            $state = [pscustomobject]@{ ServiceRegistered=$false }
+            Mock Protect-ProductionWebsiteServiceDirectory { $serviceRoot }
+            Mock Set-ProductionMongoServiceInstallPolicy { }
+            Mock Install-WinSwBinary {
+                Join-Path $serviceRoot 'ChristopherBellDev.exe'
+            }
+            Mock Copy-Item { }
+            Mock Publish-ProductionWebsiteWriterStartBundle {
+                [void]$script:registrationEvents.Add('bundle-published')
+            }
+            Mock Get-ProductionWebsiteServiceOrNull {
+                if ($script:serviceRegistered) {
+                    return [pscustomobject]@{ Status='Stopped' }
+                }
+                return $null
+            }
+            Mock Invoke-ProductionWinSwServiceInstall {
+                [void]$script:registrationEvents.Add('registered-manual')
+                $script:serviceRegistered = $true
+            }
+            Mock Set-ProductionWebsiteStartupType {
+                [void]$script:registrationEvents.Add("startup:$StartupType")
+            }
+            Mock Set-ProductionWebsiteServiceInstallPolicy {
+                [void]$script:registrationEvents.Add('service-policy')
+            }
+            Mock Assert-ProductionWebsiteServiceBoundary {
+                [void]$script:registrationEvents.Add('boundary-verified')
+            }
+            Mock Start-Service { throw 'website must not start during installation' }
+
+            Install-WebsiteService `
+                -Root $TestDrive `
+                -Configuration ([pscustomobject]@{ programDataRoot=$TestDrive }) `
+                -RegistrationState $state
+
+            $state.ServiceRegistered | Should -BeTrue
+            $script:registrationEvents | Should -Be @(
+                'bundle-published',
+                'registered-manual',
+                'startup:Disabled',
+                'service-policy',
+                'boundary-verified')
+            Should -Invoke Set-ProductionWebsiteStartupType -ParameterFilter {
+                $StartupType -eq 'Automatic'
+            } -Times 0
+            Should -Invoke Start-Service -Times 0
+        }
+    }
+
+    It 'rejects an invalid registration tracker before any service installation effect' {
+        InModuleScope Production.Install {
+            Mock Protect-ProductionWebsiteServiceDirectory {
+                throw 'service directory effect must not run'
+            }
+
+            { Install-WebsiteService `
+                    -Root $TestDrive `
+                    -Configuration ([pscustomobject]@{ programDataRoot=$TestDrive }) `
+                    -RegistrationState ([pscustomobject]@{}) } |
+                Should -Throw '*Boolean ServiceRegistered*'
+
+            Should -Invoke Protect-ProductionWebsiteServiceDirectory -Times 0
+        }
+    }
+
+    It 'fails closed at each first-registration crash checkpoint' -ForEach @(
+        @{ Checkpoint='before-registration'; ExpectedRegistered=$false },
+        @{ Checkpoint='registration-action'; ExpectedRegistered=$false },
+        @{ Checkpoint='disabled-readback'; ExpectedRegistered=$true }
+    ) {
+        InModuleScope Production.Install -Parameters @{
+            FailureCheckpoint=$Checkpoint
+            RegisteredAtFailure=$ExpectedRegistered
+        } {
+            param($FailureCheckpoint,$RegisteredAtFailure)
+            $script:serviceRegistered = $false
+            $serviceRoot = Join-Path $TestDrive "checkpoint-$FailureCheckpoint"
+            $state = [pscustomobject]@{ ServiceRegistered=$false }
+            Mock Protect-ProductionWebsiteServiceDirectory { $serviceRoot }
+            Mock Set-ProductionMongoServiceInstallPolicy { }
+            Mock Install-WinSwBinary {
+                Join-Path $serviceRoot 'ChristopherBellDev.exe'
+            }
+            Mock Copy-Item { }
+            Mock Publish-ProductionWebsiteWriterStartBundle {
+                if ($FailureCheckpoint -eq 'before-registration') {
+                    throw 'checkpoint before registration'
+                }
+            }
+            Mock Get-ProductionWebsiteServiceOrNull {
+                if ($script:serviceRegistered) {
+                    return [pscustomobject]@{ Status='Stopped' }
+                }
+                return $null
+            }
+            Mock Invoke-ProductionWinSwServiceInstall {
+                if ($FailureCheckpoint -eq 'registration-action') {
+                    throw 'checkpoint during registration action'
+                }
+                $script:serviceRegistered = $true
+            }
+            Mock Set-ProductionWebsiteStartupType {
+                if ($FailureCheckpoint -eq 'disabled-readback') {
+                    throw 'checkpoint before Disabled readback'
+                }
+            }
+            Mock Set-ProductionWebsiteServiceInstallPolicy { }
+            Mock Assert-ProductionWebsiteServiceBoundary { }
+            Mock Start-Service { throw 'website must never run at a crash checkpoint' }
+
+            { Install-WebsiteService `
+                    -Root $TestDrive `
+                    -Configuration ([pscustomobject]@{ programDataRoot=$TestDrive }) `
+                    -RegistrationState $state } | Should -Throw '*checkpoint*'
+
+            $state.ServiceRegistered | Should -Be $RegisteredAtFailure
+            Should -Invoke Set-ProductionWebsiteStartupType -ParameterFilter {
+                $StartupType -eq 'Automatic'
+            } -Times 0
+            Should -Invoke Start-Service -Times 0
+        }
+    }
+}
+
+Describe 'production install root and lock bootstrap' {
+    InModuleScope Production.Install {
+        BeforeEach {
+            $script:bootstrapEvents = [Collections.Generic.List[string]]::new()
+            Mock Protect-ProductionPath {
+                [void]$script:bootstrapEvents.Add("protect:$Path")
+            }
+            Mock Assert-ProtectedProductionPath {
+                [void]$script:bootstrapEvents.Add("verify:$Path")
+            }
+            Mock Get-ProductionWebsiteServiceOrNull {
+                throw 'service discovery must not run'
+            }
+            Mock New-ProductionDirectories { throw 'directory install must not run' }
+            Mock Install-ConfigurationExamples { throw 'config write must not run' }
+            Mock Read-ProductionConfig { throw 'config read must not run' }
+            Mock Install-CloudflaredService { throw 'cloudflared effect must not run' }
+            Mock Install-WinSwBinary { throw 'WinSW write must not run' }
+            Mock Copy-Item { throw 'XML write must not run' }
+            Mock Publish-ProductionWebsiteWriterStartBundle {
+                throw 'publisher effect must not run'
+            }
+            Mock Enter-DeploymentLock { throw 'lock acquisition must not run' }
+        }
+
+        It 'rejects a disposable production-root junction before lock or downstream effect' {
+            $target = Join-Path $TestDrive 'root-junction-target'
+            $root = Join-Path $TestDrive 'root-junction'
+            New-Item -ItemType Directory -Path $target | Out-Null
+            New-Item -ItemType Junction -Path $root -Target $target | Out-Null
+            try {
+                { Invoke-ProductionRuntimeInstallAtRoot -Root $root } |
+                    Should -Throw '*reparse*'
+
+                Should -Invoke Enter-DeploymentLock -Times 0
+                Should -Invoke Get-ProductionWebsiteServiceOrNull -Times 0
+                Should -Invoke New-ProductionDirectories -Times 0
+                Should -Invoke Install-ConfigurationExamples -Times 0
+                Should -Invoke Install-CloudflaredService -Times 0
+                Should -Invoke Install-WinSwBinary -Times 0
+                Should -Invoke Copy-Item -Times 0
+                Should -Invoke Publish-ProductionWebsiteWriterStartBundle -Times 0
+                @(Get-ChildItem -LiteralPath $target -Force).Count | Should -Be 0
+            } finally {
+                if (Test-Path -LiteralPath $root) {
+                    Remove-Item -LiteralPath $root -Force
+                }
+            }
+        }
+
+        It 'rejects a disposable locks junction before opening deploy.lock or touching its target' {
+            $root = Join-Path $TestDrive 'locks-junction-root'
+            $target = Join-Path $TestDrive 'locks-junction-target'
+            New-Item -ItemType Directory -Path $root,$target | Out-Null
+            $locks = Join-Path $root 'locks'
+            New-Item -ItemType Junction -Path $locks -Target $target | Out-Null
+            try {
+                { Invoke-ProductionRuntimeInstallAtRoot -Root $root } |
+                    Should -Throw '*reparse*'
+
+                Should -Invoke Enter-DeploymentLock -Times 0
+                Should -Invoke Get-ProductionWebsiteServiceOrNull -Times 0
+                Should -Invoke Install-ConfigurationExamples -Times 0
+                Should -Invoke Install-CloudflaredService -Times 0
+                Should -Invoke Install-WinSwBinary -Times 0
+                Should -Invoke Copy-Item -Times 0
+                Should -Invoke Publish-ProductionWebsiteWriterStartBundle -Times 0
+                @(Get-ChildItem -LiteralPath $target -Force).Count | Should -Be 0
+            } finally {
+                if (Test-Path -LiteralPath $locks) {
+                    Remove-Item -LiteralPath $locks -Force
+                }
+            }
+        }
+
+        It 'fails closed when a missing root component cannot be created' {
+            $parent = Join-Path $TestDrive 'create-failure-parent'
+            $root = Join-Path $parent 'production'
+            New-Item -ItemType Directory -Path $parent | Out-Null
+            Mock New-Item { throw 'root component creation denied' } -ParameterFilter {
+                $Path -eq $root
+            }
+
+            { Invoke-ProductionRuntimeInstallAtRoot -Root $root } |
+                Should -Throw '*root component creation denied*'
+
+            Should -Invoke Enter-DeploymentLock -Times 0
+            Should -Invoke Get-ProductionWebsiteServiceOrNull -Times 0
+            Test-Path -LiteralPath $root | Should -BeFalse
+        }
+
+        It 'detects a locks reparse replacement while establishing the protected boundary' {
+            $root = Join-Path $TestDrive 'protect-race-root'
+            $target = Join-Path $TestDrive 'protect-race-target'
+            New-Item -ItemType Directory -Path $root,$target | Out-Null
+            $locks = Join-Path $root 'locks'
+            New-Item -ItemType Directory -Path $locks | Out-Null
+            Mock Protect-ProductionPath {
+                if ($Path -eq $root) {
+                    Remove-Item -LiteralPath $locks
+                    New-Item -ItemType Junction -Path $locks -Target $target | Out-Null
+                }
+            }
+            try {
+                { Invoke-ProductionRuntimeInstallAtRoot -Root $root } |
+                    Should -Throw '*reparse*'
+
+                Should -Invoke Enter-DeploymentLock -Times 0
+                Should -Invoke Get-ProductionWebsiteServiceOrNull -Times 0
+                @(Get-ChildItem -LiteralPath $target -Force).Count | Should -Be 0
+            } finally {
+                if (Test-Path -LiteralPath $locks) {
+                    Remove-Item -LiteralPath $locks -Force
+                }
+            }
+        }
+
+        It 'revalidates the root and locks boundary under deploy.lock before downstream effect' {
+            $root = Join-Path $TestDrive 'under-lock-race-root'
+            $target = Join-Path $TestDrive 'under-lock-race-target'
+            New-Item -ItemType Directory -Path $root,$target | Out-Null
+            $locks = Join-Path $root 'locks'
+            $lock = [pscustomobject]@{}
+            $lock | Add-Member ScriptMethod Dispose {
+                [void]$script:bootstrapEvents.Add('lock:release')
+            }
+            Mock Enter-DeploymentLock {
+                Remove-Item -LiteralPath $locks
+                New-Item -ItemType Junction -Path $locks -Target $target | Out-Null
+                [void]$script:bootstrapEvents.Add('lock:acquire')
+                $lock
+            }
+            try {
+                { Invoke-ProductionRuntimeInstallAtRoot -Root $root } |
+                    Should -Throw '*reparse*'
+
+                Should -Invoke Get-ProductionWebsiteServiceOrNull -Times 0
+                Should -Invoke New-ProductionDirectories -Times 0
+                $script:bootstrapEvents | Should -Contain 'lock:release'
+                @(Get-ChildItem -LiteralPath $target -Force).Count | Should -Be 0
+            } finally {
+                if (Test-Path -LiteralPath $locks) {
+                    Remove-Item -LiteralPath $locks -Force
+                }
+            }
+        }
+    }
 }
 
 Describe 'native runtime reinstall lifecycle' {
@@ -226,12 +511,21 @@ Describe 'native runtime reinstall lifecycle' {
                 [void]$script:events.Add('lock:release')
             }
             Mock Assert-Administrator { }
-            Mock Initialize-ProductionDeploymentLockDirectory { }
+            Mock Initialize-ProductionDeploymentLockDirectory {
+                [pscustomobject]@{
+                    Root='C:\ProgramData\christopherbell.dev'
+                    Locks='C:\ProgramData\christopherbell.dev\locks'
+                    LockPath='C:\ProgramData\christopherbell.dev\locks\deploy.lock'
+                }
+            }
+            Mock Assert-ProductionDeploymentLockBoundary { }
             Mock New-ProductionDirectories { }
             Mock Install-ConfigurationExamples { }
             Mock Read-ProductionConfig { $script:config }
+            Mock Read-ProductionWebsiteStopPort { [int]$script:config.productionPort }
             Mock Read-ProductionEnvironment { @{} }
             Mock Protect-ProductionSecrets { }
+            Mock Protect-ProductionWebsiteServiceDirectory { }
             Mock Install-CloudflaredService { }
             Mock Enter-DeploymentLock {
                 [void]$script:events.Add('lock:acquire')
@@ -248,6 +542,10 @@ Describe 'native runtime reinstall lifecycle' {
             Mock Stop-ProductionWebsiteService {
                 $script:serviceStatus = 'Stopped'
                 [void]$script:events.Add('stop')
+            }
+            Mock Stop-ProductionWebsiteServiceWithoutPort {
+                $script:serviceStatus = 'Stopped'
+                [void]$script:events.Add('stop-without-port')
             }
             Mock Install-WebsiteService { [void]$script:events.Add('website-install') }
             Mock Install-SharedFolderRuntime { [void]$script:events.Add('shared-install') }
@@ -273,6 +571,46 @@ Describe 'native runtime reinstall lifecycle' {
                 'start','health','public-health','lock:release')
             $script:startupType | Should -Be 'Automatic'
             $script:serviceStatus | Should -Be 'Running'
+        }
+
+        It 'reads only the legacy stop port before stop and upgrades before full validation' {
+            $script:serviceStatus = 'Running'
+            Mock Read-ProductionWebsiteStopPort {
+                [void]$script:events.Add('legacy-port')
+                8080
+            }
+            Mock Install-ConfigurationExamples {
+                [void]$script:events.Add('upgrade-defaults')
+            }
+            Mock Read-ProductionConfig {
+                [void]$script:events.Add('full-config')
+                $script:config
+            }
+
+            Install-ProductionRuntime
+
+            $script:events.IndexOf('startup:Disabled') |
+                Should -BeLessThan $script:events.IndexOf('legacy-port')
+            $script:events.IndexOf('legacy-port') |
+                Should -BeLessThan $script:events.IndexOf('stop')
+            $script:events.IndexOf('stop') |
+                Should -BeLessThan $script:events.IndexOf('upgrade-defaults')
+            $script:events.IndexOf('upgrade-defaults') |
+                Should -BeLessThan $script:events.IndexOf('full-config')
+        }
+
+        It 'rejects a malformed legacy production port before any port-targeted stop' {
+            $script:serviceStatus = 'Running'
+            Mock Read-ProductionWebsiteStopPort { throw 'productionPort is malformed' }
+
+            { Install-ProductionRuntime } |
+                Should -Throw '*productionPort is malformed*'
+
+            Should -Invoke Stop-ProductionWebsiteService -Times 0
+            Should -Invoke Stop-ProductionWebsiteServiceWithoutPort -Times 1
+            Should -Invoke Install-ConfigurationExamples -Times 0
+            $script:startupType | Should -Be 'Disabled'
+            $script:serviceStatus | Should -Be 'Stopped'
         }
 
         It 'preserves an intentionally stopped service after successful reinstall' {
@@ -310,7 +648,7 @@ Describe 'native runtime reinstall lifecycle' {
             Should -Invoke Set-ProductionWebsiteStartupType -ParameterFilter {
                 $StartupType -eq 'Disabled'
             }
-            Should -Invoke Stop-ProductionWebsiteService
+            Should -Invoke Stop-ProductionWebsiteServiceWithoutPort
             Should -Invoke Install-WebsiteService -Times 0
         }
 
@@ -346,6 +684,157 @@ Describe 'native runtime reinstall lifecycle' {
             $caught | Should -BeOfType ([System.AggregateException])
             @($caught.InnerExceptions.Message) | Should -Contain 'SCM query denied'
             $caught.Message | Should -Match 'containment could not be verified'
+        }
+
+        It 'does not report service disappearance for a pre-registration install failure' `
+                -ForEach @(
+            @{ Failure='service directory ACL verification failed' },
+            @{ Failure='WinSW digest verification failed' },
+            @{ Failure='service XML digest verification failed' }
+        ) {
+            $script:serviceStatus = $null
+            Mock Get-ProductionWebsiteServiceOrNull {
+                [void]$script:events.Add('state:absent')
+                $null
+            }
+            Mock Install-WebsiteService { throw $Failure }
+
+            $caught = $null
+            try { Install-ProductionRuntime } catch { $caught = $_.Exception }
+
+            $caught | Should -BeOfType ([System.InvalidOperationException])
+            $caught.Message | Should -Match 'no website service is registered'
+            $caught.Message | Should -Match ([regex]::Escape($Failure))
+            $caught.Message | Should -Not -Match 'disappeared'
+        }
+
+        It 'contains a service observed after registration when Disabled verification fails' {
+            $script:serviceStatus = $null
+            $script:serviceRegistered = $false
+            Mock Get-ProductionWebsiteServiceOrNull {
+                if (-not $script:serviceRegistered) { return $null }
+                [pscustomobject]@{ Name='ChristopherBellDev'; Status=$script:serviceStatus }
+            }
+            Mock Install-WebsiteService {
+                $RegistrationState.ServiceRegistered = $true
+                $script:serviceRegistered = $true
+                $script:serviceStatus = 'Stopped'
+                throw 'Disabled startup readback failed'
+            }
+
+            { Install-ProductionRuntime } | Should -Throw '*Disabled startup readback failed*'
+
+            $script:startupType | Should -Be 'Disabled'
+            $script:serviceStatus | Should -Be 'Stopped'
+            Should -Invoke Set-ProductionWebsiteStartupType -ParameterFilter {
+                $StartupType -eq 'Automatic'
+            } -Times 0
+            Should -Invoke Start-Service -Times 0
+        }
+    }
+}
+
+Describe 'legacy native runtime reinstall upgrade' {
+    InModuleScope Production.Install {
+        It 'stops a prior running writer then upgrades missing defaults and restores health' {
+            $root = Join-Path $TestDrive 'legacy-runtime-root'
+            New-ProductionDirectories -Root $root
+            $repository = Join-Path $root 'repository'
+            $backup = Join-Path $root 'backup'
+            $mongoTools = Join-Path $root 'mongo-tools'
+            New-Item -ItemType Directory -Path $repository,$backup,$mongoTools | Out-Null
+            $java = Join-Path $root 'java.exe'
+            $node = Join-Path $root 'node.exe'
+            $mongoShell = Join-Path $root 'mongosh.exe'
+            $cloudflared = Join-Path $root 'cloudflared.exe'
+            foreach ($executable in $java,$node,$mongoShell,$cloudflared) {
+                'test executable' | Set-Content -LiteralPath $executable
+            }
+            $deployPath = Join-Path $root 'config\deploy.json'
+            [ordered]@{
+                repositoryPath=$repository
+                remote='origin'
+                branch='main'
+                programDataRoot=$root
+                javaExe=$java
+                nodeExe=$node
+                mongoToolsPath=$mongoTools
+                mongoShellExe=$mongoShell
+                cloudflaredExe=$cloudflared
+                backupRoot=$backup
+                publicUrl='https://www.christopherbell.dev/'
+                candidatePort=8081
+                productionPort=8080
+                smokeAccountEmail='admin@christopherbell.dev'
+            } | ConvertTo-Json | Set-Content -LiteralPath $deployPath
+            @(
+                'APP_JWT_SECRET=0123456789abcdef0123456789abcdef'
+                'SPRING_MONGODB_URI=mongodb://127.0.0.1:27017/christopherbell'
+                'APP_MAIL_ENABLED=false'
+            ) | Set-Content -LiteralPath (Join-Path $root 'config\app.env')
+
+            $script:legacyEvents = [Collections.Generic.List[string]]::new()
+            $script:legacyServiceStatus = 'Running'
+            Mock Protect-ProductionPath { }
+            Mock Assert-ProtectedProductionPath { }
+            Mock Protect-ProductionSecrets { }
+            Mock Get-ProductionWebsiteServiceOrNull {
+                [pscustomobject]@{
+                    Name='ChristopherBellDev'
+                    Status=$script:legacyServiceStatus
+                }
+            }
+            Mock Set-ProductionWebsiteStartupType {
+                [void]$script:legacyEvents.Add("startup:$StartupType")
+            }
+            Mock Stop-ProductionWebsiteService {
+                $beforeUpgrade = Get-Content -LiteralPath $deployPath -Raw |
+                    ConvertFrom-Json
+                $beforeUpgrade.PSObject.Properties.Name |
+                    Should -Not -Contain 'sensorLibrariesEnabled'
+                $script:legacyServiceStatus = 'Stopped'
+                [void]$script:legacyEvents.Add("stop:$ProductionPort")
+            }
+            Mock Protect-ProductionWebsiteServiceDirectory { }
+            Mock Install-CloudflaredService { }
+            Mock Install-WebsiteService {
+                [void]$script:legacyEvents.Add('website-install')
+            }
+            Mock Install-SharedFolderRuntime {
+                [void]$script:legacyEvents.Add('shared-install')
+            }
+            Mock Assert-ProductionWebsiteServiceBoundary {
+                [void]$script:legacyEvents.Add('boundary-verified')
+            }
+            Mock Start-Service {
+                $script:legacyServiceStatus = 'Running'
+                [void]$script:legacyEvents.Add('start')
+            }
+            Mock Test-ProductionEndpoints {
+                [void]$script:legacyEvents.Add('health')
+            }
+            Mock Test-ProductionPublicEndpoints {
+                [void]$script:legacyEvents.Add('public-health')
+            }
+
+            Invoke-ProductionRuntimeInstallAtRoot -Root $root
+
+            $updated = Get-Content -LiteralPath $deployPath -Raw | ConvertFrom-Json
+            $updated.sensorLibrariesEnabled | Should -BeFalse
+            $updated.releaseRetention | Should -Be 5
+            $updated.autoDeployPollSeconds | Should -Be 60
+            $updated.autoDeployFailureBackoffSeconds | Should -Be 900
+            $script:legacyEvents | Should -Be @(
+                'startup:Disabled',
+                'stop:8080',
+                'website-install',
+                'shared-install',
+                'boundary-verified',
+                'startup:Automatic',
+                'start',
+                'health',
+                'public-health')
+            $script:legacyServiceStatus | Should -Be 'Running'
         }
     }
 }

@@ -215,7 +215,14 @@ function New-ProductionBackup {
 function Enter-DeploymentLock {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$LockPath)
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LockPath) | Out-Null
+    $lockDirectory = Split-Path -Parent $LockPath
+    if (-not (Test-Path -LiteralPath $lockDirectory -PathType Container)) {
+        throw "Missing deployment lock directory: $lockDirectory"
+    }
+    Assert-ProductionPathNotReparse -Path $lockDirectory | Out-Null
+    if (Test-Path -LiteralPath $LockPath) {
+        Assert-ProductionPathNotReparse -Path $LockPath | Out-Null
+    }
     try { return [IO.File]::Open($LockPath, 'OpenOrCreate', 'ReadWrite', 'None') }
     catch [IO.IOException] { throw 'Another production operation is already running.' }
 }

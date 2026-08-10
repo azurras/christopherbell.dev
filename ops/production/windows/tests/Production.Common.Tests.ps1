@@ -81,9 +81,19 @@ Describe 'production common operations' {
 
     It 'rejects concurrent deployment locks' {
         $path = Join-Path $TestDrive 'locks\deploy.lock'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $path) | Out-Null
         $first = Enter-DeploymentLock -LockPath $path
         try { { Enter-DeploymentLock -LockPath $path } | Should -Throw '*already running*' }
         finally { $first.Dispose() }
+    }
+
+    It 'does not create an unchecked deployment-lock parent' {
+        $path = Join-Path $TestDrive 'missing-locks\deploy.lock'
+
+        { Enter-DeploymentLock -LockPath $path } |
+            Should -Throw '*deployment lock directory*'
+
+        Test-Path -LiteralPath (Split-Path -Parent $path) | Should -BeFalse
     }
 
     It 'rejects candidate and production port collisions' {

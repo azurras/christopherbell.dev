@@ -13,8 +13,16 @@ function Assert-Administrator {
 
 function New-ProductionDirectories {
     param([string]$Root)
+    if (-not (Test-Path -LiteralPath $Root)) {
+        New-Item -ItemType Directory -Path $Root -ErrorAction Stop | Out-Null
+    }
+    Assert-ProductionInstallDirectory -Path $Root | Out-Null
     foreach ($name in 'backups','config','gradle-home','locks','logs','releases','service','state','tools','worktrees') {
-        New-Item -ItemType Directory -Force (Join-Path $Root $name) | Out-Null
+        $path = Join-Path $Root $name
+        if (-not (Test-Path -LiteralPath $path)) {
+            New-Item -ItemType Directory -Path $path -ErrorAction Stop | Out-Null
+        }
+        Assert-ProductionInstallDirectory -Path $path | Out-Null
     }
 }
 
@@ -183,11 +191,178 @@ function Get-ProductionWebsiteServiceOrNull {
     }
 }
 
+function Resolve-CanonicalProductionInstallPath {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ($Path -notmatch '^[A-Za-z]:[\\/]') {
+        throw "Production installation path must be fully qualified: $Path"
+    }
+    $canonical = [IO.Path]::GetFullPath($Path)
+    $pathRoot = [IO.Path]::GetPathRoot($canonical)
+    if ([string]::Equals(
+            $canonical.TrimEnd([IO.Path]::DirectorySeparatorChar),
+            $pathRoot.TrimEnd([IO.Path]::DirectorySeparatorChar),
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Production installation path must not be a filesystem root: $Path"
+    }
+    return $canonical.TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar)
+}
+
+function Get-ProductionInstallPathComponents {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $canonical = Resolve-CanonicalProductionInstallPath -Path $Path
+    $pathRoot = [IO.Path]::GetPathRoot($canonical)
+    $components = [Collections.Generic.List[string]]::new()
+    [void]$components.Add($pathRoot)
+    $current = $pathRoot
+    foreach ($segment in $canonical.Substring($pathRoot.Length) -split '[\\/]') {
+        if ([string]::IsNullOrEmpty($segment)) { continue }
+        $current = Join-Path $current $segment
+        [void]$components.Add($current)
+    }
+    return $components.ToArray()
+}
+
+function Assert-ProductionInstallDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $item = Assert-ProductionPathNotReparse -Path $Path
+    if (-not $item.PSIsContainer) {
+        throw "Production installation directory is not a directory: $Path"
+    }
+    return $item
+}
+
+function Assert-ProductionInstallPathTraversal {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$LeafMayBeMissing
+    )
+
+    $components = @(Get-ProductionInstallPathComponents -Path $Path)
+    for ($index = 0; $index -lt $components.Count; $index++) {
+        $component = $components[$index]
+        $isLeaf = $index -eq $components.Count - 1
+        if (-not (Test-Path -LiteralPath $component)) {
+            if ($isLeaf -and $LeafMayBeMissing) { return }
+            throw "Missing production installation path component: $component"
+        }
+        if ($isLeaf) {
+            Assert-ProductionPathNotReparse -Path $component | Out-Null
+        } else {
+            Assert-ProductionInstallDirectory -Path $component | Out-Null
+        }
+    }
+}
+
+function New-ProductionInstallDirectoryPath {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $components = @(Get-ProductionInstallPathComponents -Path $Path)
+    for ($index = 0; $index -lt $components.Count; $index++) {
+        $component = $components[$index]
+        if (Test-Path -LiteralPath $component) {
+            Assert-ProductionInstallDirectory -Path $component | Out-Null
+            continue
+        }
+        if ($index -eq 0) {
+            throw "Missing filesystem root for production installation: $component"
+        }
+        $parent = $components[$index - 1]
+        Assert-ProductionInstallDirectory -Path $parent | Out-Null
+        New-Item -ItemType Directory -Path $component -ErrorAction Stop | Out-Null
+        Assert-ProductionInstallDirectory -Path $parent | Out-Null
+        Assert-ProductionInstallDirectory -Path $component | Out-Null
+    }
+}
+
 function Initialize-ProductionDeploymentLockDirectory {
+    [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Root)
 
-    New-Item -ItemType Directory -Path $Root -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $Root 'locks') -Force | Out-Null
+    $canonicalRoot = Resolve-CanonicalProductionInstallPath -Path $Root
+    $locks = Resolve-CanonicalProductionInstallPath -Path (Join-Path $canonicalRoot 'locks')
+    $lockPath = [IO.Path]::GetFullPath((Join-Path $locks 'deploy.lock'))
+    New-ProductionInstallDirectoryPath -Path $locks
+    Assert-ProductionInstallPathTraversal -Path $locks
+    Assert-ProductionInstallPathTraversal -Path $lockPath -LeafMayBeMissing
+
+    Protect-ProductionPath -Path $canonicalRoot
+    Assert-ProductionInstallPathTraversal -Path $locks
+    Assert-ProtectedProductionPath -Path $canonicalRoot
+    Protect-ProductionPath -Path $locks
+    Assert-ProductionInstallPathTraversal -Path $locks
+    Assert-ProtectedProductionPath -Path $locks
+    Assert-ProductionInstallPathTraversal -Path $lockPath -LeafMayBeMissing
+
+    return [pscustomobject]@{
+        Root = $canonicalRoot
+        Locks = $locks
+        LockPath = $lockPath
+    }
+}
+
+function Assert-ProductionDeploymentLockBoundary {
+    param([Parameter(Mandatory)]$Boundary)
+
+    $expectedLocks = [IO.Path]::GetFullPath((Join-Path $Boundary.Root 'locks'))
+    $expectedLockPath = [IO.Path]::GetFullPath((Join-Path $expectedLocks 'deploy.lock'))
+    if (-not [string]::Equals(
+            [string]$Boundary.Locks, $expectedLocks,
+            [StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals(
+            [string]$Boundary.LockPath, $expectedLockPath,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Production deployment lock boundary path identity changed.'
+    }
+    Assert-ProductionInstallPathTraversal -Path $Boundary.Locks
+    Assert-ProtectedProductionPath -Path $Boundary.Root
+    Assert-ProtectedProductionPath -Path $Boundary.Locks
+    Assert-ProductionInstallPathTraversal -Path $Boundary.LockPath
+}
+
+function Read-ProductionWebsiteStopPort {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root)
+
+    $configPath = [IO.Path]::GetFullPath((Join-Path $Root 'config\deploy.json'))
+    Assert-ProductionInstallPathTraversal -Path $configPath
+    try {
+        $legacyConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            'Legacy deploy config could not be parsed for a safe website stop.',
+            $_.Exception)
+    }
+    $property = $legacyConfig.PSObject.Properties['productionPort']
+    if (-not $property -or (
+            $property.Value -isnot [int] -and
+            $property.Value -isnot [long])) {
+        throw 'Legacy deploy config productionPort is malformed.'
+    }
+    $port = [long]$property.Value
+    if ($port -lt 1 -or $port -gt 65535) {
+        throw 'Legacy deploy config productionPort must be between 1 and 65535.'
+    }
+    return [int]$port
+}
+
+function Stop-ProductionWebsiteServiceWithoutPort {
+    [CmdletBinding()]
+    param([ValidateRange(1,300)][int]$ServiceTimeoutSeconds = 30)
+
+    Stop-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+    $service = Get-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+    $service.WaitForStatus(
+        [System.ServiceProcess.ServiceControllerStatus]::Stopped,
+        [timespan]::FromSeconds($ServiceTimeoutSeconds))
+    $service.Refresh()
+    if ([string]$service.Status -cne 'Stopped') {
+        throw "ChristopherBellDev did not reach Stopped within $ServiceTimeoutSeconds seconds."
+    }
 }
 
 function Assert-ProductionWebsiteServiceBinding {
@@ -251,25 +426,29 @@ function Protect-ProductionWebsiteServiceDirectory {
     } $Configuration
 }
 
-function Install-WebsiteService {
-    [CmdletBinding()]
+function Assert-ProductionWebsiteServiceXmlSafeRegistration {
+    param([Parameter(Mandatory)][string]$Path)
+
+    [xml]$serviceDefinition = Get-Content -LiteralPath $Path -Raw
+    if ([string]$serviceDefinition.service.startmode -cne 'Manual') {
+        throw 'Website WinSW service definition must register in Manual startup mode.'
+    }
+}
+
+function Invoke-ProductionWinSwServiceInstall {
+    param([Parameter(Mandatory)][string]$Binary)
+
+    & $Binary install | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'WinSW service installation failed.' }
+}
+
+function Publish-ProductionWebsiteWriterStartBundle {
     param(
-        [Parameter(Mandatory)][string]$Root,
-        [Parameter(Mandatory)]$Configuration
+        [Parameter(Mandatory)]$Configuration,
+        [Parameter(Mandatory)][string]$WinSwSha,
+        [Parameter(Mandatory)][string]$ServiceXmlSha
     )
 
-    $null = $Configuration
-    $service = Protect-ProductionWebsiteServiceDirectory -Configuration $Configuration
-    Set-Service MongoDB -StartupType Automatic
-    & sc.exe failure MongoDB reset= 3600 actions= restart/10000/restart/30000 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Failed to configure MongoDB service recovery.' }
-    $binary = Install-WinSwBinary -ServiceRoot $service
-    $sourceXml = Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml'
-    $installedXml = Join-Path $service 'ChristopherBellDev.xml'
-    Assert-ProductionWebsiteServiceDestinationNotReparse -Path $installedXml
-    Copy-Item $sourceXml $installedXml -Force
-    $winSwSha = Get-ProductionWinSwSha256
-    $serviceXmlSha = (Get-FileHash -LiteralPath $sourceXml -Algorithm SHA256).Hash.ToLowerInvariant()
     $writerStartModule = Get-Module Production.WriterStart -ErrorAction Stop
     & $writerStartModule {
         param($Value, $Launcher, $ModulePath, $ExpectedWinSw, $ExpectedServiceXml)
@@ -282,38 +461,81 @@ function Install-WebsiteService {
     } $Configuration `
         (Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1') `
         (Join-Path $PSScriptRoot 'Production.WriterStart.psm1') `
-        $winSwSha `
-        $serviceXmlSha
-    if (-not (Get-ProductionWebsiteServiceOrNull)) {
-        & $binary install | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'WinSW service installation failed.' }
-    }
-    & sc.exe config ChristopherBellDev start= disabled depend= MongoDB | Out-Null
+        $WinSwSha `
+        $ServiceXmlSha
+}
+
+function Set-ProductionMongoServiceInstallPolicy {
+    Set-Service MongoDB -StartupType Automatic
+    & sc.exe failure MongoDB reset= 3600 actions= restart/10000/restart/30000 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to configure MongoDB service recovery.' }
+}
+
+function Set-ProductionWebsiteServiceInstallPolicy {
+    & sc.exe config ChristopherBellDev depend= MongoDB | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        throw 'Failed to keep the website service Disabled during installation.'
+        throw 'Failed to configure the website service dependency.'
     }
     & sc.exe failure ChristopherBellDev reset= 3600 actions= restart/10000/restart/30000 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to configure website service recovery.' }
+}
+
+function Install-WebsiteService {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)]$Configuration,
+        [psobject]$RegistrationState = ([pscustomobject]@{ ServiceRegistered=$false })
+    )
+
+    $registrationProperty = $RegistrationState.PSObject.Properties['ServiceRegistered']
+    if (-not $registrationProperty -or
+        $registrationProperty.Value -isnot [bool]) {
+        throw 'Website service registration state must contain a Boolean ServiceRegistered value.'
+    }
+    $service = Protect-ProductionWebsiteServiceDirectory -Configuration $Configuration
+    Set-ProductionMongoServiceInstallPolicy
+    $binary = Install-WinSwBinary -ServiceRoot $service
+    $sourceXml = Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml'
+    Assert-ProductionWebsiteServiceXmlSafeRegistration -Path $sourceXml
+    $installedXml = Join-Path $service 'ChristopherBellDev.xml'
+    Assert-ProductionWebsiteServiceDestinationNotReparse -Path $installedXml
+    Copy-Item $sourceXml $installedXml -Force
+    $winSwSha = Get-ProductionWinSwSha256
+    $serviceXmlSha = (Get-FileHash -LiteralPath $sourceXml -Algorithm SHA256).Hash.ToLowerInvariant()
+    Publish-ProductionWebsiteWriterStartBundle `
+        -Configuration $Configuration `
+        -WinSwSha $winSwSha `
+        -ServiceXmlSha $serviceXmlSha
+    if (-not (Get-ProductionWebsiteServiceOrNull)) {
+        Invoke-ProductionWinSwServiceInstall -Binary $binary
+        if (-not (Get-ProductionWebsiteServiceOrNull)) {
+            throw 'WinSW service registration was not observed after installation.'
+        }
+        $RegistrationState.ServiceRegistered = $true
+    }
+    Set-ProductionWebsiteStartupType -StartupType Disabled
+    Set-ProductionWebsiteServiceInstallPolicy
     Assert-ProductionWebsiteServiceBoundary -Root $Root -Configuration $Configuration
 }
 
-function Install-ProductionRuntime {
+function Invoke-ProductionRuntimeInstallAtRoot {
     [CmdletBinding()]
-    param([switch]$WhatIf, [string]$CloudflareTokenPath)
-    Assert-Administrator
-    $root = 'C:\ProgramData\christopherbell.dev'
-    if ($WhatIf) {
-        Write-Output "Would install the website runtime and restricted shared media worker under $root."
-        return
-    }
-    Initialize-ProductionDeploymentLockDirectory -Root $root
-    $lock = Enter-DeploymentLock (Join-Path $root 'locks\deploy.lock')
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [string]$CloudflareTokenPath
+    )
+
+    $boundary = Initialize-ProductionDeploymentLockDirectory -Root $Root
+    $root = $boundary.Root
+    $lock = Enter-DeploymentLock -LockPath $boundary.LockPath
     try {
+        Assert-ProductionDeploymentLockBoundary -Boundary $boundary
         $priorService = $null
         $wasRunning = $false
         $config = $null
-        $productionPort = 8080
-        $websiteInstallStarted = $false
+        $productionPort = $null
+        $registrationState = [pscustomobject]@{ ServiceRegistered=$false }
         try {
             $priorService = Get-ProductionWebsiteServiceOrNull
             if ($priorService) {
@@ -323,21 +545,25 @@ function Install-ProductionRuntime {
                     throw 'ChristopherBellDev must be Running or Stopped before installation.'
                 }
                 $wasRunning = $priorStatus -eq 'Running'
-                $config = Read-ProductionConfig (Join-Path $root 'config\deploy.json')
-                $productionPort = [int]$config.productionPort
-                Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                Protect-ProductionSecrets $root
+                $productionPort = Read-ProductionWebsiteStopPort -Root $root
+                Stop-ProductionWebsiteService -ProductionPort $productionPort `
                     -KeepRecoverySuspended
             }
             New-ProductionDirectories $root
+            Protect-ProductionSecrets $root
             Install-ConfigurationExamples $root
             $config = Read-ProductionConfig (Join-Path $root 'config\deploy.json')
             $productionPort = [int]$config.productionPort
             Read-ProductionEnvironment (Join-Path $root 'config\app.env') | Out-Null
             Protect-ProductionSecrets $root
+            Protect-ProductionWebsiteServiceDirectory -Configuration $config | Out-Null
             Install-CloudflaredService `
                 -Executable $config.cloudflaredExe -TokenPath $CloudflareTokenPath
-            $websiteInstallStarted = $true
-            Install-WebsiteService -Root $root -Configuration $config
+            Install-WebsiteService `
+                -Root $root `
+                -Configuration $config `
+                -RegistrationState $registrationState
             Install-SharedFolderRuntime -ProductionRoot $root -Configuration $config
             Assert-ProductionWebsiteServiceBoundary -Root $root -Configuration $config
             Set-ProductionWebsiteStartupType -StartupType Automatic
@@ -362,8 +588,12 @@ function Install-ProductionRuntime {
                     [void]$containmentFailures.Add($_.Exception)
                 }
                 try {
-                    Stop-ProductionWebsiteService -ProductionPort $productionPort `
-                        -KeepRecoverySuspended
+                    if ($null -eq $productionPort) {
+                        Stop-ProductionWebsiteServiceWithoutPort
+                    } else {
+                        Stop-ProductionWebsiteService -ProductionPort $productionPort `
+                            -KeepRecoverySuspended
+                    }
                 } catch {
                     [void]$containmentFailures.Add($_.Exception)
                 }
@@ -376,7 +606,7 @@ function Install-ProductionRuntime {
                 } catch {
                     [void]$containmentFailures.Add($_.Exception)
                 }
-            } elseif ($priorService -or $websiteInstallStarted) {
+            } elseif ($priorService -or $registrationState.ServiceRegistered) {
                 [void]$containmentFailures.Add(
                     [System.InvalidOperationException]::new(
                         'ChristopherBellDev disappeared before containment could be verified.'))
@@ -401,6 +631,21 @@ function Install-ProductionRuntime {
     } finally {
         $lock.Dispose()
     }
+}
+
+function Install-ProductionRuntime {
+    [CmdletBinding()]
+    param([switch]$WhatIf, [string]$CloudflareTokenPath)
+
+    Assert-Administrator
+    $root = 'C:\ProgramData\christopherbell.dev'
+    if ($WhatIf) {
+        Write-Output "Would install the website runtime and restricted shared media worker under $root."
+        return
+    }
+    Invoke-ProductionRuntimeInstallAtRoot `
+        -Root $root `
+        -CloudflareTokenPath $CloudflareTokenPath
 }
 
 function Uninstall-ProductionRuntime {

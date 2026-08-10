@@ -515,8 +515,10 @@ Describe 'production writer-start schema boundary' {
             Should -BeLessThan $scriptText.IndexOf('config\deploy.json')
         $scriptText.IndexOf('Assert-InstalledWriterStartGuardAcl -Path $serviceRoot') |
             Should -BeLessThan $scriptText.IndexOf('config\deploy.json')
-        $scriptText.IndexOf('Assert-InstalledWriterStartGuardAcl -Path') |
-            Should -BeLessThan $scriptText.IndexOf('Import-Module')
+        $serviceDirectoryAcl = $scriptText.IndexOf(
+            'Assert-InstalledWriterStartServiceDirectoryAcl -Path')
+        $serviceDirectoryAcl | Should -BeGreaterOrEqual 0
+        $serviceDirectoryAcl | Should -BeLessThan $scriptText.IndexOf('Import-Module')
         $scriptText.IndexOf('Get-FileHash') |
             Should -BeLessThan $scriptText.IndexOf('Import-Module')
         $scriptText.IndexOf('Assert-ProductionWriterStartAllowed') |
