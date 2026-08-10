@@ -511,7 +511,8 @@ function Install-SharedFolderWorkerService {
             'ChristopherBellDev.exe',
             'ChristopherBellDev.xml',
             'Start-ChristopherBellDev.ps1',
-            'Production.WriterStart.psm1'
+            'Production.WriterStart.psm1',
+            'Production.WriterStart.bundle.json'
         )) {
             $path = Join-Path $serviceRoot $websiteControlFile
             if (Test-Path -LiteralPath $path -PathType Leaf) { & $ProtectPathAction $path }

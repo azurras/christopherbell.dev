@@ -24,12 +24,199 @@ function Get-ProductionWriterStartAuthorizationPath {
     Join-Path $Config.programDataRoot 'state\music-runtime-pending-start.json'
 }
 
+function Get-ProductionWriterStartGuardManifestPath {
+    param([Parameter(Mandatory)]$Config)
+    Join-Path $Config.programDataRoot 'service\Production.WriterStart.bundle.json'
+}
+
 function Assert-ExactJsonProperties {
     param($Value, [string[]]$Expected, [string]$Label)
     $actual = @($Value.PSObject.Properties.Name)
     if ($actual.Count -ne $Expected.Count) { throw "$Label has invalid properties." }
     foreach ($name in $Expected) {
         if (-not ($actual -ccontains $name)) { throw "$Label has invalid properties." }
+    }
+}
+
+function Get-ProductionWriterStartIssuerIdentity {
+    $process = [Diagnostics.Process]::GetCurrentProcess()
+    try {
+        [pscustomobject][ordered]@{
+            issuerPid = [int]$process.Id
+            issuerStartTimeUtcTicks = [long]$process.StartTime.ToUniversalTime().Ticks
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Assert-ProductionWriterStartIssuerIdentity {
+    param([Parameter(Mandatory)]$Authorization)
+    try {
+        $issuer = Get-Process -Id ([int]$Authorization.issuerPid) -ErrorAction Stop
+        $actualTicks = [long]$issuer.StartTime.ToUniversalTime().Ticks
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            'Writer-start authorization issuer is not alive.', $_.Exception)
+    }
+    if ($actualTicks -ne [long]$Authorization.issuerStartTimeUtcTicks) {
+        throw 'Writer-start authorization issuer process identity changed.'
+    }
+}
+
+function Read-ProductionWriterStartGuardManifest {
+    param([Parameter(Mandatory)]$Config)
+    $path = Get-ProductionWriterStartGuardManifestPath -Config $Config
+    try {
+        $value = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+        Assert-ExactJsonProperties $value @(
+            'version','launcherSha256','moduleSha256') 'Writer-start guard manifest'
+        if (($value.version -isnot [int] -and $value.version -isnot [long]) -or
+            [int]$value.version -ne 1 -or
+            $value.launcherSha256 -isnot [string] -or
+            [string]$value.launcherSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            $value.moduleSha256 -isnot [string] -or
+            [string]$value.moduleSha256 -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'Invalid writer-start guard manifest.'
+        }
+        [pscustomobject][ordered]@{
+            version = 1
+            launcherSha256 = [string]$value.launcherSha256
+            moduleSha256 = [string]$value.moduleSha256
+        }
+    } catch {
+        throw [System.IO.InvalidDataException]::new(
+            'Installed writer-start guard manifest is invalid.', $_.Exception)
+    }
+}
+
+function Assert-ProductionWriterStartGuardBundle {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')]
+        [string]$ExpectedLauncherSha256,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')]
+        [string]$ExpectedModuleSha256
+    )
+    $serviceRoot = Join-Path $Config.programDataRoot 'service'
+    $launcher = Join-Path $serviceRoot 'Start-ChristopherBellDev.ps1'
+    $module = Join-Path $serviceRoot 'Production.WriterStart.psm1'
+    $manifestPath = Get-ProductionWriterStartGuardManifestPath -Config $Config
+    $manifest = Read-ProductionWriterStartGuardManifest -Config $Config
+    if ($manifest.launcherSha256 -cne $ExpectedLauncherSha256 -or
+        $manifest.moduleSha256 -cne $ExpectedModuleSha256 -or
+        (Get-FileHash -LiteralPath $launcher -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
+            $ExpectedLauncherSha256 -or
+        (Get-FileHash -LiteralPath $module -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -cne
+            $ExpectedModuleSha256) {
+        throw 'Installed writer-start guard SHA-256 verification failed.'
+    }
+    if (Get-Command Assert-ProductionPathNotReparse -ErrorAction SilentlyContinue) {
+        Assert-ProductionPathNotReparse -Path $serviceRoot | Out-Null
+    }
+    foreach ($path in @($launcher,$module,$manifestPath)) {
+        if (Get-Command Assert-ProtectedProductionPath -ErrorAction SilentlyContinue) {
+            Assert-ProtectedProductionPath -Path $path | Out-Null
+        }
+    }
+    return $manifest
+}
+
+function Publish-ProductionWriterStartGuardFile {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination
+    )
+    if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
+        [IO.File]::Move($Source, $Destination)
+        return
+    }
+    $backup = "$Destination.$PID.$([guid]::NewGuid().ToString('N')).backup"
+    try {
+        [IO.File]::Replace($Source, $Destination, $backup, $true)
+    } finally {
+        if (Test-Path -LiteralPath $backup) {
+            Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Publish-ProductionWriterStartGuardBundle {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$SourceLauncherPath,
+        [Parameter(Mandatory)][string]$SourceModulePath
+    )
+    foreach ($source in @($SourceLauncherPath,$SourceModulePath)) {
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw 'Writer-start guard source file is missing.'
+        }
+        if (Get-Command Assert-ProductionPathNotReparse -ErrorAction SilentlyContinue) {
+            Assert-ProductionPathNotReparse -Path $source | Out-Null
+        }
+    }
+    $serviceRoot = Join-Path $Config.programDataRoot 'service'
+    New-Item -ItemType Directory -Path $serviceRoot -Force | Out-Null
+    if (Get-Command Assert-ProductionPathNotReparse -ErrorAction SilentlyContinue) {
+        Assert-ProductionPathNotReparse -Path $serviceRoot | Out-Null
+    }
+    $launcherSha = (Get-FileHash -LiteralPath $SourceLauncherPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $moduleSha = (Get-FileHash -LiteralPath $SourceModulePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $staging = Join-Path $serviceRoot ('.writer-start-guard-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $staging | Out-Null
+    try {
+        $stagedLauncher = Join-Path $staging 'Start-ChristopherBellDev.ps1'
+        $stagedModule = Join-Path $staging 'Production.WriterStart.psm1'
+        $stagedManifest = Join-Path $staging 'Production.WriterStart.bundle.json'
+        Copy-Item -LiteralPath $SourceLauncherPath -Destination $stagedLauncher
+        Copy-Item -LiteralPath $SourceModulePath -Destination $stagedModule
+        [ordered]@{
+            version = 1
+            launcherSha256 = $launcherSha
+            moduleSha256 = $moduleSha
+        } | ConvertTo-Json | Set-Content -LiteralPath $stagedManifest -Encoding utf8
+        foreach ($path in @($staging,$stagedLauncher,$stagedModule,$stagedManifest)) {
+            if (Get-Command Protect-ProductionPath -ErrorAction SilentlyContinue) {
+                Protect-ProductionPath -Path $path
+                Assert-ProtectedProductionPath -Path $path | Out-Null
+            }
+        }
+        if ((Get-FileHash $stagedLauncher -Algorithm SHA256).Hash.ToLowerInvariant() -cne $launcherSha -or
+            (Get-FileHash $stagedModule -Algorithm SHA256).Hash.ToLowerInvariant() -cne $moduleSha) {
+            throw 'Staged writer-start guard SHA-256 verification failed.'
+        }
+
+        # Publishing the launcher first makes every partial upgrade fail closed against the
+        # absent or old manifest. The manifest is the atomic commit point for the pair.
+        Publish-ProductionWriterStartGuardFile `
+            -Source $stagedLauncher `
+            -Destination (Join-Path $serviceRoot 'Start-ChristopherBellDev.ps1')
+        Publish-ProductionWriterStartGuardFile `
+            -Source $stagedModule `
+            -Destination (Join-Path $serviceRoot 'Production.WriterStart.psm1')
+        Publish-ProductionWriterStartGuardFile `
+            -Source $stagedManifest `
+            -Destination (Get-ProductionWriterStartGuardManifestPath -Config $Config)
+        foreach ($path in @(
+            (Join-Path $serviceRoot 'Start-ChristopherBellDev.ps1'),
+            (Join-Path $serviceRoot 'Production.WriterStart.psm1'),
+            (Get-ProductionWriterStartGuardManifestPath -Config $Config))) {
+            if (Get-Command Protect-ProductionPath -ErrorAction SilentlyContinue) {
+                Protect-ProductionPath -Path $path
+            }
+        }
+        Assert-ProductionWriterStartGuardBundle -Config $Config `
+            -ExpectedLauncherSha256 $launcherSha `
+            -ExpectedModuleSha256 $moduleSha | Out-Null
+        [pscustomobject][ordered]@{
+            launcherSha256 = $launcherSha
+            moduleSha256 = $moduleSha
+        }
+    } finally {
+        if (Test-Path -LiteralPath $staging) {
+            Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -194,7 +381,15 @@ function Grant-ProductionWriterStartAuthorization {
         -not ($script:AuthorizationPurposes -ccontains $Purpose)) {
         throw 'Writer-start authorization state or purpose is invalid.'
     }
+    $marker = Read-ProductionMusicSchemaDirection -Config $Config
+    if (-not $marker -or [string]$marker.state -cne $MarkerState) {
+        throw 'Writer-start authorization does not match the exact schema-direction marker.'
+    }
+    $issuer = Get-ProductionWriterStartIssuerIdentity
+    $nonce = [guid]::NewGuid().ToString('N')
+    $expiresAt = [DateTimeOffset]::UtcNow.AddSeconds($LifetimeSeconds).ToUnixTimeMilliseconds()
     $path = Get-ProductionWriterStartAuthorizationPath -Config $Config
+    $published = $false
     $parent = Split-Path -Parent $path
     New-Item -ItemType Directory -Path $parent -Force | Out-Null
     if (Get-Command Protect-ProductionPath -ErrorAction SilentlyContinue) {
@@ -206,24 +401,73 @@ function Grant-ProductionWriterStartAuthorization {
         [ordered]@{
             version = 1
             markerState = $MarkerState
+            markerTargetRelease = [string]$marker.targetRelease
+            markerLegacyRelease = [string]$marker.legacyRelease
             release = $Release
             purpose = $Purpose
-            expiresAtEpochMillis = [DateTimeOffset]::UtcNow.AddSeconds($LifetimeSeconds).ToUnixTimeMilliseconds()
-            nonce = [guid]::NewGuid().ToString('N')
+            expiresAtEpochMillis = $expiresAt
+            nonce = $nonce
+            issuerPid = [int]$issuer.issuerPid
+            issuerStartTimeUtcTicks = [long]$issuer.issuerStartTimeUtcTicks
         } | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding utf8
         if (Get-Command Protect-ProductionPath -ErrorAction SilentlyContinue) {
             Protect-ProductionPath -Path $temporary
             Assert-ProtectedProductionPath -Path $temporary | Out-Null
         }
         Move-Item -LiteralPath $temporary -Destination $path -Force
+        $published = $true
         if (Get-Command Protect-ProductionPath -ErrorAction SilentlyContinue) {
             Protect-ProductionPath -Path $path
             Assert-ProtectedProductionPath -Path $path | Out-Null
         }
+    } catch {
+        if ($published -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+        throw [System.InvalidOperationException]::new(
+            'Pending writer-start authorization creation failed.', $_.Exception)
     } finally {
         if (Test-Path -LiteralPath $temporary) {
             Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
         }
+    }
+    [pscustomobject][ordered]@{
+        nonce = $nonce
+        markerState = $MarkerState
+        markerTargetRelease = [string]$marker.targetRelease
+        markerLegacyRelease = [string]$marker.legacyRelease
+        release = $Release
+        purpose = $Purpose
+        issuerPid = [int]$issuer.issuerPid
+        issuerStartTimeUtcTicks = [long]$issuer.issuerStartTimeUtcTicks
+    }
+}
+
+function Revoke-ProductionWriterStartAuthorization {
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$Authorization)
+    $path = Get-ProductionWriterStartAuthorizationPath -Config $Config
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return }
+    try {
+        $value = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+        if ($value.nonce -isnot [string] -or
+            [string]$value.nonce -cne [string]$Authorization.nonce -or
+            [string]$value.markerState -cne [string]$Authorization.markerState -or
+            [string]$value.markerTargetRelease -cne
+                [string]$Authorization.markerTargetRelease -or
+            [string]$value.markerLegacyRelease -cne
+                [string]$Authorization.markerLegacyRelease -or
+            [string]$value.release -cne [string]$Authorization.release -or
+            [string]$value.purpose -cne [string]$Authorization.purpose -or
+            [int]$value.issuerPid -ne [int]$Authorization.issuerPid -or
+            [long]$value.issuerStartTimeUtcTicks -ne
+                [long]$Authorization.issuerStartTimeUtcTicks) {
+            throw 'Pending writer-start authorization does not match the revocation token.'
+        }
+        Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+    } catch {
+        throw [System.InvalidOperationException]::new(
+            'Pending writer-start authorization revocation failed.', $_.Exception)
     }
 }
 
@@ -238,12 +482,18 @@ function Use-ProductionWriterStartAuthorization {
         $value = Get-Content -LiteralPath $claimed -Raw -ErrorAction Stop |
             ConvertFrom-Json -ErrorAction Stop
         Assert-ExactJsonProperties $value @(
-            'version','markerState','release','purpose','expiresAtEpochMillis','nonce') 'Authorization'
+            'version','markerState','markerTargetRelease','markerLegacyRelease',
+            'release','purpose','expiresAtEpochMillis','nonce',
+            'issuerPid','issuerStartTimeUtcTicks') 'Authorization'
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         if (($value.version -isnot [int] -and $value.version -isnot [long]) -or
             [int]$value.version -ne 1 -or
             $value.markerState -isnot [string] -or
             [string]$value.markerState -cne [string]$Marker.state -or
+            $value.markerTargetRelease -isnot [string] -or
+            [string]$value.markerTargetRelease -cne [string]$Marker.targetRelease -or
+            $value.markerLegacyRelease -isnot [string] -or
+            [string]$value.markerLegacyRelease -cne [string]$Marker.legacyRelease -or
             $value.release -isnot [string] -or
             [string]$value.release -cne [string]$ReleaseIdentity.sha -or
             $value.purpose -isnot [string] -or
@@ -253,9 +503,15 @@ function Use-ProductionWriterStartAuthorization {
             [long]$value.expiresAtEpochMillis -lt $now -or
             [long]$value.expiresAtEpochMillis -gt ($now + 120000) -or
             $value.nonce -isnot [string] -or
-            [string]$value.nonce -cnotmatch '^[0-9a-f]{32}$') {
+            [string]$value.nonce -cnotmatch '^[0-9a-f]{32}$' -or
+            ($value.issuerPid -isnot [int] -and $value.issuerPid -isnot [long]) -or
+            [int]$value.issuerPid -lt 1 -or
+            ($value.issuerStartTimeUtcTicks -isnot [int] -and
+                $value.issuerStartTimeUtcTicks -isnot [long]) -or
+            [long]$value.issuerStartTimeUtcTicks -lt 1) {
             throw 'Authorization is invalid.'
         }
+        Assert-ProductionWriterStartIssuerIdentity -Authorization $value
         $schema = [string]$ReleaseIdentity.musicSchema
         $purpose = [string]$value.purpose
         $validPurpose =

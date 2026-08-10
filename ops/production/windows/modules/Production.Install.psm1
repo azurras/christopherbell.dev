@@ -161,8 +161,16 @@ function Install-WebsiteService {
     $service = Join-Path $Root 'service'
     $binary = Install-WinSwBinary -ServiceRoot $service
     Copy-Item (Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml') $service -Force
-    Copy-Item (Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1') $service -Force
-    Copy-Item (Join-Path $PSScriptRoot 'Production.WriterStart.psm1') $service -Force
+    $writerStartModule = Get-Module Production.WriterStart -ErrorAction Stop
+    & $writerStartModule {
+        param($Value, $Launcher, $ModulePath)
+        Publish-ProductionWriterStartGuardBundle `
+            -Config $Value `
+            -SourceLauncherPath $Launcher `
+            -SourceModulePath $ModulePath | Out-Null
+    } $Configuration `
+        (Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1') `
+        (Join-Path $PSScriptRoot 'Production.WriterStart.psm1')
     if (-not (Get-Service ChristopherBellDev -ErrorAction SilentlyContinue)) {
         & $binary install | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'WinSW service installation failed.' }
@@ -188,8 +196,17 @@ function Install-ProductionRuntime {
     Read-ProductionEnvironment (Join-Path $root 'config\app.env') | Out-Null
     Protect-ProductionSecrets $root
     Install-CloudflaredService -Executable $config.cloudflaredExe -TokenPath $CloudflareTokenPath
-    Install-WebsiteService -Root $root -Configuration $config
-    Install-SharedFolderRuntime -ProductionRoot $root -Configuration $config
+    $lock = Enter-DeploymentLock (Join-Path $root 'locks\deploy.lock')
+    try {
+        if (Get-Service ChristopherBellDev -ErrorAction SilentlyContinue) {
+            Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                -KeepRecoverySuspended
+        }
+        Install-WebsiteService -Root $root -Configuration $config
+        Install-SharedFolderRuntime -ProductionRoot $root -Configuration $config
+    } finally {
+        $lock.Dispose()
+    }
 }
 
 function Uninstall-ProductionRuntime {

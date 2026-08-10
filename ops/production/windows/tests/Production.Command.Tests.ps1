@@ -157,6 +157,21 @@ Describe 'native Windows production command surface' {
         Should -Invoke Invoke-ProductionRollback -Times 0
     }
 
+    It 'routes the explicit first Music cutover switch only to manual deploy' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
+        Mock Invoke-ProductionDeploy { }
+
+        Invoke-ProductionCommand -Command deploy -MusicSchemaCutover
+
+        Should -Invoke Invoke-ProductionDeploy -Times 1 -Exactly -ParameterFilter {
+            $MusicSchemaCutover -and -not $Automatic
+        }
+        $script = Get-Content (Join-Path $root 'ops\production\windows\prod.ps1') -Raw
+        $script | Should -Match '\[switch\]\$MusicSchemaCutover'
+        $script | Should -Not -Match "'auto-deploy'\s*=\s*\{[^}]*MusicSchemaCutover"
+    }
+
     It 'rejects unknown commands' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         & pwsh.exe -NoLogo -NoProfile -File (Join-Path $root 'ops\production\windows\prod.ps1') unknown-command 2>$null

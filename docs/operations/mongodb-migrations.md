@@ -84,6 +84,12 @@ exact raw-shape and readback validation, switches to the target release, changes
 `TARGET_ACTIVE`, and only then starts the target writer. Queue-only, radio-only, both-present, and
 both-absent states are valid; a retained destination singleton that conflicts with an absent legacy
 singleton fails closed. Task 6 must invoke the protected deploy with `-MusicSchemaCutover`; after
+the explicit command `.\prod.cmd deploy -MusicSchemaCutover` is bound by `prod.ps1` (automatic
+deployment cannot supply this switch), the deploy lock suspends SCM recovery and proves the writer
+stopped. It then stages the repository launcher and WriterStart module, publishes the launcher
+first and an exact SHA-256 manifest last as the crash-safe commit point, verifies protected ACLs
+and both installed hashes by readback, and refuses the cutover if that installed boundary is not
+exact. This upgrades a pre-guard installation without calling the unlocked service installer. After
 the new release and migration pass health verification, that same still-held deploy lock is used
 to change the pre-start `TARGET_CUTOVER_IN_PROGRESS` marker to `TARGET_ACTIVE` with the exact
 current and previous release identities before any other deployment or rollback command can run.
@@ -94,9 +100,13 @@ first-cutover path.
 
 Every WinSW launch, including boot and recovery restarts, runs the same strict marker/current-release
 guard before Java. Stable target and legacy markers permit only their exact bound release. A
-deployment transition may create one atomic authorization for an exact release, marker state,
-purpose, and expiry; the launch script consumes it once, so it cannot be replayed by recovery or a
-later manual start. If the marker is absent, the guard starts only a legacy-compatible release and
+deployment transition may create one atomic authorization for the exact marker state/target/legacy
+tuple, release, purpose, expiry, issuer PID, and issuer process start identity. The launch script
+requires that exact issuer to remain alive and consumes the authorization once; the deployment
+revokes the exact returned token on success and failure, so it cannot be replayed by recovery or a
+later manual start. The launcher also checks its own and the module's installed hashes against the
+protected bundle manifest before importing any guard code. If the marker is absent, the guard starts
+only a legacy-compatible release and
 only after the database probe proves migration 014 inactive. Active or unknown migration state,
 malformed marker data, a mismatched release, and an expired or replayed authorization all block the
 writer. Manual `prod.cmd restart` remains blocked while reconciliation is required; guarded boot,

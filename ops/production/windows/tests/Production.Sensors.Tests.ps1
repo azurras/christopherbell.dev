@@ -137,6 +137,29 @@ Describe 'PawnIO sensor provider operations' {
             Should -Invoke Restart-Service -Times 0
         }
 
+        It 'captures sensor rollback state only after lock acquisition' {
+            $configPath = Join-Path $TestDrive 'config\deploy.json'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $configPath) -Force | Out-Null
+            @{ programDataRoot=$TestDrive; productionPort=8080; sensorLibrariesEnabled=$false } |
+                ConvertTo-Json | Set-Content $configPath
+            Mock Enter-DeploymentLock {
+                @{ programDataRoot=$TestDrive; productionPort=8080; sensorLibrariesEnabled=$true } |
+                    ConvertTo-Json | Set-Content $configPath
+                [IO.MemoryStream]::new()
+            }
+            $script:restartAttempt = 0
+            Mock Restart-Service {
+                $script:restartAttempt++
+                if ($script:restartAttempt -eq 1) { throw 'restart failed' }
+            }
+
+            { Set-ProductionSensorState -Enabled $false -ConfigPath $configPath } |
+                Should -Throw '*restart failed*'
+
+            (Get-Content $configPath -Raw | ConvertFrom-Json).sensorLibrariesEnabled |
+                Should -BeTrue
+        }
+
         It 'reports protected state installation and active threat state without mutation' {
             $configPath = Join-Path $TestDrive 'deploy.json'
             @{ sensorLibrariesEnabled=$false } | ConvertTo-Json | Set-Content $configPath

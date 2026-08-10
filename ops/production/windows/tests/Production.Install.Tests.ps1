@@ -100,6 +100,15 @@ Describe 'native Windows service installer' {
         $module | Should -Match 'sc\.exe config ChristopherBellDev start= auto depend= MongoDB'
         $module | Should -Match 'Install-SharedFolderRuntime -ProductionRoot \$root -Configuration \$config'
     }
+
+    It 'installs the launcher and WriterStart module only through the verified bundle publisher' {
+        $module = Get-Content (Join-Path $PSScriptRoot '..\modules\Production.Install.psm1') -Raw
+
+        $module | Should -Match 'Publish-ProductionWriterStartGuardBundle'
+        $module | Should -Not -Match (
+            "Copy-Item\s+\(Join-Path\s+\`$PSScriptRoot\s+'\.\.\\service\\" +
+            "Start-ChristopherBellDev\.ps1'\)")
+    }
 }
 
 Describe 'native cloudflared service installer' {

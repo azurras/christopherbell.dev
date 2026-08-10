@@ -4,6 +4,7 @@ param(
     [ValidateSet('help','install','deploy','status','logs','restart','releases','rollback','backup','mongo-inventory','music-runtime-rollback','verify-startup','uninstall','auto-install','auto-deploy','auto-status','auto-remove','sensor-install','sensor-status','sensor-enable','sensor-disable')]
     [string]$Command = 'help',
     [switch]$WhatIf,
+    [switch]$MusicSchemaCutover,
     [switch]$ConfirmMusicRuntimeRollback,
     [string]$CloudflareTokenPath
 )
@@ -20,6 +21,7 @@ function Invoke-ProductionCommand {
     param(
         [Parameter(Mandatory)][string]$Command,
         [switch]$WhatIf,
+        [switch]$MusicSchemaCutover,
         [switch]$ConfirmMusicRuntimeRollback,
         [string]$CloudflareTokenPath
     )
@@ -27,7 +29,11 @@ function Invoke-ProductionCommand {
     $handlers = @{
         help = { Show-ProductionHelp }
         install = { Install-ProductionRuntime -WhatIf:$WhatIf -CloudflareTokenPath $CloudflareTokenPath }
-        deploy = { Invoke-ProductionDeploy -WhatIf:$WhatIf }
+        deploy = {
+            Invoke-ProductionDeploy `
+                -WhatIf:$WhatIf `
+                -MusicSchemaCutover:$MusicSchemaCutover
+        }
         status = { Get-ProductionStatus }
         logs = { Watch-ProductionLogs }
         restart = { Restart-ProductionService -Verify }
@@ -62,5 +68,6 @@ function Invoke-ProductionCommand {
 }
 
 Invoke-ProductionCommand -Command $Command -WhatIf:$WhatIf `
+    -MusicSchemaCutover:$MusicSchemaCutover `
     -ConfirmMusicRuntimeRollback:$ConfirmMusicRuntimeRollback `
     -CloudflareTokenPath $CloudflareTokenPath

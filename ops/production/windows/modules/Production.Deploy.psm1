@@ -25,6 +25,36 @@ function Grant-CoordinatedProductionWriterStart {
     } $Config $MarkerState $Release $Purpose
 }
 
+function Revoke-CoordinatedProductionWriterStart {
+    param($Config, [Parameter(Mandatory)]$Authorization)
+    $module = Get-Module Production.WriterStart -ErrorAction Stop
+    & $module {
+        param($Value, $Token)
+        Revoke-ProductionWriterStartAuthorization -Config $Value -Authorization $Token
+    } $Config $Authorization
+}
+
+function Install-CoordinatedProductionWriterStartGuardBundle {
+    param([Parameter(Mandatory)]$Config)
+    $launcher = Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1'
+    $modulePath = Join-Path $PSScriptRoot 'Production.WriterStart.psm1'
+    $writerStartModule = Get-Module Production.WriterStart -ErrorAction Stop
+    & $writerStartModule {
+        param($Value, $Launcher, $ModulePath)
+        Publish-ProductionWriterStartGuardBundle `
+            -Config $Value `
+            -SourceLauncherPath $Launcher `
+            -SourceModulePath $ModulePath
+    } $Config $launcher $modulePath
+}
+
+function Ensure-ProductionWriterStartGuardUnderHeldLock {
+    param([Parameter(Mandatory)]$Config)
+    Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
+        -KeepRecoverySuspended
+    Install-CoordinatedProductionWriterStartGuardBundle -Config $Config
+}
+
 function Read-ProductionReleaseMusicSchema {
     param([Parameter(Mandatory)][string]$Release,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Sha)
@@ -586,28 +616,54 @@ function Switch-ProductionRelease {
         [ValidateSet('TARGET_CUTOVER','TARGET_DEPLOY','TARGET_RECONCILIATION','LEGACY_ROLLBACK','LEGACY_RESTORE')]
         [string]$AuthorizationPurpose,
         [ValidatePattern('^$|^[0-9a-f]{40}$')][string]$AuthorizationRelease = '',
-        [switch]$KeepRecoverySuspended
+        [switch]$KeepRecoverySuspended,
+        [switch]$WriterAlreadyStopped
     )
     $release = Assert-ReleasePath $Config $Release
     $currentPath = Join-Path $Config.programDataRoot 'current'
     $previousPath = Join-Path $Config.programDataRoot 'previous'
     $old = Get-JunctionTarget $currentPath
-    Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
-        -KeepRecoverySuspended:$KeepRecoverySuspended
+    if ($WriterAlreadyStopped) {
+        Assert-ProductionWebsiteStopped -ProductionPort $Config.productionPort
+    } else {
+        Stop-ProductionWebsiteService -ProductionPort $Config.productionPort `
+            -KeepRecoverySuspended:$KeepRecoverySuspended
+    }
     $liveMigrationStarted = $false
     try {
         if ($old) { Set-AtomicJunction $Config $previousPath $old }
         Set-AtomicJunction $Config $currentPath $release
         $liveMigrationStarted = $true
+        $authorization = $null
         if ($AuthorizationPurpose) {
-            Grant-CoordinatedProductionWriterStart -Config $Config `
+            $authorization = Grant-CoordinatedProductionWriterStart -Config $Config `
                 -MarkerState $AuthorizationMarkerState `
                 -Release $AuthorizationRelease `
                 -Purpose $AuthorizationPurpose
         }
-        Start-Service ChristopherBellDev
-        Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
-        Test-ProductionPublicEndpoints -Config $Config | Out-Null
+        $startFailure = $null
+        try {
+            Start-Service ChristopherBellDev
+            Test-ProductionEndpoints -Config $Config -Port $Config.productionPort
+            Test-ProductionPublicEndpoints -Config $Config | Out-Null
+        } catch {
+            $startFailure = $_.Exception
+        } finally {
+            if ($authorization) {
+                try {
+                    Revoke-CoordinatedProductionWriterStart `
+                        -Config $Config -Authorization $authorization
+                } catch {
+                    if ($startFailure) {
+                        throw [System.AggregateException]::new(
+                            'Writer start and pending authorization cleanup both failed.',
+                            [System.Exception[]]@($startFailure, $_.Exception))
+                    }
+                    throw
+                }
+            }
+        }
+        if ($startFailure) { throw $startFailure }
     } catch {
         $deploymentFailure = $_.Exception
         if ($liveMigrationStarted) {
@@ -686,7 +742,7 @@ function Switch-ProductionReleaseAfterMusicReconciliation {
         throw 'The active release does not match the legacy Music schema-direction marker.'
     }
 
-    Stop-ProductionWebsiteService -ProductionPort $Config.productionPort -KeepRecoverySuspended
+    Ensure-ProductionWriterStartGuardUnderHeldLock -Config $Config | Out-Null
     $copy = $null
     try {
         $copy = Invoke-ProductionMusicRuntimeReconciliationNoLock -Config $Config
@@ -810,6 +866,7 @@ function Invoke-ProductionDeploy {
         } else {
             if ($MusicSchemaCutover) {
                 $legacySha = Split-Path -Leaf $legacyRelease
+                Ensure-ProductionWriterStartGuardUnderHeldLock -Config $config | Out-Null
                 Write-ProductionMusicSchemaDirection `
                     -Config $config `
                     -State TARGET_CUTOVER_IN_PROGRESS `
@@ -820,7 +877,8 @@ function Invoke-ProductionDeploy {
                         -AuthorizationMarkerState TARGET_CUTOVER_IN_PROGRESS `
                         -AuthorizationPurpose TARGET_CUTOVER `
                         -AuthorizationRelease $sha `
-                        -KeepRecoverySuspended
+                        -KeepRecoverySuspended `
+                        -WriterAlreadyStopped
                     Write-ProductionMusicSchemaDirection `
                         -Config $config `
                         -State TARGET_ACTIVE `
@@ -843,11 +901,13 @@ function Invoke-ProductionDeploy {
                 }
             } elseif ($direction -and [string]$direction.state -eq 'TARGET_ACTIVE') {
                 try {
+                    Ensure-ProductionWriterStartGuardUnderHeldLock -Config $config | Out-Null
                     Switch-ProductionRelease $config $release `
                         -AuthorizationMarkerState TARGET_ACTIVE `
                         -AuthorizationPurpose TARGET_DEPLOY `
                         -AuthorizationRelease $sha `
-                        -KeepRecoverySuspended
+                        -KeepRecoverySuspended `
+                        -WriterAlreadyStopped
                     Write-ProductionMusicSchemaDirection `
                         -Config $config `
                         -State TARGET_ACTIVE `
@@ -911,14 +971,38 @@ function Confirm-ProductionMusicTargetActive {
         $resuming = [string]$existing.state -eq 'TARGET_CUTOVER_IN_PROGRESS'
         try {
             if ($resuming) {
-                Grant-CoordinatedProductionWriterStart -Config $config `
+                Ensure-ProductionWriterStartGuardUnderHeldLock -Config $config | Out-Null
+                $authorization = Grant-CoordinatedProductionWriterStart -Config $config `
                     -MarkerState TARGET_CUTOVER_IN_PROGRESS `
                     -Release $TargetRelease `
                     -Purpose TARGET_CUTOVER
-                Start-Service ChristopherBellDev
+                $startFailure = $null
+                try {
+                    Start-Service ChristopherBellDev
+                    Test-ProductionEndpoints -Config $config -Port $config.productionPort
+                    Test-ProductionPublicEndpoints -Config $config | Out-Null
+                } catch {
+                    $startFailure = $_.Exception
+                } finally {
+                    if ($authorization) {
+                        try {
+                            Revoke-CoordinatedProductionWriterStart `
+                                -Config $config -Authorization $authorization
+                        } catch {
+                            if ($startFailure) {
+                                throw [System.AggregateException]::new(
+                                    'Pending cutover start and authorization cleanup both failed.',
+                                    [System.Exception[]]@($startFailure, $_.Exception))
+                            }
+                            throw
+                        }
+                    }
+                }
+                if ($startFailure) { throw $startFailure }
+            } else {
+                Test-ProductionEndpoints -Config $config -Port $config.productionPort
+                Test-ProductionPublicEndpoints -Config $config | Out-Null
             }
-            Test-ProductionEndpoints -Config $config -Port $config.productionPort
-            Test-ProductionPublicEndpoints -Config $config | Out-Null
             Write-ProductionMusicSchemaDirection `
                 -Config $config `
                 -State TARGET_ACTIVE `

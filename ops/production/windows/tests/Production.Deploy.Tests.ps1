@@ -9,8 +9,12 @@ Describe 'native Windows deployment' {
                 [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$target; legacyRelease=$legacy }
             }
             Mock Read-ProductionReleaseMusicSchema { 'TARGET' }
+            Mock Ensure-ProductionWriterStartGuardUnderHeldLock { }
+            Mock Revoke-CoordinatedProductionWriterStart { }
         }
         BeforeAll {
+            $script:ensureGuardImplementation =
+                (Get-Command Ensure-ProductionWriterStartGuardUnderHeldLock).ScriptBlock
             function New-ServiceStateStub {
                 param(
                     [string]$Status = 'Stopped',
@@ -946,7 +950,9 @@ Describe 'native Windows deployment' {
             Mock Invoke-CandidateReleaseValidation { [void]$events.Add('candidate') }
             Mock Assert-ReleasePath { $Release }
             Mock Get-JunctionTarget { "C:\data\releases\$legacy" }
-            Mock Stop-ProductionWebsiteService { [void]$events.Add('stop') }
+            Mock Ensure-ProductionWriterStartGuardUnderHeldLock {
+                [void]$events.Add('stop-and-guard')
+            }
             Mock Invoke-ProductionMusicRuntimeReconciliationNoLock { [void]$events.Add('reconcile') }
             Mock Set-AtomicJunction { [void]$events.Add("junction:$([IO.Path]::GetFileName($Path))") }
             Mock Write-ProductionMusicSchemaDirection { [void]$events.Add("marker:$State") }
@@ -959,7 +965,7 @@ Describe 'native Windows deployment' {
             Invoke-ProductionDeploy
 
             $events | Should -Be @(
-                'lock:acquire','candidate','stop','reconcile','junction:previous','junction:current',
+                'lock:acquire','candidate','stop-and-guard','reconcile','junction:previous','junction:current',
                 'marker:TARGET_ACTIVE','start','health','public-health','recovery-normal',
                 'cleanup','lock:release')
         }
@@ -985,7 +991,8 @@ Describe 'native Windows deployment' {
 
             { Invoke-ProductionDeploy } | Should -Throw '*writer remains stopped*'
 
-            Should -Invoke Stop-ProductionWebsiteService -Times 2
+            Should -Invoke Ensure-ProductionWriterStartGuardUnderHeldLock -Times 1
+            Should -Invoke Stop-ProductionWebsiteService -Times 1
             Should -Invoke Set-AtomicJunction -Times 0
             Should -Invoke Write-ProductionMusicSchemaDirection -Times 0
             Should -Invoke Start-Service -Times 0
@@ -1109,6 +1116,9 @@ Describe 'native Windows deployment' {
             Mock Resolve-OriginMainRelease { $target }
             Mock New-ReleaseFromOriginMain { "C:\data\releases\$target" }
             Mock Invoke-CandidateReleaseValidation { [void]$events.Add('candidate') }
+            Mock Ensure-ProductionWriterStartGuardUnderHeldLock {
+                [void]$events.Add('guard-upgrade')
+            }
             Mock Switch-ProductionRelease { [void]$events.Add('switch-and-health') }
             Mock Get-JunctionTarget { "C:\data\releases\$legacy" }
             Mock Write-ProductionMusicSchemaDirection { [void]$events.Add("marker:$State") }
@@ -1118,9 +1128,44 @@ Describe 'native Windows deployment' {
             Invoke-ProductionDeploy -MusicSchemaCutover
 
             $events | Should -Be @(
-                'lock:acquire','candidate','marker:TARGET_CUTOVER_IN_PROGRESS',
+                'lock:acquire','candidate','guard-upgrade','marker:TARGET_CUTOVER_IN_PROGRESS',
                 'switch-and-health','marker:TARGET_ACTIVE','recovery-normal',
                 'cleanup','lock:release')
+        }
+
+        It 'stops with recovery suspended before installing and verifying the guard bundle' {
+            $events = [Collections.Generic.List[string]]::new()
+            $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            Mock Stop-ProductionWebsiteService {
+                if (-not $KeepRecoverySuspended) { throw 'recovery was not suspended' }
+                [void]$events.Add('stop-suspended')
+            }
+            Mock Install-CoordinatedProductionWriterStartGuardBundle {
+                [void]$events.Add('bundle-verified')
+            }
+            Mock Start-Service { throw 'writer must not start during guard upgrade' }
+
+            & $script:ensureGuardImplementation -Config $config
+
+            $events | Should -Be @('stop-suspended','bundle-verified')
+            Should -Invoke Start-Service -Times 0
+        }
+
+        It 'leaves the writer stopped when guard bundle verification fails' {
+            $config = [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            Mock Stop-ProductionWebsiteService { }
+            Mock Install-CoordinatedProductionWriterStartGuardBundle {
+                throw 'installed guard hash mismatch'
+            }
+            Mock Start-Service { throw 'writer must not start' }
+
+            { & $script:ensureGuardImplementation -Config $config } |
+                Should -Throw '*hash mismatch*'
+
+            Should -Invoke Stop-ProductionWebsiteService -ParameterFilter {
+                $KeepRecoverySuspended
+            }
+            Should -Invoke Start-Service -Times 0
         }
 
         It 'stops the target writer and retains pending direction when cutover marker finalization fails' {

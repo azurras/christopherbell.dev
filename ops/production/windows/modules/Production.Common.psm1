@@ -527,6 +527,8 @@ Commands: install, deploy, status, logs, restart, releases, rollback, backup,
 
 Use -WhatIf to preview music-runtime-rollback. Confirmed execution requires
 -ConfirmMusicRuntimeRollback and uses the single-lock coordinated binary rollback boundary.
+The first target-schema deployment is manual only and requires
+prod.cmd deploy -MusicSchemaCutover. Automatic deployment never initiates first cutover.
 '@ | Write-Output
 }
 

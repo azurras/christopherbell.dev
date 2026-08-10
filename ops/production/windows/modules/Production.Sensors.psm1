@@ -332,21 +332,22 @@ function Set-ProductionSensorState {
         [switch]$WhatIf
     )
     Assert-SensorAdministrator
-    if ($Enabled) { Assert-NoActiveSensorThreat; Assert-PawnIoInstallation | Out-Null }
     if ($WhatIf) { Write-Output "Would set sensorLibrariesEnabled=$($Enabled.ToString().ToLowerInvariant()) and verify ChristopherBellDev."; return }
-    $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-    $sensorProperty = $config.PSObject.Properties['sensorLibrariesEnabled']
-    if (-not $sensorProperty -or $sensorProperty.Value -isnot [bool]) {
-        throw 'sensorLibrariesEnabled must be a Boolean.'
-    }
-    $previous = $sensorProperty.Value
-    $root = if ($config.PSObject.Properties.Name -ccontains 'programDataRoot') {
-        [string]$config.programDataRoot
-    } else {
-        Split-Path -Parent (Split-Path -Parent $ConfigPath)
-    }
+    $root = [IO.Path]::GetFullPath(
+        (Split-Path -Parent (Split-Path -Parent ([IO.Path]::GetFullPath($ConfigPath)))))
     $lock = Enter-DeploymentLock (Join-Path $root 'locks\deploy.lock')
     try {
+        $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+        $sensorProperty = $config.PSObject.Properties['sensorLibrariesEnabled']
+        if (-not $sensorProperty -or $sensorProperty.Value -isnot [bool]) {
+            throw 'sensorLibrariesEnabled must be a Boolean.'
+        }
+        if ($config.PSObject.Properties.Name -ccontains 'programDataRoot' -and
+            [IO.Path]::GetFullPath([string]$config.programDataRoot) -cne $root) {
+            throw 'Sensor configuration root does not match the locked production root.'
+        }
+        $previous = $sensorProperty.Value
+        if ($Enabled) { Assert-NoActiveSensorThreat; Assert-PawnIoInstallation | Out-Null }
         Write-ProductionSensorConfig -Path $ConfigPath -Enabled $Enabled
         try {
             Restart-Service -Name ChristopherBellDev

@@ -17,6 +17,24 @@ function Grant-CoordinatedProductionWriterStart {
     } $Config $MarkerState $Release $Purpose
 }
 
+function Revoke-CoordinatedProductionWriterStart {
+    param($Config, [Parameter(Mandatory)]$Authorization)
+    $module = Get-Module Production.WriterStart -ErrorAction Stop
+    & $module {
+        param($Value, $Token)
+        Revoke-ProductionWriterStartAuthorization -Config $Value -Authorization $Token
+    } $Config $Authorization
+}
+
+function Ensure-CoordinatedProductionWriterStartGuard {
+    param([Parameter(Mandatory)]$Config)
+    $module = Get-Module Production.Deploy -ErrorAction Stop
+    & $module {
+        param($Value)
+        Ensure-ProductionWriterStartGuardUnderHeldLock -Config $Value | Out-Null
+    } $Config
+}
+
 function Restore-CoordinatedProductionWebsiteRecoveryPolicy {
     $module = Get-Module Production.Deploy -ErrorAction Stop
     & $module { Set-ProductionWebsiteRecoveryPolicy -Policy Normal }
@@ -83,17 +101,37 @@ function Invoke-ProductionRollback {
                 throw ('Generic rollback cannot start the retained legacy Music writer or reverse-copy state. ' +
                     'Use prod.cmd music-runtime-rollback -ConfirmMusicRuntimeRollback.')
             }
-            Stop-ProductionWebsiteService -ProductionPort $config.productionPort -KeepRecoverySuspended
+            Ensure-CoordinatedProductionWriterStartGuard -Config $config
             try {
                 Set-AtomicJunction $config $currentPath $previous
                 Set-AtomicJunction $config $previousPath $current
-                Grant-CoordinatedProductionWriterStart -Config $config `
+                $authorization = Grant-CoordinatedProductionWriterStart -Config $config `
                     -MarkerState TARGET_ACTIVE `
                     -Release $previousSha `
                     -Purpose TARGET_DEPLOY
-                Start-Service ChristopherBellDev
-                Test-ProductionEndpoints $config $config.productionPort
-                Test-ProductionPublicEndpoints -Config $config | Out-Null
+                $startFailure = $null
+                try {
+                    Start-Service ChristopherBellDev
+                    Test-ProductionEndpoints $config $config.productionPort
+                    Test-ProductionPublicEndpoints -Config $config | Out-Null
+                } catch {
+                    $startFailure = $_.Exception
+                } finally {
+                    if ($authorization) {
+                        try {
+                            Revoke-CoordinatedProductionWriterStart `
+                                -Config $config -Authorization $authorization
+                        } catch {
+                            if ($startFailure) {
+                                throw [System.AggregateException]::new(
+                                    'Target rollback start and authorization cleanup both failed.',
+                                    [System.Exception[]]@($startFailure, $_.Exception))
+                            }
+                            throw
+                        }
+                    }
+                }
+                if ($startFailure) { throw $startFailure }
                 Write-ProductionMusicSchemaDirection `
                     -Config $config `
                     -State TARGET_ACTIVE `
@@ -118,15 +156,39 @@ function Invoke-ProductionRollback {
         }
 
         Stop-ProductionWebsiteService -ProductionPort $config.productionPort -KeepRecoverySuspended
+        $ordinaryRollbackHealthy = $false
         try {
             Set-AtomicJunction $config $currentPath $previous
             Set-AtomicJunction $config $previousPath $current
             Start-Service ChristopherBellDev
             Test-ProductionEndpoints $config $config.productionPort
+            $ordinaryRollbackHealthy = $true
+            Restore-CoordinatedProductionWebsiteRecoveryPolicy
         } catch {
             $rollbackFailure = $_.Exception
+            $stopFailure = $null
             try {
-                Stop-ProductionWebsiteService -ProductionPort $config.productionPort
+                Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                    -KeepRecoverySuspended
+            } catch {
+                $stopFailure = $_.Exception
+            }
+            if ($ordinaryRollbackHealthy) {
+                if ($stopFailure) {
+                    throw [System.AggregateException]::new(
+                        'Ordinary rollback recovery restoration and fail-closed stop both failed.',
+                        [System.Exception[]]@($rollbackFailure, $stopFailure))
+                }
+                throw [System.InvalidOperationException]::new(
+                    'Ordinary rollback recovery restoration failed; the writer remains stopped.',
+                    $rollbackFailure)
+            }
+            if ($stopFailure) {
+                throw [System.AggregateException]::new(
+                    'Production rollback and fail-closed stop both failed.',
+                    [System.Exception[]]@($rollbackFailure, $stopFailure))
+            }
+            try {
                 $junctionRestoreFailures = [System.Collections.Generic.List[System.Exception]]::new()
                 try {
                     Set-AtomicJunction $config $currentPath $current
@@ -150,6 +212,7 @@ function Invoke-ProductionRollback {
                 }
                 Start-Service ChristopherBellDev
                 Test-ProductionEndpoints $config $config.productionPort
+                Restore-CoordinatedProductionWebsiteRecoveryPolicy
             } catch {
                 throw [System.AggregateException]::new(
                     'Production rollback and release restoration both failed.',
@@ -235,18 +298,38 @@ function Invoke-ProductionMigrationAwareRollback {
             (Split-Path -Leaf $current) -cne [string]$direction.targetRelease) {
             throw 'The active target release does not match the Music schema-direction marker.'
         }
-        Stop-ProductionWebsiteService -ProductionPort $config.productionPort
+        Ensure-CoordinatedProductionWriterStartGuard -Config $config
         try {
             $copy = Invoke-MusicReverseCopyUnderHeldLock -Config $config
             Set-AtomicJunction $config $previousPath $current
             Set-AtomicJunction $config $currentPath $legacy
-            Grant-CoordinatedProductionWriterStart -Config $config `
+            $authorization = Grant-CoordinatedProductionWriterStart -Config $config `
                 -MarkerState TARGET_ACTIVE `
                 -Release ([string]$direction.legacyRelease) `
                 -Purpose LEGACY_ROLLBACK
-            Start-Service ChristopherBellDev
-            Test-ProductionEndpoints $config $config.productionPort
-            Test-ProductionPublicEndpoints -Config $config | Out-Null
+            $startFailure = $null
+            try {
+                Start-Service ChristopherBellDev
+                Test-ProductionEndpoints $config $config.productionPort
+                Test-ProductionPublicEndpoints -Config $config | Out-Null
+            } catch {
+                $startFailure = $_.Exception
+            } finally {
+                if ($authorization) {
+                    try {
+                        Revoke-CoordinatedProductionWriterStart `
+                            -Config $config -Authorization $authorization
+                    } catch {
+                        if ($startFailure) {
+                            throw [System.AggregateException]::new(
+                                'Migration-aware rollback start and authorization cleanup both failed.',
+                                [System.Exception[]]@($startFailure, $_.Exception))
+                        }
+                        throw
+                    }
+                }
+            }
+            if ($startFailure) { throw $startFailure }
             Write-ProductionMusicSchemaDirection `
                 -Config $config `
                 -State LEGACY_ACTIVE_RECONCILIATION_REQUIRED `
