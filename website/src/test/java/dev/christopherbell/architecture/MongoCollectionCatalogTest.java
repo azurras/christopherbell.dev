@@ -184,6 +184,21 @@ class MongoCollectionCatalogTest {
   }
 
   @Test
+  void musicRuntimeStateLifecycleHasExactStatusMembership() throws IOException {
+    var statusesByPhysicalName = readCatalog().stream()
+        .collect(Collectors.toMap(CatalogEntry::physicalName, CatalogEntry::status));
+
+    assertThat(statusesByPhysicalName)
+        .containsEntry("music_queue_state", "rollback-retained")
+        .containsEntry("music_radio_state", "rollback-retained")
+        .containsEntry("music_runtime_state", "active");
+    assertThat(statusesByPhysicalName.entrySet().stream()
+        .filter(entry -> entry.getValue().equals("rollback-retained"))
+        .map(Map.Entry::getKey))
+        .containsExactlyInAnyOrder("music_queue_state", "music_radio_state");
+  }
+
+  @Test
   void sourceCoverageAllowsSeparatelyClassifiedNonSourceEntries() {
     var entries = List.of(
         catalogEntry("mapped_source", "active"),
