@@ -402,7 +402,7 @@ Describe 'production install root and lock bootstrap' {
             Mock Protect-ProductionPath {
                 [void]$script:bootstrapEvents.Add("protect:$Path")
             }
-            Mock Assert-ProtectedProductionPath {
+            Mock Assert-ProductionInstallRootDirectoryAcl {
                 [void]$script:bootstrapEvents.Add("verify:$Path")
             }
             Mock Get-ProductionWebsiteServiceOrNull {
@@ -424,7 +424,7 @@ Describe 'production install root and lock bootstrap' {
             $root = Join-Path $TestDrive 'unprotected-existing-root'
             New-Item -ItemType Directory -Path $root | Out-Null
             'preserve-root' | Set-Content -LiteralPath (Join-Path $root 'sentinel.txt')
-            Mock Assert-ProtectedProductionPath {
+            Mock Assert-ProductionInstallRootDirectoryAcl {
                 if ($Path -eq $root) { throw 'existing production root is unprotected' }
             }
 
@@ -457,9 +457,11 @@ Describe 'production install root and lock bootstrap' {
             'redirect-target' | Set-Content -LiteralPath $sentinel
             $targetAcl = (Get-Acl -LiteralPath $target).Sddl
             $targetWriteTime = (Get-Item -LiteralPath $target).LastWriteTimeUtc.Ticks
+            $script:nativeReplacementCheckpoint = $false
             Mock New-ProductionInstallProtectedChildDirectoryNative {
                 Remove-Item -LiteralPath $root
                 New-Item -ItemType Junction -Path $root -Target $target | Out-Null
+                $script:nativeReplacementCheckpoint = $true
                 [ChristopherBell.Dev.ProductionInstallNativeDirectory]::
                     CreateProtectedChildDirectoryNew(
                         $root,
@@ -469,9 +471,34 @@ Describe 'production install root and lock bootstrap' {
                         $script:ProtectedProductionDirectorySddl)
             }
             try {
-                { Invoke-ProductionRuntimeInstallAtRoot -Root $root } |
-                    Should -Throw
+                $nativeType =
+                    'ChristopherBell.Dev.ProductionInstallNativeDirectory' -as [type]
+                $caught = $null
+                try {
+                    Invoke-ProductionRuntimeInstallAtRoot -Root $root
+                } catch {
+                    $caught = $_.Exception
+                }
+                $caught | Should -Not -BeNullOrEmpty
+                $nativeFailure = $caught
+                while ($null -ne $nativeFailure.InnerException) {
+                    $nativeFailure = $nativeFailure.InnerException
+                }
 
+                $nativeType | Should -Not -BeNullOrEmpty
+                $script:nativeReplacementCheckpoint | Should -BeTrue
+                $nativeFailure | Should -BeOfType ([InvalidOperationException])
+                $nativeFailure.Data['ProductionInstallErrorCode'] |
+                    Should -BeExactly 'PARENT_IDENTITY_CHANGED'
+                $nativeFailure.Message | Should -BeExactly (
+                    'Protected child parent identity changed before creation.')
+                $caught.ToString() | Should -Not -Match (
+                    'EntryPointNotFoundException|DllNotFoundException|' +
+                    'BadImageFormatException|TypeLoadException|' +
+                    'MissingMethodException|MethodException|' +
+                    'TargetParameterCountException|ParameterBindingException|' +
+                    'Win32Exception|UnauthorizedAccessException|' +
+                    'Access is denied|AccessDenied')
                 Should -Invoke Enter-DeploymentLock -Times 0
                 Should -Invoke Get-ProductionWebsiteServiceOrNull -Times 0
                 Should -Invoke New-ProductionDirectories -Times 0
@@ -491,7 +518,7 @@ Describe 'production install root and lock bootstrap' {
             $parent = Join-Path $TestDrive 'partial-stage-parent'
             $root = Join-Path $parent 'production'
             New-Item -ItemType Directory -Path $parent | Out-Null
-            Mock Assert-ProtectedProductionPath {
+            Mock Assert-ProductionInstallRootDirectoryAcl {
                 if ((Split-Path -Leaf $Path) -like '.production.install-*') {
                     throw 'staged root protection failed'
                 }
@@ -578,7 +605,7 @@ Describe 'production install root and lock bootstrap' {
             New-Item -ItemType Directory -Path $root,$target | Out-Null
             $locks = Join-Path $root 'locks'
             New-Item -ItemType Directory -Path $locks | Out-Null
-            Mock Assert-ProtectedProductionPath {
+            Mock Assert-ProductionInstallRootDirectoryAcl {
                 if ($Path -eq $root) {
                     Remove-Item -LiteralPath $locks
                     New-Item -ItemType Junction -Path $locks -Target $target | Out-Null
@@ -711,6 +738,126 @@ Describe 'production install root parent boundary' {
         It 'rejects a real disposable parent with untrusted replacement control' {
             { Assert-ProductionInstallRootParentBoundary -Path $TestDrive } |
                 Should -Throw '*replacement control*'
+        }
+    }
+}
+
+Describe 'production install root exact directory ACL' {
+    InModuleScope Production.Install {
+        BeforeEach {
+            $script:aclFixturePath = Join-Path $TestDrive 'install-root-acl-fixture'
+            New-Item -ItemType Directory -Path $script:aclFixturePath -Force |
+                Out-Null
+        }
+
+        It 'accepts the exact canonical directory ACL emitted by the protector' {
+            $acl = New-ProtectedProductionAcl -Directory
+            $descriptor = [Security.AccessControl.RawSecurityDescriptor]::new(
+                $acl.GetSecurityDescriptorBinaryForm(), 0)
+
+            { Assert-ProductionInstallRootDirectoryAcl `
+                    -Path $script:aclFixturePath `
+                    -SecurityDescriptor $descriptor } | Should -Not -Throw
+        }
+
+        It 'rejects an actual disposable directory before trusting inherited ACLs' {
+            { Assert-ProductionInstallRootDirectoryAcl `
+                    -Path $script:aclFixturePath } |
+                Should -Throw '*inheritance must be protected*'
+        }
+
+        It 'rejects <Case>' -ForEach @(
+            @{
+                Case='duplicate SYSTEM ACEs'
+                Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)'
+                Error='*exactly two explicit ACEs*'
+            },
+            @{
+                Case='duplicate Administrators ACEs'
+                Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BA)'
+                Error='*exactly two explicit ACEs*'
+            },
+            @{
+                Case='a missing SYSTEM ACE'
+                Sddl='O:BAD:P(A;OICI;FA;;;BA)'
+                Error='*exactly two explicit ACEs*'
+            },
+            @{
+                Case='a missing Administrators ACE'
+                Sddl='O:BAD:P(A;OICI;FA;;;SY)'
+                Error='*exactly two explicit ACEs*'
+            },
+            @{
+                Case='a non-inheriting SYSTEM ACE'
+                Sddl='O:BAD:P(A;;FA;;;SY)(A;OICI;FA;;;BA)'
+                Error='*exact inheritance and propagation*'
+            },
+            @{
+                Case='NoPropagate inheritance'
+                Sddl='O:BAD:P(A;OICINP;FA;;;SY)(A;OICI;FA;;;BA)'
+                Error='*exact inheritance and propagation*'
+            },
+            @{
+                Case='InheritOnly propagation'
+                Sddl='O:BAD:P(A;OICIIO;FA;;;SY)(A;OICI;FA;;;BA)'
+                Error='*exact inheritance and propagation*'
+            },
+            @{
+                Case='extra generic-all rights'
+                Sddl='O:BAD:P(A;OICI;0x101F01FF;;;SY)(A;OICI;FA;;;BA)'
+                Error='*exact FullControl rights*'
+            },
+            @{
+                Case='missing FullControl rights'
+                Sddl='O:BAD:P(A;OICI;0x1301BF;;;SY)(A;OICI;FA;;;BA)'
+                Error='*exact FullControl rights*'
+            },
+            @{
+                Case='an extra Users ACE'
+                Sddl='O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FR;;;BU)'
+                Error='*exactly two explicit ACEs*'
+            },
+            @{
+                Case='a SYSTEM deny ACE'
+                Sddl='O:BAD:P(D;OICI;FA;;;SY)(A;OICI;FA;;;BA)'
+                Error='*one SYSTEM and one Administrators allow ACE*'
+            },
+            @{
+                Case='the wrong owner'
+                Sddl='O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)'
+                Error='*owner must be Builtin Administrators*'
+            },
+            @{
+                Case='unprotected inheritance'
+                Sddl='O:BAD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)'
+                Error='*inheritance must be protected*'
+            }
+        ) {
+            $descriptor = [Security.AccessControl.RawSecurityDescriptor]::new(
+                $Sddl)
+
+            { Assert-ProductionInstallRootDirectoryAcl `
+                    -Path $script:aclFixturePath `
+                    -SecurityDescriptor $descriptor } | Should -Throw $Error
+        }
+
+        It 'rejects a reparse path before trusting an exact in-memory ACL' {
+            $target = Join-Path $TestDrive 'install-root-acl-target'
+            $junction = Join-Path $TestDrive 'install-root-acl-junction'
+            New-Item -ItemType Directory -Path $target | Out-Null
+            New-Item -ItemType Junction -Path $junction -Target $target | Out-Null
+            $descriptor = [Security.AccessControl.RawSecurityDescriptor]::new(
+                'O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)')
+            try {
+                { Assert-ProductionInstallRootDirectoryAcl `
+                        -Path $junction `
+                        -SecurityDescriptor $descriptor } |
+                    Should -Throw '*reparse*'
+            } finally {
+                if (Test-Path -LiteralPath $junction) {
+                    [IO.Directory]::Delete($junction, $false)
+                }
+            }
         }
     }
 }

@@ -213,8 +213,12 @@ namespace ChristopherBell.Dev
                     parentIdentity.VolumeSerialNumber != expectedVolumeSerialNumber ||
                     parentIdentity.FileIndex != expectedFileIndex)
                 {
-                    throw new InvalidOperationException(
+                    InvalidOperationException identityFailure =
+                        new InvalidOperationException(
                         "Protected child parent identity changed before creation.");
+                    identityFailure.Data["ProductionInstallErrorCode"] =
+                        "PARENT_IDENTITY_CHANGED";
+                    throw identityFailure;
                 }
                 return CreateProtectedChildDirectoryNew(
                     parentHandle, childName, sddl);
@@ -702,6 +706,64 @@ function Assert-ProductionInstallDirectoryIdentity {
     return $actual
 }
 
+function Assert-ProductionInstallRootDirectoryAcl {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Security.AccessControl.RawSecurityDescriptor]$SecurityDescriptor
+    )
+
+    Assert-ProductionInstallPathTraversal -Path $Path
+    if (-not $PSBoundParameters.ContainsKey('SecurityDescriptor')) {
+        $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+        $SecurityDescriptor =
+            [Security.AccessControl.RawSecurityDescriptor]::new(
+                $acl.GetSecurityDescriptorBinaryForm(), 0)
+    }
+    $protectedFlag =
+        [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected
+    if (($SecurityDescriptor.ControlFlags -band $protectedFlag) -eq 0) {
+        throw "Install root ACL inheritance must be protected: $Path"
+    }
+    $administrators = 'S-1-5-32-544'
+    if ($null -eq $SecurityDescriptor.Owner -or
+        $SecurityDescriptor.Owner.Value -cne $administrators) {
+        throw "Install root ACL owner must be Builtin Administrators: $Path"
+    }
+    $aces = @($SecurityDescriptor.DiscretionaryAcl)
+    if ($aces.Count -ne 2) {
+        throw "Install root ACL must have exactly two explicit ACEs: $Path"
+    }
+    $system = 'S-1-5-18'
+    $systemAces = @($aces | Where-Object {
+            $_ -is [Security.AccessControl.CommonAce] -and
+            $_.AceType -eq [Security.AccessControl.AceType]::AccessAllowed -and
+            $_.SecurityIdentifier.Value -ceq $system
+        })
+    $administratorAces = @($aces | Where-Object {
+            $_ -is [Security.AccessControl.CommonAce] -and
+            $_.AceType -eq [Security.AccessControl.AceType]::AccessAllowed -and
+            $_.SecurityIdentifier.Value -ceq $administrators
+        })
+    if ($systemAces.Count -ne 1 -or $administratorAces.Count -ne 1) {
+        throw (
+            "Install root ACL must have one SYSTEM and one Administrators allow ACE: $Path")
+    }
+    $fullControl = [int][Security.AccessControl.FileSystemRights]::FullControl
+    $inheritance =
+        [int][Security.AccessControl.AceFlags]::ContainerInherit -bor
+        [int][Security.AccessControl.AceFlags]::ObjectInherit
+    foreach ($ace in @($systemAces[0],$administratorAces[0])) {
+        if ([int]$ace.AccessMask -ne $fullControl) {
+            throw "Install root ACEs must grant exact FullControl rights: $Path"
+        }
+        if ([int]$ace.AceFlags -ne $inheritance) {
+            throw (
+                "Install root ACEs must use exact inheritance and propagation: $Path")
+        }
+    }
+}
+
 function Assert-ProductionInstallProtectedDirectoryState {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -711,7 +773,7 @@ function Assert-ProductionInstallProtectedDirectoryState {
     Assert-ProductionInstallPathTraversal -Path $Path
     $actual = Assert-ProductionInstallDirectoryIdentity `
         -Path $Path -ExpectedIdentity $ExpectedIdentity
-    Assert-ProtectedProductionPath -Path $Path
+    Assert-ProductionInstallRootDirectoryAcl -Path $Path
     return $actual
 }
 

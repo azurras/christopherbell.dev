@@ -14,6 +14,9 @@ follow-up commit.
 Fix Round 2 closes the remaining protected-root bootstrap, configured-root identity, and
 legacy-port parser gaps in a second separate follow-up commit.
 
+Fix Round 3 closes the exact install-root ACL and native replacement-race evidence gaps in a
+third separate follow-up commit.
+
 ## Outcomes
 
 - The deploy-lock-held pre-guard upgrade sets `ChristopherBellDev` to `Disabled` and verifies the
@@ -42,6 +45,12 @@ legacy-port parser gaps in a second separate follow-up commit.
   partial stages are deleted non-recursively. Only after the root verifies does a handle-relative
   native create establish protected `locks`, preventing a replaced visible root from redirecting
   that write. Root, locks, parent, and `deploy.lock` are revalidated under the acquired lock.
+- The staged root, published root, existing root, and `locks` directory use an install-root-specific
+  raw ACL verifier. It requires protected inheritance, Builtin Administrators ownership, and
+  exactly two explicit allow ACEs: one SYSTEM and one Builtin Administrators ACE, each with exact
+  FullControl, ContainerInherit and ObjectInherit, and no propagation flags. Missing, duplicate,
+  extra, deny, alternate-rights, alternate-inheritance, wrong-owner, unprotected, and reparse
+  variants fail closed.
 - Immediately after full configuration validation, the installer rejects relative/reparse
   traversal and requires `programDataRoot` to equal the already locked canonical root with
   `OrdinalIgnoreCase`, then rechecks the same root file identity and protected ACL before any
@@ -88,18 +97,28 @@ legacy-port parser gaps in a second separate follow-up commit.
   metadata with zero downstream installation effects. Windows PowerShell 5.1 then supplied the
   final RED by exposing the malformed JSON and secret text through the preserved parser inner
   exception; removing only that unsafe inner cause made all direct parser cases GREEN.
+- Fix Round 3 RED tests first failed because the install-root exact ACL verifier did not exist,
+  then because the native identity-race exception lacked a stable failure code. The exact raw-ACE
+  matrix exercises the real verifier without mocking it. Windows PowerShell 5.1 exposed a composite
+  enum conversion incompatibility; combining the numeric flag values preserved the exact ACL
+  contract on both hosts.
 - The launcher ordering test now requires the actual
   `Assert-InstalledWriterStartServiceDirectoryAcl` call to exist before comparing its position.
 
 ## Verification
 
-- Focused PowerShell 7 Common/WriterStart/Install/Sensors/Deploy/Operations: 302 discovered,
-  300 passed, 0 failed, 2 skipped (the opt-in real ACL tests).
-- Full PowerShell 7 production suite: 491 discovered, 464 passed, 0 failed, 27 skipped.
-- Approved Windows PowerShell 5.1 Common/Command/WriterStart/Install/Operations: 227 discovered,
-  225 passed, 0 failed, 2 skipped.
+- Focused PowerShell 7 Common/WriterStart/Install/Sensors/Deploy/Operations: 318 discovered,
+  316 passed, 0 failed, 2 skipped (the opt-in real ACL tests).
+- Full PowerShell 7 production suite: 507 discovered, 480 passed, 0 failed, 27 skipped.
+- Approved Windows PowerShell 5.1 Common/Command/WriterStart/Install/Operations: 243 discovered,
+  241 passed, 0 failed, 2 skipped.
 - Approved Windows PowerShell 5.1 exact Task 6 Deploy/Sensors selection: 89 discovered, 10 passed,
   0 failed, 0 skipped, 79 not run.
+- The exact install-root ACL selection passes on both hosts: 90 discovered, 16 passed, 0 failed,
+  0 skipped, 74 not run. The complete Install module passes on each host: 90 discovered, 89 passed,
+  0 failed, 1 skipped. Its real in-memory negative cases cover duplicate or missing SYSTEM and
+  Administrators ACEs, wrong inheritance or propagation, extra or missing rights, extra or deny
+  ACEs, wrong owner, unprotected inheritance, and reparse traversal.
 - The real `Read-ProductionWebsiteStopPort` matrix passes all 14 cases on PowerShell 7 and Windows
   PowerShell 5.1, including boundary values 1/8080/65535 and raw-config redaction.
 - PowerShell 7 and Windows PowerShell 5.1 parsers each parsed all 11 changed PowerShell files with
@@ -119,15 +138,16 @@ legacy-port parser gaps in a second separate follow-up commit.
   application remains the Task 7 evidence gate. No ACL policy was weakened.
 - The new install-root opt-in ACL test likewise reserves only an owned
   `%TEMP%\cbell-install-root-acl-<guid>` parent. Final PowerShell 7 and Windows PowerShell 5.1
-  attempts each discovered 74 Install tests, selected one, and failed before creating the parent
+  attempts each discovered 90 Install tests, selected one, and failed before creating the parent
   with `Real install-root ACL integration requires elevated PowerShell`; each reported 0 new
-  residue. Elevated native protected-create success remains a Task 7 gate.
+  residue. Elevated NTFS ACL application/readback and native volume/file-ID protected-create
+  identity evidence remain a Task 7 gate.
 - One earlier non-elevated development attempt partially changed an owned disposable ACL before
   cleanup was denied. Access was restored only on that exact temporary path and the directory was
   deleted; the final elevation precondition prevents recurrence.
 - No production service, listener, ProgramData ACL, MongoDB data/schema, Java source, or production
   configuration was changed. Fix Round 2 performed read-only `Get-Acl` inspection of `C:\` and
   `C:\ProgramData` to verify the fixed-parent replacement-control model; all mutation/integration
-  tests used owned disposable paths.
+  tests used owned disposable paths. Fix Round 3 did not inspect or mutate any production resource.
 - The unrelated modified `gradlew.bat` and untracked `testResults.xml` remain preserved and are
   excluded from this task's commit.
