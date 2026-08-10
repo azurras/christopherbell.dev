@@ -1,5 +1,26 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Invoke-MusicReverseCopyUnderHeldLock {
+    param([Parameter(Mandatory)]$Config)
+    $module = Get-Module Production.MusicRuntime -ErrorAction Stop
+    & $module { param($Value) Invoke-ProductionMusicRuntimeReverseCopyNoLock -Config $Value } $Config
+}
+
+function Grant-CoordinatedProductionWriterStart {
+    param($Config, [string]$MarkerState, [string]$Release, [string]$Purpose)
+    $module = Get-Module Production.WriterStart -ErrorAction Stop
+    & $module {
+        param($Value, $State, $Sha, $Reason)
+        Grant-ProductionWriterStartAuthorization `
+            -Config $Value -MarkerState $State -Release $Sha -Purpose $Reason
+    } $Config $MarkerState $Release $Purpose
+}
+
+function Restore-CoordinatedProductionWebsiteRecoveryPolicy {
+    $module = Get-Module Production.Deploy -ErrorAction Stop
+    & $module { Set-ProductionWebsiteRecoveryPolicy -Policy Normal }
+}
 function Get-ProductionStatus {
     $config = Read-ProductionConfig
     $website = Get-Service ChristopherBellDev -ErrorAction SilentlyContinue
@@ -54,41 +75,49 @@ function Invoke-ProductionRollback {
 
         if ($direction -and [string]$direction.state -eq 'TARGET_ACTIVE') {
             $targetSha = Split-Path -Leaf $current
-            $legacySha = Split-Path -Leaf $previous
-            if ($targetSha -cne [string]$direction.targetRelease -or
-                $legacySha -cne [string]$direction.legacyRelease) {
-                throw 'Music runtime schema-direction release identity does not match rollback junctions.'
+            $previousSha = Split-Path -Leaf $previous
+            if ($targetSha -cne [string]$direction.targetRelease) {
+                throw 'Music runtime schema-direction release identity does not match the active release.'
             }
-            Stop-ProductionWebsiteService -ProductionPort $config.productionPort
+            if ($previousSha -ceq [string]$direction.legacyRelease) {
+                throw ('Generic rollback cannot start the retained legacy Music writer or reverse-copy state. ' +
+                    'Use prod.cmd music-runtime-rollback -ConfirmMusicRuntimeRollback.')
+            }
+            Stop-ProductionWebsiteService -ProductionPort $config.productionPort -KeepRecoverySuspended
             try {
-                Write-ProductionMusicSchemaDirection `
-                    -Config $config `
-                    -State LEGACY_ACTIVE_RECONCILIATION_REQUIRED `
-                    -TargetRelease $targetSha `
-                    -LegacyRelease $legacySha
-                Invoke-ProductionMusicRuntimeReverseCopyNoLock -Config $config | Out-Null
                 Set-AtomicJunction $config $currentPath $previous
                 Set-AtomicJunction $config $previousPath $current
+                Grant-CoordinatedProductionWriterStart -Config $config `
+                    -MarkerState TARGET_ACTIVE `
+                    -Release $previousSha `
+                    -Purpose TARGET_DEPLOY
                 Start-Service ChristopherBellDev
                 Test-ProductionEndpoints $config $config.productionPort
                 Test-ProductionPublicEndpoints -Config $config | Out-Null
+                Write-ProductionMusicSchemaDirection `
+                    -Config $config `
+                    -State TARGET_ACTIVE `
+                    -TargetRelease $previousSha `
+                    -LegacyRelease ([string]$direction.legacyRelease)
+                Restore-CoordinatedProductionWebsiteRecoveryPolicy
                 return
             } catch {
                 $failure = $_.Exception
                 try {
-                    Stop-ProductionWebsiteService -ProductionPort $config.productionPort
+                    Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                        -KeepRecoverySuspended
                 } catch {
                     throw [System.AggregateException]::new(
                         'Migration-aware rollback failed and the writer stop postcondition also failed.',
                         [System.Exception[]]@($failure, $_.Exception))
                 }
                 throw [System.InvalidOperationException]::new(
-                    'Migration-aware rollback failed; the writer remains stopped.',
+                    'Target-schema binary rollback failed; the writer remains stopped.',
                     $failure)
             }
         }
 
-        Stop-ProductionWebsiteService -ProductionPort $config.productionPort
+        Stop-ProductionWebsiteService -ProductionPort $config.productionPort -KeepRecoverySuspended
         try {
             Set-AtomicJunction $config $currentPath $previous
             Set-AtomicJunction $config $previousPath $current
@@ -152,6 +181,10 @@ function Restart-ProductionService {
                 throw ('Manual restart is blocked because the first Music schema cutover is incomplete. ' +
                     'Complete bounded recovery under deploy.lock.')
             }
+            if ([string]$direction.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+                throw ('Manual restart is blocked while legacy Music runtime state requires reconciliation. ' +
+                    'Use the protected interactive deploy to reconcile before a target writer starts.')
+            }
             $current = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
             $activeSha = if ($current) { Split-Path -Leaf $current } else { '' }
             $expectedSha = if ([string]$direction.state -eq 'TARGET_ACTIVE') {
@@ -166,6 +199,79 @@ function Restart-ProductionService {
         }
         Restart-Service ChristopherBellDev
         if ($Verify) { Test-ProductionEndpoints $config $config.productionPort }
+    } finally {
+        $lock.Dispose()
+    }
+}
+
+function Invoke-ProductionMigrationAwareRollback {
+    [CmdletBinding()]
+    param([switch]$Confirm, [switch]$WhatIf)
+    if ($WhatIf) {
+        return [pscustomobject][ordered]@{
+            operation = 'target-to-legacy-migration-aware-rollback'
+            mutates = $false
+            requiresExplicitConfirmation = $true
+            singleDeploymentLock = $true
+        }
+    }
+    if (-not $Confirm) {
+        throw 'Migration-aware Music rollback requires explicit confirmation.'
+    }
+    $config = Read-ProductionConfig
+    $lock = Enter-DeploymentLock (Join-Path $config.programDataRoot 'locks\deploy.lock')
+    $copy = $null
+    try {
+        $direction = Read-ProductionMusicSchemaDirection -Config $config
+        if (-not $direction -or [string]$direction.state -ne 'TARGET_ACTIVE') {
+            throw 'Migration-aware Music rollback requires exact TARGET_ACTIVE schema direction.'
+        }
+        $currentPath = Join-Path $config.programDataRoot 'current'
+        $previousPath = Join-Path $config.programDataRoot 'previous'
+        $current = Get-JunctionTarget $currentPath
+        $legacy = Join-Path $config.programDataRoot "releases\$($direction.legacyRelease)"
+        Assert-ReleasePath $config $legacy | Out-Null
+        if (-not $current -or
+            (Split-Path -Leaf $current) -cne [string]$direction.targetRelease) {
+            throw 'The active target release does not match the Music schema-direction marker.'
+        }
+        Stop-ProductionWebsiteService -ProductionPort $config.productionPort
+        try {
+            $copy = Invoke-MusicReverseCopyUnderHeldLock -Config $config
+            Set-AtomicJunction $config $previousPath $current
+            Set-AtomicJunction $config $currentPath $legacy
+            Grant-CoordinatedProductionWriterStart -Config $config `
+                -MarkerState TARGET_ACTIVE `
+                -Release ([string]$direction.legacyRelease) `
+                -Purpose LEGACY_ROLLBACK
+            Start-Service ChristopherBellDev
+            Test-ProductionEndpoints $config $config.productionPort
+            Test-ProductionPublicEndpoints -Config $config | Out-Null
+            Write-ProductionMusicSchemaDirection `
+                -Config $config `
+                -State LEGACY_ACTIVE_RECONCILIATION_REQUIRED `
+                -TargetRelease ([string]$direction.targetRelease) `
+                -LegacyRelease ([string]$direction.legacyRelease)
+            Restore-CoordinatedProductionWebsiteRecoveryPolicy
+            return $copy
+        } catch {
+            $failure = $_.Exception
+            if ($copy -and $copy.backup) {
+                $failure = [System.InvalidOperationException]::new(
+                    "Migration-aware Music rollback failed; retained backup: $($copy.backup)",
+                    $failure)
+            }
+            try {
+                Stop-ProductionWebsiteService -ProductionPort $config.productionPort `
+                    -KeepRecoverySuspended
+            } catch {
+                throw [System.AggregateException]::new(
+                    'Migration-aware Music rollback failed and the writer stop postcondition also failed.',
+                    [System.Exception[]]@($failure, $_.Exception))
+            }
+            throw [System.InvalidOperationException]::new(
+                'Migration-aware Music rollback failed; the writer remains stopped.', $failure)
+        }
     } finally {
         $lock.Dispose()
     }
@@ -776,4 +882,4 @@ function Test-ProductionStartup {
     }
 }
 
-Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases,Assert-AutoDeployTaskContract,Get-ProductionMongoCollectionInventory,Test-ProductionStartup
+Export-ModuleMember -Function Get-ProductionStatus,Invoke-ProductionRollback,Invoke-ProductionMigrationAwareRollback,Watch-ProductionLogs,Restart-ProductionService,Get-ProductionReleases,Assert-AutoDeployTaskContract,Get-ProductionMongoCollectionInventory,Test-ProductionStartup

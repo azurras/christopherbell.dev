@@ -1,6 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $root = 'C:\ProgramData\christopherbell.dev'
 $config = Get-Content -LiteralPath (Join-Path $root 'config\deploy.json') -Raw | ConvertFrom-Json
+Import-Module (Join-Path $root 'service\Production.WriterStart.psm1') -Force
+Assert-ProductionWriterStartAllowed -Config $config
 $sensorProperty = $config.PSObject.Properties['sensorLibrariesEnabled']
 if (-not $sensorProperty -or $sensorProperty.Value -isnot [bool]) {
     throw 'deploy.json sensorLibrariesEnabled must be a Boolean.'

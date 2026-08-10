@@ -162,6 +162,7 @@ function Install-WebsiteService {
     $binary = Install-WinSwBinary -ServiceRoot $service
     Copy-Item (Join-Path $PSScriptRoot '..\service\ChristopherBellDev.xml') $service -Force
     Copy-Item (Join-Path $PSScriptRoot '..\service\Start-ChristopherBellDev.ps1') $service -Force
+    Copy-Item (Join-Path $PSScriptRoot 'Production.WriterStart.psm1') $service -Force
     if (-not (Get-Service ChristopherBellDev -ErrorAction SilentlyContinue)) {
         & $binary install | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'WinSW service installation failed.' }

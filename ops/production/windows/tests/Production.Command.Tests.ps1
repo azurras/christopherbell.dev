@@ -41,7 +41,7 @@ Describe 'native Windows production command surface' {
         foreach ($command in 'Invoke-ProductionDeploy','Install-ProductionRuntime','Get-ProductionStatus','Install-AutoDeployTask','Show-ProductionHelp') {
             Get-Command $command -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
-        Get-Command Invoke-ProductionMusicRuntimeStateRollback -ErrorAction SilentlyContinue |
+        Get-Command Invoke-ProductionMigrationAwareRollback -ErrorAction SilentlyContinue |
             Should -Not -BeNullOrEmpty
         foreach ($command in 'Install-PawnIoProvider','Get-ProductionSensorStatus','Set-ProductionSensorState') {
             Get-Command $command -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
@@ -129,7 +129,7 @@ Describe 'native Windows production command surface' {
     It 'routes only the bounded Music runtime rollback switches' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
-        Mock Invoke-ProductionMusicRuntimeStateRollback {
+        Mock Invoke-ProductionMigrationAwareRollback {
             [pscustomobject]@{ complete = $true }
         }
 
@@ -138,22 +138,23 @@ Describe 'native Windows production command surface' {
             -WhatIf `
             -ConfirmMusicRuntimeRollback
 
-        Should -Invoke Invoke-ProductionMusicRuntimeStateRollback -Times 1 -Exactly `
+        Should -Invoke Invoke-ProductionMigrationAwareRollback -Times 1 -Exactly `
             -ParameterFilter { $WhatIf -and $Confirm }
     }
 
     It 'routes confirmed Music rollback through the coordinated binary rollback boundary' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
-        Mock Invoke-ProductionRollback { }
-        Mock Invoke-ProductionMusicRuntimeStateRollback { throw 'separate reverse copy is unsafe' }
+        Mock Invoke-ProductionRollback { throw 'generic rollback is unsafe' }
+        Mock Invoke-ProductionMigrationAwareRollback { }
 
         Invoke-ProductionCommand `
             -Command 'music-runtime-rollback' `
             -ConfirmMusicRuntimeRollback
 
-        Should -Invoke Invoke-ProductionRollback -Times 1 -Exactly
-        Should -Invoke Invoke-ProductionMusicRuntimeStateRollback -Times 0
+        Should -Invoke Invoke-ProductionMigrationAwareRollback -Times 1 -Exactly `
+            -ParameterFilter { $Confirm -and -not $WhatIf }
+        Should -Invoke Invoke-ProductionRollback -Times 0
     }
 
     It 'rejects unknown commands' {

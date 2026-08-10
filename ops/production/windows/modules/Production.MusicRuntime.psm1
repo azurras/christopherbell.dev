@@ -1,94 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-function Get-ProductionMusicSchemaDirectionPath {
-    param([Parameter(Mandatory)]$Config)
-
-    return Join-Path $Config.programDataRoot 'state\music-runtime-schema-direction.json'
-}
-
-function Read-ProductionMusicSchemaDirection {
-    param([Parameter(Mandatory)]$Config)
-
-    $path = Get-ProductionMusicSchemaDirectionPath -Config $Config
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
-    try {
-        $value = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
-            ConvertFrom-Json -ErrorAction Stop
-        $names = @($value.PSObject.Properties.Name)
-        $expected = @(
-            'version','state','updatedAtEpochMillis','targetRelease','legacyRelease')
-        if ($names.Count -ne $expected.Count -or
-            @($expected | Where-Object { $_ -notin $names }).Count -ne 0 -or
-            ($value.version -isnot [int] -and $value.version -isnot [long]) -or
-            [int]$value.version -ne 1 -or
-            $value.state -isnot [string] -or
-            [string]$value.state -notin @(
-                'TARGET_ACTIVE','TARGET_CUTOVER_IN_PROGRESS',
-                'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') -or
-            ($value.updatedAtEpochMillis -isnot [int] -and
-                $value.updatedAtEpochMillis -isnot [long]) -or
-            [long]$value.updatedAtEpochMillis -lt 1 -or
-            $value.targetRelease -isnot [string] -or
-            [string]$value.targetRelease -notmatch '^[0-9a-f]{40}$' -or
-            $value.legacyRelease -isnot [string] -or
-            [string]$value.legacyRelease -notmatch '^[0-9a-f]{40}$') {
-            throw 'Invalid marker.'
-        }
-        return [pscustomobject][ordered]@{
-            version = 1
-            state = [string]$value.state
-            updatedAtEpochMillis = [long]$value.updatedAtEpochMillis
-            targetRelease = [string]$value.targetRelease
-            legacyRelease = [string]$value.legacyRelease
-        }
-    } catch {
-        throw [System.IO.InvalidDataException]::new(
-            'Music runtime schema-direction marker is invalid.')
-    }
-}
-
-function Write-ProductionMusicSchemaDirection {
-    param(
-        [Parameter(Mandatory)]$Config,
-        [Parameter(Mandatory)]
-        [ValidateSet(
-            'TARGET_ACTIVE',
-            'TARGET_CUTOVER_IN_PROGRESS',
-            'LEGACY_ACTIVE_RECONCILIATION_REQUIRED')]
-        [string]$State,
-        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')]
-        [string]$TargetRelease,
-        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')]
-        [string]$LegacyRelease
-    )
-
-    $path = Get-ProductionMusicSchemaDirectionPath -Config $Config
-    $parent = Split-Path -Parent $path
-    New-Item -ItemType Directory -Path $parent -Force | Out-Null
-    Protect-ProductionPath -Path $parent
-    Assert-ProtectedProductionPath -Path $parent | Out-Null
-    $temporary = "$path.$PID.$([guid]::NewGuid().ToString('N')).tmp"
-    try {
-        [ordered]@{
-            version = 1
-            state = $State
-            updatedAtEpochMillis = [DateTimeOffset]::new(
-                (Get-Date).ToUniversalTime()).ToUnixTimeMilliseconds()
-            targetRelease = $TargetRelease
-            legacyRelease = $LegacyRelease
-        } | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding utf8
-        Protect-ProductionPath -Path $temporary
-        Assert-ProtectedProductionPath -Path $temporary | Out-Null
-        Move-Item -LiteralPath $temporary -Destination $path -Force
-        Protect-ProductionPath -Path $path
-        Assert-ProtectedProductionPath -Path $path | Out-Null
-    } finally {
-        if (Test-Path -LiteralPath $temporary) {
-            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
+Import-Module (Join-Path $PSScriptRoot 'Production.WriterStart.psm1') -Global -Force
 
 function Get-ProductionMusicRuntimeRollbackScript {
     @'
@@ -328,8 +240,12 @@ const exactKeys = (value, required, optional) => {
 const validText = (value, maximum) => typeof value === 'string' &&
     value.trim().length !== 0 && value.length <= maximum;
 const exactDate = (value) => value instanceof Date && !Number.isNaN(value.valueOf());
-const exactLong = (value) => value !== null && typeof value === 'object' &&
-    typeof value.toString === 'function' && /^-?[0-9]+$/.test(value.toString());
+const exactLong = (value) => {
+  const encoded = EJSON.serialize(value, {relaxed:false});
+  return encoded !== null && typeof encoded === 'object' &&
+      ((typeof encoded.$numberInt === 'string' && /^-?[0-9]+$/.test(encoded.$numberInt)) ||
+       (typeof encoded.$numberLong === 'string' && /^-?[0-9]+$/.test(encoded.$numberLong)));
+};
 const exactDouble = (value) => {
   const encoded = EJSON.serialize(value, {relaxed:false});
   return encoded !== null && typeof encoded === 'object' &&
@@ -340,6 +256,13 @@ const documents = (collection) => collection.find({}).toArray();
 const queueDocuments = documents(queueSource);
 const radioDocuments = documents(radioSource);
 const destinationDocuments = documents(destination);
+const queueTypeRows = queueSource.aggregate([{$project:{
+  _id:1, versionType:{$type:'$version'}}}]).toArray();
+const radioTypeRows = radioSource.aggregate([{$project:{
+  _id:1, versionType:{$type:'$version'}, stationSequenceType:{$type:'$stationSequence'}}}]).toArray();
+const destinationTypeRows = destination.aggregate([{$project:{
+  _id:1, versionType:{$type:'$version'},
+  stationSequenceType:{$type:'$radio.stationSequence'}}}]).toArray();
 if (queueDocuments.length > 1 || radioDocuments.length > 1 ||
     destinationDocuments.length > 2) {
   throw new Error('music runtime reconciliation cardinality is invalid');
@@ -354,8 +277,12 @@ if (byId.size !== destinationDocuments.length ||
 const targetClass = 'dev.christopherbell.music.radio.MusicRuntimeStateDocument';
 const queueClass = 'dev.christopherbell.music.radio.MusicQueueState';
 const radioClass = 'dev.christopherbell.music.radio.MusicRadioState';
-const validVersion = (document) => !has(document, 'version') ||
-    (exactLong(document.version) && !document.version.toString().startsWith('-'));
+const typeRow = (rows, id) => rows.find((row) => row._id === id) || null;
+const exactIntegerType = (value) => value === 'int' || value === 'long';
+const validVersion = (document, type) => !has(document, 'version') ?
+    type === 'missing' :
+    (exactIntegerType(type) && exactLong(document.version) &&
+      !document.version.toString().startsWith('-'));
 const validClass = (document, expected) => !has(document, '_class') ||
     document._class === expected;
 const validEntry = (entry) => exactKeys(entry,
@@ -365,8 +292,8 @@ const validEntry = (entry) => exactKeys(entry,
     exactDate(entry.enqueuedAt);
 const validEntries = (entries) => Array.isArray(entries) && entries.length <= 1000 &&
     entries.every(validEntry) && new Set(entries.map((entry) => entry.id)).size === entries.length;
-const validRadioPayload = (value) =>
-    exactLong(value.stationSequence) &&
+const validRadioPayload = (value, stationSequenceType) =>
+    exactIntegerType(stationSequenceType) && exactLong(value.stationSequence) &&
     !value.stationSequence.toString().startsWith('-') && value.stationSequence.toString() !== '0' &&
     validText(value.trackId, 128) && validText(value.observedToken, 128) &&
     exactDate(value.startedAt) && exactDouble(value.durationSeconds) &&
@@ -376,27 +303,33 @@ const validRadioPayload = (value) =>
      (value.source === 'RADIO' && !has(value, 'queueEntryId')));
 const validQueue = queue === null ||
     (exactKeys(queue, ['_id','entries'], ['version','_class']) &&
-     queue._id === 'global' && validEntries(queue.entries) && validVersion(queue) &&
+     queue._id === 'global' && validEntries(queue.entries) &&
+     validVersion(queue, typeRow(queueTypeRows, 'global').versionType) &&
      validClass(queue, queueClass));
 const validRadio = radio === null ||
     (exactKeys(radio, ['_id','stationSequence','trackId','observedToken','startedAt',
       'durationSeconds','source'], ['queueEntryId','version','_class']) &&
-     radio._id === 'global' && validRadioPayload(radio) &&
-     validVersion(radio) && validClass(radio, radioClass));
+     radio._id === 'global' &&
+     validRadioPayload(radio, typeRow(radioTypeRows, 'global').stationSequenceType) &&
+     validVersion(radio, typeRow(radioTypeRows, 'global').versionType) &&
+     validClass(radio, radioClass));
 if (!validQueue || !validRadio) {
   throw new Error('music runtime reconciliation legacy shape is invalid');
 }
 const validTargetQueue = !byId.has('queue') ||
     (exactKeys(byId.get('queue'), ['_id','kind','queue'], ['version','_class']) &&
      byId.get('queue')._id === 'queue' && byId.get('queue').kind === 'QUEUE' &&
-     validVersion(byId.get('queue')) && validClass(byId.get('queue'), targetClass) &&
+     validVersion(byId.get('queue'), typeRow(destinationTypeRows, 'queue').versionType) &&
+     validClass(byId.get('queue'), targetClass) &&
      exactKeys(byId.get('queue').queue, ['entries'], []) &&
      validEntries(byId.get('queue').queue.entries));
 const validTargetRadio = !byId.has('radio') ||
     (exactKeys(byId.get('radio'), ['_id','kind','radio'], ['version','_class']) &&
      byId.get('radio')._id === 'radio' && byId.get('radio').kind === 'RADIO' &&
-     validVersion(byId.get('radio')) && validClass(byId.get('radio'), targetClass) &&
-     validRadioPayload(byId.get('radio').radio));
+     validVersion(byId.get('radio'), typeRow(destinationTypeRows, 'radio').versionType) &&
+     validClass(byId.get('radio'), targetClass) &&
+     validRadioPayload(byId.get('radio').radio,
+       typeRow(destinationTypeRows, 'radio').stationSequenceType));
 if (!validTargetQueue || !validTargetRadio) {
   throw new Error('music runtime reconciliation target shape is invalid');
 }
@@ -787,13 +720,12 @@ function Invoke-ProductionMusicRuntimeReconciliationNoLock {
     }
 }
 
+# Testable internal primitive retained for bounded reverse-copy verification. It is
+# deliberately not exported; production callers must use the coordinated binary
+# rollback boundary in Production.Operations.
 function Invoke-ProductionMusicRuntimeStateRollback {
     [CmdletBinding()]
-    param(
-        [switch]$Confirm,
-        [switch]$WhatIf
-    )
-
+    param([switch]$Confirm, [switch]$WhatIf)
     if ($WhatIf) {
         return [pscustomobject][ordered]@{
             database = 'christopherbell'
@@ -804,22 +736,17 @@ function Invoke-ProductionMusicRuntimeStateRollback {
             requiresFreshVerifiedBackup = $true
         }
     }
-    if (-not $Confirm) {
-        throw 'Music runtime rollback requires explicit confirmation.'
-    }
-
+    if (-not $Confirm) { throw 'Music runtime rollback requires explicit confirmation.' }
     $config = Read-ProductionConfig
     $lock = Enter-DeploymentLock `
         -LockPath (Join-Path $config.programDataRoot 'locks\deploy.lock')
     try {
-        return Invoke-ProductionMusicRuntimeReverseCopyNoLock -Config $config
+        Invoke-ProductionMusicRuntimeReverseCopyNoLock -Config $config
     } finally {
         $lock.Dispose()
     }
 }
 
 Export-ModuleMember -Function `
-    Get-ProductionMusicRuntimeRollbackScript,Invoke-ProductionMusicRuntimeStateRollback,`
-    Invoke-ProductionMusicRuntimeReverseCopyNoLock,Read-ProductionMusicSchemaDirection,`
-    Write-ProductionMusicSchemaDirection,Get-ProductionMusicRuntimeReconciliationScript,`
+    Get-ProductionMusicRuntimeRollbackScript,Get-ProductionMusicRuntimeReconciliationScript,`
     Invoke-ProductionMusicRuntimeReconciliationNoLock,Get-ProductionMusicMigrationActivationNoLock

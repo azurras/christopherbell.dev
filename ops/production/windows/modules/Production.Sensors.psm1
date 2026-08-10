@@ -340,15 +340,34 @@ function Set-ProductionSensorState {
         throw 'sensorLibrariesEnabled must be a Boolean.'
     }
     $previous = $sensorProperty.Value
-    Write-ProductionSensorConfig -Path $ConfigPath -Enabled $Enabled
+    $root = if ($config.PSObject.Properties.Name -ccontains 'programDataRoot') {
+        [string]$config.programDataRoot
+    } else {
+        Split-Path -Parent (Split-Path -Parent $ConfigPath)
+    }
+    $lock = Enter-DeploymentLock (Join-Path $root 'locks\deploy.lock')
     try {
-        Restart-Service -Name ChristopherBellDev
-        $updated = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-        Test-ProductionEndpoints $updated ([int]$updated.productionPort)
-    } catch {
-        Write-ProductionSensorConfig -Path $ConfigPath -Enabled $previous
-        Restart-Service -Name ChristopherBellDev
-        throw
+        Write-ProductionSensorConfig -Path $ConfigPath -Enabled $Enabled
+        try {
+            Restart-Service -Name ChristopherBellDev
+            $updated = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+            Test-ProductionEndpoints $updated ([int]$updated.productionPort)
+        } catch {
+            $failure = $_.Exception
+            try {
+                Write-ProductionSensorConfig -Path $ConfigPath -Enabled $previous
+                Restart-Service -Name ChristopherBellDev
+                $restored = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+                Test-ProductionEndpoints $restored ([int]$restored.productionPort)
+            } catch {
+                throw [System.AggregateException]::new(
+                    'Sensor state change and guarded rollback both failed.',
+                    [System.Exception[]]@($failure, $_.Exception))
+            }
+            throw $failure
+        }
+    } finally {
+        $lock.Dispose()
     }
 }
 

@@ -70,10 +70,12 @@ routes confirmed execution through the coordinated binary rollback boundary; do 
 reverse-copy followed by `rollback`. One acquisition of the fixed production `locks\deploy.lock`
 is retained while the writer is stopped, a fresh full backup and SHA-256 sidecar are verified, the
 exact singleton BSON is reverse-copied and read back, the release junctions are switched, and the
-legacy writer is started and health-checked. Before reverse-copy, the protected atomic
-schema-direction marker becomes `LEGACY_ACTIVE_RECONCILIATION_REQUIRED`, so a crash or later
-failure cannot permit the target direction to be assumed. No step drops, deletes, or renames a
-collection.
+legacy writer is started through an exact, expiring, single-use transition authorization and
+health-checked. Only then does the protected atomic schema-direction marker become
+`LEGACY_ACTIVE_RECONCILIATION_REQUIRED`. A later failure stops the writer and reports the retained
+backup path with its original cause. Generic `rollback` never performs this reverse-copy and
+refuses to select the marker-owned legacy release with exact guidance to the confirmed command.
+No step drops, deletes, or renames a collection.
 
 While reconciliation is required, automatic deployment and manual restart are blocked. An
 interactive `deploy` validates its candidate, stops the legacy writer under the same deploy lock,
@@ -89,6 +91,16 @@ The pending state blocks deploy, auto-deploy, rollback, and manual restart after
 final marker write. `Confirm-ProductionMusicTargetActive` is the bounded
 repair/confirmation seam for an already verified cutover, not a replacement for the single-lock
 first-cutover path.
+
+Every WinSW launch, including boot and recovery restarts, runs the same strict marker/current-release
+guard before Java. Stable target and legacy markers permit only their exact bound release. A
+deployment transition may create one atomic authorization for an exact release, marker state,
+purpose, and expiry; the launch script consumes it once, so it cannot be replayed by recovery or a
+later manual start. If the marker is absent, the guard starts only a legacy-compatible release and
+only after the database probe proves migration 014 inactive. Active or unknown migration state,
+malformed marker data, a mismatched release, and an expired or replayed authorization all block the
+writer. Manual `prod.cmd restart` remains blocked while reconciliation is required; guarded boot,
+service recovery, and sensor restarts may restart only the exact marker-owned legacy release.
 
 Keep the service stopped if any gate, replacement, or readback check fails. Preserve the reported
 backup, allowlisted phase/error code, and failure cause, and obtain approval before attempting a

@@ -74,7 +74,7 @@ function Invoke-AutoDeployOnce {
     $state.attemptedSha = $remote
     Write-AutoDeployState $Config $state
     try {
-        Invoke-ProductionDeploy
+        Invoke-ProductionDeploy -Automatic
         $active = Get-ActiveReleaseSha $Config
         if (-not $active) { throw 'Deployment completed without valid active release metadata.' }
         $state.successfulSha = $active

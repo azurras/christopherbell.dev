@@ -13,6 +13,7 @@ Describe 'PawnIO sensor provider operations' {
             Mock Protect-ProductionPath {}
             Mock Protect-ProductionTree {}
             Mock Assert-ProtectedProductionTree {}
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
         }
 
         It 'rejects an installer whose hash or signer thumbprint differs' {
@@ -90,10 +91,50 @@ Describe 'PawnIO sensor provider operations' {
             $configPath = Join-Path $TestDrive 'deploy.json'
             @{ productionPort=8080; sensorLibrariesEnabled=$false } | ConvertTo-Json | Set-Content $configPath
             Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0'; Driver='Running' } }
-            Mock Test-ProductionEndpoints { throw 'endpoint failed' }
+            $script:endpointAttempts = 0
+            Mock Test-ProductionEndpoints {
+                $script:endpointAttempts++
+                if ($script:endpointAttempts -eq 1) { throw 'endpoint failed' }
+            }
             { Set-ProductionSensorState -Enabled $true -ConfigPath $configPath } | Should -Throw '*endpoint failed*'
             (Get-Content $configPath -Raw | ConvertFrom-Json).sensorLibrariesEnabled | Should -BeFalse
             Should -Invoke Restart-Service -Times 2 -ParameterFilter { $Name -eq 'ChristopherBellDev' }
+            Should -Invoke Enter-DeploymentLock -Times 1 -Exactly
+        }
+
+        It 'holds deploy.lock through sensor mutation, restart, health, and release' {
+            $events = [Collections.Generic.List[string]]::new()
+            $configPath = Join-Path $TestDrive 'config\deploy.json'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $configPath) -Force | Out-Null
+            @{ programDataRoot=$TestDrive; productionPort=8080; sensorLibrariesEnabled=$false } |
+                ConvertTo-Json | Set-Content $configPath
+            $lock = [pscustomobject]@{}
+            $lock | Add-Member ScriptMethod Dispose { [void]$events.Add('lock:release') }
+            Mock Enter-DeploymentLock { [void]$events.Add('lock:acquire'); $lock }
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0' } }
+            Mock Write-ProductionSensorConfig { [void]$events.Add('config') }
+            Mock Restart-Service { [void]$events.Add('restart') }
+            Mock Test-ProductionEndpoints { [void]$events.Add('health') }
+
+            Set-ProductionSensorState -Enabled $true -ConfigPath $configPath
+
+            $events | Should -Be @('lock:acquire','config','restart','health','lock:release')
+        }
+
+        It 'has no config or service effect when deploy.lock contends' {
+            $configPath = Join-Path $TestDrive 'config\deploy.json'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $configPath) -Force | Out-Null
+            @{ programDataRoot=$TestDrive; productionPort=8080; sensorLibrariesEnabled=$false } |
+                ConvertTo-Json | Set-Content $configPath
+            Mock Assert-PawnIoInstallation { [pscustomobject]@{ Version='2.2.0.0' } }
+            Mock Enter-DeploymentLock { throw 'lock contended' }
+            Mock Write-ProductionSensorConfig { throw 'config must not change' }
+            Mock Restart-Service { throw 'service must not restart' }
+
+            { Set-ProductionSensorState -Enabled $true -ConfigPath $configPath } |
+                Should -Throw '*lock contended*'
+            Should -Invoke Write-ProductionSensorConfig -Times 0
+            Should -Invoke Restart-Service -Times 0
         }
 
         It 'reports protected state installation and active threat state without mutation' {

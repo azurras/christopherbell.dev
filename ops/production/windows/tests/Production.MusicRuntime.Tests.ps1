@@ -573,8 +573,10 @@ Describe 'Music runtime rollback operation' {
         It 'atomically protects and replaces the bounded schema-direction marker' {
             $config = [pscustomobject]@{ programDataRoot = $TestDrive }
             $events = [Collections.Generic.List[string]]::new()
-            Mock Protect-ProductionPath { [void]$events.Add("protect:$Path") }
-            Mock Assert-ProtectedProductionPath { [void]$events.Add("verify:$Path") }
+            Mock Protect-ProductionPath { [void]$events.Add("protect:$Path") } `
+                -ModuleName Production.WriterStart
+            Mock Assert-ProtectedProductionPath { [void]$events.Add("verify:$Path") } `
+                -ModuleName Production.WriterStart
 
             Write-ProductionMusicSchemaDirection `
                 -Config $config `
@@ -1210,6 +1212,81 @@ print(JSON.stringify({queueCount:target.music_runtime_state.countDocuments({_id:
 '@ | ConvertFrom-Json -ErrorAction Stop
         [int]$proof.queueCount | Should -Be 1
         [int]$proof.radioCount | Should -Be 0
+    }
+
+    It 'rejects BSON <Kind> for legacy <Field> before target mutation' -TestCases @(
+        @{ Kind='Double'; Encoding="NumberLong('7')"; Field='version' }
+        @{ Kind='Decimal128'; Encoding="NumberDecimal('7')"; Field='version' }
+        @{ Kind='Double'; Encoding="NumberLong('7')"; Field='stationSequence' }
+        @{ Kind='Decimal128'; Encoding="NumberDecimal('7')"; Field='stationSequence' }
+    ) {
+        param($Kind, $Encoding, $Field)
+        $fixture = "const target=db.getSiblingDB('christopherbell');" +
+            "target.music_runtime_state.insertOne({_id:'queue',kind:'QUEUE',queue:{entries:[]}});"
+        if ($Field -eq 'version') {
+            $fixture += "target.music_queue_state.insertOne({_id:'global',entries:[],version:$Encoding});"
+        } else {
+            $fixture += "target.music_radio_state.insertOne({_id:'global',stationSequence:$Encoding,trackId:'legacy-radio',observedToken:'token',startedAt:new Date('2026-08-09T13:01:00Z'),durationSeconds:91.5,source:'RADIO'});"
+        }
+        if ($Kind -eq 'Double' -and $Field -eq 'version') {
+            $fixture += "target.music_queue_state.updateOne({}, [{`$set:{version:{`$toDouble:'`$version'}}}]);"
+        }
+        if ($Kind -eq 'Double' -and $Field -eq 'stationSequence') {
+            $fixture += "target.music_radio_state.updateOne({}, [{`$set:{stationSequence:{`$toDouble:'`$stationSequence'}}}]);"
+        }
+        $null = Invoke-DisposableMusicRuntimeMongo -Script $fixture
+
+        $metadata = Invoke-DisposableMusicRuntimeMongo `
+            -Script (Get-ProductionMusicRuntimeReconciliationScript) |
+            ConvertFrom-Json -ErrorAction Stop
+
+        $metadata.complete | Should -BeFalse
+        $metadata.phase | Should -Be 'preflight'
+        $proof = Invoke-DisposableMusicRuntimeMongo -Script @'
+const target=db.getSiblingDB('christopherbell');
+print(JSON.stringify({queueCount:target.music_runtime_state.countDocuments({_id:'queue'}),radioCount:target.music_runtime_state.countDocuments({_id:'radio'})}));
+'@ | ConvertFrom-Json -ErrorAction Stop
+        [int]$proof.queueCount | Should -Be 1
+        [int]$proof.radioCount | Should -Be 0
+    }
+
+    It 'rejects BSON <Kind> in retained target <Field> before replacement' -TestCases @(
+        @{ Kind='Double'; Encoding="NumberLong('7')"; Field='version' }
+        @{ Kind='Decimal128'; Encoding="NumberDecimal('7')"; Field='version' }
+        @{ Kind='Double'; Encoding="NumberLong('7')"; Field='stationSequence' }
+        @{ Kind='Decimal128'; Encoding="NumberDecimal('7')"; Field='stationSequence' }
+    ) {
+        param($Kind, $Encoding, $Field)
+        $fixture = "const target=db.getSiblingDB('christopherbell');"
+        if ($Field -eq 'version') {
+            $fixture += "target.music_runtime_state.insertOne({_id:'queue',kind:'QUEUE',queue:{entries:[{id:'retained',trackId:'retained-track',observedToken:'retained-token',enqueuedByAccountId:'account',enqueuedAt:new Date('2026-08-09T13:00:00Z')}]},version:$Encoding});"
+            $fixture += "target.music_queue_state.insertOne({_id:'global',entries:[]});"
+        } else {
+            $fixture += "target.music_runtime_state.insertOne({_id:'radio',kind:'RADIO',radio:{stationSequence:$Encoding,trackId:'retained-radio',observedToken:'retained-token',startedAt:new Date('2026-08-09T13:01:00Z'),durationSeconds:91.5,source:'RADIO'}});"
+            $fixture += "target.music_radio_state.insertOne({_id:'global',stationSequence:NumberLong('8'),trackId:'legacy-radio',observedToken:'legacy-token',startedAt:new Date('2026-08-09T13:02:00Z'),durationSeconds:92.5,source:'RADIO'});"
+        }
+        if ($Kind -eq 'Double' -and $Field -eq 'version') {
+            $fixture += "target.music_runtime_state.updateOne({_id:'queue'}, [{`$set:{version:{`$toDouble:'`$version'}}}]);"
+        }
+        if ($Kind -eq 'Double' -and $Field -eq 'stationSequence') {
+            $fixture += "target.music_runtime_state.updateOne({_id:'radio'}, [{`$set:{'radio.stationSequence':{`$toDouble:'`$radio.stationSequence'}}}]);"
+        }
+        $null = Invoke-DisposableMusicRuntimeMongo -Script $fixture
+
+        $metadata = Invoke-DisposableMusicRuntimeMongo `
+            -Script (Get-ProductionMusicRuntimeReconciliationScript) |
+            ConvertFrom-Json -ErrorAction Stop
+
+        $metadata.complete | Should -BeFalse
+        $metadata.phase | Should -Be 'preflight'
+        $proof = Invoke-DisposableMusicRuntimeMongo -Script @'
+const target=db.getSiblingDB('christopherbell');
+const queue=target.music_runtime_state.findOne({_id:'queue'});
+const radio=target.music_runtime_state.findOne({_id:'radio'});
+print(JSON.stringify({queueTrack:queue && queue.queue.entries[0].trackId,radioTrack:radio && radio.radio.trackId}));
+'@ | ConvertFrom-Json -ErrorAction Stop
+        if ($Field -eq 'version') { $proof.queueTrack | Should -Be 'retained-track' }
+        else { $proof.radioTrack | Should -Be 'retained-radio' }
     }
 
     It 'rejects changed server process identity before destructive fixture mutation' {

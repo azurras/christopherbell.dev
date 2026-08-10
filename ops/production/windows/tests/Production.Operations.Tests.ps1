@@ -8,6 +8,7 @@ Describe 'native Windows production operations' {
     InModuleScope Production.Operations {
         BeforeEach {
             Mock Get-ProductionMusicMigrationActivationNoLock { $false }
+            Mock Restore-CoordinatedProductionWebsiteRecoveryPolicy { }
         }
         BeforeAll {
             function New-ValidStartupTask {
@@ -155,21 +156,26 @@ Describe 'native Windows production operations' {
             Mock Write-ProductionMusicSchemaDirection {
                 [void]$events.Add("marker:$State")
             }
-            Mock Invoke-ProductionMusicRuntimeReverseCopyNoLock {
+            Mock Invoke-MusicReverseCopyUnderHeldLock {
                 [void]$events.Add('reverse-copy')
+                [pscustomobject]@{ backup='C:\backup\music.zip' }
             }
             Mock Set-AtomicJunction { [void]$events.Add("switch:$Path") }
+            Mock Grant-CoordinatedProductionWriterStart { [void]$events.Add('authorize') }
             Mock Start-Service { [void]$events.Add('writer-start') }
             Mock Test-ProductionEndpoints { [void]$events.Add('health') }
             Mock Test-ProductionPublicEndpoints { [void]$events.Add('public-health') }
+            Mock Restore-CoordinatedProductionWebsiteRecoveryPolicy {
+                [void]$events.Add('recovery-normal')
+            }
 
-            Invoke-ProductionRollback
+            Invoke-ProductionMigrationAwareRollback -Confirm
 
             $events | Should -Be @(
-                'lock-acquire','writer-stop',
-                'marker:LEGACY_ACTIVE_RECONCILIATION_REQUIRED','reverse-copy',
-                'switch:C:\data\current','switch:C:\data\previous',
-                'writer-start','health','public-health','lock-release')
+                'lock-acquire','writer-stop','reverse-copy',
+                'switch:C:\data\previous','switch:C:\data\current','authorize',
+                'writer-start','health','public-health',
+                'marker:LEGACY_ACTIVE_RECONCILIATION_REQUIRED','recovery-normal','lock-release')
             Should -Invoke Enter-DeploymentLock -Times 1 -Exactly
         }
 
@@ -198,17 +204,22 @@ Describe 'native Windows production operations' {
             }
             Mock Stop-ProductionWebsiteService { }
             Mock Write-ProductionMusicSchemaDirection { if ($phase -eq 'marker') { throw 'marker failed' } }
-            Mock Invoke-ProductionMusicRuntimeReverseCopyNoLock { if ($phase -eq 'reverse-copy') { throw 'reverse failed' } }
+            Mock Invoke-MusicReverseCopyUnderHeldLock {
+                if ($phase -eq 'reverse-copy') { throw 'reverse failed' }
+                [pscustomobject]@{ backup='C:\backup\music.zip' }
+            }
             Mock Set-AtomicJunction { if ($phase -eq 'switch') { throw 'switch failed' } }
+            Mock Grant-CoordinatedProductionWriterStart { }
             Mock Start-Service { if ($phase -eq 'start') { throw 'start failed' } }
             Mock Test-ProductionEndpoints { if ($phase -eq 'health') { throw 'health failed' } }
             Mock Test-ProductionPublicEndpoints { }
 
-            { Invoke-ProductionRollback } | Should -Throw '*writer remains stopped*'
+            { Invoke-ProductionMigrationAwareRollback -Confirm } | Should -Throw '*writer remains stopped*'
 
             $script:released | Should -BeTrue
             Should -Invoke Enter-DeploymentLock -Times 1
             Should -Invoke Stop-ProductionWebsiteService -Times 2
+            Should -Invoke Restore-CoordinatedProductionWebsiteRecoveryPolicy -Times 0
         }
 
         It 'allows no rollback effect when the single deploy lock contends' {
@@ -217,7 +228,7 @@ Describe 'native Windows production operations' {
             Mock Get-JunctionTarget { throw 'junction must not be read' }
             Mock Stop-ProductionWebsiteService { throw 'writer must not be stopped' }
 
-            { Invoke-ProductionRollback } | Should -Throw '*lock contended*'
+            { Invoke-ProductionMigrationAwareRollback -Confirm } | Should -Throw '*lock contended*'
 
             Should -Invoke Get-JunctionTarget -Times 0
             Should -Invoke Stop-ProductionWebsiteService -Times 0
@@ -240,6 +251,26 @@ Describe 'native Windows production operations' {
             Should -Invoke Stop-ProductionWebsiteService -Times 0
         }
 
+        It 'refuses generic target-to-legacy rollback with exact confirmed-command guidance' {
+            $targetSha = '0123456789abcdef0123456789abcdef01234567'
+            $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
+            Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { "C:\data\releases\$targetSha" }
+                else { "C:\data\releases\$legacySha" }
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$targetSha; legacyRelease=$legacySha }
+            }
+            Mock Stop-ProductionWebsiteService { throw 'must not stop' }
+
+            { Invoke-ProductionRollback } |
+                Should -Throw '*prod.cmd music-runtime-rollback -ConfirmMusicRuntimeRollback*'
+            Should -Invoke Stop-ProductionWebsiteService -Times 0
+        }
+
         It 'refuses a manual restart when the active binary contradicts schema direction' {
             $lock = [IO.MemoryStream]::new()
             Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8443 } }
@@ -254,7 +285,7 @@ Describe 'native Windows production operations' {
             Mock Get-JunctionTarget { 'C:\data\releases\2222222222222222222222222222222222222222' }
             Mock Restart-Service { }
 
-            { Restart-ProductionService -Verify } | Should -Throw '*contradicts*schema-direction*'
+            { Restart-ProductionService -Verify } | Should -Throw '*reconciliation*'
 
             Should -Invoke Restart-Service -Times 0
         }
