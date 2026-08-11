@@ -1,22 +1,24 @@
 package dev.christopherbell.configuration.security.browser;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.util.List;
 import java.util.Optional;
-import lombok.RequiredArgsConstructor;
 import org.bson.Document;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.stereotype.Repository;
 
 /** Mongo join that resolves a browser session and current account in one command. */
 @Repository
-@RequiredArgsConstructor
 public class MongoBrowserSessionAuthenticationStore implements BrowserSessionAuthenticationStore {
-  private static final String SESSION_COLLECTION = "browser_sessions";
   private static final String ACCOUNT_COLLECTION = "accounts";
 
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<BrowserSession> sessions;
+
+  public MongoBrowserSessionAuthenticationStore(DomainMongoOperationsFactory factory) {
+    this.sessions = factory.forType(BrowserSession.class);
+  }
 
   @Override
   public Optional<BrowserSessionAuthentication> findById(String sessionId) {
@@ -27,7 +29,11 @@ public class MongoBrowserSessionAuthenticationStore implements BrowserSessionAut
             .append("let", new Document("accountId", "$accountId"))
             .append("pipeline", List.of(
                 new Document("$match", new Document("$expr", new Document(
-                    "$eq", List.of("$_id", "$$accountId")))),
+                    "$and", List.of(
+                        new Document("$eq", List.of("$_kind", "account")),
+                        new Document("$eq", List.of("$_id.legacyId", "$$accountId")))))),
+                new Document("$replaceRoot", new Document("newRoot", new Document(
+                    "$mergeObjects", List.of("$payload", new Document("_id", "$_id.legacyId"))))),
                 new Document("$project", new Document("_id", 1)
                     .append("passwordHash", 1)
                     .append("role", 1)
@@ -38,8 +44,6 @@ public class MongoBrowserSessionAuthenticationStore implements BrowserSessionAut
         context -> new Document("$project", new Document("_id", 0)
             .append("session", "$$ROOT")
             .append("account", "$currentAccount")));
-    return Optional.ofNullable(mongo.aggregate(
-        aggregation, SESSION_COLLECTION, BrowserSessionAuthentication.class)
-        .getUniqueMappedResult());
+    return sessions.aggregate(aggregation, BrowserSessionAuthentication.class).stream().findFirst();
   }
 }

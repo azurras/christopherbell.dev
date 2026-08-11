@@ -6,16 +6,15 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import com.mongodb.client.result.DeleteResult;
-import com.mongodb.client.result.UpdateResult;
 import java.time.Instant;
-import org.bson.BsonString;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.UpdateDefinition;
+import org.springframework.dao.DuplicateKeyException;
 
 @ExtendWith(MockitoExtension.class)
 class PostLikeStoreTest {
@@ -23,10 +22,11 @@ class PostLikeStoreTest {
 
   @Test
   void repeatedLikeReportsOnlyTheFirstEdgeAsCreated() {
-    when(mongo.upsert(any(Query.class), any(UpdateDefinition.class), eq(PostLike.class)))
-        .thenReturn(UpdateResult.acknowledged(0, 0L, new BsonString("edge")))
-        .thenReturn(UpdateResult.acknowledged(1, 0L, null));
-    var store = new PostLikeStore(mongo);
+    var store = new PostLikeStore(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
+    when(mongo.insert(any(Document.class), eq("content")))
+        .thenAnswer(invocation -> invocation.getArgument(0))
+        .thenThrow(new DuplicateKeyException("duplicate edge"));
 
     assertThat(store.like("post", "account", Instant.EPOCH).created()).isTrue();
     assertThat(store.like("post", "account", Instant.EPOCH).created()).isFalse();
@@ -34,10 +34,11 @@ class PostLikeStoreTest {
 
   @Test
   void repeatedUnlikeReportsOnlyTheExistingEdgeAsRemoved() {
-    when(mongo.remove(any(Query.class), eq(PostLike.class)))
+    when(mongo.remove(any(Query.class), eq(Document.class), eq("content")))
         .thenReturn(DeleteResult.acknowledged(1))
         .thenReturn(DeleteResult.acknowledged(0));
-    var store = new PostLikeStore(mongo);
+    var store = new PostLikeStore(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
 
     assertThat(store.unlike("post", "account").removed()).isTrue();
     assertThat(store.unlike("post", "account").removed()).isFalse();

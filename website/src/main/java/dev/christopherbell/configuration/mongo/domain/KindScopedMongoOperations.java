@@ -5,6 +5,7 @@ import com.mongodb.client.result.UpdateResult;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 
@@ -25,6 +26,12 @@ public interface KindScopedMongoOperations<T> {
   T save(T value);
 
   UpdateResult updateFirst(Query domainQuery, Update domainUpdate);
+
+  Optional<T> findAndUpdate(Query domainQuery, Update domainUpdate);
+
+  UpdateResult updateMulti(Query domainQuery, Update domainUpdate);
+
+  <R> List<R> aggregate(Aggregation domainAggregation, Class<R> resultType);
 
   DeleteResult remove(Query domainQuery);
 

@@ -2,10 +2,11 @@ package dev.christopherbell.admin.activity;
 
 import dev.christopherbell.admin.model.AdminActivity;
 import java.util.List;
-import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
+import java.util.Optional;
 
-@Repository
-public interface AdminActivityRepository extends MongoRepository<AdminActivity, String> {
+public interface AdminActivityRepository {
+  AdminActivity insert(AdminActivity activity);
+  AdminActivity save(AdminActivity activity);
+  Optional<AdminActivity> findById(String id);
   List<AdminActivity> findTop25ByOrderByCreatedOnDesc();
 }

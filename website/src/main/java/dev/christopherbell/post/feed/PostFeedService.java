@@ -36,7 +36,7 @@ public class PostFeedService {
   private static final Pageable LEGACY_HISTORY_PAGE = PageRequest.of(
       0,
       MAX_FEED_LIMIT,
-      Sort.by(Sort.Order.desc("createdOn"), Sort.Order.desc("_id")));
+      Sort.by(Sort.Order.desc("createdOn"), Sort.Order.desc("id")));
 
   private final PostRepository postRepository;
   private final AccountRepository accountRepository;

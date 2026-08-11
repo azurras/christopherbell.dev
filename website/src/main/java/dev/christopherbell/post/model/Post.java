@@ -15,7 +15,6 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
  * MongoDB document representing a tweet‑like post authored by an account.
@@ -37,7 +36,6 @@ import org.springframework.data.mongodb.core.mapping.Document;
     @CompoundIndex(name = "post_expires", def = "{'expiresOn': 1}"),
     @CompoundIndex(name = "post_account_parent", def = "{'accountId': 1, 'parentId': 1}")
 })
-@Document("posts")
 public class Post {
   private final String type = "post";
 

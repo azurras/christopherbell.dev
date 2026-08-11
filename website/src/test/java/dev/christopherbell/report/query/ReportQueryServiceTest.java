@@ -15,6 +15,7 @@ import dev.christopherbell.report.model.ReportType;
 import dev.christopherbell.report.ReportRepository;
 import java.time.Instant;
 import java.util.List;
+import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,15 +34,21 @@ class ReportQueryServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new ReportQueryService(mongo, reports);
+    service = new ReportQueryService(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo),
+        reports);
   }
 
   @Test
   @DisplayName("Report queue applies every filter and stable page ordering")
   void query_appliesFiltersAndStableSort() throws Exception {
     var report = PostReport.builder().id("r1").status(ReportStatus.OPEN).build();
-    when(mongo.count(any(Query.class), eq(PostReport.class))).thenReturn(1L);
-    when(mongo.find(any(Query.class), eq(PostReport.class))).thenReturn(List.of(report));
+    var reportEnvelope =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, report);
+    when(mongo.count(any(Query.class), eq(Document.class), eq("content"))).thenReturn(1L);
+    when(mongo.find(any(Query.class), eq(Document.class), eq("content")))
+        .thenReturn(List.of(reportEnvelope));
     var query = new ReportQuery(
         ReportStatus.OPEN,
         ReportType.SPAM,
@@ -55,12 +62,13 @@ class ReportQueryServiceTest {
     var result = service.query(query);
 
     var captured = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(captured.capture(), eq(PostReport.class));
+    verify(mongo).find(captured.capture(), eq(Document.class), eq("content"));
     assertThat(captured.getValue().getQueryObject().toString())
-        .contains("status=OPEN", "reportType=SPAM", "targetType=POST")
-        .contains("\\Qreader.*\\E", "createdOn", "$gte", "$lte");
+        .contains("_kind=post_report", "payload.status=OPEN", "payload.reportType=SPAM",
+            "payload.targetType=POST")
+        .contains("\\Qreader.*\\E", "payload.createdOn", "$gte", "$lte");
     assertThat(captured.getValue().getSortObject().toString())
-        .contains("createdOn=-1", "_id=-1");
+        .contains("payload.createdOn=-1", "_id.legacyId=-1");
     assertThat(captured.getValue().getSkip()).isEqualTo(25);
     assertThat(result.totalElements()).isEqualTo(1);
   }

@@ -25,8 +25,11 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.FindAndReplaceOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.convert.DefaultMongoTypeMapper;
 import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
 import org.springframework.data.mongodb.core.convert.NoOpDbRefResolver;
@@ -133,6 +136,70 @@ class MongoKindScopedOperationsTest {
         .append("$set", new Document("payload.display_name", "Grace"))
         .append("$inc", new Document("payload.visits", 1)
             .append("payload.version", 1)));
+  }
+
+  @Test
+  void findAndUpdateScopesTheAtomicMutationAndReturnsTheDecodedWinner() {
+    var winner = new SampleDocument("legacy-id", "Grace", 2L, new Decimal128(4L), 1L);
+    var winnerEnvelope = envelope(winner);
+    when(mongo.findAndModify(
+        any(Query.class), any(Update.class), any(FindAndModifyOptions.class),
+        eq(Document.class), eq("content")))
+        .thenReturn(winnerEnvelope);
+
+    assertThat(operations.findAndUpdate(
+        Query.query(Criteria.where("displayName").is("Ada")),
+        Update.update("displayName", "Grace")))
+        .contains(winner);
+
+    var queryCaptor = ArgumentCaptor.forClass(Query.class);
+    var updateCaptor = ArgumentCaptor.forClass(Update.class);
+    verify(mongo).findAndModify(
+        queryCaptor.capture(), updateCaptor.capture(), any(FindAndModifyOptions.class),
+        eq(Document.class), eq("content"));
+    assertThat(queryCaptor.getValue().getQueryObject()).isEqualTo(new Document("$and", List.of(
+        new Document("_kind", "sample_kind"),
+        new Document("payload.display_name", "Ada"))));
+    assertThat(updateCaptor.getValue().getUpdateObject()).isEqualTo(new Document()
+        .append("$set", new Document("payload.display_name", "Grace"))
+        .append("$inc", new Document("payload.version", 1)));
+  }
+
+  @Test
+  void updateMultiScopesEveryMatchedDocumentToTheKind() {
+    when(mongo.updateMulti(any(Query.class), any(Update.class), eq(Document.class), eq("content")))
+        .thenReturn(com.mongodb.client.result.UpdateResult.acknowledged(2, 2L, null));
+
+    operations.updateMulti(
+        Query.query(Criteria.where("displayName").is("Ada")),
+        Update.update("displayName", "Grace"));
+
+    var queryCaptor = ArgumentCaptor.forClass(Query.class);
+    verify(mongo).updateMulti(
+        queryCaptor.capture(), any(Update.class), eq(Document.class), eq("content"));
+    assertThat(queryCaptor.getValue().getQueryObject()).isEqualTo(new Document("$and", List.of(
+        new Document("_kind", "sample_kind"),
+        new Document("payload.display_name", "Ada"))));
+  }
+
+  @Test
+  void aggregateMatchesTheKindBeforeExposingTheDomainDocumentShape() {
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
+        .thenReturn(new AggregationResults<>(List.of(), new Document()));
+
+    assertThat(operations.aggregate(
+        Aggregation.newAggregation(Aggregation.match(Criteria.where("displayName").is("Ada"))),
+        Document.class))
+        .isEmpty();
+
+    var aggregationCaptor = ArgumentCaptor.forClass(Aggregation.class);
+    verify(mongo).aggregate(aggregationCaptor.capture(), eq("content"), eq(Document.class));
+    assertThat(aggregationCaptor.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT))
+        .startsWith(
+            new Document("$match", new Document("_kind", "sample_kind")),
+            new Document("$replaceRoot", new Document("newRoot", new Document("$mergeObjects", List.of(
+                "$payload", new Document("_id", "$_id.legacyId"))))))
+        .contains(new Document("$match", new Document("displayName", "Ada")));
   }
 
   @Test

@@ -9,8 +9,11 @@ import org.bson.Document;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.FindAndReplaceOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.convert.QueryMapper;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -113,6 +116,52 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
     } catch (DuplicateKeyException failure) {
       throw duplicate();
     }
+  }
+
+  @Override
+  public Optional<T> findAndUpdate(Query domainQuery, Update domainUpdate) {
+    try {
+      var envelope = mongo.findAndModify(
+          fieldMapper.mapQuery(domainQuery),
+          fieldMapper.mapUpdate(domainUpdate),
+          FindAndModifyOptions.options().returnNew(true),
+          Document.class,
+          kind.collection());
+      return Optional.ofNullable(envelope).map(codec::decode);
+    } catch (DuplicateKeyException failure) {
+      throw duplicate();
+    }
+  }
+
+  @Override
+  public UpdateResult updateMulti(Query domainQuery, Update domainUpdate) {
+    try {
+      return mongo.updateMulti(
+          fieldMapper.mapQuery(domainQuery),
+          fieldMapper.mapUpdate(domainUpdate),
+          Document.class,
+          kind.collection());
+    } catch (DuplicateKeyException failure) {
+      throw duplicate();
+    }
+  }
+
+  @Override
+  public <R> List<R> aggregate(Aggregation domainAggregation, Class<R> resultType) {
+    Objects.requireNonNull(domainAggregation, "domainAggregation");
+    Objects.requireNonNull(resultType, "resultType");
+    var operations = new java.util.ArrayList<AggregationOperation>();
+    operations.add(context -> new Document("$match", new Document("_kind", kind.kind())));
+    operations.add(context -> new Document("$replaceRoot", new Document(
+        "newRoot", new Document("$mergeObjects", List.of(
+            "$payload", new Document("_id", "$_id.legacyId"))))));
+    domainAggregation.toPipeline(Aggregation.DEFAULT_CONTEXT).stream()
+        .map(Document::new)
+        .<AggregationOperation>map(stage -> context -> stage)
+        .forEach(operations::add);
+    return mongo.aggregate(
+        Aggregation.newAggregation(operations), kind.collection(), resultType)
+        .getMappedResults();
   }
 
   @Override

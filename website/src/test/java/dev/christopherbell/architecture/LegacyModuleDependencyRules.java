@@ -127,6 +127,9 @@ final class LegacyModuleDependencyRules {
   }
 
   private boolean isPublishedApi(String packageName) {
+    if (isSharedPersistenceApi(packageName)) {
+      return true;
+    }
     var physicalArea = physicalAreaOf(packageName);
     if (physicalArea.isEmpty() || physicalArea.get().equals("permission")) {
       return false;
@@ -134,6 +137,10 @@ final class LegacyModuleDependencyRules {
 
     var apiPackage = rootPackage + "." + physicalArea.get() + ".api";
     return packageName.equals(apiPackage);
+  }
+
+  private boolean isSharedPersistenceApi(String packageName) {
+    return packageName.equals(rootPackage + ".configuration.mongo.domain");
   }
 
   private Optional<AccessViolation> violation(Dependency dependency, ViolationKind kind) {
@@ -151,7 +158,8 @@ final class LegacyModuleDependencyRules {
     }
 
     if (kind == ViolationKind.ORCHESTRATION_DIRECTION
-        && (orchestrationAreas.contains(sourceArea.get())
+        && (isSharedPersistenceApi(target.getPackageName())
+            || orchestrationAreas.contains(sourceArea.get())
             || !orchestrationAreas.contains(targetArea.get()))) {
       return Optional.empty();
     }

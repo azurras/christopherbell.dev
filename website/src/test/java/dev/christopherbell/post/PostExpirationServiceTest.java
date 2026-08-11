@@ -96,14 +96,19 @@ class PostExpirationServiceTest {
         .threadReplyLikesCount(0)
         .threadReplyCount(10_000)
         .build();
+    var factory = dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        .create(mongo);
+    var updatedEnvelope =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, updated);
     when(mongo.findAndModify(
         any(Query.class),
         any(UpdateDefinition.class),
         any(FindAndModifyOptions.class),
-        eq(Post.class))).thenReturn(updated);
+        eq(org.bson.Document.class), eq("content"))).thenReturn(updatedEnvelope);
     var service = new PostExpirationService(
         postRepository,
-        mongo,
+        factory,
         Clock.fixed(changedOn, ZoneOffset.UTC),
         true);
 
@@ -114,10 +119,11 @@ class PostExpirationServiceTest {
         any(Query.class),
         counterUpdate.capture(),
         any(FindAndModifyOptions.class),
-        eq(Post.class));
+        eq(org.bson.Document.class), eq("content"));
     assertEquals(1, counterUpdate.getValue().getUpdateObject()
-        .get("$inc", org.bson.Document.class).getInteger("likesCount"));
-    verify(mongo).updateMulti(any(Query.class), any(UpdateDefinition.class), eq(Post.class));
+        .get("$inc", org.bson.Document.class).getInteger("payload.likesCount"));
+    verify(mongo).updateMulti(
+        any(Query.class), any(UpdateDefinition.class), eq(org.bson.Document.class), eq("content"));
     verify(postRepository, never()).findByRootIdOrderByCreatedOnAsc(any());
   }
 }

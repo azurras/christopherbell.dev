@@ -1,5 +1,7 @@
 package dev.christopherbell.post.discovery;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.like.PostLikeStore;
 import java.time.Instant;
@@ -8,10 +10,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import lombok.RequiredArgsConstructor;
 import org.bson.Document;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -19,26 +19,29 @@ import org.springframework.stereotype.Repository;
 
 /** Bounded active-post queries used to suggest people without popularity signals. */
 @Repository
-@RequiredArgsConstructor
 public class VoidPeopleDiscoveryQueryRepository {
   private static final int MAX_INTEREST_POSTS = 256;
   private static final int MAX_CANDIDATES = 128;
 
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<Post> posts;
   private final PostLikeStore likes;
+
+  public VoidPeopleDiscoveryQueryRepository(
+      DomainMongoOperationsFactory factory, PostLikeStore likes) {
+    this.posts = factory.forType(Post.class);
+    this.likes = likes;
+  }
 
   public Set<String> interestsFor(String accountId, Instant now) {
     var participation = new Criteria().orOperator(
         Criteria.where("accountId").is(accountId),
-        Criteria.where("_id").in(likes.recentLikedPostIds(accountId)));
+        Criteria.where("id").in(likes.recentLikedPostIds(accountId)));
     var query = new Query(new Criteria().andOperator(
         Criteria.where("expiresOn").gt(now), participation))
-        .with(Sort.by(Sort.Direction.DESC, "createdOn", "_id"))
+        .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
         .limit(MAX_INTEREST_POSTS);
-    query.fields().include("topics");
-
     var interests = new LinkedHashSet<String>();
-    mongo.find(query, Post.class).stream()
+    posts.find(query, org.springframework.data.domain.Pageable.unpaged()).stream()
         .flatMap(post -> post.getTopics() == null ? java.util.stream.Stream.empty() : post.getTopics().stream())
         .filter(Objects::nonNull)
         .map(topic -> topic.canonical())
@@ -67,6 +70,6 @@ public class VoidPeopleDiscoveryQueryRepository {
             .append("accountId", "$_id")
             .append("topics", 1)
             .append("recentActivityOn", 1)));
-    return mongo.aggregate(aggregation, "posts", VoidPersonCandidate.class).getMappedResults();
+    return posts.aggregate(aggregation, VoidPersonCandidate.class);
   }
 }

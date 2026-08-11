@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Set;
 import dev.christopherbell.message.model.Message;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -18,7 +19,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.UpdateDefinition;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationArchiveServiceTest {
@@ -28,20 +28,26 @@ class ConversationArchiveServiceTest {
   @Test
   void archive_upsertsOnlyTheOwnersConversationView() {
     var service = new ConversationArchiveService(
-        mongo, Clock.fixed(NOW, ZoneOffset.UTC));
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo),
+        Clock.fixed(NOW, ZoneOffset.UTC));
 
-    when(mongo.findOne(any(Query.class), eq(Message.class)))
-        .thenReturn(Message.builder().id("latest-message").build());
+    var latest = Message.builder().id("latest-message").build();
+    var latestEnvelope =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, latest);
+    when(mongo.findOne(any(Query.class), eq(Document.class), eq("communications")))
+        .thenReturn(latestEnvelope);
+    when(mongo.insert(any(Document.class), eq("sessions")))
+        .thenAnswer(invocation -> invocation.getArgument(0));
 
     var result = service.archive("owner", "other:owner", Set.of("owner", "other"));
 
-    var query = ArgumentCaptor.forClass(Query.class);
-    var update = ArgumentCaptor.forClass(UpdateDefinition.class);
-    verify(mongo).upsert(query.capture(), update.capture(), eq(ConversationArchiveState.class));
-    assertThat(query.getValue().getQueryObject().toString())
-        .contains("ownerAccountId=owner", "conversationKey=other:owner");
-    assertThat(update.getValue().getUpdateObject().toString())
-        .contains("participantIds", "owner", "other", "latest-message", NOW.toString());
+    var inserted = ArgumentCaptor.forClass(Document.class);
+    verify(mongo).insert(inserted.capture(), eq("sessions"));
+    assertThat(inserted.getValue().toString())
+        .contains("_kind=conversation_archive_state", "ownerAccountId=owner",
+            "conversationKey=other:owner", "participantIds", "owner", "other",
+            "latest-message", "archivedAt");
     assertThat(result.conversationKey()).isEqualTo("other:owner");
     assertThat(result.archivedAt()).isEqualTo(NOW);
   }

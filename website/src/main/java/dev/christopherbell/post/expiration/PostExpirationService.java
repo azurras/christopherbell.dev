@@ -1,7 +1,7 @@
 package dev.christopherbell.post.expiration;
 
-import com.mongodb.client.model.FindOneAndUpdateOptions;
-import com.mongodb.client.model.ReturnDocument;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.like.PostLike;
@@ -10,18 +10,14 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
-import org.bson.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.FindAndModifyOptions;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -37,25 +33,31 @@ public class PostExpirationService {
   private static final int MAINTENANCE_BATCH_SIZE = 250;
 
   private final PostRepository postRepository;
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<Post> posts;
+  private final KindScopedMongoOperations<PostLike> likes;
   private final Clock clock;
   private final boolean expirationEnabled;
 
   @Autowired
   public PostExpirationService(
       PostRepository postRepository,
-      MongoTemplate mongo,
+      DomainMongoOperationsFactory factory,
       Clock clock,
       @Value("${posts.expiration.enabled:false}") boolean expirationEnabled) {
     this.postRepository = postRepository;
-    this.mongo = mongo;
+    this.posts = factory == null ? null : factory.forType(Post.class);
+    this.likes = factory == null ? null : factory.forType(PostLike.class);
     this.clock = clock;
     this.expirationEnabled = expirationEnabled;
   }
 
   /** Test-only compatibility constructor for focused calculation tests. */
   public PostExpirationService(PostRepository postRepository, boolean expirationEnabled) {
-    this(postRepository, null, Clock.systemUTC(), expirationEnabled);
+    this.postRepository = postRepository;
+    this.posts = null;
+    this.likes = null;
+    this.clock = Clock.systemUTC();
+    this.expirationEnabled = expirationEnabled;
   }
 
   /** Calculates a root post expiration from creation time and extension count. */
@@ -189,14 +191,13 @@ public class PostExpirationService {
         ? post.getRootId()
         : post.getId();
     var rootExpiration = post.getExpiresOn();
-    if (mongo != null) {
-      mongo.updateMulti(
+    if (posts != null) {
+      posts.updateMulti(
           new Query(new Criteria().andOperator(
               Criteria.where("rootId").is(rootId),
-              Criteria.where("_id").ne(post.getId()),
+              Criteria.where("id").ne(post.getId()),
               Criteria.where("parentId").ne(null))),
-          new Update().set("expiresOn", rootExpiration),
-          Post.class);
+          new Update().set("expiresOn", rootExpiration));
       return;
     }
     postRepository.findByRootIdOrderByCreatedOnAsc(rootId).stream()
@@ -247,14 +248,13 @@ public class PostExpirationService {
       subtree.add(post);
     }
     long removedCount;
-    if (mongo == null) {
+    if (posts == null) {
       postRepository.deleteAll(subtree);
       removedCount = subtree.size();
     } else {
       var postIds = subtree.stream().map(Post::getId).toList();
-      mongo.remove(new Query(Criteria.where("postId").in(postIds)), PostLike.class);
-      removedCount = mongo.remove(
-          new Query(Criteria.where("_id").in(postIds)), Post.class).getDeletedCount();
+      likes.remove(new Query(Criteria.where("postId").in(postIds)));
+      removedCount = posts.remove(new Query(Criteria.where("id").in(postIds))).getDeletedCount();
     }
     if (isReply(post) && removedCount > 0) {
       thread.stream()
@@ -273,7 +273,7 @@ public class PostExpirationService {
     var page = PageRequest.of(
         0,
         MAINTENANCE_BATCH_SIZE,
-        Sort.by(Sort.Direction.ASC, "_id"));
+        Sort.by(Sort.Direction.ASC, "id"));
     var missing = postRepository.findByExpiresOnIsNull(page);
     if (!missing.isEmpty()) {
       missing.forEach(p -> {
@@ -309,7 +309,7 @@ public class PostExpirationService {
 
   private Post incrementCounter(
       Post fallback, String field, int delta, Instant changedOn, boolean extended) {
-    if (mongo == null) {
+    if (posts == null) {
       int current = switch (field) {
         case "likesCount" -> fallback.getLikesCount() == null ? 0 : fallback.getLikesCount();
         case "threadReplyLikesCount" -> fallback.getThreadReplyLikesCount() == null
@@ -327,7 +327,7 @@ public class PostExpirationService {
       postRepository.save(fallback);
       return fallback;
     }
-    var criteria = Criteria.where("_id").is(fallback.getId());
+    var criteria = Criteria.where("id").is(fallback.getId());
     if (delta < 0) {
       criteria = new Criteria().andOperator(criteria, Criteria.where(field).gt(0));
     }
@@ -335,29 +335,26 @@ public class PostExpirationService {
     if (extended) {
       update.set("lastExtendedOn", changedOn);
     }
-    var updated = mongo.findAndModify(
-        new Query(criteria), update, FindAndModifyOptions.options().returnNew(true), Post.class);
-    return updated != null ? updated : mongo.findById(fallback.getId(), Post.class);
+    return posts.findAndUpdate(new Query(criteria), update)
+        .or(() -> posts.findById(fallback.getId())).orElse(null);
   }
 
   private void decrementReplyCount(Post root, long removedCount) {
     int delta = Math.toIntExact(Math.min(removedCount, Integer.MAX_VALUE));
     var changedOn = clock.instant();
-    if (mongo == null) {
+    if (posts == null) {
       var updated = incrementCounter(root, "threadReplyCount", -delta, changedOn, false);
       refreshAndPersistExpiration(updated);
       return;
     }
-    var current = new Document("$ifNull", java.util.List.of("$threadReplyCount", 0));
-    var next = new Document("$max", java.util.List.of(
-        0,
-        new Document("$subtract", java.util.List.of(current, delta))));
-    mongo.getCollection("posts").findOneAndUpdate(
-        new Document("_id", root.getId()),
-        java.util.List.of(new Document("$set", new Document("threadReplyCount", next)
-            .append("lastUpdatedOn", Date.from(changedOn)))),
-        new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
-    refreshAndPersistExpiration(mongo.findById(root.getId(), Post.class));
+    var decremented = posts.findAndUpdate(
+        Query.query(Criteria.where("id").is(root.getId()).and("threadReplyCount").gte(delta)),
+        new Update().inc("threadReplyCount", -delta).set("lastUpdatedOn", changedOn));
+    var updated = decremented.or(() -> posts.findAndUpdate(
+        Query.query(Criteria.where("id").is(root.getId()).and("threadReplyCount").lt(delta)),
+        new Update().set("threadReplyCount", 0).set("lastUpdatedOn", changedOn)))
+        .or(() -> posts.findById(root.getId())).orElse(null);
+    refreshAndPersistExpiration(updated);
   }
 
   private void refreshAndPersistExpiration(Post post) {
@@ -365,11 +362,10 @@ public class PostExpirationService {
       return;
     }
     refreshExpiration(post);
-    if (mongo != null) {
-      mongo.updateFirst(
-          new Query(Criteria.where("_id").is(post.getId())),
-          new Update().set("expiresOn", post.getExpiresOn()),
-          Post.class);
+    if (posts != null) {
+      posts.updateFirst(
+          new Query(Criteria.where("id").is(post.getId())),
+          new Update().set("expiresOn", post.getExpiresOn()));
     } else {
       postRepository.save(post);
     }

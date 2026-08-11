@@ -4,12 +4,10 @@ import java.time.Instant;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Pseudonymous durable checkpoint for retryable account deletion. */
 @Data
 @NoArgsConstructor
-@Document("account_deletion_jobs")
 public class AccountDeletionJob {
   @Id private String id;
   private AccountDeletionStatus status;

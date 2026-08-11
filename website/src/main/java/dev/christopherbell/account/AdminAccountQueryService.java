@@ -1,33 +1,38 @@
 package dev.christopherbell.account;
 
 import dev.christopherbell.account.model.Account;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.util.ArrayList;
 import java.util.regex.Pattern;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
 /** Executes bounded, private-field-safe account searches for administrators. */
-@RequiredArgsConstructor
 @Service
 public class AdminAccountQueryService {
-  private final MongoTemplate mongoTemplate;
+  private final KindScopedMongoOperations<Account> accounts;
   private final AccountMapper accountMapper;
+
+  public AdminAccountQueryService(
+      DomainMongoOperationsFactory factory, AccountMapper accountMapper) {
+    this.accounts = factory.forType(Account.class);
+    this.accountMapper = accountMapper;
+  }
 
   /** Returns the requested account page and total counts. */
   public AdminAccountPage getAccounts(AdminAccountQuery request) {
     var countQuery = new Query(buildCriteria(request));
-    var totalElements = mongoTemplate.count(countQuery, Account.class);
+    var totalElements = accounts.count(countQuery);
     var sort = Sort.by(request.direction(), request.sort())
         .and(Sort.by(request.direction(), "id"));
     var pageQuery = new Query(buildCriteria(request))
         .with(sort)
         .skip((long) request.page() * request.size())
         .limit(request.size());
-    var items = mongoTemplate.find(pageQuery, Account.class).stream()
+    var items = accounts.find(pageQuery, org.springframework.data.domain.Pageable.unpaged()).stream()
         .map(accountMapper::toAccount)
         .toList();
     var totalPages = totalElements == 0

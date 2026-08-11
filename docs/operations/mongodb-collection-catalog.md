@@ -78,12 +78,6 @@ own their collection names locally.
 
 | Manual owner type | Physical names |
 | --- | --- |
-| `dev.christopherbell.account.AdminAccountQueryService` | `accounts` |
-| `dev.christopherbell.account.auth.MongoAccountLoginStore` | `accounts` |
-| `dev.christopherbell.account.deletion.MongoAccountDeletionOperations` | `account_follows`, `account_trust_relationships`, `accounts`, `admin_activity`, `browser_sessions`, `conversation_archive_states`, `hidden_post_threads`, `messages`, `notification_delivery_guards`, `notification_preferences`, `notification_rate_limits`, `notifications`, `post_likes`, `post_reports`, `posts`, `shared_folder_audit`, `shared_folder_recycle_items`, `whatsforlunch_favorites`, `whatsforlunch_preferences`, `whatsforlunch_ratings`, `whatsforlunch_sessions` |
-| `dev.christopherbell.account.follow.AccountFollowStore` | `account_follows` |
-| `dev.christopherbell.admin.activity.AdminActivityQueryService` | `admin_activity` |
-| `dev.christopherbell.admin.commandcenter.action.MongoPendingActionStore` | `command_center_pending_actions` |
 | `dev.christopherbell.configuration.mongo.migration.MigrationStateStore` | `application_migrations` |
 | `dev.christopherbell.configuration.mongo.migration.V001EnsureMigrationInfrastructure` | `application_leases`, `application_migrations` |
 | `dev.christopherbell.configuration.mongo.migration.V002EnsureRestaurantImportPreviewIndexes` | `restaurant_import_previews` |
@@ -99,26 +93,11 @@ own their collection names locally.
 | `dev.christopherbell.configuration.mongo.migration.V012RetainSharedFolderWork` | `shared_folder_media_jobs`, `shared_folder_radio`, `shared_folder_upload_sessions` |
 | `dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes` | `whatsforlunch_ratings` |
 | `dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState` | `music_queue_state`, `music_radio_state`, `music_runtime_state` |
-| `dev.christopherbell.configuration.security.browser.MongoBrowserSessionActivityStore` | `browser_sessions` |
-| `dev.christopherbell.configuration.security.browser.MongoBrowserSessionAuthenticationStore` | `accounts`, `browser_sessions` |
-| `dev.christopherbell.federation.discovery.FederationOutboxQueryRepository` | `posts` |
-| `dev.christopherbell.federation.outbound.FederationDeliveryJobRepository` | `federation_delivery_jobs`, `federation_scan_state`, `posts` |
-| `dev.christopherbell.message.conversation.ConversationArchiveService` | `conversation_archive_states`, `messages` |
-| `dev.christopherbell.message.conversation.ConversationQueryRepository` | `messages` |
 | `dev.christopherbell.music.catalog.MusicCatalog` | `music_tracks` |
 | `dev.christopherbell.music.library.MusicLibraryService` | `music_playlists`, `music_tracks` |
 | `dev.christopherbell.music.radio.MusicRuntimeStateStore` | `music_runtime_state` |
 | `dev.christopherbell.music.security.MusicAccessAuditQueryService` | `music_access_attempts` |
 | `dev.christopherbell.music.security.MusicAccessAuditRecorder` | `music_access_attempts` |
-| `dev.christopherbell.notification.delivery.NotificationFanoutGuard` | `notification_delivery_guards`, `notification_rate_limits` |
-| `dev.christopherbell.notification.inbox.NotificationQueryRepository` | `notifications` |
-| `dev.christopherbell.post.discovery.VoidDiscoveryQueryRepository` | `posts` |
-| `dev.christopherbell.post.discovery.VoidPeopleDiscoveryQueryRepository` | `posts` |
-| `dev.christopherbell.post.expiration.PostExpirationService` | `post_likes`, `posts` |
-| `dev.christopherbell.post.feed.PostEngagementQueryRepository` | `posts` |
-| `dev.christopherbell.post.feed.PostFeedQueryRepository` | `account_follows`, `posts` |
-| `dev.christopherbell.post.like.PostLikeStore` | `post_likes` |
-| `dev.christopherbell.report.query.ReportQueryService` | `post_reports` |
 | `dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService` | `shared_folder_audit` |
 | `dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore` | `shared_folder_maintenance_leases` |
 | `dev.christopherbell.whatsforlunch.restaurant.RestaurantDuplicateQueryRepository` | `whatsforlunch` |

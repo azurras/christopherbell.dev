@@ -1,5 +1,7 @@
 package dev.christopherbell.post.discovery;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.model.Post;
@@ -9,10 +11,8 @@ import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
-import lombok.RequiredArgsConstructor;
 import org.bson.Document;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -21,13 +21,18 @@ import org.springframework.stereotype.Repository;
 
 /** Bounded MongoDB queries for anonymous Void discovery. */
 @Repository
-@RequiredArgsConstructor
 public class VoidDiscoveryQueryRepository {
   private static final int MAX_PAGE_SIZE = 24;
-  private static final String POSTS_COLLECTION = "posts";
+  private static final String POSTS_COLLECTION = "content";
 
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<Post> posts;
   private final StableCursorCodec cursors;
+
+  public VoidDiscoveryQueryRepository(
+      DomainMongoOperationsFactory factory, StableCursorCodec cursors) {
+    this.posts = factory.forType(Post.class);
+    this.cursors = cursors;
+  }
 
   public VoidDiscoveryPage<Post> newArrivals(
       Optional<StableCursor> cursor, int requestedSize, Instant now) {
@@ -56,8 +61,12 @@ public class VoidDiscoveryQueryRepository {
         .append("topics.canonical", canonical)));
     operations.add(raw("$group", new Document("_id", "$rootId")));
     operations.add(raw("$lookup", new Document("from", POSTS_COLLECTION)
-        .append("localField", "_id")
-        .append("foreignField", "_id")
+        .append("let", new Document("rootId", "$_id"))
+        .append("pipeline", List.of(
+            new Document("$match", new Document("$expr", new Document("$and", List.of(
+                new Document("$eq", List.of("$_kind", "post")),
+                new Document("$eq", List.of("$_id.legacyId", "$$rootId")))))),
+            unwrapEnvelope()))
         .append("as", "root")));
     operations.add(raw("$unwind", "$root"));
     operations.add(raw("$replaceRoot", new Document("newRoot", "$root")));
@@ -66,7 +75,7 @@ public class VoidDiscoveryQueryRepository {
     operations.add(raw("$limit", size + 1));
 
     var aggregation = Aggregation.newAggregation(operations);
-    var loaded = mongo.aggregate(aggregation, POSTS_COLLECTION, Post.class).getMappedResults();
+    var loaded = posts.aggregate(aggregation, Post.class);
     return postPage(loaded, size, Post::getCreatedOn);
   }
 
@@ -78,8 +87,12 @@ public class VoidDiscoveryQueryRepository {
         .append("topics.0", new Document("$exists", true))));
     operations.add(raw("$unwind", "$topics"));
     operations.add(raw("$lookup", new Document("from", POSTS_COLLECTION)
-        .append("localField", "rootId")
-        .append("foreignField", "_id")
+        .append("let", new Document("rootId", "$rootId"))
+        .append("pipeline", List.of(
+            new Document("$match", new Document("$expr", new Document("$and", List.of(
+                new Document("$eq", List.of("$_kind", "post")),
+                new Document("$eq", List.of("$_id.legacyId", "$$rootId")))))),
+            unwrapEnvelope()))
         .append("as", "root")));
     operations.add(raw("$unwind", "$root"));
     operations.add(raw("$match", new Document("root.parentId", null)
@@ -100,8 +113,7 @@ public class VoidDiscoveryQueryRepository {
         .append("activityOn", 1)));
 
     var aggregation = Aggregation.newAggregation(operations);
-    var loaded = mongo.aggregate(aggregation, POSTS_COLLECTION, VoidTopicSummary.class)
-        .getMappedResults();
+    var loaded = posts.aggregate(aggregation, VoidTopicSummary.class);
     boolean hasNext = loaded.size() > size;
     var items = loaded.stream().limit(size).toList();
     String nextCursor = null;
@@ -130,9 +142,9 @@ public class VoidDiscoveryQueryRepository {
     var query = new Query(criteria)
         .with(Sort.by(
             new Sort.Order(direction, timestampField),
-            new Sort.Order(direction, "_id")))
+            new Sort.Order(direction, "id")))
         .limit(size + 1);
-    var loaded = mongo.find(query, Post.class);
+    var loaded = posts.find(query, org.springframework.data.domain.Pageable.unpaged());
     return postPage(loaded, size, post -> timestamp(post, timestampField));
   }
 
@@ -164,8 +176,8 @@ public class VoidDiscoveryQueryRepository {
         ? Criteria.where(timestampField).lt(cursor.timestamp())
         : Criteria.where(timestampField).gt(cursor.timestamp());
     Criteria idBoundary = direction.isDescending()
-        ? Criteria.where("_id").lt(cursor.id())
-        : Criteria.where("_id").gt(cursor.id());
+        ? Criteria.where("id").lt(cursor.id())
+        : Criteria.where("id").gt(cursor.id());
     return new Criteria().orOperator(
         timestampBoundary,
         new Criteria().andOperator(
@@ -207,6 +219,11 @@ public class VoidDiscoveryQueryRepository {
 
   private static AggregationOperation raw(String operator, Object value) {
     return context -> new Document(operator, value);
+  }
+
+  private static Document unwrapEnvelope() {
+    return new Document("$replaceRoot", new Document("newRoot", new Document(
+        "$mergeObjects", List.of("$payload", new Document("_id", "$_id.legacyId")))));
   }
 
   private static int pageSize(int requestedSize) {

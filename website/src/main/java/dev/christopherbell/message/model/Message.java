@@ -12,7 +12,6 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 @AllArgsConstructor
 @Builder
@@ -30,7 +29,6 @@ import org.springframework.data.mongodb.core.mapping.Document;
         name = "message_recipient_sender_read",
         def = "{'recipientAccountId': 1, 'senderAccountId': 1, 'read': 1}")
 })
-@Document("messages")
 public class Message {
   private final String type = "message";
 

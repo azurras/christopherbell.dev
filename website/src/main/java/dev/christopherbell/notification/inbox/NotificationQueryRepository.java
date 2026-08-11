@@ -1,13 +1,13 @@
 package dev.christopherbell.notification.inbox;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.notification.model.Notification;
 import dev.christopherbell.notification.model.NotificationDetail;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import java.util.Optional;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -15,11 +15,16 @@ import org.springframework.stereotype.Repository;
 
 /** Stable owner-scoped reads and bulk updates for the notification inbox. */
 @Repository
-@RequiredArgsConstructor
 public class NotificationQueryRepository {
   private static final int MAX_PAGE_SIZE = 100;
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<Notification> mongo;
   private final StableCursorCodec cursorCodec;
+
+  public NotificationQueryRepository(
+      DomainMongoOperationsFactory factory, StableCursorCodec cursorCodec) {
+    this.mongo = factory.forType(Notification.class);
+    this.cursorCodec = cursorCodec;
+  }
 
   /** Reads one stable newest-first page for one recipient. */
   public NotificationPage page(
@@ -35,13 +40,13 @@ public class NotificationQueryRepository {
           Criteria.where("createdOn").lt(boundary.timestamp()),
           new Criteria().andOperator(
               Criteria.where("createdOn").is(boundary.timestamp()),
-              Criteria.where("_id").lt(boundary.id())));
+              Criteria.where("id").lt(boundary.id())));
       criteria = new Criteria().andOperator(criteria, before);
     }
     var query = new Query(criteria)
-        .with(Sort.by(Sort.Direction.DESC, "createdOn", "_id"))
+        .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
         .limit(size + 1);
-    var loaded = mongo.find(query, Notification.class);
+    var loaded = mongo.find(query, org.springframework.data.domain.Pageable.unpaged());
     boolean hasNext = loaded.size() > size;
     var notifications = loaded.stream().limit(size).toList();
     String nextCursor = null;
@@ -57,7 +62,7 @@ public class NotificationQueryRepository {
     var query = Query.query(new Criteria().andOperator(
         Criteria.where("accountId").is(accountId),
         Criteria.where("read").ne(true)));
-    var result = mongo.updateMulti(query, Update.update("read", true), Notification.class);
+    var result = mongo.updateMulti(query, Update.update("read", true));
     return new NotificationReadResult(result.getModifiedCount());
   }
 

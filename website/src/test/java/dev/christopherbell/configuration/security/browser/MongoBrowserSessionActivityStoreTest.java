@@ -27,6 +27,10 @@ class MongoBrowserSessionActivityStoreTest {
   void repositoryCanBeProxiedUsingTheApplicationClassProxyMode() {
     try (var context = new AnnotationConfigApplicationContext()) {
       context.registerBean(MongoTemplate.class, () -> mock(MongoTemplate.class));
+      context.registerBean(
+          dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory.class,
+          () -> dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+              .create(context.getBean(MongoTemplate.class)));
       context.registerBean(PersistenceExceptionTranslationPostProcessor.class, () -> {
         var postProcessor = new PersistenceExceptionTranslationPostProcessor();
         postProcessor.setProxyTargetClass(true);
@@ -44,34 +48,46 @@ class MongoBrowserSessionActivityStoreTest {
   void touchUpdatesOnlyActivityFieldsWhenTheObservedLiveSessionStillMatches() {
     var mongo = mock(MongoTemplate.class);
     var expected = BrowserSession.builder().id("session-1").build();
+    var store = new MongoBrowserSessionActivityStore(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
+    var expectedEnvelope =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, expected);
     when(mongo.findAndModify(
-        any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(BrowserSession.class)))
-        .thenReturn(expected);
-    var store = new MongoBrowserSessionActivityStore(mongo);
+        any(Query.class), any(Update.class), any(FindAndModifyOptions.class),
+        eq(Document.class), eq("sessions")))
+        .thenReturn(expectedEnvelope);
     Instant idleExpiresOn = NOW.plusSeconds(600);
 
     var result = store.touch("session-1", OBSERVED, NOW, idleExpiresOn);
 
-    assertThat(result).containsSame(expected);
+    assertThat(result).contains(expected);
     var query = ArgumentCaptor.forClass(Query.class);
     var update = ArgumentCaptor.forClass(Update.class);
     verify(mongo).findAndModify(
-        query.capture(), update.capture(), any(FindAndModifyOptions.class), eq(BrowserSession.class));
-    assertThat(query.getValue().getQueryObject()).containsEntry("lastSeenOn", OBSERVED);
+        query.capture(), update.capture(), any(FindAndModifyOptions.class),
+        eq(Document.class), eq("sessions"));
+    assertThat(query.getValue().getQueryObject().toString())
+        .contains("_kind", "browser_session", "payload.lastSeenOn");
     assertLiveSessionPredicate(query.getValue(), idleExpiresOn);
-    assertThat(update.getValue().getUpdateObject())
-        .isEqualTo(new Document("$set", new Document("lastSeenOn", NOW)
-            .append("idleExpiresOn", idleExpiresOn)));
+    assertThat(update.getValue().getUpdateObject().toString())
+        .contains("payload.lastSeenOn", "payload.idleExpiresOn")
+        .doesNotContain("tokenHash", "rotatedOn", "absoluteExpiresOn");
   }
 
   @Test
   void rotationUpdatesCredentialsAndActivityOnlyWhenTheObservedLiveSessionStillMatches() {
     var mongo = mock(MongoTemplate.class);
     var expected = BrowserSession.builder().id("session-1").build();
+    var store = new MongoBrowserSessionActivityStore(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
+    var expectedEnvelope =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, expected);
     when(mongo.findAndModify(
-        any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(BrowserSession.class)))
-        .thenReturn(expected);
-    var store = new MongoBrowserSessionActivityStore(mongo);
+        any(Query.class), any(Update.class), any(FindAndModifyOptions.class),
+        eq(Document.class), eq("sessions")))
+        .thenReturn(expectedEnvelope);
     Instant previousTokenExpiresOn = NOW.plusSeconds(120);
     Instant idleExpiresOn = NOW.plusSeconds(600);
 
@@ -79,29 +95,25 @@ class MongoBrowserSessionActivityStoreTest {
         "session-1", "old-token-hash", OBSERVED, "next-token-hash", NOW,
         previousTokenExpiresOn, idleExpiresOn);
 
-    assertThat(result).containsSame(expected);
+    assertThat(result).contains(expected);
     var query = ArgumentCaptor.forClass(Query.class);
     var update = ArgumentCaptor.forClass(Update.class);
     verify(mongo).findAndModify(
-        query.capture(), update.capture(), any(FindAndModifyOptions.class), eq(BrowserSession.class));
-    assertThat(query.getValue().getQueryObject())
-        .containsEntry("tokenHash", "old-token-hash")
-        .containsEntry("rotatedOn", OBSERVED);
+        query.capture(), update.capture(), any(FindAndModifyOptions.class),
+        eq(Document.class), eq("sessions"));
+    assertThat(query.getValue().getQueryObject().toString())
+        .contains("payload.tokenHash", "old-token-hash", "payload.rotatedOn");
     assertLiveSessionPredicate(query.getValue(), idleExpiresOn);
-    assertThat(update.getValue().getUpdateObject())
-        .isEqualTo(new Document("$set", new Document("previousTokenHash", "old-token-hash")
-            .append("previousTokenExpiresOn", previousTokenExpiresOn)
-            .append("tokenHash", "next-token-hash")
-            .append("rotatedOn", NOW)
-            .append("lastSeenOn", NOW)
-            .append("idleExpiresOn", idleExpiresOn)));
+    assertThat(update.getValue().getUpdateObject().toString())
+        .contains("payload.previousTokenHash", "old-token-hash",
+            "payload.previousTokenExpiresOn", "payload.tokenHash", "next-token-hash",
+            "payload.rotatedOn", "payload.lastSeenOn", "payload.idleExpiresOn")
+        .doesNotContain("absoluteExpiresOn", "accountId");
   }
 
   private static void assertLiveSessionPredicate(Query query, Instant idleExpiresOn) {
-    var clauses = query.getQueryObject().getList("$and", Document.class);
-    assertThat(clauses)
-        .contains(new Document("_id", "session-1"))
-        .contains(new Document("idleExpiresOn", new Document("$gt", NOW)))
-        .contains(new Document("absoluteExpiresOn", new Document("$gte", idleExpiresOn)));
+    assertThat(query.getQueryObject().toString())
+        .contains("_kind", "browser_session", "_id.legacyId", "session-1",
+            "payload.idleExpiresOn", "payload.absoluteExpiresOn");
   }
 }

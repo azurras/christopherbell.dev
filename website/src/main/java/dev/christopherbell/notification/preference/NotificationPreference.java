@@ -9,14 +9,12 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Stores per-account notification category opt-ins. */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Document("notification_preferences")
 public class NotificationPreference {
   @Id private String id;
   @Indexed(unique = true) private String accountId;

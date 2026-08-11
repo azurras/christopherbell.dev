@@ -8,7 +8,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
 
@@ -22,7 +21,6 @@ import org.springframework.data.mongodb.core.index.CompoundIndexes;
     @CompoundIndex(name = "admin_activity_target_created_id_desc", def = "{'targetType': 1, 'createdOn': -1, '_id': -1}"),
     @CompoundIndex(name = "admin_activity_actor_created_id_desc", def = "{'actorUsername': 1, 'createdOn': -1, '_id': -1}")
 })
-@Document("admin_activity")
 public class AdminActivity {
   @Id private String id;
   private String actorAccountId;

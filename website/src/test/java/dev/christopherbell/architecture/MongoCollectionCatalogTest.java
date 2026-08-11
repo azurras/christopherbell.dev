@@ -16,6 +16,7 @@ import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
@@ -50,19 +51,6 @@ class MongoCollectionCatalogTest {
           "dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState",
           "dev.christopherbell.vehicle.randomvin.model.RandomVinImportState"));
   private static final Map<String, Set<String>> MANUAL_COLLECTIONS_BY_OWNER = Map.ofEntries(
-      manualOwner("dev.christopherbell.account.AdminAccountQueryService", "accounts"),
-      manualOwner("dev.christopherbell.account.auth.MongoAccountLoginStore", "accounts"),
-      manualOwner("dev.christopherbell.account.deletion.MongoAccountDeletionOperations",
-          "account_follows", "account_trust_relationships", "accounts", "admin_activity",
-          "browser_sessions", "conversation_archive_states", "hidden_post_threads", "messages",
-          "notification_delivery_guards", "notification_preferences", "notification_rate_limits",
-          "notifications", "post_likes", "post_reports", "posts", "shared_folder_audit",
-          "shared_folder_recycle_items", "whatsforlunch_favorites", "whatsforlunch_preferences",
-          "whatsforlunch_ratings", "whatsforlunch_sessions"),
-      manualOwner("dev.christopherbell.account.follow.AccountFollowStore", "account_follows"),
-      manualOwner("dev.christopherbell.admin.activity.AdminActivityQueryService", "admin_activity"),
-      manualOwner("dev.christopherbell.admin.commandcenter.action.MongoPendingActionStore",
-          "command_center_pending_actions"),
       manualOwner("dev.christopherbell.configuration.mongo.migration.MigrationStateStore",
           "application_migrations"),
       manualOwner("dev.christopherbell.configuration.mongo.migration.V001EnsureMigrationInfrastructure",
@@ -93,32 +81,12 @@ class MongoCollectionCatalogTest {
           "whatsforlunch_ratings"),
       manualOwner("dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState",
           "music_queue_state", "music_radio_state", "music_runtime_state"),
-      manualOwner("dev.christopherbell.configuration.security.browser.MongoBrowserSessionActivityStore",
-          "browser_sessions"),
-      manualOwner("dev.christopherbell.configuration.security.browser.MongoBrowserSessionAuthenticationStore",
-          "accounts", "browser_sessions"),
-      manualOwner("dev.christopherbell.federation.discovery.FederationOutboxQueryRepository", "posts"),
-      manualOwner("dev.christopherbell.federation.outbound.FederationDeliveryJobRepository",
-          "federation_delivery_jobs", "federation_scan_state", "posts"),
-      manualOwner("dev.christopherbell.message.conversation.ConversationArchiveService",
-          "conversation_archive_states", "messages"),
-      manualOwner("dev.christopherbell.message.conversation.ConversationQueryRepository", "messages"),
       manualOwner("dev.christopherbell.music.catalog.MusicCatalog", "music_tracks"),
       manualOwner("dev.christopherbell.music.library.MusicLibraryService", "music_playlists", "music_tracks"),
       manualOwner("dev.christopherbell.music.radio.MusicRuntimeStateStore",
           "music_runtime_state"),
       manualOwner("dev.christopherbell.music.security.MusicAccessAuditQueryService", "music_access_attempts"),
       manualOwner("dev.christopherbell.music.security.MusicAccessAuditRecorder", "music_access_attempts"),
-      manualOwner("dev.christopherbell.notification.delivery.NotificationFanoutGuard",
-          "notification_delivery_guards", "notification_rate_limits"),
-      manualOwner("dev.christopherbell.notification.inbox.NotificationQueryRepository", "notifications"),
-      manualOwner("dev.christopherbell.post.discovery.VoidDiscoveryQueryRepository", "posts"),
-      manualOwner("dev.christopherbell.post.discovery.VoidPeopleDiscoveryQueryRepository", "posts"),
-      manualOwner("dev.christopherbell.post.expiration.PostExpirationService", "post_likes", "posts"),
-      manualOwner("dev.christopherbell.post.feed.PostEngagementQueryRepository", "posts"),
-      manualOwner("dev.christopherbell.post.feed.PostFeedQueryRepository", "account_follows", "posts"),
-      manualOwner("dev.christopherbell.post.like.PostLikeStore", "post_likes"),
-      manualOwner("dev.christopherbell.report.query.ReportQueryService", "post_reports"),
       manualOwner("dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService",
           "shared_folder_audit"),
       manualOwner("dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore",
@@ -135,6 +103,7 @@ class MongoCollectionCatalogTest {
           "whatsforlunch_ratings"));
   private static final Set<String> MONGO_TEMPLATE_INFRASTRUCTURE_OWNERS = Set.of(
       "dev.christopherbell.admin.commandcenter.metrics.CommandCenterMetricsService",
+      "dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory",
       "dev.christopherbell.configuration.mongo.domain.MongoKindScopedOperations",
       "dev.christopherbell.configuration.mongo.migration.ApplicationMigration",
       "dev.christopherbell.configuration.mongo.migration.MongoMigrationRunner",
@@ -304,6 +273,9 @@ class MongoCollectionCatalogTest {
 
   private static Set<String> sourceBackedCollectionNames() {
     var names = new TreeSet<>(mappedDocumentOwners().keySet());
+    DomainCollectionManifest.ALL_KINDS.stream()
+        .flatMap(kind -> kind.legacySource().stream())
+        .forEach(names::add);
     MANUAL_COLLECTIONS_BY_OWNER.values().forEach(names::addAll);
     return names;
   }

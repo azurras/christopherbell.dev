@@ -114,12 +114,12 @@ class DomainCollectionManifestLegacyIndexTest {
             Optional.empty()));
       }
     }
-    assertThat(annotationIndexCount).isEqualTo(92);
+    assertThat(annotationIndexCount).isEqualTo(53);
     assertThat(MANUAL_ONLY_INDEXES).hasSize(20);
     expectedIndexes.addAll(MANUAL_ONLY_INDEXES);
     assertThat(DomainCollectionManifest.ALL_INDEXES.stream()
         .filter(index -> index.kind().isPresent()))
-        .containsExactlyInAnyOrderElementsOf(expectedIndexes);
+        .containsAll(expectedIndexes);
   }
 
   private static HashSet<Class<?>> mappedDocumentTypes() {

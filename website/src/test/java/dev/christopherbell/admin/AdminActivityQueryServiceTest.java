@@ -14,6 +14,7 @@ import dev.christopherbell.admin.model.AdminActivity;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import java.time.Instant;
 import java.util.List;
+import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,15 +32,20 @@ class AdminActivityQueryServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new AdminActivityQueryService(mongo);
+    service = new AdminActivityQueryService(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
   }
 
   @Test
   @DisplayName("Audit pages filter action target actor and inclusive dates with stable order")
   void query_appliesAllFilters() throws Exception {
-    when(mongo.count(any(Query.class), eq(AdminActivity.class))).thenReturn(1L);
-    when(mongo.find(any(Query.class), eq(AdminActivity.class)))
-        .thenReturn(List.of(AdminActivity.builder().id("a1").build()));
+    var activity = AdminActivity.builder().id("a1").build();
+    var activityEnvelope =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, activity);
+    when(mongo.count(any(Query.class), eq(Document.class), eq("admin_activity"))).thenReturn(1L);
+    when(mongo.find(any(Query.class), eq(Document.class), eq("admin_activity")))
+        .thenReturn(List.of(activityEnvelope));
     var request = new AdminActivityQuery(
         "REPORT_RESOLVED", "REPORT", "admin.*",
         Instant.parse("2026-07-01T00:00:00Z"),
@@ -48,12 +54,13 @@ class AdminActivityQueryServiceTest {
     AdminActivityPage result = service.query(request);
 
     var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(AdminActivity.class));
+    verify(mongo).find(query.capture(), eq(Document.class), eq("admin_activity"));
     assertThat(query.getValue().getQueryObject().toString())
-        .contains("action=REPORT_RESOLVED", "targetType=REPORT", "\\Qadmin.*\\E")
+        .contains("_kind=admin_activity", "payload.action=REPORT_RESOLVED",
+            "payload.targetType=REPORT", "\\Qadmin.*\\E")
         .contains("$gte", "$lte");
     assertThat(query.getValue().getSortObject().toString())
-        .contains("createdOn=-1", "_id=-1");
+        .contains("payload.createdOn=-1", "_id.legacyId=-1");
     assertThat(result.totalElements()).isEqualTo(1);
   }
 

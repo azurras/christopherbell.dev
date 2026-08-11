@@ -10,14 +10,12 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Stores one mute or block relationship from an owner account to a target account. */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Document("account_trust_relationships")
 @CompoundIndex(
     name = "owner_target_type_unique",
     def = "{'ownerAccountId': 1, 'targetAccountId': 1, 'type': 1}",

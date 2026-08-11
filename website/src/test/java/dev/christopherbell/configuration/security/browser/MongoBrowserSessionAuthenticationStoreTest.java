@@ -33,20 +33,22 @@ class MongoBrowserSessionAuthenticationStoreTest {
             AccountStatus.ACTIVE));
     when(mongo.aggregate(
         any(Aggregation.class),
-        eq("browser_sessions"),
+        eq("sessions"),
         eq(BrowserSessionAuthentication.class)))
         .thenReturn(new AggregationResults<>(List.of(expected), new Document()));
-    var store = new MongoBrowserSessionAuthenticationStore(mongo);
+    var store = new MongoBrowserSessionAuthenticationStore(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
 
     assertThat(store.findById("session-1")).containsSame(expected);
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
     verify(mongo).aggregate(
         aggregation.capture(),
-        eq("browser_sessions"),
+        eq("sessions"),
         eq(BrowserSessionAuthentication.class));
     assertThat(aggregation.getValue().toString())
-        .contains("$match", "session-1", "$limit", "1", "$lookup", "accounts")
+        .contains("$match", "_kind", "browser_session", "session-1", "$limit", "1", "$lookup",
+            "accounts", "account")
         .contains("passwordHash", "role", "permissions", "status")
         .doesNotContain("email", "firstName", "lastName", "username");
   }
@@ -56,11 +58,13 @@ class MongoBrowserSessionAuthenticationStoreTest {
     var mongo = org.mockito.Mockito.mock(MongoTemplate.class);
     when(mongo.aggregate(
         any(Aggregation.class),
-        eq("browser_sessions"),
+        eq("sessions"),
         eq(BrowserSessionAuthentication.class)))
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
-    assertThat(new MongoBrowserSessionAuthenticationStore(mongo).findById("session-1"))
+    assertThat(new MongoBrowserSessionAuthenticationStore(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo))
+        .findById("session-1"))
         .isEmpty();
   }
 }
