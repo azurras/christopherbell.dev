@@ -223,17 +223,11 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   public <R> List<R> aggregate(KindScopedAggregation domainAggregation, Class<R> resultType) {
     Objects.requireNonNull(domainAggregation, "domainAggregation");
     Objects.requireNonNull(resultType, "resultType");
-    rejectMalformedStoredEnvelopes(
-        kind.collection(), kind.kind(), kind.schemaVersion());
-    domainAggregation.foreignKinds().forEach(foreignKind ->
-        rejectMalformedStoredEnvelopes(
-            foreignKind.collection(), foreignKind.kind(), foreignKind.schemaVersion()));
     var operations = new java.util.ArrayList<AggregationOperation>();
-    operations.add(context -> new Document("$match", new Document("_kind", kind.kind())
-        .append("schemaVersion", kind.schemaVersion())
-        .append("_id.kind", kind.kind())
-        .append("_id.legacyId", new Document("$exists", true))
-        .append("payload", new Document("$type", "object"))));
+    DomainEnvelopeAggregationValidation.stages(kind.kind(), kind.schemaVersion()).stream()
+        .map(Document::new)
+        .<AggregationOperation>map(stage -> context -> stage)
+        .forEach(operations::add);
     operations.add(context -> new Document("$replaceRoot", new Document(
         "newRoot", new Document("$mergeObjects", List.of(
             "$payload", new Document("_id", "$_id.legacyId"))))));
@@ -241,9 +235,17 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
         .map(Document::new)
         .<AggregationOperation>map(stage -> context -> stage)
         .forEach(operations::add);
-    var mapped = mongo.aggregate(
-        Aggregation.newAggregation(operations), kind.collection(), Document.class)
-        .getMappedResults();
+    final List<Document> mapped;
+    try {
+      mapped = mongo.aggregate(
+          Aggregation.newAggregation(operations), kind.collection(), Document.class)
+          .getMappedResults();
+    } catch (RuntimeException failure) {
+      if (DomainEnvelopeAggregationValidation.isControlledFailure(failure)) {
+        throw new MalformedDomainDocumentException();
+      }
+      throw failure;
+    }
     if (resultType.equals(kind.javaType())) {
       return mapped.stream()
           .map(codec::envelopeFromDomainDocument)
@@ -349,34 +351,6 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
       throw new UnapprovedDomainFieldException();
     }
     return mappedId;
-  }
-
-  private void rejectMalformedStoredEnvelopes(
-      String collection, String expectedKind, int expectedSchemaVersion) {
-    var malformed = new Document("$and", List.of(
-        new Document("_kind", expectedKind),
-        new Document("$or", List.of(
-            new Document("schemaVersion", new Document("$ne", expectedSchemaVersion)),
-            new Document("schemaVersion", new Document("$not", new Document("$type", "int"))),
-            new Document("_id.kind", new Document("$ne", expectedKind)),
-            new Document("_id.legacyId", new Document("$exists", false)),
-            new Document("_id.legacyId", null),
-            new Document("payload", new Document("$not", new Document("$type", "object"))),
-            new Document("payload._id", new Document("$exists", true)),
-            nonCanonicalKeys("$$ROOT", List.of("_id", "_kind", "schemaVersion", "payload")),
-            nonCanonicalKeys("$_id", List.of("kind", "legacyId"))))));
-    if (mongo.exists(new org.springframework.data.mongodb.core.query.BasicQuery(malformed),
-        Document.class, collection)) {
-      throw new MalformedDomainDocumentException();
-    }
-  }
-
-  private static Document nonCanonicalKeys(String input, List<String> approvedKeys) {
-    var keys = new Document("$map", new Document("input", new Document("$objectToArray", input))
-        .append("as", "field")
-        .append("in", "$$field.k"));
-    return new Document("$expr", new Document("$not", List.of(
-        new Document("$eq", List.of(keys, approvedKeys)))));
   }
 
   private static OptimisticLockingFailureException stale() {

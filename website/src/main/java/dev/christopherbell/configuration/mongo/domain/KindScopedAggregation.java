@@ -16,7 +16,6 @@ public final class KindScopedAggregation {
       "$unwind", "$replaceRoot", "$replaceWith", "$set", "$addFields", "$unset", "$count");
 
   private final List<Document> pipeline;
-  private final List<DomainCollectionManifest.KindDefinition> foreignKinds;
 
   private KindScopedAggregation(Aggregation aggregation, List<ForeignKind> foreignKinds) {
     Objects.requireNonNull(aggregation, "aggregation");
@@ -28,11 +27,13 @@ public final class KindScopedAggregation {
       foreignKindsByCollection.computeIfAbsent(
           definition.collection(), ignored -> new ArrayList<>()).add(definition.kind());
     }
-    this.foreignKinds = List.copyOf(retainedForeignKinds);
-    this.pipeline = aggregation.toPipeline(Aggregation.DEFAULT_CONTEXT).stream()
+    var requestedPipeline = aggregation.toPipeline(Aggregation.DEFAULT_CONTEXT).stream()
         .map(Document::new)
         .toList();
-    validatePipeline(pipeline, foreignKindsByCollection, true);
+    validatePipeline(requestedPipeline, foreignKindsByCollection, true);
+    this.pipeline = requestedPipeline.stream()
+        .map(stage -> inlineForeignValidation(stage, retainedForeignKinds))
+        .toList();
   }
 
   /** Accepts only local, non-writing stages. */
@@ -48,10 +49,6 @@ public final class KindScopedAggregation {
 
   List<Document> pipeline() {
     return pipeline.stream().map(Document::new).toList();
-  }
-
-  List<DomainCollectionManifest.KindDefinition> foreignKinds() {
-    return foreignKinds;
   }
 
   private static void validatePipeline(
@@ -94,6 +91,29 @@ public final class KindScopedAggregation {
       throw unsafe();
     }
     validatePipeline(foreignPipeline, Map.of(), false);
+  }
+
+  private static Document inlineForeignValidation(
+      Document stage, List<DomainCollectionManifest.KindDefinition> foreignKinds) {
+    if (!(stage.get("$lookup") instanceof Document originalLookup)) {
+      return new Document(stage);
+    }
+    var lookup = new Document(originalLookup);
+    var collection = lookup.getString("from");
+    @SuppressWarnings("unchecked")
+    var originalPipeline = (List<Document>) lookup.get("pipeline", List.class);
+    var definition = foreignKinds.stream()
+        .filter(candidate -> candidate.collection().equals(collection))
+        .filter(candidate -> originalPipeline.getFirst().get("$match") instanceof Document match
+            && requiresExactKind(match, candidate.kind()))
+        .findFirst()
+        .orElseThrow(KindScopedAggregation::unsafe);
+    var guardedPipeline = new ArrayList<Document>();
+    guardedPipeline.addAll(DomainEnvelopeAggregationValidation.stages(
+        definition.kind(), definition.schemaVersion()));
+    originalPipeline.stream().map(Document::new).forEach(guardedPipeline::add);
+    lookup.put("pipeline", List.copyOf(guardedPipeline));
+    return new Document("$lookup", lookup);
   }
 
   private static boolean requiresExactKind(Document match, String expectedKind) {

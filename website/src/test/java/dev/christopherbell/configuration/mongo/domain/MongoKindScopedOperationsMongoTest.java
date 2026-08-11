@@ -354,9 +354,11 @@ class MongoKindScopedOperationsMongoTest {
   }
 
   @Test
-  void aggregationPreflightsMalformedForeignKindsBeforeLookupUnwrap() {
+  void aggregationRejectsMalformedForeignKindsInsideTheLookupCommand() {
     mongo = template("aggregate-malformed-foreign");
     var operations = operations("sample_local");
+    operations.insert(new SampleDocument(
+        "local-id", "Local", 1L, Decimal128.parse("1.0"), null));
     mongo.getCollection("content").insertOne(new Document(
         "_id", NamespacedMongoId.of("post", "foreign-id").toBson())
         .append("_kind", "post")
@@ -364,7 +366,9 @@ class MongoKindScopedOperationsMongoTest {
         .append("payload", new Document("id", "foreign-id"))
         .append("unexpected", true));
     var lookup = new Document("from", "content")
-        .append("pipeline", List.of(new Document("$match", new Document("_kind", "post"))))
+        .append("pipeline", List.of(
+            new Document("$match", new Document("_kind", "post")),
+            new Document("$match", new Document("payload.id", "not-foreign-id"))))
         .append("as", "foreign");
     var aggregation = Aggregation.newAggregation(
         context -> new Document("$lookup", lookup));

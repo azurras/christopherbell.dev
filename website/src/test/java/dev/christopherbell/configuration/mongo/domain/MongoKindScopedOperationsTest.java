@@ -3,17 +3,25 @@ package dev.christopherbell.configuration.mongo.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.mongodb.MongoCommandException;
+import com.mongodb.MongoTimeoutException;
+import com.mongodb.ServerAddress;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.bson.BsonDocument;
+import org.bson.BsonInt32;
+import org.bson.BsonString;
 import org.bson.Document;
 import org.bson.types.Decimal128;
 import org.junit.jupiter.api.BeforeEach;
@@ -183,9 +191,15 @@ class MongoKindScopedOperationsTest {
   }
 
   @Test
-  void aggregateMatchesTheKindBeforeExposingTheDomainDocumentShape() {
+  void aggregateValidatesInlineInTheOnlyMongoCommandBeforeExposingDomainShape() {
     when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
+    var mutationWindowObserved = new AtomicBoolean();
+    when(mongo.exists(any(Query.class), eq(Document.class), anyString()))
+        .thenAnswer(invocation -> {
+          mutationWindowObserved.set(true);
+          return false;
+        });
 
     assertThat(operations.aggregate(
         KindScopedAggregation.local(
@@ -195,16 +209,100 @@ class MongoKindScopedOperationsTest {
 
     var aggregationCaptor = ArgumentCaptor.forClass(Aggregation.class);
     verify(mongo).aggregate(aggregationCaptor.capture(), eq("content"), eq(Document.class));
-    assertThat(aggregationCaptor.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT))
-        .startsWith(
-            new Document("$match", new Document("_kind", "sample_kind")
-                .append("schemaVersion", 1)
-                .append("_id.kind", "sample_kind")
-                .append("_id.legacyId", new Document("$exists", true))
-                .append("payload", new Document("$type", "object"))),
-            new Document("$replaceRoot", new Document("newRoot", new Document("$mergeObjects", List.of(
-                "$payload", new Document("_id", "$_id.legacyId"))))))
-        .contains(new Document("$match", new Document("displayName", "Ada")));
+    verify(mongo, never()).exists(any(Query.class), eq(Document.class), anyString());
+    assertThat(mutationWindowObserved).isFalse();
+
+    var pipeline = aggregationCaptor.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT);
+    assertThat(pipeline.get(0))
+        .isEqualTo(new Document("$match", new Document("_kind", "sample_kind")));
+    var validationField = onlyKey(pipeline.get(1).get("$set", Document.class));
+    assertThat(validationField).startsWith("__cbell_domain_envelope_validation_");
+    assertThat(pipeline.get(1).toJson())
+        .contains("$cond", "$objectToArray", "schemaVersion", "int", "legacyId", "payload");
+    assertThat(pipeline.get(2).get("$replaceWith", Document.class).toJson())
+        .contains(validationField, "$_id", "$_kind", "$schemaVersion", "$payload");
+    assertThat(pipeline.get(3)).isEqualTo(new Document("$replaceRoot", new Document(
+        "newRoot", new Document("$mergeObjects", List.of(
+            "$payload", new Document("_id", "$_id.legacyId"))))));
+    assertThat(pipeline.get(4))
+        .isEqualTo(new Document("$match", new Document("displayName", "Ada")));
+  }
+
+  @Test
+  void aggregateValidatesForeignEnvelopesInsideLookupBeforeEveryCallerStage() {
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
+        .thenReturn(new AggregationResults<>(List.of(), new Document()));
+    var lookup = new Document("$lookup", new Document()
+        .append("from", "content")
+        .append("pipeline", List.of(
+            new Document("$match", new Document("_kind", "post")),
+            new Document("$project", new Document("payload", 1))))
+        .append("as", "posts"));
+
+    operations.aggregate(KindScopedAggregation.withForeignKinds(
+        Aggregation.newAggregation(context -> lookup),
+        KindScopedAggregation.ForeignKind.POST), Document.class);
+
+    var aggregationCaptor = ArgumentCaptor.forClass(Aggregation.class);
+    verify(mongo).aggregate(aggregationCaptor.capture(), eq("content"), eq(Document.class));
+    verify(mongo, never()).exists(any(Query.class), eq(Document.class), anyString());
+    var pipeline = aggregationCaptor.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT);
+    var emittedLookup = pipeline.get(4).get("$lookup", Document.class);
+    @SuppressWarnings("unchecked")
+    var foreignPipeline = (List<Document>) emittedLookup.get("pipeline", List.class);
+    assertThat(foreignPipeline.get(0))
+        .isEqualTo(new Document("$match", new Document("_kind", "post")));
+    var validationField = onlyKey(foreignPipeline.get(1).get("$set", Document.class));
+    assertThat(foreignPipeline.get(2).get("$replaceWith", Document.class).toJson())
+        .contains(validationField, "$_id", "$_kind", "$schemaVersion", "$payload");
+    assertThat(foreignPipeline.get(3))
+        .isEqualTo(new Document("$match", new Document("_kind", "post")));
+    assertThat(foreignPipeline.get(4))
+        .isEqualTo(new Document("$project", new Document("payload", 1)));
+  }
+
+  @Test
+  void aggregateTranslatesOnlyItsControlledValidationFailure() {
+    var controlled = commandFailure(
+        241, "conversion failed for __cbell_malformed_domain_envelope_4d21c8a6__");
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
+        .thenThrow(controlled);
+
+    assertThatThrownBy(() -> operations.aggregate(
+        KindScopedAggregation.local(Aggregation.newAggregation(
+            Aggregation.match(Criteria.where("displayName").is("Ada")))),
+        Document.class))
+        .isInstanceOf(MalformedDomainDocumentException.class)
+        .hasMessage("Mongo domain document is malformed.")
+        .hasNoCause()
+        .satisfies(failure -> assertThat(stackTrace(failure))
+            .doesNotContain("conversion failed", "4d21c8a6"));
+  }
+
+  @Test
+  void aggregatePreservesUnrelatedMongoInfrastructureFailures() {
+    var infrastructureFailure = new MongoTimeoutException("infrastructure unavailable");
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
+        .thenThrow(infrastructureFailure);
+
+    assertThatThrownBy(() -> operations.aggregate(
+        KindScopedAggregation.local(Aggregation.newAggregation(
+            Aggregation.match(Criteria.where("displayName").is("Ada")))),
+        Document.class))
+        .isSameAs(infrastructureFailure);
+  }
+
+  @Test
+  void aggregatePreservesUnmarkedMongoConversionFailures() {
+    var callerFailure = commandFailure(241, "caller aggregation conversion failed");
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
+        .thenThrow(callerFailure);
+
+    assertThatThrownBy(() -> operations.aggregate(
+        KindScopedAggregation.local(Aggregation.newAggregation(
+            Aggregation.match(Criteria.where("displayName").is("Ada")))),
+        Document.class))
+        .isSameAs(callerFailure);
   }
 
   @Test
@@ -417,6 +515,18 @@ class MongoKindScopedOperationsTest {
 
   private static ArgumentCaptor<Document> documentCaptor() {
     return ArgumentCaptor.forClass(Document.class);
+  }
+
+  private static String onlyKey(Document document) {
+    assertThat(document).hasSize(1);
+    return document.keySet().iterator().next();
+  }
+
+  private static MongoCommandException commandFailure(int code, String message) {
+    return new MongoCommandException(new BsonDocument()
+        .append("ok", new BsonInt32(0))
+        .append("code", new BsonInt32(code))
+        .append("errmsg", new BsonString(message)), new ServerAddress());
   }
 
   private static String stackTrace(Throwable failure) {
