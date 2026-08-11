@@ -10,6 +10,7 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import dev.christopherbell.music.radio.MusicQueueState;
 import dev.christopherbell.music.radio.MusicRadioState;
+import dev.christopherbell.music.radio.MusicRuntimeStateDocument;
 import dev.christopherbell.music.radio.MusicRuntimeStateMigrationSupport;
 import dev.christopherbell.music.radio.MusicRuntimeStateStore;
 import java.time.Instant;
@@ -143,6 +144,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     var mongo = template("ordinary-versioning");
     insertSources(mongo, 4L, 9L);
     migration().apply(mongo);
+    stageCanonicalRuntimeState(mongo);
     var store = new MusicRuntimeStateStore(
         dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
             .createForDisposableMongo(mongo));
@@ -202,6 +204,9 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
 
     assertThat(target(mongo, "queue").containsKey("version")).isFalse();
     assertThat(target(mongo, "radio").containsKey("version")).isFalse();
+    stageCanonicalRuntimeState(mongo);
+    assertThat(canonicalTarget(mongo, "queue").containsKey("version")).isFalse();
+    assertThat(canonicalTarget(mongo, "radio").containsKey("version")).isFalse();
 
     var store = new MusicRuntimeStateStore(
         dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
@@ -209,7 +214,9 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     var saved = store.saveQueue(store.findQueue().orElseThrow());
 
     assertThat(saved.version()).isZero();
-    assertThat(target(mongo, "queue").get("version")).isEqualTo(0L);
+    assertThat(canonicalTarget(mongo, "queue").get("version")).isEqualTo(0L);
+    assertThat(canonicalTarget(mongo, "radio").containsKey("version")).isFalse();
+    assertThat(target(mongo, "queue").containsKey("version")).isFalse();
     assertThat(target(mongo, "radio").containsKey("version")).isFalse();
   }
 
@@ -218,6 +225,7 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     var mongo = template("absent-contention");
     insertSources(mongo, null, null);
     migration().apply(mongo);
+    stageCanonicalRuntimeState(mongo);
     var store = new MusicRuntimeStateStore(
         dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
             .createForDisposableMongo(mongo));
@@ -285,6 +293,32 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
 
   private static List<Document> targets(MongoTemplate mongo) {
     return mongo.getCollection("music_runtime_state").find().into(new java.util.ArrayList<>());
+  }
+
+  /**
+   * Models the later target-stage boundary without changing V014 or publishing V015. V014's flat
+   * target remains authoritative until the guarded domain-collection cutover; the target-schema
+   * store is exercised only after this test has explicitly converted that validated output into
+   * canonical envelopes.
+   */
+  private static void stageCanonicalRuntimeState(MongoTemplate mongo) {
+    var envelopes = targets(mongo).stream()
+        .map(document -> mongo.getConverter().read(MusicRuntimeStateDocument.class, document))
+        .map(document ->
+            dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+                .envelope(mongo, document))
+        .toList();
+    if (!envelopes.isEmpty()) {
+      mongo.getCollection("music").insertMany(envelopes);
+    }
+  }
+
+  private static Document canonicalTarget(MongoTemplate mongo, String legacyId) {
+    return mongo.getCollection("music")
+        .find(new Document("_id", new Document("kind", "music_runtime_state")
+            .append("legacyId", legacyId)))
+        .first()
+        .get("payload", Document.class);
   }
 
   private static Document queueSource(Object version) {

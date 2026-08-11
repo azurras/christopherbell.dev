@@ -49,11 +49,14 @@ import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteQueryRepo
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewCounts;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewDocument;
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewStore;
+import dev.christopherbell.whatsforlunch.restaurant.model.Address;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -63,8 +66,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
-import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.auditing.IsNewAwareAuditingHandler;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.mapping.event.AuditingEntityCallback;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 /** Real-Mongo behavioral proof for the highest-risk Task 4 adapter invariants. */
 @EnabledIfEnvironmentVariable(named = "DOMAIN_COLLECTION_TEST_URI", matches = ".+")
@@ -228,13 +234,30 @@ class MusicAndLunchMongoContractTest {
     assertThat(joined.status()).isEqualTo(WhatsForLunchSessionMutationStore.Status.UPDATED);
     assertThat(joined.session().getRevision()).isEqualTo(8);
 
+    var voted = mutations.vote("session-1", "friend-1", "restaurant-1", now.plusSeconds(1));
+    assertThat(voted.status()).isEqualTo(WhatsForLunchSessionMutationStore.Status.UPDATED);
+    assertThat(voted.session().getRevision()).isEqualTo(9);
+    assertThat(voted.session().getVotesByAccountId())
+        .containsEntry("friend-1", "restaurant-1");
+
+    var reset = mutations.resetRestaurants(
+        "session-1", "owner-1", "owner",
+        new WhatsForLunchSessionRestaurantsRequest(
+            List.of("restaurant-4", "restaurant-5", "restaurant-6"), 9),
+        now.plusSeconds(2));
+    assertThat(reset.status()).isEqualTo(WhatsForLunchSessionMutationStore.Status.UPDATED);
+    assertThat(reset.session().getRevision()).isEqualTo(10);
+    assertThat(reset.session().getRestaurantIds())
+        .containsExactly("restaurant-4", "restaurant-5", "restaurant-6");
+    assertThat(reset.session().getVotesByAccountId()).isEmpty();
+
     var stale = mutations.resetRestaurants(
         "session-1", "owner-1", "owner",
         new WhatsForLunchSessionRestaurantsRequest(
-            List.of("restaurant-4", "restaurant-5", "restaurant-6"), 7),
-        now.plusSeconds(1));
+            List.of("restaurant-7", "restaurant-8", "restaurant-9"), 9),
+        now.plusSeconds(3));
     assertThat(stale.status()).isEqualTo(WhatsForLunchSessionMutationStore.Status.CHANGED);
-    assertThat(stale.session().getRevision()).isEqualTo(8);
+    assertThat(stale.session().getRevision()).isEqualTo(10);
   }
 
   @Test
@@ -273,6 +296,12 @@ class MusicAndLunchMongoContractTest {
     assertThat(edits.findTop100ByExpiresAtBeforeOrderByExpiresAtAsc(now)).containsExactly(expired);
     edits.delete(expired);
     assertThat(edits.findById(expired.id())).isEmpty();
+    var deleteById = edits.save(new MusicMetadataEdit(
+        "edit-2", "track-2", "source", "backup", "hash-2", "old", "new", "mp3", 90,
+        "account-1", now.minusSeconds(100), now.minusSeconds(1),
+        MusicMetadataEdit.Status.APPLIED, null, null));
+    edits.deleteById(deleteById.id());
+    assertThat(edits.findById(deleteById.id())).isEmpty();
 
     var history = new MongoMusicRadioHistoryRepository(factory);
     var older = new MusicRadioHistoryEvent(
@@ -299,6 +328,8 @@ class MusicAndLunchMongoContractTest {
     var result = catalog.search(new MusicQuery(null, null, null, null, null, null, 0, 50));
     assertThat(result.tracks()).extracting(MusicTrack::id).containsExactly("track-1", "track-2");
     assertThat(result.facets().artists()).containsExactly("Alpha", "Beta");
+    assertThat(catalog.radioCandidates(1)).extracting(MusicTrack::id)
+        .containsExactly("track-1");
 
     var recorder = new MusicAccessAuditRecorder(factory);
     var attempt = recorder.deniedIp("203.0.113.7", "SIGN_IN_REQUIRED");
@@ -313,15 +344,27 @@ class MusicAndLunchMongoContractTest {
     var alpha1 = restaurant("restaurant-a1", "Alpha", "alpha");
     var alpha2 = restaurant("restaurant-a2", "Alpha Two", "alpha");
     var beta = restaurant("restaurant-b", "Beta", "beta");
+    beta.setAddress(Address.builder().latitude(30.25).longitude(-97.75).build());
     restaurants.save(alpha1);
     restaurants.save(alpha2);
     restaurants.save(beta);
+    assertThat(restaurants.findById(alpha1.getId())).contains(alpha1);
+    assertThat(restaurants.findAll()).hasSize(3);
+    assertThat(restaurants.count()).isEqualTo(3);
+    assertThat(restaurants.findByNormalizedName(alpha1.getNormalizedName())).contains(alpha1);
     assertThat(restaurants.findByDedupeKeyIn(List.of("alpha"))).hasSize(2);
     assertThat(restaurants.findAll(PageRequest.of(0, 2))).hasSize(2);
     assertThat(restaurants.findAllById(List.of(alpha1.getId(), beta.getId()))).hasSize(2);
+    assertThat(restaurants.findByCoordinateBounds(30.0, 30.5, -98.0, -97.5))
+        .containsExactly(beta);
 
     var inventory = new RestaurantInventoryQueryRepository(factory);
     assertThat(inventory.find("alpha", null, null, null, 10).items()).hasSize(2);
+    var firstPage = inventory.find(null, null, null, null, 1);
+    var secondPage = inventory.find(null, null, null, firstPage.nextCursor(), 1);
+    assertThat(firstPage.nextCursor()).isNotBlank();
+    assertThat(secondPage.items()).extracting(Restaurant::getId)
+        .doesNotContain(firstPage.items().getFirst().getId());
     var duplicates = new RestaurantDuplicateQueryRepository(factory);
     assertThat(duplicates.find(null, 10).keys()).containsExactly("alpha");
 
@@ -333,6 +376,13 @@ class MusicAndLunchMongoContractTest {
         .contains(vote1);
     assertThat(new RestaurantVoteQueryRepository(factory).topLiked(10))
         .singleElement().extracting(summary -> summary.restaurantId()).isEqualTo(alpha1.getId());
+    assertThat(new RestaurantVoteQueryRepository(factory)
+        .summariesForRestaurants(List.of(alpha1.getId(), beta.getId())))
+        .singleElement().satisfies(summary -> {
+          assertThat(summary.restaurantId()).isEqualTo(alpha1.getId());
+          assertThat(summary.upVotes()).isEqualTo(2);
+          assertThat(summary.voteCount()).isEqualTo(2);
+        });
     votes.deleteById(vote1.getId());
     assertThat(votes.findById(vote1.getId())).isEmpty();
 
@@ -366,6 +416,76 @@ class MusicAndLunchMongoContractTest {
     assertThat(importStates.findById("osm")).isEmpty();
     var importState = importStates.save(RestaurantImportState.builder().id("osm").build());
     assertThat(importStates.findById("osm")).contains(importState);
+
+    restaurants.delete(alpha2);
+    restaurants.deleteAll(List.of(alpha1, beta));
+    assertThat(restaurants.findAll()).isEmpty();
+  }
+
+  @Test
+  void generatedAuditedRestaurantIdsRemainStableAcrossCursorContinuation() {
+    var now = new AtomicReference<>(Instant.parse("2026-08-10T20:00:00Z"));
+    var handler = IsNewAwareAuditingHandler.from(mongo.getConverter().getMappingContext());
+    handler.setDateTimeProvider(() -> Optional.of(now.get()));
+    var beans = new StaticListableBeanFactory();
+    beans.addBean("auditingEntityCallback", new AuditingEntityCallback(() -> handler));
+    var auditedFactory = new DomainMongoOperationsFactory(mongo, beans);
+    var restaurants = new MongoRestaurantRepository(auditedFactory);
+    var inventory = new RestaurantInventoryQueryRepository(auditedFactory);
+
+    var alpha = restaurants.save(Restaurant.builder()
+        .name("Alpha").normalizedName("generated-alpha").dedupeKey("alpha").build());
+    now.set(now.get().plusSeconds(1));
+    var beta = restaurants.save(Restaurant.builder()
+        .name("Beta").normalizedName("generated-beta").dedupeKey("beta").build());
+
+    assertThat(alpha.getId()).matches("[0-9a-f]{24}");
+    assertThat(beta.getId()).matches("[0-9a-f]{24}");
+    assertThat(alpha.getCreatedOn()).isEqualTo(Instant.parse("2026-08-10T20:00:00Z"));
+    assertThat(beta.getCreatedOn()).isEqualTo(Instant.parse("2026-08-10T20:00:01Z"));
+    var first = inventory.find(null, null, null, null, 1);
+    var second = inventory.find(null, null, null, first.nextCursor(), 1);
+    assertThat(first.items()).extracting(Restaurant::getId).containsExactly(alpha.getId());
+    assertThat(second.items()).extracting(Restaurant::getId).containsExactly(beta.getId());
+  }
+
+  @Test
+  void remainingMusicAndLunchIndexesEnforceUniquenessAndPreviewTtlMetadata() {
+    var trackIndex = indexByKey("music_track", "payload.path");
+    var playlistIndex = indexByKey("music_playlist", "payload.normalizedName");
+    var favoriteIndex = indexByKey("favorite", "payload.accountId");
+    var previewTtl = index("import_preview", "import_preview__restaurant_import_preview_expiry");
+    createIndex(trackIndex);
+    createIndex(playlistIndex);
+    createIndex(favoriteIndex);
+    createIndex(previewTtl);
+    var now = Instant.parse("2026-08-10T20:00:00Z");
+
+    var tracks = new MongoMusicTrackRepository(factory);
+    tracks.save(track("track-1", "same.mp3", "Alpha", now));
+    assertThatThrownBy(() -> tracks.save(track("track-2", "same.mp3", "Beta", now)))
+        .isInstanceOf(DuplicateKeyException.class);
+
+    var playlists = new MongoMusicPlaylistRepository(factory);
+    playlists.save(new MusicPlaylist(
+        "playlist-1", "same", "Same", List.of(), null, "account-1", now));
+    assertThatThrownBy(() -> playlists.save(new MusicPlaylist(
+        "playlist-2", "same", "Same 2", List.of(), null, "account-1", now)))
+        .isInstanceOf(DuplicateKeyException.class);
+
+    var favorites = new MongoRestaurantFavoriteRepository(factory);
+    favorites.save(RestaurantFavorite.builder().id("favorite-1")
+        .restaurantId("restaurant-1").accountId("account-1").createdOn(now).build());
+    assertThatThrownBy(() -> favorites.save(RestaurantFavorite.builder().id("favorite-2")
+        .restaurantId("restaurant-1").accountId("account-1").createdOn(now).build()))
+        .isInstanceOf(DuplicateKeyException.class);
+
+    var actualTtl = mongo.getCollection("whatsforlunch").listIndexes().into(new java.util.ArrayList<>())
+        .stream().filter(document -> previewTtl.name().equals(document.getString("name")))
+        .findFirst().orElseThrow();
+    assertThat(actualTtl.get("expireAfterSeconds", Number.class).longValue()).isZero();
+    assertThat(actualTtl.get("key", Document.class))
+        .isEqualTo(new Document("payload.expiresOn", 1));
   }
 
   private void createIndex(DomainCollectionManifest.IndexDefinition definition) {
@@ -383,6 +503,13 @@ class MusicAndLunchMongoContractTest {
   private static DomainCollectionManifest.IndexDefinition index(String kind, String name) {
     return DomainCollectionManifest.forKind(kind).orElseThrow().indexes().stream()
         .filter(index -> index.name().equals(name))
+        .findFirst()
+        .orElseThrow();
+  }
+
+  private static DomainCollectionManifest.IndexDefinition indexByKey(String kind, String path) {
+    return DomainCollectionManifest.forKind(kind).orElseThrow().indexes().stream()
+        .filter(index -> index.keys().stream().anyMatch(key -> key.path().equals(path)))
         .findFirst()
         .orElseThrow();
   }

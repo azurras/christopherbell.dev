@@ -137,9 +137,7 @@ class MongoKindScopedOperationsTest {
     var updateCaptor = ArgumentCaptor.forClass(Update.class);
     verify(mongo).updateFirst(
         queryCaptor.capture(), updateCaptor.capture(), eq(Document.class), eq("content"));
-    assertThat(queryCaptor.getValue().getQueryObject()).isEqualTo(new Document("$and", List.of(
-        new Document("_kind", "sample_kind"),
-        new Document("payload.display_name", "Ada"))));
+    assertMutationQuery(queryCaptor.getValue(), "payload.display_name", "Ada");
     assertThat(updateCaptor.getValue().getUpdateObject()).isEqualTo(new Document()
         .append("$set", new Document("payload.display_name", "Grace"))
         .append("$inc", new Document("payload.visits", 1)
@@ -165,9 +163,7 @@ class MongoKindScopedOperationsTest {
     verify(mongo).findAndModify(
         queryCaptor.capture(), updateCaptor.capture(), any(FindAndModifyOptions.class),
         eq(Document.class), eq("content"));
-    assertThat(queryCaptor.getValue().getQueryObject()).isEqualTo(new Document("$and", List.of(
-        new Document("_kind", "sample_kind"),
-        new Document("payload.display_name", "Ada"))));
+    assertMutationQuery(queryCaptor.getValue(), "payload.display_name", "Ada");
     assertThat(updateCaptor.getValue().getUpdateObject()).isEqualTo(new Document()
         .append("$set", new Document("payload.display_name", "Grace"))
         .append("$inc", new Document("payload.version", 1)));
@@ -185,9 +181,7 @@ class MongoKindScopedOperationsTest {
     var queryCaptor = ArgumentCaptor.forClass(Query.class);
     verify(mongo).updateMulti(
         queryCaptor.capture(), any(Update.class), eq(Document.class), eq("content"));
-    assertThat(queryCaptor.getValue().getQueryObject()).isEqualTo(new Document("$and", List.of(
-        new Document("_kind", "sample_kind"),
-        new Document("payload.display_name", "Ada"))));
+    assertMutationQuery(queryCaptor.getValue(), "payload.display_name", "Ada");
   }
 
   @Test
@@ -493,8 +487,11 @@ class MongoKindScopedOperationsTest {
   void versionedInsertRaceIsRedactedAsOptimisticContention() {
     var value = new SampleDocument(
         "legacy-id", "Ada", 1L, new Decimal128(1L), null);
+    var concurrentWinner = envelope(new SampleDocument(
+        "legacy-id", "Ada", 1L, new Decimal128(1L), 0L));
     when(mongo.findOne(any(Query.class), eq(Document.class), eq("content")))
-        .thenReturn(null);
+        .thenReturn(null)
+        .thenReturn(concurrentWinner);
     when(mongo.insert(any(Document.class), eq("content")))
         .thenThrow(new DuplicateKeyException("duplicate secret-id payload"));
 
@@ -575,6 +572,15 @@ class MongoKindScopedOperationsTest {
     var buffer = new StringWriter();
     failure.printStackTrace(new PrintWriter(buffer));
     return buffer.toString();
+  }
+
+  private static void assertMutationQuery(Query actual, String field, Object value) {
+    var trustedSelector = new Document("$and", List.of(
+        new Document("_kind", KIND.kind()),
+        new Document(field, value)));
+    assertThat(actual.getQueryObject()).isEqualTo(
+        DomainEnvelopeAggregationValidation.mutationSelector(
+            trustedSelector, KIND.kind(), KIND.schemaVersion()));
   }
 
   private static MappingMongoConverter converter() throws Exception {

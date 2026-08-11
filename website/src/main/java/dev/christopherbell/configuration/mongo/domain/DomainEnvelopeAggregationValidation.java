@@ -40,6 +40,17 @@ final class DomainEnvelopeAggregationValidation {
         new Document("$replaceWith", preserveValidatedEnvelope));
   }
 
+  static Document mutationSelector(
+      Document trustedSelector, String expectedKind, int expectedSchemaVersion) {
+    var validityOrFailure = new Document("$cond", List.of(
+        validEnvelope(expectedKind, expectedSchemaVersion),
+        true,
+        controlledFailure()));
+    return new Document("$and", List.of(
+        new Document(trustedSelector),
+        new Document("$expr", validityOrFailure)));
+  }
+
   static boolean isControlledFailure(Throwable failure) {
     for (var candidate = failure; candidate != null; candidate = candidate.getCause()) {
       if (candidate instanceof MongoException mongoFailure

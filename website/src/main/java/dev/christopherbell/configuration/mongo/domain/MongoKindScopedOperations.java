@@ -86,7 +86,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   @Override
   public T insert(T value) {
     var prepared = prepareForSave(value);
-    return insertEnvelope(prepared, codec.initializeVersion(prepared.envelope()), false);
+    return insertEnvelope(prepared, codec.initializeVersion(prepared.envelope()));
   }
 
   @Override
@@ -100,8 +100,18 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
       if (codec.isVersioned() && codec.version(candidate) != null) {
         throw stale();
       }
-      return insertEnvelope(
-          prepared, codec.initializeVersion(candidate), codec.isVersioned());
+      try {
+        return insertEnvelope(prepared, codec.initializeVersion(candidate));
+      } catch (DuplicateKeyException failure) {
+        if (codec.isVersioned()) {
+          var concurrent = findEnvelopeById(mappedLegacyId);
+          if (concurrent != null) {
+            codec.decode(concurrent);
+            throw stale();
+          }
+        }
+        throw failure;
+      }
     }
     codec.decode(existing);
     if (!codec.isVersioned()) {
@@ -125,12 +135,14 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   public UpdateResult updateFirst(Query domainQuery, Update domainUpdate) {
     try {
       return mongo.updateFirst(
-          fieldMapper.mapQuery(domainQuery),
+          fieldMapper.mapMutationQuery(domainQuery, kind.schemaVersion()),
           fieldMapper.mapUpdate(domainUpdate),
           Document.class,
           kind.collection());
     } catch (DuplicateKeyException failure) {
       throw duplicate();
+    } catch (RuntimeException failure) {
+      throw translateMalformed(failure);
     }
   }
 
@@ -138,7 +150,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   public Optional<T> findAndUpdate(Query domainQuery, Update domainUpdate) {
     try {
       var envelope = mongo.findAndModify(
-          fieldMapper.mapQuery(domainQuery),
+          fieldMapper.mapMutationQuery(domainQuery, kind.schemaVersion()),
           fieldMapper.mapUpdate(domainUpdate),
           FindAndModifyOptions.options().returnNew(true),
           Document.class,
@@ -146,6 +158,8 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
       return Optional.ofNullable(envelope).map(codec::decode);
     } catch (DuplicateKeyException failure) {
       throw duplicate();
+    } catch (RuntimeException failure) {
+      throw translateMalformed(failure);
     }
   }
 
@@ -197,25 +211,32 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
     var update = AggregationUpdate.from(List.of(context ->
         new Document("$set", new Document(counterPath, nextCounter)
             .append(timestampPath, changedOn))));
-    var envelope = mongo.findAndModify(
-        fieldMapper.idQuery(mappedLegacyId(legacyId)),
-        update,
-        FindAndModifyOptions.options().returnNew(true),
-        Document.class,
-        kind.collection());
-    return Optional.ofNullable(envelope).map(codec::decode);
+    try {
+      var envelope = mongo.findAndModify(
+          fieldMapper.guardMutation(
+              fieldMapper.idQuery(mappedLegacyId(legacyId)), kind.schemaVersion()),
+          update,
+          FindAndModifyOptions.options().returnNew(true),
+          Document.class,
+          kind.collection());
+      return Optional.ofNullable(envelope).map(codec::decode);
+    } catch (RuntimeException failure) {
+      throw translateMalformed(failure);
+    }
   }
 
   @Override
   public UpdateResult updateMulti(Query domainQuery, Update domainUpdate) {
     try {
       return mongo.updateMulti(
-          fieldMapper.mapQuery(domainQuery),
+          fieldMapper.mapMutationQuery(domainQuery, kind.schemaVersion()),
           fieldMapper.mapUpdate(domainUpdate),
           Document.class,
           kind.collection());
     } catch (DuplicateKeyException failure) {
       throw duplicate();
+    } catch (RuntimeException failure) {
+      throw translateMalformed(failure);
     }
   }
 
@@ -262,7 +283,14 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
 
   @Override
   public DeleteResult remove(Query domainQuery) {
-    return mongo.remove(fieldMapper.mapQuery(domainQuery), Document.class, kind.collection());
+    try {
+      return mongo.remove(
+          fieldMapper.mapMutationQuery(domainQuery, kind.schemaVersion()),
+          Document.class,
+          kind.collection());
+    } catch (RuntimeException failure) {
+      throw translateMalformed(failure);
+    }
   }
 
   @Override
@@ -273,14 +301,14 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   private T replaceOrInsert(PreparedSave<T> prepared, Query query, Document candidate) {
     var replaced = replace(query, candidate);
     return replaced == null
-        ? insertEnvelope(prepared, candidate, false)
+        ? insertEnvelope(prepared, candidate)
         : afterSave(persistedSource(prepared.source(), replaced), replaced);
   }
 
   private Document replace(Query query, Document candidate) {
     try {
       return mongo.findAndReplace(
-          query,
+          fieldMapper.guardMutation(query, kind.schemaVersion()),
           candidate,
           FindAndReplaceOptions.options().returnNew(),
           Document.class,
@@ -288,18 +316,16 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
           Document.class);
     } catch (DuplicateKeyException failure) {
       throw duplicate();
+    } catch (RuntimeException failure) {
+      throw translateMalformed(failure);
     }
   }
 
-  private T insertEnvelope(
-      PreparedSave<T> prepared, Document candidate, boolean contentionIsStale) {
+  private T insertEnvelope(PreparedSave<T> prepared, Document candidate) {
     try {
       var persisted = mongo.insert(candidate, kind.collection());
       return afterSave(persistedSource(prepared.source(), persisted), persisted);
     } catch (DuplicateKeyException failure) {
-      if (contentionIsStale) {
-        throw stale();
-      }
       throw duplicate();
     }
   }
@@ -363,6 +389,12 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
 
   private static DuplicateKeyException duplicate() {
     return new DuplicateKeyException(DUPLICATE_MESSAGE);
+  }
+
+  private static RuntimeException translateMalformed(RuntimeException failure) {
+    return DomainEnvelopeAggregationValidation.isControlledFailure(failure)
+        ? new MalformedDomainDocumentException()
+        : failure;
   }
 
   private record PreparedSave<T>(T source, Document envelope) {}

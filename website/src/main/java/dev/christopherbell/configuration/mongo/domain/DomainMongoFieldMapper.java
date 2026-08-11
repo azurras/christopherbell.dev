@@ -89,6 +89,17 @@ final class DomainMongoFieldMapper {
     }
   }
 
+  Query mapMutationQuery(Query domainQuery, int schemaVersion) {
+    return guardMutation(mapQuery(domainQuery), schemaVersion);
+  }
+
+  Query guardMutation(Query mappedQuery, int schemaVersion) {
+    var result = new BasicQuery(DomainEnvelopeAggregationValidation.mutationSelector(
+        mappedQuery.getQueryObject(), kind, schemaVersion));
+    copySettings(mappedQuery, result);
+    return result;
+  }
+
   Update mapUpdate(Update domainUpdate) {
     if (domainUpdate == null) {
       throw new UnapprovedDomainFieldException();
