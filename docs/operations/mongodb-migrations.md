@@ -123,6 +123,21 @@ evidence record, owner token, and candidate database before publishing the new
 release mismatch, or target-schema legacy release blocks before backup or state
 publication.
 
+Every fresh consolidation now publishes a protected prepublication boundary
+before candidate work. An immutable evidence-and-owner-addressed binding records
+the new release, backup, evidence file, owner, candidate database, and the exact
+prior marker/history identity. A protected one-sided reconciliation pointer is
+written next, followed by the v2 `ROLLBACK_IN_PROGRESS` marker and only then the
+`PREVIEWED` state. That marker is a startup/deploy barrier for every release; it
+does not authorize a writer or deployment. A crash before `PREVIEWED` restores
+the exact prior marker or first-cutover absence. A crash after `PREVIEWED` leaves
+an exact marker/state/binding pair that guarded rollback or a newly confirmed
+`mongo-consolidate` retry can recover with `recover-prepublication` before any
+fresh backup or candidate is created. Candidate failure performs the same
+stopped/suspended cleanup immediately. Marker, state, binding, history, or
+one-sided-pointer mismatches fail closed; preview remains read-only and directs
+the operator to complete recovery first.
+
 The protected marker binds manifest, evidence, backup, original cutover target,
 current deployed target binary, legacy release, and deletion state. Routine
 target-schema deploys advance only the current release; they do not rewrite the

@@ -11,6 +11,7 @@ Describe 'guarded domain collection cutover orchestration' {
         BeforeEach {
             $script:events = [Collections.Generic.List[string]]::new()
             $script:exerciseRealCutoverContext = $false
+            $script:exerciseRealRetryResolver = $false
             $script:config = [pscustomobject]@{
                 programDataRoot = 'C:\ProgramData\christopherbell.dev'
                 productionPort = 8080
@@ -41,6 +42,27 @@ Describe 'guarded domain collection cutover orchestration' {
             Mock Assert-ProductionFixedRootBoundary {
                 [void]$script:events.Add('root:recheck')
                 [pscustomobject]@{}
+            }
+            Mock Resolve-ProductionDomainCollectionPrepublicationForCutoverRetry { } `
+                -ParameterFilter { -not $script:exerciseRealRetryResolver }
+            Mock Write-ProductionDomainCollectionRollbackMarker {
+                $markerPath = Get-ProductionMusicSchemaDirectionPath `
+                    -Config $State.config
+                New-Item -ItemType Directory `
+                    -Path (Split-Path -Parent $markerPath) -Force | Out-Null
+                [ordered]@{
+                    version = 2
+                    state = $MarkerState
+                    updatedAtEpochMillis = 1
+                    targetRelease = [string]$State.targetRelease
+                    currentRelease = [string]$State.currentRelease
+                    legacyRelease = [string]$State.legacyRelease
+                    manifestDigest = $script:ManifestDigest
+                    evidenceDigest = [string]$State.evidenceDigest
+                    backupIdentity = [string]$State.backupIdentity
+                    legacyDropped = $false
+                } | ConvertTo-Json |
+                    Set-Content -LiteralPath $markerPath -Encoding utf8
             }
             Mock New-ProductionDomainCollectionCutoverContext {
                 [void]$script:events.Add('backup-and-evidence')
@@ -99,6 +121,33 @@ Describe 'guarded domain collection cutover orchestration' {
             Should -Invoke Enter-ProductionFixedRootDeploymentLock -Times 1 -Exactly
         }
 
+        It 'recovers a persisted prepublication attempt under the same cutover lock' {
+            $script:exerciseRealRetryResolver = $true
+            Mock Resolve-ProductionDomainCollectionPrepublicationPublication { }
+            Mock Read-ProductionDomainSchemaDirection {
+                [pscustomobject]@{ state = 'ROLLBACK_IN_PROGRESS' }
+            }
+            Mock Read-ProductionDomainCollectionProtectedState {
+                [pscustomobject]@{
+                    state = 'PREVIEWED'
+                    legacyDropped = $false
+                }
+            }
+            Mock Invoke-ProductionDomainCollectionFailureRecovery {
+                [void]$script:events.Add('recover-persisted-prepublication')
+            }
+
+            Invoke-ProductionDomainCollectionCutover -Confirm
+
+            $script:events.IndexOf('lock:acquire') | Should -BeLessThan `
+                $script:events.IndexOf('recover-persisted-prepublication')
+            $script:events.IndexOf('recover-persisted-prepublication') |
+                Should -BeLessThan $script:events.IndexOf('backup-and-evidence')
+            $script:events.IndexOf('backup-and-evidence') | Should -BeLessThan `
+                $script:events.IndexOf('lock:release')
+            Should -Invoke Enter-ProductionFixedRootDeploymentLock -Times 1 -Exactly
+        }
+
         It 'contains a pre-drop failure without running deletion or post-drop restore' {
             Mock Invoke-ProductionDomainCollectionStageAndPublish {
                 [void]$script:events.Add('stage-publish')
@@ -114,15 +163,17 @@ Describe 'guarded domain collection cutover orchestration' {
             $script:events[-1] | Should -Be 'lock:release'
         }
 
-        It 'leaves the old writer untouched when candidate proof fails before live mutation' {
+        It 'recovers exact prepublication state when candidate proof fails' {
             Mock Invoke-ProductionDomainCollectionCandidateProof { throw 'candidate failed' }
 
             { Invoke-ProductionDomainCollectionCutover -Confirm } |
                 Should -Throw '*candidate failed*'
 
             Should -Invoke Stop-ProductionDomainCollectionWriter -Times 0
-            Should -Invoke Invoke-ProductionDomainCollectionFailureRecovery -Times 0
+            Should -Invoke Invoke-ProductionDomainCollectionFailureRecovery -Times 1 -Exactly `
+                -ParameterFilter { -not $PostDrop }
             Should -Invoke Invoke-ProductionDomainCollectionDropLegacy -Times 0
+            $script:events | Should -Contain 'recover:False'
         }
 
         It 'treats any failure after the first deletion intent as restore-bound recovery' {
@@ -159,6 +210,90 @@ Describe 'guarded domain collection cutover orchestration' {
             Should -Invoke Stop-ProductionDomainCollectionWriter -Times 0
             Should -Invoke Invoke-ProductionDomainCollectionStageAndPublish -Times 0
             Should -Invoke Invoke-ProductionDomainCollectionDropLegacy -Times 0
+        }
+
+        It 'publishes a restart-readable first-ever prepublication pair before candidate work' {
+            $script:exerciseRealCutoverContext = $true
+            $root = Join-Path $TestDrive 'first-prepublication'
+            $stateRoot = Join-Path $root 'state'
+            $backupRoot = Join-Path $root 'backups'
+            $releaseRoot = Join-Path $root 'releases'
+            $legacyRelease = '1' * 40
+            $targetRelease = '2' * 40
+            $legacyPath = Join-Path $releaseRoot $legacyRelease
+            $targetPath = Join-Path $releaseRoot $targetRelease
+            New-Item -ItemType Directory `
+                -Path $stateRoot,$backupRoot,$legacyPath,$targetPath -Force |
+                Out-Null
+            $archive = Join-Path $backupRoot 'fresh.archive.gz'
+            Set-Content -LiteralPath $archive -Value 'fresh-backup' -NoNewline
+            $evidenceDigest = 'a' * 64
+            $backupIdentity = 'b' * 64
+            $candidate = 'cbell_candidate_' + ('c' * 12) + '_' + ('d' * 24)
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                backupRoot = $backupRoot
+                candidatePort = 18081
+                productionPort = 18080
+                repositoryPath = $root
+            }
+            Mock Protect-ProductionPath { }
+            Mock Assert-ProtectedProductionPath { }
+            Mock Assert-ProductionPathNotReparse { }
+            Mock Resolve-OriginMainRelease { $targetRelease }
+            Mock New-ReleaseFromOriginMain { $targetPath }
+            Mock Get-JunctionTarget { $legacyPath }
+            Mock Get-ProductionDomainCollectionReleaseSchema {
+                if ($Sha -eq $legacyRelease) { 'LEGACY' } else { 'TARGET' }
+            }
+            Mock New-ProductionDomainCollectionVerifiedBackup {
+                [pscustomobject]@{
+                    archive = $archive
+                    backupIdentity = $backupIdentity
+                }
+            }
+            Mock Invoke-ProductionDomainCollectionEngine {
+                [pscustomobject]@{
+                    evidenceDigest = $evidenceDigest
+                    evidence = [pscustomobject]@{ version = 1 }
+                }
+            }
+            Mock New-CandidateDatabaseName { $candidate }
+            Mock Assert-ProductionDomainCollectionCandidateIsolation { }
+
+            $context = New-ProductionDomainCollectionCutoverContext -Config $config
+
+            $markerPath = Get-ProductionMusicSchemaDirectionPath -Config $config
+            $statePath = Join-Path $stateRoot 'domain-collection-cutover.json'
+            $bindingPath = @((Get-ChildItem -LiteralPath $stateRoot `
+                        -Filter 'domain-collection-prepublication.*.json').FullName)
+            $bindingPath.Count | Should -Be 1
+            $bindingPath = $bindingPath[0]
+            $pointerPath = Join-Path $stateRoot `
+                'domain-collection-prepublication-reconciliation.json'
+            Test-Path -LiteralPath $bindingPath | Should -BeTrue -Because (
+                'the durable files are ' +
+                (@(Get-ChildItem -LiteralPath $stateRoot).Name -join ','))
+            $env:CBELL_PREPUB_MARKER = $markerPath
+            $env:CBELL_PREPUB_STATE = $statePath
+            $env:CBELL_PREPUB_BINDING = $bindingPath
+            try {
+                $restartJson = & (Get-Process -Id $PID).Path `
+                    -NoProfile -NonInteractive -Command `
+                    '$marker=Get-Content -LiteralPath $env:CBELL_PREPUB_MARKER -Raw | ConvertFrom-Json; $state=Get-Content -LiteralPath $env:CBELL_PREPUB_STATE -Raw | ConvertFrom-Json; $binding=Get-Content -LiteralPath $env:CBELL_PREPUB_BINDING -Raw | ConvertFrom-Json; [pscustomobject]@{marker=$marker.state;state=$state.state;bindingTarget=$binding.targetRelease;priorState=$binding.priorStateSha256}|ConvertTo-Json -Compress'
+            } finally {
+                Remove-Item Env:CBELL_PREPUB_MARKER -ErrorAction SilentlyContinue
+                Remove-Item Env:CBELL_PREPUB_STATE -ErrorAction SilentlyContinue
+                Remove-Item Env:CBELL_PREPUB_BINDING -ErrorAction SilentlyContinue
+            }
+            $LASTEXITCODE | Should -Be 0
+            $restart = ([string]$restartJson).Trim() | ConvertFrom-Json
+            $restart.marker | Should -BeExactly 'ROLLBACK_IN_PROGRESS'
+            $restart.state | Should -BeExactly 'PREVIEWED'
+            $restart.bindingTarget | Should -BeExactly $targetRelease
+            $restart.priorState | Should -BeExactly ''
+            Test-Path -LiteralPath $pointerPath | Should -BeFalse
+            $context.state | Should -BeExactly 'PREVIEWED'
         }
 
         It 'allows preview only from an exact terminal legacy rollback state' {
@@ -227,6 +362,7 @@ Describe 'guarded domain collection cutover orchestration' {
             $script:futureMarker = [pscustomobject]@{
                 version = 2
                 state = 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
+                updatedAtEpochMillis = 1
                 targetRelease = $script:futureOldTarget
                 currentRelease = $script:futureOldTarget
                 legacyRelease = $script:futureLegacyRelease
@@ -235,6 +371,11 @@ Describe 'guarded domain collection cutover orchestration' {
                 backupIdentity = 'b' * 64
                 legacyDropped = $false
             }
+            $futureMarkerPath = Get-ProductionMusicSchemaDirectionPath -Config $config
+            $script:futureMarker | ConvertTo-Json |
+                Set-Content -LiteralPath $futureMarkerPath -Encoding utf8
+            $priorMarkerBase64 = [Convert]::ToBase64String(
+                [IO.File]::ReadAllBytes($futureMarkerPath))
             $script:futureTerminal = [pscustomobject]@{
                 config = $config
                 state = 'ROLLED_BACK'
@@ -247,7 +388,6 @@ Describe 'guarded domain collection cutover orchestration' {
             $script:futureBackupIdentity = 'c' * 64
             $script:futureEvidenceDigest = 'd' * 64
             $script:futureCandidate = 'cbell_candidate_' + ('3' * 12) + '_' + ('4' * 24)
-            Mock Read-ProductionDomainSchemaDirection { $script:futureMarker }
             Mock Read-ProductionDomainCollectionProtectedState { $script:futureTerminal }
             Mock Get-JunctionTarget { $script:futureLegacyPath }
             Mock Assert-ReleasePath { $Path }
@@ -300,6 +440,287 @@ Describe 'guarded domain collection cutover orchestration' {
             $newState.evidenceDigest | Should -BeExactly $script:futureEvidenceDigest
             $newState.ownerToken | Should -BeExactly $context.ownerToken
             $newState.candidateDatabase | Should -BeExactly $script:futureCandidate
+            $marker = Get-Content -LiteralPath $futureMarkerPath -Raw |
+                ConvertFrom-Json
+            $marker.state | Should -BeExactly 'ROLLBACK_IN_PROGRESS'
+            $marker.targetRelease | Should -BeExactly $script:futureNewTarget
+            $marker.currentRelease | Should -BeExactly $script:futureLegacyRelease
+            $marker.evidenceDigest | Should -BeExactly $script:futureEvidenceDigest
+            $marker.backupIdentity | Should -BeExactly $script:futureBackupIdentity
+            $oldStateHash = (Get-FileHash -LiteralPath $history[0].FullName `
+                -Algorithm SHA256).Hash.ToLowerInvariant()
+            $bindingPath = @((Get-ChildItem -LiteralPath $stateRoot `
+                        -Filter 'domain-collection-prepublication.*.json').FullName)
+            $bindingPath.Count | Should -Be 1
+            $bindingPath = $bindingPath[0]
+            $binding = Get-Content -LiteralPath $bindingPath -Raw |
+                ConvertFrom-Json
+            $binding.priorMarkerBase64 | Should -BeExactly $priorMarkerBase64
+            $binding.priorStateSha256 | Should -BeExactly $oldStateHash
+            [IO.Path]::GetFullPath([string]$binding.historyFile) |
+                Should -BeExactly ([IO.Path]::GetFullPath($history[0].FullName))
+            Test-Path -LiteralPath (Join-Path $stateRoot `
+                'domain-collection-prepublication-reconciliation.json') |
+                Should -BeFalse
+        }
+
+        It 'restores an absent first-ever marker after marker-first publication crashes' {
+            $root = Join-Path $TestDrive 'first-marker-crash'
+            $stateRoot = Join-Path $root 'state'
+            New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+            $config = [pscustomobject]@{ programDataRoot = $root }
+            $context = [pscustomobject]@{
+                config = $config
+                state = 'INITIALIZED'
+                targetRelease = '2' * 40
+                currentRelease = '1' * 40
+                legacyRelease = '1' * 40
+                archive = (Join-Path $root 'fresh.archive.gz')
+                backupIdentity = 'a' * 64
+                evidenceDigest = 'b' * 64
+                evidenceFile = (Join-Path $stateRoot 'evidence.json')
+                evidenceFileSha256 = 'c' * 64
+                ownerToken = 'd' * 32
+                candidateDatabase = 'cbell_candidate_' + ('e' * 12) + '_' + ('f' * 24)
+                priorMarkerBase64 = ''
+                priorStateSha256 = ''
+                historyFile = ''
+                dropStarted = $false
+            }
+            Mock Protect-ProductionPath { }
+            Mock Assert-ProtectedProductionPath { }
+            Mock Assert-ProductionPathNotReparse { }
+            Mock Save-ProductionDomainCollectionContextState {
+                throw 'simulated state publication crash'
+            }
+
+            { Publish-ProductionDomainCollectionPrepublicationContext `
+                    -Context $context } |
+                Should -Throw '*simulated state publication crash*'
+
+            $markerPath = Get-ProductionMusicSchemaDirectionPath -Config $config
+            $statePath = Join-Path $stateRoot 'domain-collection-cutover.json'
+            $pointerPath = Join-Path $stateRoot `
+                'domain-collection-prepublication-reconciliation.json'
+            (Get-Content -LiteralPath $markerPath -Raw |
+                ConvertFrom-Json).state | Should -BeExactly 'ROLLBACK_IN_PROGRESS'
+            Test-Path -LiteralPath $statePath | Should -BeFalse
+            Test-Path -LiteralPath $pointerPath | Should -BeTrue
+
+            Resolve-ProductionDomainCollectionPrepublicationPublication `
+                -Config $config
+
+            Test-Path -LiteralPath $markerPath | Should -BeFalse
+            Test-Path -LiteralPath $statePath | Should -BeFalse
+            Test-Path -LiteralPath $pointerPath | Should -BeFalse
+            @(Get-ChildItem -LiteralPath $stateRoot `
+                    -Filter 'domain-collection-prepublication.*.json').Count | Should -Be 1
+        }
+
+        It 'keeps repeated evidence snapshots isolated by owner identity' {
+            $root = Join-Path $TestDrive 'binding-owner-isolation'
+            New-Item -ItemType Directory -Path (Join-Path $root 'state') -Force |
+                Out-Null
+            $base = @{
+                config = [pscustomobject]@{ programDataRoot = $root }
+                targetRelease = '2' * 40
+                legacyRelease = '1' * 40
+                backupIdentity = 'a' * 64
+                evidenceDigest = 'b' * 64
+                evidenceFileSha256 = 'c' * 64
+                priorMarkerBase64 = ''
+                priorStateSha256 = ''
+                historyFile = ''
+            }
+            $first = [pscustomobject]$base.Clone()
+            $first | Add-Member NoteProperty ownerToken ('1' * 32)
+            $first | Add-Member NoteProperty candidateDatabase `
+                ('cbell_candidate_' + ('2' * 12) + '_' + ('3' * 24))
+            $second = [pscustomobject]$base.Clone()
+            $second | Add-Member NoteProperty ownerToken ('4' * 32)
+            $second | Add-Member NoteProperty candidateDatabase `
+                ('cbell_candidate_' + ('5' * 12) + '_' + ('6' * 24))
+            Mock Protect-ProductionPath { }
+            Mock Assert-ProtectedProductionPath { }
+            Mock Assert-ProductionPathNotReparse { }
+
+            $firstBinding = Write-ProductionDomainCollectionPrepublicationBinding `
+                -Context $first
+            $secondBinding = Write-ProductionDomainCollectionPrepublicationBinding `
+                -Context $second
+
+            $firstBinding.path | Should -Not -BeExactly $secondBinding.path
+            Test-Path -LiteralPath $firstBinding.path | Should -BeTrue
+            Test-Path -LiteralPath $secondBinding.path | Should -BeTrue
+        }
+
+        It 'restores exact terminal marker and history after marker-first publication crashes' {
+            $root = Join-Path $TestDrive 'terminal-marker-crash'
+            $stateRoot = Join-Path $root 'state'
+            $historyRoot = Join-Path $stateRoot 'history'
+            New-Item -ItemType Directory -Path $historyRoot -Force | Out-Null
+            $config = [pscustomobject]@{ programDataRoot = $root }
+            $markerPath = Get-ProductionMusicSchemaDirectionPath -Config $config
+            $statePath = Join-Path $stateRoot 'domain-collection-cutover.json'
+            $priorMarker = [ordered]@{
+                version = 2
+                state = 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
+                updatedAtEpochMillis = 1
+                targetRelease = '2' * 40
+                currentRelease = '2' * 40
+                legacyRelease = '1' * 40
+                manifestDigest = $script:ManifestDigest
+                evidenceDigest = 'a' * 64
+                backupIdentity = 'b' * 64
+                legacyDropped = $false
+            }
+            $priorMarker | ConvertTo-Json |
+                Set-Content -LiteralPath $markerPath -Encoding utf8
+            $priorMarkerBytes = [IO.File]::ReadAllBytes($markerPath)
+            $priorStateJson = '{"version":1,"state":"ROLLED_BACK","history":"exact"}'
+            Set-Content -LiteralPath $statePath -Value $priorStateJson -NoNewline
+            $priorStateSha = (Get-FileHash -LiteralPath $statePath -Algorithm SHA256).
+                Hash.ToLowerInvariant()
+            $historyFile = Join-Path $historyRoot `
+                "domain-collection-cutover.$priorStateSha.json"
+            Copy-Item -LiteralPath $statePath -Destination $historyFile
+            $context = [pscustomobject]@{
+                config = $config
+                state = 'INITIALIZED'
+                targetRelease = '3' * 40
+                currentRelease = '1' * 40
+                legacyRelease = '1' * 40
+                archive = (Join-Path $root 'fresh.archive.gz')
+                backupIdentity = 'c' * 64
+                evidenceDigest = 'd' * 64
+                evidenceFile = (Join-Path $stateRoot 'evidence.json')
+                evidenceFileSha256 = 'e' * 64
+                ownerToken = 'f' * 32
+                candidateDatabase = 'cbell_candidate_' + ('3' * 12) + '_' + ('4' * 24)
+                priorMarkerBase64 = [Convert]::ToBase64String($priorMarkerBytes)
+                priorStateSha256 = $priorStateSha
+                historyFile = $historyFile
+                dropStarted = $false
+            }
+            Mock Protect-ProductionPath { }
+            Mock Assert-ProtectedProductionPath { }
+            Mock Assert-ProductionPathNotReparse { }
+            Mock Save-ProductionDomainCollectionContextState {
+                throw 'simulated state publication crash'
+            }
+
+            { Publish-ProductionDomainCollectionPrepublicationContext `
+                    -Context $context } |
+                Should -Throw '*simulated state publication crash*'
+            Resolve-ProductionDomainCollectionPrepublicationPublication `
+                -Config $config
+
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($markerPath)) |
+                Should -BeExactly $context.priorMarkerBase64
+            (Get-Content -LiteralPath $statePath -Raw) |
+                Should -BeExactly $priorStateJson
+            (Get-FileHash -LiteralPath $historyFile -Algorithm SHA256).
+                Hash.ToLowerInvariant() | Should -BeExactly $priorStateSha
+            Test-Path -LiteralPath (Join-Path $stateRoot `
+                'domain-collection-prepublication-reconciliation.json') |
+                Should -BeFalse
+        }
+
+        It 'rejects tampered prepublication binding or marker without restoration' {
+            $root = Join-Path $TestDrive 'tampered-marker-crash'
+            $stateRoot = Join-Path $root 'state'
+            New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+            $config = [pscustomobject]@{ programDataRoot = $root }
+            $context = [pscustomobject]@{
+                config = $config
+                state = 'INITIALIZED'
+                targetRelease = '2' * 40
+                currentRelease = '1' * 40
+                legacyRelease = '1' * 40
+                archive = (Join-Path $root 'fresh.archive.gz')
+                backupIdentity = 'a' * 64
+                evidenceDigest = 'b' * 64
+                evidenceFile = (Join-Path $stateRoot 'evidence.json')
+                evidenceFileSha256 = 'c' * 64
+                ownerToken = 'd' * 32
+                candidateDatabase = 'cbell_candidate_' + ('e' * 12) + '_' + ('f' * 24)
+                priorMarkerBase64 = ''
+                priorStateSha256 = ''
+                historyFile = ''
+                dropStarted = $false
+            }
+            Mock Protect-ProductionPath { }
+            Mock Assert-ProtectedProductionPath { }
+            Mock Assert-ProductionPathNotReparse { }
+            Mock Save-ProductionDomainCollectionContextState {
+                throw 'simulated state publication crash'
+            }
+            { Publish-ProductionDomainCollectionPrepublicationContext `
+                    -Context $context } | Should -Throw
+            $bindingPath = @((Get-ChildItem -LiteralPath $stateRoot `
+                        -Filter 'domain-collection-prepublication.*.json').FullName)
+            $bindingPath.Count | Should -Be 1
+            $bindingPath = $bindingPath[0]
+            $bindingBytes = [IO.File]::ReadAllBytes($bindingPath)
+            Add-Content -LiteralPath $bindingPath -Value 'tampered'
+
+            { Resolve-ProductionDomainCollectionPrepublicationPublication `
+                    -Config $config } |
+                Should -Throw '*binding*'
+
+            (Get-Content -LiteralPath (
+                    Get-ProductionMusicSchemaDirectionPath -Config $config) -Raw |
+                ConvertFrom-Json).state | Should -BeExactly 'ROLLBACK_IN_PROGRESS'
+            Test-Path -LiteralPath (Join-Path $stateRoot `
+                'domain-collection-prepublication-reconciliation.json') |
+                Should -BeTrue
+
+            [IO.File]::WriteAllBytes($bindingPath,$bindingBytes)
+            $markerPath = Get-ProductionMusicSchemaDirectionPath -Config $config
+            $marker = Get-Content -LiteralPath $markerPath -Raw |
+                ConvertFrom-Json
+            $marker.backupIdentity = '9' * 64
+            $marker | ConvertTo-Json |
+                Set-Content -LiteralPath $markerPath -Encoding utf8
+
+            { Resolve-ProductionDomainCollectionPrepublicationPublication `
+                    -Config $config } |
+                Should -Throw '*exact prior or committed*'
+
+            Test-Path -LiteralPath $markerPath | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $stateRoot `
+                'domain-collection-prepublication-reconciliation.json') |
+                Should -BeTrue
+        }
+
+        It 'recovers only an exact persisted prepublication state on cutover retry' {
+            $script:exerciseRealRetryResolver = $true
+            $config = [pscustomobject]@{ programDataRoot = 'C:\fixed' }
+            $script:retryMarker = [pscustomobject]@{
+                state = 'ROLLBACK_IN_PROGRESS'
+            }
+            $script:retryState = [pscustomobject]@{
+                state = 'PREVIEWED'
+                legacyDropped = $false
+            }
+            Mock Resolve-ProductionDomainCollectionPrepublicationPublication { }
+            Mock Read-ProductionDomainSchemaDirection { $script:retryMarker }
+            Mock Read-ProductionDomainCollectionProtectedState { $script:retryState }
+            Mock Invoke-ProductionDomainCollectionFailureRecovery { }
+
+            Resolve-ProductionDomainCollectionPrepublicationForCutoverRetry `
+                -Config $config
+
+            Should -Invoke Invoke-ProductionDomainCollectionFailureRecovery `
+                -Times 1 -Exactly -ParameterFilter { -not $PostDrop }
+
+            $script:retryState.state = 'ROLLBACK_VERIFIED'
+            { Resolve-ProductionDomainCollectionPrepublicationForCutoverRetry `
+                    -Config $config } |
+                Should -Throw '*non-prepublication recovery state*'
+
+            Should -Invoke Invoke-ProductionDomainCollectionFailureRecovery `
+                -Times 1 -Exactly
         }
 
         It 'rejects unsafe terminal reinitialization before backup or publication' {

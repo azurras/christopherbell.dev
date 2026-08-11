@@ -607,6 +607,21 @@ read-only; confirmed cutover preserves the prior terminal JSON in protected
 evidence, owner token, and isolated candidate. Any nonterminal or mismatched
 state/marker/release/schema blocks before those cutover effects.
 
+Before candidate work, a new consolidation writes an immutable protected
+prepublication binding, a protected one-sided reconciliation pointer, the v2
+`ROLLBACK_IN_PROGRESS` startup/deploy barrier, and then protected `PREVIEWED`
+state, all under the same `deploy.lock`. The binding includes the fresh target,
+backup, evidence, owner and candidate identities plus the exact prior marker and
+terminal-history hash. The barrier authorizes no writer start or deployment.
+Marker-first interruption restores the exact prior marker/no-marker boundary;
+committed `PREVIEWED`, `CANDIDATE_VERIFIED`, or `LIVE_PUBLISHED` state is accepted
+only with the matching barrier and binding. Candidate failure performs guarded
+`recover-prepublication` while stopped with recovery suspended, resumes the exact
+legacy release, and leaves a terminal state from which preview or a newly
+confirmed cutover may safely create fresh identities. A confirmed cutover retry
+performs the same exact cleanup before starting its new context; read-only
+preview never mutates recovery state.
+
 Routine target-schema deployments preserve the original cutover target,
 evidence digest, backup identity, and legacy release in the v2 marker while
 advancing only its current target release.

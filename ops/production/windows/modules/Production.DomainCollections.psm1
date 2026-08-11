@@ -618,6 +618,382 @@ function Remove-ProductionDomainCollectionTerminalReconciliationAuthorization {
             -Config $State.config) -Force -ErrorAction Stop
 }
 
+function Get-ProductionDomainCollectionPrepublicationBindingPath {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$EvidenceDigest,
+        [Parameter(Mandatory)][string]$OwnerToken
+    )
+    Assert-ProductionDomainCollectionDigest `
+        -Value $EvidenceDigest -Description 'Prepublication evidence digest'
+    if ($OwnerToken -cnotmatch '^[0-9a-f]{32}$') {
+        throw 'Prepublication owner identity is invalid.'
+    }
+    $identityBytes = [Text.Encoding]::UTF8.GetBytes(
+        "v1`n$EvidenceDigest`n$OwnerToken")
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bindingKey = ([BitConverter]::ToString($sha256.ComputeHash(
+                    $identityBytes))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
+    Join-Path $Config.programDataRoot `
+        "state\domain-collection-prepublication.$bindingKey.json"
+}
+
+function Get-ProductionDomainCollectionPrepublicationReconciliationPath {
+    param([Parameter(Mandatory)]$Config)
+    Join-Path $Config.programDataRoot `
+        'state\domain-collection-prepublication-reconciliation.json'
+}
+
+function Read-ProductionDomainCollectionPrepublicationBinding {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$EvidenceDigest,
+        [Parameter(Mandatory)][string]$OwnerToken,
+        [string]$ExpectedSha256 = ''
+    )
+    $path = Get-ProductionDomainCollectionPrepublicationBindingPath `
+        -Config $Config -EvidenceDigest $EvidenceDigest -OwnerToken $OwnerToken
+    try {
+        Assert-ProductionPathNotReparse -Path $path | Out-Null
+        Assert-ProtectedProductionPath -Path $path | Out-Null
+        $actualSha = (Get-FileHash -LiteralPath $path -Algorithm SHA256).
+            Hash.ToLowerInvariant()
+        if (-not [string]::IsNullOrEmpty($ExpectedSha256) -and
+            $actualSha -cne $ExpectedSha256) {
+            throw 'Prepublication binding digest changed.'
+        }
+        $value = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+        Assert-ProductionDomainCollectionExactProperties -Value $value -Names @(
+            'version','manifestDigest','targetRelease','legacyRelease',
+            'evidenceDigest','backupIdentity','evidenceFileSha256','ownerToken',
+            'candidateDatabase','priorMarkerBase64','priorStateSha256',
+            'historyFile') -Description 'Prepublication binding'
+        if (($value.version -isnot [int] -and $value.version -isnot [long]) -or
+            [int]$value.version -ne 1 -or
+            $value.manifestDigest -isnot [string] -or
+            [string]$value.manifestDigest -cne $script:ManifestDigest -or
+            $value.targetRelease -isnot [string] -or
+            [string]$value.targetRelease -cnotmatch '^[0-9a-f]{40}$' -or
+            $value.legacyRelease -isnot [string] -or
+            [string]$value.legacyRelease -cnotmatch '^[0-9a-f]{40}$' -or
+            $value.ownerToken -isnot [string] -or
+            [string]$value.ownerToken -cnotmatch '^[0-9a-f]{32}$' -or
+            $value.candidateDatabase -isnot [string] -or
+            [string]$value.candidateDatabase -cnotmatch
+                '^cbell_candidate_[0-9a-f]{12}_[0-9a-f]{24}$' -or
+            $value.priorMarkerBase64 -isnot [string] -or
+            $value.priorStateSha256 -isnot [string] -or
+            $value.historyFile -isnot [string]) {
+            throw 'Prepublication binding identity is invalid.'
+        }
+        foreach ($name in 'evidenceDigest','backupIdentity','evidenceFileSha256') {
+            Assert-ProductionDomainCollectionDigest `
+                -Value $value.$name -Description "Prepublication $name"
+        }
+        if ([string]$value.evidenceDigest -cne $EvidenceDigest) {
+            throw 'Prepublication binding evidence identity changed.'
+        }
+        if ([string]$value.ownerToken -cne $OwnerToken) {
+            throw 'Prepublication binding owner identity changed.'
+        }
+        if (-not [string]::IsNullOrEmpty([string]$value.priorMarkerBase64)) {
+            try {
+                [void][Convert]::FromBase64String([string]$value.priorMarkerBase64)
+            } catch {
+                throw 'Prepublication prior marker identity is invalid.'
+            }
+        }
+        $priorStateSha = [string]$value.priorStateSha256
+        $historyFile = [string]$value.historyFile
+        if ([string]::IsNullOrEmpty($priorStateSha)) {
+            if (-not [string]::IsNullOrEmpty($historyFile) -or
+                -not [string]::IsNullOrEmpty([string]$value.priorMarkerBase64)) {
+                throw 'First prepublication binding contains prior history.'
+            }
+        } else {
+            Assert-ProductionDomainCollectionDigest `
+                -Value $priorStateSha -Description 'Prepublication prior state'
+            if ([string]::IsNullOrEmpty([string]$value.priorMarkerBase64)) {
+                throw 'Terminal prepublication binding is missing its prior marker.'
+            }
+            $expectedHistory = Join-Path $Config.programDataRoot `
+                "state\history\domain-collection-cutover.$priorStateSha.json"
+            if (-not [string]::Equals(
+                    [IO.Path]::GetFullPath($historyFile),
+                    [IO.Path]::GetFullPath($expectedHistory),
+                    [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Prepublication history path identity changed.'
+            }
+            Assert-ProductionPathNotReparse -Path $historyFile | Out-Null
+            Assert-ProtectedProductionPath -Path $historyFile | Out-Null
+            if ((Get-FileHash -LiteralPath $historyFile -Algorithm SHA256).
+                    Hash.ToLowerInvariant() -cne $priorStateSha) {
+                throw 'Prepublication history identity changed.'
+            }
+        }
+        [pscustomobject][ordered]@{
+            path = $path
+            sha256 = $actualSha
+            version = 1
+            manifestDigest = [string]$value.manifestDigest
+            targetRelease = [string]$value.targetRelease
+            legacyRelease = [string]$value.legacyRelease
+            evidenceDigest = [string]$value.evidenceDigest
+            backupIdentity = [string]$value.backupIdentity
+            evidenceFileSha256 = [string]$value.evidenceFileSha256
+            ownerToken = [string]$value.ownerToken
+            candidateDatabase = [string]$value.candidateDatabase
+            priorMarkerBase64 = [string]$value.priorMarkerBase64
+            priorStateSha256 = $priorStateSha
+            historyFile = $historyFile
+        }
+    } catch {
+        throw [IO.InvalidDataException]::new(
+            'Protected prepublication binding is invalid.', $_.Exception)
+    }
+}
+
+function Assert-ProductionDomainCollectionPrepublicationBindingMatchesState {
+    param(
+        [Parameter(Mandatory)]$Binding,
+        [Parameter(Mandatory)]$State
+    )
+    if ([string]$Binding.targetRelease -cne [string]$State.targetRelease -or
+        [string]$Binding.legacyRelease -cne [string]$State.legacyRelease -or
+        [string]$Binding.evidenceDigest -cne [string]$State.evidenceDigest -or
+        [string]$Binding.backupIdentity -cne [string]$State.backupIdentity -or
+        [string]$Binding.evidenceFileSha256 -cne
+            [string]$State.evidenceFileSha256 -or
+        [string]$Binding.ownerToken -cne [string]$State.ownerToken -or
+        [string]$Binding.candidateDatabase -cne
+            [string]$State.candidateDatabase -or
+        [string]$Binding.priorMarkerBase64 -cne
+            [string]$State.priorMarkerBase64) {
+        throw 'Protected prepublication binding does not match cutover state.'
+    }
+    return $Binding
+}
+
+function Write-ProductionDomainCollectionPrepublicationBinding {
+    param([Parameter(Mandatory)]$Context)
+    $path = Get-ProductionDomainCollectionPrepublicationBindingPath `
+        -Config $Context.config -EvidenceDigest $Context.evidenceDigest `
+        -OwnerToken $Context.ownerToken
+    $value = [ordered]@{
+        version = 1
+        manifestDigest = $script:ManifestDigest
+        targetRelease = [string]$Context.targetRelease
+        legacyRelease = [string]$Context.legacyRelease
+        evidenceDigest = [string]$Context.evidenceDigest
+        backupIdentity = [string]$Context.backupIdentity
+        evidenceFileSha256 = [string]$Context.evidenceFileSha256
+        ownerToken = [string]$Context.ownerToken
+        candidateDatabase = [string]$Context.candidateDatabase
+        priorMarkerBase64 = [string]$Context.priorMarkerBase64
+        priorStateSha256 = [string]$Context.priorStateSha256
+        historyFile = [string]$Context.historyFile
+    }
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        $existing = Read-ProductionDomainCollectionPrepublicationBinding `
+            -Config $Context.config -EvidenceDigest $Context.evidenceDigest `
+            -OwnerToken $Context.ownerToken
+        Assert-ProductionDomainCollectionPrepublicationBindingMatchesState `
+            -Binding $existing -State $Context
+        return $existing
+    }
+    Write-ProductionDomainCollectionProtectedJson `
+        -Config $Context.config -Path $path -Value $value
+    $binding = Read-ProductionDomainCollectionPrepublicationBinding `
+        -Config $Context.config -EvidenceDigest $Context.evidenceDigest `
+        -OwnerToken $Context.ownerToken
+    Assert-ProductionDomainCollectionPrepublicationBindingMatchesState `
+        -Binding $binding -State $Context
+}
+
+function Write-ProductionDomainCollectionPrepublicationReconciliation {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$Binding)
+    Write-ProductionDomainCollectionProtectedJson `
+        -Config $Context.config `
+        -Path (Get-ProductionDomainCollectionPrepublicationReconciliationPath `
+            -Config $Context.config) `
+        -Value ([ordered]@{
+            version = 1
+            evidenceDigest = [string]$Binding.evidenceDigest
+            ownerToken = [string]$Binding.ownerToken
+            bindingSha256 = [string]$Binding.sha256
+        })
+}
+
+function Read-ProductionDomainCollectionPrepublicationReconciliation {
+    param([Parameter(Mandatory)]$Config)
+    $path = Get-ProductionDomainCollectionPrepublicationReconciliationPath `
+        -Config $Config
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        Assert-ProductionPathNotReparse -Path $path | Out-Null
+        Assert-ProtectedProductionPath -Path $path | Out-Null
+        $value = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+        Assert-ProductionDomainCollectionExactProperties -Value $value -Names @(
+            'version','evidenceDigest','ownerToken','bindingSha256') `
+            -Description 'Prepublication reconciliation'
+        if (($value.version -isnot [int] -and $value.version -isnot [long]) -or
+            [int]$value.version -ne 1) {
+            throw 'Prepublication reconciliation version is invalid.'
+        }
+        foreach ($name in 'evidenceDigest','bindingSha256') {
+            Assert-ProductionDomainCollectionDigest `
+                -Value $value.$name -Description "Prepublication reconciliation $name"
+        }
+        if ($value.ownerToken -isnot [string] -or
+            [string]$value.ownerToken -cnotmatch '^[0-9a-f]{32}$') {
+            throw 'Prepublication reconciliation owner identity is invalid.'
+        }
+        $binding = Read-ProductionDomainCollectionPrepublicationBinding `
+            -Config $Config -EvidenceDigest ([string]$value.evidenceDigest) `
+            -OwnerToken ([string]$value.ownerToken) `
+            -ExpectedSha256 ([string]$value.bindingSha256)
+        [pscustomobject][ordered]@{
+            path = $path
+            binding = $binding
+        }
+    } catch {
+        throw [IO.InvalidDataException]::new(
+            'Protected prepublication reconciliation or binding is invalid.',
+            $_.Exception)
+    }
+}
+
+function Remove-ProductionDomainCollectionPrepublicationReconciliation {
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$Binding)
+    $current = Read-ProductionDomainCollectionPrepublicationReconciliation `
+        -Config $Config
+    if (-not $current -or
+        [string]$current.binding.sha256 -cne [string]$Binding.sha256) {
+        throw 'Prepublication reconciliation identity changed before removal.'
+    }
+    Remove-Item -LiteralPath $current.path -Force -ErrorAction Stop
+}
+
+function Test-ProductionDomainCollectionPrepublicationMarker {
+    param([AllowNull()]$Marker, [Parameter(Mandatory)]$Binding)
+    return $null -ne $Marker -and
+        [int]$Marker.version -eq 2 -and
+        [string]$Marker.state -ceq 'ROLLBACK_IN_PROGRESS' -and
+        [string]$Marker.targetRelease -ceq [string]$Binding.targetRelease -and
+        [string]$Marker.currentRelease -ceq [string]$Binding.legacyRelease -and
+        [string]$Marker.legacyRelease -ceq [string]$Binding.legacyRelease -and
+        [string]$Marker.manifestDigest -ceq $script:ManifestDigest -and
+        [string]$Marker.evidenceDigest -ceq [string]$Binding.evidenceDigest -and
+        [string]$Marker.backupIdentity -ceq [string]$Binding.backupIdentity -and
+        -not [bool]$Marker.legacyDropped
+}
+
+function Test-ProductionDomainCollectionPriorMarkerIdentity {
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$Binding)
+    $path = Get-ProductionMusicSchemaDirectionPath -Config $Config
+    if ([string]::IsNullOrEmpty([string]$Binding.priorMarkerBase64)) {
+        return -not (Test-Path -LiteralPath $path -PathType Leaf)
+    }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    Assert-ProductionPathNotReparse -Path $path | Out-Null
+    Assert-ProtectedProductionPath -Path $path | Out-Null
+    [Convert]::ToBase64String([IO.File]::ReadAllBytes($path)) -ceq
+        [string]$Binding.priorMarkerBase64
+}
+
+function Test-ProductionDomainCollectionPriorStateIdentity {
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$Binding)
+    $path = Get-ProductionDomainCollectionStatePath -Config $Config
+    if ([string]::IsNullOrEmpty([string]$Binding.priorStateSha256)) {
+        return -not (Test-Path -LiteralPath $path -PathType Leaf)
+    }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    Assert-ProductionPathNotReparse -Path $path | Out-Null
+    Assert-ProtectedProductionPath -Path $path | Out-Null
+    (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() `
+        -ceq [string]$Binding.priorStateSha256
+}
+
+function Publish-ProductionDomainCollectionPrepublicationContext {
+    param([Parameter(Mandatory)]$Context)
+    $binding = Write-ProductionDomainCollectionPrepublicationBinding `
+        -Context $Context
+    Write-ProductionDomainCollectionPrepublicationReconciliation `
+        -Context $Context -Binding $binding
+    Write-ProductionDomainCollectionRollbackMarker `
+        -State $Context -MarkerState ROLLBACK_IN_PROGRESS
+    Save-ProductionDomainCollectionContextState -Context $Context -State PREVIEWED
+    Remove-ProductionDomainCollectionPrepublicationReconciliation `
+        -Config $Context.config -Binding $binding
+}
+
+function Resolve-ProductionDomainCollectionPrepublicationPublication {
+    param([Parameter(Mandatory)]$Config)
+    $reconciliation =
+        Read-ProductionDomainCollectionPrepublicationReconciliation `
+            -Config $Config
+    if (-not $reconciliation) { return }
+    $binding = $reconciliation.binding
+    $marker = Read-ProductionDomainSchemaDirection -Config $Config
+    $markerIsPrepublication = Test-ProductionDomainCollectionPrepublicationMarker `
+        -Marker $marker -Binding $binding
+    $markerIsPrior = Test-ProductionDomainCollectionPriorMarkerIdentity `
+        -Config $Config -Binding $binding
+    $stateIsPrior = Test-ProductionDomainCollectionPriorStateIdentity `
+        -Config $Config -Binding $binding
+    if ($markerIsPrepublication) {
+        if ($stateIsPrior) {
+            Restore-ProductionDomainCollectionLegacyRelease -State ([pscustomobject]@{
+                config = $Config
+                priorMarkerBase64 = [string]$binding.priorMarkerBase64
+            })
+            Remove-ProductionDomainCollectionPrepublicationReconciliation `
+                -Config $Config -Binding $binding
+            return
+        }
+        $state = Read-ProductionDomainCollectionProtectedState -Config $Config
+        if ([string]$state.state -cne 'PREVIEWED') {
+            throw 'One-sided prepublication reconciliation found an invalid state.'
+        }
+        Assert-ProductionDomainCollectionPrepublicationBindingMatchesState `
+            -Binding $binding -State $state | Out-Null
+        Remove-ProductionDomainCollectionPrepublicationReconciliation `
+            -Config $Config -Binding $binding
+        return
+    }
+    if ($markerIsPrior -and $stateIsPrior) {
+        Remove-ProductionDomainCollectionPrepublicationReconciliation `
+            -Config $Config -Binding $binding
+        return
+    }
+    throw ('One-sided prepublication reconciliation does not match the exact ' +
+        'prior or committed marker/state boundary.')
+}
+
+function Resolve-ProductionDomainCollectionPrepublicationForCutoverRetry {
+    param([Parameter(Mandatory)]$Config)
+    Resolve-ProductionDomainCollectionPrepublicationPublication -Config $Config
+    $marker = Read-ProductionDomainSchemaDirection -Config $Config
+    if (-not $marker -or
+        [string]$marker.state -cne 'ROLLBACK_IN_PROGRESS') {
+        return
+    }
+    $state = Read-ProductionDomainCollectionProtectedState -Config $Config
+    if ([string]$state.state -cnotin @(
+            'PREVIEWED','CANDIDATE_VERIFIED','LIVE_PUBLISHED')) {
+        throw ('The rollback barrier belongs to a non-prepublication recovery ' +
+            'state; cutover retry is blocked.')
+    }
+    Invoke-ProductionDomainCollectionFailureRecovery `
+        -Context $state -PostDrop:$false
+}
+
 function Save-ProductionDomainCollectionContextState {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$State)
     $current = if ($Context.PSObject.Properties['state']) {
@@ -694,14 +1070,19 @@ function New-ProductionDomainCollectionCutoverContext {
         -Database $candidate `
         -CandidatePort ([int]$Config.candidatePort) `
         -ProductionPort ([int]$Config.productionPort)
+    $historyFile = ''
+    $priorStateSha256 = ''
     if ($terminalState) {
-        Archive-ProductionDomainCollectionTerminalState -State $terminalState |
-            Out-Null
+        $historyFile = Archive-ProductionDomainCollectionTerminalState `
+            -State $terminalState
+        $priorStateSha256 = (Get-FileHash -LiteralPath $historyFile `
+            -Algorithm SHA256).Hash.ToLowerInvariant()
     }
     $context = [pscustomobject][ordered]@{
         config = $Config
         targetRelease = $targetRelease
         targetPath = $targetPath
+        currentRelease = $legacyRelease
         legacyRelease = $legacyRelease
         legacyPath = $legacyPath
         archive = [string]$backup.archive
@@ -713,11 +1094,13 @@ function New-ProductionDomainCollectionCutoverContext {
         ownerToken = $owner
         candidateDatabase = $candidate
         priorMarkerBase64 = $priorMarkerBase64
+        priorStateSha256 = $priorStateSha256
+        historyFile = $historyFile
         dropStarted = $false
         writerStopped = $false
         state = 'INITIALIZED'
     }
-    Save-ProductionDomainCollectionContextState -Context $context -State PREVIEWED
+    Publish-ProductionDomainCollectionPrepublicationContext -Context $context
     return $context
 }
 
@@ -970,6 +1353,7 @@ function Read-ProductionDomainCollectionProtectedState {
         }
         $domainMarker = Read-ProductionDomainSchemaDirection -Config $Config
         $markerRequired = [string]$value.state -in @(
+            'PREVIEWED','CANDIDATE_VERIFIED','LIVE_PUBLISHED',
             'TARGET_START_PENDING','DROP_STARTED','LEGACY_DROPPED','TARGET_ACTIVE',
             'ROLLBACK_VERIFIED','LEGACY_DATA_VERIFIED','ROLLBACK_READY','ROLLED_BACK')
         if ($markerRequired -and -not $domainMarker) {
@@ -986,6 +1370,14 @@ function Read-ProductionDomainCollectionProtectedState {
         if ([string]$value.state -eq 'TARGET_ACTIVE' -and
             (-not $domainMarker.legacyDropped -or -not [bool]$value.legacyDropped)) {
             throw 'Protected target-active deletion state is inconsistent.'
+        }
+        if ([string]$value.state -in @(
+                'PREVIEWED','CANDIDATE_VERIFIED','LIVE_PUBLISHED') -and
+            ([string]$domainMarker.state -cne 'ROLLBACK_IN_PROGRESS' -or
+                [bool]$domainMarker.legacyDropped -or
+                [string]$domainMarker.currentRelease -cne
+                    [string]$value.legacyRelease)) {
+            throw 'Protected prepublication state is missing its exact startup barrier.'
         }
         if ([string]$value.state -eq 'ROLLBACK_VERIFIED' -and
             [string]$domainMarker.state -cne 'ROLLBACK_IN_PROGRESS') {
@@ -1026,6 +1418,18 @@ function Read-ProductionDomainCollectionProtectedState {
             priorMarkerBase64 = [string]$value.priorMarkerBase64
             terminalReconciliation = [string]$value.state -eq 'ROLLED_BACK'
             terminalReconciliationAuthorized = $false
+        }
+        if ([string]$value.state -in @(
+                'PREVIEWED','CANDIDATE_VERIFIED','LIVE_PUBLISHED')) {
+            $binding = Read-ProductionDomainCollectionPrepublicationBinding `
+                -Config $Config -EvidenceDigest ([string]$value.evidenceDigest) `
+                -OwnerToken ([string]$value.ownerToken)
+            Assert-ProductionDomainCollectionPrepublicationBindingMatchesState `
+                -Binding $binding -State $state | Out-Null
+            $state | Add-Member NoteProperty priorStateSha256 `
+                ([string]$binding.priorStateSha256)
+            $state | Add-Member NoteProperty historyFile `
+                ([string]$binding.historyFile)
         }
         if ([string]$value.state -eq 'ROLLED_BACK') {
             Assert-ProductionDomainCollectionTerminalLegacyState `
@@ -1272,6 +1676,8 @@ function Invoke-ProductionDomainCollectionCutover {
         -Config $config -FixedRoot $script:FixedProductionRoot
     $context = $null
     try {
+        Resolve-ProductionDomainCollectionPrepublicationForCutoverRetry `
+            -Config $config
         try {
             $context = New-ProductionDomainCollectionCutoverContext -Config $config
             Invoke-ProductionDomainCollectionCandidateProof -Context $context
@@ -1292,8 +1698,7 @@ function Invoke-ProductionDomainCollectionCutover {
             Complete-ProductionDomainCollectionCutover -Context $context
         } catch {
             $cutoverFailure = $_.Exception
-            if ($null -ne $context -and
-                ([bool]$context.writerStopped -or [bool]$context.dropStarted)) {
+            if ($null -ne $context) {
                 $postDrop = [bool]$context.dropStarted
                 try {
                     Invoke-ProductionDomainCollectionFailureRecovery `
