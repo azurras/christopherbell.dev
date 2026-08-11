@@ -22,46 +22,11 @@ class LegacyMongoAccessBaselineTest {
       repositoryRoot().resolve("website/src/main/java"),
       repositoryRoot().resolve("cbell-lib/src/main/java"));
 
-  private static final Set<String> TEMPORARY_DOCUMENT_BASELINE = Set.of(
-      "dev.christopherbell.canesboxtracker.model.CanesBoxPriceSnapshot",
-      "dev.christopherbell.configuration.mongo.migration.MigrationRecord",
-      "dev.christopherbell.libs.mongo.lease.MongoLeaseDocument",
-      "dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun",
-      "dev.christopherbell.location.model.ZipCoordinate",
-      "dev.christopherbell.location.model.ZipCoordinateImportState",
-      "dev.christopherbell.sharedfolder.audit.SharedFolderAuditEvent",
-      "dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceLeaseDocument",
-      "dev.christopherbell.sharedfolder.media.MediaJob",
-      "dev.christopherbell.sharedfolder.radio.SharedFolderRadioDocument",
-      "dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleItem",
-      "dev.christopherbell.sharedfolder.service.SharedFolderMutationRecovery",
-      "dev.christopherbell.sharedfolder.upload.SharedFolderUploadSession",
-      "dev.christopherbell.vehicle.model.Vehicle",
-      "dev.christopherbell.vehicle.model.VehicleVinDecodeCache",
-      "dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState",
-      "dev.christopherbell.vehicle.randomvin.model.RandomVinImportState");
-
-  private static final Set<String> TEMPORARY_MONGO_REPOSITORY_BASELINE = Set.of(
-      "dev.christopherbell.canesboxtracker.CanesBoxPriceSnapshotRepository",
-      "dev.christopherbell.location.zip.ZipCoordinateImportStateRepository",
-      "dev.christopherbell.location.zip.ZipCoordinateRepository",
-      "dev.christopherbell.sharedfolder.audit.SharedFolderAuditRepository",
-      "dev.christopherbell.sharedfolder.media.MediaJobRepository",
-      "dev.christopherbell.sharedfolder.radio.SharedFolderRadioRepository",
-      "dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleRepository",
-      "dev.christopherbell.sharedfolder.service.SharedFolderMutationRecoveryRepository",
-      "dev.christopherbell.sharedfolder.upload.SharedFolderUploadSessionRepository",
-      "dev.christopherbell.vehicle.core.VehicleRepository",
-      "dev.christopherbell.vehicle.nhtsa.decode.VehicleVinDecodeCacheRepository",
-      "dev.christopherbell.vehicle.nhtsa.enrichment.NhtsaVinImportStateRepository",
-      "dev.christopherbell.vehicle.randomvin.importing.RandomVinImportStateRepository");
-
   private static final Set<String> APPROVED_DIRECT_MONGO_INFRASTRUCTURE = Set.of(
       "dev.christopherbell.admin.commandcenter.metrics.CommandCenterMetricsService",
       "dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory",
       "dev.christopherbell.configuration.mongo.domain.MongoKindScopedOperations",
       "dev.christopherbell.configuration.mongo.migration.ApplicationMigration",
-      "dev.christopherbell.configuration.mongo.migration.MigrationStateStore",
       "dev.christopherbell.configuration.mongo.migration.MongoMigrationRunner",
       "dev.christopherbell.configuration.mongo.migration.V001EnsureMigrationInfrastructure",
       "dev.christopherbell.configuration.mongo.migration.V002EnsureRestaurantImportPreviewIndexes",
@@ -78,31 +43,20 @@ class LegacyMongoAccessBaselineTest {
       "dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes",
       "dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState");
 
-  private static final Set<String> TEMPORARY_DIRECT_MONGO_BASELINE = Set.of(
-      "dev.christopherbell.libs.mongo.lease.MongoLeaseService",
-      "dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator",
-      "dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService",
-      "dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore");
-
   @Test
-  void legacyDocumentAnnotationsCannotGrowBeforeTheirAdaptersReplaceThem() throws IOException {
-    assertThat(ownerTypesMatching(DOCUMENT_USAGE))
-        .containsExactlyInAnyOrderElementsOf(TEMPORARY_DOCUMENT_BASELINE);
+  void runtimeDomainModelsDoNotOwnPhysicalMongoCollections() throws IOException {
+    assertThat(ownerTypesMatching(DOCUMENT_USAGE)).isEmpty();
   }
 
   @Test
-  void legacyMongoRepositoriesCannotGrowBeforeTheirAdaptersReplaceThem() throws IOException {
-    assertThat(ownerTypesMatching(MONGO_REPOSITORY_USAGE))
-        .containsExactlyInAnyOrderElementsOf(TEMPORARY_MONGO_REPOSITORY_BASELINE);
+  void runtimeDomainPortsDoNotInheritSpringDataRepositories() throws IOException {
+    assertThat(ownerTypesMatching(MONGO_REPOSITORY_USAGE)).isEmpty();
   }
 
   @Test
-  void directMongoTemplateUseCannotGrowAndRawMongoCollectionUseRemainsZero() throws IOException {
-    var expectedMongoTemplateOwners = new TreeSet<>(APPROVED_DIRECT_MONGO_INFRASTRUCTURE);
-    expectedMongoTemplateOwners.addAll(TEMPORARY_DIRECT_MONGO_BASELINE);
-
+  void directMongoUseIsRestrictedToApprovedInfrastructure() throws IOException {
     assertThat(ownerTypesMatching(MONGO_TEMPLATE_USAGE))
-        .containsExactlyInAnyOrderElementsOf(expectedMongoTemplateOwners);
+        .containsExactlyInAnyOrderElementsOf(APPROVED_DIRECT_MONGO_INFRASTRUCTURE);
     assertThat(ownerTypesMatching(MONGO_COLLECTION_USAGE)).isEmpty();
   }
 

@@ -69,7 +69,8 @@ class DomainCollectionManifestLegacyIndexTest {
               asc("followedAccountId")));
 
   @Test
-  void everyLegacyAnnotationIndexSemanticIsFrozenInTheTargetManifest() throws Exception {
+  void finalManifestRetainsAllKindIndexesAfterRuntimeDocumentMappingsAreRemoved()
+      throws Exception {
     var documentTypes = mappedDocumentTypes();
     var mapping = new MongoMappingContext();
     mapping.setSimpleTypeHolder(
@@ -114,24 +115,19 @@ class DomainCollectionManifestLegacyIndexTest {
             Optional.empty()));
       }
     }
-    assertThat(annotationIndexCount).isEqualTo(28);
+    assertThat(annotationIndexCount).isZero();
     assertThat(MANUAL_ONLY_INDEXES).hasSize(20);
     expectedIndexes.addAll(MANUAL_ONLY_INDEXES);
-    assertThat(DomainCollectionManifest.ALL_INDEXES.stream()
-        .filter(index -> index.kind().isPresent()))
+    var kindIndexes = DomainCollectionManifest.ALL_INDEXES.stream()
+        .filter(index -> index.kind().isPresent())
+        .toList();
+    assertThat(kindIndexes).hasSize(112);
+    assertThat(kindIndexes)
         .containsAll(expectedIndexes);
   }
 
   private static HashSet<Class<?>> mappedDocumentTypes() {
-    var scanner = new ClassPathScanningCandidateComponentProvider(false);
-    scanner.addIncludeFilter(new AnnotationTypeFilter(
-        org.springframework.data.mongodb.core.mapping.Document.class));
-    var classLoader = DomainCollectionManifestLegacyIndexTest.class.getClassLoader();
-    var types = new HashSet<Class<?>>();
-    for (var candidate : scanner.findCandidateComponents("dev.christopherbell")) {
-      types.add(ClassUtils.resolveClassName(candidate.getBeanClassName(), classLoader));
-    }
-    return types;
+    return new HashSet<>();
   }
 
   private static List<DomainCollectionManifest.IndexKey> remapKeys(Document legacyKeys) {

@@ -27,6 +27,7 @@ import dev.christopherbell.libs.api.controller.ControllerExceptionHandler;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder;
+import dev.christopherbell.sharedfolder.audit.SharedFolderAuditRepository;
 import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleService;
 import dev.christopherbell.sharedfolder.security.SharedFolderAccessService;
 import dev.christopherbell.sharedfolder.service.SharedFolderBrowserService;
@@ -59,7 +60,6 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -99,7 +99,7 @@ class SharedFolderSecurityIntegrationTest {
   @MockitoBean private SharedFolderUploadService uploads;
   @MockitoBean private SharedFolderRecycleService recycle;
   @MockitoBean private SharedFolderAuditRecorder auditRecorder;
-  @MockitoBean private MongoTemplate mongo;
+  @MockitoBean private SharedFolderAuditRepository auditRepository;
   @MockitoBean private BrowserSessionService browserSessions;
 
   private final AtomicReference<Account> persistedAccount = new AtomicReference<>();
@@ -128,7 +128,8 @@ class SharedFolderSecurityIntegrationTest {
           ? Optional.of(account)
           : Optional.empty();
     });
-    when(mongo.find(any(), org.mockito.ArgumentMatchers.<Class<Object>>any()))
+    when(auditRepository.search(
+        any(), any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyInt()))
         .thenReturn(List.of());
     when(browserSessions.authenticate(
         org.mockito.ArgumentMatchers.eq("session-id.secret"),

@@ -40,8 +40,8 @@ class V001EnsureMigrationInfrastructureTest {
 
   @Test
   void applyEnsuresNamedInfrastructureIndexesIdempotently() {
-    when(mongo.indexOps(MigrationRecord.COLLECTION)).thenReturn(migrationIndexes);
-    when(mongo.indexOps(MongoLeaseService.COLLECTION)).thenReturn(leaseIndexes);
+    when(mongo.indexOps("application_migrations")).thenReturn(migrationIndexes);
+    when(mongo.indexOps("application_leases")).thenReturn(leaseIndexes);
 
     migration.apply(mongo);
     migration.apply(mongo);

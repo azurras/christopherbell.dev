@@ -1,8 +1,10 @@
 package dev.christopherbell.location.zip;
 
 import dev.christopherbell.location.model.ZipCoordinateImportState;
-import org.springframework.data.mongodb.repository.MongoRepository;
+import java.util.Optional;
 
 /** Stores observable ZIP coordinate import state by source dataset. */
-public interface ZipCoordinateImportStateRepository
-    extends MongoRepository<ZipCoordinateImportState, String> {}
+public interface ZipCoordinateImportStateRepository {
+  Optional<ZipCoordinateImportState> findById(String id);
+  ZipCoordinateImportState save(ZipCoordinateImportState state);
+}

@@ -7,16 +7,12 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 @AllArgsConstructor
 @Builder
 @Data
 @NoArgsConstructor
-@Document(VehicleVinDecodeCache.COLLECTION)
 public class VehicleVinDecodeCache {
-  public static final String COLLECTION = "vehicle_vin_decode_cache";
-
   @Id private String vin;
   private VehicleVinDecodeResponse response;
   private String decoderVersion;

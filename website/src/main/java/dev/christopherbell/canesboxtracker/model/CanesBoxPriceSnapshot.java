@@ -6,13 +6,11 @@ import java.util.ArrayList;
 import java.util.List;
 import lombok.Data;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
  * Weekly persisted Raising Canes Box Index price snapshot.
  */
 @Data
-@Document(collection = "canes_box_price_snapshots")
 public class CanesBoxPriceSnapshot {
   @Id
   private String id;

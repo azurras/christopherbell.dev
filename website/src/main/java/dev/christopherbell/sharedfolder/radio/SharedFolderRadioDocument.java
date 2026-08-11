@@ -7,10 +7,8 @@ import java.util.List;
 import java.util.Set;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Fixed-key durable state for the one shared-folder radio station. */
-@Document("shared_folder_radio")
 public record SharedFolderRadioDocument(
     @Id String id,
     State state,

@@ -78,7 +78,6 @@ own their collection names locally.
 
 | Manual owner type | Physical names |
 | --- | --- |
-| `dev.christopherbell.configuration.mongo.migration.MigrationStateStore` | `application_migrations` |
 | `dev.christopherbell.configuration.mongo.migration.V001EnsureMigrationInfrastructure` | `application_leases`, `application_migrations` |
 | `dev.christopherbell.configuration.mongo.migration.V002EnsureRestaurantImportPreviewIndexes` | `restaurant_import_previews` |
 | `dev.christopherbell.configuration.mongo.migration.V003EnsureVinPreviewCollectorIndexes` | `post_link_preview_cache`, `scheduled_collector_runs`, `vehicle_vin_decode_cache` |
@@ -93,8 +92,6 @@ own their collection names locally.
 | `dev.christopherbell.configuration.mongo.migration.V012RetainSharedFolderWork` | `shared_folder_media_jobs`, `shared_folder_radio`, `shared_folder_upload_sessions` |
 | `dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes` | `whatsforlunch_ratings` |
 | `dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState` | `music_queue_state`, `music_radio_state`, `music_runtime_state` |
-| `dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService` | `shared_folder_audit` |
-| `dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore` | `shared_folder_maintenance_leases` |
 
 Naming Rules
 ------------

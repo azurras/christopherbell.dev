@@ -4,15 +4,11 @@ import java.time.Instant;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Durable audit record for a versioned application migration. */
 @Data
 @NoArgsConstructor
-@Document(MigrationRecord.COLLECTION)
 public class MigrationRecord {
-  public static final String COLLECTION = "application_migrations";
-
   @Id private String id;
   private String checksum;
   private String description;

@@ -37,10 +37,12 @@ class MongoLeaseArbitrationTest {
   @Test
   void twoCoordinatorsSerializeWorkAndTakeOverAtTheExactExpiryBoundary() {
     var leaseMongo = new StatefulLeaseMongo();
-    var leases = new MongoLeaseService(leaseMongo.template());
+    var leases = new MongoLeaseService(leaseMongo);
     var clock = new MutableClock(NOW);
-    var firstNode = new ScheduledCollectorCoordinator(leases, mock(MongoTemplate.class), clock);
-    var secondNode = new ScheduledCollectorCoordinator(leases, mock(MongoTemplate.class), clock);
+    var firstNode = new ScheduledCollectorCoordinator(
+        leases, mock(ScheduledCollectorRunStore.class), clock);
+    var secondNode = new ScheduledCollectorCoordinator(
+        leases, mock(ScheduledCollectorRunStore.class), clock);
     var workRuns = new AtomicInteger();
     var contended = new AtomicReference<ScheduledCollectorCoordinator.Outcome<String>>();
     var takeover = new AtomicReference<ScheduledCollectorCoordinator.Outcome<String>>();
@@ -79,7 +81,7 @@ class MongoLeaseArbitrationTest {
     assertThat(workRuns).hasValue(2);
   }
 
-  private static final class StatefulLeaseMongo {
+  private static final class StatefulLeaseMongo implements MongoLeaseStore {
     private final MongoTemplate template = mock(MongoTemplate.class);
     private final List<String> acquiredOwners = new ArrayList<>();
     private final List<Instant> acquiredExpiries = new ArrayList<>();
@@ -101,6 +103,46 @@ class MongoLeaseArbitrationTest {
 
     private MongoTemplate template() {
       return template;
+    }
+
+    @Override
+    public synchronized boolean tryAcquire(
+        String name, String ownerToken, Instant now, Instant expiresAt) {
+      if (lease != null
+          && !ownerToken.equals(lease.getString("ownerToken"))
+          && instant(lease.get("expiresAt")).isAfter(now)) {
+        return false;
+      }
+      lease = new Document("_id", name)
+          .append("ownerToken", ownerToken)
+          .append("acquiredAt", now)
+          .append("expiresAt", expiresAt);
+      acquiredOwners.add(ownerToken);
+      acquiredExpiries.add(expiresAt);
+      return true;
+    }
+
+    @Override
+    public synchronized boolean renew(
+        String name, String ownerToken, Instant now, Instant expiresAt) {
+      if (lease == null || !name.equals(lease.getString("_id"))
+          || !ownerToken.equals(lease.getString("ownerToken"))
+          || !instant(lease.get("expiresAt")).isAfter(now)) {
+        return false;
+      }
+      lease.put("expiresAt", expiresAt);
+      return true;
+    }
+
+    @Override
+    public synchronized boolean release(String name, String ownerToken) {
+      if (lease == null || !name.equals(lease.getString("_id"))
+          || !ownerToken.equals(lease.getString("ownerToken"))) {
+        return false;
+      }
+      lease.remove("ownerToken");
+      lease.put("expiresAt", Instant.EPOCH);
+      return true;
     }
 
     private synchronized MongoLeaseDocument findAndModify(Query query, Update update) {

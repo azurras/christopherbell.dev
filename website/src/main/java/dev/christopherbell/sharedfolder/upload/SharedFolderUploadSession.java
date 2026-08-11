@@ -10,12 +10,10 @@ import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Mongo-backed owned upload metadata; only a random private staging key, never a local path, is kept. */
 @Data
 @NoArgsConstructor
-@Document("shared_folder_upload_sessions")
 @CompoundIndexes({
     @CompoundIndex(name = "upload_owner_state", def = "{'ownerId': 1, 'state': 1}"),
     @CompoundIndex(

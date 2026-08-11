@@ -46,13 +46,8 @@ class MongoCollectionCatalogTest {
       "active", "legacy-named", "rollback-retained", "orphan-candidate", "system-managed");
   private static final Set<String> SOURCE_BACKED_STATUSES = Set.of(
       "active", "legacy-named", "rollback-retained");
-  private static final Map<String, Set<String>> APPROVED_SHARED_DOCUMENT_MAPPINGS = Map.of(
-      "vehicle_import_state", Set.of(
-          "dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState",
-          "dev.christopherbell.vehicle.randomvin.model.RandomVinImportState"));
+  private static final Map<String, Set<String>> APPROVED_SHARED_DOCUMENT_MAPPINGS = Map.of();
   private static final Map<String, Set<String>> MANUAL_COLLECTIONS_BY_OWNER = Map.ofEntries(
-      manualOwner("dev.christopherbell.configuration.mongo.migration.MigrationStateStore",
-          "application_migrations"),
       manualOwner("dev.christopherbell.configuration.mongo.migration.V001EnsureMigrationInfrastructure",
           "application_leases", "application_migrations"),
       manualOwner("dev.christopherbell.configuration.mongo.migration.V002EnsureRestaurantImportPreviewIndexes",
@@ -80,11 +75,7 @@ class MongoCollectionCatalogTest {
       manualOwner("dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes",
           "whatsforlunch_ratings"),
       manualOwner("dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState",
-          "music_queue_state", "music_radio_state", "music_runtime_state"),
-      manualOwner("dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService",
-          "shared_folder_audit"),
-      manualOwner("dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore",
-          "shared_folder_maintenance_leases"));
+          "music_queue_state", "music_radio_state", "music_runtime_state"));
   private static final Set<String> MONGO_TEMPLATE_INFRASTRUCTURE_OWNERS = Set.of(
       "dev.christopherbell.admin.commandcenter.metrics.CommandCenterMetricsService",
       "dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory",
@@ -194,7 +185,7 @@ class MongoCollectionCatalogTest {
   }
 
   @Test
-  void onlyTheExactVehicleDocumentPairMayShareACollection() {
+  void runtimeDomainModelsOwnNoPhysicalCollectionMappings() {
     assertSharedDocumentMappings(mappedDocumentOwners(), APPROVED_SHARED_DOCUMENT_MAPPINGS);
   }
 

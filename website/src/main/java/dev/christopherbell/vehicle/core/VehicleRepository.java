@@ -2,12 +2,16 @@ package dev.christopherbell.vehicle.core;
 
 import dev.christopherbell.vehicle.model.Vehicle;
 import java.util.List;
-import org.springframework.data.mongodb.repository.MongoRepository;
+import java.util.Optional;
 
 /**
  * Repository for vehicle documents.
  */
-public interface VehicleRepository extends MongoRepository<Vehicle, String> {
+public interface VehicleRepository {
+  Vehicle save(Vehicle vehicle);
+  List<Vehicle> saveAll(Iterable<Vehicle> vehicles);
+  Optional<Vehicle> findById(String id);
+  void delete(Vehicle vehicle);
   /**
    * Checks whether a vehicle exists with the given VIN.
    *
