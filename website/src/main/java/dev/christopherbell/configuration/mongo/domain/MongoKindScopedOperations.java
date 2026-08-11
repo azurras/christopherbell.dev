@@ -147,6 +147,22 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   }
 
   @Override
+  public UpdateResult updateHeartbeatPreservingVersion(
+      Query exactOwnerStateQuery, Update heartbeatUpdate) {
+    try {
+      return mongo.updateFirst(
+          fieldMapper.mapMutationQuery(exactOwnerStateQuery, kind.schemaVersion()),
+          fieldMapper.mapHeartbeatPreservingVersion(heartbeatUpdate),
+          Document.class,
+          kind.collection());
+    } catch (DuplicateKeyException failure) {
+      throw duplicate();
+    } catch (RuntimeException failure) {
+      throw translateMalformed(failure);
+    }
+  }
+
+  @Override
   public Optional<T> findAndUpdate(Query domainQuery, Update domainUpdate) {
     try {
       var envelope = mongo.findAndModify(

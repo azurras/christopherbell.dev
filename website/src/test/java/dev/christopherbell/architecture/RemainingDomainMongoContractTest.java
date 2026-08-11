@@ -21,9 +21,12 @@ import dev.christopherbell.configuration.mongo.runtime.MongoScheduledCollectorRu
 import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun;
 import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRunStatus;
 import dev.christopherbell.sharedfolder.service.MongoSharedFolderMutationRecoveryRepository;
+import dev.christopherbell.sharedfolder.service.SharedFolderMutationRecovery;
 import dev.christopherbell.sharedfolder.service.SharedFolderMutationRecoveryState;
 import dev.christopherbell.sharedfolder.upload.MongoSharedFolderUploadSessionRepository;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadFinalizationState;
+import dev.christopherbell.sharedfolder.upload.SharedFolderUploadSession;
+import dev.christopherbell.sharedfolder.upload.SharedFolderUploadState;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.UUID;
@@ -36,6 +39,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 /** Real-Mongo proof for Task 5 atomic runtime and index contracts. */
@@ -198,6 +203,95 @@ class RemainingDomainMongoContractTest {
         "bad", "owner", 0L, now.plusSeconds(60), now))
         .isInstanceOf(MalformedDomainDocumentException.class);
     assertThat(collection.find(new Document("_id", malformedId)).first()).isEqualTo(before);
+  }
+
+  @Test
+  void recoveryHeartbeatsPreserveTheCallersVersionForTheNextStateSave() {
+    var now = Instant.parse("2026-08-11T00:00:00Z");
+    var recoveries = new MongoSharedFolderMutationRecoveryRepository(factory);
+    var recovery = new SharedFolderMutationRecovery();
+    recovery.setId("heartbeat-a");
+    recovery.setOwnerId("account-a");
+    recovery.setState(SharedFolderMutationRecoveryState.TARGET_QUARANTINED);
+    recovery.setOperationLeaseToken("owner-a");
+    recovery.setOperationLeaseExpiresAt(now.plusSeconds(30));
+    recovery.setCreatedAt(now);
+    recovery.setUpdatedAt(now);
+    var saved = recoveries.save(recovery);
+
+    assertThat(saved.getVersion()).isZero();
+    assertThat(recoveries.renewOperationLease(
+        saved.getId(), "wrong-owner", saved.getState(), now.plusSeconds(60), now.plusSeconds(1)))
+        .isZero();
+    assertThat(recoveries.renewOperationLease(
+        saved.getId(), "owner-a", SharedFolderMutationRecoveryState.PREPARED,
+        now.plusSeconds(60), now.plusSeconds(1)))
+        .isZero();
+    assertThat(recoveries.renewOperationLease(
+        saved.getId(), "owner-a", saved.getState(), now.plusSeconds(60), now.plusSeconds(1)))
+        .isEqualTo(1);
+    assertThat(recoveries.renewOperationLease(
+        saved.getId(), "owner-a", saved.getState(), now.plusSeconds(90), now.plusSeconds(2)))
+        .isEqualTo(1);
+
+    var rawId = new Document("kind", "mutation_recovery").append("legacyId", saved.getId());
+    var afterHeartbeats = mongo.getCollection("shared_folder")
+        .find(new Document("_id", rawId)).first();
+    assertThat(afterHeartbeats.get("payload", Document.class).getLong("version")).isZero();
+
+    saved.setOperationLeaseExpiresAt(now.plusSeconds(90));
+    saved.setUpdatedAt(now.plusSeconds(2));
+    saved.setState(SharedFolderMutationRecoveryState.SOURCE_MOVED);
+    assertThat(recoveries.save(saved).getVersion()).isEqualTo(1);
+  }
+
+  @Test
+  void malformedRecoveryHeartbeatWritesNothing() {
+    var now = Instant.parse("2026-08-11T00:00:00Z");
+    var recoveries = new MongoSharedFolderMutationRecoveryRepository(factory);
+    var collection = mongo.getCollection("shared_folder");
+    var id = new Document("kind", "mutation_recovery").append("legacyId", "heartbeat-bad");
+    var malformed = envelope("mutation_recovery", "heartbeat-bad", new Document("version", 0L)
+        .append("state", "TARGET_QUARANTINED")
+        .append("operationLeaseToken", "owner-a"));
+    malformed.remove("schemaVersion");
+    collection.insertOne(malformed);
+    var before = collection.find(new Document("_id", id)).first();
+
+    assertThatThrownBy(() -> recoveries.renewOperationLease(
+        "heartbeat-bad", "owner-a", SharedFolderMutationRecoveryState.TARGET_QUARANTINED,
+        now.plusSeconds(60), now))
+        .isInstanceOf(MalformedDomainDocumentException.class);
+    assertThat(collection.find(new Document("_id", id)).first()).isEqualTo(before);
+  }
+
+  @Test
+  void uploadSlicesApplyDynamicSortOffsetLookaheadAndExactBoundary() {
+    var repository = new MongoSharedFolderUploadSessionRepository(factory);
+    var due = Instant.parse("2026-08-11T00:00:00Z");
+    for (int index = 0; index < 5; index++) {
+      var session = new SharedFolderUploadSession();
+      session.setId("upload-" + index);
+      session.setOwnerId("owner-a");
+      session.setState(SharedFolderUploadState.ACTIVE);
+      session.setExpiresAt(due.minusSeconds(1));
+      session.setCreatedAt(due.minusSeconds(10));
+      session.setUpdatedAt(due.plusSeconds(index));
+      repository.save(session);
+    }
+
+    var order = Sort.by(Sort.Direction.DESC, "updatedAt");
+    var page = repository.findDueForMaintenance(due, PageRequest.of(1, 2, order));
+    assertThat(page.getContent()).extracting(SharedFolderUploadSession::getId)
+        .containsExactly("upload-2", "upload-1");
+    assertThat(page.hasNext()).isTrue();
+
+    assertThat(repository.findDueForMaintenance(due, PageRequest.of(0, 4, order)).hasNext())
+        .isTrue();
+    assertThat(repository.findDueForMaintenance(due, PageRequest.of(0, 5, order)).hasNext())
+        .isFalse();
+    assertThat(repository.findDueForMaintenance(due, PageRequest.of(0, 6, order)).hasNext())
+        .isFalse();
   }
 
   @Test

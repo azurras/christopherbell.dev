@@ -6,21 +6,13 @@ import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
 import java.util.HexFormat;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
-import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
-import org.springframework.core.type.filter.AnnotationTypeFilter;
-import org.springframework.data.mongodb.core.convert.MongoCustomConversions;
-import org.springframework.data.mongodb.core.index.MongoPersistentEntityIndexResolver;
-import org.springframework.data.mongodb.core.mapping.MongoMappingContext;
-import org.springframework.util.ClassUtils;
 
 class DomainCollectionManifestLegacyIndexTest {
   private static final List<DomainCollectionManifest.IndexDefinition> MANUAL_ONLY_INDEXES =
@@ -68,78 +60,134 @@ class DomainCollectionManifestLegacyIndexTest {
           manual("accounts", "account_follow", "account_follow_target", false, null,
               asc("followedAccountId")));
 
-  @Test
-  void finalManifestRetainsAllKindIndexesAfterRuntimeDocumentMappingsAreRemoved()
-      throws Exception {
-    var documentTypes = mappedDocumentTypes();
-    var mapping = new MongoMappingContext();
-    mapping.setSimpleTypeHolder(
-        MongoCustomConversions.create(adapter -> {}).getSimpleTypeHolder());
-    mapping.setInitialEntitySet(documentTypes);
-    mapping.afterPropertiesSet();
-    var resolver = new MongoPersistentEntityIndexResolver(mapping);
-    var definitionsByOwner = DomainCollectionManifest.ALL_KINDS.stream()
-        .collect(Collectors.toUnmodifiableMap(
-            DomainCollectionManifest.KindDefinition::ownerTypeName,
-            definition -> definition));
-    var expectedIndexes = new ArrayList<DomainCollectionManifest.IndexDefinition>();
+  private static final List<DomainCollectionManifest.IndexDefinition>
+      FROZEN_ANNOTATION_INDEXES = parseFrozen("""
+          accounts|account|account__email_asc|true|false||{"_kind": "account"}||payload.email:1
+          accounts|account|account__passwordResetTokenHash_asc|false|false||{"_kind": "account"}||payload.passwordResetTokenHash:1
+          accounts|account|account__username_asc|true|false||{"_kind": "account"}||payload.username:1
+          accounts|account_follow|account_follow__account_follow_follower_target_unique|true|false||{"_kind": "account_follow"}||payload.followerAccountId:1,payload.followedAccountId:1
+          accounts|account_trust_relationship|account_trust_relationship__owner_target_type_unique|true|false||{"_kind": "account_trust_relationship"}||payload.ownerAccountId:1,payload.targetAccountId:1,payload.type:1
+          accounts|account_trust_relationship|account_trust_relationship__ownerAccountId_asc|false|false||{"_kind": "account_trust_relationship"}||payload.ownerAccountId:1
+          accounts|account_trust_relationship|account_trust_relationship__targetAccountId_asc|false|false||{"_kind": "account_trust_relationship"}||payload.targetAccountId:1
+          sessions|browser_session|browser_session__accountId_asc|false|false||{"_kind": "browser_session"}||payload.accountId:1
+          sessions|browser_session|browser_session__absoluteExpiresOn_asc|false|false|0|{"_kind": "browser_session"}||payload.absoluteExpiresOn:1
+          sessions|conversation_archive_state|conversation_archive_state__conversation_archive_owner_key_unique|true|false||{"_kind": "conversation_archive_state"}||payload.ownerAccountId:1,payload.conversationKey:1
+          communications|message|message__message_conversation_created_asc|false|false||{"_kind": "message"}||payload.conversationKey:1,payload.createdOn:1
+          communications|message|message__message_conversation_created_id_desc|false|false||{"_kind": "message"}||payload.conversationKey:1,payload.createdOn:-1,_id.legacyId:-1
+          communications|message|message__message_participant_created_desc|false|false||{"_kind": "message"}||payload.participantIds:1,payload.createdOn:-1
+          communications|message|message__message_participant_created_id_desc|false|false||{"_kind": "message"}||payload.participantIds:1,payload.createdOn:-1,_id.legacyId:-1
+          communications|message|message__message_recipient_sender_read|false|false||{"_kind": "message"}||payload.recipientAccountId:1,payload.senderAccountId:1,payload.read:1
+          communications|notification|notification__notification_account_created_id_desc|false|false||{"_kind": "notification"}||payload.accountId:1,payload.createdOn:-1,_id.legacyId:-1
+          communications|notification|notification__notification_account_read|false|false||{"_kind": "notification"}||payload.accountId:1,payload.read:1
+          communications|notification_preference|notification_preference__accountId_asc|true|false||{"_kind": "notification_preference"}||payload.accountId:1
+          communications|notification_delivery_guard|notification_delivery_guard__expiresAt_asc|false|false|0|{"_kind": "notification_delivery_guard"}||payload.expiresAt:1
+          communications|notification_rate_limit|notification_rate_limit__expiresAt_asc|false|false|0|{"_kind": "notification_rate_limit"}||payload.expiresAt:1
+          content|post|post__post_account_created_id_desc|false|false||{"_kind": "post"}||payload.accountId:1,payload.createdOn:-1,_id.legacyId:-1
+          content|post|post__post_created_id_desc|false|false||{"_kind": "post"}||payload.createdOn:-1,_id.legacyId:-1
+          content|post|post__post_root_created_asc|false|false||{"_kind": "post"}||payload.rootId:1,payload.createdOn:1
+          content|post|post__post_parent|false|false||{"_kind": "post"}||payload.parentId:1
+          content|post|post__post_expires|false|false||{"_kind": "post"}||payload.expiresOn:1
+          content|post|post__post_account_parent|false|false||{"_kind": "post"}||payload.accountId:1,payload.parentId:1
+          content|post_like|post_like__post_like_post_account_unique|true|false||{"_kind": "post_like"}||payload.postId:1,payload.accountId:1
+          content|post_report|post_report__report_created_id_desc|false|false||{"_kind": "post_report"}||payload.createdOn:-1,_id.legacyId:-1
+          content|post_report|post_report__report_status_created_id_desc|false|false||{"_kind": "post_report"}||payload.status:1,payload.createdOn:-1,_id.legacyId:-1
+          content|post_report|post_report__openDedupeKey_asc|true|false||{"$and": [{"_kind": "post_report"}, {"payload.openDedupeKey": {"$exists": true}}]}||payload.openDedupeKey:1
+          content|post_report|post_report__reportType_asc|false|false||{"_kind": "post_report"}||payload.reportType:1
+          content|post_report|post_report__targetType_asc|false|false||{"_kind": "post_report"}||payload.targetType:1
+          content|hidden_post_thread|hidden_post_thread__account_root_unique|true|false||{"_kind": "hidden_post_thread"}||payload.accountId:1,payload.rootPostId:1
+          content|hidden_post_thread|hidden_post_thread__accountId_asc|false|false||{"_kind": "hidden_post_thread"}||payload.accountId:1
+          content|hidden_post_thread|hidden_post_thread__rootPostId_asc|false|false||{"_kind": "hidden_post_thread"}||payload.rootPostId:1
+          music|music_track|music_track__path_asc|true|false||{"_kind": "music_track"}||payload.path:1
+          music|music_track|music_track__artist_asc|false|false||{"_kind": "music_track"}||payload.artist:1
+          music|music_track|music_track__album_asc|false|false||{"_kind": "music_track"}||payload.album:1
+          music|music_track|music_track__genre_asc|false|false||{"_kind": "music_track"}||payload.genre:1
+          music|music_playlist|music_playlist__normalizedName_asc|true|false||{"_kind": "music_playlist"}||payload.normalizedName:1
+          music|music_metadata_edit|music_metadata_edit__trackId_asc|false|false||{"_kind": "music_metadata_edit"}||payload.trackId:1
+          music|music_metadata_edit|music_metadata_edit__expiresAt_asc|false|false||{"_kind": "music_metadata_edit"}||payload.expiresAt:1
+          music|music_radio_history|music_radio_history__stationSequence_asc|false|false||{"_kind": "music_radio_history"}||payload.stationSequence:1
+          music|music_radio_history|music_radio_history__occurredAt_asc|false|false||{"_kind": "music_radio_history"}||payload.occurredAt:1
+          music|music_access_attempt|music_access_attempt__expiresAt_asc|false|false|0|{"_kind": "music_access_attempt"}||payload.expiresAt:1
+          whatsforlunch|restaurant|restaurant__restaurant_coordinate_bounds|false|false||{"_kind": "restaurant"}||payload.address.latitude:1,payload.address.longitude:1
+          whatsforlunch|restaurant|restaurant__restaurant_inventory_location_name|false|false||{"_kind": "restaurant"}||payload.searchState:1,payload.searchCity:1,payload.dedupeKey:1,_id.legacyId:1
+          whatsforlunch|restaurant|restaurant__restaurant_inventory_city_name|false|false||{"_kind": "restaurant"}||payload.searchCity:1,payload.dedupeKey:1,_id.legacyId:1
+          whatsforlunch|restaurant|restaurant__restaurant_inventory_state_name|false|false||{"_kind": "restaurant"}||payload.searchState:1,payload.dedupeKey:1,_id.legacyId:1
+          whatsforlunch|restaurant|restaurant__restaurant_dedupe_key_member|false|false||{"_kind": "restaurant"}||payload.dedupeKey:1,_id.legacyId:1
+          whatsforlunch|restaurant|restaurant__normalizedName_asc|true|false||{"$and": [{"_kind": "restaurant"}, {"payload.normalizedName": {"$exists": true}}]}||payload.normalizedName:1
+          whatsforlunch|vote|vote__restaurant_account_unique|true|false||{"_kind": "vote"}||payload.restaurantId:1,payload.accountId:1
+          whatsforlunch|vote|vote__restaurantId_asc|false|false||{"_kind": "vote"}||payload.restaurantId:1
+          whatsforlunch|favorite|favorite__restaurant_account_unique|true|false||{"_kind": "favorite"}||payload.restaurantId:1,payload.accountId:1
+          whatsforlunch|favorite|favorite__restaurantId_asc|false|false||{"_kind": "favorite"}||payload.restaurantId:1
+          whatsforlunch|favorite|favorite__accountId_asc|false|false||{"_kind": "favorite"}||payload.accountId:1
+          whatsforlunch|session|session__wfl_session_participant_created|false|false||{"_kind": "session"}||payload.participantAccountIds:1,payload.createdOn:-1,_id.legacyId:1
+          whatsforlunch|session|session__createdByAccountId_asc|false|false||{"_kind": "session"}||payload.createdByAccountId:1
+          whatsforlunch|session|session__participantAccountIds_asc|false|false||{"_kind": "session"}||payload.participantAccountIds:1
+          whatsforlunch|session|session__wfl_session_delete_ttl|false|false|0|{"_kind": "session"}||payload.deleteOn:1
+          shared_folder|audit_event|audit_event__shared_audit_occurred_desc|false|false||{"_kind": "audit_event"}||payload.occurredAt:-1
+          shared_folder|audit_event|audit_event__shared_audit_account_occurred_desc|false|false||{"_kind": "audit_event"}||payload.accountId:1,payload.occurredAt:-1
+          shared_folder|audit_event|audit_event__shared_audit_action_occurred_desc|false|false||{"_kind": "audit_event"}||payload.action:1,payload.occurredAt:-1
+          shared_folder|audit_event|audit_event__shared_audit_outcome_occurred_desc|false|false||{"_kind": "audit_event"}||payload.outcome:1,payload.occurredAt:-1
+          shared_folder|audit_event|audit_event__shared_audit_path_occurred_desc|false|false||{"_kind": "audit_event"}||payload.relativePath:1,payload.occurredAt:-1
+          shared_folder|audit_event|audit_event__accountId_asc|false|false||{"_kind": "audit_event"}||payload.accountId:1
+          shared_folder|audit_event|audit_event__action_asc|false|false||{"_kind": "audit_event"}||payload.action:1
+          shared_folder|audit_event|audit_event__occurredAt_asc|false|false||{"_kind": "audit_event"}||payload.occurredAt:1
+          shared_folder|audit_event|audit_event__expiresAt_asc|false|false|0|{"_kind": "audit_event"}||payload.expiresAt:1
+          shared_folder|media_job|media_job__media_lru|false|false||{"_kind": "media_job"}||payload.status:1,payload.lastAccessedAt:1,_id.legacyId:1
+          shared_folder|media_job|media_job__media_cleanup_due|false|false||{"_kind": "media_job"}||payload.artifactsCleaned:1,payload.cleanupAfter:1,payload.status:1,_id.legacyId:1
+          shared_folder|media_job|media_job__ownerId_asc|false|false||{"_kind": "media_job"}||payload.ownerId:1
+          shared_folder|media_job|media_job__cacheKey_asc|false|false||{"_kind": "media_job"}||payload.cacheKey:1
+          shared_folder|media_job|media_job__activeCacheKey_asc|true|false||{"$and": [{"_kind": "media_job"}, {"payload.activeCacheKey": {"$exists": true}}]}||payload.activeCacheKey:1
+          shared_folder|media_job|media_job__status_asc|false|false||{"_kind": "media_job"}||payload.status:1
+          shared_folder|media_job|media_job__updatedAt_asc|false|false||{"_kind": "media_job"}||payload.updatedAt:1
+          shared_folder|media_job|media_job__shared_media_delete_ttl|false|false|0|{"_kind": "media_job"}||payload.deleteAt:1
+          shared_folder|mutation_recovery|mutation_recovery__ownerId_asc|false|false||{"_kind": "mutation_recovery"}||payload.ownerId:1
+          shared_folder|mutation_recovery|mutation_recovery__updatedAt_asc|false|false||{"_kind": "mutation_recovery"}||payload.updatedAt:1
+          shared_folder|recycle_item|recycle_item__shared_recycle_state_deleted_desc|false|false||{"_kind": "recycle_item"}||payload.state:1,payload.deletedAt:-1,_id.legacyId:-1
+          shared_folder|recycle_item|recycle_item__shared_recycle_state_recovery_due|false|false||{"_kind": "recycle_item"}||payload.state:1,payload.deletedAt:1,_id.legacyId:1,payload.retryAfter:1
+          shared_folder|recycle_item|recycle_item__shared_recycle_state_expiry|false|false||{"_kind": "recycle_item"}||payload.state:1,payload.expiresAt:1,_id.legacyId:1,payload.retryAfter:1
+          shared_folder|upload_session|upload_session__upload_owner_state|false|false||{"_kind": "upload_session"}||payload.ownerId:1,payload.state:1
+          shared_folder|upload_session|upload_session__upload_maintenance_due|false|false||{"_kind": "upload_session"}||payload.state:1,payload.maintenanceRetryAt:1,payload.expiresAt:1,_id.legacyId:1
+          shared_folder|upload_session|upload_session__ownerId_asc|false|false||{"_kind": "upload_session"}||payload.ownerId:1
+          shared_folder|upload_session|upload_session__expiresAt_asc|false|false||{"_kind": "upload_session"}||payload.expiresAt:1
+          shared_folder|upload_session|upload_session__shared_upload_delete_ttl|false|false|0|{"_kind": "upload_session"}||payload.deleteAt:1
+          vehicles|vehicle|vehicle__vin_asc|true|false||{"_kind": "vehicle"}||payload.vin:1
+          admin_activity|admin_activity|admin_activity__admin_activity_created_id_desc|false|false||{"_kind": "admin_activity"}||payload.createdOn:-1,_id.legacyId:-1
+          admin_activity|admin_activity|admin_activity__admin_activity_action_created_id_desc|false|false||{"_kind": "admin_activity"}||payload.action:1,payload.createdOn:-1,_id.legacyId:-1
+          admin_activity|admin_activity|admin_activity__admin_activity_target_created_id_desc|false|false||{"_kind": "admin_activity"}||payload.targetType:1,payload.createdOn:-1,_id.legacyId:-1
+          admin_activity|admin_activity|admin_activity__admin_activity_actor_created_id_desc|false|false||{"_kind": "admin_activity"}||payload.actorUsername:1,payload.createdOn:-1,_id.legacyId:-1
+          """);
 
-    var annotationIndexCount = 0;
-    for (var documentType : documentTypes) {
-      var kind = definitionsByOwner.get(documentType.getName());
-      assertThat(kind).as("manifest kind for %s", documentType.getName()).isNotNull();
-      for (var legacyIndex : resolver.resolveIndexFor(documentType)) {
-        annotationIndexCount++;
-        var options = new Document(legacyIndex.getIndexOptions());
-        var legacyKeys = new Document(legacyIndex.getIndexKeys());
-        var legacyName = Optional.ofNullable(options.remove("name"))
-            .map(Object::toString)
-            .filter(name -> !name.isBlank())
-            .filter(name -> !isGeneratedSingleFieldName(name, legacyKeys))
-            .orElse(null);
-        var unique = Boolean.TRUE.equals(options.remove("unique"));
-        var sparse = Boolean.TRUE.equals(options.remove("sparse"));
-        var expiry = options.remove("expireAfterSeconds");
-        assertThat(options).as("unsupported legacy index options for %s", documentType.getName())
-            .isEmpty();
-        var keys = remapKeys(legacyKeys);
-        expectedIndexes.add(new DomainCollectionManifest.IndexDefinition(
-            kind.collection(),
-            Optional.of(kind.kind()),
-            canonicalIndexName(kind.kind(), legacyName, keys),
-            keys,
-            unique,
-            false,
-            partialFilter(kind.kind(), sparse, keys),
-            expiry instanceof Number seconds ? Optional.of(seconds.longValue()) : Optional.empty(),
-            Optional.empty()));
-      }
-    }
-    assertThat(annotationIndexCount).isZero();
+  @Test
+  void finalManifestRetainsAllKindIndexesAfterRuntimeDocumentMappingsAreRemoved() {
+    var expectedIndexes = java.util.stream.Stream.concat(
+        FROZEN_ANNOTATION_INDEXES.stream(), MANUAL_ONLY_INDEXES.stream()).toList();
+    assertThat(FROZEN_ANNOTATION_INDEXES).hasSize(92);
     assertThat(MANUAL_ONLY_INDEXES).hasSize(20);
-    expectedIndexes.addAll(MANUAL_ONLY_INDEXES);
     var kindIndexes = DomainCollectionManifest.ALL_INDEXES.stream()
         .filter(index -> index.kind().isPresent())
         .toList();
     assertThat(kindIndexes).hasSize(112);
     assertThat(kindIndexes)
-        .containsAll(expectedIndexes);
+        .containsExactlyInAnyOrderElementsOf(expectedIndexes);
   }
 
-  private static HashSet<Class<?>> mappedDocumentTypes() {
-    return new HashSet<>();
-  }
-
-  private static List<DomainCollectionManifest.IndexKey> remapKeys(Document legacyKeys) {
-    return legacyKeys.entrySet().stream()
-        .map(entry -> new DomainCollectionManifest.IndexKey(
-            entry.getKey().equals("_id") ? "_id.legacyId" : "payload." + entry.getKey(),
-            ((Number) entry.getValue()).intValue()))
-        .toList();
-  }
-
-  private static boolean isGeneratedSingleFieldName(String name, Document legacyKeys) {
-    return legacyKeys.size() == 1 && name.equals(legacyKeys.keySet().iterator().next());
+  private static List<DomainCollectionManifest.IndexDefinition> parseFrozen(String snapshot) {
+    return snapshot.lines().filter(line -> !line.isBlank()).map(line -> {
+      var fields = line.strip().split("\\|", -1);
+      assertThat(fields).as("frozen index fields").hasSize(9);
+      var keys = java.util.Arrays.stream(fields[8].split(","))
+          .map(key -> {
+            var separator = key.lastIndexOf(':');
+            return new DomainCollectionManifest.IndexKey(
+                key.substring(0, separator), Integer.parseInt(key.substring(separator + 1)));
+          })
+          .toList();
+      return new DomainCollectionManifest.IndexDefinition(
+          fields[0], Optional.of(fields[1]), fields[2], keys,
+          Boolean.parseBoolean(fields[3]), Boolean.parseBoolean(fields[4]),
+          Document.parse(fields[6]),
+          fields[5].isEmpty() ? Optional.empty() : Optional.of(Long.parseLong(fields[5])),
+          fields[7].isEmpty() ? Optional.empty() : Optional.of(fields[7]));
+    }).toList();
   }
 
   private static DomainCollectionManifest.IndexDefinition manual(
@@ -173,15 +221,6 @@ class DomainCollectionManifestLegacyIndexTest {
     return new DomainCollectionManifest.IndexKey(
         legacyPath.equals("_id") ? "_id.legacyId" : "payload." + legacyPath,
         direction);
-  }
-
-  private static Map<String, Object> partialFilter(
-      String kind, boolean legacySparse, List<DomainCollectionManifest.IndexKey> keys) {
-    return legacySparse
-        ? Map.of("$and", List.of(
-            Map.of("_kind", kind),
-            Map.of(keys.getFirst().path(), Map.of("$exists", true))))
-        : Map.of("_kind", kind);
   }
 
   private static String canonicalIndexName(

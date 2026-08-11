@@ -102,6 +102,14 @@ final class DomainMongoFieldMapper {
   }
 
   Update mapUpdate(Update domainUpdate) {
+    return mapUpdate(domainUpdate, true);
+  }
+
+  Update mapHeartbeatPreservingVersion(Update heartbeatUpdate) {
+    return mapUpdate(heartbeatUpdate, false);
+  }
+
+  private Update mapUpdate(Update domainUpdate, boolean advanceVersion) {
     if (domainUpdate == null) {
       throw new UnapprovedDomainFieldException();
     }
@@ -109,7 +117,9 @@ final class DomainMongoFieldMapper {
     try {
       var mapped = updateMapper.getMappedObject(domainUpdate.getUpdateObject(), entity);
       var namespaced = namespaceUpdate(mapped);
-      incrementVersion(namespaced);
+      if (advanceVersion) {
+        incrementVersion(namespaced);
+      }
       return new MappedDomainUpdate(namespaced, domainUpdate.getArrayFilters());
     } catch (UnapprovedDomainFieldException failure) {
       throw failure;

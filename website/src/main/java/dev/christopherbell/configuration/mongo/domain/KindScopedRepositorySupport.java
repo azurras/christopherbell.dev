@@ -6,6 +6,8 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
+import org.springframework.data.domain.SliceImpl;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
@@ -44,6 +46,22 @@ public abstract class KindScopedRepositorySupport<T> {
 
   protected final Page<T> page(Query query, Pageable page) {
     return new PageImpl<>(mongo.find(query, page), page, mongo.count(query));
+  }
+
+  /** Applies pageable sort and reads one bounded look-ahead row for exact slice metadata. */
+  protected final Slice<T> slice(Query query, Pageable page) {
+    var source = Query.of(query);
+    if (page.getSort().isSorted()) {
+      source.with(page.getSort());
+    }
+    if (page.isUnpaged()) {
+      return new SliceImpl<>(find(source), page, false);
+    }
+    source.skip(page.getOffset()).limit(page.getPageSize() + 1);
+    var values = find(source);
+    var hasNext = values.size() > page.getPageSize();
+    var content = hasNext ? values.subList(0, page.getPageSize()) : values;
+    return new SliceImpl<>(content, page, hasNext);
   }
 
   protected final void deleteById(Object id) {

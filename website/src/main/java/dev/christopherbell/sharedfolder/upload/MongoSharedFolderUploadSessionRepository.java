@@ -7,7 +7,6 @@ import java.util.Collection;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
-import org.springframework.data.domain.SliceImpl;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -68,10 +67,4 @@ public final class MongoSharedFolderUploadSessionRepository
         new Update().set("appendLeaseToken", newToken).set("appendLeaseExpiresAt", expiresAt).set("updatedAt", updatedAt));
   }
   private long update(Query query, Update update) { return mongo.updateFirst(query, update).getMatchedCount(); }
-  private Slice<SharedFolderUploadSession> slice(Query query, Pageable page) {
-    query.skip(page.getOffset()).limit(page.getPageSize() + 1);
-    var values = find(query); var hasNext = values.size() > page.getPageSize();
-    var content = hasNext ? values.subList(0, page.getPageSize()) : values;
-    return new SliceImpl<>(content, page, hasNext);
-  }
 }

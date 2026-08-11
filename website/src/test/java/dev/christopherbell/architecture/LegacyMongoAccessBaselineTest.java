@@ -2,6 +2,8 @@ package dev.christopherbell.architecture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.tngtech.archunit.core.importer.ClassFileImporter;
+import com.tngtech.archunit.core.importer.ImportOption;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -58,6 +60,18 @@ class LegacyMongoAccessBaselineTest {
     assertThat(ownerTypesMatching(MONGO_TEMPLATE_USAGE))
         .containsExactlyInAnyOrderElementsOf(APPROVED_DIRECT_MONGO_INFRASTRUCTURE);
     assertThat(ownerTypesMatching(MONGO_COLLECTION_USAGE)).isEmpty();
+  }
+
+  @Test
+  void compiledRuntimeDependenciesCannotBypassKindScopedMongoOperations() {
+    var classes = new ClassFileImporter()
+        .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
+        .importPackages("dev.christopherbell");
+
+    new MongoPersistenceBoundaryRules(
+        "dev.christopherbell", APPROVED_DIRECT_MONGO_INFRASTRUCTURE)
+        .zeroBypassRule()
+        .check(classes);
   }
 
   private static Set<String> ownerTypesMatching(Pattern pattern) throws IOException {

@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
-import org.springframework.data.domain.SliceImpl;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -38,8 +37,5 @@ public final class MongoSharedFolderRecycleRepository
           List<SharedFolderRecycleState> states, Instant retryDue, Pageable page) {
     return find(Query.query(Criteria.where("state").in(states).and("retryAfter").lte(retryDue))
         .with(Sort.by(Sort.Order.asc("deletedAt"), Sort.Order.asc("id"))), page);
-  }
-  private Slice<SharedFolderRecycleItem> slice(Query query, Pageable page) {
-    var values = find(query, page); return new SliceImpl<>(values, page, values.size() == page.getPageSize());
   }
 }

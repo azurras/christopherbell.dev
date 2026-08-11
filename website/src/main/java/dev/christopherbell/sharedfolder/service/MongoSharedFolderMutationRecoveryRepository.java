@@ -29,7 +29,7 @@ public final class MongoSharedFolderMutationRecoveryRepository
   @Override public long renewOperationLease(
       String id, String token, SharedFolderMutationRecoveryState state,
       Instant expiresAt, Instant updatedAt) {
-    return mongo.updateFirst(Query.query(Criteria.where("id").is(id)
+    return mongo.updateHeartbeatPreservingVersion(Query.query(Criteria.where("id").is(id)
         .and("operationLeaseToken").is(token).and("state").is(state)),
         new Update().set("operationLeaseExpiresAt", expiresAt).set("updatedAt", updatedAt))
         .getMatchedCount();

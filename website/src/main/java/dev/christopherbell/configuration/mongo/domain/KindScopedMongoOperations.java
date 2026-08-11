@@ -2,9 +2,9 @@ package dev.christopherbell.configuration.mongo.domain;
 
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
-import java.time.Instant;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -26,6 +26,10 @@ public interface KindScopedMongoOperations<T> {
   T save(T value);
 
   UpdateResult updateFirst(Query domainQuery, Update domainUpdate);
+
+  /** Applies an owner/state heartbeat without advancing an entity's optimistic version. */
+  UpdateResult updateHeartbeatPreservingVersion(
+      Query exactOwnerStateQuery, Update heartbeatUpdate);
 
   Optional<T> findAndUpdate(Query domainQuery, Update domainUpdate);
 

@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
-import org.springframework.data.domain.SliceImpl;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -57,10 +56,4 @@ public final class MongoMediaJobRepository extends KindScopedRepositorySupport<M
         .set("descriptorPublished", false).unset("activeCacheKey").unset("deleteAt")).getMatchedCount();
   }
   private Optional<MediaJob> first(Query query, Sort sort) { query.with(sort).limit(1); return findOne(query); }
-  private Slice<MediaJob> slice(Query query, Pageable page) {
-    query.skip(page.getOffset()).limit(page.getPageSize() + 1);
-    var values = find(query); var hasNext = values.size() > page.getPageSize();
-    var content = hasNext ? values.subList(0, page.getPageSize()) : values;
-    return new SliceImpl<>(content, page, hasNext);
-  }
 }
