@@ -156,7 +156,11 @@ class SocialDomainRepositoryMongoContractTest {
     var saved = repository.save(job);
     assertThat(saved.getId()).isEqualTo(job.getId());
     assertThat(saved.getStatus()).isEqualTo(job.getStatus());
-    assertThat(repository.findById(job.getId())).contains(saved);
+    assertThat(repository.findById(job.getId())).get().satisfies(stored -> {
+      assertThat(stored.getId()).isEqualTo(saved.getId());
+      assertThat(stored.getStatus()).isEqualTo(saved.getStatus());
+      assertThat(stored.getNextStep()).isEqualTo(saved.getNextStep());
+    });
   }
 
   @Test

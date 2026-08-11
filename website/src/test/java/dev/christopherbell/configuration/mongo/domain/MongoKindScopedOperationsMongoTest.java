@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.bson.Document;
 import org.bson.types.Decimal128;
 import org.bson.types.ObjectId;
@@ -20,6 +21,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.auditing.IsNewAwareAuditingHandler;
@@ -30,6 +33,9 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.mapping.event.AuditingEntityCallback;
+import org.springframework.data.mongodb.core.mapping.event.AfterSaveCallback;
+import org.springframework.data.mongodb.core.mapping.event.BeforeConvertCallback;
+import org.springframework.data.mongodb.core.mapping.event.BeforeSaveCallback;
 import org.springframework.data.mapping.callback.EntityCallbacks;
 import org.springframework.data.mongodb.core.mapping.Field;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -233,6 +239,77 @@ class MongoKindScopedOperationsMongoTest {
   }
 
   @Test
+  void insertCarriesCallbackReturnedSourceAndPopulatesIdOnlyAfterPersistence() {
+    mongo = template("callback-lifecycle");
+    var calls = new ArrayList<String>();
+    var beforeConvertCalls = new AtomicInteger();
+    var beforeSaveCalls = new AtomicInteger();
+    var afterSaveCalls = new AtomicInteger();
+    var original = NotificationPreference.builder()
+        .accountId("original-account")
+        .build();
+    var convertedSource = NotificationPreference.builder()
+        .accountId("converted-account")
+        .mentions(true)
+        .build();
+    var beforeSaveSource = NotificationPreference.builder()
+        .accountId("callback-returned-account")
+        .messages(true)
+        .build();
+    var afterSaveSource = new AtomicReference<NotificationPreference>();
+
+    BeforeConvertCallback<NotificationPreference> beforeConvert = (source, collection) -> {
+      calls.add("before-convert");
+      beforeConvertCalls.incrementAndGet();
+      assertThat(source).isSameAs(original);
+      assertThat(source.getId()).isNull();
+      return convertedSource;
+    };
+    BeforeSaveCallback<NotificationPreference> beforeSave = (source, document, collection) -> {
+      calls.add("before-save");
+      beforeSaveCalls.incrementAndGet();
+      assertThat(source).isSameAs(convertedSource);
+      assertThat(source.getId()).isNull();
+      assertThat(document).doesNotContainKey("_id");
+      document.put("accountId", "document-mutated-account");
+      document.put("likes", true);
+      return beforeSaveSource;
+    };
+    AfterSaveCallback<NotificationPreference> afterSave = (source, document, collection) -> {
+      calls.add("after-save");
+      afterSaveCalls.incrementAndGet();
+      assertThat(source).isSameAs(beforeSaveSource);
+      assertThat(source.getId()).matches("[0-9a-f]{24}");
+      assertThat(document.get("_id")).isInstanceOf(ObjectId.class);
+      assertThat(((ObjectId) document.get("_id")).toHexString()).isEqualTo(source.getId());
+      assertThat(document.get("accountId")).isEqualTo("document-mutated-account");
+      var returned = NotificationPreference.builder()
+          .id(source.getId())
+          .accountId("after-save-returned-account")
+          .wflSessions(true)
+          .build();
+      afterSaveSource.set(returned);
+      return returned;
+    };
+    var callbacks = EntityCallbacks.create(beforeConvert, beforeSave, afterSave);
+    var preferences = new MongoKindScopedOperations<>(
+        mongo, DomainCollectionManifest.forType(NotificationPreference.class), callbacks);
+
+    var inserted = preferences.insert(original);
+
+    assertThat(calls).containsExactly("before-convert", "before-save", "after-save");
+    assertThat(beforeConvertCalls).hasValue(1);
+    assertThat(beforeSaveCalls).hasValue(1);
+    assertThat(afterSaveCalls).hasValue(1);
+    assertThat(inserted).isSameAs(afterSaveSource.get());
+    assertThat(preferences.findById(inserted.getId())).get().satisfies(stored -> {
+      assertThat(stored.getAccountId()).isEqualTo("document-mutated-account");
+      assertThat(stored.isMentions()).isTrue();
+      assertThat(stored.isLikes()).isTrue();
+    });
+  }
+
+  @Test
   void aggregationRejectsAMalformedEnvelopeBeforeReturningPayloadData() {
     mongo = template("aggregate-malformed");
     var operations = operations("sample_malformed");
@@ -271,6 +348,130 @@ class MongoKindScopedOperationsMongoTest {
         KindScopedAggregation.local(Aggregation.newAggregation(
             Aggregation.match(new Criteria()))),
         SampleDocument.class))
+        .isInstanceOf(MalformedDomainDocumentException.class)
+        .hasMessage("Mongo domain document is malformed.")
+        .hasNoCause();
+  }
+
+  @Test
+  void aggregationPreflightsMalformedForeignKindsBeforeLookupUnwrap() {
+    mongo = template("aggregate-malformed-foreign");
+    var operations = operations("sample_local");
+    mongo.getCollection("content").insertOne(new Document(
+        "_id", NamespacedMongoId.of("post", "foreign-id").toBson())
+        .append("_kind", "post")
+        .append("schemaVersion", 1)
+        .append("payload", new Document("id", "foreign-id"))
+        .append("unexpected", true));
+    var lookup = new Document("from", "content")
+        .append("pipeline", List.of(new Document("$match", new Document("_kind", "post"))))
+        .append("as", "foreign");
+    var aggregation = Aggregation.newAggregation(
+        context -> new Document("$lookup", lookup));
+
+    assertThatThrownBy(() -> operations.aggregate(
+        KindScopedAggregation.withForeignKinds(
+            aggregation, KindScopedAggregation.ForeignKind.POST),
+        Document.class))
+        .isInstanceOf(MalformedDomainDocumentException.class)
+        .hasMessage("Mongo domain document is malformed.")
+        .hasNoCause();
+  }
+
+  @Test
+  void aggregationValidatesBeforeProjectionWithoutTreatingProjectedRowsAsEnvelopes() {
+    mongo = template("aggregate-valid-projection");
+    var operations = operations("sample_valid_projection");
+    operations.insert(new SampleDocument(
+        "legacy-id", "Ada", 1L, Decimal128.parse("1.0"), null));
+    var aggregation = Aggregation.newAggregation(context -> new Document(
+        "$project", new Document("_id", 0).append("visitCount", "$visits")));
+
+    assertThat(operations.aggregate(
+        KindScopedAggregation.local(aggregation), Document.class))
+        .containsExactly(new Document("visitCount", 1L));
+  }
+
+  @Test
+  void aggregationRejectsANullLegacyIdentityBeforeCallerProjection() {
+    mongo = template("aggregate-null-identity");
+    var operations = operations("sample_null_identity");
+    mongo.getCollection("content").insertOne(new Document(
+        "_id", new Document("kind", "sample_null_identity").append("legacyId", null))
+        .append("_kind", "sample_null_identity")
+        .append("schemaVersion", 1)
+        .append("payload", new Document("display_name", "Ada")
+            .append("visits", 1L)
+            .append("amount", Decimal128.parse("1.0"))));
+
+    assertThatThrownBy(() -> operations.aggregate(
+        KindScopedAggregation.local(Aggregation.newAggregation(
+            Aggregation.match(Criteria.where("displayName").is("nobody")))),
+        Document.class))
+        .isInstanceOf(MalformedDomainDocumentException.class)
+        .hasMessage("Mongo domain document is malformed.")
+        .hasNoCause();
+  }
+
+  @Test
+  void aggregationRejectsANonDocumentIdentityWithTheRedactedTypedFailure() {
+    mongo = template("aggregate-scalar-identity");
+    var operations = operations("sample_scalar_identity");
+    mongo.getCollection("content").insertOne(new Document("_id", "scalar-id")
+        .append("_kind", "sample_scalar_identity")
+        .append("schemaVersion", 1)
+        .append("payload", new Document("display_name", "Ada")
+            .append("visits", 1L)
+            .append("amount", Decimal128.parse("1.0"))));
+
+    assertThatThrownBy(() -> operations.aggregate(
+        KindScopedAggregation.local(Aggregation.newAggregation(
+            Aggregation.match(Criteria.where("displayName").is("nobody")))),
+        Document.class))
+        .isInstanceOf(MalformedDomainDocumentException.class)
+        .hasMessage("Mongo domain document is malformed.")
+        .hasNoCause();
+  }
+
+  @Test
+  void aggregationRejectsANonCanonicalNamespacedIdentityFieldOrder() {
+    mongo = template("aggregate-identity-order");
+    var operations = operations("sample_identity_order");
+    mongo.getCollection("content").insertOne(new Document(
+        "_id", new Document("legacyId", "legacy-id").append("kind", "sample_identity_order"))
+        .append("_kind", "sample_identity_order")
+        .append("schemaVersion", 1)
+        .append("payload", new Document("display_name", "Ada")
+            .append("visits", 1L)
+            .append("amount", Decimal128.parse("1.0"))));
+
+    assertThatThrownBy(() -> operations.aggregate(
+        KindScopedAggregation.local(Aggregation.newAggregation(
+            Aggregation.match(Criteria.where("displayName").is("nobody")))),
+        Document.class))
+        .isInstanceOf(MalformedDomainDocumentException.class)
+        .hasMessage("Mongo domain document is malformed.")
+        .hasNoCause();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"int64", "double"})
+  void aggregationRejectsNonInt32SchemaVersionsBeforeCallerProjection(String representation) {
+    mongo = template("aggregate-schema-" + representation);
+    var operations = operations("sample_schema_type");
+    Object schemaVersion = "int64".equals(representation) ? 1L : 1.0d;
+    mongo.getCollection("content").insertOne(new Document(
+        "_id", NamespacedMongoId.of("sample_schema_type", representation).toBson())
+        .append("_kind", "sample_schema_type")
+        .append("schemaVersion", schemaVersion)
+        .append("payload", new Document("display_name", "Ada")
+            .append("visits", 1L)
+            .append("amount", Decimal128.parse("1.0"))));
+
+    assertThatThrownBy(() -> operations.aggregate(
+        KindScopedAggregation.local(Aggregation.newAggregation(
+            Aggregation.match(Criteria.where("displayName").is("nobody")))),
+        Document.class))
         .isInstanceOf(MalformedDomainDocumentException.class)
         .hasMessage("Mongo domain document is malformed.")
         .hasNoCause();

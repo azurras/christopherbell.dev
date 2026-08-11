@@ -16,15 +16,19 @@ public final class KindScopedAggregation {
       "$unwind", "$replaceRoot", "$replaceWith", "$set", "$addFields", "$unset", "$count");
 
   private final List<Document> pipeline;
+  private final List<DomainCollectionManifest.KindDefinition> foreignKinds;
 
   private KindScopedAggregation(Aggregation aggregation, List<ForeignKind> foreignKinds) {
     Objects.requireNonNull(aggregation, "aggregation");
     var foreignKindsByCollection = new HashMap<String, List<String>>();
+    var retainedForeignKinds = new ArrayList<DomainCollectionManifest.KindDefinition>();
     for (var foreignKind : List.copyOf(foreignKinds)) {
       var definition = foreignKind.definition();
+      retainedForeignKinds.add(definition);
       foreignKindsByCollection.computeIfAbsent(
           definition.collection(), ignored -> new ArrayList<>()).add(definition.kind());
     }
+    this.foreignKinds = List.copyOf(retainedForeignKinds);
     this.pipeline = aggregation.toPipeline(Aggregation.DEFAULT_CONTEXT).stream()
         .map(Document::new)
         .toList();
@@ -44,6 +48,10 @@ public final class KindScopedAggregation {
 
   List<Document> pipeline() {
     return pipeline.stream().map(Document::new).toList();
+  }
+
+  List<DomainCollectionManifest.KindDefinition> foreignKinds() {
+    return foreignKinds;
   }
 
   private static void validatePipeline(

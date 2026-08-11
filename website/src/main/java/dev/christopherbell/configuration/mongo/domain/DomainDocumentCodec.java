@@ -72,15 +72,58 @@ final class DomainDocumentCodec<T> {
     }
   }
 
-  T populateIdIfNecessary(T value) {
+  Document writeDomainDocument(T value) {
+    if (value == null || !kind.javaType().isInstance(value)) {
+      throw invalidValue();
+    }
+    try {
+      var mapped = new Document();
+      converter.write(value, mapped);
+      return mapped;
+    } catch (RuntimeException failure) {
+      throw invalidValue();
+    }
+  }
+
+  Object mappedIdFromSource(T value) {
+    try {
+      var sourceId = entity.getPropertyAccessor(value).getProperty(idProperty());
+      if (sourceId == null) {
+        return null;
+      }
+      var mapped = new QueryMapper(converter).getMappedObject(
+          new Document(idProperty().getName(), sourceId), entity);
+      return mapped.get("_id");
+    } catch (RuntimeException failure) {
+      throw invalidValue();
+    }
+  }
+
+  Object newStoredId() {
+    return new ObjectId();
+  }
+
+  T populateIdIfNecessary(T value, Object storedId) {
     try {
       var accessor = entity.getPropertyAccessor(value);
       var idProperty = idProperty();
-      if (accessor.getProperty(idProperty) != null) {
-        return value;
+      if (accessor.getProperty(idProperty) == null) {
+        accessor.setProperty(
+            idProperty, converter.convertId(storedId, idProperty.getType()));
       }
-      var generated = converter.convertId(new ObjectId(), idProperty.getType());
-      accessor.setProperty(idProperty, generated);
+      return kind.javaType().cast(accessor.getBean());
+    } catch (RuntimeException failure) {
+      throw invalidValue();
+    }
+  }
+
+  T populateVersion(T value, Document envelope) {
+    if (versionProperty == null) {
+      return value;
+    }
+    try {
+      var accessor = entity.getPropertyAccessor(value);
+      accessor.setProperty(versionProperty, version(envelope));
       return kind.javaType().cast(accessor.getBean());
     } catch (RuntimeException failure) {
       throw invalidValue();
@@ -96,9 +139,16 @@ final class DomainDocumentCodec<T> {
   }
 
   Document envelopeFromDomainDocument(Document mapped) {
+    return envelopeFromDomainDocument(mapped, null);
+  }
+
+  Document envelopeFromDomainDocument(Document mapped, Object fallbackLegacyId) {
     try {
       var copy = new Document(mapped);
       var legacyId = copy.remove("_id");
+      if (legacyId == null) {
+        legacyId = fallbackLegacyId;
+      }
       if (legacyId == null) {
         throw invalidValue();
       }

@@ -86,14 +86,13 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   @Override
   public T insert(T value) {
     var prepared = prepareForSave(value);
-    var candidate = prepareEnvelopeForSave(prepared);
-    return insertEnvelope(codec.initializeVersion(candidate), false);
+    return insertEnvelope(prepared, codec.initializeVersion(prepared.envelope()), false);
   }
 
   @Override
   public T save(T value) {
     var prepared = prepareForSave(value);
-    var candidate = prepareEnvelopeForSave(prepared);
+    var candidate = prepared.envelope();
     var bsonId = candidate.get("_id", Document.class);
     var mappedLegacyId = NamespacedMongoId.require(bsonId, kind.kind()).legacyId();
     var existing = findEnvelopeById(mappedLegacyId);
@@ -101,11 +100,12 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
       if (codec.isVersioned() && codec.version(candidate) != null) {
         throw stale();
       }
-      return insertEnvelope(codec.initializeVersion(candidate), codec.isVersioned());
+      return insertEnvelope(
+          prepared, codec.initializeVersion(candidate), codec.isVersioned());
     }
     codec.decode(existing);
     if (!codec.isVersioned()) {
-      return replaceOrInsert(fieldMapper.idQuery(mappedLegacyId), candidate);
+      return replaceOrInsert(prepared, fieldMapper.idQuery(mappedLegacyId), candidate);
     }
 
     var expectedVersion = codec.version(candidate);
@@ -118,7 +118,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
     if (replaced == null) {
       throw stale();
     }
-    return afterSave(codec.decode(replaced), replaced);
+    return afterSave(persistedSource(prepared.source(), replaced), replaced);
   }
 
   @Override
@@ -223,7 +223,11 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   public <R> List<R> aggregate(KindScopedAggregation domainAggregation, Class<R> resultType) {
     Objects.requireNonNull(domainAggregation, "domainAggregation");
     Objects.requireNonNull(resultType, "resultType");
-    rejectMalformedStoredEnvelopes();
+    rejectMalformedStoredEnvelopes(
+        kind.collection(), kind.kind(), kind.schemaVersion());
+    domainAggregation.foreignKinds().forEach(foreignKind ->
+        rejectMalformedStoredEnvelopes(
+            foreignKind.collection(), foreignKind.kind(), foreignKind.schemaVersion()));
     var operations = new java.util.ArrayList<AggregationOperation>();
     operations.add(context -> new Document("$match", new Document("_kind", kind.kind())
         .append("schemaVersion", kind.schemaVersion())
@@ -260,11 +264,11 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
     return kind.collection();
   }
 
-  private T replaceOrInsert(Query query, Document candidate) {
+  private T replaceOrInsert(PreparedSave<T> prepared, Query query, Document candidate) {
     var replaced = replace(query, candidate);
     return replaced == null
-        ? insertEnvelope(candidate, false)
-        : afterSave(codec.decode(replaced), replaced);
+        ? insertEnvelope(prepared, candidate, false)
+        : afterSave(persistedSource(prepared.source(), replaced), replaced);
   }
 
   private Document replace(Query query, Document candidate) {
@@ -281,9 +285,11 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
     }
   }
 
-  private T insertEnvelope(Document candidate, boolean contentionIsStale) {
+  private T insertEnvelope(
+      PreparedSave<T> prepared, Document candidate, boolean contentionIsStale) {
     try {
-      return afterSave(codec.decode(mongo.insert(candidate, kind.collection())), candidate);
+      var persisted = mongo.insert(candidate, kind.collection());
+      return afterSave(persistedSource(prepared.source(), persisted), persisted);
     } catch (DuplicateKeyException failure) {
       if (contentionIsStale) {
         throw stale();
@@ -292,21 +298,33 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
     }
   }
 
-  private T prepareForSave(T value) {
-    var audited = callbacks.callback(BeforeConvertCallback.class, value, kind.collection());
-    return codec.populateIdIfNecessary(kind.javaType().cast(audited));
-  }
-
-  private Document prepareEnvelopeForSave(T value) {
-    var envelope = codec.encode(value);
-    var mapped = codec.domainDocument(envelope);
-    callbacks.callback(BeforeSaveCallback.class, value, mapped, kind.collection());
-    return codec.envelopeFromDomainDocument(mapped);
+  private PreparedSave<T> prepareForSave(T value) {
+    var converted = kind.javaType().cast(
+        callbacks.callback(BeforeConvertCallback.class, value, kind.collection()));
+    var mapped = codec.writeDomainDocument(converted);
+    var callbackSource = kind.javaType().cast(
+        callbacks.callback(BeforeSaveCallback.class, converted, mapped, kind.collection()));
+    var mappedId = mapped.get("_id");
+    if (mappedId == null) {
+      mappedId = codec.mappedIdFromSource(callbackSource);
+    }
+    if (mappedId == null) {
+      mappedId = codec.newStoredId();
+    }
+    return new PreparedSave<>(
+        callbackSource, codec.envelopeFromDomainDocument(mapped, mappedId));
   }
 
   private T afterSave(T value, Document envelope) {
     return kind.javaType().cast(callbacks.callback(
         AfterSaveCallback.class, value, codec.domainDocument(envelope), kind.collection()));
+  }
+
+  private T persistedSource(T source, Document envelope) {
+    var identity = NamespacedMongoId.require(
+        envelope.get("_id", Document.class), kind.kind());
+    return codec.populateVersion(
+        codec.populateIdIfNecessary(source, identity.legacyId()), envelope);
   }
 
   private Document findEnvelopeById(Object mappedLegacyId) {
@@ -333,29 +351,32 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
     return mappedId;
   }
 
-  private void rejectMalformedStoredEnvelopes() {
+  private void rejectMalformedStoredEnvelopes(
+      String collection, String expectedKind, int expectedSchemaVersion) {
     var malformed = new Document("$and", List.of(
-        new Document("_kind", kind.kind()),
+        new Document("_kind", expectedKind),
         new Document("$or", List.of(
-            new Document("schemaVersion", new Document("$ne", kind.schemaVersion())),
-            new Document("_id.kind", new Document("$ne", kind.kind())),
+            new Document("schemaVersion", new Document("$ne", expectedSchemaVersion)),
+            new Document("schemaVersion", new Document("$not", new Document("$type", "int"))),
+            new Document("_id.kind", new Document("$ne", expectedKind)),
             new Document("_id.legacyId", new Document("$exists", false)),
+            new Document("_id.legacyId", null),
             new Document("payload", new Document("$not", new Document("$type", "object"))),
             new Document("payload._id", new Document("$exists", true)),
-            unexpectedKeys("$$ROOT", List.of("_id", "_kind", "schemaVersion", "payload")),
-            unexpectedKeys("$_id", List.of("kind", "legacyId"))))));
+            nonCanonicalKeys("$$ROOT", List.of("_id", "_kind", "schemaVersion", "payload")),
+            nonCanonicalKeys("$_id", List.of("kind", "legacyId"))))));
     if (mongo.exists(new org.springframework.data.mongodb.core.query.BasicQuery(malformed),
-        Document.class, kind.collection())) {
+        Document.class, collection)) {
       throw new MalformedDomainDocumentException();
     }
   }
 
-  private static Document unexpectedKeys(String input, List<String> approvedKeys) {
+  private static Document nonCanonicalKeys(String input, List<String> approvedKeys) {
     var keys = new Document("$map", new Document("input", new Document("$objectToArray", input))
         .append("as", "field")
         .append("in", "$$field.k"));
     return new Document("$expr", new Document("$not", List.of(
-        new Document("$setEquals", List.of(keys, approvedKeys)))));
+        new Document("$eq", List.of(keys, approvedKeys)))));
   }
 
   private static OptimisticLockingFailureException stale() {
@@ -365,4 +386,6 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   private static DuplicateKeyException duplicate() {
     return new DuplicateKeyException(DUPLICATE_MESSAGE);
   }
+
+  private record PreparedSave<T>(T source, Document envelope) {}
 }
