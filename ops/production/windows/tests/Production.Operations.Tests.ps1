@@ -421,7 +421,7 @@ Describe 'native Windows production operations' {
             Should -Invoke Stop-ProductionWebsiteService -Times 0
         }
 
-        It 'refuses generic target-to-legacy rollback with exact confirmed-command guidance' {
+        It 'marks pure v1 cross-schema rollback unsupported with a safe stopped-writer action' {
             $targetSha = '0123456789abcdef0123456789abcdef01234567'
             $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
             Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
@@ -437,7 +437,7 @@ Describe 'native Windows production operations' {
             Mock Stop-ProductionWebsiteService { throw 'must not stop' }
 
             { Invoke-ProductionRollback } |
-                Should -Throw '*prod.cmd mongo-consolidation-rollback -ConfirmDomainCollectionRollback*'
+                Should -Throw '*version 1*unsupported*keep ChristopherBellDev stopped*recovery suspended*deploy.lock*'
             Should -Invoke Stop-ProductionWebsiteService -Times 0
         }
 
@@ -458,6 +458,29 @@ Describe 'native Windows production operations' {
             { Restart-ProductionService -Verify } | Should -Throw '*reconciliation*'
 
             Should -Invoke Restart-Service -Times 0
+        }
+
+        It 'categorically blocks manual restart during domain rollback even on the legacy release' {
+            $direction = [pscustomobject]@{
+                version=2
+                state='ROLLBACK_IN_PROGRESS'
+                targetRelease='2' * 40
+                currentRelease='2' * 40
+                legacyRelease='1' * 40
+            }
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8443 }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection { $direction }
+            Mock Get-JunctionTarget { 'C:\data\releases\1111111111111111111111111111111111111111' }
+            Mock Restart-Service { throw 'restart must not run' }
+
+            { Restart-ProductionService -Verify } |
+                Should -Throw '*blocked*domain collection rollback*'
+
+            Should -Invoke Restart-Service -Times 0
+            Should -Invoke Get-JunctionTarget -Times 0
         }
 
         It 'uses the controlled stop for rollback and restoration' {

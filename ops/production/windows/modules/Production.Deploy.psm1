@@ -981,6 +981,17 @@ function Invoke-ProductionDeploy {
     try {
         $domainDirection = Read-ProductionDomainSchemaDirection -Config $config
         $direction = Read-ProductionMusicSchemaDirection -Config $config
+        if ($domainDirection -and
+            [string]$domainDirection.state -eq 'ROLLBACK_IN_PROGRESS') {
+            throw ('Deploy is blocked because domain collection rollback is in progress. ' +
+                'Keep ChristopherBellDev stopped with recovery suspended and resume ' +
+                'mongo-consolidation-rollback under deploy.lock.')
+        }
+        if ($domainDirection -and
+            [string]$domainDirection.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+            throw ('Deploy is blocked because guarded domain collection rollback left the ' +
+                'legacy schema active. Use mongo-consolidate for a new guarded cutover.')
+        }
         if (-not $direction) {
             try {
                 $migrationActive = Get-ProductionMusicMigrationActivationNoLock -Config $config

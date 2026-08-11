@@ -588,6 +588,14 @@ on `mongorestore --drop`, and independently verifies the restored evidence
 before selecting or starting the old writer. If any identity or postcondition
 cannot be proved, leave `ChristopherBellDev` stopped and preserve all evidence.
 
+Rollback crash states are durable startup gates. `ROLLBACK_IN_PROGRESS` blocks
+every service, boot, recovery, restart, and deploy launch;
+`LEGACY_DATA_VERIFIED` proves the bound archive has already been restored and
+verified; and `ROLLBACK_READY` is persisted before the compatible marker or
+legacy writer is enabled. Retry from either post-restore state never reruns
+`mongorestore`. Any finalization failure re-stops the writer and suspends SCM
+recovery before returning control to the operator.
+
 Routine target-schema deployments preserve the original cutover target,
 evidence digest, backup identity, and legacy release in the v2 marker while
 advancing only its current target release.

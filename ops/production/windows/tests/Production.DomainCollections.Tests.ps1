@@ -228,6 +228,34 @@ Describe 'Domain collection migration artifact contracts' {
             $LASTEXITCODE | Should -Be 0
             { & $invokeEngine 'restore-verify' $evidence $evidenceDigest } |
                 Should -Throw
+            $finalizationState = [pscustomobject]@{
+                state='LEGACY_DATA_VERIFIED'
+                legacyDropped=$true
+            }
+            Mock Restore-ProductionDomainCollectionBackup `
+                -ModuleName Production.DomainCollections {
+                    throw 'verified legacy data must not be restored again'
+                }
+            Mock Recover-ProductionDomainCollectionPrepublication `
+                -ModuleName Production.DomainCollections {
+                    throw 'verified legacy data must not be reversed again'
+                }
+            Mock Write-ProductionDomainCollectionRollbackMarker `
+                -ModuleName Production.DomainCollections { }
+            Mock Start-ProductionDomainCollectionLegacy `
+                -ModuleName Production.DomainCollections { }
+            Mock Set-ProductionWebsiteRecoveryPolicy `
+                -ModuleName Production.DomainCollections { }
+            Mock Save-ProductionDomainCollectionContextState `
+                -ModuleName Production.DomainCollections {
+                    $finalizationState.state = $State
+                }
+            & $domainModule {
+                param($State)
+                Invoke-ProductionDomainCollectionRollbackStateMachine `
+                    -State $State -PostDrop:$true
+            } $finalizationState
+            $finalizationState.state | Should -BeExactly 'ROLLED_BACK'
             $countAfterRejectedReplay = & $shell '--quiet' '--norc' $uri '--eval' `
                 "print(db.getSiblingDB('$cliDatabase').accounts.countDocuments({_id:'post-rollback-write'}))"
             [int]($countAfterRejectedReplay | Select-Object -Last 1) | Should -Be 1

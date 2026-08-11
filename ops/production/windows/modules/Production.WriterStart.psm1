@@ -6,6 +6,12 @@ $script:MarkerStates = @(
     'TARGET_CUTOVER_IN_PROGRESS',
     'LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
 )
+$script:DomainMarkerStates = @(
+    'TARGET_ACTIVE',
+    'TARGET_CUTOVER_IN_PROGRESS',
+    'LEGACY_ACTIVE_RECONCILIATION_REQUIRED',
+    'ROLLBACK_IN_PROGRESS'
+)
 $script:AuthorizationPurposes = @(
     'TARGET_CUTOVER',
     'TARGET_DEPLOY',
@@ -999,7 +1005,7 @@ function ConvertFrom-ProductionDomainSchemaDirectionValue {
     if (($Value.version -isnot [int] -and $Value.version -isnot [long]) -or
         [int]$Value.version -ne 2 -or
         $Value.state -isnot [string] -or
-        -not ($script:MarkerStates -ccontains [string]$Value.state) -or
+        -not ($script:DomainMarkerStates -ccontains [string]$Value.state) -or
         ($Value.updatedAtEpochMillis -isnot [int] -and
             $Value.updatedAtEpochMillis -isnot [long]) -or
         [long]$Value.updatedAtEpochMillis -lt 1 -or
@@ -1095,7 +1101,7 @@ function Write-ProductionDomainSchemaDirection {
     param(
         [Parameter(Mandatory)]$Config,
         [Parameter(Mandatory)]
-        [ValidateSet('TARGET_ACTIVE','TARGET_CUTOVER_IN_PROGRESS','LEGACY_ACTIVE_RECONCILIATION_REQUIRED')]
+        [ValidateSet('TARGET_ACTIVE','TARGET_CUTOVER_IN_PROGRESS','LEGACY_ACTIVE_RECONCILIATION_REQUIRED','ROLLBACK_IN_PROGRESS')]
         [string]$State,
         [Parameter(Mandatory)][ValidateScript({ $_ -cmatch '^[0-9a-f]{40}$' })]
         [string]$TargetRelease,
@@ -1470,6 +1476,10 @@ function Assert-ProductionWriterStartAllowed {
     $release = Read-ProductionReleaseIdentity -Config $Config
     $domainMarker = Read-ProductionDomainSchemaDirection -Config $Config
     $marker = Read-ProductionMusicSchemaDirection -Config $Config
+    if ($domainMarker -and
+        [string]$domainMarker.state -eq 'ROLLBACK_IN_PROGRESS') {
+        throw 'Domain collection rollback is in progress; writer start is blocked for every release.'
+    }
     if (-not $domainMarker -and
         $release.PSObject.Properties.Name -ccontains 'domainSchema' -and
         [string]$release.domainSchema -eq 'TARGET') {

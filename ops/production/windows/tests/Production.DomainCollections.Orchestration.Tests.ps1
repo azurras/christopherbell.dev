@@ -173,36 +173,84 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
             Should -Invoke Read-ProductionConfig -Times 0
         }
 
+        It 'keeps rollback marker deletion identity exact across restore' {
+            $state = [pscustomobject]@{
+                config = [pscustomobject]@{}
+                targetRelease = '2' * 40
+                currentRelease = '3' * 40
+                legacyRelease = '1' * 40
+                evidenceDigest = 'a' * 64
+                backupIdentity = 'b' * 64
+                legacyDropped = $false
+            }
+            Mock Write-ProductionDomainSchemaDirection { }
+
+            Write-ProductionDomainCollectionRollbackMarker `
+                -State $state -MarkerState ROLLBACK_IN_PROGRESS
+            $state.legacyDropped = $true
+            Write-ProductionDomainCollectionRollbackMarker `
+                -State $state -MarkerState ROLLBACK_IN_PROGRESS
+            Write-ProductionDomainCollectionRollbackMarker `
+                -State $state -MarkerState LEGACY_ACTIVE_RECONCILIATION_REQUIRED
+
+            Should -Invoke Write-ProductionDomainSchemaDirection -Times 1 `
+                -ParameterFilter {
+                    $State -eq 'ROLLBACK_IN_PROGRESS' -and -not $LegacyDropped
+                }
+            Should -Invoke Write-ProductionDomainSchemaDirection -Times 1 `
+                -ParameterFilter {
+                    $State -eq 'ROLLBACK_IN_PROGRESS' -and $LegacyDropped
+                }
+            Should -Invoke Write-ProductionDomainSchemaDirection -Times 1 `
+                -ParameterFilter {
+                    $State -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED' -and
+                    -not $LegacyDropped
+                }
+        }
+
         It 'restores the exact backup before selecting or starting the legacy writer after deletion' {
             $events = [Collections.Generic.List[string]]::new()
             $config = [pscustomobject]@{
                 programDataRoot = 'C:\ProgramData\christopherbell.dev'
                 productionPort = 8080
             }
-            $state = [pscustomobject]@{ state='TARGET_ACTIVE'; legacyDropped = $true }
+            $rollbackContext = [pscustomobject]@{
+                state='TARGET_ACTIVE'
+                legacyDropped=$true
+            }
             Mock Read-ProductionConfig { $config }
             Mock Enter-ProductionFixedRootDeploymentLock {
                 [pscustomobject]@{ Lock = [IO.MemoryStream]::new(); Boundary = [pscustomobject]@{} }
             }
-            Mock Read-ProductionDomainCollectionProtectedState { $state }
+            Mock Read-ProductionDomainCollectionProtectedState { $rollbackContext }
             Mock Stop-ProductionDomainCollectionWriter { [void]$events.Add('stop-suspended') }
             Mock Assert-ProductionDomainCollectionRollbackFreshness { [void]$events.Add('freshness') }
-            Mock Restore-ProductionDomainCollectionBackup { [void]$events.Add('restore-backup') }
+            Mock Write-ProductionDomainCollectionRollbackMarker {
+                [void]$events.Add("marker:$MarkerState")
+            }
+            Mock Restore-ProductionDomainCollectionBackup {
+                [void]$events.Add('restore-backup')
+                $rollbackContext.state = 'LEGACY_DATA_VERIFIED'
+                [void]$events.Add('state:LEGACY_DATA_VERIFIED')
+            }
             Mock Recover-ProductionDomainCollectionPrepublication { throw 'prepublication recovery must not run' }
-            Mock Restore-ProductionDomainCollectionLegacyRelease { [void]$events.Add('legacy-junction') }
+            Mock Restore-ProductionDomainCollectionLegacyRelease { throw 'prior marker must not return' }
             Mock Start-ProductionDomainCollectionLegacy { [void]$events.Add('legacy-start') }
             Mock Set-ProductionWebsiteRecoveryPolicy {
                 [void]$events.Add("recovery:$Policy")
             }
             Mock Save-ProductionDomainCollectionContextState {
                 [void]$events.Add("state:$State")
+                $rollbackContext.state = $State
             }
 
             Invoke-ProductionDomainCollectionRollback -Confirm
 
             $events | Should -Be @(
-                'stop-suspended','freshness','state:ROLLBACK_VERIFIED','restore-backup',
-                'legacy-junction','legacy-start',
+                'stop-suspended','freshness','marker:ROLLBACK_IN_PROGRESS',
+                'state:ROLLBACK_VERIFIED','restore-backup','state:LEGACY_DATA_VERIFIED',
+                'state:ROLLBACK_READY','marker:LEGACY_ACTIVE_RECONCILIATION_REQUIRED',
+                'legacy-start',
                 'recovery:Normal','state:ROLLED_BACK')
             Should -Invoke Restore-ProductionDomainCollectionBackup -Times 1
             Should -Invoke Recover-ProductionDomainCollectionPrepublication -Times 0
@@ -216,7 +264,7 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
                 programDataRoot = 'C:\ProgramData\christopherbell.dev'
                 productionPort = 8080
             }
-            $state = [pscustomobject]@{
+            $rollbackContext = [pscustomobject]@{
                 state='CANDIDATE_VERIFIED'
                 legacyDropped = $false
             }
@@ -224,26 +272,33 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
             Mock Enter-ProductionFixedRootDeploymentLock {
                 [pscustomobject]@{ Lock = [IO.MemoryStream]::new(); Boundary = [pscustomobject]@{} }
             }
-            Mock Read-ProductionDomainCollectionProtectedState { $state }
+            Mock Read-ProductionDomainCollectionProtectedState { $rollbackContext }
             Mock Stop-ProductionDomainCollectionWriter { [void]$events.Add('stop-suspended') }
             Mock Assert-ProductionDomainCollectionRollbackFreshness { throw 'freshness is post-drop only' }
             Mock Recover-ProductionDomainCollectionPrepublication {
                 [void]$events.Add('recover-prepublication')
             }
             Mock Restore-ProductionDomainCollectionBackup { throw 'restore must not run' }
-            Mock Restore-ProductionDomainCollectionLegacyRelease { [void]$events.Add('legacy-junction') }
+            Mock Write-ProductionDomainCollectionRollbackMarker {
+                [void]$events.Add("marker:$MarkerState")
+            }
+            Mock Restore-ProductionDomainCollectionLegacyRelease { throw 'prior marker must not return' }
             Mock Start-ProductionDomainCollectionLegacy { [void]$events.Add('legacy-start') }
             Mock Set-ProductionWebsiteRecoveryPolicy {
                 [void]$events.Add("recovery:$Policy")
             }
             Mock Save-ProductionDomainCollectionContextState {
                 [void]$events.Add("state:$State")
+                $rollbackContext.state = $State
             }
 
             Invoke-ProductionDomainCollectionRollback -Confirm
 
             $events | Should -Be @(
-                'stop-suspended','recover-prepublication','legacy-junction','legacy-start',
+                'stop-suspended','marker:ROLLBACK_IN_PROGRESS',
+                'recover-prepublication','state:LEGACY_DATA_VERIFIED',
+                'state:ROLLBACK_READY','marker:LEGACY_ACTIVE_RECONCILIATION_REQUIRED',
+                'legacy-start',
                 'recovery:Normal','state:ROLLED_BACK')
             Should -Invoke Restore-ProductionDomainCollectionBackup -Times 0
             Should -Invoke Assert-ProductionDomainCollectionRollbackFreshness -Times 0
@@ -266,8 +321,13 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
             Mock Restore-ProductionDomainCollectionLegacyRelease { throw 'legacy must not run' }
             Mock Start-ProductionDomainCollectionLegacy { throw 'legacy must not start' }
 
-            { Invoke-ProductionDomainCollectionRollback -Confirm } |
-                Should -Throw '*snapshot changed*'
+            $failure = try {
+                Invoke-ProductionDomainCollectionRollback -Confirm
+                $null
+            } catch { $_.Exception }
+
+            $failure.Message | Should -Match 'stopped with recovery suspended'
+            $failure.InnerException.Message | Should -BeExactly 'snapshot changed'
 
             Should -Invoke Restore-ProductionDomainCollectionBackup -Times 0
             Should -Invoke Restore-ProductionDomainCollectionLegacyRelease -Times 0
@@ -275,7 +335,7 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
         }
 
         It 'treats persisted DROP_STARTED as restore-bound even before legacyDropped is true' {
-            $state = [pscustomobject]@{
+            $rollbackContext = [pscustomobject]@{
                 state='DROP_STARTED'
                 legacyDropped=$false
             }
@@ -285,11 +345,16 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
             Mock Enter-ProductionFixedRootDeploymentLock {
                 [pscustomobject]@{ Lock=[IO.MemoryStream]::new(); Boundary=[pscustomobject]@{} }
             }
-            Mock Read-ProductionDomainCollectionProtectedState { $state }
+            Mock Read-ProductionDomainCollectionProtectedState { $rollbackContext }
             Mock Stop-ProductionDomainCollectionWriter { }
             Mock Assert-ProductionDomainCollectionRollbackFreshness { }
-            Mock Save-ProductionDomainCollectionContextState { }
-            Mock Restore-ProductionDomainCollectionBackup { }
+            Mock Save-ProductionDomainCollectionContextState {
+                $rollbackContext.state = $State
+            }
+            Mock Write-ProductionDomainCollectionRollbackMarker { }
+            Mock Restore-ProductionDomainCollectionBackup {
+                $rollbackContext.state = 'LEGACY_DATA_VERIFIED'
+            }
             Mock Recover-ProductionDomainCollectionPrepublication {
                 throw 'prepublication recovery must not run'
             }
@@ -304,7 +369,7 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
         }
 
         It 'resumes a verified partial restore without rechecking the removed target catalog' {
-            $state = [pscustomobject]@{
+            $rollbackContext = [pscustomobject]@{
                 state='ROLLBACK_VERIFIED'
                 legacyDropped=$true
             }
@@ -314,13 +379,18 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
             Mock Enter-ProductionFixedRootDeploymentLock {
                 [pscustomobject]@{ Lock=[IO.MemoryStream]::new(); Boundary=[pscustomobject]@{} }
             }
-            Mock Read-ProductionDomainCollectionProtectedState { $state }
+            Mock Read-ProductionDomainCollectionProtectedState { $rollbackContext }
             Mock Stop-ProductionDomainCollectionWriter { }
             Mock Assert-ProductionDomainCollectionRollbackFreshness {
                 throw 'target namespaces may already be removed'
             }
-            Mock Save-ProductionDomainCollectionContextState { }
-            Mock Restore-ProductionDomainCollectionBackup { }
+            Mock Save-ProductionDomainCollectionContextState {
+                $rollbackContext.state = $State
+            }
+            Mock Write-ProductionDomainCollectionRollbackMarker { }
+            Mock Restore-ProductionDomainCollectionBackup {
+                $rollbackContext.state = 'LEGACY_DATA_VERIFIED'
+            }
             Mock Restore-ProductionDomainCollectionLegacyRelease { }
             Mock Start-ProductionDomainCollectionLegacy { }
             Mock Set-ProductionWebsiteRecoveryPolicy { }
@@ -333,14 +403,191 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
 
         It 'rejects illegal and terminal protected state transitions before persistence' {
             { Assert-ProductionDomainCollectionStateTransition `
-                    -Current PREVIEWED -Next ROLLED_BACK } |
+                    -Current TARGET_ACTIVE -Next ROLLBACK_VERIFIED } |
+                Should -Not -Throw
+            { Assert-ProductionDomainCollectionStateTransition `
+                    -Current ROLLBACK_VERIFIED -Next LEGACY_DATA_VERIFIED } |
+                Should -Not -Throw
+            { Assert-ProductionDomainCollectionStateTransition `
+                    -Current LEGACY_DATA_VERIFIED -Next ROLLBACK_READY } |
+                Should -Not -Throw
+            { Assert-ProductionDomainCollectionStateTransition `
+                    -Current ROLLBACK_READY -Next ROLLED_BACK } |
                 Should -Not -Throw
             { Assert-ProductionDomainCollectionStateTransition `
                     -Current PREVIEWED -Next TARGET_ACTIVE } |
                 Should -Throw '*transition*'
             { Assert-ProductionDomainCollectionStateTransition `
+                    -Current LEGACY_DATA_VERIFIED -Next ROLLBACK_VERIFIED } |
+                Should -Throw '*transition*'
+            { Assert-ProductionDomainCollectionStateTransition `
                     -Current ROLLED_BACK -Next ROLLED_BACK } |
                 Should -Throw '*terminal*'
+        }
+
+        It 'publishes the rollback startup barrier before protected restore state' {
+            $events = [Collections.Generic.List[string]]::new()
+            $rollbackContext = [pscustomobject]@{
+                state='TARGET_ACTIVE'
+                legacyDropped=$true
+                targetRelease='2' * 40
+                legacyRelease='1' * 40
+                evidenceDigest='a' * 64
+                backupIdentity='b' * 64
+            }
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{ Lock=[IO.MemoryStream]::new(); Boundary=[pscustomobject]@{} }
+            }
+            Mock Read-ProductionDomainCollectionProtectedState { $rollbackContext }
+            Mock Stop-ProductionDomainCollectionWriter { [void]$events.Add('stop-suspended') }
+            Mock Assert-ProductionDomainCollectionRollbackFreshness {
+                [void]$events.Add('freshness')
+            }
+            Mock Write-ProductionDomainCollectionRollbackMarker {
+                [void]$events.Add("marker:$MarkerState")
+            }
+            Mock Save-ProductionDomainCollectionContextState {
+                [void]$events.Add("state:$State")
+                $rollbackContext.state = $State
+            }
+            Mock Restore-ProductionDomainCollectionBackup {
+                [void]$events.Add('restore')
+                $rollbackContext.state = 'LEGACY_DATA_VERIFIED'
+                [void]$events.Add('state:LEGACY_DATA_VERIFIED')
+            }
+            Mock Recover-ProductionDomainCollectionPrepublication {
+                throw 'prepublication recovery must not run'
+            }
+            Mock Restore-ProductionDomainCollectionLegacyRelease {
+                throw 'prior marker must not replace durable v2 rollback state'
+            }
+            Mock Start-ProductionDomainCollectionLegacy {
+                if ($rollbackContext.state -cne 'ROLLBACK_READY') {
+                    throw 'legacy start preceded durable rollback-ready state'
+                }
+                [void]$events.Add('legacy-start')
+            }
+            Mock Set-ProductionWebsiteRecoveryPolicy {
+                [void]$events.Add("recovery:$Policy")
+            }
+
+            Invoke-ProductionDomainCollectionRollback -Confirm
+
+            $events | Should -Be @(
+                'stop-suspended','freshness','marker:ROLLBACK_IN_PROGRESS',
+                'state:ROLLBACK_VERIFIED','restore','state:LEGACY_DATA_VERIFIED',
+                'state:ROLLBACK_READY','marker:LEGACY_ACTIVE_RECONCILIATION_REQUIRED',
+                'legacy-start','recovery:Normal','state:ROLLED_BACK')
+        }
+
+        It 'retries final marker publication without restoring verified legacy data again' {
+            $rollbackContext = [pscustomobject]@{
+                state='LEGACY_DATA_VERIFIED'
+                legacyDropped=$true
+                targetRelease='2' * 40
+                legacyRelease='1' * 40
+                evidenceDigest='a' * 64
+                backupIdentity='b' * 64
+            }
+            $script:markerAttempt = 0
+            $script:legacyWrite = 'retained-after-restore-verify'
+            $script:stops = 0
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{ Lock=[IO.MemoryStream]::new(); Boundary=[pscustomobject]@{} }
+            }
+            Mock Read-ProductionDomainCollectionProtectedState { $rollbackContext }
+            Mock Stop-ProductionDomainCollectionWriter { $script:stops++ }
+            Mock Assert-ProductionDomainCollectionRollbackFreshness {
+                throw 'verified legacy data must not recheck the removed target catalog'
+            }
+            Mock Restore-ProductionDomainCollectionBackup {
+                $script:legacyWrite = 'lost-by-second-restore'
+                throw 'verified legacy data must not restore again'
+            }
+            Mock Recover-ProductionDomainCollectionPrepublication {
+                throw 'verified legacy data must not reverse again'
+            }
+            Mock Write-ProductionDomainCollectionRollbackMarker {
+                $script:markerAttempt++
+                if ($script:markerAttempt -eq 1) { throw 'simulated final marker failure' }
+            }
+            Mock Save-ProductionDomainCollectionContextState {
+                $rollbackContext.state = $State
+            }
+            Mock Start-ProductionDomainCollectionLegacy { }
+            Mock Set-ProductionWebsiteRecoveryPolicy { }
+
+            { Invoke-ProductionDomainCollectionRollback -Confirm } |
+                Should -Throw '*stopped*recovery suspended*'
+            $script:legacyWrite | Should -BeExactly 'retained-after-restore-verify'
+            $script:stops | Should -Be 2
+
+            Invoke-ProductionDomainCollectionRollback -Confirm
+
+            $script:legacyWrite | Should -BeExactly 'retained-after-restore-verify'
+            Should -Invoke Restore-ProductionDomainCollectionBackup -Times 0
+            $rollbackContext.state | Should -BeExactly 'ROLLED_BACK'
+        }
+
+        It 're-suspends recovery when terminal persistence fails and retries without restore' {
+            $rollbackContext = [pscustomobject]@{
+                state='ROLLBACK_READY'
+                legacyDropped=$true
+                config=[pscustomobject]@{ productionPort=8080 }
+            }
+            $script:terminalAttempts = 0
+            $script:legacyWrite = 'retained-before-final-persistence'
+            $script:events = [Collections.Generic.List[string]]::new()
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{ Lock=[IO.MemoryStream]::new(); Boundary=[pscustomobject]@{} }
+            }
+            Mock Read-ProductionDomainCollectionProtectedState { $rollbackContext }
+            Mock Stop-ProductionDomainCollectionWriter {
+                [void]$script:events.Add('stop-suspended')
+            }
+            Mock Restore-ProductionDomainCollectionBackup {
+                $script:legacyWrite = 'lost-by-second-restore'
+                throw 'rollback-ready must not restore'
+            }
+            Mock Recover-ProductionDomainCollectionPrepublication {
+                throw 'rollback-ready must not reverse'
+            }
+            Mock Write-ProductionDomainCollectionRollbackMarker { }
+            Mock Start-ProductionDomainCollectionLegacy {
+                [void]$script:events.Add('legacy-start')
+            }
+            Mock Set-ProductionWebsiteRecoveryPolicy {
+                [void]$script:events.Add("recovery:$Policy")
+            }
+            Mock Save-ProductionDomainCollectionContextState {
+                if ($State -eq 'ROLLED_BACK') {
+                    $script:terminalAttempts++
+                    if ($script:terminalAttempts -eq 1) {
+                        throw 'simulated terminal persistence failure'
+                    }
+                }
+                $rollbackContext.state = $State
+            }
+
+            { Invoke-ProductionDomainCollectionRollback -Confirm } |
+                Should -Throw '*stopped*recovery suspended*'
+            $script:events[-1] | Should -BeExactly 'stop-suspended'
+            $rollbackContext.state | Should -BeExactly 'ROLLBACK_READY'
+
+            Invoke-ProductionDomainCollectionRollback -Confirm
+
+            $script:legacyWrite | Should -BeExactly 'retained-before-final-persistence'
+            Should -Invoke Restore-ProductionDomainCollectionBackup -Times 0
+            $rollbackContext.state | Should -BeExactly 'ROLLED_BACK'
         }
 
         It 'rejects terminal rollback replay before writer or restore effects' {
@@ -378,16 +625,25 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
                 [void]$events.Add('recover-prepublication')
             }
             Mock Reverse-ProductionDomainCollectionPublication { throw 'blind reverse must not run' }
-            Mock Restore-ProductionDomainCollectionLegacyRelease { [void]$events.Add('marker') }
+            Mock Write-ProductionDomainCollectionRollbackMarker {
+                [void]$events.Add("marker:$MarkerState")
+            }
+            Mock Restore-ProductionDomainCollectionLegacyRelease { throw 'prior marker must not return' }
             Mock Start-ProductionDomainCollectionLegacy { [void]$events.Add('start') }
             Mock Set-ProductionWebsiteRecoveryPolicy { [void]$events.Add('recovery') }
-            Mock Save-ProductionDomainCollectionContextState { [void]$events.Add('state') }
+            Mock Save-ProductionDomainCollectionContextState {
+                [void]$events.Add("state:$State")
+                $context.state = $State
+            }
 
             Invoke-ProductionDomainCollectionFailureRecovery `
                 -Context $context -PostDrop:$false
 
             $events | Should -Be @(
-                'stop','recover-prepublication','marker','start','recovery','state')
+                'stop','marker:ROLLBACK_IN_PROGRESS',
+                'recover-prepublication','state:LEGACY_DATA_VERIFIED',
+                'state:ROLLBACK_READY','marker:LEGACY_ACTIVE_RECONCILIATION_REQUIRED',
+                'start','recovery','state:ROLLED_BACK')
             Should -Invoke Reverse-ProductionDomainCollectionPublication -Times 0
         }
 
@@ -404,9 +660,17 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
             }
             Mock Save-ProductionDomainCollectionContextState {
                 [void]$events.Add("state:$State")
+                $context.state = $State
             }
-            Mock Restore-ProductionDomainCollectionBackup { [void]$events.Add('restore') }
-            Mock Restore-ProductionDomainCollectionLegacyRelease { [void]$events.Add('marker') }
+            Mock Write-ProductionDomainCollectionRollbackMarker {
+                [void]$events.Add("marker:$MarkerState")
+            }
+            Mock Restore-ProductionDomainCollectionBackup {
+                [void]$events.Add('restore')
+                $context.state = 'LEGACY_DATA_VERIFIED'
+                [void]$events.Add('state:LEGACY_DATA_VERIFIED')
+            }
+            Mock Restore-ProductionDomainCollectionLegacyRelease { throw 'prior marker must not return' }
             Mock Start-ProductionDomainCollectionLegacy { [void]$events.Add('start') }
             Mock Set-ProductionWebsiteRecoveryPolicy { [void]$events.Add('recovery') }
 
@@ -414,8 +678,58 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
                 -Context $context -PostDrop:$true
 
             $events | Should -Be @(
-                'stop','freshness','state:ROLLBACK_VERIFIED','restore',
-                'marker','start','recovery','state:ROLLED_BACK')
+                'stop','freshness','marker:ROLLBACK_IN_PROGRESS',
+                'state:ROLLBACK_VERIFIED','restore','state:LEGACY_DATA_VERIFIED',
+                'state:ROLLBACK_READY','marker:LEGACY_ACTIVE_RECONCILIATION_REQUIRED',
+                'start','recovery','state:ROLLED_BACK')
+        }
+
+        It 'uses the no-rerestore finalization states for automatic post-drop recovery' {
+            $events = [Collections.Generic.List[string]]::new()
+            $context = [pscustomobject]@{
+                config = [pscustomobject]@{ productionPort = 8080 }
+                state = 'LEGACY_DATA_VERIFIED'
+                dropStarted = $true
+                targetRelease='2' * 40
+                legacyRelease='1' * 40
+                evidenceDigest='a' * 64
+                backupIdentity='b' * 64
+            }
+            Mock Stop-ProductionDomainCollectionWriter {
+                [void]$events.Add('stop-suspended')
+            }
+            Mock Assert-ProductionDomainCollectionRollbackFreshness {
+                throw 'automatic resume must not recheck target data'
+            }
+            Mock Restore-ProductionDomainCollectionBackup {
+                throw 'automatic resume must not restore verified data again'
+            }
+            Mock Recover-ProductionDomainCollectionPrepublication {
+                throw 'automatic resume must not reverse verified data again'
+            }
+            Mock Write-ProductionDomainCollectionRollbackMarker {
+                [void]$events.Add("marker:$MarkerState")
+            }
+            Mock Save-ProductionDomainCollectionContextState {
+                [void]$events.Add("state:$State")
+                $context.state = $State
+            }
+            Mock Start-ProductionDomainCollectionLegacy {
+                [void]$events.Add('legacy-start')
+            }
+            Mock Set-ProductionWebsiteRecoveryPolicy {
+                [void]$events.Add("recovery:$Policy")
+            }
+
+            Invoke-ProductionDomainCollectionFailureRecovery `
+                -Context $context -PostDrop:$true
+
+            $events | Should -Be @(
+                'stop-suspended','state:ROLLBACK_READY',
+                'marker:LEGACY_ACTIVE_RECONCILIATION_REQUIRED',
+                'legacy-start','recovery:Normal',
+                'state:ROLLED_BACK')
+            Should -Invoke Restore-ProductionDomainCollectionBackup -Times 0
         }
 
         It 'rejects the live database and production port as candidate identities' {
@@ -679,11 +993,15 @@ Describe 'domain collection backup and process boundaries' {
                 [void]$events.Add("verify:$Action")
                 [pscustomobject]@{ complete = $true }
             }
+            Mock Save-ProductionDomainCollectionContextState {
+                [void]$events.Add("state:$State")
+            }
 
             Restore-ProductionDomainCollectionBackup -State $state
 
             $events | Should -Be @(
-                'engine:prepare-restore','archive-restore','verify:restore-verify')
+                'engine:prepare-restore','archive-restore','verify:restore-verify',
+                'state:LEGACY_DATA_VERIFIED')
         }
 
         It 'contains no ad hoc service or process lifecycle commands' {

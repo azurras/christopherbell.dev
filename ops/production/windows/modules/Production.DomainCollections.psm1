@@ -330,14 +330,16 @@ function Assert-ProductionDomainCollectionStateTransition {
     }
     $allowed = @{
         INITIALIZED = @('PREVIEWED')
-        PREVIEWED = @('CANDIDATE_VERIFIED','ROLLED_BACK')
-        CANDIDATE_VERIFIED = @('LIVE_PUBLISHED','ROLLED_BACK')
-        LIVE_PUBLISHED = @('TARGET_START_PENDING','ROLLED_BACK')
-        TARGET_START_PENDING = @('DROP_STARTED','ROLLED_BACK')
+        PREVIEWED = @('CANDIDATE_VERIFIED','LEGACY_DATA_VERIFIED')
+        CANDIDATE_VERIFIED = @('LIVE_PUBLISHED','LEGACY_DATA_VERIFIED')
+        LIVE_PUBLISHED = @('TARGET_START_PENDING','LEGACY_DATA_VERIFIED')
+        TARGET_START_PENDING = @('DROP_STARTED','LEGACY_DATA_VERIFIED')
         DROP_STARTED = @('LEGACY_DROPPED','ROLLBACK_VERIFIED')
         LEGACY_DROPPED = @('TARGET_ACTIVE','ROLLBACK_VERIFIED')
         TARGET_ACTIVE = @('ROLLBACK_VERIFIED')
-        ROLLBACK_VERIFIED = @('ROLLED_BACK')
+        ROLLBACK_VERIFIED = @('LEGACY_DATA_VERIFIED')
+        LEGACY_DATA_VERIFIED = @('ROLLBACK_READY')
+        ROLLBACK_READY = @('ROLLED_BACK')
     }
     if (-not $allowed.ContainsKey($Current) -or
         -not ($allowed[$Current] -ccontains $Next)) {
@@ -671,22 +673,11 @@ function Invoke-ProductionDomainCollectionFailureRecovery {
     )
     try {
         Stop-ProductionDomainCollectionWriter -Context $Context
-        if ($PostDrop) {
-            Assert-ProductionDomainCollectionRollbackFreshness -State $Context
-            Save-ProductionDomainCollectionContextState `
-                -Context $Context -State ROLLBACK_VERIFIED
-            Restore-ProductionDomainCollectionBackup -State $Context
-        } else {
-            Recover-ProductionDomainCollectionPrepublication -State $Context
-        }
-        Restore-ProductionDomainCollectionLegacyRelease -State $Context
-        Start-ProductionDomainCollectionLegacy -State $Context
-        Set-ProductionWebsiteRecoveryPolicy -Policy Normal
-        Save-ProductionDomainCollectionContextState -Context $Context -State ROLLED_BACK
+        Invoke-ProductionDomainCollectionRollbackStateMachine `
+            -State $Context -PostDrop:$PostDrop
     } catch {
-        throw [InvalidOperationException]::new(
-            'Guarded recovery failed; keep ChristopherBellDev stopped with recovery suspended and use mongo-consolidation-rollback.',
-            $_.Exception)
+        Stop-ProductionDomainCollectionRollbackAfterFailure `
+            -State $Context -Failure $_.Exception
     }
 }
 
@@ -708,7 +699,8 @@ function Read-ProductionDomainCollectionProtectedState {
             [string]$value.state -cnotin @(
                 'PREVIEWED','CANDIDATE_VERIFIED','LIVE_PUBLISHED',
                 'TARGET_START_PENDING','DROP_STARTED','LEGACY_DROPPED',
-                'TARGET_ACTIVE','ROLLBACK_VERIFIED','ROLLED_BACK') -or
+                'TARGET_ACTIVE','ROLLBACK_VERIFIED','LEGACY_DATA_VERIFIED',
+                'ROLLBACK_READY','ROLLED_BACK') -or
             ($value.updatedAtEpochMillis -isnot [int] -and
                 $value.updatedAtEpochMillis -isnot [long]) -or
             [long]$value.updatedAtEpochMillis -lt 1 -or
@@ -784,7 +776,8 @@ function Read-ProductionDomainCollectionProtectedState {
         }
         $domainMarker = Read-ProductionDomainSchemaDirection -Config $Config
         $markerRequired = [string]$value.state -in @(
-            'TARGET_START_PENDING','DROP_STARTED','LEGACY_DROPPED','TARGET_ACTIVE')
+            'TARGET_START_PENDING','DROP_STARTED','LEGACY_DROPPED','TARGET_ACTIVE',
+            'ROLLBACK_VERIFIED','LEGACY_DATA_VERIFIED','ROLLBACK_READY')
         if ($markerRequired -and -not $domainMarker) {
             throw 'Protected domain schema marker is missing for the recovery state.'
         }
@@ -800,10 +793,27 @@ function Read-ProductionDomainCollectionProtectedState {
             (-not $domainMarker.legacyDropped -or -not [bool]$value.legacyDropped)) {
             throw 'Protected target-active deletion state is inconsistent.'
         }
+        if ([string]$value.state -eq 'ROLLBACK_VERIFIED' -and
+            [string]$domainMarker.state -cne 'ROLLBACK_IN_PROGRESS') {
+            throw 'Protected rollback verification is missing its startup barrier.'
+        }
+        if ([string]$value.state -eq 'LEGACY_DATA_VERIFIED' -and
+            [string]$domainMarker.state -cne 'ROLLBACK_IN_PROGRESS') {
+            throw 'Protected restored data is missing its startup barrier.'
+        }
+        if ([string]$value.state -eq 'ROLLBACK_READY' -and
+            [string]$domainMarker.state -cnotin @(
+                'ROLLBACK_IN_PROGRESS','TARGET_CUTOVER_IN_PROGRESS',
+                'LEGACY_ACTIVE_RECONCILIATION_REQUIRED')) {
+            throw 'Protected rollback-ready state has an unsafe startup marker.'
+        }
         [pscustomobject][ordered]@{
             config = $Config
             state = [string]$value.state
             targetRelease = [string]$value.targetRelease
+            currentRelease = if ($domainMarker) {
+                [string]$domainMarker.currentRelease
+            } else { [string]$value.targetRelease }
             targetPath = Join-Path $Config.programDataRoot `
                 "releases\$($value.targetRelease)"
             legacyRelease = [string]$value.legacyRelease
@@ -848,6 +858,8 @@ function Restore-ProductionDomainCollectionBackup {
         -Action restore-verify -OwnerToken $State.ownerToken `
         -Release $State.targetRelease -BackupIdentity $State.backupIdentity `
         -EvidenceDigest $State.evidenceDigest -Evidence $State.evidence
+    Save-ProductionDomainCollectionContextState `
+        -Context $State -State LEGACY_DATA_VERIFIED
 }
 
 function Assert-ProductionDomainCollectionRollbackFreshness {
@@ -911,6 +923,98 @@ function Start-ProductionDomainCollectionLegacy {
     Switch-ProductionRelease `
         -Config $State.config -Release $State.legacyPath `
         -KeepRecoverySuspended -WriterAlreadyStopped
+}
+
+function Write-ProductionDomainCollectionRollbackMarker {
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)]
+        [ValidateSet('ROLLBACK_IN_PROGRESS','LEGACY_ACTIVE_RECONCILIATION_REQUIRED')]
+        [string]$MarkerState
+    )
+    $currentRelease = if ($State.PSObject.Properties['currentRelease'] -and
+        [string]$State.currentRelease -cmatch '^[0-9a-f]{40}$') {
+        [string]$State.currentRelease
+    } else { [string]$State.targetRelease }
+    $legacyDropped = if ($MarkerState -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+        $false
+    } elseif ($State.PSObject.Properties['legacyDropped']) {
+        [bool]$State.legacyDropped
+    } elseif ($State.PSObject.Properties['dropStarted']) {
+        [bool]$State.dropStarted
+    } else { $false }
+    Write-ProductionDomainSchemaDirection `
+        -Config $State.config -State $MarkerState `
+        -TargetRelease $State.targetRelease `
+        -CurrentRelease $currentRelease `
+        -LegacyRelease $State.legacyRelease `
+        -EvidenceDigest $State.evidenceDigest `
+        -BackupIdentity $State.backupIdentity `
+        -LegacyDropped:$legacyDropped | Out-Null
+}
+
+function Stop-ProductionDomainCollectionRollbackAfterFailure {
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][Exception]$Failure
+    )
+    try {
+        Stop-ProductionDomainCollectionWriter -Context $State
+    } catch {
+        throw [AggregateException]::new(
+            'Domain collection rollback failed and the stopped writer with suspended recovery could not be reproven.',
+            [Exception[]]@($Failure,$_.Exception))
+    }
+    throw [InvalidOperationException]::new(
+        ('Domain collection rollback failed; ChristopherBellDev remains stopped with recovery suspended. ' +
+            'Retry mongo-consolidation-rollback under deploy.lock.'),
+        $Failure)
+}
+
+function Invoke-ProductionDomainCollectionRollbackStateMachine {
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][bool]$PostDrop
+    )
+    $stateName = [string]$State.state
+    if ($stateName -cnotin @('LEGACY_DATA_VERIFIED','ROLLBACK_READY')) {
+        $legacyDropped = $null -ne $State.PSObject.Properties['legacyDropped'] -and
+            [bool]$State.legacyDropped
+        $restoreBound = $PostDrop -or $legacyDropped -or
+            $stateName -cin @(
+                'DROP_STARTED','LEGACY_DROPPED','TARGET_ACTIVE','ROLLBACK_VERIFIED')
+        if ($restoreBound) {
+            if ($stateName -cne 'ROLLBACK_VERIFIED') {
+                Assert-ProductionDomainCollectionRollbackFreshness -State $State
+                Write-ProductionDomainCollectionRollbackMarker `
+                    -State $State -MarkerState ROLLBACK_IN_PROGRESS
+                Save-ProductionDomainCollectionContextState `
+                    -Context $State -State ROLLBACK_VERIFIED
+            } else {
+                Write-ProductionDomainCollectionRollbackMarker `
+                    -State $State -MarkerState ROLLBACK_IN_PROGRESS
+            }
+            Restore-ProductionDomainCollectionBackup -State $State
+        } else {
+            Write-ProductionDomainCollectionRollbackMarker `
+                -State $State -MarkerState ROLLBACK_IN_PROGRESS
+            Recover-ProductionDomainCollectionPrepublication -State $State
+            Save-ProductionDomainCollectionContextState `
+                -Context $State -State LEGACY_DATA_VERIFIED
+        }
+    }
+    if ([string]$State.state -eq 'LEGACY_DATA_VERIFIED') {
+        Save-ProductionDomainCollectionContextState `
+            -Context $State -State ROLLBACK_READY
+    }
+    if ([string]$State.state -ne 'ROLLBACK_READY') {
+        throw 'Protected rollback did not reach the durable no-rerestore state.'
+    }
+    Write-ProductionDomainCollectionRollbackMarker `
+        -State $State -MarkerState LEGACY_ACTIVE_RECONCILIATION_REQUIRED
+    Start-ProductionDomainCollectionLegacy -State $State
+    Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+    Save-ProductionDomainCollectionContextState -Context $State -State ROLLED_BACK
 }
 
 function Get-ProductionDomainCollectionPreview {
@@ -1006,26 +1110,14 @@ function Invoke-ProductionDomainCollectionRollback {
         -Config $config -FixedRoot $script:FixedProductionRoot
     try {
         $state = Read-ProductionDomainCollectionProtectedState -Config $config
-        Stop-ProductionDomainCollectionWriter -Context ([pscustomobject]@{
-            config = $config
-        })
-        $stateName = [string]$state.state
-        $restoreBound = [bool]$state.legacyDropped -or $stateName -cin @(
-            'DROP_STARTED','LEGACY_DROPPED','TARGET_ACTIVE','ROLLBACK_VERIFIED')
-        if ($restoreBound) {
-            if ($stateName -cne 'ROLLBACK_VERIFIED') {
-                Assert-ProductionDomainCollectionRollbackFreshness -State $state
-                Save-ProductionDomainCollectionContextState `
-                    -Context $state -State ROLLBACK_VERIFIED
-            }
-            Restore-ProductionDomainCollectionBackup -State $state
-        } else {
-            Recover-ProductionDomainCollectionPrepublication -State $state
+        try {
+            Stop-ProductionDomainCollectionWriter -Context $state
+            Invoke-ProductionDomainCollectionRollbackStateMachine `
+                -State $state -PostDrop:([bool]$state.legacyDropped)
+        } catch {
+            Stop-ProductionDomainCollectionRollbackAfterFailure `
+                -State $state -Failure $_.Exception
         }
-        Restore-ProductionDomainCollectionLegacyRelease -State $state
-        Start-ProductionDomainCollectionLegacy -State $state
-        Set-ProductionWebsiteRecoveryPolicy -Policy Normal
-        Save-ProductionDomainCollectionContextState -Context $state -State ROLLED_BACK
     } finally {
         $guard.Lock.Dispose()
     }

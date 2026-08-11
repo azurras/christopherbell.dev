@@ -90,6 +90,15 @@ on `mongorestore --drop`, and passes an independent `restore-verify` before the
 old release can be selected or started. If recovery cannot be proved, the website
 stays stopped with recovery suspended.
 
+Rollback is crash-resumable and fail-closed. `ROLLBACK_IN_PROGRESS` blocks every
+WinSW, boot, recovery, manual-restart, and deploy launch before restoration.
+`ROLLBACK_VERIFIED` records the restore authorization, `LEGACY_DATA_VERIFIED`
+records the independently verified restore, and `ROLLBACK_READY` records the
+non-rerestore boundary before the compatible legacy marker or writer can be
+enabled. A failure publishing the final state re-stops the writer and suspends
+recovery; retry resumes from the protected state without restoring the archive a
+second time.
+
 Use the guarded rollback command, never generic release rollback, for this
 schema boundary:
 
@@ -104,6 +113,12 @@ target-schema deploys advance only the current release; they do not rewrite the
 original cutover, evidence, or backup identity. The prior Music v1 marker format
 remains readable for rollback compatibility, but its former public cutover
 switches are retired.
+
+A pure Music v1 marker has no public domain rollback command. Keep the service
+stopped with recovery suspended and, under `deploy.lock`, use the supported
+internal compatibility entry point `Invoke-ProductionMigrationAwareRollback
+-Confirm`; do not invoke `mongo-consolidation-rollback` without protected v2
+domain state.
 
 While a domain cutover marker is pending, deploy, auto-deploy, rollback, and
 manual restart remain blocked except through the guarded domain recovery path.

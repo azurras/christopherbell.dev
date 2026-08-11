@@ -1157,6 +1157,32 @@ Describe 'native Windows deployment' {
             { Invoke-ProductionDeploy } | Should -Throw '*exact target-schema release*'
         }
 
+        It 'blocks ordinary and automatic deploy before remote access during domain rollback' `
+                -ForEach @(
+                    @{ Automatic=$false }
+                    @{ Automatic=$true }
+                ) {
+            $direction = [pscustomobject]@{
+                version=2
+                state='ROLLBACK_IN_PROGRESS'
+                targetRelease='1' * 40
+                currentRelease='1' * 40
+                legacyRelease='2' * 40
+            }
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; remote='origin'; branch='main' }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionDomainSchemaDirection { $direction }
+            Mock Read-ProductionMusicSchemaDirection { $direction }
+            Mock Resolve-OriginMainRelease { throw 'remote must not be read' }
+
+            { Invoke-ProductionDeploy -Automatic:$Automatic } |
+                Should -Throw '*blocked*domain collection rollback*'
+
+            Should -Invoke Resolve-OriginMainRelease -Times 0
+        }
+
         It 'advances only the current release while preserving the bound v2 cutover identity' {
             $cutover = '1' * 40
             $current = '2' * 40

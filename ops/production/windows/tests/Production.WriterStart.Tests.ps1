@@ -619,6 +619,65 @@ Describe 'production writer-start schema boundary' {
                 Should -Not -Throw
         }
 
+        It 'categorically blocks WinSW and recovery start during domain rollback' -ForEach @(
+            @{ Sha=('1' * 40); Schema='TARGET' }
+            @{ Sha=('2' * 40); Schema='LEGACY' }
+        ) {
+            Mock Read-ProductionReleaseIdentity {
+                [pscustomobject]@{
+                    sha=$Sha
+                    musicSchema='TARGET'
+                    domainSchema=$Schema
+                }
+            }
+            $rollbackMarker = [pscustomobject]@{
+                version=2
+                state='ROLLBACK_IN_PROGRESS'
+                targetRelease='1' * 40
+                currentRelease='1' * 40
+                legacyRelease='2' * 40
+            }
+            Mock Read-ProductionDomainSchemaDirection { $rollbackMarker }
+            Mock Read-ProductionMusicSchemaDirection { $rollbackMarker }
+            Mock Use-ProductionWriterStartAuthorization {
+                throw 'rollback barrier must reject before authorization consumption'
+            }
+
+            { Assert-ProductionWriterStartAllowed `
+                    -Config $script:config -FixedRoot $TestDrive } |
+                Should -Throw '*rollback*blocked*'
+
+            Should -Invoke Use-ProductionWriterStartAuthorization -Times 0
+        }
+
+        It 'round-trips the crash-durable v2 rollback barrier without admitting it to v1' {
+            $target = '1' * 40
+            $legacy = '2' * 40
+            $marker = Write-ProductionDomainSchemaDirection `
+                -Config $script:config `
+                -State ROLLBACK_IN_PROGRESS `
+                -TargetRelease $target `
+                -CurrentRelease $target `
+                -LegacyRelease $legacy `
+                -EvidenceDigest ('a' * 64) `
+                -BackupIdentity ('b' * 64) `
+                -LegacyDropped $true
+
+            $marker.version | Should -Be 2
+            $marker.state | Should -BeExactly 'ROLLBACK_IN_PROGRESS'
+
+            $path = Get-ProductionMusicSchemaDirectionPath -Config $script:config
+            [ordered]@{
+                version=1
+                state='ROLLBACK_IN_PROGRESS'
+                updatedAtEpochMillis=1
+                targetRelease=$target
+                legacyRelease=$legacy
+            } | ConvertTo-Json | Set-Content -LiteralPath $path
+            { Read-ProductionMusicSchemaDirection -Config $script:config } |
+                Should -Throw '*marker is invalid*'
+        }
+
         It 'fails closed when a stable marker release differs and no authorization exists' {
             Mock Read-ProductionReleaseIdentity {
                 [pscustomobject]@{ sha='3333333333333333333333333333333333333333'; musicSchema='TARGET' }

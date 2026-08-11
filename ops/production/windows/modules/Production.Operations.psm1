@@ -86,6 +86,14 @@ function Invoke-ProductionRollback {
         Assert-ReleasePath $config $previous | Out-Null
         $direction = Read-ProductionMusicSchemaDirection -Config $config
         if ($direction -and
+            $direction.PSObject.Properties['version'] -and
+            [int]$direction.version -eq 2 -and
+            [string]$direction.state -eq 'ROLLBACK_IN_PROGRESS') {
+            throw ('Production rollback is blocked because domain collection rollback is in progress. ' +
+                'Keep ChristopherBellDev stopped with recovery suspended and resume ' +
+                'prod.cmd mongo-consolidation-rollback -ConfirmDomainCollectionRollback under deploy.lock.')
+        }
+        if ($direction -and
             [string]$direction.state -eq 'TARGET_CUTOVER_IN_PROGRESS') {
             if ($direction.PSObject.Properties['version'] -and
                 [int]$direction.version -eq 2) {
@@ -130,9 +138,10 @@ function Invoke-ProductionRollback {
                         'Use prod.cmd mongo-consolidation-rollback ' +
                         '-ConfirmDomainCollectionRollback.')
                 }
-                throw ('Generic rollback cannot start the retained legacy Music writer or reverse-copy state. ' +
-                    'Use prod.cmd mongo-consolidation-rollback ' +
-                    '-ConfirmDomainCollectionRollback; legacy v1 compatibility is internal only.')
+                throw ('Generic version 1 cross-schema rollback is unsupported. Keep ChristopherBellDev stopped ' +
+                    'with recovery suspended and run the protected internal compatibility function ' +
+                    'Invoke-ProductionMigrationAwareRollback -Confirm under deploy.lock; ' +
+                    'mongo-consolidation-rollback requires domain cutover state and is not valid for v1.')
             }
             Ensure-CoordinatedProductionWriterStartGuard -Config $config
             try {
@@ -287,19 +296,27 @@ function Restart-ProductionService {
     try {
         $direction = Read-ProductionMusicSchemaDirection -Config $config
         if ($direction) {
+            $markerVersion = if ($direction.PSObject.Properties['version']) {
+                [int]$direction.version
+            } else { 1 }
+            if ($markerVersion -eq 2 -and
+                [string]$direction.state -eq 'ROLLBACK_IN_PROGRESS') {
+                throw ('Manual restart is blocked because domain collection rollback is in progress. ' +
+                    'Resume the guarded rollback under deploy.lock.')
+            }
             if ([string]$direction.state -eq 'TARGET_CUTOVER_IN_PROGRESS') {
                 throw ('Manual restart is blocked because the first Music schema cutover is incomplete. ' +
                     'Complete bounded recovery under deploy.lock.')
             }
-            if ([string]$direction.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+            if ($markerVersion -eq 1 -and
+                [string]$direction.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
                 throw ('Manual restart is blocked while legacy Music runtime state requires reconciliation. ' +
                     'Use the protected interactive deploy to reconcile before a target writer starts.')
             }
             $current = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
             $activeSha = if ($current) { Split-Path -Leaf $current } else { '' }
             $expectedSha = if ([string]$direction.state -eq 'TARGET_ACTIVE') {
-                if ($direction.PSObject.Properties['version'] -and
-                    [int]$direction.version -eq 2) {
+                if ($markerVersion -eq 2) {
                     [string]$direction.currentRelease
                 } else { [string]$direction.targetRelease }
             } else {
