@@ -13,14 +13,34 @@ import org.springframework.data.repository.Repository;
 
 /** Compiled dependency rule for the final manifest-backed Mongo boundary. */
 final class MongoPersistenceBoundaryRules {
-  private static final Set<String> FORBIDDEN_MONGO_TYPES = Set.of(
+  private static final Set<String> FORBIDDEN_ACCESS_INTERFACES = Set.of(
       "com.mongodb.client.MongoClient",
       "com.mongodb.client.MongoCollection",
       "com.mongodb.client.MongoDatabase",
       "org.springframework.data.mongodb.MongoDatabaseFactory",
+      "org.springframework.data.mongodb.ReactiveMongoDatabaseFactory",
+      "org.springframework.data.mongodb.core.ExecutableAggregationOperation",
+      "org.springframework.data.mongodb.core.ExecutableFindOperation",
+      "org.springframework.data.mongodb.core.ExecutableInsertOperation",
+      "org.springframework.data.mongodb.core.ExecutableMapReduceOperation",
+      "org.springframework.data.mongodb.core.ExecutableRemoveOperation",
+      "org.springframework.data.mongodb.core.ExecutableUpdateOperation",
+      "org.springframework.data.mongodb.core.FluentMongoOperations",
       "org.springframework.data.mongodb.core.MongoOperations",
-      "org.springframework.data.mongodb.core.MongoTemplate",
-      "org.springframework.data.mongodb.core.ReactiveMongoTemplate");
+      "org.springframework.data.mongodb.core.ReactiveAggregationOperation",
+      "org.springframework.data.mongodb.core.ReactiveChangeStreamOperation",
+      "org.springframework.data.mongodb.core.ReactiveFindOperation",
+      "org.springframework.data.mongodb.core.ReactiveFluentMongoOperations",
+      "org.springframework.data.mongodb.core.ReactiveInsertOperation",
+      "org.springframework.data.mongodb.core.ReactiveMapReduceOperation",
+      "org.springframework.data.mongodb.core.ReactiveMongoOperations",
+      "org.springframework.data.mongodb.core.ReactiveRemoveOperation",
+      "org.springframework.data.mongodb.core.ReactiveUpdateOperation");
+  private static final Set<String> FORBIDDEN_ACCESS_FACTORIES = Set.of(
+      "com.mongodb.client.MongoClientFactory",
+      "com.mongodb.client.MongoClients",
+      "org.springframework.data.mongodb.core.MongoClientFactoryBean",
+      "org.springframework.data.mongodb.core.ReactiveMongoClientFactoryBean");
 
   private final String rootPackage;
   private final Set<String> approvedOwners;
@@ -61,7 +81,8 @@ final class MongoPersistenceBoundaryRules {
   }
 
   private static boolean isForbiddenMongoType(JavaClass target) {
-    return FORBIDDEN_MONGO_TYPES.contains(target.getName())
+    return FORBIDDEN_ACCESS_FACTORIES.contains(target.getName())
+        || FORBIDDEN_ACCESS_INTERFACES.stream().anyMatch(target::isAssignableTo)
         || target.isAssignableTo(Repository.class);
   }
 }

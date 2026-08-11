@@ -27,6 +27,8 @@ import dev.christopherbell.sharedfolder.upload.MongoSharedFolderUploadSessionRep
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadFinalizationState;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadSession;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadState;
+import dev.christopherbell.vehicle.core.MongoVehicleRepository;
+import dev.christopherbell.vehicle.model.Vehicle;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.UUID;
@@ -39,6 +41,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -292,6 +295,43 @@ class RemainingDomainMongoContractTest {
         .isFalse();
     assertThat(repository.findDueForMaintenance(due, PageRequest.of(0, 6, order)).hasNext())
         .isFalse();
+  }
+
+  @Test
+  void vehicleAdapterTranslatesDuplicateVinWithoutExposingTheVin() {
+    createIndex(indexByKey("vehicle", "payload.vin"));
+    var repository = new MongoVehicleRepository(factory);
+    var first = new Vehicle();
+    first.setId("vehicle-a");
+    first.setVin("SENSITIVE-VIN");
+    repository.save(first);
+    var duplicate = new Vehicle();
+    duplicate.setId("vehicle-b");
+    duplicate.setVin("SENSITIVE-VIN");
+
+    assertThatThrownBy(() -> repository.save(duplicate))
+        .isInstanceOf(DuplicateKeyException.class)
+        .hasMessage("Mongo domain identity already exists.")
+        .hasMessageNotContaining("SENSITIVE-VIN");
+  }
+
+  @Test
+  void recoveryAdapterRejectsAStaleEntityAfterAnotherVersionWins() {
+    var repository = new MongoSharedFolderMutationRecoveryRepository(factory);
+    var recovery = new SharedFolderMutationRecovery();
+    recovery.setId("version-race");
+    recovery.setOwnerId("owner-a");
+    recovery.setState(SharedFolderMutationRecoveryState.PREPARED);
+    var winner = repository.save(recovery);
+    var stale = repository.findById(winner.getId()).orElseThrow();
+
+    winner.setState(SharedFolderMutationRecoveryState.TARGET_QUARANTINED);
+    assertThat(repository.save(winner).getVersion()).isEqualTo(1);
+    stale.setState(SharedFolderMutationRecoveryState.SOURCE_MOVED);
+
+    assertThatThrownBy(() -> repository.save(stale))
+        .isInstanceOf(OptimisticLockingFailureException.class)
+        .hasMessage("Mongo domain document was changed by another writer.");
   }
 
   @Test

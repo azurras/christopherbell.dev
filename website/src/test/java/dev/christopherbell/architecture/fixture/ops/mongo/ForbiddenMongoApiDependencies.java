@@ -1,21 +1,67 @@
 package dev.christopherbell.architecture.fixture.ops.mongo;
 
 import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClientFactory;
+import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 import org.springframework.data.mongodb.MongoDatabaseFactory;
+import org.springframework.data.mongodb.ReactiveMongoDatabaseFactory;
+import org.springframework.data.mongodb.core.ExecutableAggregationOperation;
+import org.springframework.data.mongodb.core.ExecutableFindOperation;
+import org.springframework.data.mongodb.core.ExecutableInsertOperation;
+import org.springframework.data.mongodb.core.ExecutableMapReduceOperation;
+import org.springframework.data.mongodb.core.ExecutableRemoveOperation;
+import org.springframework.data.mongodb.core.ExecutableUpdateOperation;
+import org.springframework.data.mongodb.core.FluentMongoOperations;
+import org.springframework.data.mongodb.core.MongoClientFactoryBean;
 import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.ReactiveAggregationOperation;
+import org.springframework.data.mongodb.core.ReactiveChangeStreamOperation;
+import org.springframework.data.mongodb.core.ReactiveFindOperation;
+import org.springframework.data.mongodb.core.ReactiveFluentMongoOperations;
+import org.springframework.data.mongodb.core.ReactiveInsertOperation;
+import org.springframework.data.mongodb.core.ReactiveMapReduceOperation;
+import org.springframework.data.mongodb.core.ReactiveMongoClientFactoryBean;
+import org.springframework.data.mongodb.core.ReactiveMongoOperations;
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
+import org.springframework.data.mongodb.core.ReactiveRemoveOperation;
+import org.springframework.data.mongodb.core.ReactiveUpdateOperation;
+import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
+import org.springframework.data.mongodb.core.SimpleReactiveMongoDatabaseFactory;
 
 @SuppressWarnings("unused")
 public final class ForbiddenMongoApiDependencies {
   private MongoOperations operations;
+  private FluentMongoOperations fluentOperations;
+  private ExecutableFindOperation findOperations;
+  private ExecutableInsertOperation insertOperations;
+  private ExecutableUpdateOperation updateOperations;
+  private ExecutableRemoveOperation removeOperations;
+  private ExecutableAggregationOperation aggregationOperations;
+  private ExecutableMapReduceOperation mapReduceOperations;
   private MongoTemplate template;
+  private ReactiveMongoOperations reactiveOperations;
+  private ReactiveFluentMongoOperations reactiveFluentOperations;
+  private ReactiveFindOperation reactiveFindOperations;
+  private ReactiveInsertOperation reactiveInsertOperations;
+  private ReactiveUpdateOperation reactiveUpdateOperations;
+  private ReactiveRemoveOperation reactiveRemoveOperations;
+  private ReactiveAggregationOperation reactiveAggregationOperations;
+  private ReactiveMapReduceOperation reactiveMapReduceOperations;
+  private ReactiveChangeStreamOperation reactiveChangeStreamOperations;
   private ReactiveMongoTemplate reactiveTemplate;
   private MongoClient client;
+  private MongoClients clients;
+  private MongoClientFactory clientFactory;
+  private MongoClientFactoryBean clientFactoryBean;
+  private ReactiveMongoClientFactoryBean reactiveClientFactoryBean;
   private MongoDatabase database;
   private MongoDatabaseFactory databaseFactory;
+  private ReactiveMongoDatabaseFactory reactiveDatabaseFactory;
+  private SimpleMongoClientDatabaseFactory concreteDatabaseFactory;
+  private SimpleReactiveMongoDatabaseFactory concreteReactiveDatabaseFactory;
   private MongoCollection<Document> collection;
 }

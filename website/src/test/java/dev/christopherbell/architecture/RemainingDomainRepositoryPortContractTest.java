@@ -1,8 +1,12 @@
 package dev.christopherbell.architecture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
+import static org.mockito.Mockito.withSettings;
 import static org.mockito.Mockito.when;
 
 import com.mongodb.client.result.DeleteResult;
@@ -12,6 +16,7 @@ import dev.christopherbell.canesboxtracker.MongoCanesBoxPriceSnapshotRepository;
 import dev.christopherbell.canesboxtracker.model.CanesBoxPriceSnapshot;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.MalformedDomainDocumentException;
 import dev.christopherbell.location.model.ZipCoordinate;
 import dev.christopherbell.location.model.ZipCoordinateImportState;
 import dev.christopherbell.location.zip.MongoZipCoordinateImportStateRepository;
@@ -33,6 +38,7 @@ import dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleRepository;
 import dev.christopherbell.sharedfolder.service.MongoSharedFolderMutationRecoveryRepository;
 import dev.christopherbell.sharedfolder.service.SharedFolderMutationRecovery;
 import dev.christopherbell.sharedfolder.service.SharedFolderMutationRecoveryRepository;
+import dev.christopherbell.sharedfolder.service.SharedFolderMutationRecoveryState;
 import dev.christopherbell.sharedfolder.upload.MongoSharedFolderUploadSessionRepository;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadSession;
 import dev.christopherbell.sharedfolder.upload.SharedFolderUploadSessionRepository;
@@ -61,6 +67,9 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.mockito.invocation.Invocation;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
@@ -69,14 +78,14 @@ import org.springframework.data.mongodb.core.query.Update;
 
 /** Freezes every Task 5 repository method and proves that each routes through its fixed kind. */
 class RemainingDomainRepositoryPortContractTest {
-  private static final Map<String, String> FROZEN_INVOCATIONS = parseContracts("""
+  private static final Map<String, List<String>> FROZEN_INVOCATIONS = parseContracts("""
       CanesBoxPriceSnapshotRepository.findById(String) => findById(value)
       CanesBoxPriceSnapshotRepository.findTop60ByOrderByWeekStartDateDesc() => find(query=Document{{}};sort=Document{{}};skip=0;limit=0, page=0/60;offset=0;sort=weekStartDate: DESC)
       CanesBoxPriceSnapshotRepository.save(CanesBoxPriceSnapshot) => save(entity:CanesBoxPriceSnapshot)
-      ZipCoordinateRepository.deleteAll(Iterable) => remove(query=Document{{id=Document{{$in=[75001]}}}};sort=Document{{}};skip=0;limit=0)
+      ZipCoordinateRepository.deleteAll(Iterable) => remove(query=Document{{id=Document{{$in=[75001, 75002]}}}};sort=Document{{}};skip=0;limit=0)
       ZipCoordinateRepository.findAllBySource(String) => find(query=Document{{source=value}};sort=Document{{}};skip=0;limit=0, page=unpaged)
       ZipCoordinateRepository.findById(String) => findById(value)
-      ZipCoordinateRepository.saveAll(Iterable) => save(entity:ZipCoordinate)
+      ZipCoordinateRepository.saveAll(Iterable) => save(entity:ZipCoordinate#first) && save(entity:ZipCoordinate#second)
       ZipCoordinateImportStateRepository.findById(String) => findById(value)
       ZipCoordinateImportStateRepository.save(ZipCoordinateImportState) => save(entity:ZipCoordinateImportState)
       SharedFolderAuditRepository.save(SharedFolderAuditEvent) => save(entity:SharedFolderAuditEvent)
@@ -130,7 +139,7 @@ class RemainingDomainRepositoryPortContractTest {
       VehicleRepository.findByNotes(String) => find(query=Document{{notes=value}};sort=Document{{}};skip=0;limit=0, page=unpaged)
       VehicleRepository.findByVinIsNotNull() => find(query=Document{{vin=Document{{$ne=null}}}};sort=Document{{}};skip=0;limit=0, page=unpaged)
       VehicleRepository.save(Vehicle) => save(entity:Vehicle)
-      VehicleRepository.saveAll(Iterable) => save(entity:Vehicle)
+      VehicleRepository.saveAll(Iterable) => save(entity:Vehicle#first) && save(entity:Vehicle#second)
       VehicleVinDecodeCacheRepository.findById(String) => findById(value)
       VehicleVinDecodeCacheRepository.save(VehicleVinDecodeCache) => save(entity:VehicleVinDecodeCache)
       NhtsaVinImportStateRepository.findById(String) => findById(value)
@@ -218,8 +227,10 @@ class RemainingDomainRepositoryPortContractTest {
     assertThat(FROZEN_INVOCATIONS).hasSize(
         ADAPTERS.stream().mapToInt(definition -> definition.expectedMethods().size()).sum());
     for (var definition : ADAPTERS) {
-      var returnedEntity = entityArgument(definition.entity());
-      var operations = operationsMock(returnedEntity);
+      var returnedEntities = List.of(
+          entityArgument(definition.entity(), "result-first"),
+          entityArgument(definition.entity(), "result-second"));
+      var operations = operationsMock(returnedEntities);
       var factory = mock(DomainMongoOperationsFactory.class);
       bind(factory, definition.entity(), operations);
       var repository = definition.adapter()
@@ -240,21 +251,99 @@ class RemainingDomainRepositoryPortContractTest {
         var contractKey = definition.port().getSimpleName() + "." + signature(method);
         assertThat(invocationSnapshots)
             .as(contractKey)
-            .containsExactly(FROZEN_INVOCATIONS.get(contractKey));
-        assertResultContract(method, methodArguments, result, returnedEntity, contractKey);
+            .containsExactlyElementsOf(FROZEN_INVOCATIONS.get(contractKey));
+        assertResultContract(method, methodArguments, result, returnedEntities, contractKey);
         if (invocationSnapshots.getFirst().startsWith("update")) {
-          assertStaleMutationIsReportedAsNoMatch(definition, method, contractKey, returnedEntity);
+          assertStaleMutationIsReportedAsNoMatch(
+              definition, method, contractKey, returnedEntities);
         }
       }
     }
+  }
+
+  @Test
+  void everyBulkPortPreservesTwoValuesAndPerformsNoWorkForEmptyInput() throws Exception {
+    var bulkMethods = ADAPTERS.stream()
+        .flatMap(definition -> java.util.Arrays.stream(definition.port().getDeclaredMethods())
+            .filter(method -> method.getName().equals("saveAll")
+                || method.getName().equals("deleteAll"))
+            .map(method -> new BulkMethod(definition, method)))
+        .toList();
+    assertThat(bulkMethods).extracting(item -> signature(item.method()))
+        .containsExactlyInAnyOrder("deleteAll(Iterable)", "saveAll(Iterable)",
+            "saveAll(Iterable)");
+
+    for (var item : bulkMethods) {
+      var operations = operationsMock(List.of(
+          entityArgument(item.definition().entity(), "unused-first"),
+          entityArgument(item.definition().entity(), "unused-second")));
+      var factory = mock(DomainMongoOperationsFactory.class);
+      bind(factory, item.definition().entity(), operations);
+      var repository = item.definition().adapter()
+          .getConstructor(DomainMongoOperationsFactory.class)
+          .newInstance(factory);
+
+      var result = item.method().invoke(repository, List.of());
+
+      assertThat(mockingDetails(operations).getInvocations())
+          .as(item.definition().port().getSimpleName() + "." + signature(item.method()))
+          .isEmpty();
+      if (item.method().getReturnType() == void.class) {
+        assertThat(result).isNull();
+      } else {
+        assertThat(result).isEqualTo(List.of());
+      }
+    }
+  }
+
+  @Test
+  void representativeAdaptersPreserveTypedBoundaryFailuresAndCauses() {
+    var saved = mock(CanesBoxPriceSnapshot.class);
+    var saveOperations = typedOperations(CanesBoxPriceSnapshot.class);
+    var duplicate = new DuplicateKeyException("Mongo domain identity already exists.");
+    when(saveOperations.save(saved)).thenThrow(duplicate);
+    assertThatThrownBy(() -> new MongoCanesBoxPriceSnapshotRepository(
+        factory(CanesBoxPriceSnapshot.class, saveOperations)).save(saved))
+        .isSameAs(duplicate);
+
+    var findOperations = typedOperations(CanesBoxPriceSnapshot.class);
+    var malformed = new MalformedDomainDocumentException();
+    when(findOperations.findById("sensitive-id")).thenThrow(malformed);
+    assertThatThrownBy(() -> new MongoCanesBoxPriceSnapshotRepository(
+        factory(CanesBoxPriceSnapshot.class, findOperations)).findById("sensitive-id"))
+        .isSameAs(malformed)
+        .hasMessage("Mongo domain document is malformed.")
+        .hasMessageNotContaining("sensitive-id");
+
+    var deleteOperations = typedOperations(MediaJob.class);
+    var rootCause = new IllegalStateException("socket closed");
+    var infrastructure = new DataAccessResourceFailureException("Mongo unavailable", rootCause);
+    when(deleteOperations.remove(any(Query.class))).thenThrow(infrastructure);
+    var thrown = catchThrowable(() -> new MongoMediaJobRepository(
+        factory(MediaJob.class, deleteOperations)).deleteById("job-a"));
+    assertThat(thrown).isSameAs(infrastructure);
+    assertThat(thrown.getCause()).isSameAs(rootCause);
+
+    var mutationOperations = typedOperations(SharedFolderMutationRecovery.class);
+    var stale = new OptimisticLockingFailureException(
+        "Mongo domain document was changed by another writer.");
+    when(mutationOperations.updateHeartbeatPreservingVersion(any(Query.class), any(Update.class)))
+        .thenThrow(stale);
+    assertThatThrownBy(() -> new MongoSharedFolderMutationRecoveryRepository(
+        factory(SharedFolderMutationRecovery.class, mutationOperations))
+        .renewOperationLease("recovery-a", "owner-a",
+            SharedFolderMutationRecoveryState.PREPARED,
+            Instant.parse("2026-08-11T00:01:00Z"),
+            Instant.parse("2026-08-11T00:00:00Z")))
+        .isSameAs(stale);
   }
 
   private static void assertStaleMutationIsReportedAsNoMatch(
       AdapterDefinition definition,
       Method method,
       String contractKey,
-      Object returnedEntity) throws Exception {
-    var operations = operationsMock(returnedEntity, 0);
+      List<Object> returnedEntities) throws Exception {
+    var operations = operationsMock(returnedEntities, 0);
     var factory = mock(DomainMongoOperationsFactory.class);
     bind(factory, definition.entity(), operations);
     var repository = definition.adapter()
@@ -269,7 +358,7 @@ class RemainingDomainRepositoryPortContractTest {
       Method method,
       Object[] methodArguments,
       Object result,
-      Object returnedEntity,
+      List<Object> returnedEntities,
       String contractKey) {
     if (method.getReturnType() == void.class) {
       assertThat(result).as(contractKey).isNull();
@@ -278,13 +367,16 @@ class RemainingDomainRepositoryPortContractTest {
     } else if (method.getReturnType() == long.class) {
       assertThat(result).as(contractKey).isEqualTo(1L);
     } else if (method.getReturnType() == Optional.class) {
-      assertThat(result).as(contractKey).isEqualTo(Optional.of(returnedEntity));
+      assertThat(result).as(contractKey).isEqualTo(Optional.of(returnedEntities.getFirst()));
     } else if (Slice.class.isAssignableFrom(method.getReturnType())) {
       var slice = (Slice<?>) result;
-      assertThat(slice.getContent()).as(contractKey).isEqualTo(List.of(returnedEntity));
+      assertThat(slice.getContent()).as(contractKey).isEqualTo(returnedEntities);
       assertThat(slice.hasNext()).as(contractKey).isFalse();
     } else if (Collection.class.isAssignableFrom(method.getReturnType())) {
-      assertThat((Collection<?>) result).as(contractKey).isNotEmpty();
+      var expected = method.getName().equals("saveAll")
+          ? methodArguments[0]
+          : returnedEntities;
+      assertThat(result).as(contractKey).isEqualTo(expected);
     } else {
       assertThat(result).as(contractKey).isSameAs(methodArguments[0]);
     }
@@ -321,8 +413,10 @@ class RemainingDomainRepositoryPortContractTest {
         || argument instanceof Instant || argument.getClass().isEnum()) {
       return String.valueOf(argument);
     }
-    return "entity:" + mockingDetails(argument).getMockCreationSettings()
-        .getTypeToMock().getSimpleName();
+    var settings = mockingDetails(argument).getMockCreationSettings();
+    var label = settings.getMockName().toString();
+    var suffix = label.equals("first") || label.equals("second") ? "#" + label : "";
+    return "entity:" + settings.getTypeToMock().getSimpleName() + suffix;
   }
 
   private static Set<String> signatures(Class<?> type) {
@@ -337,12 +431,13 @@ class RemainingDomainRepositoryPortContractTest {
         .collect(Collectors.joining(",", "(", ")"));
   }
 
-  private static Map<String, String> parseContracts(String contracts) {
+  private static Map<String, List<String>> parseContracts(String contracts) {
     return contracts.lines()
         .filter(line -> !line.isBlank())
         .map(String::strip)
         .map(line -> line.split(" => ", 2))
-        .collect(Collectors.toUnmodifiableMap(fields -> fields[0], fields -> fields[1]));
+        .collect(Collectors.toUnmodifiableMap(
+            fields -> fields[0], fields -> List.of(fields[1].split(" && "))));
   }
 
   private static Object[] arguments(Method method) {
@@ -363,34 +458,43 @@ class RemainingDomainRepositoryPortContractTest {
     if (rawType.isEnum()) return rawType.getEnumConstants()[0];
     if (Collection.class.isAssignableFrom(rawType) || Iterable.class == rawType) {
       var elementType = (Class<?>) ((ParameterizedType) genericType).getActualTypeArguments()[0];
-      return List.of(entityArgument(elementType));
+      if (elementType.isEnum()) {
+        return List.of(entityArgument(elementType, "value"));
+      }
+      return List.of(
+          entityArgument(elementType, "first"),
+          entityArgument(elementType, "second"));
     }
-    return entityArgument(rawType);
+    return entityArgument(rawType, "value");
   }
 
-  private static Object entityArgument(Class<?> type) {
+  private static Object entityArgument(Class<?> type, String label) {
     if (type.isEnum()) return type.getEnumConstants()[0];
-    var value = mock(type);
-    if (value instanceof ZipCoordinate coordinate) when(coordinate.getZipCode()).thenReturn("75001");
-    if (value instanceof Vehicle vehicle) when(vehicle.getId()).thenReturn("vehicle-a");
+    var value = mock(type, withSettings().name(label));
+    if (value instanceof ZipCoordinate coordinate) {
+      when(coordinate.getZipCode()).thenReturn(label.equals("second") ? "75002" : "75001");
+    }
+    if (value instanceof Vehicle vehicle) {
+      when(vehicle.getId()).thenReturn(label.equals("second") ? "vehicle-b" : "vehicle-a");
+    }
     return value;
   }
 
   @SuppressWarnings({"rawtypes", "unchecked"})
-  private static KindScopedMongoOperations<?> operationsMock(Object returnedEntity) {
-    return operationsMock(returnedEntity, 1);
+  private static KindScopedMongoOperations<?> operationsMock(List<Object> returnedEntities) {
+    return operationsMock(returnedEntities, 1);
   }
 
   @SuppressWarnings({"rawtypes", "unchecked"})
   private static KindScopedMongoOperations<?> operationsMock(
-      Object returnedEntity, long matchedCount) {
+      List<Object> returnedEntities, long matchedCount) {
     var update = UpdateResult.acknowledged(matchedCount, matchedCount, null);
     return mock(KindScopedMongoOperations.class, invocation -> {
       var name = invocation.getMethod().getName();
       if (name.equals("save") || name.equals("insert")) return invocation.getArgument(0);
       var returnType = invocation.getMethod().getReturnType();
-      if (returnType == Optional.class) return Optional.of(returnedEntity);
-      if (returnType == List.class) return List.of(returnedEntity);
+      if (returnType == Optional.class) return Optional.of(returnedEntities.getFirst());
+      if (returnType == List.class) return returnedEntities;
       if (returnType == long.class) return 1L;
       if (returnType == boolean.class) return true;
       if (returnType == UpdateResult.class) return update;
@@ -398,6 +502,19 @@ class RemainingDomainRepositoryPortContractTest {
       if (returnType == String.class) return "test";
       return null;
     });
+  }
+
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  private static <T> KindScopedMongoOperations<T> typedOperations(Class<T> entity) {
+    return mock(KindScopedMongoOperations.class,
+        withSettings().name(entity.getSimpleName() + "Operations"));
+  }
+
+  private static <T> DomainMongoOperationsFactory factory(
+      Class<T> entity, KindScopedMongoOperations<T> operations) {
+    var factory = mock(DomainMongoOperationsFactory.class);
+    when(factory.forType(entity)).thenReturn(operations);
+    return factory;
   }
 
   @SuppressWarnings({"rawtypes", "unchecked"})
@@ -415,4 +532,6 @@ class RemainingDomainRepositoryPortContractTest {
 
   private record AdapterDefinition(
       Class<?> port, Class<?> adapter, Class<?> entity, Set<String> expectedMethods) {}
+
+  private record BulkMethod(AdapterDefinition definition, Method method) {}
 }
