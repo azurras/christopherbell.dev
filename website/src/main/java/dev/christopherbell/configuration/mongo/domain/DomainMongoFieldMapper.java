@@ -106,6 +106,21 @@ final class DomainMongoFieldMapper {
     }
   }
 
+  String mapWritablePath(String domainPath) {
+    validateDomainPath(domainPath, false, false);
+    try {
+      var mapped = queryMapper.getMappedObject(new Document(domainPath, 1), entity);
+      if (mapped.size() != 1) {
+        throw new UnapprovedDomainFieldException();
+      }
+      return namespacePath(mapped.keySet().iterator().next());
+    } catch (UnapprovedDomainFieldException failure) {
+      throw failure;
+    } catch (RuntimeException failure) {
+      throw new UnapprovedDomainFieldException();
+    }
+  }
+
   Query idQuery(Object mappedLegacyId) {
     if (mappedLegacyId == null) {
       throw new UnapprovedDomainFieldException();

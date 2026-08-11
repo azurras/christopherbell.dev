@@ -2,6 +2,7 @@ package dev.christopherbell.post.discovery;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.like.PostLikeStore;
 import java.time.Instant;
@@ -70,6 +71,6 @@ public class VoidPeopleDiscoveryQueryRepository {
             .append("accountId", "$_id")
             .append("topics", 1)
             .append("recentActivityOn", 1)));
-    return posts.aggregate(aggregation, VoidPersonCandidate.class);
+    return posts.aggregate(KindScopedAggregation.local(aggregation), VoidPersonCandidate.class);
   }
 }

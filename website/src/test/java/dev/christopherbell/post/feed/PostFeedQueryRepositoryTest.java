@@ -106,14 +106,14 @@ class PostFeedQueryRepositoryTest {
   @Test
   @DisplayName("Following pages join unique edges without materializing an account id list")
   void following_usesEdgeLookupBeforeLimit() {
-    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Post.class)))
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
     repository.following(
         "self", Optional.empty(), 20, PostFeedVisibility.unrestricted());
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
-    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Post.class));
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
     var pipeline = aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString();
     assertThat(pipeline)
         .contains("_kind=post", "$lookup", "accounts", "account_follow",

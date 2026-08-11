@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import org.bson.Document;
+import org.bson.types.ObjectId;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.mongodb.core.convert.MongoConverter;
 import org.springframework.data.mongodb.core.convert.QueryMapper;
@@ -66,6 +67,45 @@ final class DomainDocumentCodec<T> {
           .append("_kind", kind.kind())
           .append("schemaVersion", kind.schemaVersion())
           .append("payload", payload);
+    } catch (RuntimeException failure) {
+      throw invalidValue();
+    }
+  }
+
+  T populateIdIfNecessary(T value) {
+    try {
+      var accessor = entity.getPropertyAccessor(value);
+      var idProperty = idProperty();
+      if (accessor.getProperty(idProperty) != null) {
+        return value;
+      }
+      var generated = converter.convertId(new ObjectId(), idProperty.getType());
+      accessor.setProperty(idProperty, generated);
+      return kind.javaType().cast(accessor.getBean());
+    } catch (RuntimeException failure) {
+      throw invalidValue();
+    }
+  }
+
+  Document domainDocument(Document envelope) {
+    var identity = NamespacedMongoId.require(
+        envelope.get("_id", Document.class), kind.kind());
+    var mapped = new Document("_id", identity.legacyId());
+    mapped.putAll(envelope.get("payload", Document.class));
+    return mapped;
+  }
+
+  Document envelopeFromDomainDocument(Document mapped) {
+    try {
+      var copy = new Document(mapped);
+      var legacyId = copy.remove("_id");
+      if (legacyId == null) {
+        throw invalidValue();
+      }
+      return new Document("_id", NamespacedMongoId.of(kind.kind(), legacyId).toBson())
+          .append("_kind", kind.kind())
+          .append("schemaVersion", kind.schemaVersion())
+          .append("payload", copy);
     } catch (RuntimeException failure) {
       throw invalidValue();
     }

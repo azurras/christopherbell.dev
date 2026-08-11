@@ -32,6 +32,11 @@ public final class DomainMongoOperationsTestFactory {
     }
   }
 
+  /** Creates the real boundary over a disposable MongoTemplate. */
+  public static DomainMongoOperationsFactory createForDisposableMongo(MongoTemplate mongo) {
+    return new DomainMongoOperationsFactory(mongo);
+  }
+
   /** Encodes one test value exactly as the real boundary expects from MongoTemplate. */
   @SuppressWarnings("unchecked")
   public static <T> Document envelope(MongoTemplate mongo, T value) {
@@ -44,5 +49,13 @@ public final class DomainMongoOperationsTestFactory {
         .append("_kind", kind.kind())
         .append("schemaVersion", kind.schemaVersion())
         .append("payload", payload);
+  }
+
+  /** Maps one aggregation result through the same converter used by production. */
+  public static Document mappedDocument(MongoTemplate mongo, Object value) {
+    var mapped = new Document();
+    mongo.getConverter().write(value, mapped);
+    mapped.remove("_class");
+    return mapped;
   }
 }

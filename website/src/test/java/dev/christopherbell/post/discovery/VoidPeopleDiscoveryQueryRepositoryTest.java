@@ -55,7 +55,7 @@ class VoidPeopleDiscoveryQueryRepositoryTest {
 
   @Test
   void candidatePoolIsCappedAndUsesRecentActivityWithoutEngagementTotals() {
-    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(VoidPersonCandidate.class)))
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
     new VoidPeopleDiscoveryQueryRepository(
@@ -63,7 +63,7 @@ class VoidPeopleDiscoveryQueryRepositoryTest {
         likes).recentActiveCandidates(NOW, 500);
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
-    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(VoidPersonCandidate.class));
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
     var pipeline = aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString();
     assertThat(pipeline)
         .contains("_kind=post", "expiresOn", "lastExtendedOn", "createdOn", "$group", "$limit=128")

@@ -2,6 +2,7 @@ package dev.christopherbell.post.discovery;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.model.Post;
@@ -75,7 +76,9 @@ public class VoidDiscoveryQueryRepository {
     operations.add(raw("$limit", size + 1));
 
     var aggregation = Aggregation.newAggregation(operations);
-    var loaded = posts.aggregate(aggregation, Post.class);
+    var loaded = posts.aggregate(
+        KindScopedAggregation.withForeignKinds(
+            aggregation, KindScopedAggregation.ForeignKind.POST), Post.class);
     return postPage(loaded, size, Post::getCreatedOn);
   }
 
@@ -113,7 +116,9 @@ public class VoidDiscoveryQueryRepository {
         .append("activityOn", 1)));
 
     var aggregation = Aggregation.newAggregation(operations);
-    var loaded = posts.aggregate(aggregation, VoidTopicSummary.class);
+    var loaded = posts.aggregate(
+        KindScopedAggregation.withForeignKinds(
+            aggregation, KindScopedAggregation.ForeignKind.POST), VoidTopicSummary.class);
     boolean hasNext = loaded.size() > size;
     var items = loaded.stream().limit(size).toList();
     String nextCursor = null;

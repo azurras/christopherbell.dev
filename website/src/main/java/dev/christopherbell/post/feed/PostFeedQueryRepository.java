@@ -2,9 +2,9 @@ package dev.christopherbell.post.feed;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
-import dev.christopherbell.account.follow.AccountFollow;
 import dev.christopherbell.post.model.Post;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -94,7 +94,9 @@ public class PostFeedQueryRepository {
         context -> new Document("$match", new Document("matchingFollow.0", new Document("$exists", true))),
         context -> new Document("$sort", new Document("createdOn", -1).append("_id", -1)),
         context -> new Document("$limit", size + 1));
-    return slice(posts.aggregate(aggregation, Post.class), size);
+    return slice(posts.aggregate(
+        KindScopedAggregation.withForeignKinds(
+            aggregation, KindScopedAggregation.ForeignKind.ACCOUNT_FOLLOW), Post.class), size);
   }
 
   private PostFeedSlice page(

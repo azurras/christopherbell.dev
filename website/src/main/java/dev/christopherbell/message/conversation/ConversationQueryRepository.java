@@ -2,6 +2,7 @@ package dev.christopherbell.message.conversation;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.message.model.Message;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
@@ -60,7 +61,10 @@ public class ConversationQueryRepository {
         visibleAfterArchive,
         Aggregation.sort(Sort.by(Sort.Direction.DESC, "createdOn", "_id")),
         Aggregation.limit(limit));
-    return messages.aggregate(aggregation, Message.class);
+    return messages.aggregate(
+        KindScopedAggregation.withForeignKinds(
+            aggregation, KindScopedAggregation.ForeignKind.CONVERSATION_ARCHIVE_STATE),
+        Message.class);
   }
 
   /** Counts unread incoming messages for all returned conversation peers in one query. */
@@ -78,7 +82,7 @@ public class ConversationQueryRepository {
     var aggregation = Aggregation.newAggregation(
         Aggregation.match(criteria),
         Aggregation.group("senderAccountId").count().as("count"));
-    return messages.aggregate(aggregation, ConversationUnreadCount.class).stream()
+    return messages.aggregate(KindScopedAggregation.local(aggregation), ConversationUnreadCount.class).stream()
         .collect(Collectors.toUnmodifiableMap(
             ConversationUnreadCount::id,
             ConversationUnreadCount::count));

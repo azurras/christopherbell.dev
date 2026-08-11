@@ -45,13 +45,16 @@ class ConversationQueryRepositoryTest {
   @DisplayName("Conversation summaries aggregate one latest message per distinct visible thread")
   void latestDistinctVisible_usesMongoGroupingAndOwnerArchiveLookup() {
     var latest = message("m3", "a:b", "2026-07-26T12:00:00Z");
-    when(mongo.aggregate(any(Aggregation.class), eq("communications"), eq(Message.class)))
-        .thenReturn(new AggregationResults<>(List.of(latest), new Document()));
+    var latestDocument =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .mappedDocument(mongo, latest);
+    when(mongo.aggregate(any(Aggregation.class), eq("communications"), eq(Document.class)))
+        .thenReturn(new AggregationResults<>(List.of(latestDocument), new Document()));
 
     assertThat(repository.latestDistinctVisible("a", 30)).containsExactly(latest);
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
-    verify(mongo).aggregate(aggregation.capture(), eq("communications"), eq(Message.class));
+    verify(mongo).aggregate(aggregation.capture(), eq("communications"), eq(Document.class));
     assertThat(aggregation.getValue().toString())
         .contains("_kind", "message", "$group", "conversationKey", "$lookup", "sessions",
             "conversation_archive_state")
@@ -62,9 +65,9 @@ class ConversationQueryRepositoryTest {
   @DisplayName("Unread counts group all requested senders in one immutable result")
   void unreadCounts_groupsAllRequestedSendersInOneAggregation() {
     when(mongo.aggregate(
-            any(Aggregation.class), eq("communications"), eq(ConversationUnreadCount.class)))
+            any(Aggregation.class), eq("communications"), eq(Document.class)))
         .thenReturn(new AggregationResults<>(
-            List.of(new ConversationUnreadCount("other-a", 2L)), new Document()));
+            List.of(new Document("_id", "other-a").append("count", 2L)), new Document()));
 
     var counts = repository.unreadCounts("self", List.of("other-a", "other-b"));
 
@@ -73,7 +76,7 @@ class ConversationQueryRepositoryTest {
         .isInstanceOf(UnsupportedOperationException.class);
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
     verify(mongo).aggregate(
-        aggregation.capture(), eq("communications"), eq(ConversationUnreadCount.class));
+        aggregation.capture(), eq("communications"), eq(Document.class));
     assertThat(aggregation.getValue().toString())
         .contains(
             "recipientAccountId",
@@ -95,7 +98,7 @@ class ConversationQueryRepositoryTest {
     assertThat(repository.unreadCounts("self", List.of())).isEmpty();
 
     verify(mongo, never()).aggregate(
-        any(Aggregation.class), eq("communications"), eq(ConversationUnreadCount.class));
+        any(Aggregation.class), eq("communications"), eq(Document.class));
   }
 
   @Test

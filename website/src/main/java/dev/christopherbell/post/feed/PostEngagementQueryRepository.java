@@ -2,6 +2,7 @@ package dev.christopherbell.post.feed;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.post.model.Post;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -27,7 +28,7 @@ public class PostEngagementQueryRepository {
         Aggregation.match(Criteria.where("parentId").in(postIds)),
         Aggregation.group("parentId").count().as("count"));
     var result = new LinkedHashMap<String, Integer>();
-    posts.aggregate(aggregation, CountRow.class)
+    posts.aggregate(KindScopedAggregation.local(aggregation), CountRow.class)
         .forEach(row -> result.put(row.id(), row.count()));
     return Map.copyOf(result);
   }

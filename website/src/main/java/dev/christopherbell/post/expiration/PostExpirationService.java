@@ -347,12 +347,8 @@ public class PostExpirationService {
       refreshAndPersistExpiration(updated);
       return;
     }
-    var decremented = posts.findAndUpdate(
-        Query.query(Criteria.where("id").is(root.getId()).and("threadReplyCount").gte(delta)),
-        new Update().inc("threadReplyCount", -delta).set("lastUpdatedOn", changedOn));
-    var updated = decremented.or(() -> posts.findAndUpdate(
-        Query.query(Criteria.where("id").is(root.getId()).and("threadReplyCount").lt(delta)),
-        new Update().set("threadReplyCount", 0).set("lastUpdatedOn", changedOn)))
+    var updated = posts.decrementFloorZeroById(
+        root.getId(), "threadReplyCount", delta, "lastUpdatedOn", changedOn)
         .or(() -> posts.findById(root.getId())).orElse(null);
     refreshAndPersistExpiration(updated);
   }

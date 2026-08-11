@@ -10,7 +10,9 @@ import com.mongodb.client.MongoClients;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import org.bson.Document;
 import org.bson.types.Decimal128;
 import org.bson.types.ObjectId;
@@ -20,15 +22,25 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.auditing.IsNewAwareAuditingHandler;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.mapping.event.AuditingEntityCallback;
+import org.springframework.data.mapping.callback.EntityCallbacks;
 import org.springframework.data.mongodb.core.mapping.Field;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
+import dev.christopherbell.notification.preference.NotificationPreference;
+import dev.christopherbell.report.model.PostReport;
+import dev.christopherbell.report.model.ReportStatus;
+import dev.christopherbell.report.model.ReportTargetType;
+import dev.christopherbell.report.model.ReportType;
+import java.time.Instant;
 
 @EnabledIfEnvironmentVariable(named = "DOMAIN_COLLECTION_TEST_URI", matches = ".+")
 class MongoKindScopedOperationsMongoTest {
@@ -180,6 +192,90 @@ class MongoKindScopedOperationsMongoTest {
     assertThat(operations.findById("same-id")).isEmpty();
   }
 
+  @Test
+  void nullIdInsertGeneratesIdsAndAppliesAuditingAcrossRepresentativeEntities() {
+    mongo = template("generated-id-auditing");
+    var now = new AtomicReference<>(Instant.parse("2026-08-10T20:00:00Z"));
+    var callbacks = auditingCallbacks(mongo, now);
+    mongo.setEntityCallbacks(callbacks);
+    var preferences = new MongoKindScopedOperations<>(
+        mongo, DomainCollectionManifest.forType(NotificationPreference.class), callbacks);
+    var reports = new MongoKindScopedOperations<>(
+        mongo, DomainCollectionManifest.forType(PostReport.class), callbacks);
+
+    var insertedPreference = preferences.insert(NotificationPreference.builder()
+        .accountId("account-1")
+        .mentions(true)
+        .build());
+    var insertedReport = reports.insert(PostReport.builder()
+        .postId("post-1")
+        .reporterAccountId("reporter-1")
+        .reportType(ReportType.SPAM)
+        .targetType(ReportTargetType.POST)
+        .status(ReportStatus.OPEN)
+        .build());
+
+    assertThat(insertedPreference.getId()).matches("[0-9a-f]{24}");
+    assertThat(insertedReport.getId()).matches("[0-9a-f]{24}");
+    assertThat(insertedPreference.getCreatedOn()).isEqualTo(now.get());
+    assertThat(insertedPreference.getLastUpdatedOn()).isEqualTo(now.get());
+    assertThat(insertedReport.getCreatedOn()).isEqualTo(now.get());
+    assertThat(insertedReport.getLastUpdatedOn()).isEqualTo(now.get());
+
+    var createdOn = insertedPreference.getCreatedOn();
+    now.set(Instant.parse("2026-08-10T20:05:00Z"));
+    insertedPreference.setLikes(true);
+    var updatedPreference = preferences.save(insertedPreference);
+
+    assertThat(updatedPreference.getCreatedOn()).isEqualTo(createdOn);
+    assertThat(updatedPreference.getLastUpdatedOn()).isEqualTo(now.get());
+    assertThat(preferences.findById(updatedPreference.getId())).contains(updatedPreference);
+  }
+
+  @Test
+  void aggregationRejectsAMalformedEnvelopeBeforeReturningPayloadData() {
+    mongo = template("aggregate-malformed");
+    var operations = operations("sample_malformed");
+    mongo.getCollection("content").insertOne(new Document(
+        "_id", NamespacedMongoId.of("sample_malformed", "legacy-id").toBson())
+        .append("_kind", "sample_malformed")
+        .append("schemaVersion", 99)
+        .append("payload", new Document("display_name", "Ada")
+            .append("visits", 1L)
+            .append("amount", Decimal128.parse("1.0"))));
+
+    assertThatThrownBy(() -> operations.aggregate(
+        KindScopedAggregation.local(Aggregation.newAggregation(
+            Aggregation.match(new Criteria()))),
+        SampleDocument.class))
+        .isInstanceOf(MalformedDomainDocumentException.class)
+        .hasMessage("Mongo domain document is malformed.")
+        .hasNoCause();
+  }
+
+  @Test
+  void aggregationRejectsUnexpectedEnvelopeAndIdentityFieldsBeforeUnwrapping() {
+    mongo = template("aggregate-unexpected-fields");
+    var operations = operations("sample_unexpected_fields");
+    var identity = NamespacedMongoId.of("sample_unexpected_fields", "legacy-id").toBson()
+        .append("unexpected", "value");
+    mongo.getCollection("content").insertOne(new Document("_id", identity)
+        .append("_kind", "sample_unexpected_fields")
+        .append("schemaVersion", 1)
+        .append("payload", new Document("display_name", "Ada")
+            .append("visits", 1L)
+            .append("amount", Decimal128.parse("1.0")))
+        .append("unexpected", true));
+
+    assertThatThrownBy(() -> operations.aggregate(
+        KindScopedAggregation.local(Aggregation.newAggregation(
+            Aggregation.match(new Criteria()))),
+        SampleDocument.class))
+        .isInstanceOf(MalformedDomainDocumentException.class)
+        .hasMessage("Mongo domain document is malformed.")
+        .hasNoCause();
+  }
+
   private MongoKindScopedOperations<SampleDocument> operations(String kind) {
     var registry = DomainDocumentKindRegistry.of(Map.of(kind, "content"));
     return new MongoKindScopedOperations<>(
@@ -190,6 +286,14 @@ class MongoKindScopedOperationsMongoTest {
     String database = "domain_boundary_" + purpose + "_"
         + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     return new MongoTemplate(client, database);
+  }
+
+  private static EntityCallbacks auditingCallbacks(
+      MongoTemplate mongo, AtomicReference<Instant> now) {
+    var handler = IsNewAwareAuditingHandler.from(
+        mongo.getConverter().getMappingContext());
+    handler.setDateTimeProvider(() -> Optional.of(now.get()));
+    return EntityCallbacks.create(new AuditingEntityCallback(() -> handler));
   }
 
   private static List<String> indexNames(Object value) {

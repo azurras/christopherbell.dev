@@ -2,6 +2,7 @@ package dev.christopherbell.post.like;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -54,7 +55,7 @@ public class PostLikeStore {
         Aggregation.match(Criteria.where("postId").in(postIds)),
         Aggregation.group("postId").count().as("count"));
     var counts = new LinkedHashMap<String, Integer>();
-    mongo.aggregate(aggregation, CountRow.class)
+    mongo.aggregate(KindScopedAggregation.local(aggregation), CountRow.class)
         .forEach(row -> counts.put(row.id(), row.count()));
     return Map.copyOf(counts);
   }

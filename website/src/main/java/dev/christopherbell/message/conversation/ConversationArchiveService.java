@@ -41,20 +41,14 @@ public class ConversationArchiveService {
         .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
         .limit(1);
     var latest = messages.findOne(latestQuery).orElse(null);
-    var query = new Query(new Criteria().andOperator(
-        Criteria.where("ownerAccountId").is(ownerAccountId),
-        Criteria.where("conversationKey").is(conversationKey)));
-    var state = archives.findOne(query).orElseGet(() -> {
-      var created = new ConversationArchiveState();
-      created.setId(ownerAccountId + ":" + conversationKey);
-      return created;
-    });
-    state.setOwnerAccountId(ownerAccountId);
-    state.setConversationKey(conversationKey);
-    state.setParticipantIds(Set.copyOf(participantIds));
-    state.setArchivedThroughMessageId(latest == null ? null : latest.getId());
-    state.setArchivedAt(archivedAt);
-    archives.save(state);
+    archives.upsertById(
+        ownerAccountId + ":" + conversationKey,
+        new org.springframework.data.mongodb.core.query.Update()
+            .set("ownerAccountId", ownerAccountId)
+            .set("conversationKey", conversationKey)
+            .set("participantIds", Set.copyOf(participantIds))
+            .set("archivedThroughMessageId", latest == null ? null : latest.getId())
+            .set("archivedAt", archivedAt));
     return new ConversationArchiveResult(conversationKey, archivedAt);
   }
 }

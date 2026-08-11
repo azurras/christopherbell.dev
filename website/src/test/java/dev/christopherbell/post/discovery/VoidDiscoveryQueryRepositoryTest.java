@@ -95,13 +95,13 @@ class VoidDiscoveryQueryRepositoryTest {
 
   @Test
   void topicThreadsAreGroupedToActiveRootsBeforePaging() {
-    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Post.class)))
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
     repository.topic("music", Optional.empty(), 24, NOW);
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
-    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Post.class));
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
     var pipeline = aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString();
     assertThat(pipeline)
         .contains("_kind=post", "topics.canonical", "music", "$group", "$lookup", "$replaceRoot",
@@ -110,13 +110,13 @@ class VoidDiscoveryQueryRepositoryTest {
 
   @Test
   void topicSummariesUseActivityAndCanonicalAsStableKeys() {
-    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(VoidTopicSummary.class)))
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
     repository.topics(Optional.of(new StableCursor(NOW.minusSeconds(1), "music")), 12, NOW);
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
-    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(VoidTopicSummary.class));
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
     var pipeline = aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString();
     assertThat(pipeline)
         .contains("_kind=post", "$unwind", "$lookup", "root.expiresOn", "$group", "activityOn",

@@ -4,8 +4,8 @@ import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 
@@ -29,9 +29,18 @@ public interface KindScopedMongoOperations<T> {
 
   Optional<T> findAndUpdate(Query domainQuery, Update domainUpdate);
 
+  T upsertById(Object legacyId, Update domainUpdate);
+
+  Optional<T> decrementFloorZeroById(
+      Object legacyId,
+      String counterField,
+      int decrement,
+      String timestampField,
+      Instant changedOn);
+
   UpdateResult updateMulti(Query domainQuery, Update domainUpdate);
 
-  <R> List<R> aggregate(Aggregation domainAggregation, Class<R> resultType);
+  <R> List<R> aggregate(KindScopedAggregation domainAggregation, Class<R> resultType);
 
   DeleteResult remove(Query domainQuery);
 

@@ -188,7 +188,8 @@ class MongoKindScopedOperationsTest {
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
     assertThat(operations.aggregate(
-        Aggregation.newAggregation(Aggregation.match(Criteria.where("displayName").is("Ada"))),
+        KindScopedAggregation.local(
+            Aggregation.newAggregation(Aggregation.match(Criteria.where("displayName").is("Ada")))),
         Document.class))
         .isEmpty();
 
@@ -196,10 +197,62 @@ class MongoKindScopedOperationsTest {
     verify(mongo).aggregate(aggregationCaptor.capture(), eq("content"), eq(Document.class));
     assertThat(aggregationCaptor.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT))
         .startsWith(
-            new Document("$match", new Document("_kind", "sample_kind")),
+            new Document("$match", new Document("_kind", "sample_kind")
+                .append("schemaVersion", 1)
+                .append("_id.kind", "sample_kind")
+                .append("_id.legacyId", new Document("$exists", true))
+                .append("payload", new Document("$type", "object"))),
             new Document("$replaceRoot", new Document("newRoot", new Document("$mergeObjects", List.of(
                 "$payload", new Document("_id", "$_id.legacyId"))))))
         .contains(new Document("$match", new Document("displayName", "Ada")));
+  }
+
+  @Test
+  void aggregateRejectsWriteAndCallerSelectedCollectionStages() {
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
+        .thenReturn(new AggregationResults<>(List.of(), new Document()));
+
+    for (var stage : List.of(
+        new Document("$out", "attacker_selected"),
+        new Document("$merge", new Document("into", "attacker_selected")),
+        new Document("$unionWith", "attacker_selected"),
+        new Document("$lookup", new Document("from", "attacker_selected")
+            .append("pipeline", List.of())
+            .append("as", "leak")))) {
+      var aggregation = Aggregation.newAggregation(context -> stage);
+
+      assertThatThrownBy(() -> operations.aggregate(
+          KindScopedAggregation.local(aggregation), Document.class))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
+
+  @Test
+  void aggregationRejectsARegisteredCollectionLookupWithoutExactForeignKindScope() {
+    var aggregation = Aggregation.newAggregation(context -> new Document("$lookup", new Document()
+        .append("from", "content")
+        .append("pipeline", List.of(new Document("$match", new Document("payload.id", "x"))))
+        .append("as", "leak")));
+
+    assertThatThrownBy(() -> KindScopedAggregation.withForeignKinds(
+        aggregation, KindScopedAggregation.ForeignKind.POST))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Mongo domain aggregation stage is not approved.");
+  }
+
+  @Test
+  void aggregationRejectsAForeignKindPredicateThatCanBeBypassedByAnOrBranch() {
+    var aggregation = Aggregation.newAggregation(context -> new Document("$lookup", new Document()
+        .append("from", "content")
+        .append("pipeline", List.of(new Document("$match", new Document("$or", List.of(
+            new Document("_kind", "post"),
+            new Document("payload.accountId", "attacker-selected"))))))
+        .append("as", "leak")));
+
+    assertThatThrownBy(() -> KindScopedAggregation.withForeignKinds(
+        aggregation, KindScopedAggregation.ForeignKind.POST))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Mongo domain aggregation stage is not approved.");
   }
 
   @Test

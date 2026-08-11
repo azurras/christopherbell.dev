@@ -2,6 +2,7 @@ package dev.christopherbell.configuration.security.browser;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import java.util.List;
 import java.util.Optional;
 import org.bson.Document;
@@ -44,6 +45,9 @@ public class MongoBrowserSessionAuthenticationStore implements BrowserSessionAut
         context -> new Document("$project", new Document("_id", 0)
             .append("session", "$$ROOT")
             .append("account", "$currentAccount")));
-    return sessions.aggregate(aggregation, BrowserSessionAuthentication.class).stream().findFirst();
+    return sessions.aggregate(
+        KindScopedAggregation.withForeignKinds(
+            aggregation, KindScopedAggregation.ForeignKind.ACCOUNT),
+        BrowserSessionAuthentication.class).stream().findFirst();
   }
 }
