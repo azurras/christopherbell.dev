@@ -36,6 +36,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.FindAndReplaceOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Collation;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.convert.DefaultMongoTypeMapper;
@@ -148,13 +149,22 @@ class MongoKindScopedOperationsTest {
   void findAndUpdateScopesTheAtomicMutationAndReturnsTheDecodedWinner() {
     var winner = new SampleDocument("legacy-id", "Grace", 2L, new Decimal128(4L), 1L);
     var winnerEnvelope = envelope(winner);
+    var sorted = Query.query(Criteria.where("displayName").is("Ada"))
+        .with(Sort.by(Sort.Order.asc("visits"), Sort.Order.desc("displayName")))
+        .skip(2)
+        .limit(3)
+        .collation(Collation.of("en"))
+        .withHint("sample_hint")
+        .comment("claim-due")
+        .cursorBatchSize(7)
+        .allowDiskUse(true);
     when(mongo.findAndModify(
         any(Query.class), any(Update.class), any(FindAndModifyOptions.class),
         eq(Document.class), eq("content")))
         .thenReturn(winnerEnvelope);
 
     assertThat(operations.findAndUpdate(
-        Query.query(Criteria.where("displayName").is("Ada")),
+        sorted,
         Update.update("displayName", "Grace")))
         .contains(winner);
 
@@ -164,6 +174,16 @@ class MongoKindScopedOperationsTest {
         queryCaptor.capture(), updateCaptor.capture(), any(FindAndModifyOptions.class),
         eq(Document.class), eq("content"));
     assertMutationQuery(queryCaptor.getValue(), "payload.display_name", "Ada");
+    assertThat(queryCaptor.getValue().getSortObject()).isEqualTo(new Document()
+        .append("payload.visits", 1)
+        .append("payload.display_name", -1));
+    assertThat(queryCaptor.getValue()).satisfies(guarded -> {
+      assertThat(guarded.getSkip()).isEqualTo(sorted.getSkip());
+      assertThat(guarded.getLimit()).isEqualTo(sorted.getLimit());
+      assertThat(guarded.getCollation()).isEqualTo(sorted.getCollation());
+      assertThat(guarded.getHint()).isEqualTo(sorted.getHint());
+      assertThat(guarded.getMeta()).isEqualTo(sorted.getMeta());
+    });
     assertThat(updateCaptor.getValue().getUpdateObject()).isEqualTo(new Document()
         .append("$set", new Document("payload.display_name", "Grace"))
         .append("$inc", new Document("payload.version", 1)));

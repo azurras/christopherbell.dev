@@ -96,6 +96,7 @@ final class DomainMongoFieldMapper {
   Query guardMutation(Query mappedQuery, int schemaVersion) {
     var result = new BasicQuery(DomainEnvelopeAggregationValidation.mutationSelector(
         mappedQuery.getQueryObject(), kind, schemaVersion));
+    result.setSortObject(new Document(mappedQuery.getSortObject()));
     copySettings(mappedQuery, result);
     return result;
   }
