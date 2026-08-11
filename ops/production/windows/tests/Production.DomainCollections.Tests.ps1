@@ -69,6 +69,24 @@ Describe 'Domain collection migration artifact contracts' {
             $result.indexes | Should -Be 126
             $result.collections | Should -Be 14
             $result.faultBoundaries | Should -Be 468
+
+            $cliDatabase = 'cbell_candidate_bbbbbbbbbbbb_bbbbbbbbbbbbbbbbbbbbbbbb'
+            $cliArguments = @(
+                $cliDatabase,
+                'preview',
+                '576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24',
+                ('b' * 32),
+                ('a' * 40),
+                ('b' * 64),
+                ('0' * 64)) | ConvertTo-Json -Compress
+            $bootstrap = "globalThis.DOMAIN_COLLECTION_ARGS=$cliArguments;void 0;"
+            $cliOutput = @(& $shell '--quiet' '--norc' $uri `
+                '--eval' $bootstrap '--file' $manifest '--file' $engine 2>&1)
+            $LASTEXITCODE | Should -Be 0
+            $cliResult = ($cliOutput -join "`n") | ConvertFrom-Json -ErrorAction Stop
+            $cliResult.database | Should -BeExactly $cliDatabase
+            $cliResult.action | Should -BeExactly 'preview'
+            $cliResult.complete | Should -BeTrue
         } finally {
             $quoted = ($databaseNames | ForEach-Object { "'$_'" }) -join ','
             & $shell '--quiet' '--norc' $uri '--eval' `

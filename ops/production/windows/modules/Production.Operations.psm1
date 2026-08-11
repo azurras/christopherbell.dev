@@ -87,6 +87,11 @@ function Invoke-ProductionRollback {
         $direction = Read-ProductionMusicSchemaDirection -Config $config
         if ($direction -and
             [string]$direction.state -eq 'TARGET_CUTOVER_IN_PROGRESS') {
+            if ($direction.PSObject.Properties['version'] -and
+                [int]$direction.version -eq 2) {
+                throw ('Production rollback is blocked because domain collection cutover is incomplete. ' +
+                    'Use prod.cmd mongo-consolidation-rollback -ConfirmDomainCollectionRollback.')
+            }
             throw ('Production rollback is blocked because the first Music schema cutover is incomplete. ' +
                 'Keep the writer stopped and complete bounded recovery under deploy.lock.')
         }
@@ -113,6 +118,12 @@ function Invoke-ProductionRollback {
                 throw 'Music runtime schema-direction release identity does not match the active release.'
             }
             if ($previousSha -ceq [string]$direction.legacyRelease) {
+                if ($direction.PSObject.Properties['version'] -and
+                    [int]$direction.version -eq 2) {
+                    throw ('Generic rollback cannot cross the domain collection schema boundary. ' +
+                        'Use prod.cmd mongo-consolidation-rollback ' +
+                        '-ConfirmDomainCollectionRollback.')
+                }
                 throw ('Generic rollback cannot start the retained legacy Music writer or reverse-copy state. ' +
                     'Use prod.cmd music-runtime-rollback -ConfirmMusicRuntimeRollback.')
             }
@@ -446,6 +457,7 @@ function Assert-AutoDeployTaskContract {
 
 function Get-ProductionMongoCollectionInventoryScript {
     @'
+const manifest = DomainCollectionManifest.MANIFEST;
 const target = db.getSiblingDB('christopherbell');
 const has = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
 const numberOrNull = (value) => {
@@ -528,13 +540,110 @@ const collections = target.getCollectionInfos()
         indexes
       };
     });
+const actualNames = collections.map((collection) => collection.name);
+const expectedNames = [...manifest.targets].sort();
+const collectionsCompliant = JSON.stringify(actualNames) === JSON.stringify(expectedNames);
+const kindMetrics = manifest.kinds.map((kind) => ({
+  kind: kind.kind,
+  target: kind.target,
+  count: target.getCollectionNames().includes(kind.target)
+      ? safeMetadataInteger(
+          target.getCollection(kind.target).countDocuments({ _kind: kind.kind }),
+          `kind count ${kind.kind}`)
+      : 0
+}));
+const kindsCompliant = manifest.targets.every((name) => {
+  if (!target.getCollectionNames().includes(name)) return false;
+  const allowed = manifest.kinds.filter((kind) => kind.target === name).map((kind) => kind.kind);
+  const collection = target.getCollection(name);
+  const unexpected = safeMetadataInteger(
+      collection.countDocuments({ _kind: { $nin: allowed } }), `unexpected kinds ${name}`);
+  const counted = kindMetrics.filter((kind) => kind.target === name)
+      .reduce((sum, kind) => sum + kind.count, 0);
+  return unexpected === 0 && counted === safeMetadataInteger(
+      collection.countDocuments({}), `collection count ${name}`);
+});
+const indexKey = (index) => Object.fromEntries(index.keys);
+const expectedIndex = (index) => ({
+  version: 2,
+  name: index.name,
+  key: indexKey(index),
+  unique: index.name === '_id_' || index.unique,
+  sparse: index.sparse,
+  partialFilterExpression: index.partialFilterExpression,
+  expireAfterSeconds: index.expireAfterSeconds,
+  collation: index.collation,
+  hidden: false
+});
+const actualIndex = (index) => {
+  const modeled = new Set(['v', 'key', 'name', 'unique', 'sparse',
+    'partialFilterExpression', 'expireAfterSeconds', 'collation', 'hidden', 'ns']);
+  if (!index || typeof index !== 'object' || Array.isArray(index) ||
+      Object.keys(index).some((field) => !modeled.has(field)) ||
+      Number(index.v) !== 2 || typeof index.name !== 'string' ||
+      !index.key || typeof index.key !== 'object' || Array.isArray(index.key) ||
+      has(index, 'hidden') && typeof index.hidden !== 'boolean') return null;
+  return {
+    version: Number(index.v),
+    name: index.name,
+    key: index.key,
+    unique: index.name === '_id_' || index.unique === true,
+    sparse: index.sparse === true,
+    partialFilterExpression: index.partialFilterExpression || {},
+    expireAfterSeconds: has(index, 'expireAfterSeconds')
+        ? Number(index.expireAfterSeconds) : null,
+    collation: index.collation || null,
+    hidden: index.hidden === true
+  };
+};
+const indexesCompliant = manifest.targets.every((name) => {
+  if (!target.getCollectionNames().includes(name)) return false;
+  const actual = target.getCollection(name).getIndexes().map(actualIndex)
+      .sort((left, right) => left === null || right === null ? 0
+          : left.name.localeCompare(right.name));
+  const expected = manifest.indexes.filter((index) => index.target === name)
+      .map(expectedIndex).sort((left, right) => left.name.localeCompare(right.name));
+  return JSON.stringify(actual) === JSON.stringify(expected);
+});
+const manifestCompliant = collectionsCompliant && kindsCompliant && indexesCompliant;
 print(JSON.stringify({
   complete: true,
   database: target.getName(),
   generatedAt: new Date().toISOString(),
+  manifest: {
+    digest: DomainCollectionManifest.DIGEST,
+    manifestCompliant,
+    collectionsCompliant,
+    kindsCompliant,
+    indexesCompliant
+  },
+  kinds: kindMetrics,
   collections
 }));
 '@
+}
+
+function Get-ProductionMongoInventoryExpectedKinds {
+    $path = Join-Path $PSScriptRoot '..\scripts\DomainCollectionManifest.js'
+    $text = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+    if ($text -cnotmatch
+        '576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24') {
+        throw 'MongoDB inventory manifest digest is unavailable.'
+    }
+    $matches = [regex]::Matches($text, '(?m)^kind\|([^|\r\n]+)\|([^|\r\n]+)\|')
+    if ($matches.Count -ne 52) {
+        throw 'MongoDB inventory manifest kind cardinality is invalid.'
+    }
+    $result = [ordered]@{}
+    foreach ($match in $matches) {
+        $target = $match.Groups[1].Value
+        $kind = $match.Groups[2].Value
+        if ($result.Contains($kind)) {
+            throw 'MongoDB inventory manifest kind identity is duplicated.'
+        }
+        $result[$kind] = $target
+    }
+    return $result
 }
 
 function Test-ProductionMongoCollectionInventoryNumber {
@@ -751,7 +860,7 @@ function ConvertFrom-ProductionMongoCollectionInventory {
             $_.Exception)
     }
     Assert-ProductionMongoCollectionInventoryPropertySet -Value $inventory -Path 'root' `
-        -Allowed @('complete','database','generatedAt','collections') `
+        -Allowed @('complete','database','generatedAt','manifest','kinds','collections') `
         -Required @('complete','database','generatedAt','collections')
     if ($inventory.complete -isnot [bool]) {
         throw 'MongoDB collection inventory complete is invalid.'
@@ -779,6 +888,73 @@ function ConvertFrom-ProductionMongoCollectionInventory {
     }
     if ($inventory.collections -isnot [Array]) {
         throw 'MongoDB collection inventory collections are invalid.'
+    }
+    $rootNames = @($inventory.PSObject.Properties.Name)
+    $hasManifest = $rootNames -contains 'manifest'
+    $hasKinds = $rootNames -contains 'kinds'
+    if ($hasManifest -ne $hasKinds) {
+        throw 'MongoDB collection inventory manifest and kinds must be reported together.'
+    }
+    $canonicalManifest = $null
+    $canonicalKinds = $null
+    if ($hasManifest) {
+        Assert-ProductionMongoCollectionInventoryPropertySet `
+            -Value $inventory.manifest -Path 'manifest' `
+            -Allowed @('digest','manifestCompliant','collectionsCompliant',
+                'kindsCompliant','indexesCompliant') `
+            -Required @('digest','manifestCompliant','collectionsCompliant',
+                'kindsCompliant','indexesCompliant')
+        if ($inventory.manifest.digest -isnot [string] -or
+            [string]$inventory.manifest.digest -cne
+                '576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24') {
+            throw 'MongoDB collection inventory manifest digest is invalid.'
+        }
+        foreach ($name in 'manifestCompliant','collectionsCompliant',
+            'kindsCompliant','indexesCompliant') {
+            if ($inventory.manifest.$name -isnot [bool]) {
+                throw "MongoDB collection inventory manifest.$name is invalid."
+            }
+        }
+        $conjunction = [bool]$inventory.manifest.collectionsCompliant -and
+            [bool]$inventory.manifest.kindsCompliant -and
+            [bool]$inventory.manifest.indexesCompliant
+        if ([bool]$inventory.manifest.manifestCompliant -ne $conjunction) {
+            throw 'MongoDB collection inventory manifest compliance is inconsistent.'
+        }
+        if ($inventory.kinds -isnot [Array] -or @($inventory.kinds).Count -ne 52) {
+            throw 'MongoDB collection inventory must contain exactly 52 kind counts.'
+        }
+        $expectedKinds = Get-ProductionMongoInventoryExpectedKinds
+        $seenKinds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        $kindResults = [Collections.Generic.List[object]]::new()
+        foreach ($metric in @($inventory.kinds)) {
+            Assert-ProductionMongoCollectionInventoryPropertySet `
+                -Value $metric -Path 'kind' `
+                -Allowed @('kind','target','count') `
+                -Required @('kind','target','count')
+            if ($metric.kind -isnot [string] -or
+                -not $expectedKinds.Contains([string]$metric.kind) -or
+                $metric.target -isnot [string] -or
+                [string]$metric.target -cne [string]$expectedKinds[[string]$metric.kind] -or
+                -not $seenKinds.Add([string]$metric.kind)) {
+                throw 'MongoDB collection inventory kind identity is invalid.'
+            }
+            $count = Convert-ProductionMongoCollectionInventoryInteger `
+                -Value $metric.count -Path "kind.$($metric.kind).count" -AllowNull $false
+            [void]$kindResults.Add([pscustomobject][ordered]@{
+                kind = [string]$metric.kind
+                target = [string]$metric.target
+                count = $count
+            })
+        }
+        $canonicalManifest = [pscustomobject][ordered]@{
+            digest = [string]$inventory.manifest.digest
+            manifestCompliant = [bool]$inventory.manifest.manifestCompliant
+            collectionsCompliant = [bool]$inventory.manifest.collectionsCompliant
+            kindsCompliant = [bool]$inventory.manifest.kindsCompliant
+            indexesCompliant = [bool]$inventory.manifest.indexesCompliant
+        }
+        $canonicalKinds = $kindResults.ToArray()
     }
     $names = [Collections.Generic.List[string]]::new()
     $uniqueNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -933,12 +1109,17 @@ function ConvertFrom-ProductionMongoCollectionInventory {
         [string]::Join([char]0, $sortedNames)) {
         throw 'MongoDB collection inventory names must be sorted.'
     }
-    return [pscustomobject][ordered]@{
+    $result = [ordered]@{
         complete = $true
         database = 'christopherbell'
         generatedAt = $generatedAt.UtcDateTime.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
-        collections = $canonicalCollections.ToArray()
     }
+    if ($hasManifest) {
+        $result.manifest = $canonicalManifest
+        $result.kinds = $canonicalKinds
+    }
+    $result.collections = $canonicalCollections.ToArray()
+    return [pscustomobject]$result
 }
 
 function Get-ProductionMongoCollectionInventory {
@@ -949,6 +1130,8 @@ function Get-ProductionMongoCollectionInventory {
             '--quiet'
             '--norc'
             'mongodb://127.0.0.1:27017/admin'
+            '--file'
+            (Join-Path $PSScriptRoot '..\scripts\DomainCollectionManifest.js')
             '--eval'
             (Get-ProductionMongoCollectionInventoryScript)
         ) `

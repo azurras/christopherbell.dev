@@ -20,6 +20,8 @@ Describe 'native Windows deployment' {
                 [pscustomobject]@{ state='TARGET_ACTIVE'; targetRelease=$target; legacyRelease=$legacy }
             }
             Mock Read-ProductionReleaseMusicSchema { 'TARGET' }
+            Mock Read-ProductionDomainSchemaDirection { $null }
+            Mock Read-ProductionReleaseDomainSchema { 'LEGACY' }
             Mock Ensure-ProductionWriterStartGuardUnderHeldLock { }
             Mock Revoke-CoordinatedProductionWriterStart { }
         }
@@ -1016,6 +1018,52 @@ Describe 'native Windows deployment' {
             Should -Invoke Invoke-CandidateReleaseValidation -Times 1 -Exactly -ParameterFilter {
                 $Sha -eq '0123456789abcdef0123456789abcdef01234567'
             }
+        }
+
+        It 'blocks a target domain release outside the guarded consolidation command' {
+            $lock = [IO.MemoryStream]::new()
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; remote='origin'; branch='main' }
+            }
+            Mock Enter-DeploymentLock { $lock }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='TARGET_ACTIVE'; targetRelease='1' * 40; legacyRelease='3' * 40
+                }
+            }
+            Mock Resolve-OriginMainRelease { '2' * 40 }
+            Mock New-ReleaseFromOriginMain { 'C:\data\releases\target' }
+            Mock Read-ProductionReleaseDomainSchema { 'TARGET' }
+            Mock Get-JunctionTarget { 'C:\data\releases\1111111111111111111111111111111111111111' }
+            Mock Invoke-CandidateReleaseValidation { throw 'candidate must not run' }
+
+            { Invoke-ProductionDeploy } | Should -Throw '*mongo-consolidate*'
+
+            Should -Invoke Invoke-CandidateReleaseValidation -Times 0
+        }
+
+        It 'blocks a legacy release after the exact domain marker is active' {
+            $lock = [IO.MemoryStream]::new()
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; remote='origin'; branch='main' }
+            }
+            Mock Enter-DeploymentLock { $lock }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    state='TARGET_ACTIVE'; targetRelease='1' * 40; legacyRelease='3' * 40
+                }
+            }
+            Mock Read-ProductionDomainSchemaDirection {
+                [pscustomobject]@{
+                    state='TARGET_ACTIVE'; targetRelease='1' * 40; legacyRelease='3' * 40
+                }
+            }
+            Mock Resolve-OriginMainRelease { '2' * 40 }
+            Mock New-ReleaseFromOriginMain { 'C:\data\releases\legacy' }
+            Mock Read-ProductionReleaseDomainSchema { 'LEGACY' }
+            Mock Get-JunctionTarget { 'C:\data\releases\1111111111111111111111111111111111111111' }
+
+            { Invoke-ProductionDeploy } | Should -Throw '*exact target-schema release*'
         }
 
         It 'keeps recovery suspended for a caller-owned schema transition' {

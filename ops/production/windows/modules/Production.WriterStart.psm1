@@ -13,6 +13,8 @@ $script:AuthorizationPurposes = @(
     'LEGACY_ROLLBACK',
     'LEGACY_RESTORE'
 )
+$script:DomainCollectionManifestDigest =
+    '576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24'
 
 if (-not ('ChristopherBell.Dev.ProductionFixedRootNativeDirectory' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -987,6 +989,65 @@ function Publish-ProductionWriterStartGuardBundle {
     }
 }
 
+function ConvertFrom-ProductionDomainSchemaDirectionValue {
+    param([Parameter(Mandatory)]$Value)
+
+    Assert-ExactJsonProperties $Value @(
+        'version','state','updatedAtEpochMillis','targetRelease','legacyRelease',
+        'manifestDigest','evidenceDigest','backupIdentity','legacyDropped') `
+        'Domain marker'
+    if (($Value.version -isnot [int] -and $Value.version -isnot [long]) -or
+        [int]$Value.version -ne 2 -or
+        $Value.state -isnot [string] -or
+        -not ($script:MarkerStates -ccontains [string]$Value.state) -or
+        ($Value.updatedAtEpochMillis -isnot [int] -and
+            $Value.updatedAtEpochMillis -isnot [long]) -or
+        [long]$Value.updatedAtEpochMillis -lt 1 -or
+        $Value.targetRelease -isnot [string] -or
+        [string]$Value.targetRelease -cnotmatch '^[0-9a-f]{40}$' -or
+        $Value.legacyRelease -isnot [string] -or
+        [string]$Value.legacyRelease -cnotmatch '^[0-9a-f]{40}$' -or
+        $Value.manifestDigest -isnot [string] -or
+        [string]$Value.manifestDigest -cne $script:DomainCollectionManifestDigest -or
+        $Value.evidenceDigest -isnot [string] -or
+        [string]$Value.evidenceDigest -cnotmatch '^[0-9a-f]{64}$' -or
+        $Value.backupIdentity -isnot [string] -or
+        [string]$Value.backupIdentity -cnotmatch '^[0-9a-f]{64}$' -or
+        $Value.legacyDropped -isnot [bool]) {
+        throw 'Invalid domain marker.'
+    }
+    [pscustomobject][ordered]@{
+        version = 2
+        state = [string]$Value.state
+        updatedAtEpochMillis = [long]$Value.updatedAtEpochMillis
+        targetRelease = [string]$Value.targetRelease
+        legacyRelease = [string]$Value.legacyRelease
+        manifestDigest = [string]$Value.manifestDigest
+        evidenceDigest = [string]$Value.evidenceDigest
+        backupIdentity = [string]$Value.backupIdentity
+        legacyDropped = [bool]$Value.legacyDropped
+    }
+}
+
+function Read-ProductionDomainSchemaDirection {
+    param([Parameter(Mandatory)]$Config)
+    $path = Get-ProductionMusicSchemaDirectionPath -Config $Config
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        $value = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+        if (($value.PSObject.Properties.Name -ccontains 'version') -and
+            ($value.version -is [int] -or $value.version -is [long]) -and
+            [int]$value.version -eq 1) {
+            return $null
+        }
+        ConvertFrom-ProductionDomainSchemaDirectionValue -Value $value
+    } catch {
+        throw [System.IO.InvalidDataException]::new(
+            'Domain schema-direction marker is invalid.', $_.Exception)
+    }
+}
+
 function Read-ProductionMusicSchemaDirection {
     param([Parameter(Mandatory)]$Config)
     $path = Get-ProductionMusicSchemaDirectionPath -Config $Config
@@ -994,6 +1055,11 @@ function Read-ProductionMusicSchemaDirection {
     try {
         $value = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
             ConvertFrom-Json -ErrorAction Stop
+        if (($value.PSObject.Properties.Name -ccontains 'version') -and
+            ($value.version -is [int] -or $value.version -is [long]) -and
+            [int]$value.version -eq 2) {
+            return ConvertFrom-ProductionDomainSchemaDirectionValue -Value $value
+        }
         Assert-ExactJsonProperties $value @(
             'version','state','updatedAtEpochMillis','targetRelease','legacyRelease') 'Marker'
         if (($value.version -isnot [int] -and $value.version -isnot [long]) -or
@@ -1019,6 +1085,60 @@ function Read-ProductionMusicSchemaDirection {
     } catch {
         throw [System.IO.InvalidDataException]::new(
             'Music runtime schema-direction marker is invalid.', $_.Exception)
+    }
+}
+
+function Write-ProductionDomainSchemaDirection {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]
+        [ValidateSet('TARGET_ACTIVE','TARGET_CUTOVER_IN_PROGRESS','LEGACY_ACTIVE_RECONCILIATION_REQUIRED')]
+        [string]$State,
+        [Parameter(Mandatory)][ValidateScript({ $_ -cmatch '^[0-9a-f]{40}$' })]
+        [string]$TargetRelease,
+        [Parameter(Mandatory)][ValidateScript({ $_ -cmatch '^[0-9a-f]{40}$' })]
+        [string]$LegacyRelease,
+        [Parameter(Mandatory)][ValidateScript({ $_ -cmatch '^[0-9a-f]{64}$' })]
+        [string]$EvidenceDigest,
+        [Parameter(Mandatory)][ValidateScript({ $_ -cmatch '^[0-9a-f]{64}$' })]
+        [string]$BackupIdentity,
+        [Parameter(Mandatory)][bool]$LegacyDropped
+    )
+
+    $path = Get-ProductionMusicSchemaDirectionPath -Config $Config
+    $parent = Split-Path -Parent $path
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    if (Get-Command Protect-ProductionPath -ErrorAction SilentlyContinue) {
+        Protect-ProductionPath -Path $parent
+        Assert-ProtectedProductionPath -Path $parent | Out-Null
+    }
+    $temporary = "$path.$PID.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [ordered]@{
+            version = 2
+            state = $State
+            updatedAtEpochMillis = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            targetRelease = $TargetRelease
+            legacyRelease = $LegacyRelease
+            manifestDigest = $script:DomainCollectionManifestDigest
+            evidenceDigest = $EvidenceDigest
+            backupIdentity = $BackupIdentity
+            legacyDropped = $LegacyDropped
+        } | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding utf8
+        if (Get-Command Protect-ProductionPath -ErrorAction SilentlyContinue) {
+            Protect-ProductionPath -Path $temporary
+            Assert-ProtectedProductionPath -Path $temporary | Out-Null
+        }
+        Move-Item -LiteralPath $temporary -Destination $path -Force
+        if (Get-Command Protect-ProductionPath -ErrorAction SilentlyContinue) {
+            Protect-ProductionPath -Path $path
+            Assert-ProtectedProductionPath -Path $path | Out-Null
+        }
+        return Read-ProductionDomainSchemaDirection -Config $Config
+    } finally {
+        if (Test-Path -LiteralPath $temporary) {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -1095,7 +1215,19 @@ function Read-ProductionReleaseIdentity {
             }
             $schema = [string]$metadata.musicSchema
         }
-        [pscustomobject][ordered]@{ sha=$sha; musicSchema=$schema }
+        $domainSchema = $null
+        if ($names -ccontains 'domainSchema') {
+            if ($metadata.domainSchema -isnot [string] -or
+                [string]$metadata.domainSchema -cnotin @('LEGACY','TARGET')) {
+                throw 'Invalid release domain schema.'
+            }
+            $domainSchema = [string]$metadata.domainSchema
+        }
+        [pscustomobject][ordered]@{
+            sha=$sha
+            musicSchema=$schema
+            domainSchema=$domainSchema
+        }
     } catch {
         throw [System.IO.InvalidDataException]::new(
             'Active release metadata is invalid.', $_.Exception)
@@ -1279,7 +1411,14 @@ function Use-ProductionWriterStartAuthorization {
             throw 'Authorization is invalid.'
         }
         Assert-ProductionWriterStartIssuerIdentity -Authorization $value
-        $schema = [string]$ReleaseIdentity.musicSchema
+        $markerVersion = if ($Marker.PSObject.Properties['version']) {
+            [int]$Marker.version
+        } else { 1 }
+        $schema = if ($markerVersion -eq 2) {
+            [string]$ReleaseIdentity.domainSchema
+        } else {
+            [string]$ReleaseIdentity.musicSchema
+        }
         $purpose = [string]$value.purpose
         $validPurpose =
             ($purpose -eq 'TARGET_CUTOVER' -and $Marker.state -eq 'TARGET_CUTOVER_IN_PROGRESS' -and $schema -eq 'TARGET') -or
@@ -1308,7 +1447,13 @@ function Assert-ProductionWriterStartAllowed {
     Assert-ProductionFixedRootBoundary `
         -Config $Config -FixedRoot $FixedRoot | Out-Null
     $release = Read-ProductionReleaseIdentity -Config $Config
+    $domainMarker = Read-ProductionDomainSchemaDirection -Config $Config
     $marker = Read-ProductionMusicSchemaDirection -Config $Config
+    if (-not $domainMarker -and
+        $release.PSObject.Properties.Name -ccontains 'domainSchema' -and
+        [string]$release.domainSchema -eq 'TARGET') {
+        throw 'A target domain-schema release cannot start before the protected domain cutover.'
+    }
     if (-not $marker) {
         if (Get-ProductionMusicMigrationActivationForWriterStart -Config $Config) {
             throw 'Music schema-direction marker is absent after migration activation; writer start is blocked.'
@@ -1324,19 +1469,28 @@ function Assert-ProductionWriterStartAllowed {
         [string]$marker.legacyRelease
     } else { '' }
     $expectedSchema = if ($marker.state -eq 'TARGET_ACTIVE') { 'TARGET' } else { 'LEGACY' }
+    $markerVersion = if ($marker.PSObject.Properties['version']) {
+        [int]$marker.version
+    } else { 1 }
+    $releaseSchema = if ($markerVersion -eq 2) {
+        if (-not ($release.PSObject.Properties.Name -ccontains 'domainSchema')) { $null }
+        else { [string]$release.domainSchema }
+    } else { [string]$release.musicSchema }
     if ($release.sha -eq $expected -and
-        ($null -eq $release.musicSchema -or $release.musicSchema -eq $expectedSchema)) {
+        (($null -eq $releaseSchema -and $markerVersion -eq 1) -or
+            $releaseSchema -eq $expectedSchema)) {
         return
     }
     if (Use-ProductionWriterStartAuthorization -Config $Config -Marker $marker -ReleaseIdentity $release) {
         return
     }
-    throw 'The active release is incompatible with the Music schema-direction marker; writer start is blocked.'
+    throw 'The active release is incompatible with the protected schema-direction marker; writer start is blocked.'
 }
 
 Export-ModuleMember -Function `
     Assert-ProductionFixedRootDirectoryAcl,Assert-ProductionFixedRootBoundary,`
     Enter-ProductionFixedRootDeploymentLock,Get-ProductionMusicSchemaDirectionPath,`
     Read-ProductionMusicSchemaDirection,Write-ProductionMusicSchemaDirection,`
+    Read-ProductionDomainSchemaDirection,Write-ProductionDomainSchemaDirection,`
     Assert-ProductionWriterStartAllowed,Get-ProductionMusicMigrationActivationForWriterStart,`
     Read-ProductionReleaseIdentity

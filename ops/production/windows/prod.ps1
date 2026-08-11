@@ -1,11 +1,11 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('help','install','deploy','status','logs','restart','releases','rollback','backup','mongo-inventory','music-runtime-rollback','verify-startup','uninstall','auto-install','auto-deploy','auto-status','auto-remove','sensor-install','sensor-status','sensor-enable','sensor-disable')]
+    [ValidateSet('help','install','deploy','status','logs','restart','releases','rollback','backup','mongo-inventory','mongo-consolidation-preview','mongo-consolidate','mongo-consolidation-rollback','verify-startup','uninstall','auto-install','auto-deploy','auto-status','auto-remove','sensor-install','sensor-status','sensor-enable','sensor-disable')]
     [string]$Command = 'help',
     [switch]$WhatIf,
-    [switch]$MusicSchemaCutover,
-    [switch]$ConfirmMusicRuntimeRollback,
+    [switch]$ConfirmDomainCollectionCutover,
+    [switch]$ConfirmDomainCollectionRollback,
     [string]$CloudflareTokenPath
 )
 
@@ -13,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 $moduleRoot = Join-Path $PSScriptRoot 'modules'
 Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $moduleRoot 'Production.WriterStart.psm1') -Global -Force
-foreach ($module in 'Production.MusicRuntime','Production.Deploy','Production.SharedFolder','Production.Install','Production.Sensors','Production.Operations','Production.AutoDeploy') {
+foreach ($module in 'Production.MusicRuntime','Production.Deploy','Production.SharedFolder','Production.Install','Production.Sensors','Production.Operations','Production.AutoDeploy','Production.DomainCollections') {
     Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
 }
 
@@ -21,19 +21,15 @@ function Invoke-ProductionCommand {
     param(
         [Parameter(Mandatory)][string]$Command,
         [switch]$WhatIf,
-        [switch]$MusicSchemaCutover,
-        [switch]$ConfirmMusicRuntimeRollback,
+        [switch]$ConfirmDomainCollectionCutover,
+        [switch]$ConfirmDomainCollectionRollback,
         [string]$CloudflareTokenPath
     )
 
     $handlers = @{
         help = { Show-ProductionHelp }
         install = { Install-ProductionRuntime -WhatIf:$WhatIf -CloudflareTokenPath $CloudflareTokenPath }
-        deploy = {
-            Invoke-ProductionDeploy `
-                -WhatIf:$WhatIf `
-                -MusicSchemaCutover:$MusicSchemaCutover
-        }
+        deploy = { Invoke-ProductionDeploy -WhatIf:$WhatIf }
         status = { Get-ProductionStatus }
         logs = { Watch-ProductionLogs }
         restart = { Restart-ProductionService -Verify }
@@ -43,14 +39,24 @@ function Invoke-ProductionCommand {
         'mongo-inventory' = {
             Get-ProductionMongoCollectionInventory | ConvertTo-Json -Depth 100
         }
-        'music-runtime-rollback' = {
-            if (-not $WhatIf -and -not $ConfirmMusicRuntimeRollback) {
-                throw 'Music runtime rollback requires explicit confirmation.'
-            } else {
-                Invoke-ProductionMigrationAwareRollback `
-                    -Confirm:$ConfirmMusicRuntimeRollback `
-                    -WhatIf:$WhatIf
+        'mongo-consolidation-preview' = {
+            Get-ProductionDomainCollectionPreview
+        }
+        'mongo-consolidate' = {
+            if (-not $WhatIf -and -not $ConfirmDomainCollectionCutover) {
+                throw 'Domain collection consolidation requires explicit confirmation.'
             }
+            Invoke-ProductionDomainCollectionCutover `
+                -Confirm:$ConfirmDomainCollectionCutover `
+                -WhatIf:$WhatIf
+        }
+        'mongo-consolidation-rollback' = {
+            if (-not $WhatIf -and -not $ConfirmDomainCollectionRollback) {
+                throw 'Domain collection rollback requires explicit confirmation.'
+            }
+            Invoke-ProductionDomainCollectionRollback `
+                -Confirm:$ConfirmDomainCollectionRollback `
+                -WhatIf:$WhatIf
         }
         'verify-startup' = { Test-ProductionStartup }
         uninstall = { Uninstall-ProductionRuntime -WhatIf:$WhatIf }
@@ -68,6 +74,6 @@ function Invoke-ProductionCommand {
 }
 
 Invoke-ProductionCommand -Command $Command -WhatIf:$WhatIf `
-    -MusicSchemaCutover:$MusicSchemaCutover `
-    -ConfirmMusicRuntimeRollback:$ConfirmMusicRuntimeRollback `
+    -ConfirmDomainCollectionCutover:$ConfirmDomainCollectionCutover `
+    -ConfirmDomainCollectionRollback:$ConfirmDomainCollectionRollback `
     -CloudflareTokenPath $CloudflareTokenPath

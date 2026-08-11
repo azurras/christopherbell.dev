@@ -528,14 +528,14 @@ function Show-ProductionHelp {
 Usage: prod.cmd <command> [-WhatIf]
 
 Commands: install, deploy, status, logs, restart, releases, rollback, backup,
-          mongo-inventory, music-runtime-rollback, verify-startup, uninstall,
+          mongo-inventory, mongo-consolidation-preview, mongo-consolidate,
+          mongo-consolidation-rollback, verify-startup, uninstall,
           auto-install, auto-deploy, auto-status, auto-remove, sensor-install,
           sensor-status, sensor-enable, sensor-disable
 
-Use -WhatIf to preview music-runtime-rollback. Confirmed execution requires
--ConfirmMusicRuntimeRollback and uses the single-lock coordinated binary rollback boundary.
-The first target-schema deployment is manual only and requires
-prod.cmd deploy -MusicSchemaCutover. Automatic deployment never initiates first cutover.
+mongo-consolidation-preview is read-only. mongo-consolidate requires
+-ConfirmDomainCollectionCutover. mongo-consolidation-rollback requires
+-ConfirmDomainCollectionRollback. Automatic deployment never supplies either switch.
 '@ | Write-Output
 }
 

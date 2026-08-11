@@ -522,10 +522,12 @@ With GNU Make, run the identical inventory command:
 make prod-mongo-inventory
 ```
 
-The command connects only to `mongodb://127.0.0.1:27017/admin`, selects the
+The command connects only to the fixed loopback MongoDB listener, selects the
 `christopherbell` database inside the audited script, and returns collection
 names/types (including time-series namespaces), strictly allowlisted collection
-options, counts, storage/index sizes, and index definitions. Time-series counts
+options, counts, storage/index sizes, index definitions, the fixed manifest
+digest, compliance flags, and one metadata-only count for each of the 52
+allowlisted kinds. Time-series counts
 are `null` because `collStats` does not expose a measurement count; their size
 and index metadata remain populated. Compound-index key order is preserved.
 Integer-only collection metadata, including capped size/count limits,
@@ -549,6 +551,39 @@ Collection cleanup requires a separate approved plan with a current compressed
 backup, SHA-256, restore validation, exact-namespace backup, impact report,
 one-at-a-time removal, rollback retention, and Mongo-backed website verification.
 This command cannot rename, merge, drop, compact, repair, or clean collections.
+
+## Domain Collection Consolidation
+
+Preview without mutation:
+
+```powershell
+.\prod.cmd mongo-consolidation-preview
+```
+
+During an approved maintenance window, execute the single-lock cutover with the
+exact confirmation switch:
+
+```powershell
+.\prod.cmd mongo-consolidate -ConfirmDomainCollectionCutover
+```
+
+The command proves a fresh hash-bound, dry-restored backup and an isolated
+candidate database/port before stopping the live writer. SCM recovery remains
+suspended for live mutation. It stages and verifies the 14 targets, starts and
+verifies the target release, stops the writer again, and only then drops legacy
+collections one at a time. Automatic deployment cannot initiate or confirm it.
+
+For guarded recovery use:
+
+```powershell
+.\prod.cmd mongo-consolidation-rollback -WhatIf
+.\prod.cmd mongo-consolidation-rollback -ConfirmDomainCollectionRollback
+```
+
+Before deletion, rollback reverses publication. After deletion, it restores
+and verifies the exact bound backup before selecting or starting the old
+writer. If any identity or postcondition cannot be proved, leave
+`ChristopherBellDev` stopped and preserve all evidence.
 
 ## Native MongoDB Backup and Restore
 
@@ -657,6 +692,9 @@ sidecar.
   verification: the website remains stopped and unready. Do not restart the
   prior binary; preserve the verified backup and repair forward. Restore live
   data only as a separate, explicitly approved maintenance operation.
+- Domain consolidation failure: use the protected cutover state and
+  `mongo-consolidation-rollback`; post-deletion recovery restores the bound
+  archive before the prior writer starts. Do not use generic `rollback`.
 - MongoDB failure: stop deployment activity, inspect the native MongoDB service
   and logs, and restore only from a verified archive after explicit approval.
 - cloudflared failure: restart the native service, inspect Windows events, and

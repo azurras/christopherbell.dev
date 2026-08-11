@@ -136,6 +136,28 @@ function Read-ProductionReleaseMusicSchema {
     }
 }
 
+function Read-ProductionReleaseDomainSchema {
+    param(
+        [Parameter(Mandatory)][string]$Release,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Sha)
+    try {
+        $value = Get-Content -LiteralPath (Join-Path $Release 'release.json') -Raw `
+            -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $names = @($value.PSObject.Properties.Name)
+        if (-not ($names -ccontains 'sha') -or
+            -not ($names -ccontains 'domainSchema') -or
+            $value.sha -isnot [string] -or [string]$value.sha -cne $Sha -or
+            $value.domainSchema -isnot [string] -or
+            [string]$value.domainSchema -cnotin @('LEGACY','TARGET')) {
+            throw 'Invalid release domain schema metadata.'
+        }
+        return [string]$value.domainSchema
+    } catch {
+        throw [System.IO.InvalidDataException]::new(
+            'Release domain schema metadata is invalid.', $_.Exception)
+    }
+}
+
 function Get-ProductionReleaseDomainSchema {
     param([Parameter(Mandatory)][string]$SourceTree)
     $gate = Join-Path $SourceTree `
@@ -876,6 +898,7 @@ function Invoke-ProductionDeploy {
         }
     $lock = $guard.Lock
     try {
+        $domainDirection = Read-ProductionDomainSchemaDirection -Config $config
         $direction = Read-ProductionMusicSchemaDirection -Config $config
         if (-not $direction) {
             try {
@@ -937,6 +960,15 @@ function Invoke-ProductionDeploy {
         if ($WhatIf) { Write-Output "Would deploy $($config.remote)/$($config.branch) at $sha"; return }
         $release = New-ReleaseFromOriginMain $config $sha
         $releaseMusicSchema = Read-ProductionReleaseMusicSchema -Release $release -Sha $sha
+        $releaseDomainSchema = Read-ProductionReleaseDomainSchema `
+            -Release $release -Sha $sha
+        if (-not $domainDirection -and $releaseDomainSchema -eq 'TARGET') {
+            throw ('A target domain-schema release requires the guarded ' +
+                'mongo-consolidate command. Automatic and ordinary deploy cannot initiate cutover.')
+        }
+        if ($domainDirection -and $releaseDomainSchema -ne 'TARGET') {
+            throw 'An active domain-schema marker requires an exact target-schema release.'
+        }
         if (-not $direction -and -not $MusicSchemaCutover) {
             if ($releaseMusicSchema -cne 'LEGACY') {
                 throw ('A target-schema release requires the protected first-cutover path with ' +
@@ -1128,4 +1160,11 @@ function Confirm-ProductionMusicTargetActive {
     }
 }
 
-Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,New-ReleaseFromOriginMain,Start-ProductionJar,Test-ProductionEndpoints,Test-ProductionPublicEndpoints,Test-CandidateRelease,Stop-ProductionWebsiteService,Set-ProductionWebsiteStartupType,Switch-ProductionRelease,Switch-ProductionReleaseAfterMusicReconciliation,Remove-ExpiredReleases,Confirm-ProductionMusicTargetActive
+Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,`
+    New-ReleaseFromOriginMain,Start-ProductionJar,Test-ProductionEndpoints,`
+    Test-ProductionPublicEndpoints,Test-CandidateRelease,New-CandidateDatabaseName,`
+    Restore-CandidateDatabaseFromBackup,Remove-CandidateDatabase,`
+    Stop-ProductionWebsiteService,Set-ProductionWebsiteRecoveryPolicy,`
+    Set-ProductionWebsiteStartupType,Switch-ProductionRelease,`
+    Switch-ProductionReleaseAfterMusicReconciliation,Remove-ExpiredReleases,`
+    Confirm-ProductionMusicTargetActive

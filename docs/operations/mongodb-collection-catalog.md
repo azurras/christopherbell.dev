@@ -109,8 +109,11 @@ Naming Rules
 Live Comparison Rules
 ---------------------
 
-`prod.cmd mongo-inventory` returns metadata only. Compare its physical names with
-this table. Source-only names may be features that have never persisted data.
-Live-only names remain unreviewed extras until current source, migrations,
-operations scripts, history, count, size, options, and indexes establish their
-ownership. No result from this command authorizes deletion.
+`prod.cmd mongo-inventory` returns metadata only. It also reports the fixed
+domain-manifest digest, exact collection/kind/index compliance, and one count
+for each of the 52 allowlisted kinds; it never returns document values. Before
+consolidation, compare legacy physical names with this table. After
+consolidation, require exactly the 14 manifest target names and all compliance
+flags. No inventory result by itself authorizes deletion; only the guarded
+`mongo-consolidate -ConfirmDomainCollectionCutover` workflow owns the
+backup-bound, deletion-last cutover.
