@@ -4,7 +4,7 @@ import com.mongodb.MongoException;
 import java.util.List;
 import org.bson.Document;
 
-/** Builds optimizer-visible guards for stored domain envelopes. */
+/** Builds blocking, optimizer-visible guards for selected domain envelopes. */
 final class DomainEnvelopeAggregationValidation {
   private static final int CONVERSION_FAILURE_CODE = 241;
   private static final String VALIDATION_FIELD =
@@ -17,21 +17,26 @@ final class DomainEnvelopeAggregationValidation {
 
   private DomainEnvelopeAggregationValidation() {}
 
-  static List<Document> stages(String expectedKind, int expectedSchemaVersion) {
-    var validation = new Document("$cond", List.of(
+  static List<Document> stages(
+      Document trustedSelector, String expectedKind, int expectedSchemaVersion) {
+    var candidateValidity = new Document("$cond", List.of(
         validEnvelope(expectedKind, expectedSchemaVersion),
-        true,
-        controlledFailure()));
+        1,
+        0));
+    var validationWindow = new Document("$min", candidateValidity)
+        .append("window", new Document(
+            "documents", List.of("unbounded", "unbounded")));
     var preserveValidatedEnvelope = new Document("$cond", List.of(
-        "$" + VALIDATION_FIELD,
+        equal("$" + VALIDATION_FIELD, 1),
         new Document("_id", "$_id")
             .append("_kind", "$_kind")
             .append("schemaVersion", "$schemaVersion")
             .append("payload", "$payload"),
-        "$$ROOT"));
+        controlledFailure()));
     return List.of(
-        new Document("$match", new Document("_kind", expectedKind)),
-        new Document("$set", new Document(VALIDATION_FIELD, validation)),
+        new Document("$match", new Document(trustedSelector)),
+        new Document("$setWindowFields", new Document(
+            "output", new Document(VALIDATION_FIELD, validationWindow))),
         new Document("$replaceWith", preserveValidatedEnvelope));
   }
 

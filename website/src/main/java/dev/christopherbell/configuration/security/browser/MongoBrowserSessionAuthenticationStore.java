@@ -24,7 +24,7 @@ public class MongoBrowserSessionAuthenticationStore implements BrowserSessionAut
   @Override
   public Optional<BrowserSessionAuthentication> findById(String sessionId) {
     var aggregation = Aggregation.newAggregation(
-        Aggregation.match(Criteria.where("_id").is(sessionId)),
+        Aggregation.match(Criteria.where("id").is(sessionId)),
         Aggregation.limit(1),
         context -> new Document("$lookup", new Document("from", ACCOUNT_COLLECTION)
             .append("let", new Document("accountId", "$accountId"))

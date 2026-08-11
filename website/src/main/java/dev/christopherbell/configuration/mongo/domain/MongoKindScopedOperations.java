@@ -224,7 +224,11 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
     Objects.requireNonNull(domainAggregation, "domainAggregation");
     Objects.requireNonNull(resultType, "resultType");
     var operations = new java.util.ArrayList<AggregationOperation>();
-    DomainEnvelopeAggregationValidation.stages(kind.kind(), kind.schemaVersion()).stream()
+    var selector = fieldMapper.mapQuery(
+        new org.springframework.data.mongodb.core.query.BasicQuery(
+            domainAggregation.trustedSelector())).getQueryObject();
+    DomainEnvelopeAggregationValidation.stages(
+        selector, kind.kind(), kind.schemaVersion()).stream()
         .map(Document::new)
         .<AggregationOperation>map(stage -> context -> stage)
         .forEach(operations::add);

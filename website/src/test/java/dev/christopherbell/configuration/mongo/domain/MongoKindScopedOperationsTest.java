@@ -214,18 +214,22 @@ class MongoKindScopedOperationsTest {
 
     var pipeline = aggregationCaptor.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT);
     assertThat(pipeline.get(0))
-        .isEqualTo(new Document("$match", new Document("_kind", "sample_kind")));
-    var validationField = onlyKey(pipeline.get(1).get("$set", Document.class));
+        .isEqualTo(new Document("$match", new Document("$and", List.of(
+            new Document("_kind", "sample_kind"),
+            new Document("payload.display_name", "Ada")))));
+    var window = pipeline.get(1).get("$setWindowFields", Document.class);
+    var validationField = onlyKey(window.get("output", Document.class));
     assertThat(validationField).startsWith("__cbell_domain_envelope_validation_");
+    assertThat(pipeline.get(0).toJson()).contains("payload.display_name", "Ada");
     assertThat(pipeline.get(1).toJson())
-        .contains("$cond", "$objectToArray", "schemaVersion", "int", "legacyId", "payload");
+        .contains("$min", "unbounded", "$objectToArray", "schemaVersion", "int",
+            "legacyId", "payload");
     assertThat(pipeline.get(2).get("$replaceWith", Document.class).toJson())
         .contains(validationField, "$_id", "$_kind", "$schemaVersion", "$payload");
     assertThat(pipeline.get(3)).isEqualTo(new Document("$replaceRoot", new Document(
         "newRoot", new Document("$mergeObjects", List.of(
             "$payload", new Document("_id", "$_id.legacyId"))))));
-    assertThat(pipeline.get(4))
-        .isEqualTo(new Document("$match", new Document("displayName", "Ada")));
+    assertThat(pipeline).hasSize(4);
   }
 
   @Test
@@ -252,13 +256,13 @@ class MongoKindScopedOperationsTest {
     var foreignPipeline = (List<Document>) emittedLookup.get("pipeline", List.class);
     assertThat(foreignPipeline.get(0))
         .isEqualTo(new Document("$match", new Document("_kind", "post")));
-    var validationField = onlyKey(foreignPipeline.get(1).get("$set", Document.class));
+    var validationField = onlyKey(foreignPipeline.get(1)
+        .get("$setWindowFields", Document.class).get("output", Document.class));
     assertThat(foreignPipeline.get(2).get("$replaceWith", Document.class).toJson())
         .contains(validationField, "$_id", "$_kind", "$schemaVersion", "$payload");
     assertThat(foreignPipeline.get(3))
-        .isEqualTo(new Document("$match", new Document("_kind", "post")));
-    assertThat(foreignPipeline.get(4))
         .isEqualTo(new Document("$project", new Document("payload", 1)));
+    assertThat(foreignPipeline).hasSize(4);
   }
 
   @Test
@@ -345,6 +349,44 @@ class MongoKindScopedOperationsTest {
         .append("pipeline", List.of(new Document("$match", new Document("$or", List.of(
             new Document("_kind", "post"),
             new Document("payload.accountId", "attacker-selected"))))))
+        .append("as", "leak")));
+
+    assertThatThrownBy(() -> KindScopedAggregation.withForeignKinds(
+        aggregation, KindScopedAggregation.ForeignKind.POST))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Mongo domain aggregation stage is not approved.");
+  }
+
+  @Test
+  void aggregationRejectsUntrustedForeignSelectorOperatorsAndVariables() {
+    var unsafeSelectors = List.of(
+        new Document("$and", List.of(
+            new Document("_kind", "post"),
+            new Document("payload.id", new Document("$ne", "secret")))),
+        new Document("$expr", new Document("$and", List.of(
+            new Document("$eq", List.of("$_kind", "post")),
+            new Document("$eq", List.of("$_id.legacyId", "$$undeclared"))))));
+
+    for (var selector : unsafeSelectors) {
+      var aggregation = Aggregation.newAggregation(context -> new Document("$lookup", new Document()
+          .append("from", "content")
+          .append("pipeline", List.of(new Document("$match", selector)))
+          .append("as", "leak")));
+
+      assertThatThrownBy(() -> KindScopedAggregation.withForeignKinds(
+          aggregation, KindScopedAggregation.ForeignKind.POST))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("Mongo domain aggregation stage is not approved.");
+    }
+  }
+
+  @Test
+  void aggregationRejectsLookupOptionsOutsideTheClosedPipelineModel() {
+    var aggregation = Aggregation.newAggregation(context -> new Document("$lookup", new Document()
+        .append("from", "content")
+        .append("localField", "accountId")
+        .append("foreignField", "payload.accountId")
+        .append("pipeline", List.of(new Document("$match", new Document("_kind", "post"))))
         .append("as", "leak")));
 
     assertThatThrownBy(() -> KindScopedAggregation.withForeignKinds(

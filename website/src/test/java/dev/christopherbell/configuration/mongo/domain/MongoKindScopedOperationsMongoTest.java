@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.mongodb.ConnectionString;
+import com.mongodb.ExplainVerbosity;
 import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
@@ -383,6 +384,107 @@ class MongoKindScopedOperationsMongoTest {
   }
 
   @Test
+  void aggregationLimitCannotHideASelectedMalformedCandidateAfterAValidCandidate() {
+    mongo = template("aggregate-selected-limit");
+    var operations = operations("sample_selected_limit");
+    operations.insert(new SampleDocument(
+        "valid-id", "Selected", 1L, Decimal128.parse("1.0"), null));
+    mongo.getCollection("content").insertOne(new Document(
+        "_id", NamespacedMongoId.of("sample_selected_limit", "malformed-id").toBson())
+        .append("_kind", "sample_selected_limit")
+        .append("schemaVersion", 1)
+        .append("payload", new Document("display_name", "Selected")
+            .append("visits", 2L)
+            .append("amount", Decimal128.parse("2.0"))
+            .append("version", 0L))
+        .append("unexpected", true));
+    var aggregation = Aggregation.newAggregation(
+        Aggregation.match(Criteria.where("visits").gte(1L)),
+        Aggregation.limit(1));
+
+    assertThatThrownBy(() -> operations.aggregate(
+        KindScopedAggregation.local(aggregation), SampleDocument.class))
+        .isInstanceOf(MalformedDomainDocumentException.class)
+        .hasMessage("Mongo domain document is malformed.")
+        .hasNoCause();
+  }
+
+  @Test
+  void aggregationTrustedSelectorExcludesUnrelatedMalformedCandidates() {
+    mongo = template("aggregate-unselected-malformed");
+    var operations = operations("sample_unselected_malformed");
+    var valid = operations.insert(new SampleDocument(
+        "valid-id", "Selected", 1L, Decimal128.parse("1.0"), null));
+    mongo.getCollection("content").insertOne(new Document(
+        "_id", NamespacedMongoId.of("sample_unselected_malformed", "malformed-id").toBson())
+        .append("_kind", "sample_unselected_malformed")
+        .append("schemaVersion", 1)
+        .append("payload", new Document("display_name", "Excluded")
+            .append("visits", 2L)
+            .append("amount", Decimal128.parse("2.0"))
+            .append("version", 0L))
+        .append("unexpected", true));
+    var aggregation = Aggregation.newAggregation(
+        Aggregation.match(Criteria.where("visits").is(1L)));
+
+    assertThat(operations.aggregate(
+        KindScopedAggregation.local(aggregation), SampleDocument.class))
+        .containsExactly(valid);
+  }
+
+  @Test
+  void correlatedLookupExplainUsesTheBoundedSelectorIndexBeforeTheWindowBarrier() {
+    mongo = template("aggregate-correlated-explain");
+    var operations = operations("sample_correlated_local");
+    operations.insert(new SampleDocument(
+        "local-id", "Local", 7L, Decimal128.parse("1.0"), null));
+    var postKind = DomainCollectionManifest.forKind("post").orElseThrow();
+    mongo.getCollection("content").insertOne(new Document(
+        "_id", NamespacedMongoId.of("post", 7L).toBson())
+        .append("_kind", "post")
+        .append("schemaVersion", postKind.schemaVersion())
+        .append("payload", new Document("id", "post-id")));
+    mongo.getCollection("content").createIndex(
+        new Document("_kind", 1).append("_id.legacyId", 1),
+        new com.mongodb.client.model.IndexOptions().name("kind_legacy_selector"));
+    var lookup = new Document("$lookup", new Document("from", "content")
+        .append("let", new Document("foreignId", "$visits"))
+        .append("pipeline", List.of(new Document("$match", new Document(
+            "$expr", new Document("$and", List.of(
+                new Document("$eq", List.of("$_kind", "post")),
+                new Document("$eq", List.of("$_id.legacyId", "$$foreignId"))))))))
+        .append("as", "foreign"));
+    var descriptor = KindScopedAggregation.withForeignKinds(
+        Aggregation.newAggregation(context -> lookup),
+        KindScopedAggregation.ForeignKind.POST);
+    var rawPipeline = List.of(
+        new Document("$match", new Document("_kind", "sample_correlated_local")),
+        new Document("$replaceWith", new Document(
+            "$mergeObjects", List.of("$payload", new Document("_id", "$_id.legacyId")))),
+        descriptor.pipeline().getFirst());
+
+    var explanation = mongo.getCollection("content")
+        .aggregate(rawPipeline)
+        .explain(ExplainVerbosity.EXECUTION_STATS);
+    @SuppressWarnings("unchecked")
+    var stages = (List<Document>) explanation.get("stages", List.class);
+    var lookupExplain = stages.stream()
+        .filter(stage -> stage.containsKey("$lookup"))
+        .findFirst()
+        .orElseThrow();
+    assertThat(lookupExplain.get("indexesUsed", List.class))
+        .containsExactly("kind_legacy_selector");
+    assertThat(((Number) lookupExplain.get("totalDocsExamined")).longValue()).isEqualTo(1L);
+    assertThat(((Number) lookupExplain.get("totalKeysExamined")).longValue()).isEqualTo(1L);
+    assertThat(((Number) lookupExplain.get("collectionScans")).longValue()).isZero();
+    var emittedLookup = descriptor.pipeline().getFirst().get("$lookup", Document.class);
+    @SuppressWarnings("unchecked")
+    var foreignPipeline = (List<Document>) emittedLookup.get("pipeline", List.class);
+    assertThat(foreignPipeline.get(0)).containsKey("$match");
+    assertThat(foreignPipeline.get(1)).containsKey("$setWindowFields");
+  }
+
+  @Test
   void aggregationValidatesBeforeProjectionWithoutTreatingProjectedRowsAsEnvelopes() {
     mongo = template("aggregate-valid-projection");
     var operations = operations("sample_valid_projection");
@@ -410,7 +512,7 @@ class MongoKindScopedOperationsMongoTest {
 
     assertThatThrownBy(() -> operations.aggregate(
         KindScopedAggregation.local(Aggregation.newAggregation(
-            Aggregation.match(Criteria.where("displayName").is("nobody")))),
+            context -> new Document("$project", new Document("_id", 0)))),
         Document.class))
         .isInstanceOf(MalformedDomainDocumentException.class)
         .hasMessage("Mongo domain document is malformed.")
@@ -430,7 +532,7 @@ class MongoKindScopedOperationsMongoTest {
 
     assertThatThrownBy(() -> operations.aggregate(
         KindScopedAggregation.local(Aggregation.newAggregation(
-            Aggregation.match(Criteria.where("displayName").is("nobody")))),
+            context -> new Document("$project", new Document("_id", 0)))),
         Document.class))
         .isInstanceOf(MalformedDomainDocumentException.class)
         .hasMessage("Mongo domain document is malformed.")
@@ -451,7 +553,7 @@ class MongoKindScopedOperationsMongoTest {
 
     assertThatThrownBy(() -> operations.aggregate(
         KindScopedAggregation.local(Aggregation.newAggregation(
-            Aggregation.match(Criteria.where("displayName").is("nobody")))),
+            context -> new Document("$project", new Document("_id", 0)))),
         Document.class))
         .isInstanceOf(MalformedDomainDocumentException.class)
         .hasMessage("Mongo domain document is malformed.")
@@ -474,7 +576,7 @@ class MongoKindScopedOperationsMongoTest {
 
     assertThatThrownBy(() -> operations.aggregate(
         KindScopedAggregation.local(Aggregation.newAggregation(
-            Aggregation.match(Criteria.where("displayName").is("nobody")))),
+            context -> new Document("$project", new Document("_id", 0)))),
         Document.class))
         .isInstanceOf(MalformedDomainDocumentException.class)
         .hasMessage("Mongo domain document is malformed.")
