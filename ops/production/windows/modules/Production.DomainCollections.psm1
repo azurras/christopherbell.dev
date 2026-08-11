@@ -268,6 +268,8 @@ function Invoke-ProductionDomainCollectionEngine {
 
 function New-ProductionDomainCollectionPreviewContext {
     param([Parameter(Mandatory)]$Config)
+    $null = Get-ProductionDomainCollectionTerminalReinitializationState `
+        -Config $Config
     $active = Get-JunctionTarget (Join-Path $Config.programDataRoot 'current')
     if (-not $active) { throw 'The active production release is unavailable.' }
     $release = Split-Path -Leaf $active
@@ -432,13 +434,196 @@ function New-ProductionDomainCollectionVerifiedBackup {
     }
 }
 
+function Assert-ProductionDomainCollectionTerminalLegacyState {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]$Marker,
+        [Parameter(Mandatory)]$State
+    )
+    if ([int]$Marker.version -ne 2 -or
+        [string]$Marker.state -cne 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED' -or
+        [bool]$Marker.legacyDropped) {
+        throw ('Terminal domain collection reinitialization requires an exact ' +
+            'legacy-compatible v2 marker.')
+    }
+    if ([string]$State.state -cne 'ROLLED_BACK') {
+        throw 'Terminal domain collection reinitialization requires exact ROLLED_BACK state.'
+    }
+    if ([string]$Marker.targetRelease -cne [string]$State.targetRelease -or
+        [string]$Marker.legacyRelease -cne [string]$State.legacyRelease -or
+        [string]$Marker.evidenceDigest -cne [string]$State.evidenceDigest -or
+        [string]$Marker.backupIdentity -cne [string]$State.backupIdentity) {
+        throw 'Terminal domain collection marker and protected state identities do not match.'
+    }
+    $active = Get-JunctionTarget (Join-Path $Config.programDataRoot 'current')
+    if (-not $active) {
+        throw 'Terminal domain collection state requires an active legacy release.'
+    }
+    $active = Assert-ReleasePath $Config $active
+    $expected = Assert-ReleasePath $Config (
+        Join-Path $Config.programDataRoot "releases\$($State.legacyRelease)")
+    if (-not [string]::Equals(
+            [IO.Path]::GetFullPath($active),[IO.Path]::GetFullPath($expected),
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Terminal domain collection state does not own the active legacy release.'
+    }
+    if ((Get-ProductionDomainCollectionReleaseSchema `
+            -Release $active -Sha ([string]$State.legacyRelease)) -cne 'LEGACY') {
+        throw 'Terminal domain collection active release is not an exact legacy domain-schema release.'
+    }
+    return $State
+}
+
+function Get-ProductionDomainCollectionTerminalReinitializationState {
+    param([Parameter(Mandatory)]$Config)
+    $marker = Read-ProductionDomainSchemaDirection -Config $Config
+    if (-not $marker) {
+        $statePath = Get-ProductionDomainCollectionStatePath -Config $Config
+        if (Test-Path -LiteralPath $statePath -PathType Leaf) {
+            throw ('Protected domain collection state exists without its exact marker; ' +
+                'preview and cutover are blocked.')
+        }
+        return $null
+    }
+    if ([string]$marker.state -cne 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
+        throw ('Domain collection preview or cutover requires an absent marker or an exact ' +
+            'terminal legacy rollback state.')
+    }
+    $state = Read-ProductionDomainCollectionProtectedState -Config $Config
+    if ($state.PSObject.Properties['terminalReconciliationAuthorized'] -and
+        [bool]$state.terminalReconciliationAuthorized) {
+        throw ('Terminal domain collection state requires rollback reconciliation ' +
+            'before preview or a future cutover.')
+    }
+    Assert-ProductionDomainCollectionTerminalLegacyState `
+        -Config $Config -Marker $marker -State $state
+}
+
+function Archive-ProductionDomainCollectionTerminalState {
+    param([Parameter(Mandatory)]$State)
+    if ([string]$State.state -cne 'ROLLED_BACK') {
+        throw 'Only exact terminal domain collection state may be archived.'
+    }
+    $source = Get-ProductionDomainCollectionStatePath -Config $State.config
+    Assert-ProductionPathNotReparse -Path $source | Out-Null
+    Assert-ProtectedProductionPath -Path $source | Out-Null
+    $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).
+        Hash.ToLowerInvariant()
+    $historyRoot = Join-Path $State.config.programDataRoot 'state\history'
+    New-Item -ItemType Directory -Path $historyRoot -Force | Out-Null
+    Protect-ProductionPath -Path $historyRoot
+    Assert-ProtectedProductionPath -Path $historyRoot | Out-Null
+    $destination = Join-Path $historyRoot `
+        "domain-collection-cutover.$sourceHash.json"
+    if (Test-Path -LiteralPath $destination -PathType Leaf) {
+        Assert-ProductionPathNotReparse -Path $destination | Out-Null
+        Assert-ProtectedProductionPath -Path $destination | Out-Null
+        $existingHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).
+            Hash.ToLowerInvariant()
+        if ($existingHash -cne $sourceHash) {
+            throw 'Protected terminal domain collection history identity changed.'
+        }
+        return $destination
+    }
+    $temporary = "$destination.$PID.$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        Copy-Item -LiteralPath $source -Destination $temporary
+        Protect-ProductionPath -Path $temporary
+        Assert-ProtectedProductionPath -Path $temporary | Out-Null
+        $temporaryHash = (Get-FileHash -LiteralPath $temporary -Algorithm SHA256).
+            Hash.ToLowerInvariant()
+        if ($temporaryHash -cne $sourceHash) {
+            throw 'Staged terminal domain collection history identity changed.'
+        }
+        Move-Item -LiteralPath $temporary -Destination $destination
+        Protect-ProductionPath -Path $destination
+        Assert-ProtectedProductionPath -Path $destination | Out-Null
+        $destinationHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).
+            Hash.ToLowerInvariant()
+        $currentSourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).
+            Hash.ToLowerInvariant()
+        if ($destinationHash -cne $sourceHash -or
+            $currentSourceHash -cne $sourceHash) {
+            throw 'Published terminal domain collection history identity changed.'
+        }
+        return $destination
+    } finally {
+        if (Test-Path -LiteralPath $temporary) {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-ProductionDomainCollectionTerminalReconciliationPath {
+    param([Parameter(Mandatory)]$Config)
+    Join-Path $Config.programDataRoot `
+        'state\domain-collection-rollback-reconciliation.json'
+}
+
+function Write-ProductionDomainCollectionTerminalReconciliationAuthorization {
+    param([Parameter(Mandatory)]$State)
+    Write-ProductionDomainCollectionProtectedJson `
+        -Config $State.config `
+        -Path (Get-ProductionDomainCollectionTerminalReconciliationPath `
+            -Config $State.config) `
+        -Value ([ordered]@{
+            version = 1
+            targetRelease = [string]$State.targetRelease
+            legacyRelease = [string]$State.legacyRelease
+            evidenceDigest = [string]$State.evidenceDigest
+            backupIdentity = [string]$State.backupIdentity
+        })
+}
+
+function Test-ProductionDomainCollectionTerminalReconciliationAuthorization {
+    param([Parameter(Mandatory)]$State)
+    $path = Get-ProductionDomainCollectionTerminalReconciliationPath `
+        -Config $State.config
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    try {
+        Assert-ProductionPathNotReparse -Path $path | Out-Null
+        Assert-ProtectedProductionPath -Path $path | Out-Null
+        $value = Get-Content -LiteralPath $path -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+        Assert-ProductionDomainCollectionExactProperties -Value $value -Names @(
+            'version','targetRelease','legacyRelease','evidenceDigest',
+            'backupIdentity') -Description 'Terminal reconciliation authorization'
+        if (($value.version -isnot [int] -and $value.version -isnot [long]) -or
+            [int]$value.version -ne 1 -or
+            $value.targetRelease -isnot [string] -or
+            [string]$value.targetRelease -cne [string]$State.targetRelease -or
+            $value.legacyRelease -isnot [string] -or
+            [string]$value.legacyRelease -cne [string]$State.legacyRelease -or
+            $value.evidenceDigest -isnot [string] -or
+            [string]$value.evidenceDigest -cne [string]$State.evidenceDigest -or
+            $value.backupIdentity -isnot [string] -or
+            [string]$value.backupIdentity -cne [string]$State.backupIdentity) {
+            throw 'Terminal reconciliation authorization identity is invalid.'
+        }
+        return $true
+    } catch {
+        throw [IO.InvalidDataException]::new(
+            'Terminal reconciliation authorization is invalid.', $_.Exception)
+    }
+}
+
+function Remove-ProductionDomainCollectionTerminalReconciliationAuthorization {
+    param([Parameter(Mandatory)]$State)
+    if (-not (Test-ProductionDomainCollectionTerminalReconciliationAuthorization `
+            -State $State)) {
+        throw 'Terminal reconciliation authorization is missing.'
+    }
+    Remove-Item -LiteralPath (
+        Get-ProductionDomainCollectionTerminalReconciliationPath `
+            -Config $State.config) -Force -ErrorAction Stop
+}
+
 function Save-ProductionDomainCollectionContextState {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$State)
     $current = if ($Context.PSObject.Properties['state']) {
         [string]$Context.state
     } else { 'INITIALIZED' }
     Assert-ProductionDomainCollectionStateTransition -Current $current -Next $State
-    $Context.state = $State
     $value = [ordered]@{
         version = 1
         state = $State
@@ -455,18 +640,26 @@ function Save-ProductionDomainCollectionContextState {
         legacyDropped = [bool]$Context.dropStarted
         priorMarkerBase64 = [string]$Context.priorMarkerBase64
     }
+    if ($State -ceq 'ROLLED_BACK') {
+        Write-ProductionDomainCollectionTerminalReconciliationAuthorization `
+            -State $Context
+    }
     Write-ProductionDomainCollectionProtectedJson `
         -Config $Context.config `
         -Path (Get-ProductionDomainCollectionStatePath -Config $Context.config) `
         -Value $value
+    $Context.state = $State
+    if ($State -ceq 'ROLLED_BACK') {
+        Remove-ProductionDomainCollectionTerminalReconciliationAuthorization `
+            -State $Context
+    }
 }
 
 function New-ProductionDomainCollectionCutoverContext {
     param([Parameter(Mandatory)]$Config)
 
-    if (Read-ProductionDomainSchemaDirection -Config $Config) {
-        throw 'A domain collection cutover marker already exists.'
-    }
+    $terminalState = Get-ProductionDomainCollectionTerminalReinitializationState `
+        -Config $Config
     $targetRelease = Resolve-OriginMainRelease $Config
     $targetPath = New-ReleaseFromOriginMain $Config $targetRelease
     if ((Get-ProductionDomainCollectionReleaseSchema `
@@ -501,6 +694,10 @@ function New-ProductionDomainCollectionCutoverContext {
         -Database $candidate `
         -CandidatePort ([int]$Config.candidatePort) `
         -ProductionPort ([int]$Config.productionPort)
+    if ($terminalState) {
+        Archive-ProductionDomainCollectionTerminalState -State $terminalState |
+            Out-Null
+    }
     $context = [pscustomobject][ordered]@{
         config = $Config
         targetRelease = $targetRelease
@@ -716,9 +913,6 @@ function Read-ProductionDomainCollectionProtectedState {
             $value.legacyDropped -isnot [bool]) {
             throw 'Protected cutover state identity is invalid.'
         }
-        if ([string]$value.state -eq 'ROLLED_BACK') {
-            throw 'Protected domain collection rollback state is terminal.'
-        }
         if ($value.priorMarkerBase64 -isnot [string]) {
             throw 'Protected prior schema marker identity is invalid.'
         }
@@ -777,7 +971,7 @@ function Read-ProductionDomainCollectionProtectedState {
         $domainMarker = Read-ProductionDomainSchemaDirection -Config $Config
         $markerRequired = [string]$value.state -in @(
             'TARGET_START_PENDING','DROP_STARTED','LEGACY_DROPPED','TARGET_ACTIVE',
-            'ROLLBACK_VERIFIED','LEGACY_DATA_VERIFIED','ROLLBACK_READY')
+            'ROLLBACK_VERIFIED','LEGACY_DATA_VERIFIED','ROLLBACK_READY','ROLLED_BACK')
         if ($markerRequired -and -not $domainMarker) {
             throw 'Protected domain schema marker is missing for the recovery state.'
         }
@@ -807,7 +1001,7 @@ function Read-ProductionDomainCollectionProtectedState {
                 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED')) {
             throw 'Protected rollback-ready state has an unsafe startup marker.'
         }
-        [pscustomobject][ordered]@{
+        $state = [pscustomobject][ordered]@{
             config = $Config
             state = [string]$value.state
             targetRelease = [string]$value.targetRelease
@@ -830,7 +1024,17 @@ function Read-ProductionDomainCollectionProtectedState {
             dropStarted = [bool]$value.legacyDropped
             legacyDropped = [bool]$value.legacyDropped
             priorMarkerBase64 = [string]$value.priorMarkerBase64
+            terminalReconciliation = [string]$value.state -eq 'ROLLED_BACK'
+            terminalReconciliationAuthorized = $false
         }
+        if ([string]$value.state -eq 'ROLLED_BACK') {
+            Assert-ProductionDomainCollectionTerminalLegacyState `
+                -Config $Config -Marker $domainMarker -State $state | Out-Null
+            $state.terminalReconciliationAuthorized =
+                Test-ProductionDomainCollectionTerminalReconciliationAuthorization `
+                    -State $state
+        }
+        return $state
     } catch {
         throw [IO.InvalidDataException]::new(
             'Protected domain collection recovery state is invalid.', $_.Exception)
@@ -977,6 +1181,23 @@ function Invoke-ProductionDomainCollectionRollbackStateMachine {
         [Parameter(Mandatory)][bool]$PostDrop
     )
     $stateName = [string]$State.state
+    if ($stateName -ceq 'ROLLED_BACK') {
+        if (-not $State.PSObject.Properties['terminalReconciliation'] -or
+            -not [bool]$State.terminalReconciliation) {
+            throw 'Terminal rollback reconciliation requires exact protected readback.'
+        }
+        if (-not $State.PSObject.Properties['terminalReconciliationAuthorized'] -or
+            -not [bool]$State.terminalReconciliationAuthorized) {
+            throw 'Terminal rollback reconciliation requires one-shot authorization.'
+        }
+        Write-ProductionDomainCollectionRollbackMarker `
+            -State $State -MarkerState LEGACY_ACTIVE_RECONCILIATION_REQUIRED
+        Start-ProductionDomainCollectionLegacy -State $State
+        Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+        Remove-ProductionDomainCollectionTerminalReconciliationAuthorization `
+            -State $State
+        return
+    }
     if ($stateName -cnotin @('LEGACY_DATA_VERIFIED','ROLLBACK_READY')) {
         $legacyDropped = $null -ne $State.PSObject.Properties['legacyDropped'] -and
             [bool]$State.legacyDropped
@@ -1110,6 +1331,11 @@ function Invoke-ProductionDomainCollectionRollback {
         -Config $config -FixedRoot $script:FixedProductionRoot
     try {
         $state = Read-ProductionDomainCollectionProtectedState -Config $config
+        if ([string]$state.state -ceq 'ROLLED_BACK' -and
+            (-not $state.PSObject.Properties['terminalReconciliationAuthorized'] -or
+                -not [bool]$state.terminalReconciliationAuthorized)) {
+            throw 'Terminal rollback replay requires one-shot reconciliation authorization.'
+        }
         try {
             Stop-ProductionDomainCollectionWriter -Context $state
             Invoke-ProductionDomainCollectionRollbackStateMachine `

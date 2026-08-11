@@ -97,7 +97,12 @@ records the independently verified restore, and `ROLLBACK_READY` records the
 non-rerestore boundary before the compatible legacy marker or writer can be
 enabled. A failure publishing the final state re-stops the writer and suspends
 recovery; retry resumes from the protected state without restoring the archive a
-second time.
+second time. If the terminal rename committed before a later ACL/readback fault,
+retry accepts only the exact terminal state, compatible marker, active legacy
+release, and legacy schema; it performs marker/writer/recovery reconciliation
+with zero cleanup or restore effects. A protected one-shot reconciliation
+authorization is written before the terminal commit and consumed after exact
+finalization; completed terminal rollback cannot be replayed arbitrarily.
 
 Use the guarded rollback command, never generic release rollback, for this
 schema boundary:
@@ -106,6 +111,17 @@ schema boundary:
 .\prod.cmd mongo-consolidation-rollback -WhatIf
 .\prod.cmd mongo-consolidation-rollback -ConfirmDomainCollectionRollback
 ```
+
+After a successful rollback, `mongo-consolidation-preview` and a newly confirmed
+`mongo-consolidate` are available only while the terminal protected state, v2
+legacy-compatible marker, active legacy release, and legacy schema still agree.
+Any outstanding one-shot rollback reconciliation must be completed first.
+The new cutover preserves the exact prior terminal JSON under protected
+`state\history`, retains its archive/evidence files, and creates a fresh backup,
+evidence record, owner token, and candidate database before publishing the new
+`PREVIEWED` state. A missing or mismatched marker, nonterminal state, active
+release mismatch, or target-schema legacy release blocks before backup or state
+publication.
 
 The protected marker binds manifest, evidence, backup, original cutover target,
 current deployed target binary, legacy release, and deletion state. Routine

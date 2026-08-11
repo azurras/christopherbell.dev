@@ -10,6 +10,7 @@ Describe 'guarded domain collection cutover orchestration' {
     InModuleScope Production.DomainCollections {
         BeforeEach {
             $script:events = [Collections.Generic.List[string]]::new()
+            $script:exerciseRealCutoverContext = $false
             $script:config = [pscustomobject]@{
                 programDataRoot = 'C:\ProgramData\christopherbell.dev'
                 productionPort = 8080
@@ -44,7 +45,7 @@ Describe 'guarded domain collection cutover orchestration' {
             Mock New-ProductionDomainCollectionCutoverContext {
                 [void]$script:events.Add('backup-and-evidence')
                 $script:context
-            }
+            } -ParameterFilter { -not $script:exerciseRealCutoverContext }
             Mock Invoke-ProductionDomainCollectionCandidateProof {
                 [void]$script:events.Add('candidate')
             }
@@ -158,6 +159,235 @@ Describe 'guarded domain collection cutover orchestration' {
             Should -Invoke Stop-ProductionDomainCollectionWriter -Times 0
             Should -Invoke Invoke-ProductionDomainCollectionStageAndPublish -Times 0
             Should -Invoke Invoke-ProductionDomainCollectionDropLegacy -Times 0
+        }
+
+        It 'allows preview only from an exact terminal legacy rollback state' {
+            $config = [pscustomobject]@{
+                programDataRoot = 'C:\ProgramData\christopherbell.dev'
+            }
+            $legacyPath = 'C:\ProgramData\christopherbell.dev\releases\' + ('1' * 40)
+            $script:terminalMarker = [pscustomobject]@{
+                version = 2
+                state = 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
+                targetRelease = '2' * 40
+                currentRelease = '2' * 40
+                legacyRelease = '1' * 40
+                manifestDigest = $script:ManifestDigest
+                evidenceDigest = 'a' * 64
+                backupIdentity = 'b' * 64
+                legacyDropped = $false
+            }
+            Mock Read-ProductionDomainSchemaDirection { $script:terminalMarker }
+            Mock Read-ProductionDomainCollectionProtectedState {
+                [pscustomobject]@{
+                    config = $config
+                    state = 'ROLLED_BACK'
+                    targetRelease = '2' * 40
+                    legacyRelease = '1' * 40
+                    evidenceDigest = 'a' * 64
+                    backupIdentity = 'b' * 64
+                }
+            }
+            Mock Get-JunctionTarget { $legacyPath }
+            Mock Assert-ReleasePath { $Path }
+            Mock Get-ProductionDomainCollectionReleaseSchema { 'LEGACY' }
+
+            $context = New-ProductionDomainCollectionPreviewContext -Config $config
+
+            $context.release | Should -BeExactly ('1' * 40)
+
+            $script:terminalMarker.state = 'TARGET_ACTIVE'
+            { New-ProductionDomainCollectionPreviewContext -Config $config } |
+                Should -Throw '*terminal*legacy*'
+        }
+
+        It 'archives exact terminal history before publishing a fresh cutover context' {
+            $script:exerciseRealCutoverContext = $true
+            $root = Join-Path $TestDrive 'future-cutover'
+            $stateRoot = Join-Path $root 'state'
+            $releaseRoot = Join-Path $root 'releases'
+            $script:futureLegacyRelease = '1' * 40
+            $script:futureOldTarget = '2' * 40
+            $script:futureNewTarget = '3' * 40
+            $script:futureLegacyPath = Join-Path $releaseRoot $script:futureLegacyRelease
+            $script:futureTargetPath = Join-Path $releaseRoot $script:futureNewTarget
+            New-Item -ItemType Directory `
+                -Path $stateRoot,$script:futureLegacyPath,$script:futureTargetPath -Force |
+                Out-Null
+            $statePath = Join-Path $stateRoot 'domain-collection-cutover.json'
+            $oldStateJson = '{"version":1,"state":"ROLLED_BACK","history":"exact"}'
+            Set-Content -LiteralPath $statePath -Value $oldStateJson -NoNewline
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                backupRoot = (Join-Path $root 'backups')
+                candidatePort = 18081
+                productionPort = 18080
+                repositoryPath = $root
+            }
+            $script:futureMarker = [pscustomobject]@{
+                version = 2
+                state = 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
+                targetRelease = $script:futureOldTarget
+                currentRelease = $script:futureOldTarget
+                legacyRelease = $script:futureLegacyRelease
+                manifestDigest = $script:ManifestDigest
+                evidenceDigest = 'a' * 64
+                backupIdentity = 'b' * 64
+                legacyDropped = $false
+            }
+            $script:futureTerminal = [pscustomobject]@{
+                config = $config
+                state = 'ROLLED_BACK'
+                targetRelease = $script:futureOldTarget
+                legacyRelease = $script:futureLegacyRelease
+                backupIdentity = 'b' * 64
+                evidenceDigest = 'a' * 64
+            }
+            $script:futureArchive = Join-Path $config.backupRoot 'new.archive.gz'
+            $script:futureBackupIdentity = 'c' * 64
+            $script:futureEvidenceDigest = 'd' * 64
+            $script:futureCandidate = 'cbell_candidate_' + ('3' * 12) + '_' + ('4' * 24)
+            Mock Read-ProductionDomainSchemaDirection { $script:futureMarker }
+            Mock Read-ProductionDomainCollectionProtectedState { $script:futureTerminal }
+            Mock Get-JunctionTarget { $script:futureLegacyPath }
+            Mock Assert-ReleasePath { $Path }
+            Mock Resolve-OriginMainRelease { $script:futureNewTarget }
+            Mock New-ReleaseFromOriginMain { $script:futureTargetPath }
+            Mock Get-ProductionDomainCollectionReleaseSchema {
+                if ($Sha -eq $script:futureLegacyRelease) { 'LEGACY' } else { 'TARGET' }
+            }
+            Mock New-ProductionDomainCollectionVerifiedBackup {
+                [pscustomobject]@{
+                    archive = $script:futureArchive
+                    backupIdentity = $script:futureBackupIdentity
+                }
+            }
+            Mock Invoke-ProductionDomainCollectionEngine {
+                [pscustomobject]@{
+                    evidenceDigest = $script:futureEvidenceDigest
+                    evidence = [pscustomobject]@{ version = 1 }
+                }
+            }
+            Mock Write-ProductionDomainCollectionProtectedJson {
+                New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force |
+                    Out-Null
+                $jsonDepth = if ([int]$Depth -ge 1) { [int]$Depth } else { 20 }
+                $Value | ConvertTo-Json -Depth $jsonDepth |
+                    Set-Content -LiteralPath $Path -NoNewline
+            }
+            Mock Protect-ProductionPath { }
+            Mock Assert-ProtectedProductionPath { }
+            Mock Assert-ProductionPathNotReparse { }
+            Mock New-CandidateDatabaseName { $script:futureCandidate }
+            Mock Assert-ProductionDomainCollectionCandidateIsolation { }
+
+            $context = New-ProductionDomainCollectionCutoverContext -Config $config
+
+            $context.targetRelease | Should -BeExactly $script:futureNewTarget
+            $context.legacyRelease | Should -BeExactly $script:futureLegacyRelease
+            $context.backupIdentity | Should -BeExactly $script:futureBackupIdentity
+            $context.evidenceDigest | Should -BeExactly $script:futureEvidenceDigest
+            $context.candidateDatabase | Should -BeExactly $script:futureCandidate
+            $context.ownerToken | Should -Match '^[0-9a-f]{32}$'
+            $context.ownerToken | Should -Not -BeExactly ('0' * 32)
+            $history = @(Get-ChildItem -LiteralPath (Join-Path $stateRoot 'history') -File)
+            $history.Count | Should -Be 1
+            (Get-Content -LiteralPath $history[0].FullName -Raw) |
+                Should -BeExactly $oldStateJson
+            $newState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+            $newState.state | Should -BeExactly 'PREVIEWED'
+            $newState.backupIdentity | Should -BeExactly $script:futureBackupIdentity
+            $newState.evidenceDigest | Should -BeExactly $script:futureEvidenceDigest
+            $newState.ownerToken | Should -BeExactly $context.ownerToken
+            $newState.candidateDatabase | Should -BeExactly $script:futureCandidate
+        }
+
+        It 'rejects unsafe terminal reinitialization before backup or publication' {
+            $script:exerciseRealCutoverContext = $true
+            $config = [pscustomobject]@{
+                programDataRoot = 'C:\ProgramData\christopherbell.dev'
+            }
+            $legacyRelease = '1' * 40
+            $legacyPath = Join-Path $config.programDataRoot "releases\$legacyRelease"
+            $script:reinitializationMarker = [pscustomobject]@{
+                version = 2
+                state = 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
+                targetRelease = '2' * 40
+                currentRelease = '2' * 40
+                legacyRelease = $legacyRelease
+                evidenceDigest = 'a' * 64
+                backupIdentity = 'b' * 64
+                legacyDropped = $false
+            }
+            $script:reinitializationState = [pscustomobject]@{
+                state = 'ROLLED_BACK'
+                targetRelease = '2' * 40
+                legacyRelease = $legacyRelease
+                evidenceDigest = 'a' * 64
+                backupIdentity = 'b' * 64
+                terminalReconciliationAuthorized = $false
+            }
+            $script:activeLegacyPath = $legacyPath
+            $script:activeLegacySchema = 'LEGACY'
+            Mock Read-ProductionDomainSchemaDirection { $script:reinitializationMarker }
+            Mock Read-ProductionDomainCollectionProtectedState {
+                $script:reinitializationState
+            }
+            Mock Get-JunctionTarget { $script:activeLegacyPath }
+            Mock Assert-ReleasePath { $Path }
+            Mock Get-ProductionDomainCollectionReleaseSchema {
+                $script:activeLegacySchema
+            }
+            Mock Resolve-OriginMainRelease { throw 'release effect must not run' }
+            Mock New-ProductionDomainCollectionVerifiedBackup {
+                throw 'backup effect must not run'
+            }
+
+            Mock Test-Path {
+                $true
+            } -ParameterFilter {
+                $LiteralPath -like '*domain-collection-cutover.json'
+            }
+
+            $savedMarker = $script:reinitializationMarker
+            $script:reinitializationMarker = $null
+            { New-ProductionDomainCollectionCutoverContext -Config $config } |
+                Should -Throw '*state exists without*marker*'
+            $script:reinitializationMarker = $savedMarker
+
+            $script:reinitializationMarker.state = 'TARGET_ACTIVE'
+            { New-ProductionDomainCollectionCutoverContext -Config $config } |
+                Should -Throw '*terminal*legacy*'
+
+            $script:reinitializationMarker.state =
+                'LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
+            $script:reinitializationState.state = 'ROLLBACK_READY'
+            { New-ProductionDomainCollectionCutoverContext -Config $config } |
+                Should -Throw '*terminal*'
+
+            $script:reinitializationState.state = 'ROLLED_BACK'
+            $script:reinitializationState.terminalReconciliationAuthorized = $true
+            { New-ProductionDomainCollectionCutoverContext -Config $config } |
+                Should -Throw '*requires rollback reconciliation*'
+
+            $script:reinitializationState.terminalReconciliationAuthorized = $false
+            $script:activeLegacyPath = Join-Path $config.programDataRoot `
+                ('releases\' + ('9' * 40))
+            { New-ProductionDomainCollectionCutoverContext -Config $config } |
+                Should -Throw '*active legacy release*'
+
+            $script:activeLegacyPath = $legacyPath
+            $script:activeLegacySchema = 'TARGET'
+            { New-ProductionDomainCollectionCutoverContext -Config $config } |
+                Should -Throw '*legacy domain-schema*'
+
+            $script:activeLegacySchema = 'LEGACY'
+            $script:reinitializationState.backupIdentity = 'c' * 64
+            { New-ProductionDomainCollectionCutoverContext -Config $config } |
+                Should -Throw '*identities do not match*'
+
+            Should -Invoke Resolve-OriginMainRelease -Times 0
+            Should -Invoke New-ProductionDomainCollectionVerifiedBackup -Times 0
         }
     }
 }
@@ -590,7 +820,142 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
             $rollbackContext.state | Should -BeExactly 'ROLLED_BACK'
         }
 
-        It 'rejects terminal rollback replay before writer or restore effects' {
+        It 'reconciles a terminal state committed before post-move protection failed' {
+            $root = Join-Path $TestDrive 'terminal-commit'
+            $backupRoot = Join-Path $root 'backups'
+            $stateRoot = Join-Path $root 'state'
+            $releaseRoot = Join-Path $root 'releases'
+            $legacyRelease = '1' * 40
+            $targetRelease = '2' * 40
+            $legacyPath = Join-Path $releaseRoot $legacyRelease
+            New-Item -ItemType Directory `
+                -Path $backupRoot,$stateRoot,$legacyPath -Force | Out-Null
+            $archive = Join-Path $backupRoot 'bound.archive.gz'
+            Set-Content -LiteralPath $archive -Value 'archive' -NoNewline
+            $backupIdentity = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).
+                Hash.ToLowerInvariant()
+            [ordered]@{
+                archive = $archive
+                sha256 = $backupIdentity
+                createdAt = '2026-08-11T00:00:00.0000000Z'
+            } | ConvertTo-Json | Set-Content -LiteralPath "$archive.sha256.json"
+            $evidenceFile = Join-Path $stateRoot 'evidence.json'
+            [ordered]@{
+                manifestDigest = $script:ManifestDigest
+                release = $targetRelease
+                backupIdentity = $backupIdentity
+            } | ConvertTo-Json | Set-Content -LiteralPath $evidenceFile
+            $evidenceFileSha = (Get-FileHash -LiteralPath $evidenceFile -Algorithm SHA256).
+                Hash.ToLowerInvariant()
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                backupRoot = $backupRoot
+                productionPort = 18080
+            }
+            $statePath = Join-Path $stateRoot 'domain-collection-cutover.json'
+            $context = [pscustomobject]@{
+                config = $config
+                state = 'ROLLBACK_READY'
+                targetRelease = $targetRelease
+                legacyRelease = $legacyRelease
+                archive = $archive
+                backupIdentity = $backupIdentity
+                evidenceDigest = 'a' * 64
+                evidenceFile = $evidenceFile
+                evidenceFileSha256 = $evidenceFileSha
+                ownerToken = 'b' * 32
+                candidateDatabase = 'cbell_candidate_' + ('c' * 12) + '_' + ('d' * 24)
+                dropStarted = $true
+                priorMarkerBase64 = ''
+            }
+            $marker = [pscustomobject]@{
+                version = 2
+                state = 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
+                targetRelease = $targetRelease
+                currentRelease = $targetRelease
+                legacyRelease = $legacyRelease
+                manifestDigest = $script:ManifestDigest
+                evidenceDigest = 'a' * 64
+                backupIdentity = $backupIdentity
+                legacyDropped = $false
+            }
+            $reconciliationPath = Join-Path $stateRoot `
+                'domain-collection-rollback-reconciliation.json'
+            $script:postCommitFault = $true
+            $script:terminalStatePath = [IO.Path]::GetFullPath($statePath)
+            Mock Protect-ProductionPath {
+                if ($script:postCommitFault -and
+                    [IO.Path]::GetFullPath($Path) -eq $script:terminalStatePath) {
+                    $script:postCommitFault = $false
+                    throw 'simulated post-move protection failure'
+                }
+            }
+            Mock Assert-ProtectedProductionPath { }
+
+            { Save-ProductionDomainCollectionContextState `
+                    -Context $context -State ROLLED_BACK } |
+                Should -Throw '*post-move protection failure*'
+            (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).state |
+                Should -BeExactly 'ROLLED_BACK'
+            Test-Path -LiteralPath $reconciliationPath | Should -BeTrue
+            $hostExecutable = (Get-Process -Id $PID).Path
+            $env:CBELL_TERMINAL_STATE_PROBE = $statePath
+            try {
+                $restartState = & $hostExecutable -NoProfile -NonInteractive -Command `
+                    '$value=Get-Content -LiteralPath $env:CBELL_TERMINAL_STATE_PROBE -Raw | ConvertFrom-Json; $value.state'
+            } finally {
+                Remove-Item Env:CBELL_TERMINAL_STATE_PROBE -ErrorAction SilentlyContinue
+            }
+            $LASTEXITCODE | Should -Be 0
+            ([string]$restartState).Trim() | Should -BeExactly 'ROLLED_BACK'
+
+            $script:events = [Collections.Generic.List[string]]::new()
+            Mock Read-ProductionConfig { $config }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{
+                    Lock = [IO.MemoryStream]::new()
+                    Boundary = [pscustomobject]@{}
+                }
+            }
+            Mock Assert-ProductionPathNotReparse { }
+            Mock Assert-ProductionDomainCollectionEngineEvidence { }
+            Mock Read-ProductionDomainSchemaDirection { $marker }
+            Mock Get-JunctionTarget { $legacyPath }
+            Mock Assert-ReleasePath { $Path }
+            Mock Get-ProductionDomainCollectionReleaseSchema { 'LEGACY' }
+            Mock Stop-ProductionDomainCollectionWriter {
+                [void]$script:events.Add('stop-suspended')
+            }
+            Mock Assert-ProductionDomainCollectionRollbackFreshness {
+                throw 'terminal retry must not check target freshness'
+            }
+            Mock Restore-ProductionDomainCollectionBackup {
+                throw 'terminal retry must not restore an old backup'
+            }
+            Mock Recover-ProductionDomainCollectionPrepublication {
+                throw 'terminal retry must not run cleanup'
+            }
+            Mock Write-ProductionDomainCollectionRollbackMarker {
+                [void]$script:events.Add("marker:$MarkerState")
+            }
+            Mock Start-ProductionDomainCollectionLegacy {
+                [void]$script:events.Add('legacy-start')
+            }
+            Mock Set-ProductionWebsiteRecoveryPolicy {
+                [void]$script:events.Add("recovery:$Policy")
+            }
+
+            Invoke-ProductionDomainCollectionRollback -Confirm
+
+            $script:events | Should -Be @(
+                'stop-suspended','marker:LEGACY_ACTIVE_RECONCILIATION_REQUIRED',
+                'legacy-start','recovery:Normal')
+            Should -Invoke Restore-ProductionDomainCollectionBackup -Times 0
+            Should -Invoke Recover-ProductionDomainCollectionPrepublication -Times 0
+            Test-Path -LiteralPath $reconciliationPath | Should -BeFalse
+        }
+
+        It 'rejects unproven terminal rollback replay before writer or restore effects' {
             Mock Read-ProductionConfig {
                 [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' }
             }
@@ -608,6 +973,36 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
 
             { Invoke-ProductionDomainCollectionRollback -Confirm } |
                 Should -Throw '*terminal*'
+
+            Should -Invoke Stop-ProductionDomainCollectionWriter -Times 0
+            Should -Invoke Restore-ProductionDomainCollectionBackup -Times 0
+        }
+
+        It 'rejects exact terminal replay without one-shot reconciliation authorization' {
+            $state = [pscustomobject]@{
+                state = 'ROLLED_BACK'
+                terminalReconciliation = $true
+                terminalReconciliationAuthorized = $false
+            }
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' }
+            }
+            Mock Enter-ProductionFixedRootDeploymentLock {
+                [pscustomobject]@{
+                    Lock = [IO.MemoryStream]::new()
+                    Boundary = [pscustomobject]@{}
+                }
+            }
+            Mock Read-ProductionDomainCollectionProtectedState { $state }
+            Mock Stop-ProductionDomainCollectionWriter {
+                throw 'writer effect must not run'
+            }
+            Mock Restore-ProductionDomainCollectionBackup {
+                throw 'restore effect must not run'
+            }
+
+            { Invoke-ProductionDomainCollectionRollback -Confirm } |
+                Should -Throw '*one-shot*authorization*'
 
             Should -Invoke Stop-ProductionDomainCollectionWriter -Times 0
             Should -Invoke Restore-ProductionDomainCollectionBackup -Times 0

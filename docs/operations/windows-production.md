@@ -594,7 +594,18 @@ every service, boot, recovery, restart, and deploy launch;
 verified; and `ROLLBACK_READY` is persisted before the compatible marker or
 legacy writer is enabled. Retry from either post-restore state never reruns
 `mongorestore`. Any finalization failure re-stops the writer and suspends SCM
-recovery before returning control to the operator.
+recovery before returning control to the operator. A terminal state committed
+before a later protection/readback fault is reconciled only when its exact
+legacy-compatible marker, active release, and legacy schema still match; retry
+does not perform cleanup or restore. The retry also requires and consumes the
+protected one-shot terminal reconciliation authorization; a fully completed
+rollback is not replayable.
+
+An exact completed rollback can begin a future guarded consolidation. Preview is
+read-only; confirmed cutover preserves the prior terminal JSON in protected
+`state\history` and retains its archive/evidence while creating a new backup,
+evidence, owner token, and isolated candidate. Any nonterminal or mismatched
+state/marker/release/schema blocks before those cutover effects.
 
 Routine target-schema deployments preserve the original cutover target,
 evidence digest, backup identity, and legacy release in the v2 marker while
