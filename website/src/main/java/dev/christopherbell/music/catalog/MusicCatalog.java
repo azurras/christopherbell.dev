@@ -7,18 +7,23 @@ import java.util.List;
 import java.util.Optional;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import org.bson.Document;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
 /** Bounded read model for indexed, currently present Music tracks. */
 public class MusicCatalog {
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<MusicTrack> mongo;
   private final MusicTrackRepository tracks;
 
-  public MusicCatalog(MongoTemplate mongo, MusicTrackRepository tracks) {
-    this.mongo = mongo;
+  public MusicCatalog(DomainMongoOperationsFactory factory, MusicTrackRepository tracks) {
+    this.mongo = factory.forType(MusicTrack.class);
     this.tracks = tracks;
   }
 
@@ -26,7 +31,7 @@ public class MusicCatalog {
     var queryRequest = request == null
         ? new MusicQuery(null, null, null, null, null, null, 0, 50)
         : request;
-    long totalTracks = mongo.count(Query.query(criteria(queryRequest)), MusicTrack.class);
+    long totalTracks = mongo.count(Query.query(criteria(queryRequest)));
     int totalPages = totalPages(totalTracks, queryRequest.size());
     int page = totalPages == 0 ? 0 : Math.min(queryRequest.page(), totalPages - 1);
     var query = Query.query(criteria(queryRequest))
@@ -39,7 +44,7 @@ public class MusicCatalog {
             Sort.Order.asc("id")))
         .skip((long) page * queryRequest.size())
         .limit(queryRequest.size());
-    List<MusicTrack> matches = List.copyOf(mongo.find(query, MusicTrack.class));
+    List<MusicTrack> matches = mongo.find(query, Pageable.unpaged());
     return new MusicCatalogResult(
         matches, albums(matches), facets(queryRequest),
         page, queryRequest.size(), totalTracks, totalPages);
@@ -87,7 +92,7 @@ public class MusicCatalog {
             .and("excludedFromRadio").is(false))
         .with(Sort.by(Sort.Order.asc("id")))
         .limit(limit);
-    return List.copyOf(mongo.find(query, MusicTrack.class));
+    return mongo.find(query, Pageable.unpaged());
   }
 
   private void exact(List<Criteria> filters, String field, String value) {
@@ -118,8 +123,15 @@ public class MusicCatalog {
   }
 
   private <T> List<T> distinct(MusicQuery queryRequest, String field, Class<T> type) {
-    return mongo.findDistinct(
-        Query.query(criteria(queryRequest)), field, MusicTrack.class, type);
+    var aggregation = Aggregation.newAggregation(
+        Aggregation.match(criteria(queryRequest)),
+        Aggregation.group(field),
+        Aggregation.sort(Sort.by(Sort.Direction.ASC, "_id")));
+    return mongo.aggregate(KindScopedAggregation.local(aggregation), Document.class).stream()
+        .map(document -> document.get("_id"))
+        .filter(type::isInstance)
+        .map(type::cast)
+        .toList();
   }
 
   private List<String> strings(List<String> values) {

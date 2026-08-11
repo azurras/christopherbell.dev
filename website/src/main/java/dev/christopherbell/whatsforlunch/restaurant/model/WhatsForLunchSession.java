@@ -12,7 +12,6 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
  * Mongo-backed group lunch session with fixed restaurants and participant votes.
@@ -26,7 +25,6 @@ import org.springframework.data.mongodb.core.mapping.Document;
         name = "wfl_session_participant_created",
         def = "{'participantAccountIds': 1, 'createdOn': -1, '_id': 1}")
 })
-@Document("whatsforlunch_sessions")
 public class WhatsForLunchSession {
   private final String type = "whatsforlunch_session";
 

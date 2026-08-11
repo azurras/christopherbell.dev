@@ -29,12 +29,6 @@ class LegacyMongoAccessBaselineTest {
       "dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun",
       "dev.christopherbell.location.model.ZipCoordinate",
       "dev.christopherbell.location.model.ZipCoordinateImportState",
-      "dev.christopherbell.music.catalog.MusicTrack",
-      "dev.christopherbell.music.library.MusicPlaylist",
-      "dev.christopherbell.music.metadata.MusicMetadataEdit",
-      "dev.christopherbell.music.radio.MusicRadioHistoryEvent",
-      "dev.christopherbell.music.radio.MusicRuntimeStateDocument",
-      "dev.christopherbell.music.security.MusicAccessAttempt",
       "dev.christopherbell.sharedfolder.audit.SharedFolderAuditEvent",
       "dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceLeaseDocument",
       "dev.christopherbell.sharedfolder.media.MediaJob",
@@ -45,24 +39,12 @@ class LegacyMongoAccessBaselineTest {
       "dev.christopherbell.vehicle.model.Vehicle",
       "dev.christopherbell.vehicle.model.VehicleVinDecodeCache",
       "dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState",
-      "dev.christopherbell.vehicle.randomvin.model.RandomVinImportState",
-      "dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewDocument",
-      "dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks",
-      "dev.christopherbell.whatsforlunch.restaurant.model.Restaurant",
-      "dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite",
-      "dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState",
-      "dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVote",
-      "dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreference",
-      "dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession");
+      "dev.christopherbell.vehicle.randomvin.model.RandomVinImportState");
 
   private static final Set<String> TEMPORARY_MONGO_REPOSITORY_BASELINE = Set.of(
       "dev.christopherbell.canesboxtracker.CanesBoxPriceSnapshotRepository",
       "dev.christopherbell.location.zip.ZipCoordinateImportStateRepository",
       "dev.christopherbell.location.zip.ZipCoordinateRepository",
-      "dev.christopherbell.music.catalog.MusicTrackRepository",
-      "dev.christopherbell.music.library.MusicPlaylistRepository",
-      "dev.christopherbell.music.metadata.MusicMetadataEditRepository",
-      "dev.christopherbell.music.radio.MusicRadioHistoryRepository",
       "dev.christopherbell.sharedfolder.audit.SharedFolderAuditRepository",
       "dev.christopherbell.sharedfolder.media.MediaJobRepository",
       "dev.christopherbell.sharedfolder.radio.SharedFolderRadioRepository",
@@ -72,14 +54,7 @@ class LegacyMongoAccessBaselineTest {
       "dev.christopherbell.vehicle.core.VehicleRepository",
       "dev.christopherbell.vehicle.nhtsa.decode.VehicleVinDecodeCacheRepository",
       "dev.christopherbell.vehicle.nhtsa.enrichment.NhtsaVinImportStateRepository",
-      "dev.christopherbell.vehicle.randomvin.importing.RandomVinImportStateRepository",
-      "dev.christopherbell.whatsforlunch.restaurant.DailyLunchPicksRepository",
-      "dev.christopherbell.whatsforlunch.restaurant.favorite.RestaurantFavoriteRepository",
-      "dev.christopherbell.whatsforlunch.restaurant.preference.WhatsForLunchPreferenceRepository",
-      "dev.christopherbell.whatsforlunch.restaurant.RestaurantImportStateRepository",
-      "dev.christopherbell.whatsforlunch.restaurant.RestaurantRepository",
-      "dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionRepository",
-      "dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteRepository");
+      "dev.christopherbell.vehicle.randomvin.importing.RandomVinImportStateRepository");
 
   private static final Set<String> APPROVED_DIRECT_MONGO_INFRASTRUCTURE = Set.of(
       "dev.christopherbell.admin.commandcenter.metrics.CommandCenterMetricsService",
@@ -101,24 +76,13 @@ class LegacyMongoAccessBaselineTest {
       "dev.christopherbell.configuration.mongo.migration.V011HardenWhatsForLunchData",
       "dev.christopherbell.configuration.mongo.migration.V012RetainSharedFolderWork",
       "dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes",
-      "dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState",
-      "dev.christopherbell.music.catalog.MusicCatalogConfiguration");
+      "dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState");
 
   private static final Set<String> TEMPORARY_DIRECT_MONGO_BASELINE = Set.of(
       "dev.christopherbell.libs.mongo.lease.MongoLeaseService",
       "dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator",
-      "dev.christopherbell.music.catalog.MusicCatalog",
-      "dev.christopherbell.music.library.MusicLibraryService",
-      "dev.christopherbell.music.radio.MusicRuntimeStateStore",
-      "dev.christopherbell.music.security.MusicAccessAuditQueryService",
-      "dev.christopherbell.music.security.MusicAccessAuditRecorder",
       "dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService",
-      "dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore",
-      "dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewStore",
-      "dev.christopherbell.whatsforlunch.restaurant.RestaurantDuplicateQueryRepository",
-      "dev.christopherbell.whatsforlunch.restaurant.RestaurantInventoryQueryRepository",
-      "dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionMutationStore",
-      "dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteQueryRepository");
+      "dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore");
 
   @Test
   void legacyDocumentAnnotationsCannotGrowBeforeTheirAdaptersReplaceThem() throws IOException {

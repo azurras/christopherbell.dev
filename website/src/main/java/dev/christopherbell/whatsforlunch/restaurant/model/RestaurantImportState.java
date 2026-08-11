@@ -8,7 +8,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
  * Durable import scheduler state for a restaurant data source.
@@ -17,7 +16,6 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Builder
 @Data
 @NoArgsConstructor
-@Document("restaurant_import_state")
 public class RestaurantImportState {
   @Id
   private String id;

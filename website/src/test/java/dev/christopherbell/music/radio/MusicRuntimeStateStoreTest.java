@@ -2,137 +2,71 @@ package dev.christopherbell.music.radio;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.time.Instant;
 import java.util.List;
-import org.bson.Document;
+import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.OptimisticLockingFailureException;
-import org.springframework.data.mongodb.core.FindAndModifyOptions;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.UpdateDefinition;
 
 @ExtendWith(MockitoExtension.class)
 class MusicRuntimeStateStoreTest {
-  @Mock private MongoTemplate mongo;
-  @Captor private ArgumentCaptor<Query> query;
-  @Captor private ArgumentCaptor<UpdateDefinition> update;
-  @Captor private ArgumentCaptor<FindAndModifyOptions> options;
+  @Mock private DomainMongoOperationsFactory factory;
+  @Mock private KindScopedMongoOperations<MusicRuntimeStateDocument> states;
+  private MusicRuntimeStateStore store;
 
-  @Test
-  void firstQueueSaveAtomicallyInitializesAnExistingVersionlessEnvelope() {
-    var state = queue(null, "entry-1");
-    var persisted = MusicRuntimeStateDocument.forQueue(queue(0L, "entry-1"));
-    when(mongo.findAndModify(
-        any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
-        eq(MusicRuntimeStateDocument.class), eq(MusicRuntimeStateDocument.COLLECTION)))
-        .thenReturn(persisted);
-
-    var saved = new MusicRuntimeStateStore(mongo).saveQueue(state);
-
-    assertThat(saved).isEqualTo(persisted.toQueueState());
-    verify(mongo).findAndModify(
-        query.capture(), update.capture(), options.capture(),
-        eq(MusicRuntimeStateDocument.class), eq(MusicRuntimeStateDocument.COLLECTION));
-    assertVersionlessCas(query.getValue(), "queue", "QUEUE");
-    assertThat(update.getValue().getUpdateObject().get("$set", Document.class))
-        .containsEntry("version", 0L)
-        .containsKey("queue")
-        .doesNotContainKey("radio");
-    assertThat(options.getValue().isReturnNew()).isTrue();
-    assertThat(options.getValue().isUpsert()).isFalse();
-    verify(mongo, never()).save(any(), eq(MusicRuntimeStateDocument.COLLECTION));
+  @BeforeEach
+  void setUp() {
+    when(factory.forType(MusicRuntimeStateDocument.class)).thenReturn(states);
+    store = new MusicRuntimeStateStore(factory);
   }
 
   @Test
-  void firstRadioSaveUsesOnlyTheRadioIdentityKindAndPayload() {
-    var state = radio(null);
-    var persisted = MusicRuntimeStateDocument.forRadio(radio(0L));
-    when(mongo.findAndModify(
-        any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
-        eq(MusicRuntimeStateDocument.class), eq(MusicRuntimeStateDocument.COLLECTION)))
-        .thenReturn(persisted);
+  void queueAndRadioUseIndependentLegacyIdentitiesWithinOneFixedKind() {
+    var queue = queue(3L, "entry-1");
+    var radio = radio(8L);
+    when(states.save(MusicRuntimeStateDocument.forQueue(queue)))
+        .thenReturn(MusicRuntimeStateDocument.forQueue(queue(4L, "entry-1")));
+    when(states.save(MusicRuntimeStateDocument.forRadio(radio)))
+        .thenReturn(MusicRuntimeStateDocument.forRadio(radio(9L)));
 
-    var saved = new MusicRuntimeStateStore(mongo).saveRadio(state);
+    assertThat(store.saveQueue(queue).version()).isEqualTo(4L);
+    assertThat(store.saveRadio(radio).version()).isEqualTo(9L);
 
-    assertThat(saved).isEqualTo(persisted.toRadioState());
-    verify(mongo).findAndModify(
-        query.capture(), update.capture(), options.capture(),
-        eq(MusicRuntimeStateDocument.class), eq(MusicRuntimeStateDocument.COLLECTION));
-    assertVersionlessCas(query.getValue(), "radio", "RADIO");
-    assertThat(update.getValue().getUpdateObject().get("$set", Document.class))
-        .containsEntry("version", 0L)
-        .containsKey("radio")
-        .doesNotContainKey("queue");
+    verify(states).save(MusicRuntimeStateDocument.forQueue(queue));
+    verify(states).save(MusicRuntimeStateDocument.forRadio(radio));
+    assertThat(MusicRuntimeStateDocument.forQueue(queue).id()).isEqualTo("queue");
+    assertThat(MusicRuntimeStateDocument.forRadio(radio).id()).isEqualTo("radio");
   }
 
   @Test
-  void staleVersionlessSaveCannotOverwriteAnExistingEnvelope() {
-    when(mongo.findAndModify(
-        any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
-        eq(MusicRuntimeStateDocument.class), eq(MusicRuntimeStateDocument.COLLECTION)))
-        .thenReturn(null);
-    when(mongo.exists(any(Query.class), eq(MusicRuntimeStateDocument.COLLECTION)))
-        .thenReturn(true);
+  void readsMapOnlyTheRequestedRuntimeIdentity() {
+    var queue = MusicRuntimeStateDocument.forQueue(queue(2L, "entry-1"));
+    var radio = MusicRuntimeStateDocument.forRadio(radio(5L));
+    when(states.findById("queue")).thenReturn(Optional.of(queue));
+    when(states.findById("radio")).thenReturn(Optional.of(radio));
 
-    assertThatThrownBy(() -> new MusicRuntimeStateStore(mongo).saveQueue(queue(null, "stale")))
+    assertThat(store.findQueue()).contains(queue.toQueueState());
+    assertThat(store.findRadio()).contains(radio.toRadioState());
+  }
+
+  @Test
+  void staleQueueFailurePropagatesWithoutWritingRadioOrFallingBack() {
+    var requested = queue(4L, "stale");
+    when(states.save(MusicRuntimeStateDocument.forQueue(requested)))
+        .thenThrow(new OptimisticLockingFailureException("stale"));
+
+    assertThatThrownBy(() -> store.saveQueue(requested))
         .isInstanceOf(OptimisticLockingFailureException.class);
-
-    verify(mongo, never()).save(any(), eq(MusicRuntimeStateDocument.COLLECTION));
-  }
-
-  @Test
-  void genuinelyAbsentVersionlessQueueRetainsNormalInsertSemantics() {
-    var requested = queue(null, "new-entry");
-    var persisted = MusicRuntimeStateDocument.forQueue(queue(0L, "new-entry"));
-    when(mongo.findAndModify(
-        any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
-        eq(MusicRuntimeStateDocument.class), eq(MusicRuntimeStateDocument.COLLECTION)))
-        .thenReturn(null);
-    when(mongo.exists(any(Query.class), eq(MusicRuntimeStateDocument.COLLECTION)))
-        .thenReturn(false);
-    when(mongo.save(
-        MusicRuntimeStateDocument.forQueue(requested), MusicRuntimeStateDocument.COLLECTION))
-        .thenReturn(persisted);
-
-    var saved = new MusicRuntimeStateStore(mongo).saveQueue(requested);
-
-    assertThat(saved).isEqualTo(persisted.toQueueState());
-  }
-
-  @Test
-  void alreadyVersionedStateRetainsNormalOptimisticSaveSemantics() {
-    var requested = queue(4L, "entry-1");
-    var persisted = MusicRuntimeStateDocument.forQueue(queue(5L, "entry-1"));
-    when(mongo.save(
-        MusicRuntimeStateDocument.forQueue(requested), MusicRuntimeStateDocument.COLLECTION))
-        .thenReturn(persisted);
-
-    var saved = new MusicRuntimeStateStore(mongo).saveQueue(requested);
-
-    assertThat(saved).isEqualTo(persisted.toQueueState());
-    verify(mongo, never()).findAndModify(
-        any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
-        eq(MusicRuntimeStateDocument.class), eq(MusicRuntimeStateDocument.COLLECTION));
-  }
-
-  private static void assertVersionlessCas(Query query, String id, String kind) {
-    assertThat(query.getQueryObject())
-        .containsEntry("_id", id)
-        .containsEntry("kind", kind);
-    assertThat(query.getQueryObject().get("version", Document.class))
-        .containsEntry("$exists", false);
+    verify(states).save(MusicRuntimeStateDocument.forQueue(requested));
   }
 
   private static MusicQueueState queue(Long version, String entryId) {

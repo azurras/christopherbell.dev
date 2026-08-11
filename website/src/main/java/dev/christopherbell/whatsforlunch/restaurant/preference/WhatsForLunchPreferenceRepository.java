@@ -1,13 +1,12 @@
 package dev.christopherbell.whatsforlunch.restaurant.preference;
 
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreference;
-import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
+import java.util.Optional;
 
 /**
  * Stores per-account What's For Lunch filters.
  */
-@Repository
-public interface WhatsForLunchPreferenceRepository
-    extends MongoRepository<WhatsForLunchPreference, String> {
+public interface WhatsForLunchPreferenceRepository {
+  WhatsForLunchPreference save(WhatsForLunchPreference preference);
+  Optional<WhatsForLunchPreference> findById(String accountId);
 }

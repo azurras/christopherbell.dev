@@ -143,7 +143,9 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     var mongo = template("ordinary-versioning");
     insertSources(mongo, 4L, 9L);
     migration().apply(mongo);
-    var store = new MusicRuntimeStateStore(mongo);
+    var store = new MusicRuntimeStateStore(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .createForDisposableMongo(mongo));
     var winningSnapshot = store.findQueue().orElseThrow();
     var staleSnapshot = store.findQueue().orElseThrow();
     var winningEntry = entry("ordinary-winner");
@@ -201,7 +203,9 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     assertThat(target(mongo, "queue").containsKey("version")).isFalse();
     assertThat(target(mongo, "radio").containsKey("version")).isFalse();
 
-    var store = new MusicRuntimeStateStore(mongo);
+    var store = new MusicRuntimeStateStore(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .createForDisposableMongo(mongo));
     var saved = store.saveQueue(store.findQueue().orElseThrow());
 
     assertThat(saved.version()).isZero();
@@ -214,7 +218,9 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     var mongo = template("absent-contention");
     insertSources(mongo, null, null);
     migration().apply(mongo);
-    var store = new MusicRuntimeStateStore(mongo);
+    var store = new MusicRuntimeStateStore(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .createForDisposableMongo(mongo));
     var firstSnapshot = store.findQueue().orElseThrow();
     var staleSnapshot = store.findQueue().orElseThrow();
     var winningEntry = entry("winner");
@@ -233,7 +239,9 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
   @Test
   void genuinelyAbsentRuntimeDocumentRetainsNormalInsertSemantics() {
     var mongo = template("normal-insert");
-    var store = new MusicRuntimeStateStore(mongo);
+    var store = new MusicRuntimeStateStore(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .createForDisposableMongo(mongo));
 
     var saved = store.saveQueue(MusicQueueState.empty());
 

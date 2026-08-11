@@ -93,18 +93,8 @@ own their collection names locally.
 | `dev.christopherbell.configuration.mongo.migration.V012RetainSharedFolderWork` | `shared_folder_media_jobs`, `shared_folder_radio`, `shared_folder_upload_sessions` |
 | `dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes` | `whatsforlunch_ratings` |
 | `dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState` | `music_queue_state`, `music_radio_state`, `music_runtime_state` |
-| `dev.christopherbell.music.catalog.MusicCatalog` | `music_tracks` |
-| `dev.christopherbell.music.library.MusicLibraryService` | `music_playlists`, `music_tracks` |
-| `dev.christopherbell.music.radio.MusicRuntimeStateStore` | `music_runtime_state` |
-| `dev.christopherbell.music.security.MusicAccessAuditQueryService` | `music_access_attempts` |
-| `dev.christopherbell.music.security.MusicAccessAuditRecorder` | `music_access_attempts` |
 | `dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService` | `shared_folder_audit` |
 | `dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore` | `shared_folder_maintenance_leases` |
-| `dev.christopherbell.whatsforlunch.restaurant.RestaurantDuplicateQueryRepository` | `whatsforlunch` |
-| `dev.christopherbell.whatsforlunch.restaurant.RestaurantInventoryQueryRepository` | `whatsforlunch` |
-| `dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewStore` | `restaurant_import_previews` |
-| `dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionMutationStore` | `whatsforlunch_sessions` |
-| `dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteQueryRepository` | `whatsforlunch_ratings` |
 
 Naming Rules
 ------------

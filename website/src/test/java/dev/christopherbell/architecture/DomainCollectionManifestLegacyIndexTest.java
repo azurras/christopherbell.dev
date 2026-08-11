@@ -114,7 +114,7 @@ class DomainCollectionManifestLegacyIndexTest {
             Optional.empty()));
       }
     }
-    assertThat(annotationIndexCount).isEqualTo(53);
+    assertThat(annotationIndexCount).isEqualTo(28);
     assertThat(MANUAL_ONLY_INDEXES).hasSize(20);
     expectedIndexes.addAll(MANUAL_ONLY_INDEXES);
     assertThat(DomainCollectionManifest.ALL_INDEXES.stream()

@@ -3,13 +3,21 @@ package dev.christopherbell.whatsforlunch.restaurant;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import java.util.List;
 import java.util.Optional;
-import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.data.mongodb.repository.Query;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 /**
  * Repository interface for managing Restaurant entities in MongoDB.
  */
-public interface RestaurantRepository extends MongoRepository<Restaurant, String> {
+public interface RestaurantRepository {
+  Restaurant save(Restaurant restaurant);
+  Optional<Restaurant> findById(String id);
+  void delete(Restaurant restaurant);
+  void deleteAll(Iterable<Restaurant> restaurants);
+  List<Restaurant> findAll();
+  long count();
+  Page<Restaurant> findAll(Pageable pageable);
+  List<Restaurant> findAllById(Iterable<String> ids);
   Optional<Restaurant> findByNormalizedName(String normalizedName);
 
   List<Restaurant> findByDedupeKeyIn(List<String> dedupeKeys);
@@ -19,12 +27,6 @@ public interface RestaurantRepository extends MongoRepository<Restaurant, String
    *
    * <p>The service still applies an exact radius check after this query.</p>
    */
-  @Query("""
-      {
-        'address.latitude': { $gte: ?0, $lte: ?1 },
-        'address.longitude': { $gte: ?2, $lte: ?3 }
-      }
-      """)
   List<Restaurant> findByCoordinateBounds(
       double minLatitude,
       double maxLatitude,

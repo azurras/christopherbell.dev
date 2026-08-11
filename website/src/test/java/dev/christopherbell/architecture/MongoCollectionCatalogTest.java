@@ -81,33 +81,16 @@ class MongoCollectionCatalogTest {
           "whatsforlunch_ratings"),
       manualOwner("dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState",
           "music_queue_state", "music_radio_state", "music_runtime_state"),
-      manualOwner("dev.christopherbell.music.catalog.MusicCatalog", "music_tracks"),
-      manualOwner("dev.christopherbell.music.library.MusicLibraryService", "music_playlists", "music_tracks"),
-      manualOwner("dev.christopherbell.music.radio.MusicRuntimeStateStore",
-          "music_runtime_state"),
-      manualOwner("dev.christopherbell.music.security.MusicAccessAuditQueryService", "music_access_attempts"),
-      manualOwner("dev.christopherbell.music.security.MusicAccessAuditRecorder", "music_access_attempts"),
       manualOwner("dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService",
           "shared_folder_audit"),
       manualOwner("dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore",
-          "shared_folder_maintenance_leases"),
-      manualOwner("dev.christopherbell.whatsforlunch.restaurant.RestaurantDuplicateQueryRepository",
-          "whatsforlunch"),
-      manualOwner("dev.christopherbell.whatsforlunch.restaurant.RestaurantInventoryQueryRepository",
-          "whatsforlunch"),
-      manualOwner("dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewStore",
-          "restaurant_import_previews"),
-      manualOwner("dev.christopherbell.whatsforlunch.restaurant.session.WhatsForLunchSessionMutationStore",
-          "whatsforlunch_sessions"),
-      manualOwner("dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteQueryRepository",
-          "whatsforlunch_ratings"));
+          "shared_folder_maintenance_leases"));
   private static final Set<String> MONGO_TEMPLATE_INFRASTRUCTURE_OWNERS = Set.of(
       "dev.christopherbell.admin.commandcenter.metrics.CommandCenterMetricsService",
       "dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory",
       "dev.christopherbell.configuration.mongo.domain.MongoKindScopedOperations",
       "dev.christopherbell.configuration.mongo.migration.ApplicationMigration",
-      "dev.christopherbell.configuration.mongo.migration.MongoMigrationRunner",
-      "dev.christopherbell.music.catalog.MusicCatalogConfiguration");
+      "dev.christopherbell.configuration.mongo.migration.MongoMigrationRunner");
 
   @Test
   void catalogEntriesAreCompleteAndValid() throws IOException {

@@ -1,12 +1,14 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
-import java.util.ArrayList;
 import java.util.List;
-import lombok.RequiredArgsConstructor;
 import org.bson.Document;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.http.HttpStatus;
@@ -15,10 +17,13 @@ import org.springframework.web.server.ResponseStatusException;
 
 /** Indexed aggregation for bounded duplicate-name discovery. */
 @Repository
-@RequiredArgsConstructor
 public class RestaurantDuplicateQueryRepository {
   private static final int MAX_PAGE_SIZE = 100;
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<Restaurant> restaurants;
+
+  public RestaurantDuplicateQueryRepository(DomainMongoOperationsFactory factory) {
+    this.restaurants = factory.forType(Restaurant.class);
+  }
 
   /** Aggregates only one page of duplicate keys and then fetches only those members. */
   public Page find(String cursor, int size) {
@@ -37,9 +42,11 @@ public class RestaurantDuplicateQueryRepository {
         new Document("$match", new Document("count", new Document("$gt", 1))),
         new Document("$sort", new Document("_id", 1)),
         new Document("$limit", size + 1));
-    var grouped = mongo.getCollection("whatsforlunch")
-        .aggregate(pipeline)
-        .into(new ArrayList<>());
+    var grouped = restaurants.aggregate(KindScopedAggregation.local(
+        Aggregation.newAggregation(pipeline.stream()
+            .<org.springframework.data.mongodb.core.aggregation.AggregationOperation>
+                map(stage -> context -> stage)
+            .toList())), Document.class);
     var keysWithExtra = grouped.stream()
         .map(document -> document.getString("_id"))
         .filter(key -> key != null && !key.isBlank())
@@ -48,11 +55,10 @@ public class RestaurantDuplicateQueryRepository {
     var keys = List.copyOf(keysWithExtra.subList(0, Math.min(size, keysWithExtra.size())));
     var members = keys.isEmpty()
         ? List.<Restaurant>of()
-        : mongo.find(
+        : restaurants.find(
             new Query(Criteria.where("dedupeKey").in(keys))
-                .with(Sort.by(Sort.Order.asc("dedupeKey"), Sort.Order.asc("_id"))),
-            Restaurant.class,
-            "whatsforlunch");
+                .with(Sort.by(Sort.Order.asc("dedupeKey"), Sort.Order.asc("id"))),
+            Pageable.unpaged());
     return new Page(keys, hasMore ? keys.getLast() : null, List.copyOf(members));
   }
 
