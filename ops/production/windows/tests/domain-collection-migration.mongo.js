@@ -136,6 +136,14 @@ function rawRename(databaseName, from, to) {
   assert(outcome.ok === 1, "crash-boundary rename simulation failed");
 }
 
+function setIndexHidden(database, collection, index, hidden) {
+  const outcome = database.runCommand({
+    collMod: collection,
+    index: { name: index, hidden }
+  });
+  assert(outcome.ok === 1, "collMod hidden-state test setup failed");
+}
+
 function publishAll(databaseName) {
   let prior = 0;
   while (true) {
@@ -373,6 +381,9 @@ assert(migration.canonicalExtendedJson(main.getCollection("__domain_stage__accou
 assert(migration.canonicalExtendedJson(main.getCollection("__domain_stage__accounts")
   .findOne({ "_id.legacyId": UUID("00112233-4455-6677-8899-aabbccddeeff") })
   ._id.legacyId).includes('"subType":"04"'), "UUID identity type changed");
+setIndexHidden(main, "__domain_stage__accounts", "account__username_asc", true);
+expectFailure(() => command(databases.main, "verify-stage"), "hidden staged target index");
+setIndexHidden(main, "__domain_stage__accounts", "account__username_asc", false);
 const stageVerification = command(databases.main, "verify-stage");
 assert(stageVerification.indexes.reduce((sum, target) => sum + target.count, 0) === 126,
   "stage index count is not exact");
@@ -417,8 +428,14 @@ corruptPlan.getCollection("__domain_stage__application_migrations").updateOne(
 expectFailure(() => command(databases.corruptPlan, "stage"), "mutable publication plan");
 
 const rawDrift = seed(databases.rawDrift);
+rawDrift.getCollection("accounts").createIndex(
+  { legacyLookup: 1 }, { name: "legacy_lookup" });
 command(databases.rawDrift, "preview");
 activateTarget(databases.rawDrift);
+setIndexHidden(rawDrift, "__domain_legacy__accounts", "legacy_lookup", true);
+expectFailure(() => command(databases.rawDrift, "drop-legacy"),
+  "hidden ordinary legacy index before first drop intent");
+setIndexHidden(rawDrift, "__domain_legacy__accounts", "legacy_lookup", false);
 const protectedAccount = rawDrift.getCollection("__domain_legacy__accounts")
   .findOne({ marker: "account" });
 rawDrift.getCollection("__domain_legacy__accounts").updateOne(
@@ -435,12 +452,18 @@ assert(command(databases.rawDrift, "drop-legacy").complete === false,
   "repaired raw legacy collection did not resume deletion");
 
 const dropIntentDrift = seed(databases.dropIntentDrift);
+dropIntentDrift.getCollection("accounts").createIndex(
+  { legacyLookup: 1 }, { name: "legacy_lookup" });
 command(databases.dropIntentDrift, "preview");
 activateTarget(databases.dropIntentDrift);
 globalThis.DOMAIN_COLLECTION_INTERRUPT_AT = "after-intent";
 expectFailure(() => command(databases.dropIntentDrift, "drop-legacy"),
   "drop after-intent interruption");
 globalThis.DOMAIN_COLLECTION_INTERRUPT_AT = null;
+setIndexHidden(dropIntentDrift, "__domain_legacy__accounts", "legacy_lookup", true);
+expectFailure(() => command(databases.dropIntentDrift, "drop-legacy"),
+  "hidden legacy index after persisted drop intent");
+setIndexHidden(dropIntentDrift, "__domain_legacy__accounts", "legacy_lookup", false);
 const intentAccount = dropIntentDrift.getCollection("__domain_legacy__accounts")
   .findOne({ marker: "account" });
 dropIntentDrift.getCollection("__domain_legacy__accounts").updateOne(
@@ -491,6 +514,9 @@ command(databases.main, "verify-live");
 reverseAll(databases.main);
 command(databases.main, "verify-stage");
 publishAll(databases.main);
+setIndexHidden(main, "accounts", "account__username_asc", true);
+expectFailure(() => command(databases.main, "verify-live"), "hidden live target index");
+setIndexHidden(main, "accounts", "account__username_asc", false);
 const live = command(databases.main, "verify-live");
 assert(live.state === "TARGET_ACTIVE", "live verification did not activate target");
 verifiedLedger = main.getCollection("application_migrations")

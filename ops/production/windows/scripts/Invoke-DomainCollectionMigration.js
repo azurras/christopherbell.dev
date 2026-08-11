@@ -477,26 +477,43 @@ function indexOptions(index) {
 
 function expectedIndexSemantics(index) {
   return {
+    version: 2,
     name: index.name,
     key: indexKeysDocument(index),
     unique: index.name === "_id_" || index.unique,
     sparse: index.sparse,
     partialFilterExpression: index.partialFilterExpression,
     expireAfterSeconds: index.expireAfterSeconds,
-    collation: index.collation
+    collation: index.collation,
+    hidden: false
   };
 }
 
-function actualIndexSemantics(index) {
+function canonicalIndexSemantics(index) {
+  const modeled = new Set(["v", "key", "name", "unique", "sparse",
+    "partialFilterExpression", "expireAfterSeconds", "collation", "hidden", "ns"]);
+  if (!index || typeof index !== "object" || Array.isArray(index)
+      || Object.keys(index).some((field) => !modeled.has(field))
+      || Number(index.v) !== 2 || typeof index.name !== "string"
+      || !index.key || typeof index.key !== "object" || Array.isArray(index.key)
+      || index.hidden !== undefined && typeof index.hidden !== "boolean") {
+    fail("Mongo index contains an unmodeled behavioral option.");
+  }
   return {
+    version: Number(index.v),
     name: index.name,
     key: index.key,
     unique: index.name === "_id_" || index.unique === true,
     sparse: index.sparse === true,
     partialFilterExpression: index.partialFilterExpression || {},
     expireAfterSeconds: index.expireAfterSeconds === undefined ? null : Number(index.expireAfterSeconds),
-    collation: index.collation || null
+    collation: index.collation || null,
+    hidden: index.hidden === true
   };
+}
+
+function actualIndexSemantics(index) {
+  return canonicalIndexSemantics(index);
 }
 
 function indexMetrics(database, manifest, staged) {
@@ -1247,6 +1264,7 @@ const exported = Object.freeze({
   requireLedgerDocument,
   canonicalExtendedJson,
   canonicalChecksum,
+  canonicalIndexSemantics,
   buildPublicationOperations,
   reversePublicationOperations,
   execute

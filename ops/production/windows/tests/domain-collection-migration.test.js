@@ -113,6 +113,24 @@ test("canonical Extended JSON distinguishes BSON types and normalizes document k
     migration.canonicalExtendedJson({ a: { x: 3, y: 2 }, z: 1 }));
 });
 
+test("index semantics distinguish hidden state and reject unmodeled behavior", () => {
+  const visible = migration.canonicalIndexSemantics({ v: 2, name: "lookup", key: { value: 1 } });
+  const hidden = migration.canonicalIndexSemantics({
+    v: 2, name: "lookup", key: { value: 1 }, hidden: true
+  });
+
+  assert.equal(visible.hidden, false);
+  assert.equal(hidden.hidden, true);
+  assert.notEqual(migration.canonicalExtendedJson(visible),
+    migration.canonicalExtendedJson(hidden));
+  assert.throws(() => migration.canonicalIndexSemantics({
+    v: 2, name: "lookup", key: { value: 1 }, storageEngine: { wiredTiger: {} }
+  }), /index/i);
+  assert.throws(() => migration.canonicalIndexSemantics({
+    v: 2, name: "wildcard", key: { "$**": 1 }, wildcardProjection: { secret: 0 }
+  }), /index/i);
+});
+
 test("publication plan performs one rename at a time and remains exactly reversible", () => {
   const manifest = manifestModule.requireDigest(manifestModule.DIGEST);
   const operations = migration.buildPublicationOperations(manifest);
