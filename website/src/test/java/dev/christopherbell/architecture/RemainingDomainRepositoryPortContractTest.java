@@ -91,17 +91,17 @@ class RemainingDomainRepositoryPortContractTest {
       SharedFolderAuditRepository.save(SharedFolderAuditEvent) => save(entity:SharedFolderAuditEvent)
       SharedFolderAuditRepository.search(String,String,String,String,Instant,Instant,int) => find(query=Document{{$and=[Document{{accountId=value}}, Document{{action=value}}, Document{{outcome=value}}, Document{{relativePath=value}}, Document{{occurredAt=Document{{$gte=2026-08-11T00:00:00Z, $lte=2026-08-11T00:00:00Z}}}}]}};sort=Document{{}};skip=0;limit=0, page=0/1;offset=0;sort=occurredAt: DESC)
       MediaJobRepository.cancelActive(String,String,Instant,Instant) => updateFirst(query=Document{{id=value, ownerId=value, status=Document{{$in=[QUEUED, INSPECTING, TRANSCODING, BUFFERING]}}}};sort=Document{{}};skip=0;limit=0, update=Document{{$set=Document{{status=CANCELED, updatedAt=2026-08-11T00:00:00Z, cleanupAfter=2026-08-11T00:00:00Z, artifactsCleaned=false, descriptorPublished=false}}, $unset=Document{{activeCacheKey=1, deleteAt=1}}}})
-      MediaJobRepository.countByOwnerIdAndStatusIn(String,Collection) => count(query=Document{{ownerId=value, status=Document{{$in=[QUEUED]}}}};sort=Document{{}};skip=0;limit=0)
-      MediaJobRepository.countByStatusIn(Collection) => count(query=Document{{status=Document{{$in=[QUEUED]}}}};sort=Document{{}};skip=0;limit=0)
+      MediaJobRepository.countByOwnerIdAndStatusIn(String,Collection) => count(query=Document{{ownerId=value, status=Document{{$in=[QUEUED, INSPECTING]}}}};sort=Document{{}};skip=0;limit=0)
+      MediaJobRepository.countByStatusIn(Collection) => count(query=Document{{status=Document{{$in=[QUEUED, INSPECTING]}}}};sort=Document{{}};skip=0;limit=0)
       MediaJobRepository.deleteById(String) => remove(query=Document{{id=value}};sort=Document{{}};skip=0;limit=0)
       MediaJobRepository.findById(String) => findById(value)
       MediaJobRepository.findByOwnerIdOrderByIdAsc(String,Pageable) => find(query=Document{{ownerId=value}};sort=Document{{id=1}};skip=0;limit=11, page=unpaged)
-      MediaJobRepository.findByStatusIn(Collection) => find(query=Document{{status=Document{{$in=[QUEUED]}}}};sort=Document{{}};skip=0;limit=0, page=unpaged)
-      MediaJobRepository.findByStatusInAndCleanupAfterLessThanEqualAndArtifactsCleanedFalseOrderByCleanupAfterAscIdAsc(Collection,Instant,Pageable) => find(query=Document{{status=Document{{$in=[QUEUED]}}, cleanupAfter=Document{{$lte=2026-08-11T00:00:00Z}}, artifactsCleaned=false}};sort=Document{{cleanupAfter=1, id=1}};skip=0;limit=11, page=unpaged)
+      MediaJobRepository.findByStatusIn(Collection) => find(query=Document{{status=Document{{$in=[QUEUED, INSPECTING]}}}};sort=Document{{}};skip=0;limit=0, page=unpaged)
+      MediaJobRepository.findByStatusInAndCleanupAfterLessThanEqualAndArtifactsCleanedFalseOrderByCleanupAfterAscIdAsc(Collection,Instant,Pageable) => find(query=Document{{status=Document{{$in=[QUEUED, INSPECTING]}}, cleanupAfter=Document{{$lte=2026-08-11T00:00:00Z}}, artifactsCleaned=false}};sort=Document{{cleanupAfter=1, id=1}};skip=0;limit=11, page=unpaged)
       MediaJobRepository.findByStatusOrderByLastAccessedAtAscIdAsc(MediaJobStatus,Pageable) => find(query=Document{{status=QUEUED}};sort=Document{{lastAccessedAt=1, id=1}};skip=0;limit=11, page=unpaged)
-      MediaJobRepository.findFirstByCacheKeyAndStatusInOrderByCreatedAtAsc(String,Collection) => findOne(query=Document{{cacheKey=value, status=Document{{$in=[QUEUED]}}}};sort=Document{{createdAt=1}};skip=0;limit=1)
+      MediaJobRepository.findFirstByCacheKeyAndStatusInOrderByCreatedAtAsc(String,Collection) => findOne(query=Document{{cacheKey=value, status=Document{{$in=[QUEUED, INSPECTING]}}}};sort=Document{{createdAt=1}};skip=0;limit=1)
       MediaJobRepository.findFirstByCacheKeyAndStatusOrderByUpdatedAtDesc(String,MediaJobStatus) => findOne(query=Document{{cacheKey=value, status=QUEUED}};sort=Document{{updatedAt=-1}};skip=0;limit=1)
-      MediaJobRepository.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(Collection) => findOne(query=Document{{descriptorPublished=true, status=Document{{$in=[QUEUED]}}}};sort=Document{{createdAt=1}};skip=0;limit=1)
+      MediaJobRepository.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(Collection) => findOne(query=Document{{descriptorPublished=true, status=Document{{$in=[QUEUED, INSPECTING]}}}};sort=Document{{createdAt=1}};skip=0;limit=1)
       MediaJobRepository.findFirstByStatusAndDescriptorPublishedFalseOrderByCreatedAtAsc(MediaJobStatus) => findOne(query=Document{{status=QUEUED, descriptorPublished=false}};sort=Document{{createdAt=1}};skip=0;limit=1)
       MediaJobRepository.save(MediaJob) => save(entity:MediaJob)
       SharedFolderRadioRepository.findById(String) => findById(value)
@@ -109,7 +109,7 @@ class RemainingDomainRepositoryPortContractTest {
       SharedFolderRecycleRepository.deleteById(String) => remove(query=Document{{id=value}};sort=Document{{}};skip=0;limit=0)
       SharedFolderRecycleRepository.findById(String) => findById(value)
       SharedFolderRecycleRepository.findByStateAndExpiresAtBeforeAndRetryAfterLessThanEqualOrderByExpiresAtAscIdAsc(SharedFolderRecycleState,Instant,Instant,Pageable) => find(query=Document{{state=PREPARING, expiresAt=Document{{$lt=2026-08-11T00:00:00Z}}, retryAfter=Document{{$lte=2026-08-11T00:00:00Z}}}};sort=Document{{expiresAt=1, id=1}};skip=0;limit=0, page=0/10;offset=0;sort=UNSORTED)
-      SharedFolderRecycleRepository.findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(List,Instant,Pageable) => find(query=Document{{state=Document{{$in=[PREPARING]}}, retryAfter=Document{{$lte=2026-08-11T00:00:00Z}}}};sort=Document{{deletedAt=1, id=1}};skip=0;limit=0, page=0/10;offset=0;sort=UNSORTED)
+      SharedFolderRecycleRepository.findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(List,Instant,Pageable) => find(query=Document{{state=Document{{$in=[PREPARING, RECYCLED]}}, retryAfter=Document{{$lte=2026-08-11T00:00:00Z}}}};sort=Document{{deletedAt=1, id=1}};skip=0;limit=0, page=0/10;offset=0;sort=UNSORTED)
       SharedFolderRecycleRepository.findByStateOrderByDeletedAtDescIdDesc(SharedFolderRecycleState,Pageable) => find(query=Document{{state=PREPARING}};sort=Document{{deletedAt=-1, id=-1}};skip=0;limit=11, page=unpaged)
       SharedFolderRecycleRepository.save(SharedFolderRecycleItem) => save(entity:SharedFolderRecycleItem)
       SharedFolderMutationRecoveryRepository.claimExpiredOperationLease(String,String,SharedFolderMutationRecoveryState,Instant,String,Instant,Instant) => updateFirst(query=Document{{id=value, operationLeaseToken=value, state=PREPARED, $and=[Document{{$or=[Document{{operationLeaseExpiresAt=Document{{$lte=2026-08-11T00:00:00Z}}}}, Document{{operationLeaseExpiresAt=null}}]}}]}};sort=Document{{}};skip=0;limit=0, update=Document{{$set=Document{{operationLeaseToken=value, operationLeaseExpiresAt=2026-08-11T00:00:00Z, updatedAt=2026-08-11T00:00:00Z}}}})
@@ -121,7 +121,7 @@ class RemainingDomainRepositoryPortContractTest {
       SharedFolderMutationRecoveryRepository.save(SharedFolderMutationRecovery) => save(entity:SharedFolderMutationRecovery)
       SharedFolderUploadSessionRepository.claimExpiredAppendLease(String,String,long,Instant,String,Instant,Instant) => updateFirst(query=Document{{id=value, state=APPENDING, appendLeaseToken=value, appendOffset=1, appendLeaseExpiresAt=Document{{$lte=2026-08-11T00:00:00Z}}}};sort=Document{{}};skip=0;limit=0, update=Document{{$set=Document{{appendLeaseToken=value, appendLeaseExpiresAt=2026-08-11T00:00:00Z, updatedAt=2026-08-11T00:00:00Z}}}})
       SharedFolderUploadSessionRepository.claimExpiredFinalizationLease(String,String,SharedFolderUploadFinalizationState,Instant,String,Instant,Instant) => updateFirst(query=Document{{id=value, state=FINALIZING, finalizationLeaseToken=value, finalizationState=PREPARED, $and=[Document{{$or=[Document{{finalizationLeaseExpiresAt=Document{{$lte=2026-08-11T00:00:00Z}}}}, Document{{finalizationLeaseExpiresAt=null}}]}}]}};sort=Document{{}};skip=0;limit=0, update=Document{{$set=Document{{finalizationLeaseToken=value, finalizationLeaseExpiresAt=2026-08-11T00:00:00Z, updatedAt=2026-08-11T00:00:00Z}}}})
-      SharedFolderUploadSessionRepository.countByOwnerIdAndStateIn(String,Collection) => count(query=Document{{ownerId=value, state=Document{{$in=[ACTIVE]}}}};sort=Document{{}};skip=0;limit=0)
+      SharedFolderUploadSessionRepository.countByOwnerIdAndStateIn(String,Collection) => count(query=Document{{ownerId=value, state=Document{{$in=[ACTIVE, APPENDING]}}}};sort=Document{{}};skip=0;limit=0)
       SharedFolderUploadSessionRepository.deferExpiredMaintenance(String,int,Instant,int,Instant) => updateFirst(query=Document{{id=value, state=EXPIRED, $and=[Document{{$or=[Document{{maintenanceAttempts=1}}, Document{{maintenanceAttempts=Document{{$exists=false}}}}]}}]}};sort=Document{{}};skip=0;limit=0, update=Document{{$set=Document{{maintenanceRetryAt=2026-08-11T00:00:00Z, maintenanceAttempts=1, updatedAt=2026-08-11T00:00:00Z}}}})
       SharedFolderUploadSessionRepository.deleteById(String) => remove(query=Document{{id=value}};sort=Document{{}};skip=0;limit=0)
       SharedFolderUploadSessionRepository.expireActive(String,Instant,Instant) => updateFirst(query=Document{{id=value, state=ACTIVE, expiresAt=Document{{$lte=2026-08-11T00:00:00Z}}}};sort=Document{{}};skip=0;limit=0, update=Document{{$set=Document{{state=EXPIRED, maintenanceRetryAt=2026-08-11T00:00:00Z, maintenanceAttempts=0, updatedAt=2026-08-11T00:00:00Z}}}})
@@ -146,6 +146,16 @@ class RemainingDomainRepositoryPortContractTest {
       NhtsaVinImportStateRepository.save(NhtsaVinImportState) => save(entity:NhtsaVinImportState)
       RandomVinImportStateRepository.findById(String) => findById(value)
       RandomVinImportStateRepository.save(RandomVinImportState) => save(entity:RandomVinImportState)
+      """);
+  private static final Map<String, List<String>> EMPTY_COLLECTION_INVOCATIONS = parseContracts("""
+      MediaJobRepository.countByOwnerIdAndStatusIn(String,Collection) => count(query=Document{{ownerId=value, status=Document{{$in=[]}}}};sort=Document{{}};skip=0;limit=0)
+      MediaJobRepository.countByStatusIn(Collection) => count(query=Document{{status=Document{{$in=[]}}}};sort=Document{{}};skip=0;limit=0)
+      MediaJobRepository.findByStatusIn(Collection) => find(query=Document{{status=Document{{$in=[]}}}};sort=Document{{}};skip=0;limit=0, page=unpaged)
+      MediaJobRepository.findByStatusInAndCleanupAfterLessThanEqualAndArtifactsCleanedFalseOrderByCleanupAfterAscIdAsc(Collection,Instant,Pageable) => find(query=Document{{status=Document{{$in=[]}}, cleanupAfter=Document{{$lte=2026-08-11T00:00:00Z}}, artifactsCleaned=false}};sort=Document{{cleanupAfter=1, id=1}};skip=0;limit=11, page=unpaged)
+      MediaJobRepository.findFirstByCacheKeyAndStatusInOrderByCreatedAtAsc(String,Collection) => findOne(query=Document{{cacheKey=value, status=Document{{$in=[]}}}};sort=Document{{createdAt=1}};skip=0;limit=1)
+      MediaJobRepository.findFirstByDescriptorPublishedTrueAndStatusInOrderByCreatedAtAsc(Collection) => findOne(query=Document{{descriptorPublished=true, status=Document{{$in=[]}}}};sort=Document{{createdAt=1}};skip=0;limit=1)
+      SharedFolderRecycleRepository.findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(List,Instant,Pageable) => find(query=Document{{state=Document{{$in=[]}}, retryAfter=Document{{$lte=2026-08-11T00:00:00Z}}}};sort=Document{{deletedAt=1, id=1}};skip=0;limit=0, page=0/10;offset=0;sort=UNSORTED)
+      SharedFolderUploadSessionRepository.countByOwnerIdAndStateIn(String,Collection) => count(query=Document{{ownerId=value, state=Document{{$in=[]}}}};sort=Document{{}};skip=0;limit=0)
       """);
 
   private static final List<AdapterDefinition> ADAPTERS = List.of(
@@ -257,6 +267,74 @@ class RemainingDomainRepositoryPortContractTest {
           assertStaleMutationIsReportedAsNoMatch(
               definition, method, contractKey, returnedEntities);
         }
+      }
+    }
+  }
+
+  @Test
+  void everyEnumCollectionQueryPreservesTwoValuesAndAcceptsEmptyInput() throws Exception {
+    var applicable = ADAPTERS.stream()
+        .flatMap(definition -> java.util.Arrays.stream(definition.port().getDeclaredMethods())
+            .filter(RemainingDomainRepositoryPortContractTest::hasEnumCollectionParameter)
+            .map(method -> new BulkMethod(definition, method)))
+        .toList();
+    assertThat(applicable.stream().map(item ->
+        item.definition().port().getSimpleName() + "." + signature(item.method())))
+        .containsExactlyInAnyOrderElementsOf(EMPTY_COLLECTION_INVOCATIONS.keySet());
+
+    for (var item : applicable) {
+      var returnedEntities = List.of(
+          entityArgument(item.definition().entity(), "result-first"),
+          entityArgument(item.definition().entity(), "result-second"));
+      var operations = operationsMock(returnedEntities);
+      var repository = repository(item.definition(), operations);
+      var methodArguments = arguments(item.method());
+      for (int index = 0; index < item.method().getParameterCount(); index++) {
+        if (Collection.class.isAssignableFrom(item.method().getParameterTypes()[index])) {
+          methodArguments[index] = List.of();
+        }
+      }
+
+      var result = item.method().invoke(repository, methodArguments);
+      var contractKey = item.definition().port().getSimpleName() + "." + signature(item.method());
+      assertThat(mockingDetails(operations).getInvocations().stream()
+          .map(RemainingDomainRepositoryPortContractTest::snapshot))
+          .as(contractKey)
+          .containsExactlyElementsOf(EMPTY_COLLECTION_INVOCATIONS.get(contractKey));
+      assertResultContract(item.method(), methodArguments, result, returnedEntities, contractKey);
+    }
+  }
+
+  @Test
+  void everyLookupResultPreservesExactStorageAbsence() throws Exception {
+    var lookups = ADAPTERS.stream()
+        .flatMap(definition -> java.util.Arrays.stream(definition.port().getDeclaredMethods())
+            .filter(RemainingDomainRepositoryPortContractTest::returnsLookupResult)
+            .filter(method -> FROZEN_INVOCATIONS.get(
+                definition.port().getSimpleName() + "." + signature(method)).getFirst()
+                .startsWith("find"))
+            .map(method -> new BulkMethod(definition, method)))
+        .toList();
+    assertThat(lookups).hasSize(34);
+
+    for (var item : lookups) {
+      var operations = operationsMock(List.of());
+      var repository = repository(item.definition(), operations);
+      var methodArguments = arguments(item.method());
+      var result = item.method().invoke(repository, methodArguments);
+      var contractKey = item.definition().port().getSimpleName() + "." + signature(item.method());
+
+      assertThat(mockingDetails(operations).getInvocations().stream()
+          .map(RemainingDomainRepositoryPortContractTest::snapshot))
+          .as(contractKey)
+          .containsExactlyElementsOf(FROZEN_INVOCATIONS.get(contractKey));
+      if (result instanceof Optional<?> optional) {
+        assertThat(optional).as(contractKey).isEmpty();
+      } else if (result instanceof Slice<?> slice) {
+        assertThat(slice.getContent()).as(contractKey).isEmpty();
+        assertThat(slice.hasNext()).as(contractKey).isFalse();
+      } else {
+        assertThat(result).as(contractKey).isEqualTo(List.of());
       }
     }
   }
@@ -431,6 +509,25 @@ class RemainingDomainRepositoryPortContractTest {
         .collect(Collectors.joining(",", "(", ")"));
   }
 
+  private static boolean hasEnumCollectionParameter(Method method) {
+    for (int index = 0; index < method.getParameterCount(); index++) {
+      if (!Collection.class.isAssignableFrom(method.getParameterTypes()[index])) {
+        continue;
+      }
+      var parameter = (ParameterizedType) method.getGenericParameterTypes()[index];
+      if (((Class<?>) parameter.getActualTypeArguments()[0]).isEnum()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean returnsLookupResult(Method method) {
+    return method.getReturnType() == Optional.class
+        || method.getReturnType() == List.class
+        || Slice.class.isAssignableFrom(method.getReturnType());
+  }
+
   private static Map<String, List<String>> parseContracts(String contracts) {
     return contracts.lines()
         .filter(line -> !line.isBlank())
@@ -459,7 +556,8 @@ class RemainingDomainRepositoryPortContractTest {
     if (Collection.class.isAssignableFrom(rawType) || Iterable.class == rawType) {
       var elementType = (Class<?>) ((ParameterizedType) genericType).getActualTypeArguments()[0];
       if (elementType.isEnum()) {
-        return List.of(entityArgument(elementType, "value"));
+        var constants = elementType.getEnumConstants();
+        return List.of(constants[0], constants[1]);
       }
       return List.of(
           entityArgument(elementType, "first"),
@@ -493,7 +591,11 @@ class RemainingDomainRepositoryPortContractTest {
       var name = invocation.getMethod().getName();
       if (name.equals("save") || name.equals("insert")) return invocation.getArgument(0);
       var returnType = invocation.getMethod().getReturnType();
-      if (returnType == Optional.class) return Optional.of(returnedEntities.getFirst());
+      if (returnType == Optional.class) {
+        return returnedEntities.isEmpty()
+            ? Optional.empty()
+            : Optional.of(returnedEntities.getFirst());
+      }
       if (returnType == List.class) return returnedEntities;
       if (returnType == long.class) return 1L;
       if (returnType == boolean.class) return true;
@@ -523,6 +625,14 @@ class RemainingDomainRepositoryPortContractTest {
       Class<?> entity,
       KindScopedMongoOperations<?> operations) {
     when(factory.forType((Class) entity)).thenReturn((KindScopedMongoOperations) operations);
+  }
+
+  private static Object repository(
+      AdapterDefinition definition, KindScopedMongoOperations<?> operations) throws Exception {
+    var factory = mock(DomainMongoOperationsFactory.class);
+    bind(factory, definition.entity(), operations);
+    return definition.adapter().getConstructor(DomainMongoOperationsFactory.class)
+        .newInstance(factory);
   }
 
   private static AdapterDefinition adapter(

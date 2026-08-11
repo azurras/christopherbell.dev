@@ -13,34 +13,43 @@ import org.springframework.data.repository.Repository;
 
 /** Compiled dependency rule for the final manifest-backed Mongo boundary. */
 final class MongoPersistenceBoundaryRules {
-  private static final Set<String> FORBIDDEN_ACCESS_INTERFACES = Set.of(
-      "com.mongodb.client.MongoClient",
-      "com.mongodb.client.MongoCollection",
-      "com.mongodb.client.MongoDatabase",
-      "org.springframework.data.mongodb.MongoDatabaseFactory",
-      "org.springframework.data.mongodb.ReactiveMongoDatabaseFactory",
-      "org.springframework.data.mongodb.core.ExecutableAggregationOperation",
-      "org.springframework.data.mongodb.core.ExecutableFindOperation",
-      "org.springframework.data.mongodb.core.ExecutableInsertOperation",
-      "org.springframework.data.mongodb.core.ExecutableMapReduceOperation",
-      "org.springframework.data.mongodb.core.ExecutableRemoveOperation",
-      "org.springframework.data.mongodb.core.ExecutableUpdateOperation",
-      "org.springframework.data.mongodb.core.FluentMongoOperations",
-      "org.springframework.data.mongodb.core.MongoOperations",
-      "org.springframework.data.mongodb.core.ReactiveAggregationOperation",
-      "org.springframework.data.mongodb.core.ReactiveChangeStreamOperation",
-      "org.springframework.data.mongodb.core.ReactiveFindOperation",
-      "org.springframework.data.mongodb.core.ReactiveFluentMongoOperations",
-      "org.springframework.data.mongodb.core.ReactiveInsertOperation",
-      "org.springframework.data.mongodb.core.ReactiveMapReduceOperation",
-      "org.springframework.data.mongodb.core.ReactiveMongoOperations",
-      "org.springframework.data.mongodb.core.ReactiveRemoveOperation",
-      "org.springframework.data.mongodb.core.ReactiveUpdateOperation");
-  private static final Set<String> FORBIDDEN_ACCESS_FACTORIES = Set.of(
-      "com.mongodb.client.MongoClientFactory",
-      "com.mongodb.client.MongoClients",
+  private static final String SPRING_MONGO_ROOT = "org.springframework.data.mongodb.";
+  private static final String SPRING_CORE_ROOT = SPRING_MONGO_ROOT + "core.";
+  private static final Set<String> INERT_DRIVER_VALUE_PACKAGES = Set.of(
+      "com.mongodb.client.gridfs.model.",
+      "com.mongodb.client.model.",
+      "com.mongodb.client.result.");
+  private static final Set<String> INERT_DRIVER_VALUE_TYPES = Set.of(
+      "com.mongodb.AutoEncryptionSettings",
+      "com.mongodb.ClientEncryptionSettings",
+      "com.mongodb.ClientSessionOptions",
+      "com.mongodb.MongoClientSettings");
+  private static final Set<String> INERT_SPRING_VALUE_PACKAGES = Set.of(
+      SPRING_CORE_ROOT + "aggregation.",
+      SPRING_CORE_ROOT + "geo.",
+      SPRING_CORE_ROOT + "mapping.",
+      SPRING_CORE_ROOT + "mapreduce.",
+      SPRING_CORE_ROOT + "query.",
+      SPRING_CORE_ROOT + "schema.",
+      SPRING_CORE_ROOT + "time.",
+      SPRING_CORE_ROOT + "validation.");
+  private static final Set<String> INERT_SPRING_VALUE_TYPES = Set.of(
+      SPRING_CORE_ROOT + "ChangeStreamEvent",
+      SPRING_CORE_ROOT + "ChangeStreamOptions",
+      SPRING_CORE_ROOT + "CollectionOptions",
+      SPRING_CORE_ROOT + "FindAndModifyOptions",
+      SPRING_CORE_ROOT + "FindAndReplaceOptions",
+      SPRING_CORE_ROOT + "ReplaceOptions",
+      SPRING_CORE_ROOT + "index.IndexDefinition",
+      SPRING_CORE_ROOT + "index.IndexInfo",
+      SPRING_MONGO_ROOT + "gridfs.GridFsResource");
+  private static final Set<String> SPRING_ACCESS_FACTORIES = Set.of(
       "org.springframework.data.mongodb.core.MongoClientFactoryBean",
-      "org.springframework.data.mongodb.core.ReactiveMongoClientFactoryBean");
+      "org.springframework.data.mongodb.core.ReactiveMongoClientFactoryBean",
+      "org.springframework.data.mongodb.repository.support.MongoRepositoryFactory",
+      "org.springframework.data.mongodb.repository.support.MongoRepositoryFactoryBean",
+      "org.springframework.data.mongodb.repository.support.ReactiveMongoRepositoryFactory",
+      "org.springframework.data.mongodb.repository.support.ReactiveMongoRepositoryFactoryBean");
 
   private final String rootPackage;
   private final Set<String> approvedOwners;
@@ -80,9 +89,90 @@ final class MongoPersistenceBoundaryRules {
     }
   }
 
-  private static boolean isForbiddenMongoType(JavaClass target) {
-    return FORBIDDEN_ACCESS_FACTORIES.contains(target.getName())
-        || FORBIDDEN_ACCESS_INTERFACES.stream().anyMatch(target::isAssignableTo)
-        || target.isAssignableTo(Repository.class);
+  static boolean isForbiddenMongoType(JavaClass target) {
+    if (target.isAssignableTo(Repository.class)) {
+      return true;
+    }
+    var name = target.getName();
+    return isDriverAccessType(name) || isSpringAccessType(name);
+  }
+
+  private static boolean isDriverAccessType(String name) {
+    if (INERT_DRIVER_VALUE_TYPES.contains(name)
+        || startsWithAny(name, INERT_DRIVER_VALUE_PACKAGES)) {
+      return false;
+    }
+    return name.startsWith("com.mongodb.client.")
+        || name.startsWith("com.mongodb.session.");
+  }
+
+  private static boolean isSpringAccessType(String name) {
+    if (INERT_SPRING_VALUE_TYPES.contains(name)
+        || startsWithAny(name, INERT_SPRING_VALUE_PACKAGES)) {
+      return false;
+    }
+    var simpleName = name.substring(name.lastIndexOf('.') + 1);
+    if (SPRING_ACCESS_FACTORIES.contains(name)
+        || name.equals("org.springframework.data.mongodb.MongoDatabaseFactory")
+        || name.equals("org.springframework.data.mongodb.ReactiveMongoDatabaseFactory")) {
+      return true;
+    }
+    if (name.startsWith(SPRING_MONGO_ROOT)
+        && !name.substring(SPRING_MONGO_ROOT.length()).contains(".")) {
+      return simpleName.endsWith("DatabaseUtils")
+          || simpleName.endsWith("MongoClusterCapable")
+          || simpleName.equals("MongoSessionProvider")
+          || simpleName.endsWith("MongoTransactionManager")
+          || simpleName.endsWith("MongoResourceHolder")
+          || simpleName.equals("SessionAwareMethodInterceptor");
+    }
+    if (name.startsWith(SPRING_CORE_ROOT + "index.")) {
+      return simpleName.contains("IndexOperations")
+          || simpleName.endsWith("EntityIndexCreator");
+    }
+    if (name.startsWith(SPRING_CORE_ROOT + "convert.")) {
+      return simpleName.equals("DefaultDbRefResolver")
+          || simpleName.equals("MongoDatabaseFactoryReferenceLoader");
+    }
+    if (name.startsWith(SPRING_MONGO_ROOT + "gridfs.")) {
+      return simpleName.contains("GridFsOperations") || simpleName.endsWith("GridFsTemplate");
+    }
+    if (name.startsWith(SPRING_CORE_ROOT + "messaging.")) {
+      return simpleName.endsWith("Task")
+          || simpleName.equals("TaskFactory")
+          || simpleName.endsWith("MessageListenerContainer")
+          || simpleName.equals("Subscription");
+    }
+    if (name.startsWith(SPRING_MONGO_ROOT + "repository.support.")) {
+      return simpleName.contains("RepositoryFactory")
+          || simpleName.matches("Simple(Reactive)?MongoRepository")
+          || simpleName.contains("MongoPredicateExecutor")
+          || simpleName.contains("SpringDataMongodbQuery")
+          || simpleName.equals("IndexEnsuringQueryCreationListener")
+          || simpleName.contains("RepositoryFragmentsContributor");
+    }
+    if (!name.startsWith(SPRING_CORE_ROOT)
+        || name.substring(SPRING_CORE_ROOT.length()).contains(".")) {
+      return false;
+    }
+    return simpleName.contains("Operations")
+        || simpleName.startsWith("Executable")
+        || simpleName.startsWith("Reactive") && simpleName.contains("Operation")
+        || simpleName.endsWith("MongoTemplate")
+        || simpleName.contains("DatabaseFactory")
+        || simpleName.equals("MongoAdmin")
+        || simpleName.endsWith("CollectionCallback")
+        || simpleName.endsWith("DatabaseCallback")
+        || simpleName.endsWith("SessionCallback")
+        || simpleName.endsWith("SessionScoped")
+        || simpleName.endsWith("CursorPreparer")
+        || simpleName.endsWith("CollectionPreparer")
+        || simpleName.endsWith("BulkWriter")
+        || simpleName.endsWith("BulkWriterSupport")
+        || simpleName.endsWith("BulkWriteSupport");
+  }
+
+  private static boolean startsWithAny(String name, Set<String> prefixes) {
+    return prefixes.stream().anyMatch(name::startsWith);
   }
 }
