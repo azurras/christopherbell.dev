@@ -20,7 +20,15 @@ const databases = Object.freeze({
   required: "cbell_candidate_333333333333_333333333333333333333333",
   v014: "cbell_candidate_444444444444_444444444444444444444444",
   corruptPlan: "cbell_candidate_555555555555_555555555555555555555555",
-  faultMatrix: "cbell_candidate_666666666666_666666666666666666666666"
+  faultMatrix: "cbell_candidate_666666666666_666666666666666666666666",
+  ledgerPublish: "cbell_candidate_777777777777_777777777777777777777777",
+  ledgerLive: "cbell_candidate_888888888888_888888888888888888888888",
+  ledgerDrop: "cbell_candidate_999999999999_999999999999999999999999",
+  rawDrift: "cbell_candidate_abababababab_abababababababababababab",
+  reverseDocument: "cbell_candidate_acacacacacac_acacacacacacacacacacacac",
+  reverseIndex: "cbell_candidate_adadadadadad_adadadadadadadadadadadad",
+  replacement: "cbell_candidate_aeaeaeaeaeae_aeaeaeaeaeaeaeaeaeaeaeae",
+  dropIntentDrift: "cbell_candidate_afafafafafaf_afafafafafafafafafafafaf"
 });
 
 function assert(condition, message) {
@@ -29,8 +37,11 @@ function assert(condition, message) {
 
 function command(database, action, commandOwner = owner) {
   globalThis.DOMAIN_COLLECTION_EVIDENCE = protectedEvidence.get(database) || null;
+  const expectedEvidenceDigest = action === "preview" ? "0".repeat(64)
+    : migration.evidenceDigest(globalThis.DOMAIN_COLLECTION_EVIDENCE);
   const outcome = migration.execute(
-    db, [database, action, digest, commandOwner, release, backupIdentity]);
+    db, [database, action, digest, commandOwner, release, backupIdentity,
+      expectedEvidenceDigest]);
   if (action === "preview") {
     assert(outcome.evidence !== null, "preview omitted protected evidence");
     protectedEvidence.set(database, outcome.evidence);
@@ -41,6 +52,9 @@ function command(database, action, commandOwner = owner) {
   assert(outcome.action === action, action + " omitted its action");
   assert(outcome.manifestDigest === digest, action + " omitted its manifest digest");
   assert(outcome.backupIdentity === backupIdentity, action + " omitted its backup identity");
+  assert(outcome.expectedEvidenceDigest === (action === "preview"
+    ? outcome.evidenceDigest : expectedEvidenceDigest),
+  action + " omitted its independently supplied evidence digest");
   assert(typeof outcome.evidenceDigest === "string", action + " omitted its evidence digest");
   assert(outcome.kinds.length === manifest.kinds.length, action + " omitted kind evidence");
   assert(outcome.indexes.length === manifest.targets.length, action + " omitted index evidence");
@@ -74,7 +88,8 @@ function seed(databaseName) {
         status: "APPLIED",
         ownerToken: "v014-owner",
         startedAt: ISODate("2026-08-10T00:00:00.000Z"),
-        completedAt: ISODate("2026-08-10T00:01:00.000Z")
+        completedAt: ISODate("2026-08-10T00:01:00.000Z"),
+        _class: "dev.christopherbell.configuration.mongo.migration.MigrationRecord"
       };
     }
     database.getCollection(kind.source).insertOne(document);
@@ -214,6 +229,19 @@ function interruptEveryBoundary(databaseName, action, progressField, expectedPro
   assert(ledger.payload.intent === null, action + " retained a completed effect intent");
 }
 
+function activateTarget(databaseName) {
+  stageAll(databaseName);
+  command(databaseName, "verify-stage");
+  publishAll(databaseName);
+  command(databaseName, "verify-live");
+}
+
+function reverseUntilFinal(databaseName) {
+  while (currentLedger(databaseName).payload.publishIndex > 1) {
+    command(databaseName, "reverse-next");
+  }
+}
+
 for (const name of Object.values(databases)) db.getSiblingDB(name).dropDatabase();
 
 const restore = seed(databases.restore);
@@ -251,6 +279,49 @@ const v014 = seed(databases.v014);
 v014.getCollection("application_migrations").updateOne(
   { _id: "014-consolidate-music-runtime-state" }, { $set: { checksum: "0".repeat(64) } });
 expectFailure(() => command(databases.v014, "preview"), "wrong V014 checksum");
+
+seed(databases.replacement);
+command(databases.replacement, "preview");
+const originalEvidence = protectedEvidence.get(databases.replacement);
+const replacementEvidence = { ...originalEvidence,
+  collections: originalEvidence.collections.map((metric, index) => index === 0
+    ? { ...metric, checksum: "f".repeat(64) } : metric) };
+globalThis.DOMAIN_COLLECTION_EVIDENCE = replacementEvidence;
+expectFailure(() => migration.execute(db, [databases.replacement, "stage", digest, owner,
+  release, backupIdentity, migration.evidenceDigest(originalEvidence)]),
+"replacement evidence with a recomputed digest");
+globalThis.DOMAIN_COLLECTION_EVIDENCE = null;
+
+seed(databases.ledgerPublish);
+command(databases.ledgerPublish, "preview");
+stageAll(databases.ledgerPublish);
+command(databases.ledgerPublish, "verify-stage");
+db.getSiblingDB(databases.ledgerPublish)
+  .getCollection("__domain_stage__application_migrations").updateOne(
+    { _kind: "domain_collection_cutover" },
+    { $set: { "payload.presentSources": [] } });
+expectFailure(() => command(databases.ledgerPublish, "publish-next"),
+  "corrupt ledger source plan at publication");
+
+seed(databases.ledgerLive);
+command(databases.ledgerLive, "preview");
+stageAll(databases.ledgerLive);
+command(databases.ledgerLive, "verify-stage");
+publishAll(databases.ledgerLive);
+db.getSiblingDB(databases.ledgerLive).getCollection("application_migrations").updateOne(
+  { _kind: "domain_collection_cutover" },
+  { $set: { "payload.expectedKindMetrics.0.checksum": "f".repeat(64) } });
+expectFailure(() => command(databases.ledgerLive, "verify-live"),
+  "corrupt ledger metrics at live verification");
+
+seed(databases.ledgerDrop);
+command(databases.ledgerDrop, "preview");
+activateTarget(databases.ledgerDrop);
+db.getSiblingDB(databases.ledgerDrop).getCollection("application_migrations").updateOne(
+  { _kind: "domain_collection_cutover" },
+  { $set: { "payload.presentSources.0": "account_follows" } });
+expectFailure(() => command(databases.ledgerDrop, "drop-legacy"),
+  "corrupt ledger source plan at deletion");
 
 const malformed = seed(databases.malformed);
 malformed.getCollection("accounts").deleteMany({});
@@ -344,6 +415,68 @@ corruptPlan.getCollection("__domain_stage__application_migrations").updateOne(
     { kind: "rename", from: "accounts", to: "unrelated_collection" }
   ] } });
 expectFailure(() => command(databases.corruptPlan, "stage"), "mutable publication plan");
+
+const rawDrift = seed(databases.rawDrift);
+command(databases.rawDrift, "preview");
+activateTarget(databases.rawDrift);
+const protectedAccount = rawDrift.getCollection("__domain_legacy__accounts")
+  .findOne({ marker: "account" });
+rawDrift.getCollection("__domain_legacy__accounts").updateOne(
+  { _id: protectedAccount._id }, { $set: { marker: "post-preview-drift" } });
+expectFailure(() => command(databases.rawDrift, "drop-legacy"),
+  "ordinary legacy document drift before deletion");
+rawDrift.getCollection("__domain_legacy__accounts").replaceOne(
+  { _id: protectedAccount._id }, protectedAccount);
+rawDrift.getCollection("__domain_legacy__accounts").createIndex({ unexpected: 1 });
+expectFailure(() => command(databases.rawDrift, "drop-legacy"),
+  "ordinary legacy index drift before deletion");
+rawDrift.getCollection("__domain_legacy__accounts").dropIndex("unexpected_1");
+assert(command(databases.rawDrift, "drop-legacy").complete === false,
+  "repaired raw legacy collection did not resume deletion");
+
+const dropIntentDrift = seed(databases.dropIntentDrift);
+command(databases.dropIntentDrift, "preview");
+activateTarget(databases.dropIntentDrift);
+globalThis.DOMAIN_COLLECTION_INTERRUPT_AT = "after-intent";
+expectFailure(() => command(databases.dropIntentDrift, "drop-legacy"),
+  "drop after-intent interruption");
+globalThis.DOMAIN_COLLECTION_INTERRUPT_AT = null;
+const intentAccount = dropIntentDrift.getCollection("__domain_legacy__accounts")
+  .findOne({ marker: "account" });
+dropIntentDrift.getCollection("__domain_legacy__accounts").updateOne(
+  { _id: intentAccount._id }, { $set: { marker: "after-intent-drift" } });
+expectFailure(() => command(databases.dropIntentDrift, "drop-legacy"),
+  "after-intent legacy mutation");
+assert(dropIntentDrift.getCollection("__domain_legacy__accounts").countDocuments({}) > 0
+  && currentLedger(databases.dropIntentDrift).payload.dropIndex === 0,
+"after-intent drift was deleted or reconciled");
+dropIntentDrift.getCollection("__domain_legacy__accounts").replaceOne(
+  { _id: intentAccount._id }, intentAccount);
+assert(command(databases.dropIntentDrift, "drop-legacy").complete === false,
+  "repaired after-intent collection did not resume the exact drop");
+
+const reverseDocument = seed(databases.reverseDocument);
+command(databases.reverseDocument, "preview");
+stageAll(databases.reverseDocument);
+command(databases.reverseDocument, "verify-stage");
+publishAll(databases.reverseDocument);
+const reverseAccount = reverseDocument.getCollection("__domain_legacy__accounts")
+  .findOne({ marker: "account" });
+reverseDocument.getCollection("__domain_legacy__accounts").updateOne(
+  { _id: reverseAccount._id }, { $set: { marker: "reverse-drift" } });
+reverseUntilFinal(databases.reverseDocument);
+expectFailure(() => command(databases.reverseDocument, "reverse-next"),
+  "final reverse document proof");
+
+const reverseIndex = seed(databases.reverseIndex);
+command(databases.reverseIndex, "preview");
+stageAll(databases.reverseIndex);
+command(databases.reverseIndex, "verify-stage");
+publishAll(databases.reverseIndex);
+reverseIndex.getCollection("__domain_legacy__accounts").createIndex({ unexpected: 1 });
+reverseUntilFinal(databases.reverseIndex);
+expectFailure(() => command(databases.reverseIndex, "reverse-next"),
+  "final reverse index proof");
 
 globalThis.DOMAIN_COLLECTION_INTERRUPT_AT = "after-effect";
 expectFailure(() => command(databases.main, "publish-next"), "publication after-effect interruption");

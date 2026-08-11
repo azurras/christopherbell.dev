@@ -1,11 +1,14 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 const manifestModule = require("../scripts/DomainCollectionManifest.js");
 const migration = require("../scripts/Invoke-DomainCollectionMigration.js");
 const backupIdentity = "b".repeat(64);
+const noExpectedEvidence = "0".repeat(64);
 
 test("manifest freezes all targets kinds sources indexes and V014 drop-only artifacts", () => {
   const manifest = manifestModule.requireDigest(
@@ -24,13 +27,14 @@ test("manifest freezes all targets kinds sources indexes and V014 drop-only arti
 test("command parser rejects unsafe database action digest owner and release inputs", () => {
   const valid = ["cbell_candidate_123456789abc_1234567890abcdef12345678", "preview",
     "576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24",
-    "0123456789abcdef0123456789abcdef", "a".repeat(40), backupIdentity];
+    "0123456789abcdef0123456789abcdef", "a".repeat(40), backupIdentity,
+    noExpectedEvidence];
   assert.equal(migration.parseCommand(valid).action, "preview");
   assert.equal(migration.parseCommand(valid).backupIdentity, backupIdentity);
 
   for (const replacement of [
     [0, "admin"], [1, "eval"], [2, "0".repeat(64)], [3, "owner value"],
-    [4, "A".repeat(40)], [5, "backup"]
+    [4, "A".repeat(40)], [5, "backup"], [6, "evidence"]
   ]) {
     const args = valid.slice();
     args[replacement[0]] = replacement[1];
@@ -50,6 +54,7 @@ test("failure results retain the action contract without echoing unsafe argument
     state: "FAILED",
     manifestDigest: null,
     backupIdentity: null,
+    expectedEvidenceDigest: null,
     evidenceDigest: null,
     evidence: null,
     kinds: [],
@@ -61,11 +66,6 @@ test("failure results retain the action contract without echoing unsafe argument
 });
 
 test("protected evidence is bound to manifest release backup and exact content", () => {
-  const command = migration.parseCommand([
-    "cbell_candidate_123456789abc_1234567890abcdef12345678", "stage",
-    manifestModule.DIGEST, "0123456789abcdef0123456789abcdef", "a".repeat(40),
-    backupIdentity
-  ]);
   const evidence = {
     version: 1,
     manifestDigest: manifestModule.DIGEST,
@@ -85,12 +85,23 @@ test("protected evidence is bound to manifest release backup and exact content",
     }
   };
   const digest = migration.evidenceDigest(evidence);
+  const command = migration.parseCommand([
+    "cbell_candidate_123456789abc_1234567890abcdef12345678", "stage",
+    manifestModule.DIGEST, "0123456789abcdef0123456789abcdef", "a".repeat(40),
+    backupIdentity, digest
+  ]);
 
-  assert.equal(migration.requireProtectedEvidence(command, evidence, digest), evidence);
+  assert.equal(migration.requireProtectedEvidence(command, evidence), evidence);
   assert.throws(() => migration.requireProtectedEvidence(
-    command, { ...evidence, backupIdentity: "c".repeat(64) }, digest), /evidence/i);
+    command, { ...evidence, backupIdentity: "c".repeat(64) }), /evidence/i);
   assert.throws(() => migration.requireProtectedEvidence(
-    command, { ...evidence, presentSources: ["accounts"] }, digest), /evidence/i);
+    command, { ...evidence, presentSources: ["accounts"] }), /evidence/i);
+  const replacement = { ...evidence, collections: [{
+    name: "accounts", count: 0, checksum: "3".repeat(64), indexDigest: "4".repeat(64)
+  }] };
+  assert.notEqual(migration.evidenceDigest(replacement), digest);
+  assert.throws(() => migration.requireProtectedEvidence(command, replacement), /evidence/i,
+    "replacement evidence must not authenticate against its recomputed digest");
 });
 
 test("canonical Extended JSON distinguishes BSON types and normalizes document keys", () => {
@@ -113,4 +124,45 @@ test("publication plan performs one rename at a time and remains exactly reversi
     operations.toReversed().map((operation) => ({
       kind: "rename", from: operation.to, to: operation.from
     })));
+});
+
+test("Java and JavaScript enforce the shared exact ledger field contract", () => {
+  const contractPath = path.resolve(__dirname,
+    "../../../../website/src/test/resources/domain-collection-ledger-contract.txt");
+  const contract = new Map(fs.readFileSync(contractPath, "utf8").trim().split(/\r?\n/)
+    .map((line) => {
+      const [name, fields] = line.split("|");
+      return [name, fields.split(",")];
+    }));
+  const manifest = manifestModule.MANIFEST;
+  const presentSources = [...new Set(manifest.kinds.filter((kind) => kind.source)
+    .map((kind) => kind.source))].sort();
+  const metrics = manifest.kinds.map((kind) => ({
+    kind: kind.kind, count: 0, checksum: "0".repeat(64)
+  }));
+  const evidence = { presentSources, kinds: metrics };
+  const payloadValues = {
+    state: "TARGET_ACTIVE", manifestDigest: manifest.digest,
+    ownerToken: "0".repeat(32), release: "1".repeat(40), backupIdentity: "2".repeat(64),
+    evidenceDigest: "3".repeat(64), revision: 7, stageIndex: 66, publishIndex: 19,
+    dropIndex: 0, completed: true, legacyDropped: false, intent: null,
+    presentSources, expectedKindMetrics: metrics
+  };
+  const payload = Object.fromEntries(contract.get("payload")
+    .map((field) => [field, payloadValues[field]]));
+  const id = Object.fromEntries(contract.get("id").map((field) => [field,
+    field === "kind" ? "domain_collection_cutover" : "domain-collection-cutover"]));
+  const values = { _id: id, _kind: "domain_collection_cutover", schemaVersion: 1, payload };
+  const ledger = Object.fromEntries(contract.get("envelope").map((field) => [field, values[field]]));
+  const command = migration.parseCommand([
+    "cbell_candidate_123456789abc_1234567890abcdef12345678", "verify-live",
+    manifest.digest, payload.ownerToken, payload.release, payload.backupIdentity,
+    payload.evidenceDigest
+  ]);
+
+  assert.equal(migration.requireLedgerDocument(ledger, command, evidence), ledger);
+  assert.throws(() => migration.requireLedgerDocument(
+    { ...ledger, unexpected: true }, command, evidence), /ledger/i);
+  assert.throws(() => migration.requireLedgerDocument({ ...ledger,
+    payload: { ...payload, dropIndex: 0n } }, command, evidence), /ledger/i);
 });

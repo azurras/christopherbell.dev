@@ -13,6 +13,7 @@ const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const OWNER = /^[0-9a-f]{32}$/;
 const RELEASE = /^[0-9a-f]{40}$/;
 const BACKUP = /^[0-9a-f]{64}$/;
+const PREVIEW_EVIDENCE = "0".repeat(64);
 const LEDGER_ID = "domain-collection-cutover";
 const LEDGER_KIND = "domain_collection_cutover";
 const STAGE_PREFIX = "__domain_stage__";
@@ -20,14 +21,17 @@ const LEGACY_PREFIX = "__domain_legacy__";
 const V014_ID = "014-consolidate-music-runtime-state";
 const V014_CHECKSUM = "11a69bdd4556cfc38060ccdda5075fb9d6bc36f1cc414edd7b26cd61a74b5cbb";
 const V014_DESCRIPTION = "Consolidate Music queue and radio runtime state";
+const MIGRATION_RECORD_TYPE =
+  "dev.christopherbell.configuration.mongo.migration.MigrationRecord";
 
 function fail(message) {
   throw new Error(message);
 }
 
 function parseCommand(args) {
-  if (!Array.isArray(args) || args.length !== 6) fail("Mongo migration arguments are invalid.");
-  const [database, action, manifestDigest, ownerToken, release, backupIdentity] = args;
+  if (!Array.isArray(args) || args.length !== 7) fail("Mongo migration arguments are invalid.");
+  const [database, action, manifestDigest, ownerToken, release, backupIdentity,
+    expectedEvidenceDigest] = args;
   if (typeof database !== "string" || !DATABASE.test(database)) {
     fail("Mongo migration database is invalid.");
   }
@@ -47,7 +51,15 @@ function parseCommand(args) {
   if (typeof backupIdentity !== "string" || !BACKUP.test(backupIdentity)) {
     fail("Mongo migration backup identity is invalid.");
   }
-  return Object.freeze({ database, action, manifestDigest, ownerToken, release, backupIdentity });
+  if (typeof expectedEvidenceDigest !== "string" || !DIGEST_PATTERN.test(expectedEvidenceDigest)
+      || action === "preview" && expectedEvidenceDigest !== PREVIEW_EVIDENCE
+      || action !== "preview" && expectedEvidenceDigest === PREVIEW_EVIDENCE) {
+    fail("Mongo migration evidence digest is invalid.");
+  }
+  return Object.freeze({
+    database, action, manifestDigest, ownerToken, release, backupIdentity,
+    expectedEvidenceDigest
+  });
 }
 
 function redactedFailure(args) {
@@ -58,6 +70,8 @@ function redactedFailure(args) {
     ? values[2] : null;
   const backupIdentity = typeof values[5] === "string" && BACKUP.test(values[5])
     ? values[5] : null;
+  const expectedEvidenceDigest = typeof values[6] === "string"
+      && DIGEST_PATTERN.test(values[6]) ? values[6] : null;
   return Object.freeze({
     complete: false,
     database,
@@ -65,6 +79,7 @@ function redactedFailure(args) {
     state: "FAILED",
     manifestDigest,
     backupIdentity,
+    expectedEvidenceDigest,
     evidenceDigest: null,
     evidence: null,
     kinds: Object.freeze([]),
@@ -114,7 +129,7 @@ function evidenceDigest(evidence) {
   return sha256(canonicalExtendedJson(evidence));
 }
 
-function requireProtectedEvidence(command, evidence, expectedDigest) {
+function validateProtectedEvidence(command, evidence, expectedDigest) {
   const fields = evidence && typeof evidence === "object" && !Array.isArray(evidence)
     ? Object.keys(evidence).sort() : [];
   const expectedFields = [
@@ -163,6 +178,10 @@ function requireProtectedEvidence(command, evidence, expectedDigest) {
     fail("Mongo protected evidence is invalid.");
   }
   return evidence;
+}
+
+function requireProtectedEvidence(command, evidence) {
+  return validateProtectedEvidence(command, evidence, command.expectedEvidenceDigest);
 }
 
 function sourceNames(manifest) {
@@ -248,6 +267,33 @@ function requireProtectedLegacyCollections(database, evidence) {
   }
 }
 
+function requireProtectedDropCollection(database, name, evidence) {
+  const original = name.startsWith(LEGACY_PREFIX) ? name.slice(LEGACY_PREFIX.length) : name;
+  const expected = evidence.collections.find((metric) => metric.name === original) || null;
+  const actual = rawCollectionMetric(database, name);
+  if (expected === null && actual !== null
+      || expected !== null && (actual === null || actual.count !== expected.count
+        || actual.checksum !== expected.checksum || actual.indexDigest !== expected.indexDigest)) {
+    fail("Mongo legacy collection changed after protected backup evidence was recorded.");
+  }
+}
+
+function requireRestoredLegacy(database, manifest, evidence) {
+  const legacyNames = applicationCollections(database)
+    .filter((name) => !name.startsWith(STAGE_PREFIX));
+  if (!sameValue(legacyNames, evidence.collections.map((metric) => metric.name).sort())) {
+    fail("Mongo restored legacy inventory does not match protected evidence.");
+  }
+  requireProtectedLegacyCollections(database, evidence);
+  const presentSources = sourceNames(manifest)
+    .filter((source) => collectionExists(database, source)).sort();
+  if (!sameValue(presentSources, evidence.presentSources)
+      || !sameValue(kindMetricsFromLegacy(database, manifest), evidence.kinds)
+      || !sameValue(v014Evidence(database), evidence.v014)) {
+    fail("Mongo restored legacy data does not match protected evidence.");
+  }
+}
+
 function assertInitialInventory(database, manifest) {
   const approved = new Set(sourceNames(manifest).concat(manifest.dropOnly));
   for (const name of applicationCollections(database)) {
@@ -298,12 +344,13 @@ function assertV014Authority(database) {
     fail("Mongo V014 authority is absent.");
   }
   const migration = database.getCollection("application_migrations").findOne({ _id: V014_ID });
-  const exactKeys = ["_id", "checksum", "completedAt", "description", "ownerToken", "startedAt", "status"];
-  if (!migration || !sameValue(Object.keys(migration).sort(), exactKeys.sort())
+  const exactKeys = ["_id", "checksum", "description", "status", "ownerToken", "startedAt",
+    "completedAt", "_class"];
+  if (!migration || !sameValue(Object.keys(migration), exactKeys)
       || migration.checksum !== V014_CHECKSUM || migration.description !== V014_DESCRIPTION
       || migration.status !== "APPLIED" || typeof migration.ownerToken !== "string"
       || migration.ownerToken.length === 0 || !(migration.startedAt instanceof Date)
-      || !(migration.completedAt instanceof Date)) {
+      || !(migration.completedAt instanceof Date) || migration._class !== MIGRATION_RECORD_TYPE) {
     fail("Mongo V014 authority is absent or malformed.");
   }
   if (!collectionExists(database, "music_runtime_state")) {
@@ -518,6 +565,8 @@ function result(command, state, kinds, indexes, nextOperation, complete, publish
     state,
     manifestDigest: command.manifestDigest,
     backupIdentity: command.backupIdentity,
+    expectedEvidenceDigest: publishedEvidence ? evidenceDigest(publishedEvidence)
+      : command.expectedEvidenceDigest,
     evidenceDigest: evidence ? evidenceDigest(evidence) : null,
     evidence: publishedEvidence,
     kinds,
@@ -534,26 +583,121 @@ function ledgerNames() {
   return [STAGE_PREFIX + "application_migrations", "application_migrations"];
 }
 
+function ledgerDocumentPayload(stored) {
+  const payload = stored.payload;
+  const exactPayloadKeys = ["state", "manifestDigest", "ownerToken", "release", "backupIdentity",
+    "evidenceDigest", "revision", "stageIndex", "publishIndex", "dropIndex", "completed",
+    "legacyDropped", "intent", "presentSources", "expectedKindMetrics"];
+  if (!sameValue(Object.keys(stored), ["_id", "_kind", "schemaVersion", "payload"])
+      || !sameValue(Object.keys(stored._id || {}), ["kind", "legacyId"])
+      || !sameValue(stored._id, ledgerId()) || stored._kind !== LEDGER_KIND
+      || stored.schemaVersion !== 1
+      || !payload || !sameValue(Object.keys(payload), exactPayloadKeys)
+      || payload.manifestDigest !== ManifestApi.DIGEST
+      || !OWNER.test(payload.ownerToken) || !RELEASE.test(payload.release)
+      || !BACKUP.test(payload.backupIdentity) || !DIGEST_PATTERN.test(payload.evidenceDigest)
+      || !Array.isArray(payload.presentSources) || !Array.isArray(payload.expectedKindMetrics)
+      || !Number.isSafeInteger(payload.revision) || payload.revision < 1
+      || !Number.isSafeInteger(payload.stageIndex) || !Number.isSafeInteger(payload.publishIndex)
+      || !Number.isSafeInteger(payload.dropIndex)
+      || typeof payload.completed !== "boolean" || typeof payload.legacyDropped !== "boolean"
+      || typeof payload.state !== "string"
+      || !(payload.intent === null || typeof payload.intent === "object")) {
+    fail("Mongo cutover ledger is malformed.");
+  }
+  return payload;
+}
+
 function findLedger(database) {
   const found = ledgerNames().filter((name) => collectionExists(database, name))
     .map((name) => ({ name, value: database.getCollection(name).findOne({
       _id: ledgerId(), _kind: LEDGER_KIND
     }) })).filter((entry) => entry.value);
   if (found.length !== 1) fail("Mongo cutover ledger is absent or ambiguous.");
-  const payload = found[0].value.payload;
-  const exactPayloadKeys = ["backupIdentity", "completed", "dropIndex", "evidenceDigest",
-    "expectedKindMetrics", "intent", "legacyDropped", "manifestDigest", "ownerToken",
-    "presentSources", "publishIndex", "release", "revision", "stageIndex", "state"];
-  if (!payload || !sameValue(Object.keys(payload).sort(), exactPayloadKeys.sort())
-      || payload.manifestDigest !== ManifestApi.DIGEST
-      || !OWNER.test(payload.ownerToken) || !RELEASE.test(payload.release)
-      || !BACKUP.test(payload.backupIdentity) || !DIGEST_PATTERN.test(payload.evidenceDigest)
-      || !Array.isArray(payload.presentSources) || !Array.isArray(payload.expectedKindMetrics)
-      || !Number.isSafeInteger(payload.revision) || payload.revision < 1
-      || !(payload.intent === null || typeof payload.intent === "object")) {
-    fail("Mongo cutover ledger is malformed.");
-  }
+  const payload = ledgerDocumentPayload(found[0].value);
   return { collection: found[0].name, document: found[0].value, payload };
+}
+
+function requireIntentShape(payload) {
+  const intent = payload.intent;
+  if (intent === null) return;
+  if (Array.isArray(intent)
+      || !sameValue(Object.keys(intent), ["phase", "index", "ownerToken", "originalRevision",
+        "originalState", "operation"])
+      || !["stage", "publish", "reverse", "drop"].includes(intent.phase)
+      || !Number.isSafeInteger(intent.index) || intent.index < 0
+      || intent.ownerToken !== payload.ownerToken
+      || !Number.isSafeInteger(intent.originalRevision) || intent.originalRevision < 1
+      || intent.originalRevision + 1 !== payload.revision
+      || intent.originalState !== payload.state
+      || !intent.operation || Array.isArray(intent.operation)
+      || typeof intent.operation.kind !== "string") {
+    fail("Mongo cutover ledger intent is malformed.");
+  }
+  const operationFields = {
+    "stage-kind": ["kind", "target", "domainKind"],
+    "stage-indexes": ["kind", "target"],
+    "stage-complete": ["kind"],
+    rename: ["kind", "from", "to"],
+    drop: ["kind", "name"]
+  }[intent.operation.kind];
+  const expectedIndex = {
+    stage: payload.stageIndex,
+    publish: payload.publishIndex,
+    reverse: payload.publishIndex,
+    drop: payload.dropIndex
+  }[intent.phase];
+  if (!operationFields || !sameValue(Object.keys(intent.operation), operationFields)
+      || intent.index !== expectedIndex
+      || intent.phase === "stage" && !intent.operation.kind.startsWith("stage-")
+      || ["publish", "reverse"].includes(intent.phase) && intent.operation.kind !== "rename"
+      || intent.phase === "drop" && intent.operation.kind !== "drop"
+      || Object.entries(intent.operation).some(([field, value]) =>
+        field !== "kind" && typeof value !== "string")) {
+    fail("Mongo cutover ledger intent operation is malformed.");
+  }
+}
+
+function requireLedgerProgress(payload, evidence, manifest) {
+  const stageCount = manifest.kinds.length + manifest.targets.length;
+  const publishCount = buildPublicationOperations(manifest, evidence.presentSources).length;
+  const dropCount = buildDropCollections(manifest, evidence.presentSources).length;
+  const states = ["STAGING", "STAGED", "STAGE_VERIFIED", "PUBLISHING", "PUBLISHED",
+    "TARGET_ACTIVE", "REVERSING", "LEGACY_ACTIVE"];
+  if (!states.includes(payload.state)
+      || payload.stageIndex < 0 || payload.stageIndex > stageCount
+      || payload.publishIndex < 0 || payload.publishIndex > publishCount
+      || payload.dropIndex < 0 || payload.dropIndex > dropCount
+      || payload.completed !== (payload.state === "TARGET_ACTIVE")
+      || payload.legacyDropped !== (payload.dropIndex === dropCount)
+      || payload.state !== "TARGET_ACTIVE" && payload.dropIndex !== 0
+      || payload.state === "STAGING" && payload.stageIndex >= stageCount
+      || ["STAGED", "STAGE_VERIFIED", "PUBLISHING", "PUBLISHED", "TARGET_ACTIVE",
+        "REVERSING", "LEGACY_ACTIVE"].includes(payload.state) && payload.stageIndex !== stageCount
+      || ["STAGING", "STAGED", "STAGE_VERIFIED"].includes(payload.state)
+        && payload.publishIndex !== 0
+      || payload.state === "PUBLISHING" && payload.publishIndex >= publishCount
+      || ["PUBLISHED", "TARGET_ACTIVE"].includes(payload.state)
+        && payload.publishIndex !== publishCount
+      || payload.state === "REVERSING" && payload.publishIndex <= 0
+      || payload.state === "LEGACY_ACTIVE" && payload.publishIndex !== 0) {
+    fail("Mongo cutover ledger progress is malformed.");
+  }
+  requireIntentShape(payload);
+}
+
+function requireLedgerDocument(stored, command, evidence) {
+  const payload = ledgerDocumentPayload(stored);
+  if (payload.ownerToken !== command.ownerToken || payload.release !== command.release
+      || payload.manifestDigest !== command.manifestDigest
+      || payload.backupIdentity !== command.backupIdentity
+      || payload.evidenceDigest !== command.expectedEvidenceDigest
+      || !sameValue(payload.presentSources, evidence.presentSources)
+      || !sameValue(payload.expectedKindMetrics, evidence.kinds)) {
+    fail("Mongo cutover ledger evidence or ownership does not match.");
+  }
+  requireLedgerProgress(payload, evidence, ManifestApi.MANIFEST);
+  return stored;
 }
 
 function requireLedger(database, command) {
@@ -564,15 +708,18 @@ function requireLedger(database, command) {
       || ledger.payload.backupIdentity !== command.backupIdentity) {
     fail("Mongo cutover ledger ownership does not match.");
   }
-  suppliedEvidence(command, ledger.payload.evidenceDigest);
+  const evidence = suppliedEvidence(command, ledger.payload.evidenceDigest);
+  requireLedgerDocument(ledger.document, command, evidence);
   return ledger;
 }
 
 function suppliedEvidence(command, expectedDigest = null) {
   const evidence = typeof globalThis !== "undefined"
     ? globalThis.DOMAIN_COLLECTION_EVIDENCE : null;
-  const digest = expectedDigest || (evidence ? evidenceDigest(evidence) : null);
-  return requireProtectedEvidence(command, evidence, digest);
+  if (expectedDigest !== null && expectedDigest !== command.expectedEvidenceDigest) {
+    fail("Mongo protected evidence does not match the cutover ledger.");
+  }
+  return requireProtectedEvidence(command, evidence);
 }
 
 function buildDropCollections(manifest, presentSources) {
@@ -592,15 +739,17 @@ function stagedTargetsAt(manifest, stageIndex) {
 }
 
 function inventoryAt(ledger, manifest, effectApplied = false) {
-  const names = new Set(suppliedEvidence({
+  const evidence = suppliedEvidence({
     manifestDigest: ledger.payload.manifestDigest,
     release: ledger.payload.release,
-    backupIdentity: ledger.payload.backupIdentity
-  }, ledger.payload.evidenceDigest).collections.map((metric) => metric.name));
+    backupIdentity: ledger.payload.backupIdentity,
+    expectedEvidenceDigest: ledger.payload.evidenceDigest
+  }, ledger.payload.evidenceDigest);
+  const names = new Set(evidence.collections.map((metric) => metric.name));
   const effectiveStageIndex = ledger.payload.stageIndex
     + (effectApplied && ledger.payload.intent && ledger.payload.intent.phase === "stage" ? 1 : 0);
   for (const name of stagedTargetsAt(manifest, effectiveStageIndex)) names.add(name);
-  const publications = buildPublicationOperations(manifest, ledger.payload.presentSources);
+  const publications = buildPublicationOperations(manifest, evidence.presentSources);
   const publicationCount = ledger.payload.publishIndex
     + (effectApplied && ledger.payload.intent && ledger.payload.intent.phase === "publish" ? 1 : 0);
   for (let index = 0; index < publicationCount; index++) {
@@ -611,11 +760,7 @@ function inventoryAt(ledger, manifest, effectApplied = false) {
     ? ledger.payload.publishIndex - 1 : ledger.payload.publishIndex;
   if (ledger.payload.state === "REVERSING" || ledger.payload.intent && ledger.payload.intent.phase === "reverse") {
     const forwardCount = Math.max(0, reverseCount);
-    const reset = new Set(suppliedEvidence({
-      manifestDigest: ledger.payload.manifestDigest,
-      release: ledger.payload.release,
-      backupIdentity: ledger.payload.backupIdentity
-    }, ledger.payload.evidenceDigest).collections.map((metric) => metric.name));
+    const reset = new Set(evidence.collections.map((metric) => metric.name));
     for (const name of stagedTargetsAt(manifest, effectiveStageIndex)) reset.add(name);
     for (let index = 0; index < forwardCount; index++) {
       reset.delete(publications[index].from);
@@ -624,7 +769,7 @@ function inventoryAt(ledger, manifest, effectApplied = false) {
     names.clear();
     for (const name of reset) names.add(name);
   }
-  const drops = buildDropCollections(manifest, ledger.payload.presentSources);
+  const drops = buildDropCollections(manifest, evidence.presentSources);
   const dropCount = ledger.payload.dropIndex
     + (effectApplied && ledger.payload.intent && ledger.payload.intent.phase === "drop" ? 1 : 0);
   for (let index = 0; index < dropCount; index++) names.delete(drops[index]);
@@ -738,7 +883,7 @@ function preview(database, command, manifest) {
     collections: snapshot.collections,
     v014: v014Evidence(database)
   });
-  requireProtectedEvidence(command, evidence, evidenceDigest(evidence));
+  validateProtectedEvidence(command, evidence, evidenceDigest(evidence));
   const metrics = snapshot.kinds;
   return result(command, "PREVIEWED", metrics, indexMetrics(database, manifest, false),
     "stage", true, evidence);
@@ -862,11 +1007,12 @@ function requireEquivalentMetrics(left, right) {
 
 function verifyStage(database, command, manifest) {
   const ledger = requireLedger(database, command);
+  const evidence = suppliedEvidence(command, ledger.payload.evidenceDigest);
   requireExactInventory(database, ledger, manifest);
-  requireProtectedLegacyCollections(database, suppliedEvidence(command, ledger.payload.evidenceDigest));
+  requireProtectedLegacyCollections(database, evidence);
   if (ledger.payload.state === "STAGE_VERIFIED") {
     const staged = kindMetricsFromTarget(database, manifest, true);
-    requireEquivalentMetrics(ledger.payload.expectedKindMetrics, staged);
+    requireEquivalentMetrics(evidence.kinds, staged);
     requireExactIndexes(database, manifest, true);
     return result(command, "STAGE_VERIFIED", staged, indexMetrics(database, manifest, true),
       "publish-next", true);
@@ -901,10 +1047,11 @@ function rename(database, operation) {
 
 function publishNext(database, command, manifest) {
   let ledger = requireLedger(database, command);
+  const evidence = suppliedEvidence(command, ledger.payload.evidenceDigest);
   requireExactInventory(database, ledger, manifest);
   if (ledger.payload.state === "PUBLISHED") {
     const available = kindMetricsFromAvailableTarget(database, manifest);
-    requireEquivalentMetrics(ledger.payload.expectedKindMetrics, available);
+    requireEquivalentMetrics(evidence.kinds, available);
     requireExactAvailableIndexes(database, manifest);
     return result(command, "PUBLISHED", available,
       indexMetricsFromAvailableTarget(database, manifest), "verify-live", true);
@@ -916,13 +1063,13 @@ function publishNext(database, command, manifest) {
     updateLedger(database, ledger, { state: "PUBLISHING" });
     ledger = requireLedger(database, command);
   }
-  const operations = buildPublicationOperations(manifest, ledger.payload.presentSources);
+  const operations = buildPublicationOperations(manifest, evidence.presentSources);
   const index = ledger.payload.publishIndex;
   if (!Array.isArray(operations) || !Number.isSafeInteger(index) || index < 0 || index > operations.length) {
     fail("Mongo publication progress is invalid.");
   }
   const available = kindMetricsFromAvailableTarget(database, manifest);
-  requireEquivalentMetrics(ledger.payload.expectedKindMetrics, available);
+  requireEquivalentMetrics(evidence.kinds, available);
   requireExactAvailableIndexes(database, manifest);
   if (index >= operations.length) fail("Mongo publication progress is invalid.");
   ledger = claimEffect(database, command, ledger, "publish", index, operations[index]);
@@ -943,16 +1090,17 @@ function publishNext(database, command, manifest) {
 
 function verifyLive(database, command, manifest) {
   const ledger = requireLedger(database, command);
+  const evidence = suppliedEvidence(command, ledger.payload.evidenceDigest);
   requireExactInventory(database, ledger, manifest);
   if (ledger.payload.state === "TARGET_ACTIVE" && ledger.payload.completed === true) {
     const live = kindMetricsFromTarget(database, manifest, false);
-    requireEquivalentMetrics(ledger.payload.expectedKindMetrics, live);
+    requireEquivalentMetrics(evidence.kinds, live);
     requireExactIndexes(database, manifest, false);
     return result(command, "TARGET_ACTIVE", live, indexMetrics(database, manifest, false),
       ledger.payload.legacyDropped === true ? null : "drop-legacy", true);
   }
   if (ledger.payload.state !== "PUBLISHED") fail("Mongo cutover ledger state is invalid for live verification.");
-  const source = ledger.payload.expectedKindMetrics;
+  const source = evidence.kinds;
   if (!Array.isArray(source) || source.length !== manifest.kinds.length) {
     fail("Mongo cutover ledger verification evidence is malformed.");
   }
@@ -966,18 +1114,19 @@ function verifyLive(database, command, manifest) {
 
 function dropLegacy(database, command, manifest) {
   let ledger = requireLedger(database, command);
+  const evidence = suppliedEvidence(command, ledger.payload.evidenceDigest);
   requireExactInventory(database, ledger, manifest);
   if (ledger.payload.state !== "TARGET_ACTIVE" || ledger.payload.completed !== true) {
     fail("Mongo cutover ledger state is invalid for legacy deletion.");
   }
-  const drops = buildDropCollections(manifest, ledger.payload.presentSources);
+  const drops = buildDropCollections(manifest, evidence.presentSources);
   const index = ledger.payload.dropIndex;
   if (!Array.isArray(drops) || !Number.isSafeInteger(index) || index < 0 || index > drops.length) {
     fail("Mongo legacy deletion progress is invalid.");
   }
   if (ledger.payload.legacyDropped === true && index === drops.length) {
     const live = kindMetricsFromTarget(database, manifest, false);
-    requireEquivalentMetrics(ledger.payload.expectedKindMetrics, live);
+    requireEquivalentMetrics(evidence.kinds, live);
     requireExactIndexes(database, manifest, false);
     if (manifest.targets.length !== 14) fail("Mongo target inventory cardinality is invalid.");
     return result(command, "TARGET_ACTIVE", live,
@@ -985,25 +1134,28 @@ function dropLegacy(database, command, manifest) {
   }
   if (index >= drops.length) fail("Mongo legacy deletion progress is invalid.");
   const live = kindMetricsFromTarget(database, manifest, false);
-  requireEquivalentMetrics(ledger.payload.expectedKindMetrics, live);
+  requireEquivalentMetrics(evidence.kinds, live);
   requireExactIndexes(database, manifest, false);
-  const evidence = suppliedEvidence(command, ledger.payload.evidenceDigest);
   const name = drops[index];
-  if (name === "music_queue_state" && rawCollectionMetric(database, name)
-      && rawCollectionMetric(database, name).checksum !== evidence.v014.queueChecksum) {
-    fail("Mongo V014 queue evidence changed before deletion.");
-  }
-  if (name === "music_radio_state" && rawCollectionMetric(database, name)
-      && rawCollectionMetric(database, name).checksum !== evidence.v014.radioChecksum) {
-    fail("Mongo V014 radio evidence changed before deletion.");
-  }
   const operation = { kind: "drop", name };
   ledger = claimEffect(database, command, ledger, "drop", index, operation);
   if (collectionExists(database, name)) {
+    requireProtectedDropCollection(database, name, evidence);
+    if (name === "music_queue_state" && rawCollectionMetric(database, name)
+        && rawCollectionMetric(database, name).checksum !== evidence.v014.queueChecksum) {
+      fail("Mongo V014 queue evidence changed before deletion.");
+    }
+    if (name === "music_radio_state" && rawCollectionMetric(database, name)
+        && rawCollectionMetric(database, name).checksum !== evidence.v014.radioChecksum) {
+        fail("Mongo V014 radio evidence changed before deletion.");
+    }
     const acknowledged = database.getCollection(name).drop();
     if (acknowledged !== true || collectionExists(database, name)) {
       fail("Mongo allowlisted legacy deletion was not acknowledged.");
     }
+  }
+  if (collectionExists(database, name)) {
+    fail("Mongo allowlisted legacy deletion postcondition failed.");
   }
   maybeInterrupt("after-effect");
   requireExactInventory(database, ledger, manifest);
@@ -1018,6 +1170,7 @@ function dropLegacy(database, command, manifest) {
 
 function reverseNext(database, command, manifest) {
   let ledger = requireLedger(database, command);
+  const evidence = suppliedEvidence(command, ledger.payload.evidenceDigest);
   requireExactInventory(database, ledger, manifest);
   if (ledger.payload.dropIndex !== 0 || ledger.payload.legacyDropped === true) {
     fail("Mongo publication cannot be reversed after legacy deletion.");
@@ -1037,9 +1190,9 @@ function reverseNext(database, command, manifest) {
   if (!Number.isSafeInteger(index) || index < 0) fail("Mongo reversal progress is invalid.");
   if (index <= 0) fail("Mongo reversal progress is invalid.");
   const available = kindMetricsFromAvailableTarget(database, manifest);
-  requireEquivalentMetrics(ledger.payload.expectedKindMetrics, available);
+  requireEquivalentMetrics(evidence.kinds, available);
   requireExactAvailableIndexes(database, manifest);
-  const publications = buildPublicationOperations(manifest, ledger.payload.presentSources);
+  const publications = buildPublicationOperations(manifest, evidence.presentSources);
   const forward = publications[index - 1];
   if (!forward) fail("Mongo reversal progress is invalid.");
   const operation = { kind: "rename", from: forward.to, to: forward.from };
@@ -1048,6 +1201,7 @@ function reverseNext(database, command, manifest) {
   maybeInterrupt("after-effect");
   requireExactInventory(database, ledger, manifest);
   const next = Math.max(0, index - 1);
+  if (next === 0) requireRestoredLegacy(database, manifest, evidence);
   completeEffect(database, command, ledger, {
     publishIndex: next,
     state: next === 0 ? "LEGACY_ACTIVE" : "REVERSING"
@@ -1090,6 +1244,7 @@ const exported = Object.freeze({
   redactedFailure,
   evidenceDigest,
   requireProtectedEvidence,
+  requireLedgerDocument,
   canonicalExtendedJson,
   canonicalChecksum,
   buildPublicationOperations,
