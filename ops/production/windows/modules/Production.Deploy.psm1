@@ -135,6 +135,15 @@ function Read-ProductionReleaseMusicSchema {
             'Release Music schema metadata is invalid.', $_.Exception)
     }
 }
+
+function Get-ProductionReleaseDomainSchema {
+    param([Parameter(Mandatory)][string]$SourceTree)
+    $gate = Join-Path $SourceTree `
+        'website\src\main\java\dev\christopherbell\configuration\mongo\migration\V015RequireDomainCollectionSchema.java'
+    if (Test-Path -LiteralPath $gate -PathType Leaf) { return 'TARGET' }
+    return 'LEGACY'
+}
+
 function Resolve-OriginMainRelease {
     param($Config)
     $fetchArguments = Get-TrustedGitArguments $Config.repositoryPath @('fetch','--prune',$Config.remote,$Config.branch)
@@ -169,11 +178,13 @@ function New-ReleaseFromOriginMain {
         $musicSchema = if (Test-Path -LiteralPath (Join-Path $worktree `
                 'website\src\main\java\dev\christopherbell\configuration\mongo\migration\V014ConsolidateMusicRuntimeState.java') `
                 -PathType Leaf) { 'TARGET' } else { 'LEGACY' }
+        $domainSchema = Get-ProductionReleaseDomainSchema -SourceTree $worktree
         [ordered]@{
             sha=$Sha
             source="$($Config.remote)/$($Config.branch)"
             builtAt=(Get-Date).ToUniversalTime().ToString('o')
             musicSchema=$musicSchema
+            domainSchema=$domainSchema
         } |
             ConvertTo-Json | Set-Content (Join-Path $staging 'release.json') -Encoding utf8
         Move-Item -LiteralPath $staging -Destination $release

@@ -29,6 +29,7 @@ class LegacyMongoAccessBaselineTest {
       "dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory",
       "dev.christopherbell.configuration.mongo.domain.MongoKindScopedOperations",
       "dev.christopherbell.configuration.mongo.migration.ApplicationMigration",
+      "dev.christopherbell.configuration.mongo.migration.DomainCollectionCutoverLedger",
       "dev.christopherbell.configuration.mongo.migration.MongoMigrationRunner",
       "dev.christopherbell.configuration.mongo.migration.V001EnsureMigrationInfrastructure",
       "dev.christopherbell.configuration.mongo.migration.V002EnsureRestaurantImportPreviewIndexes",
@@ -43,7 +44,8 @@ class LegacyMongoAccessBaselineTest {
       "dev.christopherbell.configuration.mongo.migration.V011HardenWhatsForLunchData",
       "dev.christopherbell.configuration.mongo.migration.V012RetainSharedFolderWork",
       "dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes",
-      "dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState");
+      "dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState",
+      "dev.christopherbell.configuration.mongo.migration.V015RequireDomainCollectionSchema");
 
   @Test
   void runtimeDomainModelsDoNotOwnPhysicalMongoCollections() throws IOException {

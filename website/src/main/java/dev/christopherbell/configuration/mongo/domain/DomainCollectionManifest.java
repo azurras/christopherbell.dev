@@ -191,6 +191,11 @@ public final class DomainCollectionManifest {
     return Optional.ofNullable(KIND_BY_KIND.get(kind));
   }
 
+  /** Exact canonical text shared with the checked-in mongosh manifest. */
+  public static String canonicalManifestText() {
+    return canonicalManifest();
+  }
+
   private static List<IndexDefinition> buildIndexes() {
     var indexes = new ArrayList<IndexDefinition>();
     ALL_COLLECTIONS.stream().sorted().map(DomainCollectionManifest::globalIdIndex)

@@ -75,7 +75,11 @@ class MongoCollectionCatalogTest {
       manualOwner("dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes",
           "whatsforlunch_ratings"),
       manualOwner("dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState",
-          "music_queue_state", "music_radio_state", "music_runtime_state"));
+          "music_queue_state", "music_radio_state", "music_runtime_state"),
+      manualOwner("dev.christopherbell.configuration.mongo.migration.DomainCollectionCutoverLedger",
+          "application_migrations"),
+      manualOwner("dev.christopherbell.configuration.mongo.migration.V015RequireDomainCollectionSchema",
+          "application_migrations"));
   private static final Set<String> MONGO_TEMPLATE_INFRASTRUCTURE_OWNERS = Set.of(
       "dev.christopherbell.admin.commandcenter.metrics.CommandCenterMetricsService",
       "dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory",

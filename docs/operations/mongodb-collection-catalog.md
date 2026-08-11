@@ -92,6 +92,8 @@ own their collection names locally.
 | `dev.christopherbell.configuration.mongo.migration.V012RetainSharedFolderWork` | `shared_folder_media_jobs`, `shared_folder_radio`, `shared_folder_upload_sessions` |
 | `dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes` | `whatsforlunch_ratings` |
 | `dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState` | `music_queue_state`, `music_radio_state`, `music_runtime_state` |
+| `dev.christopherbell.configuration.mongo.migration.DomainCollectionCutoverLedger` | `application_migrations` |
+| `dev.christopherbell.configuration.mongo.migration.V015RequireDomainCollectionSchema` | `application_migrations` |
 
 Naming Rules
 ------------
