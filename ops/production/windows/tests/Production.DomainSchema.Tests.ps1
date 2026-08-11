@@ -13,6 +13,7 @@ Describe 'domain schema direction compatibility boundary' {
                 state = 'TARGET_ACTIVE'
                 updatedAtEpochMillis = 1
                 targetRelease = 'a' * 40
+                currentRelease = 'e' * 40
                 legacyRelease = 'b' * 40
                 manifestDigest = '576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24'
                 evidenceDigest = 'c' * 64
@@ -26,6 +27,7 @@ Describe 'domain schema direction compatibility boundary' {
 
             $domain.version | Should -Be 2
             $domain.legacyDropped | Should -BeTrue
+            $domain.currentRelease | Should -BeExactly ('e' * 40)
             $music.version | Should -Be 2
             $music.targetRelease | Should -BeExactly ('a' * 40)
         }

@@ -82,10 +82,13 @@ recovery restoration, and auto-deploy refresh. The candidate uses only a
 generated non-production database and configured candidate port.
 
 Deletion is last. Before the first deletion intent, recovery reverses the
-publication and resumes the exact old release. At or after that intent, recovery
-restores the bound archive and passes `restore-verify` before the old release can
-be selected or started. If recovery cannot be proved, the website stays stopped
-with recovery suspended.
+publication when needed, removes only manifest-owned staging namespaces, proves
+the legacy snapshot again, and resumes the exact old release. At or after that
+intent, recovery first proves the stopped target snapshot is still exact, removes
+every manifest-owned live namespace, restores the bound archive without relying
+on `mongorestore --drop`, and passes an independent `restore-verify` before the
+old release can be selected or started. If recovery cannot be proved, the website
+stays stopped with recovery suspended.
 
 Use the guarded rollback command, never generic release rollback, for this
 schema boundary:
@@ -95,9 +98,12 @@ schema boundary:
 .\prod.cmd mongo-consolidation-rollback -ConfirmDomainCollectionRollback
 ```
 
-The protected marker binds manifest, evidence, backup, target/legacy releases,
-and deletion state. The prior Music v1 marker format remains readable for
-rollback compatibility, but its former public cutover switches are retired.
+The protected marker binds manifest, evidence, backup, original cutover target,
+current deployed target binary, legacy release, and deletion state. Routine
+target-schema deploys advance only the current release; they do not rewrite the
+original cutover, evidence, or backup identity. The prior Music v1 marker format
+remains readable for rollback compatibility, but its former public cutover
+switches are retired.
 
 While a domain cutover marker is pending, deploy, auto-deploy, rollback, and
 manual restart remain blocked except through the guarded domain recovery path.
@@ -105,8 +111,9 @@ Preserve the protected archive, sidecar, evidence, and cutover-state files until
 the rollback window is explicitly closed.
 
 Every WinSW launch, including boot and recovery restarts, runs the same strict marker/current-release
-guard before Java. Stable target and legacy markers permit only their exact bound release. A
-deployment transition may create one atomic authorization for the exact marker state/target/legacy
+guard before Java. A stable v2 target marker permits only its exact current release while retaining
+the immutable cutover target; stable legacy markers permit only their exact bound release. A
+deployment transition may create one atomic authorization for the exact marker state/target/current/legacy
 tuple, release, purpose, expiry, issuer PID, and issuer process start identity. The launch script
 requires that exact issuer to remain alive and consumes the authorization once; the deployment
 revokes the exact returned token on success and failure, so it cannot be replayed by recovery or a

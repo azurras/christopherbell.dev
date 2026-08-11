@@ -299,6 +299,69 @@ function Test-ProductionPublicEndpoints {
     return $checkCount
 }
 
+function Assert-ProductionCandidatePortUnused {
+    param([Parameter(Mandatory)][ValidateRange(1,65535)][int]$Port)
+    $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction Stop |
+        Where-Object { [int]$_.LocalPort -eq $Port })
+    if ($listeners.Count -ne 0) {
+        throw "Candidate port $Port is occupied before candidate start."
+    }
+}
+
+function Get-ProductionCandidateProcessIdentity {
+    param([Parameter(Mandatory)]$Process)
+    $Process.Refresh()
+    if ($Process.HasExited) { throw 'The candidate process exited before validation.' }
+    [pscustomobject][ordered]@{
+        pid = [int]$Process.Id
+        startTimeUtcTicks = [long]$Process.StartTime.ToUniversalTime().Ticks
+    }
+}
+
+function Assert-ProductionCandidateProcessOwnsListener {
+    param(
+        [Parameter(Mandatory)][ValidateRange(1,65535)][int]$Port,
+        [Parameter(Mandatory)]$Identity
+    )
+    $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction Stop |
+        Where-Object { [int]$_.LocalPort -eq $Port })
+    if ($listeners.Count -ne 1 -or
+        [int]$listeners[0].OwningProcess -ne [int]$Identity.pid) {
+        throw 'The candidate listener is not owned by the spawned candidate process.'
+    }
+    $process = Get-Process -Id ([int]$Identity.pid) -ErrorAction Stop
+    if ($process.HasExited -or
+        [long]$process.StartTime.ToUniversalTime().Ticks -ne
+            [long]$Identity.startTimeUtcTicks) {
+        throw 'The candidate process identity changed during validation.'
+    }
+}
+
+function Wait-ProductionCandidateOwnedListener {
+    param(
+        [Parameter(Mandatory)][ValidateRange(1,65535)][int]$Port,
+        [Parameter(Mandatory)]$Identity,
+        [ValidateRange(1,300)][int]$TimeoutSeconds = 180
+    )
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $process = Get-Process -Id ([int]$Identity.pid) -ErrorAction Stop
+        if ($process.HasExited -or
+            [long]$process.StartTime.ToUniversalTime().Ticks -ne
+                [long]$Identity.startTimeUtcTicks) {
+            throw 'The candidate process exited or changed identity before binding.'
+        }
+        $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction Stop |
+            Where-Object { [int]$_.LocalPort -eq $Port })
+        if ($listeners.Count -gt 0) {
+            Assert-ProductionCandidateProcessOwnsListener -Port $Port -Identity $Identity
+            return $Identity
+        }
+        Start-Sleep -Milliseconds 100
+    } while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+    throw 'The candidate process did not bind its configured port in time.'
+}
+
 function Test-CandidateRelease {
     param($Config, [Parameter(Mandatory)][string]$Release, [string]$Database)
     $additionalEnvironment = @{
@@ -307,11 +370,26 @@ function Test-CandidateRelease {
     if (-not [string]::IsNullOrWhiteSpace($Database)) {
         $additionalEnvironment.SPRING_MONGODB_DATABASE = $Database
     }
+    Assert-ProductionCandidatePortUnused -Port ([int]$Config.candidatePort)
     $process = Start-ProductionJar -Config $Config -Release $Release -Port $Config.candidatePort -Profiles 'prod,deploy-smoke' -AdditionalEnvironment $additionalEnvironment
+    $identity = $null
     try {
+        $identity = Get-ProductionCandidateProcessIdentity -Process $process
+        $null = Wait-ProductionCandidateOwnedListener `
+            -Port ([int]$Config.candidatePort) -Identity $identity
         Test-ProductionEndpoints -Config $Config -Port $Config.candidatePort
+        Assert-ProductionCandidateProcessOwnsListener `
+            -Port ([int]$Config.candidatePort) -Identity $identity
     } finally {
-        if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+        $process.Refresh()
+        if (-not $process.HasExited) {
+            $current = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+            if ($current -and $identity -and
+                [long]$current.StartTime.ToUniversalTime().Ticks -eq
+                    [long]$identity.startTimeUtcTicks) {
+                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
         $process.WaitForExit(10000) | Out-Null
     }
 }
@@ -436,7 +514,10 @@ function Invoke-BoundedCheckedProcess {
             $timeoutFailure = [System.TimeoutException]::new(
                 "$([IO.Path]::GetFileName($FilePath)) did not exit within $TimeoutMilliseconds milliseconds.")
             try {
-                $process.Kill($true)
+                $killTree = $process.GetType().GetMethod(
+                    'Kill',[type[]]@([bool]))
+                if ($null -ne $killTree) { $process.Kill($true) }
+                else { $process.Kill() }
             } catch {
                 throw [System.AggregateException]::new(
                     'A checked process timed out and could not be terminated.',
@@ -952,7 +1033,11 @@ function Invoke-ProductionDeploy {
             }
         } elseif ($direction -and [string]$direction.state -eq 'TARGET_ACTIVE') {
             $active = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
-            if (-not $active -or (Split-Path -Leaf $active) -cne [string]$direction.targetRelease) {
+            $expectedActive = if ($direction.PSObject.Properties['version'] -and
+                [int]$direction.version -eq 2) {
+                [string]$direction.currentRelease
+            } else { [string]$direction.targetRelease }
+            if (-not $active -or (Split-Path -Leaf $active) -cne $expectedActive) {
                 throw 'The active release does not match the target Music schema-direction marker.'
             }
         }
@@ -1029,11 +1114,24 @@ function Invoke-ProductionDeploy {
                         -AuthorizationRelease $sha `
                         -KeepRecoverySuspended `
                         -WriterAlreadyStopped
-                    Write-ProductionMusicSchemaDirection `
-                        -Config $config `
-                        -State TARGET_ACTIVE `
-                        -TargetRelease $sha `
-                        -LegacyRelease ([string]$direction.legacyRelease)
+                    if ($direction.PSObject.Properties['version'] -and
+                        [int]$direction.version -eq 2) {
+                        Write-ProductionDomainSchemaDirection `
+                            -Config $config `
+                            -State TARGET_ACTIVE `
+                            -TargetRelease ([string]$direction.targetRelease) `
+                            -CurrentRelease $sha `
+                            -LegacyRelease ([string]$direction.legacyRelease) `
+                            -EvidenceDigest ([string]$direction.evidenceDigest) `
+                            -BackupIdentity ([string]$direction.backupIdentity) `
+                            -LegacyDropped ([bool]$direction.legacyDropped) | Out-Null
+                    } else {
+                        Write-ProductionMusicSchemaDirection `
+                            -Config $config `
+                            -State TARGET_ACTIVE `
+                            -TargetRelease $sha `
+                            -LegacyRelease ([string]$direction.legacyRelease)
+                    }
                     Set-ProductionWebsiteRecoveryPolicy -Policy Normal
                 } catch {
                     $failure = $_.Exception

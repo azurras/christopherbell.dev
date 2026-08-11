@@ -416,14 +416,14 @@ Describe 'native Windows deployment' {
                 param($FilePath, $ArgumentList, $WorkingDirectory, $Environment)
                 $script:capturedEnvironment = $Environment.Clone()
                 $start = [Diagnostics.ProcessStartInfo]::new()
-                $start.FileName = Join-Path $PSHOME 'pwsh.exe'
+                $start.FileName = (Get-Process -Id $PID).Path
                 $start.Arguments = '-NoLogo -NoProfile -Command exit'
                 $start.UseShellExecute = $false
                 return $start
             }
             $configuration = [pscustomobject]@{
                 programDataRoot = $TestDrive
-                javaExe = Join-Path $PSHOME 'pwsh.exe'
+                javaExe = (Get-Process -Id $PID).Path
             }
 
             $process = Start-ProductionJar `
@@ -434,7 +434,7 @@ Describe 'native Windows deployment' {
         }
 
         It 'bounds checked processes that do not exit' {
-            $slowPowerShell = Join-Path $PSHOME 'pwsh.exe'
+            $slowPowerShell = (Get-Process -Id $PID).Path
             $watch = [Diagnostics.Stopwatch]::StartNew()
 
             {
@@ -824,8 +824,15 @@ Describe 'native Windows deployment' {
         It 'overrides the candidate database for migration validation' {
             $process = [pscustomobject]@{ Id=1234; HasExited=$true }
             $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($milliseconds) $true }
+            $process | Add-Member -MemberType ScriptMethod -Name Refresh -Value { }
             Mock Start-ProductionJar { $process }
             Mock Test-ProductionEndpoints {}
+            Mock Assert-ProductionCandidatePortUnused { }
+            Mock Get-ProductionCandidateProcessIdentity {
+                [pscustomobject]@{ pid=1234; startTimeUtcTicks=99 }
+            }
+            Mock Wait-ProductionCandidateOwnedListener { [pscustomobject]@{} }
+            Mock Assert-ProductionCandidateProcessOwnsListener { }
             $config = [pscustomobject]@{ candidatePort=8081 }
             Test-CandidateRelease $config 'C:\data\releases\new' 'christopherbell_restore_check'
             Should -Invoke Start-ProductionJar -ParameterFilter { $AdditionalEnvironment.SPRING_MONGODB_DATABASE -eq 'christopherbell_restore_check' }
@@ -836,8 +843,15 @@ Describe 'native Windows deployment' {
             $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
                 param($milliseconds) $true
             }
+            $process | Add-Member -MemberType ScriptMethod -Name Refresh -Value { }
             Mock Start-ProductionJar { $process }
             Mock Test-ProductionEndpoints {}
+            Mock Assert-ProductionCandidatePortUnused { }
+            Mock Get-ProductionCandidateProcessIdentity {
+                [pscustomobject]@{ pid=1234; startTimeUtcTicks=99 }
+            }
+            Mock Wait-ProductionCandidateOwnedListener { [pscustomobject]@{} }
+            Mock Assert-ProductionCandidateProcessOwnsListener { }
             $config = [pscustomobject]@{ candidatePort=8081 }
 
             Test-CandidateRelease $config 'C:\data\releases\new' 'restore_check'
@@ -846,6 +860,83 @@ Describe 'native Windows deployment' {
                 $AdditionalEnvironment.COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED -eq 'false' -and
                 $AdditionalEnvironment.SPRING_MONGODB_DATABASE -eq 'restore_check'
             }
+        }
+
+        It 'rejects an occupied candidate port before starting a process' {
+            Mock Assert-ProductionCandidatePortUnused { throw 'candidate port is occupied' }
+            Mock Start-ProductionJar { throw 'candidate must not start' }
+            $config = [pscustomobject]@{ candidatePort = 8081 }
+
+            { Test-CandidateRelease $config 'C:\data\releases\new' 'restore_check' } |
+                Should -Throw '*candidate port is occupied*'
+
+            Should -Invoke Start-ProductionJar -Times 0
+        }
+
+        It 'binds endpoint checks to the spawned candidate PID and start time throughout' {
+            $events = [Collections.Generic.List[string]]::new()
+            $process = [pscustomobject]@{ Id=1234; HasExited=$false }
+            $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
+                param($milliseconds) $true
+            }
+            $process | Add-Member -MemberType ScriptMethod -Name Refresh -Value { }
+            Mock Assert-ProductionCandidatePortUnused { [void]$events.Add('unused') }
+            Mock Start-ProductionJar { [void]$events.Add('start'); $process }
+            Mock Get-ProductionCandidateProcessIdentity {
+                [pscustomobject]@{ pid=1234; startTimeUtcTicks=99 }
+            }
+            Mock Wait-ProductionCandidateOwnedListener {
+                [void]$events.Add('owned-before')
+                [pscustomobject]@{ pid=1234; startTimeUtcTicks=99 }
+            }
+            Mock Test-ProductionEndpoints { [void]$events.Add('endpoints') }
+            Mock Assert-ProductionCandidateProcessOwnsListener {
+                [void]$events.Add('owned-after')
+                $process.HasExited = $true
+            }
+            Mock Stop-Process { $process.HasExited = $true }
+            $config = [pscustomobject]@{ candidatePort = 8081 }
+
+            Test-CandidateRelease $config 'C:\data\releases\new' 'restore_check'
+
+            $events | Should -Be @(
+                'unused','start','owned-before','endpoints','owned-after')
+        }
+
+        It 'rejects a candidate process that exits before identity capture' {
+            $process = [pscustomobject]@{ Id=1234; HasExited=$true }
+            $process | Add-Member -MemberType ScriptMethod -Name Refresh -Value { }
+
+            { Get-ProductionCandidateProcessIdentity -Process $process } |
+                Should -Throw '*exited*'
+        }
+
+        It 'rejects a stale listener owned by a different process' {
+            Mock Get-NetTCPConnection {
+                [pscustomobject]@{ LocalPort=8081; OwningProcess=9999 }
+            }
+
+            { Assert-ProductionCandidateProcessOwnsListener `
+                    -Port 8081 `
+                    -Identity ([pscustomobject]@{ pid=1234; startTimeUtcTicks=99 }) } |
+                Should -Throw '*not owned*'
+        }
+
+        It 'rejects PID reuse after the candidate binds its listener' {
+            $differentStart = [datetime]::UtcNow.AddHours(-1).ToLocalTime()
+            Mock Get-NetTCPConnection {
+                [pscustomobject]@{ LocalPort=8081; OwningProcess=1234 }
+            }
+            Mock Get-Process {
+                [pscustomobject]@{ HasExited=$false; StartTime=$differentStart }
+            }
+
+            { Assert-ProductionCandidateProcessOwnsListener `
+                    -Port 8081 `
+                    -Identity ([pscustomobject]@{
+                        pid=1234
+                        startTimeUtcTicks=$differentStart.ToUniversalTime().Ticks + 1
+                    }) } | Should -Throw '*identity changed*'
         }
 
         It 'allows the fixed JNA bridge in deployment candidate JVMs' {
@@ -1064,6 +1155,56 @@ Describe 'native Windows deployment' {
             Mock Get-JunctionTarget { 'C:\data\releases\1111111111111111111111111111111111111111' }
 
             { Invoke-ProductionDeploy } | Should -Throw '*exact target-schema release*'
+        }
+
+        It 'advances only the current release while preserving the bound v2 cutover identity' {
+            $cutover = '1' * 40
+            $current = '2' * 40
+            $next = '3' * 40
+            $legacy = '4' * 40
+            $direction = [pscustomobject][ordered]@{
+                version = 2
+                state = 'TARGET_ACTIVE'
+                updatedAtEpochMillis = 1
+                targetRelease = $cutover
+                currentRelease = $current
+                legacyRelease = $legacy
+                manifestDigest = '576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24'
+                evidenceDigest = 'a' * 64
+                backupIdentity = 'b' * 64
+                legacyDropped = $true
+            }
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; remote='origin'; branch='main' }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionDomainSchemaDirection { $direction }
+            Mock Read-ProductionMusicSchemaDirection { $direction }
+            Mock Get-JunctionTarget { "C:\data\releases\$current" }
+            Mock Resolve-OriginMainRelease { $next }
+            Mock New-ReleaseFromOriginMain { "C:\data\releases\$next" }
+            Mock Read-ProductionReleaseMusicSchema { 'TARGET' }
+            Mock Read-ProductionReleaseDomainSchema { 'TARGET' }
+            Mock Invoke-CandidateReleaseValidation { }
+            Mock Switch-ProductionRelease { }
+            Mock Write-ProductionMusicSchemaDirection { throw 'v2 deploy must not downgrade marker' }
+            Mock Write-ProductionDomainSchemaDirection { }
+            Mock Set-ProductionWebsiteRecoveryPolicy { }
+            Mock Remove-ExpiredReleases { }
+
+            Invoke-ProductionDeploy
+
+            Should -Invoke Write-ProductionDomainSchemaDirection -Times 1 -Exactly `
+                -ParameterFilter {
+                    $State -eq 'TARGET_ACTIVE' -and
+                    $TargetRelease -ceq $cutover -and
+                    $CurrentRelease -ceq $next -and
+                    $LegacyRelease -ceq $legacy -and
+                    $EvidenceDigest -ceq ('a' * 64) -and
+                    $BackupIdentity -ceq ('b' * 64) -and
+                    $LegacyDropped -eq $true
+                }
+            Should -Invoke Write-ProductionMusicSchemaDirection -Times 0
         }
 
         It 'keeps recovery suspended for a caller-owned schema transition' {

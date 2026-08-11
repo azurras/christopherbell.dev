@@ -993,7 +993,7 @@ function ConvertFrom-ProductionDomainSchemaDirectionValue {
     param([Parameter(Mandatory)]$Value)
 
     Assert-ExactJsonProperties $Value @(
-        'version','state','updatedAtEpochMillis','targetRelease','legacyRelease',
+        'version','state','updatedAtEpochMillis','targetRelease','currentRelease','legacyRelease',
         'manifestDigest','evidenceDigest','backupIdentity','legacyDropped') `
         'Domain marker'
     if (($Value.version -isnot [int] -and $Value.version -isnot [long]) -or
@@ -1005,6 +1005,8 @@ function ConvertFrom-ProductionDomainSchemaDirectionValue {
         [long]$Value.updatedAtEpochMillis -lt 1 -or
         $Value.targetRelease -isnot [string] -or
         [string]$Value.targetRelease -cnotmatch '^[0-9a-f]{40}$' -or
+        $Value.currentRelease -isnot [string] -or
+        [string]$Value.currentRelease -cnotmatch '^[0-9a-f]{40}$' -or
         $Value.legacyRelease -isnot [string] -or
         [string]$Value.legacyRelease -cnotmatch '^[0-9a-f]{40}$' -or
         $Value.manifestDigest -isnot [string] -or
@@ -1021,6 +1023,7 @@ function ConvertFrom-ProductionDomainSchemaDirectionValue {
         state = [string]$Value.state
         updatedAtEpochMillis = [long]$Value.updatedAtEpochMillis
         targetRelease = [string]$Value.targetRelease
+        currentRelease = [string]$Value.currentRelease
         legacyRelease = [string]$Value.legacyRelease
         manifestDigest = [string]$Value.manifestDigest
         evidenceDigest = [string]$Value.evidenceDigest
@@ -1097,6 +1100,8 @@ function Write-ProductionDomainSchemaDirection {
         [Parameter(Mandatory)][ValidateScript({ $_ -cmatch '^[0-9a-f]{40}$' })]
         [string]$TargetRelease,
         [Parameter(Mandatory)][ValidateScript({ $_ -cmatch '^[0-9a-f]{40}$' })]
+        [string]$CurrentRelease,
+        [Parameter(Mandatory)][ValidateScript({ $_ -cmatch '^[0-9a-f]{40}$' })]
         [string]$LegacyRelease,
         [Parameter(Mandatory)][ValidateScript({ $_ -cmatch '^[0-9a-f]{64}$' })]
         [string]$EvidenceDigest,
@@ -1119,6 +1124,7 @@ function Write-ProductionDomainSchemaDirection {
             state = $State
             updatedAtEpochMillis = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             targetRelease = $TargetRelease
+            currentRelease = $CurrentRelease
             legacyRelease = $LegacyRelease
             manifestDigest = $script:DomainCollectionManifestDigest
             evidenceDigest = $EvidenceDigest
@@ -1284,6 +1290,10 @@ function Grant-ProductionWriterStartAuthorization {
     if (-not $marker -or [string]$marker.state -cne $MarkerState) {
         throw 'Writer-start authorization does not match the exact schema-direction marker.'
     }
+    $markerCurrentRelease = if ($marker.PSObject.Properties['version'] -and
+        [int]$marker.version -eq 2) {
+        [string]$marker.currentRelease
+    } else { [string]$marker.targetRelease }
     $issuer = Get-ProductionWriterStartIssuerIdentity
     $nonce = [guid]::NewGuid().ToString('N')
     $expiresAt = [DateTimeOffset]::UtcNow.AddSeconds($LifetimeSeconds).ToUnixTimeMilliseconds()
@@ -1301,6 +1311,7 @@ function Grant-ProductionWriterStartAuthorization {
             version = 1
             markerState = $MarkerState
             markerTargetRelease = [string]$marker.targetRelease
+            markerCurrentRelease = $markerCurrentRelease
             markerLegacyRelease = [string]$marker.legacyRelease
             release = $Release
             purpose = $Purpose
@@ -1334,6 +1345,7 @@ function Grant-ProductionWriterStartAuthorization {
         nonce = $nonce
         markerState = $MarkerState
         markerTargetRelease = [string]$marker.targetRelease
+        markerCurrentRelease = $markerCurrentRelease
         markerLegacyRelease = [string]$marker.legacyRelease
         release = $Release
         purpose = $Purpose
@@ -1354,6 +1366,8 @@ function Revoke-ProductionWriterStartAuthorization {
             [string]$value.markerState -cne [string]$Authorization.markerState -or
             [string]$value.markerTargetRelease -cne
                 [string]$Authorization.markerTargetRelease -or
+            [string]$value.markerCurrentRelease -cne
+                [string]$Authorization.markerCurrentRelease -or
             [string]$value.markerLegacyRelease -cne
                 [string]$Authorization.markerLegacyRelease -or
             [string]$value.release -cne [string]$Authorization.release -or
@@ -1381,16 +1395,23 @@ function Use-ProductionWriterStartAuthorization {
         $value = Get-Content -LiteralPath $claimed -Raw -ErrorAction Stop |
             ConvertFrom-Json -ErrorAction Stop
         Assert-ExactJsonProperties $value @(
-            'version','markerState','markerTargetRelease','markerLegacyRelease',
+            'version','markerState','markerTargetRelease','markerCurrentRelease',
+            'markerLegacyRelease',
             'release','purpose','expiresAtEpochMillis','nonce',
             'issuerPid','issuerStartTimeUtcTicks') 'Authorization'
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $expectedMarkerCurrentRelease = if ($Marker.PSObject.Properties['version'] -and
+            [int]$Marker.version -eq 2) {
+            [string]$Marker.currentRelease
+        } else { [string]$Marker.targetRelease }
         if (($value.version -isnot [int] -and $value.version -isnot [long]) -or
             [int]$value.version -ne 1 -or
             $value.markerState -isnot [string] -or
             [string]$value.markerState -cne [string]$Marker.state -or
             $value.markerTargetRelease -isnot [string] -or
             [string]$value.markerTargetRelease -cne [string]$Marker.targetRelease -or
+            $value.markerCurrentRelease -isnot [string] -or
+            [string]$value.markerCurrentRelease -cne $expectedMarkerCurrentRelease -or
             $value.markerLegacyRelease -isnot [string] -or
             [string]$value.markerLegacyRelease -cne [string]$Marker.legacyRelease -or
             $value.release -isnot [string] -or
@@ -1463,15 +1484,16 @@ function Assert-ProductionWriterStartAllowed {
         }
         return
     }
+    $markerVersion = if ($marker.PSObject.Properties['version']) {
+        [int]$marker.version
+    } else { 1 }
     $expected = if ($marker.state -eq 'TARGET_ACTIVE') {
-        [string]$marker.targetRelease
+        if ($markerVersion -eq 2) { [string]$marker.currentRelease }
+        else { [string]$marker.targetRelease }
     } elseif ($marker.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') {
         [string]$marker.legacyRelease
     } else { '' }
     $expectedSchema = if ($marker.state -eq 'TARGET_ACTIVE') { 'TARGET' } else { 'LEGACY' }
-    $markerVersion = if ($marker.PSObject.Properties['version']) {
-        [int]$marker.version
-    } else { 1 }
     $releaseSchema = if ($markerVersion -eq 2) {
         if (-not ($release.PSObject.Properties.Name -ccontains 'domainSchema')) { $null }
         else { [string]$release.domainSchema }

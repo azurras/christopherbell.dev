@@ -6,7 +6,8 @@ const ManifestApi = typeof globalThis !== "undefined" && globalThis.DomainCollec
 
 const ACTIONS = Object.freeze([
   "preview", "stage", "verify-stage", "publish-next", "verify-live",
-  "drop-legacy", "reverse-next", "restore-verify"
+  "drop-legacy", "reverse-next", "recover-prepublication", "prepare-restore",
+  "restore-verify"
 ]);
 const DATABASE = /^(christopherbell|cbell_candidate_[0-9a-f]{12}_[0-9a-f]{24})$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -186,6 +187,15 @@ function requireProtectedEvidence(command, evidence) {
 
 function sourceNames(manifest) {
   return [...new Set(manifest.kinds.filter((kind) => kind.source).map((kind) => kind.source))];
+}
+
+function buildStageNamespaces(manifest) {
+  return [...manifest.targets].map((target) => STAGE_PREFIX + target).sort();
+}
+
+function buildRestoreNamespaces(manifest) {
+  return [...new Set(manifest.targets.concat(sourceNames(manifest), manifest.dropOnly,
+    manifest.targets.map((target) => LEGACY_PREFIX + target)))].sort();
 }
 
 function orderedTargets(manifest) {
@@ -635,6 +645,17 @@ function findLedger(database) {
   return { collection: found[0].name, document: found[0].value, payload };
 }
 
+function findOptionalLedger(database) {
+  const found = ledgerNames().filter((name) => collectionExists(database, name))
+    .map((name) => ({ name, value: database.getCollection(name).findOne({
+      _id: ledgerId(), _kind: LEDGER_KIND
+    }) })).filter((entry) => entry.value);
+  if (found.length > 1) fail("Mongo cutover ledger is ambiguous.");
+  if (found.length === 0) return null;
+  const payload = ledgerDocumentPayload(found[0].value);
+  return { collection: found[0].name, document: found[0].value, payload };
+}
+
 function requireIntentShape(payload) {
   const intent = payload.intent;
   if (intent === null) return;
@@ -680,7 +701,7 @@ function requireLedgerProgress(payload, evidence, manifest) {
   const publishCount = buildPublicationOperations(manifest, evidence.presentSources).length;
   const dropCount = buildDropCollections(manifest, evidence.presentSources).length;
   const states = ["STAGING", "STAGED", "STAGE_VERIFIED", "PUBLISHING", "PUBLISHED",
-    "TARGET_ACTIVE", "REVERSING", "LEGACY_ACTIVE"];
+    "TARGET_ACTIVE", "REVERSING", "LEGACY_ACTIVE", "RECOVERY_CLEANUP"];
   if (!states.includes(payload.state)
       || payload.stageIndex < 0 || payload.stageIndex > stageCount
       || payload.publishIndex < 0 || payload.publishIndex > publishCount
@@ -691,7 +712,7 @@ function requireLedgerProgress(payload, evidence, manifest) {
       || payload.state === "STAGING" && payload.stageIndex >= stageCount
       || ["STAGED", "STAGE_VERIFIED", "PUBLISHING", "PUBLISHED", "TARGET_ACTIVE",
         "REVERSING", "LEGACY_ACTIVE"].includes(payload.state) && payload.stageIndex !== stageCount
-      || ["STAGING", "STAGED", "STAGE_VERIFIED"].includes(payload.state)
+      || ["STAGING", "STAGED", "STAGE_VERIFIED", "RECOVERY_CLEANUP"].includes(payload.state)
         && payload.publishIndex !== 0
       || payload.state === "PUBLISHING" && payload.publishIndex >= publishCount
       || ["PUBLISHED", "TARGET_ACTIVE"].includes(payload.state)
@@ -1223,10 +1244,101 @@ function reverseNext(database, command, manifest) {
     publishIndex: next,
     state: next === 0 ? "LEGACY_ACTIVE" : "REVERSING"
   });
+  const recovering = command.action === "recover-prepublication";
+  const nextOperation = recovering ? "recover-prepublication"
+    : next === 0 ? null : "reverse-next";
   return result(command, next === 0 ? "LEGACY_ACTIVE" : "REVERSING",
     kindMetricsFromAvailableTarget(database, manifest),
-    indexMetricsFromAvailableTarget(database, manifest),
-    next === 0 ? null : "reverse-next", next === 0);
+    indexMetricsFromAvailableTarget(database, manifest), nextOperation,
+    next === 0 && !recovering);
+}
+
+function requireLegacyWithOwnedStage(database, manifest, evidence) {
+  const actual = applicationCollections(database);
+  const expectedLegacy = evidence.collections.map((metric) => metric.name).sort();
+  const allowedStages = new Set(buildStageNamespaces(manifest));
+  const legacy = actual.filter((name) => !name.startsWith(STAGE_PREFIX));
+  const stages = actual.filter((name) => name.startsWith(STAGE_PREFIX));
+  if (!sameValue(legacy, expectedLegacy)
+      || stages.some((name) => !allowedStages.has(name))) {
+    fail("Mongo prepublication recovery inventory is invalid.");
+  }
+  requireProtectedLegacyCollections(database, evidence);
+  if (!sameValue(kindMetricsFromLegacy(database, manifest), evidence.kinds)
+      || !sameValue(v014Evidence(database), evidence.v014)) {
+    fail("Mongo prepublication recovery evidence changed.");
+  }
+  return stages;
+}
+
+function recoverPrepublication(database, command, manifest) {
+  const evidence = suppliedEvidence(command);
+  let ledger = findOptionalLedger(database);
+  if (ledger === null) {
+    const stages = requireLegacyWithOwnedStage(database, manifest, evidence);
+    if (stages.length === 0) {
+      return result(command, "LEGACY_ACTIVE", evidence.kinds,
+        indexMetricsFromAvailableTarget(database, manifest), null, true);
+    }
+    database.getCollection(stages[0]).drop();
+    const remaining = requireLegacyWithOwnedStage(database, manifest, evidence);
+    return result(command, remaining.length === 0 ? "LEGACY_ACTIVE" : "RECOVERY_CLEANUP",
+      evidence.kinds, indexMetricsFromAvailableTarget(database, manifest),
+      remaining.length === 0 ? null : "recover-prepublication", remaining.length === 0);
+  }
+  ledger = requireLedger(database, command);
+  if (ledger.payload.dropIndex !== 0 || ledger.payload.legacyDropped === true) {
+    fail("Mongo prepublication recovery cannot follow legacy deletion.");
+  }
+  if (ledger.payload.publishIndex > 0
+      || ["PUBLISHING", "PUBLISHED", "TARGET_ACTIVE", "REVERSING"].includes(
+        ledger.payload.state)) {
+    return reverseNext(database, command, manifest);
+  }
+  if (ledger.payload.state !== "RECOVERY_CLEANUP") {
+    if (!["STAGING", "STAGED", "STAGE_VERIFIED", "LEGACY_ACTIVE"].includes(
+      ledger.payload.state)) {
+      fail("Mongo prepublication recovery ledger state is invalid.");
+    }
+    requireExactInventory(database, ledger, manifest);
+    updateLedger(database, ledger, { state: "RECOVERY_CLEANUP", completed: false });
+    ledger = requireLedger(database, command);
+  }
+  const stages = requireLegacyWithOwnedStage(database, manifest, evidence);
+  if (stages.length === 0) {
+    fail("Mongo recovery ledger exists outside an owned stage namespace.");
+  }
+  const next = stages.find((name) => name !== ledger.collection) || ledger.collection;
+  database.getCollection(next).drop();
+  if (next === ledger.collection) {
+    requireSnapshotMatchesEvidence(database, manifest, evidence);
+    return result(command, "LEGACY_ACTIVE", evidence.kinds,
+      indexMetricsFromAvailableTarget(database, manifest), null, true);
+  }
+  requireLegacyWithOwnedStage(database, manifest, evidence);
+  return result(command, "RECOVERY_CLEANUP", evidence.kinds,
+    indexMetricsFromAvailableTarget(database, manifest), "recover-prepublication", false);
+}
+
+function prepareRestore(database, command, manifest) {
+  suppliedEvidence(command);
+  const owned = buildRestoreNamespaces(manifest);
+  const allowed = new Set(owned);
+  const actual = applicationCollections(database);
+  if (actual.some((name) => !allowed.has(name))) {
+    fail("Mongo restore preparation found an unowned namespace.");
+  }
+  if (actual.length === 0) {
+    return result(command, "RESTORE_PREPARED", [], [], null, true);
+  }
+  const ledger = findOptionalLedger(database);
+  if (ledger !== null) requireLedger(database, command);
+  const next = ledger === null ? actual[0]
+    : actual.find((name) => name !== ledger.collection) || ledger.collection;
+  database.getCollection(next).drop();
+  const remaining = applicationCollections(database);
+  return result(command, remaining.length === 0 ? "RESTORE_PREPARED" : "RESTORE_PREPARING",
+    [], [], remaining.length === 0 ? null : "prepare-restore", remaining.length === 0);
 }
 
 function restoreVerify(database, command, manifest) {
@@ -1251,6 +1363,8 @@ function execute(rootDatabase, args) {
     "verify-live": verifyLive,
     "drop-legacy": dropLegacy,
     "reverse-next": reverseNext,
+    "recover-prepublication": recoverPrepublication,
+    "prepare-restore": prepareRestore,
     "restore-verify": restoreVerify
   });
   return handlers[command.action](database, command, manifest);
@@ -1267,6 +1381,8 @@ const exported = Object.freeze({
   canonicalIndexSemantics,
   buildPublicationOperations,
   reversePublicationOperations,
+  buildStageNamespaces,
+  buildRestoreNamespaces,
   execute
 });
 

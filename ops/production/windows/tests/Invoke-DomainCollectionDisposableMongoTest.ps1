@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$MongodExe = 'C:\Program Files\MongoDB\Server\8.3\bin\mongod.exe',
-    [string]$MongoshExe = 'mongosh.exe'
+    [string]$MongoshExe = 'mongosh.exe',
+    [string]$MongoToolsPath = 'C:\Program Files\MongoDB\Tools\100\bin'
 )
 
 Set-StrictMode -Version Latest
@@ -20,6 +21,15 @@ function New-DisposableMongoPort {
 if (-not (Test-Path -LiteralPath $MongodExe -PathType Leaf)) {
     throw 'Disposable Mongo requires an explicit mongod executable.'
 }
+foreach ($tool in 'mongodump.exe','mongorestore.exe') {
+    if (-not (Test-Path -LiteralPath (Join-Path $MongoToolsPath $tool) -PathType Leaf)) {
+        throw "Disposable Mongo requires $tool."
+    }
+}
+$deployModule = Import-Module `
+    (Join-Path $PSScriptRoot '..\modules\Production.Deploy.psm1') `
+    -Force `
+    -PassThru
 $temporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
 $ownedName = 'cbell-domain-task7-' + [guid]::NewGuid().ToString('N')
 $ownedRoot = Join-Path $temporaryParent $ownedName
@@ -33,6 +43,7 @@ try {
     if ($port -in 27017,8080,8081 -or $port -lt 1000) {
         throw 'Disposable Mongo selected a forbidden production port.'
     }
+    & $deployModule { param($Port) Assert-ProductionCandidatePortUnused -Port $Port } $port
     $process = Start-Process `
         -FilePath $MongodExe `
         -ArgumentList @(
@@ -50,6 +61,10 @@ try {
         root = $ownedRoot
     }
     $owner | ConvertTo-Json | Set-Content -LiteralPath $ownerPath -Encoding utf8
+    $candidateIdentity = & $deployModule {
+        param($Process)
+        Get-ProductionCandidateProcessIdentity -Process $Process
+    } $process
 
     $ready = $false
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
@@ -59,9 +74,14 @@ try {
         Start-Sleep -Milliseconds 250
     }
     if (-not $ready) { throw 'Disposable Mongo did not become ready.' }
+    & $deployModule {
+        param($Port,$Identity)
+        Assert-ProductionCandidateProcessOwnsListener -Port $Port -Identity $Identity
+    } $port $candidateIdentity
 
     $env:DOMAIN_COLLECTION_MIGRATION_TEST_URI =
         "mongodb://127.0.0.1:$port/admin"
+    $env:DOMAIN_COLLECTION_MIGRATION_TEST_MONGO_TOOLS = $MongoToolsPath
     $result = Invoke-Pester `
         -Path (Join-Path $PSScriptRoot 'Production.DomainCollections.Tests.ps1') `
         -Output Normal `
@@ -75,6 +95,7 @@ try {
     }
 } finally {
     Remove-Item Env:DOMAIN_COLLECTION_MIGRATION_TEST_URI -ErrorAction SilentlyContinue
+    Remove-Item Env:DOMAIN_COLLECTION_MIGRATION_TEST_MONGO_TOOLS -ErrorAction SilentlyContinue
     if ($owner) {
         $current = Get-Process -Id $owner.pid -ErrorAction SilentlyContinue
         if ($current -and

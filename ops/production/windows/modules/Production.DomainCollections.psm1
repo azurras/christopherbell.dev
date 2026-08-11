@@ -6,7 +6,8 @@ $script:ProductionDatabase = 'christopherbell'
 $script:ManifestDigest = '576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24'
 $script:EngineActions = @(
     'preview','stage','verify-stage','publish-next','verify-live',
-    'drop-legacy','reverse-next','restore-verify')
+    'drop-legacy','reverse-next','recover-prepublication','prepare-restore',
+    'restore-verify')
 $script:EngineResultProperties = @(
     'complete','database','action','state','manifestDigest','backupIdentity',
     'expectedEvidenceDigest','evidenceDigest','evidence','kinds','indexes',
@@ -91,8 +92,9 @@ function Assert-ProductionDomainCollectionEngineEvidence {
             -Description 'Migration kind metric'
         if ($metric.kind -isnot [string] -or
             [string]$metric.kind -cnotmatch '^[a-z][a-z0-9_]{0,63}$' -or
-            $metric.count -isnot [string] -or
-            [string]$metric.count -cnotmatch '^(0|[1-9][0-9]*)$') {
+            ($metric.count -isnot [int] -and $metric.count -isnot [long]) -or
+            [long]$metric.count -lt 0 -or
+            [long]$metric.count -gt 9007199254740991) {
             throw 'Migration kind metric is invalid.'
         }
         Assert-ProductionDomainCollectionDigest `
@@ -100,16 +102,19 @@ function Assert-ProductionDomainCollectionEngineEvidence {
     }
     foreach ($metric in @($Evidence.collections)) {
         Assert-ProductionDomainCollectionExactProperties `
-            -Value $metric -Names @('name','count','checksum') `
+            -Value $metric -Names @('name','count','checksum','indexDigest') `
             -Description 'Migration collection metric'
         if ($metric.name -isnot [string] -or
             [string]$metric.name -cnotmatch '^[a-z][a-z0-9_]{0,127}$' -or
-            $metric.count -isnot [string] -or
-            [string]$metric.count -cnotmatch '^(0|[1-9][0-9]*)$') {
+            ($metric.count -isnot [int] -and $metric.count -isnot [long]) -or
+            [long]$metric.count -lt 0 -or
+            [long]$metric.count -gt 9007199254740991) {
             throw 'Migration collection metric is invalid.'
         }
         Assert-ProductionDomainCollectionDigest `
             -Value $metric.checksum -Description 'Migration collection checksum'
+        Assert-ProductionDomainCollectionDigest `
+            -Value $metric.indexDigest -Description 'Migration collection index digest'
     }
     Assert-ProductionDomainCollectionExactProperties `
         -Value $Evidence.v014 `
@@ -190,7 +195,8 @@ function Invoke-ProductionDomainCollectionEngine {
         [Parameter(Mandatory)][string]$Release,
         [Parameter(Mandatory)][string]$BackupIdentity,
         [Parameter(Mandatory)][string]$EvidenceDigest,
-        $Evidence
+        $Evidence,
+        [string]$MongoUri = ''
     )
 
     if ($Database -cnotmatch '^(christopherbell|cbell_candidate_[0-9a-f]{12}_[0-9a-f]{24})$') {
@@ -216,6 +222,18 @@ function Invoke-ProductionDomainCollectionEngine {
     if ($null -ne $Evidence) {
         Assert-ProductionDomainCollectionEngineEvidence -Evidence $Evidence
     }
+    $effectiveMongoUri = 'mongodb://127.0.0.1:27017/admin'
+    if (-not [string]::IsNullOrEmpty($MongoUri)) {
+        if ($Database -cnotmatch '^cbell_candidate_' -or
+            $MongoUri -cnotmatch '^mongodb://127\.0\.0\.1:([0-9]{4,5})/admin$') {
+            throw 'The disposable Mongo URI is not an isolated candidate boundary.'
+        }
+        $disposablePort = [int]$Matches[1]
+        if ($disposablePort -in 27017,8080,8081 -or $disposablePort -gt 65535) {
+            throw 'The disposable Mongo URI uses a forbidden production port.'
+        }
+        $effectiveMongoUri = $MongoUri
+    }
     $arguments = @(
         $Database,$Action,$script:ManifestDigest,$OwnerToken,$Release,
         $BackupIdentity,$EvidenceDigest)
@@ -238,7 +256,7 @@ function Invoke-ProductionDomainCollectionEngine {
     $json = Invoke-CheckedProcess `
         -FilePath $Config.mongoShellExe `
         -ArgumentList @(
-            '--quiet','--norc','mongodb://127.0.0.1:27017/admin',
+            '--quiet','--norc',$effectiveMongoUri,
             '--eval',$bootstrap,'--file',$manifest,'--file',$engine) `
         -WorkingDirectory $Config.repositoryPath `
         -Environment $environment
@@ -300,6 +318,31 @@ function Get-ProductionDomainCollectionReleaseSchema {
 function Get-ProductionDomainCollectionStatePath {
     param([Parameter(Mandatory)]$Config)
     Join-Path $Config.programDataRoot 'state\domain-collection-cutover.json'
+}
+
+function Assert-ProductionDomainCollectionStateTransition {
+    param(
+        [Parameter(Mandatory)][string]$Current,
+        [Parameter(Mandatory)][string]$Next
+    )
+    if ($Current -ceq 'ROLLED_BACK') {
+        throw 'Protected domain collection rollback state is terminal.'
+    }
+    $allowed = @{
+        INITIALIZED = @('PREVIEWED')
+        PREVIEWED = @('CANDIDATE_VERIFIED','ROLLED_BACK')
+        CANDIDATE_VERIFIED = @('LIVE_PUBLISHED','ROLLED_BACK')
+        LIVE_PUBLISHED = @('TARGET_START_PENDING','ROLLED_BACK')
+        TARGET_START_PENDING = @('DROP_STARTED','ROLLED_BACK')
+        DROP_STARTED = @('LEGACY_DROPPED','ROLLBACK_VERIFIED')
+        LEGACY_DROPPED = @('TARGET_ACTIVE','ROLLBACK_VERIFIED')
+        TARGET_ACTIVE = @('ROLLBACK_VERIFIED')
+        ROLLBACK_VERIFIED = @('ROLLED_BACK')
+    }
+    if (-not $allowed.ContainsKey($Current) -or
+        -not ($allowed[$Current] -ccontains $Next)) {
+        throw "Protected domain collection state transition $Current -> $Next is invalid."
+    }
 }
 
 function Write-ProductionDomainCollectionProtectedJson {
@@ -389,6 +432,10 @@ function New-ProductionDomainCollectionVerifiedBackup {
 
 function Save-ProductionDomainCollectionContextState {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$State)
+    $current = if ($Context.PSObject.Properties['state']) {
+        [string]$Context.state
+    } else { 'INITIALIZED' }
+    Assert-ProductionDomainCollectionStateTransition -Current $current -Next $State
     $Context.state = $State
     $value = [ordered]@{
         version = 1
@@ -469,7 +516,7 @@ function New-ProductionDomainCollectionCutoverContext {
         priorMarkerBase64 = $priorMarkerBase64
         dropStarted = $false
         writerStopped = $false
-        state = 'PREVIEWED'
+        state = 'INITIALIZED'
     }
     Save-ProductionDomainCollectionContextState -Context $context -State PREVIEWED
     return $context
@@ -572,6 +619,7 @@ function Start-ProductionDomainCollectionTargetForVerification {
     Write-ProductionDomainSchemaDirection `
         -Config $Context.config -State TARGET_CUTOVER_IN_PROGRESS `
         -TargetRelease $Context.targetRelease -LegacyRelease $Context.legacyRelease `
+        -CurrentRelease $Context.targetRelease `
         -EvidenceDigest $Context.evidenceDigest `
         -BackupIdentity $Context.backupIdentity -LegacyDropped:$false | Out-Null
     Save-ProductionDomainCollectionContextState -Context $Context -State TARGET_START_PENDING
@@ -602,6 +650,7 @@ function Complete-ProductionDomainCollectionCutover {
     Write-ProductionDomainSchemaDirection `
         -Config $Context.config -State TARGET_ACTIVE `
         -TargetRelease $Context.targetRelease -LegacyRelease $Context.legacyRelease `
+        -CurrentRelease $Context.targetRelease `
         -EvidenceDigest $Context.evidenceDigest `
         -BackupIdentity $Context.backupIdentity -LegacyDropped:$true | Out-Null
     Save-ProductionDomainCollectionContextState -Context $Context -State TARGET_ACTIVE
@@ -623,9 +672,12 @@ function Invoke-ProductionDomainCollectionFailureRecovery {
     try {
         Stop-ProductionDomainCollectionWriter -Context $Context
         if ($PostDrop) {
+            Assert-ProductionDomainCollectionRollbackFreshness -State $Context
+            Save-ProductionDomainCollectionContextState `
+                -Context $Context -State ROLLBACK_VERIFIED
             Restore-ProductionDomainCollectionBackup -State $Context
         } else {
-            Reverse-ProductionDomainCollectionPublication -State $Context
+            Recover-ProductionDomainCollectionPrepublication -State $Context
         }
         Restore-ProductionDomainCollectionLegacyRelease -State $Context
         Start-ProductionDomainCollectionLegacy -State $Context
@@ -656,7 +708,7 @@ function Read-ProductionDomainCollectionProtectedState {
             [string]$value.state -cnotin @(
                 'PREVIEWED','CANDIDATE_VERIFIED','LIVE_PUBLISHED',
                 'TARGET_START_PENDING','DROP_STARTED','LEGACY_DROPPED',
-                'TARGET_ACTIVE','ROLLED_BACK') -or
+                'TARGET_ACTIVE','ROLLBACK_VERIFIED','ROLLED_BACK') -or
             ($value.updatedAtEpochMillis -isnot [int] -and
                 $value.updatedAtEpochMillis -isnot [long]) -or
             [long]$value.updatedAtEpochMillis -lt 1 -or
@@ -671,6 +723,9 @@ function Read-ProductionDomainCollectionProtectedState {
                 '^cbell_candidate_[0-9a-f]{12}_[0-9a-f]{24}$' -or
             $value.legacyDropped -isnot [bool]) {
             throw 'Protected cutover state identity is invalid.'
+        }
+        if ([string]$value.state -eq 'ROLLED_BACK') {
+            throw 'Protected domain collection rollback state is terminal.'
         }
         if ($value.priorMarkerBase64 -isnot [string]) {
             throw 'Protected prior schema marker identity is invalid.'
@@ -778,11 +833,14 @@ function Restore-ProductionDomainCollectionBackup {
     if ($actualHash -cne [string]$State.backupIdentity) {
         throw 'Domain collection restore archive identity changed.'
     }
+    $null = Invoke-ProductionDomainCollectionUntilComplete `
+        -Context $State -Database $script:ProductionDatabase `
+        -Action prepare-restore
     Invoke-CheckedProcess `
         -FilePath (Join-Path $State.config.mongoToolsPath 'mongorestore.exe') `
         -ArgumentList @(
             '--uri=mongodb://127.0.0.1:27017',
-            "--archive=$($State.archive)",'--gzip','--drop',
+            "--archive=$($State.archive)",'--gzip',
             '--nsInclude=christopherbell.*') `
         -WorkingDirectory $State.config.repositoryPath | Out-Null
     $null = Invoke-ProductionDomainCollectionEngine `
@@ -792,10 +850,29 @@ function Restore-ProductionDomainCollectionBackup {
         -EvidenceDigest $State.evidenceDigest -Evidence $State.evidence
 }
 
+function Assert-ProductionDomainCollectionRollbackFreshness {
+    param([Parameter(Mandatory)]$State)
+    $result = Invoke-ProductionDomainCollectionEngine `
+        -Config $State.config -Database $script:ProductionDatabase `
+        -Action verify-live -OwnerToken $State.ownerToken `
+        -Release $State.targetRelease -BackupIdentity $State.backupIdentity `
+        -EvidenceDigest $State.evidenceDigest -Evidence $State.evidence
+    if (-not [bool]$result.complete -or [string]$result.state -cne 'TARGET_ACTIVE') {
+        throw 'The stopped target database no longer matches the rollback-bound snapshot.'
+    }
+}
+
 function Reverse-ProductionDomainCollectionPublication {
     param([Parameter(Mandatory)]$State)
     $null = Invoke-ProductionDomainCollectionUntilComplete `
         -Context $State -Database $script:ProductionDatabase -Action reverse-next
+}
+
+function Recover-ProductionDomainCollectionPrepublication {
+    param([Parameter(Mandatory)]$State)
+    $null = Invoke-ProductionDomainCollectionUntilComplete `
+        -Context $State -Database $script:ProductionDatabase `
+        -Action recover-prepublication
 }
 
 function Restore-ProductionDomainCollectionLegacyRelease {
@@ -932,10 +1009,18 @@ function Invoke-ProductionDomainCollectionRollback {
         Stop-ProductionDomainCollectionWriter -Context ([pscustomobject]@{
             config = $config
         })
-        if ([bool]$state.legacyDropped) {
+        $stateName = [string]$state.state
+        $restoreBound = [bool]$state.legacyDropped -or $stateName -cin @(
+            'DROP_STARTED','LEGACY_DROPPED','TARGET_ACTIVE','ROLLBACK_VERIFIED')
+        if ($restoreBound) {
+            if ($stateName -cne 'ROLLBACK_VERIFIED') {
+                Assert-ProductionDomainCollectionRollbackFreshness -State $state
+                Save-ProductionDomainCollectionContextState `
+                    -Context $state -State ROLLBACK_VERIFIED
+            }
             Restore-ProductionDomainCollectionBackup -State $state
         } else {
-            Reverse-ProductionDomainCollectionPublication -State $state
+            Recover-ProductionDomainCollectionPrepublication -State $state
         }
         Restore-ProductionDomainCollectionLegacyRelease -State $state
         Start-ProductionDomainCollectionLegacy -State $state

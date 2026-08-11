@@ -31,6 +31,12 @@ test("command parser rejects unsafe database action digest owner and release inp
     noExpectedEvidence];
   assert.equal(migration.parseCommand(valid).action, "preview");
   assert.equal(migration.parseCommand(valid).backupIdentity, backupIdentity);
+  for (const action of ["recover-prepublication", "prepare-restore"]) {
+    const args = valid.slice();
+    args[1] = action;
+    args[6] = "1".repeat(64);
+    assert.equal(migration.parseCommand(args).action, action);
+  }
 
   for (const replacement of [
     [0, "admin"], [1, "eval"], [2, "0".repeat(64)], [3, "owner value"],
@@ -142,6 +148,20 @@ test("publication plan performs one rename at a time and remains exactly reversi
     operations.toReversed().map((operation) => ({
       kind: "rename", from: operation.to, to: operation.from
     })));
+});
+
+test("recovery allowlists only staged and manifest-owned restore namespaces", () => {
+  const manifest = manifestModule.requireDigest(manifestModule.DIGEST);
+  const expectedRestore = [...new Set(manifest.targets
+    .concat(manifest.kinds.filter((kind) => kind.source).map((kind) => kind.source))
+    .concat(manifest.dropOnly)
+    .concat(manifest.targets.map((target) => `__domain_legacy__${target}`)))].sort();
+
+  assert.deepEqual(migration.buildRestoreNamespaces(manifest), expectedRestore);
+  assert.deepEqual(migration.buildStageNamespaces(manifest),
+    manifest.targets.map((target) => `__domain_stage__${target}`).sort());
+  assert.equal(migration.buildRestoreNamespaces(manifest).some(
+    (name) => name.startsWith("__domain_legacy__")), true);
 });
 
 test("Java and JavaScript enforce the shared exact ledger field contract", () => {

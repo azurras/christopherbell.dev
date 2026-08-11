@@ -28,7 +28,11 @@ const databases = Object.freeze({
   reverseDocument: "cbell_candidate_acacacacacac_acacacacacacacacacacacac",
   reverseIndex: "cbell_candidate_adadadadadad_adadadadadadadadadadadad",
   replacement: "cbell_candidate_aeaeaeaeaeae_aeaeaeaeaeaeaeaeaeaeaeae",
-  dropIntentDrift: "cbell_candidate_afafafafafaf_afafafafafafafafafafafaf"
+  dropIntentDrift: "cbell_candidate_afafafafafaf_afafafafafafafafafafafaf",
+  recoveryInit: "cbell_candidate_b0b0b0b0b0b0_b0b0b0b0b0b0b0b0b0b0b0b0",
+  recoveryPartialStage: "cbell_candidate_b1b1b1b1b1b1_b1b1b1b1b1b1b1b1b1b1b1b1",
+  recoveryStaged: "cbell_candidate_b2b2b2b2b2b2_b2b2b2b2b2b2b2b2b2b2b2b2",
+  recoveryPublishing: "cbell_candidate_b3b3b3b3b3b3_b3b3b3b3b3b3b3b3b3b3b3b3"
 });
 
 function assert(condition, message) {
@@ -39,9 +43,14 @@ function command(database, action, commandOwner = owner) {
   globalThis.DOMAIN_COLLECTION_EVIDENCE = protectedEvidence.get(database) || null;
   const expectedEvidenceDigest = action === "preview" ? "0".repeat(64)
     : migration.evidenceDigest(globalThis.DOMAIN_COLLECTION_EVIDENCE);
-  const outcome = migration.execute(
-    db, [database, action, digest, commandOwner, release, backupIdentity,
-      expectedEvidenceDigest]);
+  let outcome;
+  try {
+    outcome = migration.execute(
+      db, [database, action, digest, commandOwner, release, backupIdentity,
+        expectedEvidenceDigest]);
+  } catch (failure) {
+    throw new Error(`${database} ${action}: ${failure.message}`);
+  }
   if (action === "preview") {
     assert(outcome.evidence !== null, "preview omitted protected evidence");
     protectedEvidence.set(database, outcome.evidence);
@@ -248,6 +257,13 @@ function reverseUntilFinal(databaseName) {
   while (currentLedger(databaseName).payload.publishIndex > 1) {
     command(databaseName, "reverse-next");
   }
+}
+
+function recoverPrepublicationScenario(databaseName) {
+  while (!command(databaseName, "recover-prepublication").complete) {
+    // The engine owns one bounded allowlisted recovery effect per call.
+  }
+  command(databaseName, "preview");
 }
 
 for (const name of Object.values(databases)) db.getSiblingDB(name).dropDatabase();
@@ -582,6 +598,28 @@ for (let index = 0; index < faultDrops; index++) {
 }
 assert(currentLedger(databases.faultMatrix).payload.legacyDropped === true,
   "fault matrix did not complete exact legacy deletion");
+
+seed(databases.recoveryInit);
+command(databases.recoveryInit, "preview");
+db.getSiblingDB(databases.recoveryInit).createCollection("__domain_stage__application_migrations");
+recoverPrepublicationScenario(databases.recoveryInit);
+
+seed(databases.recoveryPartialStage);
+command(databases.recoveryPartialStage, "preview");
+command(databases.recoveryPartialStage, "stage");
+recoverPrepublicationScenario(databases.recoveryPartialStage);
+
+seed(databases.recoveryStaged);
+command(databases.recoveryStaged, "preview");
+stageAll(databases.recoveryStaged);
+recoverPrepublicationScenario(databases.recoveryStaged);
+
+seed(databases.recoveryPublishing);
+command(databases.recoveryPublishing, "preview");
+stageAll(databases.recoveryPublishing);
+command(databases.recoveryPublishing, "verify-stage");
+command(databases.recoveryPublishing, "publish-next");
+recoverPrepublicationScenario(databases.recoveryPublishing);
 
 print(JSON.stringify({ complete: true, databases: Object.keys(databases).length,
   kinds: 52, indexes: 126, collections: names.length, drops,

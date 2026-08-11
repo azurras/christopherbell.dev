@@ -114,7 +114,13 @@ function Invoke-ProductionRollback {
         if ($direction -and [string]$direction.state -eq 'TARGET_ACTIVE') {
             $targetSha = Split-Path -Leaf $current
             $previousSha = Split-Path -Leaf $previous
-            if ($targetSha -cne [string]$direction.targetRelease) {
+            $markerVersion = if ($direction.PSObject.Properties['version']) {
+                [int]$direction.version
+            } else { 1 }
+            $expectedCurrentRelease = if ($markerVersion -eq 2) {
+                [string]$direction.currentRelease
+            } else { [string]$direction.targetRelease }
+            if ($targetSha -cne $expectedCurrentRelease) {
                 throw 'Music runtime schema-direction release identity does not match the active release.'
             }
             if ($previousSha -ceq [string]$direction.legacyRelease) {
@@ -125,7 +131,8 @@ function Invoke-ProductionRollback {
                         '-ConfirmDomainCollectionRollback.')
                 }
                 throw ('Generic rollback cannot start the retained legacy Music writer or reverse-copy state. ' +
-                    'Use prod.cmd music-runtime-rollback -ConfirmMusicRuntimeRollback.')
+                    'Use prod.cmd mongo-consolidation-rollback ' +
+                    '-ConfirmDomainCollectionRollback; legacy v1 compatibility is internal only.')
             }
             Ensure-CoordinatedProductionWriterStartGuard -Config $config
             try {
@@ -158,11 +165,23 @@ function Invoke-ProductionRollback {
                     }
                 }
                 if ($startFailure) { throw $startFailure }
-                Write-ProductionMusicSchemaDirection `
-                    -Config $config `
-                    -State TARGET_ACTIVE `
-                    -TargetRelease $previousSha `
-                    -LegacyRelease ([string]$direction.legacyRelease)
+                if ($markerVersion -eq 2) {
+                    Write-ProductionDomainSchemaDirection `
+                        -Config $config `
+                        -State TARGET_ACTIVE `
+                        -TargetRelease ([string]$direction.targetRelease) `
+                        -CurrentRelease $previousSha `
+                        -LegacyRelease ([string]$direction.legacyRelease) `
+                        -EvidenceDigest ([string]$direction.evidenceDigest) `
+                        -BackupIdentity ([string]$direction.backupIdentity) `
+                        -LegacyDropped ([bool]$direction.legacyDropped) | Out-Null
+                } else {
+                    Write-ProductionMusicSchemaDirection `
+                        -Config $config `
+                        -State TARGET_ACTIVE `
+                        -TargetRelease $previousSha `
+                        -LegacyRelease ([string]$direction.legacyRelease)
+                }
                 Restore-CoordinatedProductionWebsiteRecoveryPolicy
                 return
             } catch {
@@ -279,7 +298,10 @@ function Restart-ProductionService {
             $current = Get-JunctionTarget (Join-Path $config.programDataRoot 'current')
             $activeSha = if ($current) { Split-Path -Leaf $current } else { '' }
             $expectedSha = if ([string]$direction.state -eq 'TARGET_ACTIVE') {
-                [string]$direction.targetRelease
+                if ($direction.PSObject.Properties['version'] -and
+                    [int]$direction.version -eq 2) {
+                    [string]$direction.currentRelease
+                } else { [string]$direction.targetRelease }
             } else {
                 [string]$direction.legacyRelease
             }

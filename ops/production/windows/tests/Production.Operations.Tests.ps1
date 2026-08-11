@@ -437,7 +437,7 @@ Describe 'native Windows production operations' {
             Mock Stop-ProductionWebsiteService { throw 'must not stop' }
 
             { Invoke-ProductionRollback } |
-                Should -Throw '*prod.cmd music-runtime-rollback -ConfirmMusicRuntimeRollback*'
+                Should -Throw '*prod.cmd mongo-consolidation-rollback -ConfirmDomainCollectionRollback*'
             Should -Invoke Stop-ProductionWebsiteService -Times 0
         }
 
@@ -936,7 +936,7 @@ Describe 'native Windows production operations' {
             Mock Read-ProductionMusicSchemaDirection {
                 [pscustomobject]@{
                     version=2; state='TARGET_ACTIVE'
-                    targetRelease=$targetSha; legacyRelease=$legacySha
+                    targetRelease=$targetSha; currentRelease=$targetSha; legacyRelease=$legacySha
                 }
             }
             Mock Stop-ProductionWebsiteService { throw 'must not stop' }
@@ -944,6 +944,58 @@ Describe 'native Windows production operations' {
             { Invoke-ProductionRollback } |
                 Should -Throw '*mongo-consolidation-rollback -ConfirmDomainCollectionRollback*'
             Should -Invoke Stop-ProductionWebsiteService -Times 0
+        }
+
+        It 'rolls back between target binaries while preserving the v2 cutover binding' {
+            $cutoverSha = '0123456789abcdef0123456789abcdef01234567'
+            $currentSha = '1111111111111111111111111111111111111111'
+            $previousSha = '2222222222222222222222222222222222222222'
+            $legacySha = '3333333333333333333333333333333333333333'
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { "C:\data\releases\$currentSha" }
+                else { "C:\data\releases\$previousSha" }
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    version=2
+                    state='TARGET_ACTIVE'
+                    targetRelease=$cutoverSha
+                    currentRelease=$currentSha
+                    legacyRelease=$legacySha
+                    evidenceDigest=('a' * 64)
+                    backupIdentity=('b' * 64)
+                    legacyDropped=$true
+                }
+            }
+            Mock Ensure-CoordinatedProductionWriterStartGuard { }
+            Mock Set-AtomicJunction { }
+            Mock Grant-CoordinatedProductionWriterStart {
+                [pscustomobject]@{ nonce='c' * 32 }
+            }
+            Mock Revoke-CoordinatedProductionWriterStart { }
+            Mock Start-Service { }
+            Mock Test-ProductionEndpoints { }
+            Mock Test-ProductionPublicEndpoints { }
+            Mock Write-ProductionDomainSchemaDirection { }
+            Mock Restore-CoordinatedProductionWebsiteRecoveryPolicy { }
+
+            Invoke-ProductionRollback
+
+            Should -Invoke Write-ProductionDomainSchemaDirection -Times 1 -Exactly `
+                -ParameterFilter {
+                    $State -eq 'TARGET_ACTIVE' -and
+                    $TargetRelease -eq $cutoverSha -and
+                    $CurrentRelease -eq $previousSha -and
+                    $LegacyRelease -eq $legacySha -and
+                    $EvidenceDigest -eq ('a' * 64) -and
+                    $BackupIdentity -eq ('b' * 64) -and
+                    $LegacyDropped
+                }
         }
 
         It 'reports only manifest compliance and per-kind counts without document values' {

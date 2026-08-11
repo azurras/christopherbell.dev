@@ -594,6 +594,31 @@ Describe 'production writer-start schema boundary' {
                 Should -Not -Throw
         }
 
+        It 'allows the current v2 release without changing its immutable cutover release' {
+            Mock Read-ProductionReleaseIdentity {
+                [pscustomobject]@{
+                    sha='3333333333333333333333333333333333333333'
+                    musicSchema='TARGET'
+                    domainSchema='TARGET'
+                }
+            }
+            $v2Marker = [pscustomobject]@{
+                version=2
+                state='TARGET_ACTIVE'
+                targetRelease='1111111111111111111111111111111111111111'
+                currentRelease='3333333333333333333333333333333333333333'
+                legacyRelease='2222222222222222222222222222222222222222'
+            }
+            Mock Read-ProductionDomainSchemaDirection { $v2Marker }
+            Mock Read-ProductionMusicSchemaDirection {
+                $v2Marker
+            }
+
+            { Assert-ProductionWriterStartAllowed `
+                    -Config $script:config -FixedRoot $TestDrive } |
+                Should -Not -Throw
+        }
+
         It 'fails closed when a stable marker release differs and no authorization exists' {
             Mock Read-ProductionReleaseIdentity {
                 [pscustomobject]@{ sha='3333333333333333333333333333333333333333'; musicSchema='TARGET' }
@@ -729,6 +754,36 @@ Describe 'production writer-start schema boundary' {
 
             { Use-ProductionWriterStartAuthorization -Config $script:config `
                     -Marker $changedMarker -ReleaseIdentity $release } |
+                Should -Throw '*blocked*'
+        }
+
+        It 'binds a v2 authorization to the marker current release identity' {
+            $marker = [pscustomobject]@{
+                version=2
+                state='TARGET_ACTIVE'
+                targetRelease='1111111111111111111111111111111111111111'
+                currentRelease='3333333333333333333333333333333333333333'
+                legacyRelease='2222222222222222222222222222222222222222'
+            }
+            Mock Read-ProductionMusicSchemaDirection { $marker }
+            $release = [pscustomobject]@{
+                sha='4444444444444444444444444444444444444444'
+                domainSchema='TARGET'
+                musicSchema='TARGET'
+            }
+            Grant-ProductionWriterStartAuthorization -Config $script:config `
+                -MarkerState TARGET_ACTIVE -Release $release.sha -Purpose TARGET_DEPLOY |
+                Out-Null
+            $changed = [pscustomobject]@{
+                version=2
+                state='TARGET_ACTIVE'
+                targetRelease=$marker.targetRelease
+                currentRelease='5555555555555555555555555555555555555555'
+                legacyRelease=$marker.legacyRelease
+            }
+
+            { Use-ProductionWriterStartAuthorization -Config $script:config `
+                    -Marker $changed -ReleaseIdentity $release } |
                 Should -Throw '*blocked*'
         }
 

@@ -580,10 +580,17 @@ For guarded recovery use:
 .\prod.cmd mongo-consolidation-rollback -ConfirmDomainCollectionRollback
 ```
 
-Before deletion, rollback reverses publication. After deletion, it restores
-and verifies the exact bound backup before selecting or starting the old
-writer. If any identity or postcondition cannot be proved, leave
-`ChristopherBellDev` stopped and preserve all evidence.
+Before deletion, rollback reverses publication when needed and removes only
+manifest-owned staging residue before proving the legacy snapshot. After
+deletion, it first proves the stopped target snapshot is unchanged, removes
+every manifest-owned namespace, restores the exact bound backup without relying
+on `mongorestore --drop`, and independently verifies the restored evidence
+before selecting or starting the old writer. If any identity or postcondition
+cannot be proved, leave `ChristopherBellDev` stopped and preserve all evidence.
+
+Routine target-schema deployments preserve the original cutover target,
+evidence digest, backup identity, and legacy release in the v2 marker while
+advancing only its current target release.
 
 ## Native MongoDB Backup and Restore
 
