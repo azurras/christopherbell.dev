@@ -1,5 +1,6 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -7,8 +8,10 @@ import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.stereotype.Component;
 
 /** Startup-only validation of the durable domain-collection cutover ledger. */
+@Component
 public final class DomainCollectionCutoverLedger {
   public static final String LEGACY_ID = "domain-collection-cutover";
   private static final String COLLECTION = "application_migrations";
@@ -19,11 +22,18 @@ public final class DomainCollectionCutoverLedger {
   private static final List<String> ID_FIELDS = List.of("kind", "legacyId");
   private static final String NOT_ACTIVE = "Domain collection schema is not active.";
 
-  private DomainCollectionCutoverLedger() {}
+  private final MongoTemplate mongo;
+
+  public DomainCollectionCutoverLedger(MongoTemplate mongo) {
+    this.mongo = Objects.requireNonNull(mongo, "mongo");
+  }
 
   /** Fails closed unless the exact target manifest completed publication. */
-  public static void requireTargetActive(MongoTemplate mongo, String expectedManifestDigest) {
-    Objects.requireNonNull(mongo, "mongo");
+  public void requireTargetActive() {
+    requireTargetActive(DomainCollectionManifest.DIGEST);
+  }
+
+  void requireTargetActive(String expectedManifestDigest) {
     if (expectedManifestDigest == null || !SHA256.matcher(expectedManifestDigest).matches()) {
       throw new IllegalArgumentException("Domain collection manifest digest is invalid.");
     }

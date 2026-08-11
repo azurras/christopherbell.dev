@@ -45,7 +45,11 @@ Describe 'Domain collection migration artifact contracts' {
             'cbell_candidate_eeeeeeeeeeee_eeeeeeeeeeeeeeeeeeeeeeee',
             'cbell_candidate_ffffffffffff_ffffffffffffffffffffffff',
             'cbell_candidate_111111111111_111111111111111111111111',
-            'cbell_candidate_222222222222_222222222222222222222222'
+            'cbell_candidate_222222222222_222222222222222222222222',
+            'cbell_candidate_333333333333_333333333333333333333333',
+            'cbell_candidate_444444444444_444444444444444444444444',
+            'cbell_candidate_555555555555_555555555555555555555555',
+            'cbell_candidate_666666666666_666666666666666666666666'
         )
         try {
             $output = @(& $shell '--quiet' '--norc' $uri '--file' $manifest `
@@ -56,6 +60,7 @@ Describe 'Domain collection migration artifact contracts' {
             $result.kinds | Should -Be 52
             $result.indexes | Should -Be 126
             $result.collections | Should -Be 14
+            $result.faultBoundaries | Should -Be 468
         } finally {
             $quoted = ($databaseNames | ForEach-Object { "'$_'" }) -join ','
             & $shell '--quiet' '--norc' $uri '--eval' `

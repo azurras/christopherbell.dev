@@ -7,6 +7,12 @@ import org.springframework.stereotype.Component;
 /** Blocks a target-schema release until the exact domain cutover is active. */
 @Component
 public final class V015RequireDomainCollectionSchema implements ApplicationMigration {
+  private final DomainCollectionCutoverLedger ledger;
+
+  public V015RequireDomainCollectionSchema(DomainCollectionCutoverLedger ledger) {
+    this.ledger = ledger;
+  }
+
   @Override
   public String id() {
     return "015-require-domain-collection-schema";
@@ -24,6 +30,6 @@ public final class V015RequireDomainCollectionSchema implements ApplicationMigra
 
   @Override
   public void apply(MongoTemplate mongo) {
-    DomainCollectionCutoverLedger.requireTargetActive(mongo, DomainCollectionManifest.DIGEST);
+    ledger.requireTargetActive();
   }
 }

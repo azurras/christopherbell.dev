@@ -6,6 +6,8 @@ const digest = DomainCollectionManifest.DIGEST;
 const owner = "0123456789abcdef0123456789abcdef";
 const wrongOwner = "fedcba9876543210fedcba9876543210";
 const release = "a".repeat(40);
+const backupIdentity = "b".repeat(64);
+const protectedEvidence = new Map();
 const databases = Object.freeze({
   main: "cbell_candidate_aaaaaaaaaaaa_aaaaaaaaaaaaaaaaaaaaaaaa",
   restore: "cbell_candidate_bbbbbbbbbbbb_bbbbbbbbbbbbbbbbbbbbbbbb",
@@ -14,7 +16,11 @@ const databases = Object.freeze({
   collision: "cbell_candidate_eeeeeeeeeeee_eeeeeeeeeeeeeeeeeeeeeeee",
   unexpected: "cbell_candidate_ffffffffffff_ffffffffffffffffffffffff",
   optional: "cbell_candidate_111111111111_111111111111111111111111",
-  malformedStage: "cbell_candidate_222222222222_222222222222222222222222"
+  malformedStage: "cbell_candidate_222222222222_222222222222222222222222",
+  required: "cbell_candidate_333333333333_333333333333333333333333",
+  v014: "cbell_candidate_444444444444_444444444444444444444444",
+  corruptPlan: "cbell_candidate_555555555555_555555555555555555555555",
+  faultMatrix: "cbell_candidate_666666666666_666666666666666666666666"
 });
 
 function assert(condition, message) {
@@ -22,10 +28,20 @@ function assert(condition, message) {
 }
 
 function command(database, action, commandOwner = owner) {
-  const outcome = migration.execute(db, [database, action, digest, commandOwner, release]);
+  globalThis.DOMAIN_COLLECTION_EVIDENCE = protectedEvidence.get(database) || null;
+  const outcome = migration.execute(
+    db, [database, action, digest, commandOwner, release, backupIdentity]);
+  if (action === "preview") {
+    assert(outcome.evidence !== null, "preview omitted protected evidence");
+    protectedEvidence.set(database, outcome.evidence);
+  } else {
+    assert(outcome.evidence === null, action + " exposed protected evidence");
+  }
   assert(outcome.database === database, action + " omitted its database");
   assert(outcome.action === action, action + " omitted its action");
   assert(outcome.manifestDigest === digest, action + " omitted its manifest digest");
+  assert(outcome.backupIdentity === backupIdentity, action + " omitted its backup identity");
+  assert(typeof outcome.evidenceDigest === "string", action + " omitted its evidence digest");
   assert(outcome.kinds.length === manifest.kinds.length, action + " omitted kind evidence");
   assert(outcome.indexes.length === manifest.targets.length, action + " omitted index evidence");
   return outcome;
@@ -39,17 +55,36 @@ function seed(databaseName) {
     let id = kind.sourceId || kind.kind + "-id";
     if (kind.kind === "account") id = ObjectId("64b64b64b64b64b64b64b64b");
     if (kind.kind === "migration_record") id = "014-consolidate-music-runtime-state";
-    const document = {
+    let document = {
       _id: id,
       marker: kind.kind,
       longValue: Long.fromString("9007199254740993"),
       decimalValue: Decimal128.fromString("1234567890.0123456789"),
+      intValue: new Int32(7),
+      sameValueLong: Long.fromString("7"),
+      doubleValue: new Double(7.25),
       recordedAt: ISODate("2026-08-11T00:00:00.000Z"),
       nested: { z: 2, a: 1 }
     };
-    if (kind.kind === "migration_record") document.status = "APPLIED";
+    if (kind.kind === "migration_record") {
+      document = {
+        _id: "014-consolidate-music-runtime-state",
+        checksum: "11a69bdd4556cfc38060ccdda5075fb9d6bc36f1cc414edd7b26cd61a74b5cbb",
+        description: "Consolidate Music queue and radio runtime state",
+        status: "APPLIED",
+        ownerToken: "v014-owner",
+        startedAt: ISODate("2026-08-10T00:00:00.000Z"),
+        completedAt: ISODate("2026-08-10T00:01:00.000Z")
+      };
+    }
     database.getCollection(kind.source).insertOne(document);
   }
+  database.getCollection("accounts").insertMany([
+    { _id: BinData(0, "AQID"), marker: "binary-id", email: "binary@example.test",
+      username: "binary-account" },
+    { _id: UUID("00112233-4455-6677-8899-aabbccddeeff"), marker: "uuid-id",
+      email: "uuid@example.test", username: "uuid-account" }
+  ]);
   for (const name of manifest.dropOnly) {
     database.getCollection(name).insertOne({ _id: name, retained: true });
   }
@@ -116,10 +151,6 @@ function reverseAll(databaseName) {
     || database.getCollection("application_migrations")
       .findOne({ _kind: "domain_collection_cutover" });
   let prior = ledger.payload.publishIndex;
-  if (prior > 0) {
-    const forward = ledger.payload.publicationOperations[prior - 1];
-    rawRename(databaseName, forward.to, forward.from);
-  }
   while (true) {
     const outcome = command(databaseName, "reverse-next");
     ledger = database.getCollection("__domain_stage__application_migrations")
@@ -147,19 +178,79 @@ function expectFailure(work, label) {
   assert(failed, label + " did not fail closed");
 }
 
+function currentLedger(databaseName) {
+  const database = db.getSiblingDB(databaseName);
+  return database.getCollection("__domain_stage__application_migrations")
+    .findOne({ _kind: "domain_collection_cutover" })
+    || database.getCollection("application_migrations")
+      .findOne({ _kind: "domain_collection_cutover" });
+}
+
+function interruptEveryBoundary(databaseName, action, progressField, expectedProgress) {
+  for (const point of ["after-intent", "after-effect", "after-reconcile"]) {
+    globalThis.DOMAIN_COLLECTION_INTERRUPT_AT = point;
+    expectFailure(() => command(databaseName, action), action + " " + point);
+    if (point === "after-intent") {
+      const ledger = currentLedger(databaseName);
+      const collection = db.getSiblingDB(databaseName)
+        .getCollection(ledger._id.kind === "domain_collection_cutover"
+          && db.getSiblingDB(databaseName).getCollection("__domain_stage__application_migrations")
+            .findOne({ _id: ledger._id }) ? "__domain_stage__application_migrations"
+          : "application_migrations");
+      const stale = collection.updateOne({
+        _id: ledger._id,
+        "payload.ownerToken": owner,
+        "payload.revision": ledger.payload.revision - 1,
+        "payload.intent": null
+      }, { $set: { "payload.state": "CORRUPT_CONCURRENT_STATE" } });
+      assert(stale.matchedCount === 0,
+        action + " accepted a stale same-owner concurrent write");
+    }
+  }
+  globalThis.DOMAIN_COLLECTION_INTERRUPT_AT = null;
+  const ledger = currentLedger(databaseName);
+  assert(ledger.payload[progressField] === expectedProgress,
+    action + " did not advance exactly once across interruption retries");
+  assert(ledger.payload.intent === null, action + " retained a completed effect intent");
+}
+
 for (const name of Object.values(databases)) db.getSiblingDB(name).dropDatabase();
 
 const restore = seed(databases.restore);
+command(databases.restore, "preview");
 assert(command(databases.restore, "restore-verify").state === "LEGACY_RESTORE_VERIFIED",
   "restore verification failed");
+const restoreAccount = restore.getCollection("accounts").findOne({ marker: "account" });
+restore.getCollection("accounts").updateOne(
+  { _id: restoreAccount._id }, { $set: { marker: "mutated" } });
+expectFailure(() => command(databases.restore, "restore-verify"), "mutated restore document");
+restore.getCollection("accounts").replaceOne({ _id: restoreAccount._id }, restoreAccount);
+restore.getCollection("accounts").createIndex({ unexpected: 1 });
+expectFailure(() => command(databases.restore, "restore-verify"), "mutated restore index");
+restore.getCollection("accounts").dropIndex("unexpected_1");
+restore.createCollection("unexpected_restore_collection");
+expectFailure(() => command(databases.restore, "restore-verify"), "extra restore collection");
+restore.getCollection("unexpected_restore_collection").drop();
+assert(command(databases.restore, "restore-verify").complete, "repaired restore did not verify");
 
 const optional = seed(databases.optional);
 optional.getCollection("scheduled_collector_runs").drop();
+command(databases.optional, "preview");
 assert(command(databases.optional, "preview").kinds
   .find((kind) => kind.kind === "scheduled_collector_run").count === 0,
 "absent optional source was not reported as empty");
 stageAll(databases.optional);
 command(databases.optional, "verify-stage");
+
+const required = seed(databases.required);
+command(databases.required, "preview");
+required.getCollection("scheduled_collector_runs").drop();
+expectFailure(() => command(databases.required, "stage"), "protected present source removal");
+
+const v014 = seed(databases.v014);
+v014.getCollection("application_migrations").updateOne(
+  { _id: "014-consolidate-music-runtime-state" }, { $set: { checksum: "0".repeat(64) } });
+expectFailure(() => command(databases.v014, "preview"), "wrong V014 checksum");
 
 const malformed = seed(databases.malformed);
 malformed.getCollection("accounts").deleteMany({});
@@ -167,6 +258,7 @@ malformed.getCollection("accounts").insertOne({ _id: { nested: "unsupported" }, 
 expectFailure(() => command(databases.malformed, "preview"), "malformed source identity");
 
 const stale = seed(databases.stale);
+command(databases.stale, "preview");
 stale.createCollection("__domain_stage__accounts");
 expectFailure(() => command(databases.stale, "stage"), "stale target residue");
 
@@ -175,6 +267,7 @@ unexpected.createCollection("unapproved_collection");
 expectFailure(() => command(databases.unexpected, "preview"), "unexpected collection");
 
 const collision = seed(databases.collision);
+command(databases.collision, "preview");
 command(databases.collision, "stage");
 expectFailure(() => command(databases.collision, "stage", wrongOwner), "CAS owner mismatch");
 const follow = collision.getCollection("account_follows").findOne({});
@@ -187,15 +280,28 @@ collision.getCollection("__domain_stage__accounts").insertOne({
 expectFailure(() => command(databases.collision, "stage"), "staging collision");
 
 const main = seed(databases.main);
-const preview = command(databases.main, "preview");
-assert(preview.kinds.length === 52, "preview did not report all kinds");
+const mainPreview = command(databases.main, "preview");
+assert(mainPreview.kinds.length === 52, "preview did not report all kinds");
 stageAll(databases.main);
 const account = main.getCollection("__domain_stage__accounts")
   .findOne({ _kind: "account" });
 assert(account._id.legacyId instanceof ObjectId, "ObjectId identity type changed");
 assert(account.payload.longValue instanceof Long, "int64 payload type changed");
 assert(account.payload.decimalValue instanceof Decimal128, "decimal payload type changed");
+assert(migration.canonicalExtendedJson(account.payload.intValue).includes("$numberInt"),
+  "int32 payload type changed");
+assert(migration.canonicalExtendedJson(account.payload.doubleValue).includes("$numberDouble"),
+  "double payload type changed");
+assert(migration.canonicalExtendedJson(account.payload.intValue)
+  !== migration.canonicalExtendedJson(account.payload.sameValueLong),
+"same-value distinct numeric BSON types collapsed");
 assert(account.payload.recordedAt instanceof Date, "date payload type changed");
+assert(migration.canonicalExtendedJson(main.getCollection("__domain_stage__accounts")
+  .findOne({ "_id.legacyId": BinData(0, "AQID") })._id.legacyId).includes('"subType":"00"'),
+"binary identity type changed");
+assert(migration.canonicalExtendedJson(main.getCollection("__domain_stage__accounts")
+  .findOne({ "_id.legacyId": UUID("00112233-4455-6677-8899-aabbccddeeff") })
+  ._id.legacyId).includes('"subType":"04"'), "UUID identity type changed");
 const stageVerification = command(databases.main, "verify-stage");
 assert(stageVerification.indexes.reduce((sum, target) => sum + target.count, 0) === 126,
   "stage index count is not exact");
@@ -208,6 +314,7 @@ assert(main.getCollection("__domain_stage__application_migrations")
 "completed stage verification retry mutated the ledger");
 
 const malformedStage = seed(databases.malformedStage);
+command(databases.malformedStage, "preview");
 stageAll(databases.malformedStage);
 const malformedEnvelope = malformedStage.getCollection("__domain_stage__accounts")
   .findOne({ _kind: "account" });
@@ -219,12 +326,28 @@ malformedStage.getCollection("__domain_stage__accounts")
 malformedStage.getCollection("__domain_stage__accounts").createIndex({ unexpected: 1 });
 expectFailure(() => command(databases.malformedStage, "verify-stage"), "unexpected target index");
 malformedStage.getCollection("__domain_stage__accounts").dropIndex("unexpected_1");
+malformedStage.getCollection("__domain_stage__accounts").insertOne({
+  _id: { kind: "unknown_kind", legacyId: "unexpected" },
+  _kind: "unknown_kind", schemaVersion: 1, payload: {}
+});
+expectFailure(() => command(databases.malformedStage, "verify-stage"), "unknown target kind");
+malformedStage.getCollection("__domain_stage__accounts")
+  .deleteOne({ _kind: "unknown_kind" });
 command(databases.malformedStage, "verify-stage");
 
-let crashLedger = main.getCollection("__domain_stage__application_migrations")
-  .findOne({ _kind: "domain_collection_cutover" });
-rawRename(databases.main, crashLedger.payload.publicationOperations[0].from,
-  crashLedger.payload.publicationOperations[0].to);
+const corruptPlan = seed(databases.corruptPlan);
+command(databases.corruptPlan, "preview");
+command(databases.corruptPlan, "stage");
+corruptPlan.getCollection("__domain_stage__application_migrations").updateOne(
+  { _kind: "domain_collection_cutover" },
+  { $set: { "payload.publicationOperations": [
+    { kind: "rename", from: "accounts", to: "unrelated_collection" }
+  ] } });
+expectFailure(() => command(databases.corruptPlan, "stage"), "mutable publication plan");
+
+globalThis.DOMAIN_COLLECTION_INTERRUPT_AT = "after-effect";
+expectFailure(() => command(databases.main, "publish-next"), "publication after-effect interruption");
+globalThis.DOMAIN_COLLECTION_INTERRUPT_AT = null;
 assert(command(databases.main, "publish-next").state === "PUBLISHING",
   "publication did not resume after a completed rename");
 for (let count = 0; count < 6; count++) command(databases.main, "publish-next");
@@ -276,5 +399,31 @@ assert(ledger.payload.state === "TARGET_ACTIVE" && ledger.payload.completed === 
 "final cutover ledger is not startup-safe");
 expectFailure(() => command(databases.main, "reverse-next"), "post-deletion reversal");
 
+seed(databases.faultMatrix);
+command(databases.faultMatrix, "preview");
+const stageOperationCount = manifest.kinds.length + manifest.targets.length;
+for (let index = 0; index < stageOperationCount; index++) {
+  interruptEveryBoundary(databases.faultMatrix, "stage", "stageIndex", index + 1);
+}
+command(databases.faultMatrix, "verify-stage");
+const publicationCount = migration.buildPublicationOperations(
+  manifest, currentLedger(databases.faultMatrix).payload.presentSources).length;
+for (let index = 0; index < publicationCount; index++) {
+  interruptEveryBoundary(databases.faultMatrix, "publish-next", "publishIndex", index + 1);
+}
+for (let index = publicationCount; index > 0; index--) {
+  interruptEveryBoundary(databases.faultMatrix, "reverse-next", "publishIndex", index - 1);
+}
+command(databases.faultMatrix, "verify-stage");
+publishAll(databases.faultMatrix);
+command(databases.faultMatrix, "verify-live");
+const faultDrops = drops;
+for (let index = 0; index < faultDrops; index++) {
+  interruptEveryBoundary(databases.faultMatrix, "drop-legacy", "dropIndex", index + 1);
+}
+assert(currentLedger(databases.faultMatrix).payload.legacyDropped === true,
+  "fault matrix did not complete exact legacy deletion");
+
 print(JSON.stringify({ complete: true, databases: Object.keys(databases).length,
-  kinds: 52, indexes: 126, collections: names.length, drops }));
+  kinds: 52, indexes: 126, collections: names.length, drops,
+  faultBoundaries: (stageOperationCount + publicationCount * 2 + faultDrops) * 3 }));

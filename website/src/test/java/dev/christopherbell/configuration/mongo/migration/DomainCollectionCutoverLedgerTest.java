@@ -20,8 +20,8 @@ class DomainCollectionCutoverLedgerTest {
     when(mongo.findOne(any(), eq(Document.class), eq("application_migrations")))
         .thenReturn(envelope("TARGET_ACTIVE", true, DomainCollectionManifest.DIGEST));
 
-    assertThatCode(() -> DomainCollectionCutoverLedger.requireTargetActive(
-        mongo, DomainCollectionManifest.DIGEST)).doesNotThrowAnyException();
+    assertThatCode(() -> new DomainCollectionCutoverLedger(mongo)
+        .requireTargetActive(DomainCollectionManifest.DIGEST)).doesNotThrowAnyException();
   }
 
   @Test
@@ -33,8 +33,8 @@ class DomainCollectionCutoverLedgerTest {
         .thenReturn(envelope("PUBLISHING", true, DomainCollectionManifest.DIGEST));
 
     for (int attempt = 0; attempt < 4; attempt++) {
-      assertThatThrownBy(() -> DomainCollectionCutoverLedger.requireTargetActive(
-          mongo, DomainCollectionManifest.DIGEST))
+      assertThatThrownBy(() -> new DomainCollectionCutoverLedger(mongo)
+          .requireTargetActive(DomainCollectionManifest.DIGEST))
           .isInstanceOf(IllegalStateException.class)
           .hasMessage("Domain collection schema is not active.")
           .hasNoCause();
@@ -52,8 +52,8 @@ class DomainCollectionCutoverLedgerTest {
                 .append("manifestDigest", DomainCollectionManifest.DIGEST)
                 .append("completed", true)));
 
-    assertThatThrownBy(() -> DomainCollectionCutoverLedger.requireTargetActive(
-        mongo, DomainCollectionManifest.DIGEST))
+    assertThatThrownBy(() -> new DomainCollectionCutoverLedger(mongo)
+        .requireTargetActive(DomainCollectionManifest.DIGEST))
         .isInstanceOf(IllegalStateException.class)
         .hasMessage("Domain collection schema is not active.")
         .hasNoCause()

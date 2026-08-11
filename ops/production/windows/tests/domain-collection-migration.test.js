@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const manifestModule = require("../scripts/DomainCollectionManifest.js");
 const migration = require("../scripts/Invoke-DomainCollectionMigration.js");
+const backupIdentity = "b".repeat(64);
 
 test("manifest freezes all targets kinds sources indexes and V014 drop-only artifacts", () => {
   const manifest = manifestModule.requireDigest(
@@ -23,11 +24,13 @@ test("manifest freezes all targets kinds sources indexes and V014 drop-only arti
 test("command parser rejects unsafe database action digest owner and release inputs", () => {
   const valid = ["cbell_candidate_123456789abc_1234567890abcdef12345678", "preview",
     "576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24",
-    "0123456789abcdef0123456789abcdef", "a".repeat(40)];
+    "0123456789abcdef0123456789abcdef", "a".repeat(40), backupIdentity];
   assert.equal(migration.parseCommand(valid).action, "preview");
+  assert.equal(migration.parseCommand(valid).backupIdentity, backupIdentity);
 
   for (const replacement of [
-    [0, "admin"], [1, "eval"], [2, "0".repeat(64)], [3, "owner value"], [4, "A".repeat(40)]
+    [0, "admin"], [1, "eval"], [2, "0".repeat(64)], [3, "owner value"],
+    [4, "A".repeat(40)], [5, "backup"]
   ]) {
     const args = valid.slice();
     args[replacement[0]] = replacement[1];
@@ -37,7 +40,7 @@ test("command parser rejects unsafe database action digest owner and release inp
 
 test("failure results retain the action contract without echoing unsafe arguments", () => {
   const failure = migration.redactedFailure([
-    "admin", "eval", "secret-digest", "secret-owner", "secret-release"
+    "admin", "eval", "secret-digest", "secret-owner", "secret-release", "secret-backup"
   ]);
 
   assert.deepEqual(failure, {
@@ -46,12 +49,48 @@ test("failure results retain the action contract without echoing unsafe argument
     action: null,
     state: "FAILED",
     manifestDigest: null,
+    backupIdentity: null,
+    evidenceDigest: null,
+    evidence: null,
     kinds: [],
     indexes: [],
     nextOperation: null,
     category: "DOMAIN_COLLECTION_MIGRATION_FAILED"
   });
   assert.equal(JSON.stringify(failure).includes("secret"), false);
+});
+
+test("protected evidence is bound to manifest release backup and exact content", () => {
+  const command = migration.parseCommand([
+    "cbell_candidate_123456789abc_1234567890abcdef12345678", "stage",
+    manifestModule.DIGEST, "0123456789abcdef0123456789abcdef", "a".repeat(40),
+    backupIdentity
+  ]);
+  const evidence = {
+    version: 1,
+    manifestDigest: manifestModule.DIGEST,
+    release: "a".repeat(40),
+    backupIdentity,
+    presentSources: ["accounts", "application_migrations", "music_runtime_state"],
+    kinds: manifestModule.MANIFEST.kinds.map((kind) => ({
+      kind: kind.kind, count: 0, checksum: "0".repeat(64)
+    })),
+    collections: [],
+    v014: {
+      id: "014-consolidate-music-runtime-state",
+      checksum: "11a69bdd4556cfc38060ccdda5075fb9d6bc36f1cc414edd7b26cd61a74b5cbb",
+      queueChecksum: "0".repeat(64),
+      radioChecksum: "1".repeat(64),
+      targetChecksum: "2".repeat(64)
+    }
+  };
+  const digest = migration.evidenceDigest(evidence);
+
+  assert.equal(migration.requireProtectedEvidence(command, evidence, digest), evidence);
+  assert.throws(() => migration.requireProtectedEvidence(
+    command, { ...evidence, backupIdentity: "c".repeat(64) }, digest), /evidence/i);
+  assert.throws(() => migration.requireProtectedEvidence(
+    command, { ...evidence, presentSources: ["accounts"] }, digest), /evidence/i);
 });
 
 test("canonical Extended JSON distinguishes BSON types and normalizes document keys", () => {

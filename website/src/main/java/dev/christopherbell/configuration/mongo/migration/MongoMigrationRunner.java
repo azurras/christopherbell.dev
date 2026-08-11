@@ -23,6 +23,7 @@ public class MongoMigrationRunner implements InitializingBean {
   private final MongoLeaseService leases;
   private final MigrationProperties properties;
   private final Clock clock;
+  private final DomainCollectionStartupPreflight preflight;
 
   public MongoMigrationRunner(
       List<ApplicationMigration> migrations,
@@ -30,17 +31,20 @@ public class MongoMigrationRunner implements InitializingBean {
       MigrationStateStore state,
       MongoLeaseService leases,
       MigrationProperties properties,
-      Clock clock) {
+      Clock clock,
+      DomainCollectionStartupPreflight preflight) {
     this.migrations = orderedAndUnique(migrations);
     this.mongo = mongo;
     this.state = state;
     this.leases = leases;
     this.properties = properties;
     this.clock = clock;
+    this.preflight = preflight;
   }
 
   @Override
   public void afterPropertiesSet() {
+    preflight.requireReady();
     var ownerToken = UUID.randomUUID().toString();
     var now = Instant.now(clock);
     var expiresAt = now.plus(properties.leaseDuration());
