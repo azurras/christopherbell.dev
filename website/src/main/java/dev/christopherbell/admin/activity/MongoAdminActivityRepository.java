@@ -11,7 +11,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-final class MongoAdminActivityRepository extends KindScopedRepositorySupport<AdminActivity>
+class MongoAdminActivityRepository extends KindScopedRepositorySupport<AdminActivity>
     implements AdminActivityRepository {
   MongoAdminActivityRepository(DomainMongoOperationsFactory factory) {
     super(factory, AdminActivity.class);

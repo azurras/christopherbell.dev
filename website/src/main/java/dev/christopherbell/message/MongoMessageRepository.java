@@ -12,7 +12,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-final class MongoMessageRepository extends KindScopedRepositorySupport<Message>
+class MongoMessageRepository extends KindScopedRepositorySupport<Message>
     implements MessageRepository {
   MongoMessageRepository(DomainMongoOperationsFactory factory) { super(factory, Message.class); }
 

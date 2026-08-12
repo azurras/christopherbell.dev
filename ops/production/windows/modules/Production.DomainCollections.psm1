@@ -1655,6 +1655,7 @@ function Restore-ProductionDomainCollectionLegacyRelease {
 
 function Start-ProductionDomainCollectionLegacy {
     param([Parameter(Mandatory)]$State)
+    Ensure-ProductionWriterStartGuardUnderHeldLock -Config $State.config
     Switch-ProductionRelease `
         -Config $State.config -Release $State.legacyPath `
         -KeepRecoverySuspended -WriterAlreadyStopped

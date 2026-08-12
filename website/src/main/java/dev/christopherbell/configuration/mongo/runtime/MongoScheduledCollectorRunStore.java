@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped durable collector history adapter. */
 @Repository
-public final class MongoScheduledCollectorRunStore implements ScheduledCollectorRunStore {
+public class MongoScheduledCollectorRunStore implements ScheduledCollectorRunStore {
   private final KindScopedMongoOperations<ScheduledCollectorRun> mongo;
 
   public MongoScheduledCollectorRunStore(DomainMongoOperationsFactory factory) {

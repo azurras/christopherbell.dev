@@ -13,7 +13,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped application lease adapter with one atomic owner transition. */
 @Repository
-public final class MongoApplicationLeaseStore implements MongoLeaseStore {
+public class MongoApplicationLeaseStore implements MongoLeaseStore {
   private final KindScopedMongoOperations<MongoLeaseDocument> mongo;
 
   public MongoApplicationLeaseStore(DomainMongoOperationsFactory factory) {

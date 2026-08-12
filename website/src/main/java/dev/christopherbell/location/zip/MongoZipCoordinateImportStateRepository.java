@@ -7,7 +7,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoZipCoordinateImportStateRepository
+public class MongoZipCoordinateImportStateRepository
     extends KindScopedRepositorySupport<ZipCoordinateImportState>
     implements ZipCoordinateImportStateRepository {
   public MongoZipCoordinateImportStateRepository(DomainMongoOperationsFactory factory) { super(factory, ZipCoordinateImportState.class); }

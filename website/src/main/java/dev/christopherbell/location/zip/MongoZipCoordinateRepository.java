@@ -11,7 +11,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoZipCoordinateRepository extends KindScopedRepositorySupport<ZipCoordinate>
+public class MongoZipCoordinateRepository extends KindScopedRepositorySupport<ZipCoordinate>
     implements ZipCoordinateRepository {
   public MongoZipCoordinateRepository(DomainMongoOperationsFactory factory) { super(factory, ZipCoordinate.class); }
   @Override public List<ZipCoordinate> saveAll(Iterable<ZipCoordinate> values) {

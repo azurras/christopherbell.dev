@@ -6,7 +6,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoSharedFolderRadioRepository
+public class MongoSharedFolderRadioRepository
     extends KindScopedRepositorySupport<SharedFolderRadioDocument>
     implements SharedFolderRadioRepository {
   public MongoSharedFolderRadioRepository(DomainMongoOperationsFactory factory) { super(factory, SharedFolderRadioDocument.class); }

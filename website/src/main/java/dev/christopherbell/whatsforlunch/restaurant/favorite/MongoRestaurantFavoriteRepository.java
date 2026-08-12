@@ -13,7 +13,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the restaurant-favorite persistence port. */
 @Repository
-public final class MongoRestaurantFavoriteRepository
+public class MongoRestaurantFavoriteRepository
     extends KindScopedRepositorySupport<RestaurantFavorite>
     implements RestaurantFavoriteRepository {
   public MongoRestaurantFavoriteRepository(DomainMongoOperationsFactory factory) {

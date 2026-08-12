@@ -32,7 +32,8 @@ const databases = Object.freeze({
   recoveryInit: "cbell_candidate_b0b0b0b0b0b0_b0b0b0b0b0b0b0b0b0b0b0b0",
   recoveryPartialStage: "cbell_candidate_b1b1b1b1b1b1_b1b1b1b1b1b1b1b1b1b1b1b1",
   recoveryStaged: "cbell_candidate_b2b2b2b2b2b2_b2b2b2b2b2b2b2b2b2b2b2b2",
-  recoveryPublishing: "cbell_candidate_b3b3b3b3b3b3_b3b3b3b3b3b3b3b3b3b3b3b3"
+  recoveryPublishing: "cbell_candidate_b3b3b3b3b3b3_b3b3b3b3b3b3b3b3b3b3b3b3",
+  recoveryLiveDrift: "cbell_candidate_b4b4b4b4b4b4_b4b4b4b4b4b4b4b4b4b4b4b4"
 });
 
 function assert(condition, message) {
@@ -303,6 +304,28 @@ function recoverPrepublicationScenario(databaseName) {
 }
 
 for (const name of Object.values(databases)) db.getSiblingDB(name).dropDatabase();
+
+const recoveryLiveDrift = seed(databases.recoveryLiveDrift);
+recoveryLiveDrift.getCollection("scheduled_collector_runs").drop();
+command(databases.recoveryLiveDrift, "preview");
+recoveryLiveDrift.getCollection("accounts").updateOne(
+  { marker: "account" }, { $set: { liveWriteAfterPreview: true } });
+recoveryLiveDrift.getCollection("scheduled_collector_runs").insertOne({
+  _id: "collector-created-after-preview", marker: "scheduled_collector_run"
+});
+assert(command(databases.recoveryLiveDrift, "recover-prepublication").complete,
+  "no-effect prepublication recovery rejected ordinary live writes or an approved collection");
+recoveryLiveDrift.getCollection("scheduled_collector_runs").deleteMany({});
+recoveryLiveDrift.createCollection("__domain_stage__accounts");
+expectFailure(() => command(databases.recoveryLiveDrift, "recover-prepublication"),
+  "staged recovery with a new empty approved legacy collection");
+assert(recoveryLiveDrift.getCollectionInfos({ name: "__domain_stage__accounts" }).length === 1,
+  "failed strict recovery removed staged data");
+recoveryLiveDrift.getCollection("scheduled_collector_runs").drop();
+recoveryLiveDrift.getCollection("accounts").updateOne(
+  { marker: "account" }, { $unset: { liveWriteAfterPreview: "" } });
+assert(command(databases.recoveryLiveDrift, "recover-prepublication").complete,
+  "repaired strict recovery did not remove its owned stage");
 
 const restore = seed(databases.restore);
 command(databases.restore, "preview");

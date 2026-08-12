@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the WFL session persistence port. */
 @Repository
-public final class MongoWhatsForLunchSessionRepository
+public class MongoWhatsForLunchSessionRepository
     extends KindScopedRepositorySupport<WhatsForLunchSession>
     implements WhatsForLunchSessionRepository {
   public MongoWhatsForLunchSessionRepository(DomainMongoOperationsFactory factory) {

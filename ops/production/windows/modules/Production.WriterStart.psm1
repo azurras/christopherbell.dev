@@ -1505,7 +1505,9 @@ function Assert-ProductionWriterStartAllowed {
     } else { '' }
     $expectedSchema = if ($marker.state -eq 'TARGET_ACTIVE') { 'TARGET' } else { 'LEGACY' }
     $releaseSchema = if ($markerVersion -eq 2) {
-        if (-not ($release.PSObject.Properties.Name -ccontains 'domainSchema')) { $null }
+        if (-not ($release.PSObject.Properties.Name -ccontains 'domainSchema') -and
+            $marker.state -eq 'LEGACY_ACTIVE_RECONCILIATION_REQUIRED') { 'LEGACY' }
+        elseif (-not ($release.PSObject.Properties.Name -ccontains 'domainSchema')) { $null }
         else { [string]$release.domainSchema }
     } else { [string]$release.musicSchema }
     if ($release.sha -eq $expected -and

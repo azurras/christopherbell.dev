@@ -19,7 +19,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the account persistence port. */
 @Repository
-public final class MongoAccountRepository extends KindScopedRepositorySupport<Account>
+public class MongoAccountRepository extends KindScopedRepositorySupport<Account>
     implements AccountRepository {
   public MongoAccountRepository(DomainMongoOperationsFactory factory) {
     super(factory, Account.class);

@@ -7,7 +7,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-final class MongoBrowserSessionRepository extends KindScopedRepositorySupport<BrowserSession>
+class MongoBrowserSessionRepository extends KindScopedRepositorySupport<BrowserSession>
     implements BrowserSessionRepository {
   MongoBrowserSessionRepository(DomainMongoOperationsFactory factory) {
     super(factory, BrowserSession.class);

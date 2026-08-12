@@ -13,7 +13,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoSharedFolderRecycleRepository
+public class MongoSharedFolderRecycleRepository
     extends KindScopedRepositorySupport<SharedFolderRecycleItem>
     implements SharedFolderRecycleRepository {
   public MongoSharedFolderRecycleRepository(DomainMongoOperationsFactory factory) { super(factory, SharedFolderRecycleItem.class); }

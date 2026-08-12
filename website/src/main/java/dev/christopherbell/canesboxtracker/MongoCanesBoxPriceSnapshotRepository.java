@@ -11,7 +11,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoCanesBoxPriceSnapshotRepository
+public class MongoCanesBoxPriceSnapshotRepository
     extends KindScopedRepositorySupport<CanesBoxPriceSnapshot>
     implements CanesBoxPriceSnapshotRepository {
   public MongoCanesBoxPriceSnapshotRepository(DomainMongoOperationsFactory factory) {

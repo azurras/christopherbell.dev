@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the daily-picks persistence port. */
 @Repository
-public final class MongoDailyLunchPicksRepository
+public class MongoDailyLunchPicksRepository
     extends KindScopedRepositorySupport<DailyLunchPicks>
     implements DailyLunchPicksRepository {
   public MongoDailyLunchPicksRepository(DomainMongoOperationsFactory factory) {

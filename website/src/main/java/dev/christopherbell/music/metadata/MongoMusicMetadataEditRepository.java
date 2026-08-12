@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the music metadata-edit persistence port. */
 @Repository
-public final class MongoMusicMetadataEditRepository
+public class MongoMusicMetadataEditRepository
     extends KindScopedRepositorySupport<MusicMetadataEdit>
     implements MusicMetadataEditRepository {
   public MongoMusicMetadataEditRepository(DomainMongoOperationsFactory factory) {

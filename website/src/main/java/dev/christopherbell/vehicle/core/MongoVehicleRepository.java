@@ -13,7 +13,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoVehicleRepository extends KindScopedRepositorySupport<Vehicle>
+public class MongoVehicleRepository extends KindScopedRepositorySupport<Vehicle>
     implements VehicleRepository {
   public MongoVehicleRepository(DomainMongoOperationsFactory factory) { super(factory, Vehicle.class); }
   @Override public Vehicle save(Vehicle value) { return saveValue(value); }

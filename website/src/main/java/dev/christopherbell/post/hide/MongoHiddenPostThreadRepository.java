@@ -9,7 +9,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-final class MongoHiddenPostThreadRepository extends KindScopedRepositorySupport<HiddenPostThread>
+class MongoHiddenPostThreadRepository extends KindScopedRepositorySupport<HiddenPostThread>
     implements HiddenPostThreadRepository {
   MongoHiddenPostThreadRepository(DomainMongoOperationsFactory factory) {
     super(factory, HiddenPostThread.class);

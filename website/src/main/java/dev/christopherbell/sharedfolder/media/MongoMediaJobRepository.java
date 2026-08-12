@@ -15,7 +15,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoMediaJobRepository extends KindScopedRepositorySupport<MediaJob>
+public class MongoMediaJobRepository extends KindScopedRepositorySupport<MediaJob>
     implements MediaJobRepository {
   public MongoMediaJobRepository(DomainMongoOperationsFactory factory) { super(factory, MediaJob.class); }
   @Override public MediaJob save(MediaJob value) { return saveValue(value); }
