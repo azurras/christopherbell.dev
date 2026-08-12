@@ -222,6 +222,30 @@ function expectFailure(work, label) {
   assert(failed, label + " did not fail closed");
 }
 
+function expectV014PreviewFailure(databaseName, label, expectedMessage) {
+  const database = db.getSiblingDB(databaseName);
+  const collection = database.getCollection("application_migrations");
+  const before = collection.findOne({ _id: "014-consolidate-music-runtime-state" });
+  assert(before, label + " omitted its V014 record");
+  const beforeKeys = JSON.stringify(Object.keys(before));
+  const beforeDocument = EJSON.stringify(before, { relaxed: false });
+  let failure = null;
+  try {
+    command(databaseName, "preview");
+  } catch (expected) {
+    failure = expected;
+  }
+  assert(failure, label + " did not fail closed");
+  assert(failure.message.endsWith(expectedMessage),
+    label + " failed with an unexpected diagnostic: " + failure.message);
+  const after = collection.findOne({ _id: "014-consolidate-music-runtime-state" });
+  assert(after, label + " removed its V014 record");
+  assert(JSON.stringify(Object.keys(after)) === beforeKeys,
+    label + " reordered its V014 record");
+  assert(EJSON.stringify(after, { relaxed: false }) === beforeDocument,
+    label + " mutated its V014 record");
+}
+
 function currentLedger(databaseName) {
   const database = db.getSiblingDB(databaseName);
   return database.getCollection("__domain_stage__application_migrations")
@@ -316,6 +340,77 @@ command(databases.v014, "preview");
 v014.getCollection("application_migrations").updateOne(
   { _id: "014-consolidate-music-runtime-state" }, { $set: { checksum: "0".repeat(64) } });
 expectFailure(() => command(databases.v014, "preview"), "wrong V014 checksum");
+
+const malformedV014Message = "Mongo V014 authority is absent or malformed.";
+const v014NegativeCases = [
+  {
+    label: "third V014 field order",
+    expectedMessage: malformedV014Message,
+    mutate(database, original) {
+      database.getCollection("application_migrations").replaceOne(
+        { _id: original._id },
+        {
+          _id: original._id,
+          checksum: original.checksum,
+          description: original.description,
+          status: original.status,
+          ownerToken: original.ownerToken,
+          _class: original._class,
+          startedAt: original.startedAt,
+          completedAt: original.completedAt
+        });
+    }
+  },
+  {
+    label: "missing V014 field",
+    expectedMessage: malformedV014Message,
+    mutate(database) {
+      database.getCollection("application_migrations").updateOne(
+        { _id: "014-consolidate-music-runtime-state" }, { $unset: { completedAt: "" } });
+    }
+  },
+  {
+    label: "extra V014 field",
+    expectedMessage: malformedV014Message,
+    mutate(database) {
+      database.getCollection("application_migrations").updateOne(
+        { _id: "014-consolidate-music-runtime-state" }, { $set: { unexpected: true } });
+    }
+  },
+  {
+    label: "wrong V014 class",
+    expectedMessage: malformedV014Message,
+    mutate(database) {
+      database.getCollection("application_migrations").updateOne(
+        { _id: "014-consolidate-music-runtime-state" }, { $set: { _class: "wrong" } });
+    }
+  },
+  {
+    label: "wrong V014 BSON date type",
+    expectedMessage: malformedV014Message,
+    mutate(database) {
+      database.getCollection("application_migrations").updateOne(
+        { _id: "014-consolidate-music-runtime-state" },
+        { $set: { completedAt: "2026-08-10T00:01:00.000Z" } });
+    }
+  },
+  {
+    label: "absent V014 authoritative source",
+    expectedMessage: "Mongo V014 authoritative source is absent.",
+    mutate(database) {
+      database.getCollection("music_runtime_state").drop();
+    }
+  }
+];
+for (const scenario of v014NegativeCases) {
+  const database = seed(databases.v014, "fresh");
+  protectedEvidence.delete(databases.v014);
+  const original = database.getCollection("application_migrations")
+    .findOne({ _id: "014-consolidate-music-runtime-state" });
+  scenario.mutate(database, original);
+  expectV014PreviewFailure(
+    databases.v014, scenario.label, scenario.expectedMessage);
+}
 
 seed(databases.replacement);
 command(databases.replacement, "preview");
