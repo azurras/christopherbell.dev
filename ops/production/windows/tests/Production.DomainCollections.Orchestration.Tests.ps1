@@ -23,6 +23,13 @@ Describe 'guarded domain collection cutover orchestration' {
                 productionPort = 8080
                 candidatePort = 8081
                 repositoryPath = 'A:\Projects\christopherbell.dev'
+                remote = 'origin'
+                branch = 'main'
+            }
+            $script:releaseMetadataConfig = [pscustomobject]@{
+                programDataRoot = $TestDrive
+                remote = 'origin'
+                branch = 'main'
             }
             $script:context = [pscustomobject][ordered]@{
                 config = $script:config
@@ -105,6 +112,252 @@ Describe 'guarded domain collection cutover orchestration' {
             Mock Invoke-ProductionDomainCollectionFailureRecovery {
                 [void]$script:events.Add("recover:$PostDrop")
             }
+        }
+
+        function script:New-DomainCollectionReleaseMetadataFixture {
+            param(
+                [Parameter(Mandatory)][string]$Name,
+                [Parameter(Mandatory)][string]$Sha,
+                [AllowNull()][object]$DomainSchema = $null,
+                [string]$Metadata = ''
+            )
+            $releaseRoot = Join-Path (Join-Path $TestDrive 'releases') $Name
+            $release = Join-Path $releaseRoot $Sha
+            New-Item -ItemType Directory -Path $release -Force | Out-Null
+            $metadataPath = Join-Path $release 'release.json'
+            if ([string]::IsNullOrEmpty($Metadata)) {
+                $base = '{{"sha":"{0}","source":"origin/main","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"LEGACY"' -f $Sha
+                $Metadata = if ($null -eq $DomainSchema) {
+                    $base + '}'
+                } else {
+                    $base + (' ,"domainSchema":"{0}"}}' -f $DomainSchema)
+                }
+            }
+            [IO.File]::WriteAllText($metadataPath, $Metadata, [Text.UTF8Encoding]::new($false))
+            [pscustomobject]@{ release = $release; metadataPath = $metadataPath }
+        }
+
+        function script:New-DomainCollectionReleaseJarFixture {
+            param(
+                [Parameter(Mandatory)][string]$Release,
+                [Parameter(Mandatory)][bool]$IncludesV015
+            )
+            Add-Type -AssemblyName System.IO.Compression
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $archive = [IO.Compression.ZipFile]::Open(
+                (Join-Path $Release 'app.jar'), [IO.Compression.ZipArchiveMode]::Create)
+            try {
+                $application = $archive.CreateEntry(
+                    'BOOT-INF/classes/dev/christopherbell/Application.class')
+                $applicationStream = $application.Open()
+                try { $applicationStream.WriteByte(0) } finally { $applicationStream.Dispose() }
+                if ($IncludesV015) {
+                    $migration = $archive.CreateEntry(
+                        'BOOT-INF/classes/dev/christopherbell/configuration/mongo/migration/V015RequireDomainCollectionSchema.class')
+                    $migrationStream = $migration.Open()
+                    try { $migrationStream.WriteByte(0) } finally { $migrationStream.Dispose() }
+                }
+            } finally {
+                $archive.Dispose()
+            }
+        }
+
+        function script:Enable-DomainCollectionMetadataPublication {
+            Mock Write-ProductionDomainCollectionProtectedJson {
+                param($Config, $Path, $Value, $Depth)
+                $jsonDepth = if ($null -eq $Depth) { 20 } else { [int]$Depth }
+                $Value | ConvertTo-Json -Depth $jsonDepth -Compress |
+                    Set-Content -LiteralPath $Path -Encoding utf8 -NoNewline
+            }
+        }
+
+        It 'backfills a historical target release from the exact V015 JAR entry' {
+            $sha = '2' * 40
+            $fixture = New-DomainCollectionReleaseMetadataFixture `
+                -Name 'historical-target' -Sha $sha
+            New-DomainCollectionReleaseJarFixture -Release $fixture.release -IncludesV015 $true
+            Enable-DomainCollectionMetadataPublication
+
+            (Get-ProductionDomainCollectionReleaseSchema `
+                -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha) |
+                Should -BeExactly 'TARGET'
+            @((Get-Content -LiteralPath $fixture.metadataPath -Raw | ConvertFrom-Json).
+                PSObject.Properties.Name) | Should -Be @(
+                'sha','source','builtAt','musicSchema','domainSchema')
+            (Get-Content -LiteralPath $fixture.metadataPath -Raw | ConvertFrom-Json).
+                domainSchema | Should -BeExactly 'TARGET'
+        }
+
+        It 'backfills a historical legacy release without the V015 JAR entry' {
+            $sha = '1' * 40
+            $fixture = New-DomainCollectionReleaseMetadataFixture `
+                -Name 'historical-legacy' -Sha $sha
+            New-DomainCollectionReleaseJarFixture -Release $fixture.release -IncludesV015 $false
+            Enable-DomainCollectionMetadataPublication
+
+            (Get-ProductionDomainCollectionReleaseSchema `
+                -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha) |
+                Should -BeExactly 'LEGACY'
+            @((Get-Content -LiteralPath $fixture.metadataPath -Raw | ConvertFrom-Json).
+                PSObject.Properties.Name) | Should -Be @(
+                'sha','source','builtAt','musicSchema','domainSchema')
+            (Get-Content -LiteralPath $fixture.metadataPath -Raw | ConvertFrom-Json).
+                domainSchema | Should -BeExactly 'LEGACY'
+        }
+
+        It 'preserves the exact historical metadata scalar strings during backfill' {
+            $sha = '8' * 40
+            $builtAt = '2026-08-12T00:00:00.1200000Z'
+            $metadata = ('{{"sha":"{0}","source":"origin/main","builtAt":"{1}","musicSchema":"LEGACY"}}' -f $sha,$builtAt)
+            $fixture = New-DomainCollectionReleaseMetadataFixture `
+                -Name 'preserve-metadata-scalars' -Sha $sha -Metadata $metadata
+            New-DomainCollectionReleaseJarFixture -Release $fixture.release -IncludesV015 $true
+            Enable-DomainCollectionMetadataPublication
+
+            (Get-ProductionDomainCollectionReleaseSchema `
+                -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha) |
+                Should -BeExactly 'TARGET'
+            $backfilled = Get-Content -LiteralPath $fixture.metadataPath -Raw
+            $backfilled | Should -Match ([regex]::Escape('"sha":"' + $sha + '"'))
+            $backfilled | Should -Match ([regex]::Escape('"source":"origin/main"'))
+            $backfilled | Should -Match ([regex]::Escape('"builtAt":"' + $builtAt + '"'))
+            $backfilled | Should -Match ([regex]::Escape('"musicSchema":"LEGACY"'))
+        }
+
+        It 'rejects a matching-SHA release outside the configured releases root without mutation' {
+            $sha = '9' * 40
+            $outside = Join-Path (Join-Path $TestDrive 'outside') $sha
+            New-Item -ItemType Directory -Path $outside -Force | Out-Null
+            $metadataPath = Join-Path $outside 'release.json'
+            $metadata = ('{{"sha":"{0}","source":"origin/main","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"LEGACY","domainSchema":"TARGET"}}' -f $sha)
+            [IO.File]::WriteAllText($metadataPath, $metadata, [Text.UTF8Encoding]::new($false))
+            $original = [IO.File]::ReadAllBytes($metadataPath)
+            Mock Get-ProductionDomainCollectionHistoricalReleaseSchema {
+                throw 'outside release JAR must not be opened'
+            }
+            Mock Write-ProductionDomainCollectionProtectedJson {
+                throw 'outside release metadata must not be published'
+            }
+
+            { Get-ProductionDomainCollectionReleaseSchema `
+                    -Config $script:releaseMetadataConfig -Release $outside -Sha $sha } |
+                Should -Throw '*Domain collection release metadata is invalid*'
+            [IO.File]::ReadAllBytes($metadataPath) | Should -Be $original
+            Should -Invoke Get-ProductionDomainCollectionHistoricalReleaseSchema -Times 0 -Exactly
+            Should -Invoke Write-ProductionDomainCollectionProtectedJson -Times 0 -Exactly
+        }
+
+        It 'rejects an object-valued top-level builtAt before JAR access or publication' {
+            $sha = 'a' * 40
+            $metadata = ('{{"sha":"{0}","source":"origin/main","builtAt":{{"builtAt":"2026-08-12T00:00:00.0000000Z"}},"musicSchema":"LEGACY","domainSchema":"TARGET"}}' -f $sha)
+            $fixture = New-DomainCollectionReleaseMetadataFixture `
+                -Name 'object-built-at' -Sha $sha -Metadata $metadata
+            $original = [IO.File]::ReadAllBytes($fixture.metadataPath)
+            Mock Get-ProductionDomainCollectionHistoricalReleaseSchema {
+                throw 'object-valued builtAt JAR must not be opened'
+            }
+            Mock Write-ProductionDomainCollectionProtectedJson {
+                throw 'object-valued builtAt metadata must not be published'
+            }
+
+            { Get-ProductionDomainCollectionReleaseSchema `
+                    -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha } |
+                Should -Throw '*Domain collection release metadata is invalid*'
+            [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
+            Should -Invoke Get-ProductionDomainCollectionHistoricalReleaseSchema -Times 0 -Exactly
+            Should -Invoke Write-ProductionDomainCollectionProtectedJson -Times 0 -Exactly
+        }
+
+        It 'preserves modern release metadata bytes without requiring an executable JAR' {
+            $sha = '3' * 40
+            $fixture = New-DomainCollectionReleaseMetadataFixture `
+                -Name 'modern-target' -Sha $sha -DomainSchema 'TARGET'
+            $original = [IO.File]::ReadAllBytes($fixture.metadataPath)
+            Mock Write-ProductionDomainCollectionProtectedJson {
+                throw 'modern metadata must not be republished'
+            }
+
+            (Get-ProductionDomainCollectionReleaseSchema `
+                -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha) |
+                Should -BeExactly 'TARGET'
+            [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
+            Should -Invoke Write-ProductionDomainCollectionProtectedJson -Times 0 -Exactly
+        }
+
+        It 'fails closed for invalid ordered metadata without changing original bytes' -ForEach @(
+            @{ Name='wrong-sha'; Metadata='{"sha":"ffffffffffffffffffffffffffffffffffffffff","source":"origin/main","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"LEGACY"}' }
+            @{ Name='wrong-source'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":"upstream/main","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"LEGACY"}' }
+            @{ Name='null-source'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":null,"builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"LEGACY"}' }
+            @{ Name='mistyped-source'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":1,"builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"LEGACY"}' }
+            @{ Name='wrong-timestamp'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":"origin/main","builtAt":"later","musicSchema":"LEGACY"}' }
+            @{ Name='null-timestamp'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":"origin/main","builtAt":null,"musicSchema":"LEGACY"}' }
+            @{ Name='mistyped-timestamp'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":"origin/main","builtAt":1,"musicSchema":"LEGACY"}' }
+            @{ Name='wrong-music-schema'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":"origin/main","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"UNKNOWN"}' }
+            @{ Name='null-music-schema'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":"origin/main","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":null}' }
+            @{ Name='mistyped-music-schema'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":"origin/main","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":1}' }
+            @{ Name='extra-property'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":"origin/main","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"LEGACY","domainSchema":"LEGACY","extra":"x"}' }
+            @{ Name='reordered-property'; Metadata='{"source":"origin/main","sha":"4444444444444444444444444444444444444444","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"LEGACY"}' }
+            @{ Name='null-domain-schema'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":"origin/main","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"LEGACY","domainSchema":null}' }
+            @{ Name='mistyped-domain-schema'; Metadata='{"sha":"4444444444444444444444444444444444444444","source":"origin/main","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"LEGACY","domainSchema":1}' }
+        ) {
+            $sha = '4' * 40
+            $fixture = New-DomainCollectionReleaseMetadataFixture `
+                -Name $Name -Sha $sha -Metadata $Metadata
+            $original = [IO.File]::ReadAllBytes($fixture.metadataPath)
+
+            { Get-ProductionDomainCollectionReleaseSchema `
+                    -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha } |
+                Should -Throw '*Domain collection release metadata is invalid*'
+            [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
+        }
+
+        It 'fails closed when the historical executable JAR is missing corrupt or lacks the application class' -ForEach @(
+            @{ Name='missing-jar'; Setup={} }
+            @{ Name='corrupt-jar'; Setup={ param($Release) [IO.File]::WriteAllText((Join-Path $Release 'app.jar'), 'not-a-jar') } }
+            @{ Name='missing-application-class'; Setup={ param($Release)
+                Add-Type -AssemblyName System.IO.Compression
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                $archive = [IO.Compression.ZipFile]::Open((Join-Path $Release 'app.jar'), [IO.Compression.ZipArchiveMode]::Create)
+                try { $archive.CreateEntry('BOOT-INF/classes/other.class') | Out-Null } finally { $archive.Dispose() }
+            } }
+        ) {
+            $sha = '5' * 40
+            $fixture = New-DomainCollectionReleaseMetadataFixture -Name $Name -Sha $sha
+            & $Setup $fixture.release
+            $original = [IO.File]::ReadAllBytes($fixture.metadataPath)
+
+            { Get-ProductionDomainCollectionReleaseSchema `
+                    -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha } |
+                Should -Throw '*Domain collection release metadata is invalid*'
+            [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
+        }
+
+        It 'preserves historical metadata when protected publication faults' {
+            $sha = '6' * 40
+            $fixture = New-DomainCollectionReleaseMetadataFixture `
+                -Name 'publication-fault' -Sha $sha
+            New-DomainCollectionReleaseJarFixture -Release $fixture.release -IncludesV015 $true
+            $original = [IO.File]::ReadAllBytes($fixture.metadataPath)
+            Mock Write-ProductionDomainCollectionProtectedJson { throw 'publication fault' }
+
+            { Get-ProductionDomainCollectionReleaseSchema `
+                    -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha } |
+                Should -Throw '*Domain collection release metadata is invalid*'
+            [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
+        }
+
+        It 'rejects an unchanged historical readback after protected publication' {
+            $sha = '7' * 40
+            $fixture = New-DomainCollectionReleaseMetadataFixture `
+                -Name 'readback-mismatch' -Sha $sha
+            New-DomainCollectionReleaseJarFixture -Release $fixture.release -IncludesV015 $false
+            $original = [IO.File]::ReadAllBytes($fixture.metadataPath)
+            Mock Write-ProductionDomainCollectionProtectedJson { }
+
+            { Get-ProductionDomainCollectionReleaseSchema `
+                    -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha } |
+                Should -Throw '*Domain collection release metadata is invalid*'
+            [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
         }
 
         It 'requires exact cutover confirmation before config lock backup or database effects' {
@@ -300,6 +553,7 @@ Describe 'guarded domain collection cutover orchestration' {
             $evidenceDigest = 'a' * 64
             $backupIdentity = 'b' * 64
             $candidate = 'cbell_candidate_' + ('c' * 12) + '_' + ('d' * 24)
+            $schemaCalls = [Collections.Generic.List[string]]::new()
             $config = [pscustomobject]@{
                 programDataRoot = $root
                 backupRoot = $backupRoot
@@ -314,6 +568,7 @@ Describe 'guarded domain collection cutover orchestration' {
             Mock New-ReleaseFromOriginMain { $targetPath }
             Mock Get-JunctionTarget { $legacyPath }
             Mock Get-ProductionDomainCollectionReleaseSchema {
+                [void]$schemaCalls.Add($Sha)
                 if ($Sha -eq $legacyRelease) { 'LEGACY' } else { 'TARGET' }
             }
             Mock New-ProductionDomainCollectionVerifiedBackup {
@@ -364,6 +619,9 @@ Describe 'guarded domain collection cutover orchestration' {
             $restart.priorState | Should -BeExactly ''
             Test-Path -LiteralPath $pointerPath | Should -BeFalse
             $context.state | Should -BeExactly 'PREVIEWED'
+            $schemaCalls | Should -Be @($targetRelease,$legacyRelease)
+            Should -Invoke Get-ProductionDomainCollectionReleaseSchema -Times 2 -Exactly `
+                -ParameterFilter { $Config -eq $config }
         }
 
         It 'allows preview only from an exact terminal legacy rollback state' {
