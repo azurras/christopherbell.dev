@@ -70,7 +70,8 @@ function command(database, action, commandOwner = owner) {
   return outcome;
 }
 
-function seed(databaseName) {
+function seed(databaseName, v014Order = "durable") {
+  assert(["durable", "fresh"].includes(v014Order), "V014 fixture order is invalid");
   const database = db.getSiblingDB(databaseName);
   database.dropDatabase();
   for (const kind of manifest.kinds) {
@@ -90,16 +91,27 @@ function seed(databaseName) {
       nested: { z: 2, a: 1 }
     };
     if (kind.kind === "migration_record") {
-      document = {
-        _id: "014-consolidate-music-runtime-state",
-        checksum: "11a69bdd4556cfc38060ccdda5075fb9d6bc36f1cc414edd7b26cd61a74b5cbb",
-        description: "Consolidate Music queue and radio runtime state",
-        status: "APPLIED",
-        ownerToken: "v014-owner",
-        startedAt: ISODate("2026-08-10T00:00:00.000Z"),
-        completedAt: ISODate("2026-08-10T00:01:00.000Z"),
-        _class: "dev.christopherbell.configuration.mongo.migration.MigrationRecord"
-      };
+      document = v014Order === "durable"
+        ? {
+            _id: "014-consolidate-music-runtime-state",
+            checksum: "11a69bdd4556cfc38060ccdda5075fb9d6bc36f1cc414edd7b26cd61a74b5cbb",
+            description: "Consolidate Music queue and radio runtime state",
+            status: "APPLIED",
+            ownerToken: "v014-owner",
+            startedAt: ISODate("2026-08-10T00:00:00.000Z"),
+            _class: "dev.christopherbell.configuration.mongo.migration.MigrationRecord",
+            completedAt: ISODate("2026-08-10T00:01:00.000Z")
+          }
+        : {
+            _id: "014-consolidate-music-runtime-state",
+            checksum: "11a69bdd4556cfc38060ccdda5075fb9d6bc36f1cc414edd7b26cd61a74b5cbb",
+            description: "Consolidate Music queue and radio runtime state",
+            status: "APPLIED",
+            ownerToken: "v014-owner",
+            startedAt: ISODate("2026-08-10T00:00:00.000Z"),
+            completedAt: ISODate("2026-08-10T00:01:00.000Z"),
+            _class: "dev.christopherbell.configuration.mongo.migration.MigrationRecord"
+          };
     }
     database.getCollection(kind.source).insertOne(document);
   }
@@ -299,7 +311,8 @@ command(databases.required, "preview");
 required.getCollection("scheduled_collector_runs").drop();
 expectFailure(() => command(databases.required, "stage"), "protected present source removal");
 
-const v014 = seed(databases.v014);
+const v014 = seed(databases.v014, "fresh");
+command(databases.v014, "preview");
 v014.getCollection("application_migrations").updateOne(
   { _id: "014-consolidate-music-runtime-state" }, { $set: { checksum: "0".repeat(64) } });
 expectFailure(() => command(databases.v014, "preview"), "wrong V014 checksum");

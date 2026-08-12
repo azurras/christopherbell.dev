@@ -354,9 +354,15 @@ function assertV014Authority(database) {
     fail("Mongo V014 authority is absent.");
   }
   const migration = database.getCollection("application_migrations").findOne({ _id: V014_ID });
-  const exactKeys = ["_id", "checksum", "description", "status", "ownerToken", "startedAt",
-    "completedAt", "_class"];
-  if (!migration || !sameValue(Object.keys(migration), exactKeys)
+  const v014KeyOrders = Object.freeze([
+    Object.freeze(["_id", "checksum", "description", "status", "ownerToken", "startedAt",
+      "completedAt", "_class"]),
+    Object.freeze(["_id", "checksum", "description", "status", "ownerToken", "startedAt",
+      "_class", "completedAt"])
+  ]);
+  const hasExactKeys = migration
+    && v014KeyOrders.some((keys) => sameValue(Object.keys(migration), keys));
+  if (!hasExactKeys
       || migration.checksum !== V014_CHECKSUM || migration.description !== V014_DESCRIPTION
       || migration.status !== "APPLIED" || typeof migration.ownerToken !== "string"
       || migration.ownerToken.length === 0 || !(migration.startedAt instanceof Date)
