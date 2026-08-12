@@ -8,9 +8,21 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 class DomainCollectionReleaseMetadataTest {
   private static final String RELEASE = "a".repeat(40);
+
+  @Test
+  void springSelectsTheProductionInjectionConstructor() {
+    try (var context = new AnnotationConfigApplicationContext()) {
+      context.registerBean(ObjectMapper.class);
+      context.register(DomainCollectionReleaseMetadata.class);
+      context.refresh();
+
+      assertThat(context.getBean(DomainCollectionReleaseMetadata.class)).isNotNull();
+    }
+  }
 
   @Test
   void targetReleaseRequiresRecurringDomainGate(@TempDir Path directory) throws Exception {

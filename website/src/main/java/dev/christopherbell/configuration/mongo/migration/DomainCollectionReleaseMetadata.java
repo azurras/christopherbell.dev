@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -21,6 +22,7 @@ public final class DomainCollectionReleaseMetadata {
   private final String expectedRelease;
   private final Path metadata;
 
+  @Autowired
   public DomainCollectionReleaseMetadata(
       ObjectMapper mapper,
       @Value("${GIT_COMMIT:}") String expectedRelease) {
