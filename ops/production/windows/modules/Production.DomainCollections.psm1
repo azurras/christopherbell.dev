@@ -300,7 +300,8 @@ function Get-ProductionDomainCollectionReleaseMetadataSchema {
     param(
         [Parameter(Mandatory)]$Config,
         [Parameter(Mandatory)]$Metadata,
-        [Parameter(Mandatory)][string]$Sha
+        [Parameter(Mandatory)][string]$Sha,
+        [Parameter(Mandatory)][string]$BuiltAt
     )
     $historicalNames = @('sha','source','builtAt','musicSchema')
     $modernNames = @('sha','source','builtAt','musicSchema','domainSchema')
@@ -322,23 +323,11 @@ function Get-ProductionDomainCollectionReleaseMetadataSchema {
         [string]$Metadata.musicSchema -cnotin @('LEGACY','TARGET')) {
         throw 'Release metadata identity is invalid.'
     }
-    $builtAt = [datetimeoffset]::MinValue
-    if ($Metadata.builtAt -is [datetime]) {
-        if ($Metadata.builtAt.Kind -ne [datetimekind]::Utc) {
-            throw 'Release metadata build timestamp is invalid.'
-        }
-        $builtAt = [datetimeoffset]$Metadata.builtAt
-    } elseif ($Metadata.builtAt -is [string]) {
-        if (-not [datetimeoffset]::TryParseExact(
-                [string]$Metadata.builtAt, 'o',
-                [Globalization.CultureInfo]::InvariantCulture,
-                [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$builtAt)) {
-            throw 'Release metadata build timestamp is invalid.'
-        }
-    } else {
-        throw 'Release metadata build timestamp is invalid.'
-    }
-    if ($builtAt.Offset -ne [timespan]::Zero) {
+    $builtAtValue = [datetimeoffset]::MinValue
+    if (-not [datetimeoffset]::TryParseExact(
+            $BuiltAt, 'o', [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$builtAtValue) -or
+        $builtAtValue.Offset -ne [timespan]::Zero) {
         throw 'Release metadata build timestamp is invalid.'
     }
     if ($isHistorical) {
@@ -352,6 +341,16 @@ function Get-ProductionDomainCollectionReleaseMetadataSchema {
         modern = $true
         schema = [string]$Metadata.domainSchema
     }
+}
+
+function Get-ProductionDomainCollectionReleaseBuiltAt {
+    param([Parameter(Mandatory)][string]$MetadataJson)
+    $matches = [regex]::Matches(
+        $MetadataJson, '"builtAt"\s*:\s*"(?<value>[^"\\]+)"')
+    if ($matches.Count -ne 1) {
+        throw 'Release metadata build timestamp is invalid.'
+    }
+    return [string]$matches[0].Groups['value'].Value
 }
 
 function Get-ProductionDomainCollectionHistoricalReleaseSchema {
@@ -391,17 +390,24 @@ function Get-ProductionDomainCollectionReleaseSchema {
         [Parameter(Mandatory)][string]$Release,
         [Parameter(Mandatory)][string]$Sha
     )
-    $metadataPath = Join-Path $Release 'release.json'
     try {
-        $metadata = Get-Content -LiteralPath $metadataPath -Raw -ErrorAction Stop |
+        $releasePath = Assert-ReleasePath -Config $Config -Path $Release
+        if ((Split-Path -Leaf $releasePath) -cne $Sha) {
+            throw 'Release path identity is invalid.'
+        }
+        $metadataPath = Join-Path $releasePath 'release.json'
+        $metadataJson = Get-Content -LiteralPath $metadataPath -Raw -ErrorAction Stop
+        $builtAt = Get-ProductionDomainCollectionReleaseBuiltAt `
+            -MetadataJson $metadataJson
+        $metadata = $metadataJson |
             ConvertFrom-Json -ErrorAction Stop
         $metadataSchema = Get-ProductionDomainCollectionReleaseMetadataSchema `
-            -Config $Config -Metadata $metadata -Sha $Sha
+            -Config $Config -Metadata $metadata -Sha $Sha -BuiltAt $builtAt
         if ($metadataSchema.modern) {
             return [string]$metadataSchema.schema
         }
         $historicalSchema = Get-ProductionDomainCollectionHistoricalReleaseSchema `
-            -Release $Release
+            -Release $releasePath
         if ($historicalSchema -cnotin @('LEGACY','TARGET')) {
             throw 'Historical release executable JAR classification is invalid.'
         }
@@ -409,16 +415,19 @@ function Get-ProductionDomainCollectionReleaseSchema {
         $backfilledMetadata = [ordered]@{
             sha = [string]$metadata.sha
             source = [string]$metadata.source
-            builtAt = $metadata.builtAt
+            builtAt = $builtAt
             musicSchema = [string]$metadata.musicSchema
             domainSchema = $schema
         }
         Write-ProductionDomainCollectionProtectedJson `
             -Config $Config -Path $metadataPath -Value $backfilledMetadata
-        $readback = Get-Content -LiteralPath $metadataPath -Raw -ErrorAction Stop |
+        $readbackJson = Get-Content -LiteralPath $metadataPath -Raw -ErrorAction Stop
+        $readbackBuiltAt = Get-ProductionDomainCollectionReleaseBuiltAt `
+            -MetadataJson $readbackJson
+        $readback = $readbackJson |
             ConvertFrom-Json -ErrorAction Stop
         $readbackMetadataSchema = Get-ProductionDomainCollectionReleaseMetadataSchema `
-            -Config $Config -Metadata $readback -Sha $Sha
+            -Config $Config -Metadata $readback -Sha $Sha -BuiltAt $readbackBuiltAt
         if (-not $readbackMetadataSchema.modern -or
             [string]$readbackMetadataSchema.schema -cne $schema) {
             throw 'Release metadata backfill readback is invalid.'

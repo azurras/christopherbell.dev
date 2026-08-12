@@ -26,6 +26,11 @@ Describe 'guarded domain collection cutover orchestration' {
                 remote = 'origin'
                 branch = 'main'
             }
+            $script:releaseMetadataConfig = [pscustomobject]@{
+                programDataRoot = $TestDrive
+                remote = 'origin'
+                branch = 'main'
+            }
             $script:context = [pscustomobject][ordered]@{
                 config = $script:config
                 targetRelease = '2' * 40
@@ -116,7 +121,8 @@ Describe 'guarded domain collection cutover orchestration' {
                 [AllowNull()][object]$DomainSchema = $null,
                 [string]$Metadata = ''
             )
-            $release = Join-Path $TestDrive $Name
+            $releaseRoot = Join-Path (Join-Path $TestDrive 'releases') $Name
+            $release = Join-Path $releaseRoot $Sha
             New-Item -ItemType Directory -Path $release -Force | Out-Null
             $metadataPath = Join-Path $release 'release.json'
             if ([string]::IsNullOrEmpty($Metadata)) {
@@ -173,7 +179,7 @@ Describe 'guarded domain collection cutover orchestration' {
             Enable-DomainCollectionMetadataPublication
 
             (Get-ProductionDomainCollectionReleaseSchema `
-                -Config $script:config -Release $fixture.release -Sha $sha) |
+                -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha) |
                 Should -BeExactly 'TARGET'
             @((Get-Content -LiteralPath $fixture.metadataPath -Raw | ConvertFrom-Json).
                 PSObject.Properties.Name) | Should -Be @(
@@ -190,13 +196,55 @@ Describe 'guarded domain collection cutover orchestration' {
             Enable-DomainCollectionMetadataPublication
 
             (Get-ProductionDomainCollectionReleaseSchema `
-                -Config $script:config -Release $fixture.release -Sha $sha) |
+                -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha) |
                 Should -BeExactly 'LEGACY'
             @((Get-Content -LiteralPath $fixture.metadataPath -Raw | ConvertFrom-Json).
                 PSObject.Properties.Name) | Should -Be @(
                 'sha','source','builtAt','musicSchema','domainSchema')
             (Get-Content -LiteralPath $fixture.metadataPath -Raw | ConvertFrom-Json).
                 domainSchema | Should -BeExactly 'LEGACY'
+        }
+
+        It 'preserves the exact historical metadata scalar strings during backfill' {
+            $sha = '8' * 40
+            $builtAt = '2026-08-12T00:00:00.1200000Z'
+            $metadata = ('{{"sha":"{0}","source":"origin/main","builtAt":"{1}","musicSchema":"LEGACY"}}' -f $sha,$builtAt)
+            $fixture = New-DomainCollectionReleaseMetadataFixture `
+                -Name 'preserve-metadata-scalars' -Sha $sha -Metadata $metadata
+            New-DomainCollectionReleaseJarFixture -Release $fixture.release -IncludesV015 $true
+            Enable-DomainCollectionMetadataPublication
+
+            (Get-ProductionDomainCollectionReleaseSchema `
+                -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha) |
+                Should -BeExactly 'TARGET'
+            $backfilled = Get-Content -LiteralPath $fixture.metadataPath -Raw
+            $backfilled | Should -Match ([regex]::Escape('"sha":"' + $sha + '"'))
+            $backfilled | Should -Match ([regex]::Escape('"source":"origin/main"'))
+            $backfilled | Should -Match ([regex]::Escape('"builtAt":"' + $builtAt + '"'))
+            $backfilled | Should -Match ([regex]::Escape('"musicSchema":"LEGACY"'))
+        }
+
+        It 'rejects a matching-SHA release outside the configured releases root without mutation' {
+            $sha = '9' * 40
+            $outside = Join-Path (Join-Path $TestDrive 'outside') $sha
+            New-Item -ItemType Directory -Path $outside -Force | Out-Null
+            $metadataPath = Join-Path $outside 'release.json'
+            $metadata = ('{{"sha":"{0}","source":"origin/main","builtAt":"2026-08-12T00:00:00.0000000Z","musicSchema":"LEGACY","domainSchema":"TARGET"}}' -f $sha)
+            [IO.File]::WriteAllText($metadataPath, $metadata, [Text.UTF8Encoding]::new($false))
+            $original = [IO.File]::ReadAllBytes($metadataPath)
+            Mock Get-ProductionDomainCollectionHistoricalReleaseSchema {
+                throw 'outside release JAR must not be opened'
+            }
+            Mock Write-ProductionDomainCollectionProtectedJson {
+                throw 'outside release metadata must not be published'
+            }
+
+            { Get-ProductionDomainCollectionReleaseSchema `
+                    -Config $script:releaseMetadataConfig -Release $outside -Sha $sha } |
+                Should -Throw '*Domain collection release metadata is invalid*'
+            [IO.File]::ReadAllBytes($metadataPath) | Should -Be $original
+            Should -Invoke Get-ProductionDomainCollectionHistoricalReleaseSchema -Times 0 -Exactly
+            Should -Invoke Write-ProductionDomainCollectionProtectedJson -Times 0 -Exactly
         }
 
         It 'preserves modern release metadata bytes without requiring an executable JAR' {
@@ -209,7 +257,7 @@ Describe 'guarded domain collection cutover orchestration' {
             }
 
             (Get-ProductionDomainCollectionReleaseSchema `
-                -Config $script:config -Release $fixture.release -Sha $sha) |
+                -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha) |
                 Should -BeExactly 'TARGET'
             [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
             Should -Invoke Write-ProductionDomainCollectionProtectedJson -Times 0 -Exactly
@@ -237,7 +285,7 @@ Describe 'guarded domain collection cutover orchestration' {
             $original = [IO.File]::ReadAllBytes($fixture.metadataPath)
 
             { Get-ProductionDomainCollectionReleaseSchema `
-                    -Config $script:config -Release $fixture.release -Sha $sha } |
+                    -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha } |
                 Should -Throw '*Domain collection release metadata is invalid*'
             [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
         }
@@ -258,7 +306,7 @@ Describe 'guarded domain collection cutover orchestration' {
             $original = [IO.File]::ReadAllBytes($fixture.metadataPath)
 
             { Get-ProductionDomainCollectionReleaseSchema `
-                    -Config $script:config -Release $fixture.release -Sha $sha } |
+                    -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha } |
                 Should -Throw '*Domain collection release metadata is invalid*'
             [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
         }
@@ -272,7 +320,7 @@ Describe 'guarded domain collection cutover orchestration' {
             Mock Write-ProductionDomainCollectionProtectedJson { throw 'publication fault' }
 
             { Get-ProductionDomainCollectionReleaseSchema `
-                    -Config $script:config -Release $fixture.release -Sha $sha } |
+                    -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha } |
                 Should -Throw '*Domain collection release metadata is invalid*'
             [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
         }
@@ -286,7 +334,7 @@ Describe 'guarded domain collection cutover orchestration' {
             Mock Write-ProductionDomainCollectionProtectedJson { }
 
             { Get-ProductionDomainCollectionReleaseSchema `
-                    -Config $script:config -Release $fixture.release -Sha $sha } |
+                    -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha } |
                 Should -Throw '*Domain collection release metadata is invalid*'
             [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
         }
