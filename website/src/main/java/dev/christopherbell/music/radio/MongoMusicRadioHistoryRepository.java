@@ -11,7 +11,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the music-radio history persistence port. */
 @Repository
-public final class MongoMusicRadioHistoryRepository
+public class MongoMusicRadioHistoryRepository
     extends KindScopedRepositorySupport<MusicRadioHistoryEvent>
     implements MusicRadioHistoryRepository {
   public MongoMusicRadioHistoryRepository(DomainMongoOperationsFactory factory) {

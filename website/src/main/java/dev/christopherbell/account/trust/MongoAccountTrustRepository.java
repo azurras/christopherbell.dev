@@ -11,7 +11,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-final class MongoAccountTrustRepository
+class MongoAccountTrustRepository
     extends KindScopedRepositorySupport<AccountTrustRelationship>
     implements AccountTrustRepository {
   MongoAccountTrustRepository(DomainMongoOperationsFactory factory) {

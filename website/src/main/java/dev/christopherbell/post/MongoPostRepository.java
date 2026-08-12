@@ -14,7 +14,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-final class MongoPostRepository extends KindScopedRepositorySupport<Post>
+class MongoPostRepository extends KindScopedRepositorySupport<Post>
     implements PostRepository {
   MongoPostRepository(DomainMongoOperationsFactory factory) { super(factory, Post.class); }
 

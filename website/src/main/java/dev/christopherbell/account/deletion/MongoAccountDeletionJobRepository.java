@@ -6,7 +6,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 @Repository
-final class MongoAccountDeletionJobRepository
+class MongoAccountDeletionJobRepository
     extends KindScopedRepositorySupport<AccountDeletionJob>
     implements AccountDeletionJobRepository {
   MongoAccountDeletionJobRepository(DomainMongoOperationsFactory factory) {

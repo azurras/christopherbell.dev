@@ -13,7 +13,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoSharedFolderMutationRecoveryRepository
+public class MongoSharedFolderMutationRecoveryRepository
     extends KindScopedRepositorySupport<SharedFolderMutationRecovery>
     implements SharedFolderMutationRecoveryRepository {
   public MongoSharedFolderMutationRecoveryRepository(DomainMongoOperationsFactory factory) { super(factory, SharedFolderMutationRecovery.class); }

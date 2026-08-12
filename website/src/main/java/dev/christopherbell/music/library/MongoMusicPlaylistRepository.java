@@ -13,7 +13,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the music-playlist persistence port. */
 @Repository
-public final class MongoMusicPlaylistRepository extends KindScopedRepositorySupport<MusicPlaylist>
+public class MongoMusicPlaylistRepository extends KindScopedRepositorySupport<MusicPlaylist>
     implements MusicPlaylistRepository {
   public MongoMusicPlaylistRepository(DomainMongoOperationsFactory factory) {
     super(factory, MusicPlaylist.class);

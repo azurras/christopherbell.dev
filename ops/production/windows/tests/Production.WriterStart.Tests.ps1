@@ -619,6 +619,28 @@ Describe 'production writer-start schema boundary' {
                 Should -Not -Throw
         }
 
+        It 'allows the exact historical legacy release during v2 rollback reconciliation' {
+            Mock Read-ProductionReleaseIdentity {
+                [pscustomobject]@{
+                    sha='2222222222222222222222222222222222222222'
+                    musicSchema='TARGET'
+                }
+            }
+            $v2Marker = [pscustomobject]@{
+                version=2
+                state='LEGACY_ACTIVE_RECONCILIATION_REQUIRED'
+                targetRelease='1111111111111111111111111111111111111111'
+                currentRelease='1111111111111111111111111111111111111111'
+                legacyRelease='2222222222222222222222222222222222222222'
+            }
+            Mock Read-ProductionDomainSchemaDirection { $v2Marker }
+            Mock Read-ProductionMusicSchemaDirection { $v2Marker }
+
+            { Assert-ProductionWriterStartAllowed `
+                    -Config $script:config -FixedRoot $TestDrive } |
+                Should -Not -Throw
+        }
+
         It 'categorically blocks WinSW and recovery start during domain rollback' -ForEach @(
             @{ Sha=('1' * 40); Schema='TARGET' }
             @{ Sha=('2' * 40); Schema='LEGACY' }

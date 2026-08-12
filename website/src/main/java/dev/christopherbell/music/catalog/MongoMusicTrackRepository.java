@@ -11,7 +11,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the music-track persistence port. */
 @Repository
-public final class MongoMusicTrackRepository extends KindScopedRepositorySupport<MusicTrack>
+public class MongoMusicTrackRepository extends KindScopedRepositorySupport<MusicTrack>
     implements MusicTrackRepository {
   public MongoMusicTrackRepository(DomainMongoOperationsFactory factory) {
     super(factory, MusicTrack.class);

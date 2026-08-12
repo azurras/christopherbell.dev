@@ -8,7 +8,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-final class MongoNotificationPreferenceRepository
+class MongoNotificationPreferenceRepository
     extends KindScopedRepositorySupport<NotificationPreference>
     implements NotificationPreferenceRepository {
   MongoNotificationPreferenceRepository(DomainMongoOperationsFactory factory) {

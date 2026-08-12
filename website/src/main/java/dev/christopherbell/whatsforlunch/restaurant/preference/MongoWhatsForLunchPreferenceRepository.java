@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the WFL preference persistence port. */
 @Repository
-public final class MongoWhatsForLunchPreferenceRepository
+public class MongoWhatsForLunchPreferenceRepository
     extends KindScopedRepositorySupport<WhatsForLunchPreference>
     implements WhatsForLunchPreferenceRepository {
   public MongoWhatsForLunchPreferenceRepository(DomainMongoOperationsFactory factory) {

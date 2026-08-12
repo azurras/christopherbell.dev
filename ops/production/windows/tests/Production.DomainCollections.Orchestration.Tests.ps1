@@ -171,6 +171,21 @@ Describe 'guarded domain collection cutover orchestration' {
             }
         }
 
+        It 'refreshes the writer-start guard before starting the historical legacy release' {
+            Mock Ensure-ProductionWriterStartGuardUnderHeldLock {
+                [void]$script:events.Add('guard:refresh')
+            }
+            Mock Switch-ProductionRelease {
+                [void]$script:events.Add('release:start')
+            }
+            $script:context | Add-Member NoteProperty legacyPath `
+                ('C:\ProgramData\christopherbell.dev\releases\' + ('1' * 40))
+
+            Start-ProductionDomainCollectionLegacy -State $script:context
+
+            $script:events | Should -Be @('guard:refresh','release:start')
+        }
+
         It 'backfills a historical target release from the exact V015 JAR entry' {
             $sha = '2' * 40
             $fixture = New-DomainCollectionReleaseMetadataFixture `

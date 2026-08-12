@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the restaurant-import state persistence port. */
 @Repository
-public final class MongoRestaurantImportStateRepository
+public class MongoRestaurantImportStateRepository
     extends KindScopedRepositorySupport<RestaurantImportState>
     implements RestaurantImportStateRepository {
   public MongoRestaurantImportStateRepository(DomainMongoOperationsFactory factory) {

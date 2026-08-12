@@ -13,7 +13,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-final class MongoReportRepository extends KindScopedRepositorySupport<PostReport>
+class MongoReportRepository extends KindScopedRepositorySupport<PostReport>
     implements ReportRepository {
   MongoReportRepository(DomainMongoOperationsFactory factory) { super(factory, PostReport.class); }
   @Override public PostReport save(PostReport value) { return saveValue(value); }

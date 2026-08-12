@@ -7,7 +7,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoVehicleVinDecodeCacheRepository
+public class MongoVehicleVinDecodeCacheRepository
     extends KindScopedRepositorySupport<VehicleVinDecodeCache>
     implements VehicleVinDecodeCacheRepository {
   public MongoVehicleVinDecodeCacheRepository(DomainMongoOperationsFactory factory) { super(factory, VehicleVinDecodeCache.class); }

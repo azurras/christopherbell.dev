@@ -12,7 +12,7 @@ import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the restaurant-vote persistence port. */
 @Repository
-public final class MongoRestaurantVoteRepository
+public class MongoRestaurantVoteRepository
     extends KindScopedRepositorySupport<RestaurantVote>
     implements RestaurantVoteRepository {
   public MongoRestaurantVoteRepository(DomainMongoOperationsFactory factory) {

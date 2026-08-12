@@ -7,7 +7,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoRandomVinImportStateRepository
+public class MongoRandomVinImportStateRepository
     extends KindScopedRepositorySupport<RandomVinImportState>
     implements RandomVinImportStateRepository {
   public MongoRandomVinImportStateRepository(DomainMongoOperationsFactory factory) { super(factory, RandomVinImportState.class); }

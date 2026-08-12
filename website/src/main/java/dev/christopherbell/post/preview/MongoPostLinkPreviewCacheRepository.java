@@ -6,7 +6,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 @Repository
-final class MongoPostLinkPreviewCacheRepository
+class MongoPostLinkPreviewCacheRepository
     extends KindScopedRepositorySupport<PostLinkPreviewCacheEntry>
     implements PostLinkPreviewCacheRepository {
   MongoPostLinkPreviewCacheRepository(DomainMongoOperationsFactory factory) {

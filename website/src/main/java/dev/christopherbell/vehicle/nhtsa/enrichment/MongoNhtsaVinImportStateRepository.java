@@ -7,7 +7,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoNhtsaVinImportStateRepository
+public class MongoNhtsaVinImportStateRepository
     extends KindScopedRepositorySupport<NhtsaVinImportState>
     implements NhtsaVinImportStateRepository {
   public MongoNhtsaVinImportStateRepository(DomainMongoOperationsFactory factory) { super(factory, NhtsaVinImportState.class); }

@@ -1259,15 +1259,26 @@ function reverseNext(database, command, manifest) {
     next === 0 && !recovering);
 }
 
-function requireLegacyWithOwnedStage(database, manifest, evidence) {
+function requireLegacyInventoryWithOwnedStage(database, manifest, evidence) {
   const actual = applicationCollections(database);
-  const expectedLegacy = evidence.collections.map((metric) => metric.name).sort();
+  const approvedLegacy = new Set(sourceNames(manifest).concat(manifest.dropOnly));
   const allowedStages = new Set(buildStageNamespaces(manifest));
   const legacy = actual.filter((name) => !name.startsWith(STAGE_PREFIX));
   const stages = actual.filter((name) => name.startsWith(STAGE_PREFIX));
-  if (!sameValue(legacy, expectedLegacy)
+  if (legacy.some((name) => !approvedLegacy.has(name))
       || stages.some((name) => !allowedStages.has(name))) {
     fail("Mongo prepublication recovery inventory is invalid.");
+  }
+  return stages;
+}
+
+function requireLegacyWithOwnedStage(database, manifest, evidence) {
+  const stages = requireLegacyInventoryWithOwnedStage(database, manifest, evidence);
+  const currentLegacy = applicationCollections(database)
+    .filter((name) => !name.startsWith(STAGE_PREFIX));
+  const expectedLegacy = evidence.collections.map((metric) => metric.name).sort();
+  if (!sameValue(currentLegacy, expectedLegacy)) {
+    fail("Mongo prepublication recovery evidence changed.");
   }
   requireProtectedLegacyCollections(database, evidence);
   if (!sameValue(kindMetricsFromLegacy(database, manifest), evidence.kinds)
@@ -1281,11 +1292,12 @@ function recoverPrepublication(database, command, manifest) {
   const evidence = suppliedEvidence(command);
   let ledger = findOptionalLedger(database);
   if (ledger === null) {
-    const stages = requireLegacyWithOwnedStage(database, manifest, evidence);
+    const stages = requireLegacyInventoryWithOwnedStage(database, manifest, evidence);
     if (stages.length === 0) {
       return result(command, "LEGACY_ACTIVE", evidence.kinds,
         indexMetricsFromAvailableTarget(database, manifest), null, true);
     }
+    requireLegacyWithOwnedStage(database, manifest, evidence);
     database.getCollection(stages[0]).drop();
     const remaining = requireLegacyWithOwnedStage(database, manifest, evidence);
     return result(command, remaining.length === 0 ? "LEGACY_ACTIVE" : "RECOVERY_CLEANUP",

@@ -12,7 +12,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-final class MongoNotificationRepository extends KindScopedRepositorySupport<Notification>
+class MongoNotificationRepository extends KindScopedRepositorySupport<Notification>
     implements NotificationRepository {
   MongoNotificationRepository(DomainMongoOperationsFactory factory) {
     super(factory, Notification.class);

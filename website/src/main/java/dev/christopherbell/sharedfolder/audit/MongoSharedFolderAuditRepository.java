@@ -12,7 +12,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class MongoSharedFolderAuditRepository
+public class MongoSharedFolderAuditRepository
     extends KindScopedRepositorySupport<SharedFolderAuditEvent>
     implements SharedFolderAuditRepository {
   public MongoSharedFolderAuditRepository(DomainMongoOperationsFactory factory) { super(factory, SharedFolderAuditEvent.class); }

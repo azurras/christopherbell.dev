@@ -1274,6 +1274,7 @@ Export-ModuleMember -Function Invoke-ProductionDeploy,Resolve-OriginMainRelease,
     Test-ProductionPublicEndpoints,Test-CandidateRelease,New-CandidateDatabaseName,`
     Restore-CandidateDatabaseFromBackup,Remove-CandidateDatabase,`
     Stop-ProductionWebsiteService,Set-ProductionWebsiteRecoveryPolicy,`
+    Ensure-ProductionWriterStartGuardUnderHeldLock,`
     Set-ProductionWebsiteStartupType,Switch-ProductionRelease,`
     Switch-ProductionReleaseAfterMusicReconciliation,Remove-ExpiredReleases,`
     Confirm-ProductionMusicTargetActive

@@ -63,7 +63,8 @@ Describe 'Domain collection migration artifact contracts' {
             'cbell_candidate_b0b0b0b0b0b0_b0b0b0b0b0b0b0b0b0b0b0b0',
             'cbell_candidate_b1b1b1b1b1b1_b1b1b1b1b1b1b1b1b1b1b1b1',
             'cbell_candidate_b2b2b2b2b2b2_b2b2b2b2b2b2b2b2b2b2b2b2',
-            'cbell_candidate_b3b3b3b3b3b3_b3b3b3b3b3b3b3b3b3b3b3b3'
+            'cbell_candidate_b3b3b3b3b3b3_b3b3b3b3b3b3b3b3b3b3b3b3',
+            'cbell_candidate_b4b4b4b4b4b4_b4b4b4b4b4b4b4b4b4b4b4b4'
         )
         try {
             $output = @(& $shell '--quiet' '--norc' $uri '--file' $manifest `
