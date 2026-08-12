@@ -247,6 +247,27 @@ Describe 'guarded domain collection cutover orchestration' {
             Should -Invoke Write-ProductionDomainCollectionProtectedJson -Times 0 -Exactly
         }
 
+        It 'rejects an object-valued top-level builtAt before JAR access or publication' {
+            $sha = 'a' * 40
+            $metadata = ('{{"sha":"{0}","source":"origin/main","builtAt":{{"builtAt":"2026-08-12T00:00:00.0000000Z"}},"musicSchema":"LEGACY","domainSchema":"TARGET"}}' -f $sha)
+            $fixture = New-DomainCollectionReleaseMetadataFixture `
+                -Name 'object-built-at' -Sha $sha -Metadata $metadata
+            $original = [IO.File]::ReadAllBytes($fixture.metadataPath)
+            Mock Get-ProductionDomainCollectionHistoricalReleaseSchema {
+                throw 'object-valued builtAt JAR must not be opened'
+            }
+            Mock Write-ProductionDomainCollectionProtectedJson {
+                throw 'object-valued builtAt metadata must not be published'
+            }
+
+            { Get-ProductionDomainCollectionReleaseSchema `
+                    -Config $script:releaseMetadataConfig -Release $fixture.release -Sha $sha } |
+                Should -Throw '*Domain collection release metadata is invalid*'
+            [IO.File]::ReadAllBytes($fixture.metadataPath) | Should -Be $original
+            Should -Invoke Get-ProductionDomainCollectionHistoricalReleaseSchema -Times 0 -Exactly
+            Should -Invoke Write-ProductionDomainCollectionProtectedJson -Times 0 -Exactly
+        }
+
         It 'preserves modern release metadata bytes without requiring an executable JAR' {
             $sha = '3' * 40
             $fixture = New-DomainCollectionReleaseMetadataFixture `
