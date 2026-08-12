@@ -296,8 +296,98 @@ function Invoke-ProductionDomainCollectionPreviewAction {
         -EvidenceDigest ('0' * 64)
 }
 
+function Get-ProductionDomainCollectionReleaseMetadataSchema {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]$Metadata,
+        [Parameter(Mandatory)][string]$Sha
+    )
+    $historicalNames = @('sha','source','builtAt','musicSchema')
+    $modernNames = @('sha','source','builtAt','musicSchema','domainSchema')
+    $names = @($Metadata.PSObject.Properties.Name)
+    $isHistorical = ($names.Count -eq $historicalNames.Count -and
+        ([string]::Join("`0", $names) -ceq [string]::Join("`0", $historicalNames)))
+    $isModern = ($names.Count -eq $modernNames.Count -and
+        ([string]::Join("`0", $names) -ceq [string]::Join("`0", $modernNames)))
+    if (-not $isHistorical -and -not $isModern) {
+        throw 'Release metadata shape is invalid.'
+    }
+    if ($Sha -cnotmatch '^[0-9a-f]{40}$' -or
+        $Config.remote -isnot [string] -or [string]::IsNullOrWhiteSpace($Config.remote) -or
+        $Config.branch -isnot [string] -or [string]::IsNullOrWhiteSpace($Config.branch) -or
+        $Metadata.sha -isnot [string] -or [string]$Metadata.sha -cne $Sha -or
+        $Metadata.source -isnot [string] -or
+        [string]$Metadata.source -cne "$($Config.remote)/$($Config.branch)" -or
+        $Metadata.musicSchema -isnot [string] -or
+        [string]$Metadata.musicSchema -cnotin @('LEGACY','TARGET')) {
+        throw 'Release metadata identity is invalid.'
+    }
+    $builtAt = [datetimeoffset]::MinValue
+    if ($Metadata.builtAt -is [datetime]) {
+        if ($Metadata.builtAt.Kind -ne [datetimekind]::Utc) {
+            throw 'Release metadata build timestamp is invalid.'
+        }
+        $builtAt = [datetimeoffset]$Metadata.builtAt
+    } elseif ($Metadata.builtAt -is [string]) {
+        if (-not [datetimeoffset]::TryParseExact(
+                [string]$Metadata.builtAt, 'o',
+                [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$builtAt)) {
+            throw 'Release metadata build timestamp is invalid.'
+        }
+    } else {
+        throw 'Release metadata build timestamp is invalid.'
+    }
+    if ($builtAt.Offset -ne [timespan]::Zero) {
+        throw 'Release metadata build timestamp is invalid.'
+    }
+    if ($isHistorical) {
+        return [pscustomobject][ordered]@{ modern = $false; schema = '' }
+    }
+    if ($Metadata.domainSchema -isnot [string] -or
+        [string]$Metadata.domainSchema -cnotin @('LEGACY','TARGET')) {
+        throw 'Release metadata domain schema is invalid.'
+    }
+    return [pscustomobject][ordered]@{
+        modern = $true
+        schema = [string]$Metadata.domainSchema
+    }
+}
+
+function Get-ProductionDomainCollectionHistoricalReleaseSchema {
+    param([Parameter(Mandatory)][string]$Release)
+    $jarPath = Join-Path $Release 'app.jar'
+    if (-not (Test-Path -LiteralPath $jarPath -PathType Leaf)) {
+        throw 'Historical release executable JAR is unavailable.'
+    }
+    Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+    $archive = [IO.Compression.ZipFile]::OpenRead($jarPath)
+    try {
+        $applicationPath = 'BOOT-INF/classes/dev/christopherbell/Application.class'
+        $applicationEntries = @($archive.Entries | Where-Object {
+            $_.FullName -ceq $applicationPath -and $_.Length -gt 0
+        })
+        if ($applicationEntries.Count -ne 1) {
+            throw 'Historical release executable JAR is invalid.'
+        }
+        $migrationPath = 'BOOT-INF/classes/dev/christopherbell/configuration/mongo/migration/V015RequireDomainCollectionSchema.class'
+        $migrationEntries = @($archive.Entries | Where-Object {
+            $_.FullName -ceq $migrationPath -and $_.Length -gt 0
+        })
+        if ($migrationEntries.Count -gt 1) {
+            throw 'Historical release executable JAR is ambiguous.'
+        }
+        if ($migrationEntries.Count -eq 1) { return 'TARGET' }
+        return 'LEGACY'
+    } finally {
+        $archive.Dispose()
+    }
+}
+
 function Get-ProductionDomainCollectionReleaseSchema {
     param(
+        [Parameter(Mandatory)]$Config,
         [Parameter(Mandatory)][string]$Release,
         [Parameter(Mandatory)][string]$Sha
     )
@@ -305,12 +395,35 @@ function Get-ProductionDomainCollectionReleaseSchema {
     try {
         $metadata = Get-Content -LiteralPath $metadataPath -Raw -ErrorAction Stop |
             ConvertFrom-Json -ErrorAction Stop
-        if ($metadata.sha -isnot [string] -or [string]$metadata.sha -cne $Sha -or
-            $metadata.domainSchema -isnot [string] -or
-            [string]$metadata.domainSchema -cnotin @('LEGACY','TARGET')) {
-            throw 'Release metadata identity is invalid.'
+        $metadataSchema = Get-ProductionDomainCollectionReleaseMetadataSchema `
+            -Config $Config -Metadata $metadata -Sha $Sha
+        if ($metadataSchema.modern) {
+            return [string]$metadataSchema.schema
         }
-        return [string]$metadata.domainSchema
+        $historicalSchema = Get-ProductionDomainCollectionHistoricalReleaseSchema `
+            -Release $Release
+        if ($historicalSchema -cnotin @('LEGACY','TARGET')) {
+            throw 'Historical release executable JAR classification is invalid.'
+        }
+        $schema = [string]$historicalSchema
+        $backfilledMetadata = [ordered]@{
+            sha = [string]$metadata.sha
+            source = [string]$metadata.source
+            builtAt = $metadata.builtAt
+            musicSchema = [string]$metadata.musicSchema
+            domainSchema = $schema
+        }
+        Write-ProductionDomainCollectionProtectedJson `
+            -Config $Config -Path $metadataPath -Value $backfilledMetadata
+        $readback = Get-Content -LiteralPath $metadataPath -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+        $readbackMetadataSchema = Get-ProductionDomainCollectionReleaseMetadataSchema `
+            -Config $Config -Metadata $readback -Sha $Sha
+        if (-not $readbackMetadataSchema.modern -or
+            [string]$readbackMetadataSchema.schema -cne $schema) {
+            throw 'Release metadata backfill readback is invalid.'
+        }
+        return $schema
     } catch {
         throw [IO.InvalidDataException]::new(
             'Domain collection release metadata is invalid.', $_.Exception)
@@ -468,7 +581,7 @@ function Assert-ProductionDomainCollectionTerminalLegacyState {
         throw 'Terminal domain collection state does not own the active legacy release.'
     }
     if ((Get-ProductionDomainCollectionReleaseSchema `
-            -Release $active -Sha ([string]$State.legacyRelease)) -cne 'LEGACY') {
+            -Config $Config -Release $active -Sha ([string]$State.legacyRelease)) -cne 'LEGACY') {
         throw 'Terminal domain collection active release is not an exact legacy domain-schema release.'
     }
     return $State
@@ -1039,7 +1152,7 @@ function New-ProductionDomainCollectionCutoverContext {
     $targetRelease = Resolve-OriginMainRelease $Config
     $targetPath = New-ReleaseFromOriginMain $Config $targetRelease
     if ((Get-ProductionDomainCollectionReleaseSchema `
-            -Release $targetPath -Sha $targetRelease) -cne 'TARGET') {
+            -Config $Config -Release $targetPath -Sha $targetRelease) -cne 'TARGET') {
         throw 'Domain collection cutover requires an exact target-schema release.'
     }
     $legacyPath = Get-JunctionTarget (Join-Path $Config.programDataRoot 'current')
@@ -1047,7 +1160,7 @@ function New-ProductionDomainCollectionCutoverContext {
     $legacyRelease = Split-Path -Leaf $legacyPath
     if ($legacyRelease -cnotmatch '^[0-9a-f]{40}$' -or
         (Get-ProductionDomainCollectionReleaseSchema `
-            -Release $legacyPath -Sha $legacyRelease) -cne 'LEGACY') {
+            -Config $Config -Release $legacyPath -Sha $legacyRelease) -cne 'LEGACY') {
         throw 'Domain collection cutover requires a proven legacy domain-schema release.'
     }
     $markerPath = Get-ProductionMusicSchemaDirectionPath -Config $Config
