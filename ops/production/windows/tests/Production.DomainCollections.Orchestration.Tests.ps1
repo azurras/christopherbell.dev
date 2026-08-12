@@ -624,34 +624,79 @@ Describe 'guarded domain collection cutover orchestration' {
                 -ParameterFilter { $Config -eq $config }
         }
 
-        It 'preserves an existing schema marker on the first domain cutover' {
+        It 'restores an exact existing schema marker after first-cutover publication crashes' {
             $root = Join-Path $TestDrive 'first-cutover-existing-marker'
             $stateRoot = Join-Path $root 'state'
             New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
-            $markerBytes = [Text.Encoding]::UTF8.GetBytes('{"version":1,"state":"TARGET"}')
-            $context = [pscustomobject]@{
-                config = [pscustomobject]@{ programDataRoot = $root }
-                targetRelease = '2' * 40
-                legacyRelease = '1' * 40
-                backupIdentity = 'a' * 64
-                evidenceDigest = 'b' * 64
-                evidenceFileSha256 = 'c' * 64
-                ownerToken = 'd' * 32
-                candidateDatabase = 'cbell_candidate_' + ('e' * 12) + '_' + ('f' * 24)
-                priorMarkerBase64 = [Convert]::ToBase64String($markerBytes)
-                priorStateSha256 = ''
-                historyFile = ''
-            }
+            $config = [pscustomobject]@{ programDataRoot = $root }
             Mock Protect-ProductionPath { }
             Mock Assert-ProtectedProductionPath { }
             Mock Assert-ProductionPathNotReparse { }
+            $markerPath = Get-ProductionMusicSchemaDirectionPath -Config $config
+            [ordered]@{
+                version = 1
+                state = 'TARGET_ACTIVE'
+                updatedAtEpochMillis = 1
+                targetRelease = '2' * 40
+                legacyRelease = '1' * 40
+            } | ConvertTo-Json | Set-Content -LiteralPath $markerPath -Encoding utf8
+            $markerBytes = [IO.File]::ReadAllBytes($markerPath)
+            $context = [pscustomobject]@{
+                config = $config
+                state = 'INITIALIZED'
+                targetRelease = '2' * 40
+                currentRelease = '1' * 40
+                legacyRelease = '1' * 40
+                archive = (Join-Path $root 'fresh.archive.gz')
+                backupIdentity = 'a' * 64
+                evidenceDigest = 'b' * 64
+                evidenceFile = (Join-Path $stateRoot 'evidence.json')
+                evidenceFileSha256 = 'c' * 64
+                ownerToken = 'd' * 32
+                candidateDatabase = 'cbell_candidate_' + ('e' * 12) + '_' + ('f' * 24)
+                priorMarkerBase64 = Get-ProductionDomainCollectionPriorMarkerBase64 `
+                    -Config $config
+                priorStateSha256 = ''
+                historyFile = ''
+                dropStarted = $false
+            }
+            Mock Save-ProductionDomainCollectionContextState {
+                throw 'simulated state publication crash'
+            }
 
-            $binding = Write-ProductionDomainCollectionPrepublicationBinding `
-                -Context $context
+            { Publish-ProductionDomainCollectionPrepublicationContext `
+                    -Context $context } |
+                Should -Throw '*simulated state publication crash*'
+            (Get-Content -LiteralPath $markerPath -Raw |
+                ConvertFrom-Json).state | Should -BeExactly 'ROLLBACK_IN_PROGRESS'
 
-            $binding.priorMarkerBase64 | Should -BeExactly $context.priorMarkerBase64
-            $binding.priorStateSha256 | Should -BeExactly ''
-            $binding.historyFile | Should -BeExactly ''
+            Resolve-ProductionDomainCollectionPrepublicationPublication `
+                -Config $config
+
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($markerPath)) |
+                Should -BeExactly ([Convert]::ToBase64String($markerBytes))
+            Test-Path -LiteralPath (Join-Path $stateRoot `
+                'domain-collection-cutover.json') | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $stateRoot `
+                'domain-collection-prepublication-reconciliation.json') |
+                Should -BeFalse
+        }
+
+        It 'rejects a malformed first-cutover marker before capture' {
+            $root = Join-Path $TestDrive 'first-cutover-malformed-marker'
+            $stateRoot = Join-Path $root 'state'
+            New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+            $config = [pscustomobject]@{ programDataRoot = $root }
+            $markerPath = Get-ProductionMusicSchemaDirectionPath -Config $config
+            $original = '{"version":1,"state":"TARGET"}'
+            Set-Content -LiteralPath $markerPath -Value $original -NoNewline
+            Mock Assert-ProtectedProductionPath { }
+            Mock Assert-ProductionPathNotReparse { }
+
+            { Get-ProductionDomainCollectionPriorMarkerBase64 -Config $config } |
+                Should -Throw '*Music runtime schema-direction marker is invalid*'
+
+            Get-Content -LiteralPath $markerPath -Raw | Should -BeExactly $original
         }
 
         It 'allows preview only from an exact terminal legacy rollback state' {
