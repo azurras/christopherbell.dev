@@ -1,12 +1,12 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState;
-import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
+import java.util.Optional;
 
 /**
  * Stores durable state for automated restaurant imports.
  */
-@Repository
-public interface RestaurantImportStateRepository extends MongoRepository<RestaurantImportState, String> {
+public interface RestaurantImportStateRepository {
+  RestaurantImportState save(RestaurantImportState state);
+  Optional<RestaurantImportState> findById(String id);
 }

@@ -6,12 +6,10 @@ import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Owner-scoped bounded recovery journal for one conditional shared-folder replacement. */
 @Data
 @NoArgsConstructor
-@Document("shared_folder_mutation_recoveries")
 public class SharedFolderMutationRecovery {
   @Id private String id;
   @Version private Long version;

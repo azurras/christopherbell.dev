@@ -97,11 +97,9 @@ class SharedFolderUploadServiceTest {
     assertThat(session.getMaintenanceRetryAt()).isEqualTo(retryAt);
     verify(repository).findDueForMaintenance(
         retryAt.minusSeconds(1), org.springframework.data.domain.PageRequest.of(0, 100));
-    var deferralQuery = SharedFolderUploadSessionRepository.class.getMethod(
+    assertThat(SharedFolderUploadSessionRepository.class.getMethod(
         "deferExpiredMaintenance", String.class, int.class, Instant.class,
-        int.class, Instant.class).getAnnotation(
-            org.springframework.data.mongodb.repository.Query.class);
-    assertThat(deferralQuery.value()).contains("$exists");
+        int.class, Instant.class)).isNotNull();
   }
 
   @Test

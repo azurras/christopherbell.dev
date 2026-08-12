@@ -157,7 +157,7 @@ public class RestaurantService {
     var restaurants = restaurantRepository.findAll(PageRequest.of(
         0,
         100,
-        Sort.by(Sort.Order.asc("normalizedName"), Sort.Order.asc("_id")))).getContent();
+        Sort.by(Sort.Order.asc("normalizedName"), Sort.Order.asc("id")))).getContent();
     return toVoteDetails(restaurants);
   }
 

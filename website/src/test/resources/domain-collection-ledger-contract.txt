@@ -1,0 +1,4 @@
+envelope|_id,_kind,schemaVersion,payload
+id|kind,legacyId
+payload|state,manifestDigest,ownerToken,release,backupIdentity,evidenceDigest,revision,stageIndex,publishIndex,dropIndex,completed,legacyDropped,intent,presentSources,expectedKindMetrics
+metric|kind,count,checksum

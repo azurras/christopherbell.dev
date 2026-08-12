@@ -53,61 +53,121 @@ startup. Correct the underlying failure first. Confirm no deployment is active
 and that the lease is absent or expired. If the operation was not safely
 idempotent, restore the pre-deployment backup instead of editing migration state.
 
-### Music runtime-state rollback exception
+### Exact domain collection consolidation
 
-Migration 014 leaves both legacy collections intact, but the new release writes only
-`music_runtime_state`. A binary rollback therefore requires reverse-copying the latest queue
-and radio state before the prior release starts. This is an emergency compatibility operation,
-not a routine application rollback step. Keep the `ChristopherBellDev` writer stopped and first
-preview the fixed database and three namespaces:
+The 52 allowlisted domain kinds consolidate into exactly 14 physical
+collections. Start with the read-only metadata and checksum preview:
 
 ```powershell
-.\prod.cmd music-runtime-rollback -WhatIf
+.\prod.cmd mongo-consolidation-preview
 ```
 
-After confirming that preview, run the command with `-ConfirmMusicRuntimeRollback`. The dispatcher
-routes confirmed execution through the coordinated binary rollback boundary; do not run a separate
-reverse-copy followed by `rollback`. One acquisition of the fixed production `locks\deploy.lock`
-is retained while the writer is stopped, a fresh full backup and SHA-256 sidecar are verified, the
-exact singleton BSON is reverse-copied and read back, the release junctions are switched, and the
-legacy writer is started through an exact, expiring, single-use transition authorization and
-health-checked. Only then does the protected atomic schema-direction marker become
-`LEGACY_ACTIVE_RECONCILIATION_REQUIRED`. A later failure stops the writer and reports the retained
-backup path with its original cause. Generic `rollback` never performs this reverse-copy and
-refuses to select the marker-owned legacy release with exact guidance to the confirmed command.
-No step drops, deletes, or renames a collection.
+The preview never creates a backup, stops a service, starts a process, mutates
+MongoDB, or prints document values. Stop if it is incomplete, reports an
+unexpected kind/collection, or does not use manifest digest
+`576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24`.
 
-While reconciliation is required, automatic deployment and manual restart are blocked. An
-interactive `deploy` validates its candidate, stops the legacy writer under the same deploy lock,
-creates and verifies a new backup, copies each currently present legacy singleton forward with
-exact raw-shape and readback validation, switches to the target release, changes the marker to
-`TARGET_ACTIVE`, and only then starts the target writer. Queue-only, radio-only, both-present, and
-both-absent states are valid; a retained destination singleton that conflicts with an absent legacy
-singleton fails closed. Task 6 must invoke the protected deploy with `-MusicSchemaCutover`; after
-the explicit command `.\prod.cmd deploy -MusicSchemaCutover` is bound by `prod.ps1` (automatic
-deployment cannot supply this switch), the deploy lock suspends SCM recovery and proves the writer
-stopped. It then stages the repository launcher and WriterStart module, publishes the launcher
-first and an exact SHA-256 manifest last as the crash-safe commit point, verifies protected ACLs
-and both installed hashes by readback, and refuses the cutover if that installed boundary is not
-exact. This upgrades a pre-guard installation without calling the unlocked service installer. After
-the new release and migration pass health verification, that same still-held deploy lock is used
-to change the pre-start `TARGET_CUTOVER_IN_PROGRESS` marker to `TARGET_ACTIVE` with the exact
-current and previous release identities before any other deployment or rollback command can run.
-The pending state blocks deploy, auto-deploy, rollback, and manual restart after a crash or failed
-final marker write. `Confirm-ProductionMusicTargetActive` is the bounded
-repair/confirmation seam for an already verified cutover, not a replacement for the single-lock
-first-cutover path.
+Run the mutating command only in an approved maintenance window:
+
+```powershell
+.\prod.cmd mongo-consolidate -ConfirmDomainCollectionCutover
+```
+
+The confirmation is exact; `deploy` and `auto-deploy` cannot supply it. One
+fixed `locks\deploy.lock` is held from the fresh hash-bound backup and second
+dry restore through isolated candidate proof, writer stop with SCM recovery
+suspended, live stage/publication, target startup-barrier publication, stopped
+target-snapshot re-verification, one-at-a-time legacy deletion, target-active
+marker finalization, one target start and verification, recovery restoration,
+and auto-deploy refresh. The candidate uses only a generated non-production
+database and configured candidate port.
+
+Deletion is last. Before the first deletion intent, recovery reverses the
+publication when needed, removes only manifest-owned staging namespaces, proves
+the legacy snapshot again, and resumes the exact old release. At or after that
+intent, recovery first proves the stopped target snapshot is still exact, removes
+every manifest-owned live namespace, restores the bound archive without relying
+on `mongorestore --drop`, and passes an independent `restore-verify` before the
+old release can be selected or started. If recovery cannot be proved, the website
+stays stopped with recovery suspended.
+
+Rollback is crash-resumable and fail-closed. `ROLLBACK_IN_PROGRESS` blocks every
+WinSW, boot, recovery, manual-restart, and deploy launch before restoration.
+`ROLLBACK_VERIFIED` records the restore authorization, `LEGACY_DATA_VERIFIED`
+records the independently verified restore, and `ROLLBACK_READY` records the
+non-rerestore boundary before the compatible legacy marker or writer can be
+enabled. A failure publishing the final state re-stops the writer and suspends
+recovery; retry resumes from the protected state without restoring the archive a
+second time. If the terminal rename committed before a later ACL/readback fault,
+retry accepts only the exact terminal state, compatible marker, active legacy
+release, and legacy schema; it performs marker/writer/recovery reconciliation
+with zero cleanup or restore effects. A protected one-shot reconciliation
+authorization is written before the terminal commit and consumed after exact
+finalization; completed terminal rollback cannot be replayed arbitrarily.
+
+Use the guarded rollback command, never generic release rollback, for this
+schema boundary:
+
+```powershell
+.\prod.cmd mongo-consolidation-rollback -WhatIf
+.\prod.cmd mongo-consolidation-rollback -ConfirmDomainCollectionRollback
+```
+
+After a successful rollback, `mongo-consolidation-preview` and a newly confirmed
+`mongo-consolidate` are available only while the terminal protected state, v2
+legacy-compatible marker, active legacy release, and legacy schema still agree.
+Any outstanding one-shot rollback reconciliation must be completed first.
+The new cutover preserves the exact prior terminal JSON under protected
+`state\history`, retains its archive/evidence files, and creates a fresh backup,
+evidence record, owner token, and candidate database before publishing the new
+`PREVIEWED` state. A missing or mismatched marker, nonterminal state, active
+release mismatch, or target-schema legacy release blocks before backup or state
+publication.
+
+Every fresh consolidation now publishes a protected prepublication boundary
+before candidate work. An immutable evidence-and-owner-addressed binding records
+the new release, backup, evidence file, owner, candidate database, and the exact
+prior marker/history identity. A protected one-sided reconciliation pointer is
+written next, followed by the v2 `ROLLBACK_IN_PROGRESS` marker and only then the
+`PREVIEWED` state. That marker is a startup/deploy barrier for every release; it
+does not authorize a writer or deployment. A crash before `PREVIEWED` restores
+the exact prior marker or first-cutover absence. A crash after `PREVIEWED` leaves
+an exact marker/state/binding pair that guarded rollback or a newly confirmed
+`mongo-consolidate` retry can recover with `recover-prepublication` before any
+fresh backup or candidate is created. Candidate failure performs the same
+stopped/suspended cleanup immediately. Marker, state, binding, history, or
+one-sided-pointer mismatches fail closed; preview remains read-only and directs
+the operator to complete recovery first.
+
+The protected marker binds manifest, evidence, backup, original cutover target,
+current deployed target binary, legacy release, and deletion state. Routine
+target-schema deploys advance only the current release; they do not rewrite the
+original cutover, evidence, or backup identity. The prior Music v1 marker format
+remains readable for rollback compatibility, but its former public cutover
+switches are retired.
+
+A pure Music v1 marker has no public domain rollback command. Keep the service
+stopped with recovery suspended and, under `deploy.lock`, use the supported
+internal compatibility entry point `Invoke-ProductionMigrationAwareRollback
+-Confirm`; do not invoke `mongo-consolidation-rollback` without protected v2
+domain state.
+
+While a domain cutover marker is pending, deploy, auto-deploy, rollback, and
+manual restart remain blocked except through the guarded domain recovery path.
+Preserve the protected archive, sidecar, evidence, and cutover-state files until
+the rollback window is explicitly closed.
 
 Every WinSW launch, including boot and recovery restarts, runs the same strict marker/current-release
-guard before Java. Stable target and legacy markers permit only their exact bound release. A
-deployment transition may create one atomic authorization for the exact marker state/target/legacy
+guard before Java. A stable v2 target marker permits only its exact current release while retaining
+the immutable cutover target; stable legacy markers permit only their exact bound release. A
+deployment transition may create one atomic authorization for the exact marker state/target/current/legacy
 tuple, release, purpose, expiry, issuer PID, and issuer process start identity. The launch script
 requires that exact issuer to remain alive and consumes the authorization once; the deployment
 revokes the exact returned token on success and failure, so it cannot be replayed by recovery or a
 later manual start. The launcher also checks its own and the module's installed hashes against the
-protected bundle manifest before importing any guard code. If the marker is absent, the guard starts
-only a legacy-compatible release and
-only after the database probe proves migration 014 inactive. Active or unknown migration state,
+protected bundle manifest before importing any guard code. If the domain marker
+is absent, the guard starts only a legacy domain-schema release. The retained
+Music v1 compatibility path still requires its migration-014 probe. Active or unknown migration state,
 malformed marker data, a mismatched release, and an expired or replayed authorization all block the
 writer. Manual `prod.cmd restart` remains blocked while reconciliation is required; guarded boot,
 service recovery, and sensor restarts may restart only the exact marker-owned legacy release.

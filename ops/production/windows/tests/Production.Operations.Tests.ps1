@@ -147,7 +147,7 @@ Describe 'native Windows production operations' {
                     [void]$violations.Add('Document aggregate calls are forbidden.')
                 }
                 if ($Script -match (
-                        '\.(find|findOne|aggregate|watch|countDocuments|estimatedDocumentCount|distinct|' +
+                    '\.(find|findOne|aggregate|watch|estimatedDocumentCount|distinct|' +
                         'mapReduce|insert|insertOne|insertMany|save|update|updateOne|updateMany|replaceOne|' +
                         'remove|deleteOne|deleteMany|findOneAndDelete|findOneAndReplace|findOneAndUpdate|' +
                         'bulkWrite|drop|renameCollection|compact|repairDatabase|createIndex|createIndexes|' +
@@ -166,6 +166,15 @@ Describe 'native Windows production operations' {
                 if ($runCommandReferenceCount -ne 1 -or $collStatsCommandCount -ne 1) {
                     [void]$violations.Add(
                         'Generic MongoDB commands must be the single audited collStats call.')
+                }
+                $countDocumentReferences = [regex]::Matches(
+                    $Script, '\.countDocuments\s*\(').Count
+                $allowlistedCountReferences = [regex]::Matches(
+                    $Script,
+                    'countDocuments\s*\(\s*(\{\s*_kind:\s*kind\.kind\s*\}|\{\s*_kind:\s*\{\s*\$nin:\s*allowed\s*\}\s*\}|\{\s*\})\s*\)').Count
+                if ($countDocumentReferences -ne $allowlistedCountReferences) {
+                    [void]$violations.Add(
+                        'Document counts must use only exact manifest-kind inventory filters.')
                 }
                 return $violations.ToArray()
             }
@@ -412,7 +421,7 @@ Describe 'native Windows production operations' {
             Should -Invoke Stop-ProductionWebsiteService -Times 0
         }
 
-        It 'refuses generic target-to-legacy rollback with exact confirmed-command guidance' {
+        It 'marks pure v1 cross-schema rollback unsupported with a safe stopped-writer action' {
             $targetSha = '0123456789abcdef0123456789abcdef01234567'
             $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
             Mock Read-ProductionConfig { [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 } }
@@ -428,7 +437,7 @@ Describe 'native Windows production operations' {
             Mock Stop-ProductionWebsiteService { throw 'must not stop' }
 
             { Invoke-ProductionRollback } |
-                Should -Throw '*prod.cmd music-runtime-rollback -ConfirmMusicRuntimeRollback*'
+                Should -Throw '*version 1*unsupported*keep ChristopherBellDev stopped*recovery suspended*deploy.lock*'
             Should -Invoke Stop-ProductionWebsiteService -Times 0
         }
 
@@ -449,6 +458,29 @@ Describe 'native Windows production operations' {
             { Restart-ProductionService -Verify } | Should -Throw '*reconciliation*'
 
             Should -Invoke Restart-Service -Times 0
+        }
+
+        It 'categorically blocks manual restart during domain rollback even on the legacy release' {
+            $direction = [pscustomobject]@{
+                version=2
+                state='ROLLBACK_IN_PROGRESS'
+                targetRelease='2' * 40
+                currentRelease='2' * 40
+                legacyRelease='1' * 40
+            }
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8443 }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Read-ProductionMusicSchemaDirection { $direction }
+            Mock Get-JunctionTarget { 'C:\data\releases\1111111111111111111111111111111111111111' }
+            Mock Restart-Service { throw 'restart must not run' }
+
+            { Restart-ProductionService -Verify } |
+                Should -Throw '*blocked*domain collection rollback*'
+
+            Should -Invoke Restart-Service -Times 0
+            Should -Invoke Get-JunctionTarget -Times 0
         }
 
         It 'uses the controlled stop for rollback and restoration' {
@@ -902,12 +934,130 @@ Describe 'native Windows production operations' {
             Should -Invoke Invoke-CheckedProcess -Times 1 -Exactly -ParameterFilter {
                 $FilePath -eq 'C:\tools\mongosh.exe' -and
                 $WorkingDirectory -eq 'C:\repo' -and
-                $ArgumentList.Count -eq 5 -and
+                $ArgumentList.Count -eq 7 -and
                 $ArgumentList[0] -eq '--quiet' -and
                 $ArgumentList[1] -eq '--norc' -and
                 $ArgumentList[2] -eq 'mongodb://127.0.0.1:27017/admin' -and
-                $ArgumentList[3] -eq '--eval'
+                $ArgumentList[3] -eq '--file' -and
+                $ArgumentList[4] -match 'DomainCollectionManifest\.js$' -and
+                $ArgumentList[5] -eq '--eval'
             }
+        }
+
+        It 'routes a domain marker rollback only to the guarded domain recovery command' {
+            $targetSha = '0123456789abcdef0123456789abcdef01234567'
+            $legacySha = '89abcdef0123456789abcdef0123456789abcdef'
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { "C:\data\releases\$targetSha" }
+                else { "C:\data\releases\$legacySha" }
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    version=2; state='TARGET_ACTIVE'
+                    targetRelease=$targetSha; currentRelease=$targetSha; legacyRelease=$legacySha
+                }
+            }
+            Mock Stop-ProductionWebsiteService { throw 'must not stop' }
+
+            { Invoke-ProductionRollback } |
+                Should -Throw '*mongo-consolidation-rollback -ConfirmDomainCollectionRollback*'
+            Should -Invoke Stop-ProductionWebsiteService -Times 0
+        }
+
+        It 'rolls back between target binaries while preserving the v2 cutover binding' {
+            $cutoverSha = '0123456789abcdef0123456789abcdef01234567'
+            $currentSha = '1111111111111111111111111111111111111111'
+            $previousSha = '2222222222222222222222222222222222222222'
+            $legacySha = '3333333333333333333333333333333333333333'
+            Mock Read-ProductionConfig {
+                [pscustomobject]@{ programDataRoot='C:\data'; productionPort=8080 }
+            }
+            Mock Enter-DeploymentLock { [IO.MemoryStream]::new() }
+            Mock Get-JunctionTarget {
+                if ($Path -like '*\current') { "C:\data\releases\$currentSha" }
+                else { "C:\data\releases\$previousSha" }
+            }
+            Mock Assert-ReleasePath { $Path }
+            Mock Read-ProductionMusicSchemaDirection {
+                [pscustomobject]@{
+                    version=2
+                    state='TARGET_ACTIVE'
+                    targetRelease=$cutoverSha
+                    currentRelease=$currentSha
+                    legacyRelease=$legacySha
+                    evidenceDigest=('a' * 64)
+                    backupIdentity=('b' * 64)
+                    legacyDropped=$true
+                }
+            }
+            Mock Ensure-CoordinatedProductionWriterStartGuard { }
+            Mock Set-AtomicJunction { }
+            Mock Grant-CoordinatedProductionWriterStart {
+                [pscustomobject]@{ nonce='c' * 32 }
+            }
+            Mock Revoke-CoordinatedProductionWriterStart { }
+            Mock Start-Service { }
+            Mock Test-ProductionEndpoints { }
+            Mock Test-ProductionPublicEndpoints { }
+            Mock Write-ProductionDomainSchemaDirection { }
+            Mock Restore-CoordinatedProductionWebsiteRecoveryPolicy { }
+
+            Invoke-ProductionRollback
+
+            Should -Invoke Write-ProductionDomainSchemaDirection -Times 1 -Exactly `
+                -ParameterFilter {
+                    $State -eq 'TARGET_ACTIVE' -and
+                    $TargetRelease -eq $cutoverSha -and
+                    $CurrentRelease -eq $previousSha -and
+                    $LegacyRelease -eq $legacySha -and
+                    $EvidenceDigest -eq ('a' * 64) -and
+                    $BackupIdentity -eq ('b' * 64) -and
+                    $LegacyDropped
+                }
+        }
+
+        It 'reports only manifest compliance and per-kind counts without document values' {
+            $script = Get-ProductionMongoCollectionInventoryScript
+
+            $script | Should -Match 'DomainCollectionManifest\.MANIFEST'
+            $script | Should -Match 'countDocuments\(\{ _kind: kind\.kind \}\)'
+            $script | Should -Match 'manifestCompliant'
+            $script | Should -Not -Match '\.find\('
+
+            $expectedKindMap = Get-ProductionMongoInventoryExpectedKinds
+            $candidate = [ordered]@{
+                complete = $true
+                database = 'christopherbell'
+                generatedAt = '2026-08-09T12:00:00.000Z'
+                manifest = [ordered]@{
+                    digest = '576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24'
+                    manifestCompliant = $true
+                    collectionsCompliant = $true
+                    kindsCompliant = $true
+                    indexesCompliant = $true
+                }
+                kinds = @($expectedKindMap.GetEnumerator() | ForEach-Object {
+                    [ordered]@{
+                        kind = [string]$_.Key
+                        target = [string]$_.Value
+                        count = 0
+                    }
+                })
+                collections = @()
+            }
+
+            $inventory = ConvertFrom-ProductionMongoCollectionInventory `
+                -Json ($candidate | ConvertTo-Json -Depth 10)
+
+            $inventory.manifest.manifestCompliant | Should -BeTrue
+            $inventory.kinds | Should -HaveCount 52
+            @($inventory.kinds[0].PSObject.Properties.Name) |
+                Should -Be @('kind','target','count')
         }
 
         It 'rejects unallowlisted properties at every MongoDB inventory level' -TestCases @(

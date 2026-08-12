@@ -6,7 +6,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
  * User-owned default filters for What's For Lunch recommendations.
@@ -15,7 +14,6 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Builder
 @Data
 @NoArgsConstructor
-@Document("whatsforlunch_preferences")
 public class WhatsForLunchPreference {
   @Id
   private String accountId;

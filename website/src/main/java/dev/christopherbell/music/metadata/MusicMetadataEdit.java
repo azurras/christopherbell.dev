@@ -4,10 +4,8 @@ import java.time.Instant;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Private checksum-bound backup and audit record for one applied metadata edit. */
-@Document("music_metadata_edits")
 public record MusicMetadataEdit(
     @Id String id,
     @Indexed String trackId,

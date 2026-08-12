@@ -1,5 +1,7 @@
 package dev.christopherbell.music.security;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -9,8 +11,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.mongodb.core.FindAndModifyOptions;
-import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -20,16 +21,16 @@ import org.springframework.stereotype.Component;
 @Component
 public class MusicAccessAuditRecorder {
   private static final Duration RETENTION = Duration.ofDays(30);
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<MusicAccessAttempt> attempts;
   private final Clock clock;
 
   @Autowired
-  public MusicAccessAuditRecorder(MongoTemplate mongo) {
-    this(mongo, Clock.systemUTC());
+  public MusicAccessAuditRecorder(DomainMongoOperationsFactory factory) {
+    this(factory, Clock.systemUTC());
   }
 
-  MusicAccessAuditRecorder(MongoTemplate mongo, Clock clock) {
-    this.mongo = mongo;
+  MusicAccessAuditRecorder(DomainMongoOperationsFactory factory, Clock clock) {
+    this.attempts = factory.forType(MusicAccessAttempt.class);
     this.clock = clock;
   }
 
@@ -46,22 +47,27 @@ public class MusicAccessAuditRecorder {
       String principal,
       String reason) {
     String safeReason = bounded(reason, 64);
-    var now = clock.instant();
+    var now = clock.instant().truncatedTo(ChronoUnit.MILLIS);
     var bucket = now.atZone(ZoneOffset.UTC).truncatedTo(ChronoUnit.HOURS).toInstant();
     String id = hash(type + "\n" + principal + "\n" + safeReason + "\n" + bucket);
     var update = new Update()
-        .setOnInsert("principalType", type)
-        .setOnInsert("principal", principal)
-        .setOnInsert("reason", safeReason)
-        .setOnInsert("firstAttemptAt", now)
         .inc("count", 1)
         .set("lastAttemptAt", now)
         .set("expiresAt", now.plus(RETENTION));
-    return mongo.findAndModify(
-        Query.query(Criteria.where("_id").is(id)),
-        update,
-        FindAndModifyOptions.options().upsert(true).returnNew(true),
-        MusicAccessAttempt.class);
+    var identity = Query.query(Criteria.where("id").is(id));
+    var existing = attempts.findAndUpdate(identity, update);
+    if (existing.isPresent()) {
+      return existing.get();
+    }
+    var initial = new MusicAccessAttempt(
+        id, type, principal, safeReason, 1, now, now, now.plus(RETENTION));
+    try {
+      return attempts.insert(initial);
+    } catch (DuplicateKeyException concurrentInsert) {
+      return attempts.findAndUpdate(identity, update)
+          .orElseThrow(() -> new IllegalStateException(
+              "Concurrent Music access audit insert did not leave a record."));
+    }
   }
 
   private String bounded(String value, int maximum) {

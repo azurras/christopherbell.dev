@@ -2,15 +2,15 @@ package dev.christopherbell.sharedfolder.recycle;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
-import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
 
 /** Persistence boundary for recoverable recycle metadata. */
-@Repository
-public interface SharedFolderRecycleRepository
-    extends MongoRepository<SharedFolderRecycleItem, String> {
+public interface SharedFolderRecycleRepository {
+  SharedFolderRecycleItem save(SharedFolderRecycleItem item);
+  Optional<SharedFolderRecycleItem> findById(String id);
+  void deleteById(String id);
   Slice<SharedFolderRecycleItem> findByStateOrderByDeletedAtDescIdDesc(
       SharedFolderRecycleState state, Pageable page);
 

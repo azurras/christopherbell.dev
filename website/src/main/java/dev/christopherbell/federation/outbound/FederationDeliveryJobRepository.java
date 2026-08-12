@@ -1,6 +1,8 @@
 package dev.christopherbell.federation.outbound;
 
 import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.post.model.Post;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -10,8 +12,6 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.FindAndModifyOptions;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -20,17 +20,20 @@ import org.springframework.stereotype.Repository;
 /** Mongo owner of idempotent enqueue, scan cursor, due claim, and exact-owner transitions. */
 @Repository
 class FederationDeliveryJobRepository implements FederationDeliveryStore {
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<Post> posts;
+  private final KindScopedMongoOperations<FederationScanState> scans;
+  private final KindScopedMongoOperations<FederationDeliveryJob> jobs;
 
-  FederationDeliveryJobRepository(MongoTemplate mongo) {
-    this.mongo = mongo;
+  FederationDeliveryJobRepository(DomainMongoOperationsFactory factory) {
+    this.posts = factory.forType(Post.class);
+    this.scans = factory.forType(FederationScanState.class);
+    this.jobs = factory.forType(FederationDeliveryJob.class);
   }
 
   @Override
   public FederationScanCursor loadCursor() {
-    var state = mongo.findById(
-        FederationScanState.OUTBOUND_CREATE, FederationScanState.class);
-    return state == null ? null : state.cursor();
+    return scans.findById(FederationScanState.OUTBOUND_CREATE)
+        .map(FederationScanState::cursor).orElse(null);
   }
 
   @Override
@@ -42,38 +45,31 @@ class FederationDeliveryJobRepository implements FederationDeliveryStore {
           Criteria.where("createdOn").gt(cursor.createdOn()),
           new Criteria().andOperator(
               Criteria.where("createdOn").is(cursor.createdOn()),
-              Criteria.where("_id").gt(cursor.postId()))));
+              Criteria.where("id").gt(cursor.postId()))));
     }
     var query = Query.query(criteria)
-        .with(Sort.by(Sort.Order.asc("createdOn"), Sort.Order.asc("_id")))
+        .with(Sort.by(Sort.Order.asc("createdOn"), Sort.Order.asc("id")))
         .limit(limit);
-    return mongo.find(query, Post.class);
+    return posts.find(query, org.springframework.data.domain.Pageable.unpaged());
   }
 
   @Override
   public void enqueueIfAbsent(Post post, ControlledPeer peer, Instant now) {
     String id = stableJobId(post.getId(), peer.name());
-    var update = new Update()
-        .setOnInsert("postId", post.getId())
-        .setOnInsert("accountId", post.getAccountId())
-        .setOnInsert("peerName", peer.name())
-        .setOnInsert("peerInbox", peer.inbox().toString())
-        .setOnInsert("state", FederationDeliveryState.PENDING)
-        .setOnInsert("attempts", 0)
-        .setOnInsert("nextAttemptOn", now)
-        .setOnInsert("createdOn", now)
-        .setOnInsert("updatedOn", now);
-    mongo.upsert(Query.query(Criteria.where("_id").is(id)), update, FederationDeliveryJob.class);
+    if (jobs.findById(id).isPresent()) return;
+    try {
+      jobs.insert(new FederationDeliveryJob(id, post.getId(), post.getAccountId(), peer.name(),
+          peer.inbox().toString(), FederationDeliveryState.PENDING, 0, now, null, null,
+          null, null, now, now));
+    } catch (org.springframework.dao.DuplicateKeyException ignored) {
+      // A concurrent coordinator already created the same deterministic job.
+    }
   }
 
   @Override
   public void saveCursor(FederationScanCursor cursor, Instant now) {
-    var update = new Update()
-        .set("createdOn", cursor.createdOn())
-        .set("postId", cursor.postId())
-        .set("updatedOn", now);
-    mongo.upsert(Query.query(Criteria.where("_id").is(FederationScanState.OUTBOUND_CREATE)),
-        update, FederationScanState.class);
+    scans.save(new FederationScanState(
+        FederationScanState.OUTBOUND_CREATE, cursor.createdOn(), cursor.postId(), now));
   }
 
   @Override
@@ -94,8 +90,7 @@ class FederationDeliveryJobRepository implements FederationDeliveryStore {
         .set("claimUntil", leaseUntil)
         .set("updatedOn", now)
         .inc("attempts", 1);
-    return Optional.ofNullable(mongo.findAndModify(
-        query, update, FindAndModifyOptions.options().returnNew(true), FederationDeliveryJob.class));
+    return jobs.findAndUpdate(query, update);
   }
 
   @Override
@@ -144,10 +139,10 @@ class FederationDeliveryJobRepository implements FederationDeliveryStore {
 
   private boolean transition(String jobId, String owner, Update update) {
     var query = Query.query(new Criteria().andOperator(
-        Criteria.where("_id").is(jobId),
+        Criteria.where("id").is(jobId),
         Criteria.where("state").is(FederationDeliveryState.CLAIMED),
         Criteria.where("claimOwner").is(owner)));
-    return mongo.updateFirst(query, update, FederationDeliveryJob.class).getModifiedCount() == 1;
+    return jobs.updateFirst(query, update).getModifiedCount() == 1;
   }
 
   private static String stableJobId(String postId, String peerName) {

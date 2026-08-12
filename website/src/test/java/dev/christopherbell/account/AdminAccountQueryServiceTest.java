@@ -13,6 +13,7 @@ import dev.christopherbell.account.model.Role;
 import dev.christopherbell.account.model.dto.AccountDetail;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import java.util.List;
+import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,7 +32,9 @@ class AdminAccountQueryServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new AdminAccountQueryService(mongoTemplate, accountMapper);
+    service = new AdminAccountQueryService(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .create(mongoTemplate), accountMapper);
   }
 
   @Test
@@ -45,21 +48,25 @@ class AdminAccountQueryServiceTest {
         .build();
     var detail = AccountDetail.builder().id("account-1").username("alpha").build();
     var query = AdminAccountQuery.from(2, 25, "username", "desc", "ACTIVE", "USER", "a.b");
-    when(mongoTemplate.count(any(Query.class), eq(Account.class))).thenReturn(51L);
-    when(mongoTemplate.find(any(Query.class), eq(Account.class))).thenReturn(List.of(account));
+    var accountEnvelope =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongoTemplate, account);
+    when(mongoTemplate.count(any(Query.class), eq(Document.class), eq("accounts"))).thenReturn(51L);
+    when(mongoTemplate.find(any(Query.class), eq(Document.class), eq("accounts")))
+        .thenReturn(List.of(accountEnvelope));
     when(accountMapper.toAccount(account)).thenReturn(detail);
 
     var result = service.getAccounts(query);
 
     var countQuery = ArgumentCaptor.forClass(Query.class);
     var pageQuery = ArgumentCaptor.forClass(Query.class);
-    verify(mongoTemplate).count(countQuery.capture(), eq(Account.class));
-    verify(mongoTemplate).find(pageQuery.capture(), eq(Account.class));
+    verify(mongoTemplate).count(countQuery.capture(), eq(Document.class), eq("accounts"));
+    verify(mongoTemplate).find(pageQuery.capture(), eq(Document.class), eq("accounts"));
     assertThat(countQuery.getValue().getQueryObject().toString())
-        .contains("status", "ACTIVE", "role", "USER", "\\Qa.b\\E");
+        .contains("_kind", "account", "payload.status", "ACTIVE", "payload.role", "USER", "\\Qa.b\\E");
     assertThat(pageQuery.getValue().getSkip()).isEqualTo(50L);
     assertThat(pageQuery.getValue().getLimit()).isEqualTo(25);
-    assertThat(pageQuery.getValue().getSortObject().toString()).contains("username=-1");
+    assertThat(pageQuery.getValue().getSortObject().toString()).contains("payload.username=-1");
     assertThat(result.items()).containsExactly(detail);
     assertThat(result.page()).isEqualTo(2);
     assertThat(result.size()).isEqualTo(25);

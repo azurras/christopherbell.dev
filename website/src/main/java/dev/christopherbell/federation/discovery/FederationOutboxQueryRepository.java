@@ -1,25 +1,30 @@
 package dev.christopherbell.federation.discovery;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import java.util.Optional;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Bounded active-post queries for a local actor's public outbox. */
 @Repository
-@RequiredArgsConstructor
 public class FederationOutboxQueryRepository {
   private static final int MAX_PAGE_SIZE = 20;
 
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<Post> mongo;
   private final StableCursorCodec cursors;
+
+  public FederationOutboxQueryRepository(
+      DomainMongoOperationsFactory factory, StableCursorCodec cursors) {
+    this.mongo = factory.forType(Post.class);
+    this.cursors = cursors;
+  }
 
   public FederationPage<Post> page(
       String accountId,
@@ -35,9 +40,9 @@ public class FederationOutboxQueryRepository {
     var query = new Query(criteria)
         .with(Sort.by(
             new Sort.Order(Sort.Direction.DESC, "createdOn"),
-            new Sort.Order(Sort.Direction.DESC, "_id")))
+            new Sort.Order(Sort.Direction.DESC, "id")))
         .limit(size + 1);
-    var loaded = mongo.find(query, Post.class);
+    var loaded = mongo.find(query, org.springframework.data.domain.Pageable.unpaged());
     boolean hasNext = loaded.size() > size;
     var items = loaded.stream().limit(size).toList();
     String nextCursor = null;
@@ -49,7 +54,7 @@ public class FederationOutboxQueryRepository {
   }
 
   public long count(String accountId, Instant now) {
-    return mongo.count(new Query(activeOwned(accountId, now)), Post.class);
+    return mongo.count(new Query(activeOwned(accountId, now)));
   }
 
   private static Criteria activeOwned(String accountId, Instant now) {
@@ -64,6 +69,6 @@ public class FederationOutboxQueryRepository {
         Criteria.where("createdOn").lt(cursor.timestamp()),
         new Criteria().andOperator(
             Criteria.where("createdOn").is(cursor.timestamp()),
-            Criteria.where("_id").lt(cursor.id())));
+            Criteria.where("id").lt(cursor.id())));
   }
 }

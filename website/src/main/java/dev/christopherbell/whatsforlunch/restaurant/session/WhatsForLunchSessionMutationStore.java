@@ -1,14 +1,13 @@
 package dev.christopherbell.whatsforlunch.restaurant.session;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchRestaurantResetAudit;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.regex.Pattern;
-import lombok.RequiredArgsConstructor;
-import org.springframework.data.mongodb.core.FindAndModifyOptions;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -16,13 +15,19 @@ import org.springframework.stereotype.Component;
 
 /** Performs bounded one-document session mutations without whole-document saves. */
 @Component
-@RequiredArgsConstructor
 public class WhatsForLunchSessionMutationStore {
   private static final int RESET_AUDIT_LIMIT = 100;
   private static final Pattern SAFE_MAP_KEY = Pattern.compile("[A-Za-z0-9_-]{1,128}");
 
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<WhatsForLunchSession> sessions;
   private final WhatsForLunchSessionRepository repository;
+
+  public WhatsForLunchSessionMutationStore(
+      DomainMongoOperationsFactory factory,
+      WhatsForLunchSessionRepository repository) {
+    this.sessions = factory.forType(WhatsForLunchSession.class);
+    this.repository = repository;
+  }
 
   /** Atomically joins below the member cap; retries by existing members are no-ops. */
   public Result join(
@@ -42,10 +47,9 @@ public class WhatsForLunchSessionMutationStore {
         .set("participantUsernamesByAccountId." + safeAccountId, username)
         .set("lastUpdatedOn", now)
         .inc("revision", 1);
-    var updated = mongo.findAndModify(
-        query, update, FindAndModifyOptions.options().returnNew(true), WhatsForLunchSession.class);
-    if (updated != null) {
-      return new Result(Status.UPDATED, updated);
+    var updated = sessions.findAndUpdate(query, update);
+    if (updated.isPresent()) {
+      return new Result(Status.UPDATED, updated.orElseThrow());
     }
     return classifyJoin(sessionId, safeAccountId, now, maxMembers);
   }
@@ -60,10 +64,9 @@ public class WhatsForLunchSessionMutationStore {
         .set("votesByAccountId." + safeAccountId, restaurantId)
         .set("lastUpdatedOn", now)
         .inc("revision", 1);
-    var updated = mongo.findAndModify(
-        query, update, FindAndModifyOptions.options().returnNew(true), WhatsForLunchSession.class);
-    if (updated != null) {
-      return new Result(Status.UPDATED, updated);
+    var updated = sessions.findAndUpdate(query, update);
+    if (updated.isPresent()) {
+      return new Result(Status.UPDATED, updated.orElseThrow());
     }
     return classifyVote(sessionId, safeAccountId, restaurantId, now);
   }
@@ -94,10 +97,9 @@ public class WhatsForLunchSessionMutationStore {
         .inc("revision", 1)
         .inc("restaurantResetCount", 1);
     update.push("restaurantResetAudit").slice(-RESET_AUDIT_LIMIT).each(audit);
-    var updated = mongo.findAndModify(
-        query, update, FindAndModifyOptions.options().returnNew(true), WhatsForLunchSession.class);
-    if (updated != null) {
-      return new Result(Status.UPDATED, updated);
+    var updated = sessions.findAndUpdate(query, update);
+    if (updated.isPresent()) {
+      return new Result(Status.UPDATED, updated.orElseThrow());
     }
     return classifyReset(sessionId, safeAccountId, request.expectedRevision(), now);
   }
@@ -172,7 +174,7 @@ public class WhatsForLunchSessionMutationStore {
   }
 
   private Query activeSession(String sessionId, Instant now) {
-    return new Query(Criteria.where("_id").is(sessionId).and("activeUntil").gt(now));
+    return new Query(Criteria.where("id").is(sessionId).and("activeUntil").gt(now));
   }
 
   private boolean active(WhatsForLunchSession session, Instant now) {

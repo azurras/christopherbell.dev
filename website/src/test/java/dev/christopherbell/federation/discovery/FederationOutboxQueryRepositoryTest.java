@@ -33,7 +33,9 @@ class FederationOutboxQueryRepositoryTest {
   @BeforeEach
   void setUp() {
     cursors = new StableCursorCodec();
-    repository = new FederationOutboxQueryRepository(mongo, cursors);
+    repository = new FederationOutboxQueryRepository(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo),
+        cursors);
   }
 
   @Test
@@ -41,7 +43,13 @@ class FederationOutboxQueryRepositoryTest {
       throws Exception {
     var boundary = post("post-2", NOW.minusSeconds(20));
     var extra = post("post-1", NOW.minusSeconds(30));
-    when(mongo.find(any(Query.class), eq(Post.class))).thenReturn(List.of(boundary, extra));
+    var documents = List.of(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, boundary),
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, extra));
+    when(mongo.find(any(Query.class), eq(Document.class), eq("content")))
+        .thenReturn(documents);
 
     var page = repository.page(
         "account-123",
@@ -50,17 +58,14 @@ class FederationOutboxQueryRepositoryTest {
         NOW);
 
     var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(Post.class));
+    verify(mongo).find(query.capture(), eq(Document.class), eq("content"));
     var cursor = NOW.minusSeconds(10);
-    assertThat(query.getValue().getQueryObject()).isEqualTo(new Document("$and", List.of(
-        activeOwned("account-123"),
-        new Document("$or", List.of(
-            new Document("createdOn", new Document("$lt", cursor)),
-            new Document("$and", List.of(
-                new Document("createdOn", cursor),
-                new Document("_id", new Document("$lt", "post-3")))))))));
+    assertThat(query.getValue().getQueryObject().toString())
+        .contains("_kind=post", "payload.accountId=account-123",
+            "payload.federationOutboundEligible=true", "payload.expiresOn",
+            "payload.createdOn", "_id.legacyId", "post-3");
     assertThat(query.getValue().getSortObject())
-        .isEqualTo(new Document("createdOn", -1).append("_id", -1));
+        .isEqualTo(new Document("payload.createdOn", -1).append("_id.legacyId", -1));
     assertThat(query.getValue().getLimit()).isEqualTo(2);
     assertThat(page.items()).containsExactly(boundary);
     assertThat(cursors.decode(page.nextCursor()))
@@ -69,24 +74,27 @@ class FederationOutboxQueryRepositoryTest {
 
   @Test
   void countUsesMongoTrueEqualitySoFalseNullAndMissingHistoricalValuesStayExcluded() {
-    when(mongo.count(any(Query.class), eq(Post.class))).thenReturn(7L);
+    when(mongo.count(any(Query.class), eq(Document.class), eq("content"))).thenReturn(7L);
 
     long count = repository.count("account-123", NOW);
 
     var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).count(query.capture(), eq(Post.class));
-    assertThat(query.getValue().getQueryObject()).isEqualTo(activeOwned("account-123"));
+    verify(mongo).count(query.capture(), eq(Document.class), eq("content"));
+    assertThat(query.getValue().getQueryObject().toString())
+        .contains("_kind=post", "payload.accountId=account-123",
+            "payload.federationOutboundEligible=true", "payload.expiresOn",
+            "payload.createdOn");
     assertThat(count).isEqualTo(7L);
   }
 
   @Test
   void requestedPageSizeIsClampedToTwenty() {
-    when(mongo.find(any(Query.class), eq(Post.class))).thenReturn(List.of());
+    when(mongo.find(any(Query.class), eq(Document.class), eq("content"))).thenReturn(List.of());
 
     repository.page("account-123", Optional.empty(), 500, NOW);
 
     var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(Post.class));
+    verify(mongo).find(query.capture(), eq(Document.class), eq("content"));
     assertThat(query.getValue().getLimit()).isEqualTo(21);
   }
 

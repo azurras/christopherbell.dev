@@ -4,10 +4,8 @@ import java.time.Instant;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Private recycle metadata. Absolute host paths are deliberately absent. */
-@Document("shared_folder_recycle_items")
 @CompoundIndexes({
     @CompoundIndex(name = "shared_recycle_state_deleted_desc",
         def = "{'state': 1, 'deletedAt': -1, '_id': -1}"),

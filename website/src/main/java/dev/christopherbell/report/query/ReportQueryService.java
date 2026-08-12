@@ -1,26 +1,30 @@
 package dev.christopherbell.report.query;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.report.model.PostReport;
 import dev.christopherbell.report.ReportRepository;
 import dev.christopherbell.report.model.ReportStatus;
 import java.util.ArrayList;
 import java.util.regex.Pattern;
-import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
 /** Validates and executes filterable stable report queue pages. */
 @Service
-@RequiredArgsConstructor
 public class ReportQueryService {
   private static final int MAX_PAGE_SIZE = 100;
   private static final int MAX_REPORTER_LENGTH = 100;
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<PostReport> mongo;
   private final ReportRepository reports;
+
+  public ReportQueryService(DomainMongoOperationsFactory factory, ReportRepository reports) {
+    this.mongo = factory.forType(PostReport.class);
+    this.reports = reports;
+  }
 
   /** Returns a page ordered by immutable creation time and id tie-breaker. */
   public ReportPage query(ReportQuery request) throws InvalidRequestException {
@@ -44,12 +48,12 @@ public class ReportQueryService {
         ? new Criteria()
         : new Criteria().andOperator(filters.toArray(Criteria[]::new));
     var countQuery = new Query(criteria);
-    long total = mongo.count(countQuery, PostReport.class);
+    long total = mongo.count(countQuery);
     var pageQuery = new Query(criteria)
-        .with(Sort.by(Sort.Direction.DESC, "createdOn", "_id"))
+        .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
         .skip((long) request.page() * request.size())
         .limit(request.size());
-    var items = mongo.find(pageQuery, PostReport.class);
+    var items = mongo.find(pageQuery, org.springframework.data.domain.Pageable.unpaged());
     includeRepeatReportContext(items);
     int totalPages = total == 0 ? 0 : (int) Math.ceil((double) total / request.size());
     return new ReportPage(items, request.page(), request.size(), total, totalPages);

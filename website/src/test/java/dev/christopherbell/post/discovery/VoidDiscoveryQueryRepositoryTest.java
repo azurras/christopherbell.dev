@@ -35,24 +35,32 @@ class VoidDiscoveryQueryRepositoryTest {
   @BeforeEach
   void setUp() {
     cursors = new StableCursorCodec();
-    repository = new VoidDiscoveryQueryRepository(mongo, cursors);
+    repository = new VoidDiscoveryQueryRepository(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo),
+        cursors);
   }
 
   @Test
   void newArrivalsAreActiveRootsWithStableDescendingPagination() throws Exception {
     var boundary = post("p2", NOW.minusSeconds(20));
     var extra = post("p1", NOW.minusSeconds(30));
-    when(mongo.find(any(Query.class), eq(Post.class))).thenReturn(List.of(boundary, extra));
+    var documents = List.of(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, boundary),
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, extra));
+    when(mongo.find(any(Query.class), eq(Document.class), eq("content"))).thenReturn(documents);
 
     var page = repository.newArrivals(
         Optional.of(new StableCursor(NOW.minusSeconds(10), "p3")), 1, NOW);
 
     var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(Post.class));
+    verify(mongo).find(query.capture(), eq(Document.class), eq("content"));
     assertThat(query.getValue().getQueryObject().toString())
-        .contains("parentId", "expiresOn", "$gt", "createdOn", "$lt", "_id");
+        .contains("_kind=post", "payload.parentId", "payload.expiresOn", "$gt",
+            "payload.createdOn", "$lt", "_id.legacyId");
     assertThat(query.getValue().getSortObject().toString())
-        .contains("createdOn=-1", "_id=-1");
+        .contains("payload.createdOn=-1", "_id.legacyId=-1");
     assertThat(page.items()).containsExactly(boundary);
     assertThat(cursors.decode(page.nextCursor()))
         .contains(new StableCursor(boundary.getCreatedOn(), boundary.getId()));
@@ -60,57 +68,59 @@ class VoidDiscoveryQueryRepositoryTest {
 
   @Test
   void fadingSoonClampsTheFetchAndUsesAscendingExpirationOrder() {
-    when(mongo.find(any(Query.class), eq(Post.class))).thenReturn(List.of());
+    when(mongo.find(any(Query.class), eq(Document.class), eq("content"))).thenReturn(List.of());
 
     repository.fadingSoon(Optional.empty(), 500, NOW);
 
     var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(Post.class));
+    verify(mongo).find(query.capture(), eq(Document.class), eq("content"));
     assertThat(query.getValue().getLimit()).isEqualTo(25);
     assertThat(query.getValue().getSortObject().toString())
-        .contains("expiresOn=1", "_id=1");
+        .contains("payload.expiresOn=1", "_id.legacyId=1");
   }
 
   @Test
   void revivedRequiresAConfirmedExtensionTimestamp() {
-    when(mongo.find(any(Query.class), eq(Post.class))).thenReturn(List.of());
+    when(mongo.find(any(Query.class), eq(Document.class), eq("content"))).thenReturn(List.of());
 
     repository.recentlyRevived(Optional.empty(), 12, NOW);
 
     var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(Post.class));
+    verify(mongo).find(query.capture(), eq(Document.class), eq("content"));
     assertThat(query.getValue().getQueryObject().toString())
-        .contains("lastExtendedOn", "$ne", "expiresOn", "$gt");
+        .contains("_kind=post", "payload.lastExtendedOn", "$ne", "payload.expiresOn", "$gt");
     assertThat(query.getValue().getSortObject().toString())
-        .contains("lastExtendedOn=-1", "_id=-1");
+        .contains("payload.lastExtendedOn=-1", "_id.legacyId=-1");
   }
 
   @Test
   void topicThreadsAreGroupedToActiveRootsBeforePaging() {
-    when(mongo.aggregate(any(Aggregation.class), eq("posts"), eq(Post.class)))
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
     repository.topic("music", Optional.empty(), 24, NOW);
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
-    verify(mongo).aggregate(aggregation.capture(), eq("posts"), eq(Post.class));
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
     var pipeline = aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString();
     assertThat(pipeline)
-        .contains("topics.canonical", "music", "$group", "$lookup", "$replaceRoot", "$limit=25");
+        .contains("_kind=post", "topics.canonical", "music", "$group", "$lookup", "$replaceRoot",
+            "$limit=25");
   }
 
   @Test
   void topicSummariesUseActivityAndCanonicalAsStableKeys() {
-    when(mongo.aggregate(any(Aggregation.class), eq("posts"), eq(VoidTopicSummary.class)))
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
     repository.topics(Optional.of(new StableCursor(NOW.minusSeconds(1), "music")), 12, NOW);
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
-    verify(mongo).aggregate(aggregation.capture(), eq("posts"), eq(VoidTopicSummary.class));
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
     var pipeline = aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString();
     assertThat(pipeline)
-        .contains("$unwind", "$lookup", "root.expiresOn", "$group", "activityOn", "canonical", "$limit=13");
+        .contains("_kind=post", "$unwind", "$lookup", "root.expiresOn", "$group", "activityOn",
+            "canonical", "$limit=13");
   }
 
   private static Post post(String id, Instant createdOn) {

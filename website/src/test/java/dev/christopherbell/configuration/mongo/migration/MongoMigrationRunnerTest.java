@@ -7,7 +7,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
@@ -34,6 +37,7 @@ class MongoMigrationRunnerTest {
   @Mock private MongoTemplate mongo;
   @Mock private MigrationStateStore state;
   @Mock private MongoLeaseService leases;
+  @Mock private DomainCollectionStartupPreflight preflight;
 
   private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
   private final MigrationProperties properties = new MigrationProperties(Duration.ofMinutes(2));
@@ -134,8 +138,32 @@ class MongoMigrationRunnerTest {
         .hasMessageContaining("Duplicate migration id", "001");
   }
 
+  @Test
+  void targetPreflightBlocksBeforeLeaseOrMigrationStateEvenWhenV015WasApplied() {
+    doThrow(new IllegalStateException("Domain collection schema is not active."))
+        .when(preflight).requireReady();
+
+    assertThatThrownBy(() -> runner(List.of(new V015RequireDomainCollectionSchema(null)))
+        .afterPropertiesSet())
+        .hasMessageContaining("Domain collection schema is not active.");
+
+    verify(preflight).requireReady();
+    verifyNoInteractions(leases, state, mongo);
+  }
+
+  @Test
+  void preflightCompletesBeforeTheMigrationLeaseIsAcquired() throws Exception {
+    runner(List.of()).afterPropertiesSet();
+
+    var ordered = inOrder(preflight, leases);
+    ordered.verify(preflight).requireReady();
+    ordered.verify(leases).tryAcquire(
+        eq(MigrationProperties.LEASE_NAME), anyString(), eq(NOW), eq(NOW.plusSeconds(120)));
+  }
+
   private MongoMigrationRunner runner(List<ApplicationMigration> migrations) {
-    return new MongoMigrationRunner(migrations, mongo, state, leases, properties, clock);
+    return new MongoMigrationRunner(
+        migrations, mongo, state, leases, properties, clock, preflight);
   }
 
   private ApplicationMigration migration(

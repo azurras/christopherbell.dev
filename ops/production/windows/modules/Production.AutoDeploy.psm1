@@ -114,13 +114,76 @@ function Resolve-PowerShell7Executable {
     return $executable
 }
 
+function Update-ProductionAutoDeployToolsUnderHeldLock {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Config)
+
+    $tools = Join-Path $Config.programDataRoot 'tools'
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config -FixedRoot $script:FixedProductionRoot | Out-Null
+    Assert-ProductionPathNotReparse -Path $Config.programDataRoot | Out-Null
+    Protect-ProductionPath -Path $Config.programDataRoot
+    if (Test-Path -LiteralPath $tools) {
+        Assert-ProductionTreeNotReparse -Path $tools
+    }
+    Stop-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction SilentlyContinue
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        $existingTask = Get-ScheduledTask `
+            -TaskName 'ChristopherBellAutoDeploy' -ErrorAction SilentlyContinue
+        if (-not $existingTask -or [string]$existingTask.State -ne 'Running') { break }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    if ($existingTask -and [string]$existingTask.State -eq 'Running') {
+        throw 'ChristopherBellAutoDeploy did not stop before task registration.'
+    }
+    if (Test-Path -LiteralPath $tools) {
+        Remove-Item -LiteralPath $tools -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $tools | Out-Null
+    Protect-ProductionPath -Path $tools
+    Copy-Item (Join-Path $PSScriptRoot '..\*') $tools -Recurse -Force
+    Protect-ProductionTree -Path $tools
+    Assert-ProtectedProductionTree -Path $tools
+    $actionArguments = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden ' +
+        "-ExecutionPolicy Bypass -File `"$tools\prod.ps1`" auto-deploy"
+    $action = New-ScheduledTaskAction `
+        -Execute (Resolve-PowerShell7Executable) -Argument $actionArguments
+    $startupTrigger = New-ScheduledTaskTrigger -AtStartup
+    $repeatingTrigger = New-ScheduledTaskTrigger `
+        -Once -At (Get-Date).AddMinutes(1) `
+        -RepetitionInterval (New-TimeSpan -Seconds ([int]$Config.autoDeployPollSeconds))
+    $settings = New-ScheduledTaskSettingsSet `
+        -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
+        -RestartCount 3 `
+        -RestartInterval (New-TimeSpan -Minutes 1) `
+        -MultipleInstances IgnoreNew `
+        -Hidden `
+        -StartWhenAvailable `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries
+    $principal = New-ScheduledTaskPrincipal `
+        -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    Register-ScheduledTask `
+        -TaskName 'ChristopherBellAutoDeploy' `
+        -Action $action `
+        -Trigger @($startupTrigger, $repeatingTrigger) `
+        -Settings $settings `
+        -Principal $principal `
+        -Force | Out-Null
+    Start-ScheduledTask -TaskName 'ChristopherBellAutoDeploy'
+}
+
 function Install-AutoDeployTask {
     [CmdletBinding()]
     param([switch]$WhatIf)
     Assert-Administrator
     $config = Read-ProductionConfig (
         Join-Path $script:FixedProductionRoot 'config\deploy.json')
-    if ($WhatIf) { Write-Output 'Would register and start the ChristopherBellAutoDeploy startup task.'; return }
+    if ($WhatIf) {
+        Write-Output 'Would register and start the ChristopherBellAutoDeploy startup task.'
+        return
+    }
     $guard = Enter-ProductionFixedRootDeploymentLock `
         -Config $config `
         -FixedRoot $script:FixedProductionRoot `
@@ -128,64 +191,11 @@ function Install-AutoDeployTask {
             param($LockPath)
             Enter-DeploymentLock -LockPath $LockPath
         }
-    $lock = $guard.Lock
     try {
-        $tools = Join-Path $config.programDataRoot 'tools'
-        Assert-ProductionPathNotReparse -Path $config.programDataRoot | Out-Null
-        Protect-ProductionPath -Path $config.programDataRoot
-        if (Test-Path -LiteralPath $tools) {
-            Assert-ProductionTreeNotReparse -Path $tools
-        }
-        Stop-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction SilentlyContinue
-        $deadline = (Get-Date).AddSeconds(30)
-        do {
-            $existingTask = Get-ScheduledTask -TaskName 'ChristopherBellAutoDeploy' -ErrorAction SilentlyContinue
-            if (-not $existingTask -or [string]$existingTask.State -ne 'Running') { break }
-            Start-Sleep -Milliseconds 500
-        } while ((Get-Date) -lt $deadline)
-        if ($existingTask -and [string]$existingTask.State -eq 'Running') {
-            throw 'ChristopherBellAutoDeploy did not stop before task registration.'
-        }
-        if (Test-Path -LiteralPath $tools) {
-            Remove-Item -LiteralPath $tools -Recurse -Force
-        }
-        New-Item -ItemType Directory -Path $tools | Out-Null
-        Protect-ProductionPath -Path $tools
-        Copy-Item (Join-Path $PSScriptRoot '..\*') $tools -Recurse -Force
-        Protect-ProductionTree -Path $tools
-        Assert-ProtectedProductionTree -Path $tools
-        $actionArguments = "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden " +
-            "-ExecutionPolicy Bypass -File `"$tools\prod.ps1`" auto-deploy"
-        $action = New-ScheduledTaskAction `
-            -Execute (Resolve-PowerShell7Executable) `
-            -Argument $actionArguments
-        $startupTrigger = New-ScheduledTaskTrigger -AtStartup
-        $repeatingTrigger = New-ScheduledTaskTrigger `
-            -Once `
-            -At (Get-Date).AddMinutes(1) `
-            -RepetitionInterval (New-TimeSpan -Seconds ([int]$config.autoDeployPollSeconds))
-        $settings = New-ScheduledTaskSettingsSet `
-            -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
-            -RestartCount 3 `
-            -RestartInterval (New-TimeSpan -Minutes 1) `
-            -MultipleInstances IgnoreNew `
-            -Hidden `
-            -StartWhenAvailable `
-            -AllowStartIfOnBatteries `
-            -DontStopIfGoingOnBatteries
-        $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-        Register-ScheduledTask `
-            -TaskName 'ChristopherBellAutoDeploy' `
-            -Action $action `
-            -Trigger @($startupTrigger, $repeatingTrigger) `
-            -Settings $settings `
-            -Principal $principal `
-            -Force | Out-Null
+        Update-ProductionAutoDeployToolsUnderHeldLock -Config $config
+    } finally {
+        $guard.Lock.Dispose()
     }
-    finally {
-        $lock.Dispose()
-    }
-    Start-ScheduledTask -TaskName 'ChristopherBellAutoDeploy'
 }
 
 function Remove-AutoDeployTask {
@@ -205,4 +215,8 @@ function Get-AutoDeployStatus {
     }
 }
 
-Export-ModuleMember -Function New-AutoDeployState,Read-AutoDeployState,Write-AutoDeployState,Get-RemoteMainSha,Get-ActiveReleaseSha,Invoke-AutoDeployOnce,Start-AutoDeployLoop,Install-AutoDeployTask,Remove-AutoDeployTask,Get-AutoDeployStatus
+Export-ModuleMember -Function New-AutoDeployState,Read-AutoDeployState,`
+    Write-AutoDeployState,Get-RemoteMainSha,Get-ActiveReleaseSha,`
+    Invoke-AutoDeployOnce,Start-AutoDeployLoop,Install-AutoDeployTask,`
+    Update-ProductionAutoDeployToolsUnderHeldLock,Remove-AutoDeployTask,`
+    Get-AutoDeployStatus

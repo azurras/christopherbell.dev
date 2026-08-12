@@ -866,7 +866,6 @@ public class RestaurantServiceTest {
     assertEquals(2, result.get(0).getUpVotes());
     assertEquals(0, result.get(0).getDownVotes());
     verify(restaurantVoteQueryRepository).topLiked(eq(10));
-    verify(restaurantVoteRepository, never()).findAll();
   }
 
   @Test

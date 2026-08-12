@@ -1,10 +1,9 @@
 package dev.christopherbell.configuration.security.browser;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.time.Instant;
 import java.util.Optional;
-import lombok.RequiredArgsConstructor;
-import org.springframework.data.mongodb.core.FindAndModifyOptions;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -16,9 +15,12 @@ import org.springframework.stereotype.Repository;
  * <p>Intentionally non-final so Spring can apply class-based persistence exception translation.
  */
 @Repository
-@RequiredArgsConstructor
 public class MongoBrowserSessionActivityStore implements BrowserSessionActivityStore {
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<BrowserSession> mongo;
+
+  public MongoBrowserSessionActivityStore(DomainMongoOperationsFactory factory) {
+    this.mongo = factory.forType(BrowserSession.class);
+  }
 
   @Override
   public Optional<BrowserSession> touch(
@@ -50,8 +52,7 @@ public class MongoBrowserSessionActivityStore implements BrowserSessionActivityS
   }
 
   private Optional<BrowserSession> findAndModify(Query query, Update update) {
-    return Optional.ofNullable(mongo.findAndModify(
-        query, update, FindAndModifyOptions.options().returnNew(true), BrowserSession.class));
+    return mongo.findAndUpdate(query, update);
   }
 
   static Query touchQuery(
@@ -73,7 +74,7 @@ public class MongoBrowserSessionActivityStore implements BrowserSessionActivityS
 
   private static Query liveSessionQuery(String sessionId, Instant now, Instant idleExpiresOn) {
     return new Query(new Criteria().andOperator(
-        Criteria.where("_id").is(sessionId),
+        Criteria.where("id").is(sessionId),
         Criteria.where("idleExpiresOn").gt(now),
         Criteria.where("absoluteExpiresOn").gte(idleExpiresOn)));
   }

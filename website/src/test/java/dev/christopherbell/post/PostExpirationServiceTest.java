@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -26,6 +27,7 @@ import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.UpdateDefinition;
+import com.mongodb.client.result.DeleteResult;
 
 @ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class PostExpirationServiceTest {
@@ -96,14 +98,19 @@ class PostExpirationServiceTest {
         .threadReplyLikesCount(0)
         .threadReplyCount(10_000)
         .build();
+    var factory = dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        .create(mongo);
+    var updatedEnvelope =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, updated);
     when(mongo.findAndModify(
         any(Query.class),
         any(UpdateDefinition.class),
         any(FindAndModifyOptions.class),
-        eq(Post.class))).thenReturn(updated);
+        eq(org.bson.Document.class), eq("content"))).thenReturn(updatedEnvelope);
     var service = new PostExpirationService(
         postRepository,
-        mongo,
+        factory,
         Clock.fixed(changedOn, ZoneOffset.UTC),
         true);
 
@@ -114,10 +121,68 @@ class PostExpirationServiceTest {
         any(Query.class),
         counterUpdate.capture(),
         any(FindAndModifyOptions.class),
-        eq(Post.class));
+        eq(org.bson.Document.class), eq("content"));
     assertEquals(1, counterUpdate.getValue().getUpdateObject()
-        .get("$inc", org.bson.Document.class).getInteger("likesCount"));
-    verify(mongo).updateMulti(any(Query.class), any(UpdateDefinition.class), eq(Post.class));
+        .get("$inc", org.bson.Document.class).getInteger("payload.likesCount"));
+    verify(mongo).updateMulti(
+        any(Query.class), any(UpdateDefinition.class), eq(org.bson.Document.class), eq("content"));
     verify(postRepository, never()).findByRootIdOrderByCreatedOnAsc(any());
+  }
+
+  @Test
+  void replyCountClampIsOneAtomicWriteAcrossAConcurrentIncrement() {
+    var changedOn = Instant.parse("2026-07-29T03:00:00Z");
+    var root = Post.builder()
+        .id("root")
+        .rootId("root")
+        .createdOn(Instant.parse("2026-07-29T01:00:00Z"))
+        .threadReplyCount(0)
+        .likesCount(0)
+        .threadReplyLikesCount(0)
+        .build();
+    var reply = Post.builder()
+        .id("reply")
+        .rootId("root")
+        .parentId("root")
+        .build();
+    var linearized = Post.builder()
+        .id("root")
+        .rootId("root")
+        .createdOn(root.getCreatedOn())
+        .threadReplyCount(1)
+        .likesCount(0)
+        .threadReplyLikesCount(0)
+        .lastUpdatedOn(changedOn)
+        .build();
+    when(postRepository.findByRootIdOrderByCreatedOnAsc("root"))
+        .thenReturn(List.of(root, reply));
+    when(mongo.remove(any(Query.class), eq(org.bson.Document.class), any(String.class)))
+        .thenReturn(DeleteResult.acknowledged(1));
+    var factory = dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        .create(mongo);
+    var linearizedEnvelope =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, linearized);
+    when(mongo.findAndModify(
+        any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
+        eq(org.bson.Document.class), eq("content")))
+        .thenAnswer(invocation -> {
+          var update = invocation.<UpdateDefinition>getArgument(1).getUpdateObject();
+          if (update.toString().contains("$max") && update.toString().contains("$subtract")) {
+            return linearizedEnvelope;
+          }
+          return null;
+        });
+    var service = new PostExpirationService(
+        postRepository,
+        factory,
+        Clock.fixed(changedOn, ZoneOffset.UTC),
+        true);
+
+    service.deletePostTree(reply);
+
+    verify(mongo, times(1)).findAndModify(
+        any(Query.class), any(UpdateDefinition.class), any(FindAndModifyOptions.class),
+        eq(org.bson.Document.class), eq("content"));
   }
 }

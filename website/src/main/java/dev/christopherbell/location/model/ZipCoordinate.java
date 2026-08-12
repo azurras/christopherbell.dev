@@ -9,7 +9,6 @@ import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
  * Persisted coordinate origin for a ZIP Code Tabulation Area.
@@ -18,7 +17,6 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Builder
 @Data
 @NoArgsConstructor
-@Document("location_zip_coordinates")
 public class ZipCoordinate {
   @Id
   private String zipCode;

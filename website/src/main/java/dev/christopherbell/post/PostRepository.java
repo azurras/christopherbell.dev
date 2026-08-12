@@ -3,16 +3,20 @@ package dev.christopherbell.post;
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
 
 /**
  * Spring Data Mongo repository for {@link dev.christopherbell.post.model.Post} entities.
  */
-@Repository
-public interface PostRepository extends MongoRepository<Post, String> {
+public interface PostRepository {
+  Post save(Post post);
+  Optional<Post> findById(String id);
+  void delete(Post post);
+  void deleteById(String id);
+  void deleteAll(Iterable<Post> posts);
+  long count();
   /**
    * Retrieves posts for a given account, newest first.
    *

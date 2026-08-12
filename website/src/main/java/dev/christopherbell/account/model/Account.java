@@ -19,13 +19,12 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
  * Represents a user account in the system.
  *
  * <p>
- * This class is mapped to the "accounts" collection in MongoDB.
+ * This class is persisted as the {@code account} kind in the shared accounts collection.
  * It includes fields for user information, authentication details,
  * and account status. Sensitive information like password hash and
  * salt are included here but should be handled carefully in application logic.
@@ -36,7 +35,6 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @NoArgsConstructor
-@Document("accounts")
 public class Account {
   public static final String PROPERTY_ROLE = "role";
   private final String type = "account";

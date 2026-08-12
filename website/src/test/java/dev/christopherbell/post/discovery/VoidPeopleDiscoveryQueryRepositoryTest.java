@@ -31,34 +31,42 @@ class VoidPeopleDiscoveryQueryRepositoryTest {
   @Test
   void interestsUseOnlyBoundedActiveParticipationAndKeepAlives() {
     var post = Post.builder()
+        .id("post-1")
         .topics(List.of(new PostTopic("music", "Music"), new PostTopic("music", "MUSIC")))
         .build();
-    when(mongo.find(any(Query.class), eq(Post.class))).thenReturn(List.of(post));
-
     when(likes.recentLikedPostIds("self")).thenReturn(List.of("liked-post"));
-    var interests = new VoidPeopleDiscoveryQueryRepository(mongo, likes).interestsFor("self", NOW);
+    var factory = dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        .create(mongo);
+    var postEnvelope =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, post);
+    when(mongo.find(any(Query.class), eq(Document.class), eq("content")))
+        .thenReturn(List.of(postEnvelope));
+    var interests = new VoidPeopleDiscoveryQueryRepository(factory, likes).interestsFor("self", NOW);
 
     var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(Post.class));
+    verify(mongo).find(query.capture(), eq(Document.class), eq("content"));
     assertThat(query.getValue().getLimit()).isEqualTo(256);
     assertThat(query.getValue().getQueryObject().toString())
-        .contains("expiresOn", "accountId", "liked-post", "self")
+        .contains("_kind=post", "payload.expiresOn", "payload.accountId", "liked-post", "self")
         .doesNotContain("likedBy");
     assertThat(interests).containsExactly("music");
   }
 
   @Test
   void candidatePoolIsCappedAndUsesRecentActivityWithoutEngagementTotals() {
-    when(mongo.aggregate(any(Aggregation.class), eq("posts"), eq(VoidPersonCandidate.class)))
+    when(mongo.aggregate(any(Aggregation.class), eq("content"), eq(Document.class)))
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
-    new VoidPeopleDiscoveryQueryRepository(mongo, likes).recentActiveCandidates(NOW, 500);
+    new VoidPeopleDiscoveryQueryRepository(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo),
+        likes).recentActiveCandidates(NOW, 500);
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
-    verify(mongo).aggregate(aggregation.capture(), eq("posts"), eq(VoidPersonCandidate.class));
+    verify(mongo).aggregate(aggregation.capture(), eq("content"), eq(Document.class));
     var pipeline = aggregation.getValue().toPipeline(Aggregation.DEFAULT_CONTEXT).toString();
     assertThat(pipeline)
-        .contains("expiresOn", "lastExtendedOn", "createdOn", "$group", "$limit=128")
+        .contains("_kind=post", "expiresOn", "lastExtendedOn", "createdOn", "$group", "$limit=128")
         .doesNotContain("likesCount", "threadReplyLikesCount", "follower");
   }
 }

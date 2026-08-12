@@ -1,28 +1,33 @@
 package dev.christopherbell.post.feed;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
-import dev.christopherbell.account.follow.AccountFollow;
 import dev.christopherbell.post.model.Post;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
-import lombok.RequiredArgsConstructor;
 import org.bson.Document;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Compound Mongo queries for deterministic global and author post feeds. */
 @Repository
-@RequiredArgsConstructor
 public class PostFeedQueryRepository {
   private static final int MAX_PAGE_SIZE = 100;
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<Post> posts;
   private final StableCursorCodec cursorCodec;
+
+  public PostFeedQueryRepository(
+      DomainMongoOperationsFactory factory, StableCursorCodec cursorCodec) {
+    this.posts = factory.forType(Post.class);
+    this.cursorCodec = cursorCodec;
+  }
 
   /** Reads a global stable page. */
   public PostFeedSlice global(Optional<StableCursor> cursor, int requestedSize) {
@@ -74,12 +79,13 @@ public class PostFeedQueryRepository {
   ) {
     int size = pageSize(requestedSize);
     var criteria = visible(new Criteria(), cursor, visibility);
-    var lookup = new Document("from", AccountFollow.COLLECTION)
+    var lookup = new Document("from", "accounts")
         .append("let", new Document("authorId", "$accountId"))
         .append("pipeline", List.of(
             new Document("$match", new Document("$expr", new Document("$and", List.of(
-                new Document("$eq", List.of("$followerAccountId", followerId)),
-                new Document("$eq", List.of("$followedAccountId", "$$authorId")))))),
+                new Document("$eq", List.of("$_kind", "account_follow")),
+                new Document("$eq", List.of("$payload.followerAccountId", followerId)),
+                new Document("$eq", List.of("$payload.followedAccountId", "$$authorId")))))),
             new Document("$limit", 1)))
         .append("as", "matchingFollow");
     var aggregation = org.springframework.data.mongodb.core.aggregation.Aggregation.newAggregation(
@@ -88,7 +94,9 @@ public class PostFeedQueryRepository {
         context -> new Document("$match", new Document("matchingFollow.0", new Document("$exists", true))),
         context -> new Document("$sort", new Document("createdOn", -1).append("_id", -1)),
         context -> new Document("$limit", size + 1));
-    return slice(mongo.aggregate(aggregation, "posts", Post.class).getMappedResults(), size);
+    return slice(posts.aggregate(
+        KindScopedAggregation.withForeignKinds(
+            aggregation, KindScopedAggregation.ForeignKind.ACCOUNT_FOLLOW), Post.class), size);
   }
 
   private PostFeedSlice page(
@@ -100,9 +108,9 @@ public class PostFeedQueryRepository {
     int size = pageSize(requestedSize);
     Criteria criteria = visible(scope, cursor, visibility);
     var query = new Query(criteria)
-        .with(Sort.by(Sort.Direction.DESC, "createdOn", "_id"))
+        .with(Sort.by(Sort.Direction.DESC, "createdOn", "id"))
         .limit(size + 1);
-    return slice(mongo.find(query, Post.class), size);
+    return slice(posts.find(query, org.springframework.data.domain.Pageable.unpaged()), size);
   }
 
   private Criteria visible(
@@ -120,7 +128,7 @@ public class PostFeedQueryRepository {
           Criteria.where("createdOn").lt(boundary.timestamp()),
           new Criteria().andOperator(
               Criteria.where("createdOn").is(boundary.timestamp()),
-              Criteria.where("_id").lt(boundary.id())));
+              Criteria.where("id").lt(boundary.id())));
       clauses.add(before);
     }
     visibility.expiresAfter().ifPresent(cutoff ->

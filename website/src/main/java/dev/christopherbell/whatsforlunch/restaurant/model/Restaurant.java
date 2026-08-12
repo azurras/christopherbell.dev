@@ -14,7 +14,6 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
  * Represents a restaurant entity with its details.
@@ -40,7 +39,6 @@ import org.springframework.data.mongodb.core.mapping.Document;
         name = "restaurant_dedupe_key_member",
         def = "{'dedupeKey': 1, '_id': 1}")
 })
-@Document("whatsforlunch")
 public class Restaurant {
   private final String type = "restaurant";
 

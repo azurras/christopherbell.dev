@@ -2,6 +2,7 @@ package dev.christopherbell.music.library;
 
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicTrack;
+import dev.christopherbell.music.catalog.MusicTrackRepository;
 import dev.christopherbell.music.radio.MusicRadioHistoryEvent;
 import dev.christopherbell.music.radio.MusicRadioHistoryRepository;
 import dev.christopherbell.music.security.MusicAccessService;
@@ -13,11 +14,6 @@ import java.util.Locale;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
-import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -29,7 +25,7 @@ public final class MusicLibraryService {
   private final MusicCatalog catalog;
   private final MusicRadioHistoryRepository history;
   private final MusicAccessService access;
-  private final MongoTemplate mongo;
+  private final MusicTrackRepository tracks;
   private final Clock clock;
 
   public MusicLibraryService(
@@ -37,20 +33,20 @@ public final class MusicLibraryService {
       MusicCatalog catalog,
       MusicRadioHistoryRepository history,
       MusicAccessService access,
-      MongoTemplate mongo,
+      MusicTrackRepository tracks,
       Clock clock) {
     this.playlists = playlists;
     this.catalog = catalog;
     this.history = history;
     this.access = access;
-    this.mongo = mongo;
+    this.tracks = tracks;
     this.clock = clock;
   }
 
   public List<MusicPlaylistView> playlists() {
     access.requireRead();
-    Query query = new Query().with(Sort.by("normalizedName")).limit(100);
-    return mongo.find(query, MusicPlaylist.class).stream().map(MusicPlaylistView::from).toList();
+    return playlists.findTop100ByOrderByNormalizedNameAsc().stream()
+        .map(MusicPlaylistView::from).toList();
   }
 
   /** Resolves one authorized global playlist for server-side catalog paging. */
@@ -61,7 +57,7 @@ public final class MusicLibraryService {
 
   public MusicPlaylistView create(String name, List<String> trackIds) {
     var account = access.requireWrite();
-    if (mongo.count(new Query(), MusicPlaylist.class) >= 100) {
+    if (playlists.count() >= 100) {
       throw new ResponseStatusException(HttpStatus.INSUFFICIENT_STORAGE, "Music playlist limit reached.");
     }
     String safeName = safeName(name);
@@ -104,14 +100,8 @@ public final class MusicLibraryService {
       boolean excluded) {
     access.requireWrite();
     MusicTrack current = catalog.findReady(trackId).orElseThrow(this::trackNotFound);
-    Query query = Query.query(Criteria.where("_id").is(current.id())
-        .and("favorite").is(expectedFavorite)
-        .and("excludedFromRadio").is(expectedExcluded));
-    var result = mongo.updateFirst(
-        query,
-        new Update().set("favorite", favorite).set("excludedFromRadio", excluded),
-        MusicTrack.class);
-    if (result.getMatchedCount() != 1) {
+    if (!tracks.updatePreferences(
+        current.id(), expectedFavorite, expectedExcluded, favorite, excluded)) {
       if (catalog.findReady(trackId).isEmpty()) {
         throw trackNotFound();
       }

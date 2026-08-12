@@ -1,6 +1,7 @@
 package dev.christopherbell.music.catalog;
 
 import java.time.Clock;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
 import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.music.metadata.FfmpegMusicTagProcess;
@@ -15,7 +16,6 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
-import org.springframework.data.mongodb.core.MongoTemplate;
 
 /** Wires the bounded Music indexing pipeline. */
 @Configuration
@@ -69,8 +69,9 @@ public class MusicCatalogConfiguration {
   }
 
   @Bean
-  public MusicCatalog musicCatalog(MongoTemplate mongo, MusicTrackRepository tracks) {
-    return new MusicCatalog(mongo, tracks);
+  public MusicCatalog musicCatalog(
+      DomainMongoOperationsFactory factory, MusicTrackRepository tracks) {
+    return new MusicCatalog(factory, tracks);
   }
 
   @Bean

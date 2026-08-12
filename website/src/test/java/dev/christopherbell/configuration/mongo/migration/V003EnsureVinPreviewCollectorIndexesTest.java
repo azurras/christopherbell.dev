@@ -36,8 +36,8 @@ class V003EnsureVinPreviewCollectorIndexesTest {
 
   @Test
   void applyEnsuresNamedVinExpiryIndex() {
-    when(mongo.indexOps(VehicleVinDecodeCache.COLLECTION)).thenReturn(vinIndexes);
-    when(mongo.indexOps(ScheduledCollectorRun.COLLECTION)).thenReturn(collectorIndexes);
+    when(mongo.indexOps("vehicle_vin_decode_cache")).thenReturn(vinIndexes);
+    when(mongo.indexOps("scheduled_collector_runs")).thenReturn(collectorIndexes);
     when(mongo.indexOps(PostLinkPreviewCacheEntry.COLLECTION)).thenReturn(previewIndexes);
 
     new V003EnsureVinPreviewCollectorIndexes().apply(mongo);

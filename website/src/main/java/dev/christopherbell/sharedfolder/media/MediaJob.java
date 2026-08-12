@@ -7,12 +7,10 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Owned media job metadata; browser responses never serialize this persistence model. */
 @Data
 @NoArgsConstructor
-@Document("shared_folder_media_jobs")
 @CompoundIndex(name = "media_lru", def = "{'status': 1, 'lastAccessedAt': 1, '_id': 1}")
 @CompoundIndex(
     name = "media_cleanup_due",

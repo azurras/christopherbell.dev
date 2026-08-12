@@ -29,11 +29,11 @@ public final class V001EnsureMigrationInfrastructure implements ApplicationMigra
 
   @Override
   public void apply(MongoTemplate mongo) {
-    mongo.indexOps(MigrationRecord.COLLECTION).createIndex(new Index()
+    mongo.indexOps("application_migrations").createIndex(new Index()
         .on("status", Direction.ASC)
         .on("completedAt", Direction.DESC)
         .named("migration_status_completed"));
-    mongo.indexOps(MongoLeaseService.COLLECTION).createIndex(new Index()
+    mongo.indexOps("application_leases").createIndex(new Index()
         .on("expiresAt", Direction.ASC)
         .named("lease_expiry"));
   }

@@ -7,14 +7,12 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** One expiring success or safe failure for a normalized preview URL. */
 @AllArgsConstructor
 @Builder
 @Data
 @NoArgsConstructor
-@Document(PostLinkPreviewCacheEntry.COLLECTION)
 public class PostLinkPreviewCacheEntry {
   public static final String COLLECTION = "post_link_preview_cache";
 

@@ -3,19 +3,19 @@ package dev.christopherbell.libs.mongo.lease;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.UUID;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
 
 /** Serializes collector work through owner-scoped Mongo leases and records safe status. */
 @Service
 public class ScheduledCollectorCoordinator {
   private final MongoLeaseService leases;
-  private final MongoTemplate mongo;
+  private final ScheduledCollectorRunStore runs;
   private final Clock clock;
 
-  public ScheduledCollectorCoordinator(MongoLeaseService leases, MongoTemplate mongo, Clock clock) {
+  public ScheduledCollectorCoordinator(
+      MongoLeaseService leases, ScheduledCollectorRunStore runs, Clock clock) {
     this.leases = leases;
-    this.mongo = mongo;
+    this.runs = runs;
     this.clock = clock;
   }
 
@@ -32,7 +32,7 @@ public class ScheduledCollectorCoordinator {
         collectorName, ownerToken, startedOn, startedOn.plus(leaseDuration))) {
       run.setStatus(ScheduledCollectorRunStatus.SKIPPED_LOCKED);
       run.setCompletedOn(clock.instant());
-      mongo.save(run);
+      runs.save(run);
       return new Outcome<>(ScheduledCollectorRunStatus.SKIPPED_LOCKED, null);
     }
 
@@ -40,7 +40,7 @@ public class ScheduledCollectorCoordinator {
         leases, clock, collectorName, ownerToken, leaseDuration, startedOn);
     try {
       run.setStatus(ScheduledCollectorRunStatus.RUNNING);
-      mongo.save(run);
+      runs.save(run);
       var value = work.execute(guard);
       guard.verifyHeld();
       run.setStatus(ScheduledCollectorRunStatus.SUCCEEDED);
@@ -56,7 +56,7 @@ public class ScheduledCollectorCoordinator {
     } finally {
       run.setCompletedOn(clock.instant());
       try {
-        mongo.save(run);
+        runs.save(run);
       } finally {
         leases.release(collectorName, ownerToken);
       }

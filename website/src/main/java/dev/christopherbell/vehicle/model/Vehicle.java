@@ -14,7 +14,6 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
  * Vehicle persisted in the vehicles MongoDB collection.
@@ -23,7 +22,6 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Builder
 @Data
 @NoArgsConstructor
-@Document("vehicles")
 public class Vehicle {
   private final String type = "vehicle";
 

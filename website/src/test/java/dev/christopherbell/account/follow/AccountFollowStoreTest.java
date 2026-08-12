@@ -6,16 +6,15 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import com.mongodb.client.result.DeleteResult;
-import com.mongodb.client.result.UpdateResult;
 import java.time.Instant;
-import org.bson.BsonString;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.UpdateDefinition;
+import org.springframework.dao.DuplicateKeyException;
 
 @ExtendWith(MockitoExtension.class)
 class AccountFollowStoreTest {
@@ -23,13 +22,14 @@ class AccountFollowStoreTest {
 
   @Test
   void duplicateFollowAndUnfollowRetriesAreIdempotent() {
-    when(mongo.upsert(any(Query.class), any(UpdateDefinition.class), eq(AccountFollow.class)))
-        .thenReturn(UpdateResult.acknowledged(0, 0L, new BsonString("edge")))
-        .thenReturn(UpdateResult.acknowledged(1, 0L, null));
-    when(mongo.remove(any(Query.class), eq(AccountFollow.class)))
+    when(mongo.insert(any(Document.class), eq("accounts")))
+        .thenAnswer(invocation -> invocation.getArgument(0))
+        .thenThrow(new DuplicateKeyException("duplicate edge"));
+    when(mongo.remove(any(Query.class), eq(Document.class), eq("accounts")))
         .thenReturn(DeleteResult.acknowledged(1))
         .thenReturn(DeleteResult.acknowledged(0));
-    var store = new AccountFollowStore(mongo);
+    var store = new AccountFollowStore(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
 
     assertThat(store.follow("self", "target", Instant.EPOCH).created()).isTrue();
     assertThat(store.follow("self", "target", Instant.EPOCH).created()).isFalse();

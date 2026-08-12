@@ -32,11 +32,11 @@ public final class V003EnsureVinPreviewCollectorIndexes implements ApplicationMi
 
   @Override
   public void apply(MongoTemplate mongo) {
-    mongo.indexOps(VehicleVinDecodeCache.COLLECTION).createIndex(new Index()
+    mongo.indexOps("vehicle_vin_decode_cache").createIndex(new Index()
         .on("expiresOn", Direction.ASC)
         .expire(Duration.ZERO)
         .named("vehicle_vin_cache_expiry"));
-    mongo.indexOps(ScheduledCollectorRun.COLLECTION).createIndex(new Index()
+    mongo.indexOps("scheduled_collector_runs").createIndex(new Index()
         .on("status", Direction.ASC)
         .on("completedOn", Direction.DESC)
         .named("scheduled_collector_status_completed"));

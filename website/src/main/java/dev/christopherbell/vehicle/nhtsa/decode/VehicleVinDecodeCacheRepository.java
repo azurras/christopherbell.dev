@@ -1,8 +1,9 @@
 package dev.christopherbell.vehicle.nhtsa.decode;
 
 import dev.christopherbell.vehicle.model.VehicleVinDecodeCache;
-import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
+import java.util.Optional;
 
-@Repository
-public interface VehicleVinDecodeCacheRepository extends MongoRepository<VehicleVinDecodeCache, String> {}
+public interface VehicleVinDecodeCacheRepository {
+  Optional<VehicleVinDecodeCache> findById(String id);
+  VehicleVinDecodeCache save(VehicleVinDecodeCache cache);
+}

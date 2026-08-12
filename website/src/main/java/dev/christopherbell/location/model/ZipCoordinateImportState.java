@@ -6,14 +6,12 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Durable identity and outcome of the last successful ZIP coordinate dataset import. */
 @AllArgsConstructor
 @Builder
 @Data
 @NoArgsConstructor
-@Document("zip_coordinate_import_state")
 public class ZipCoordinateImportState {
   @Id private String id;
   private String checksum;

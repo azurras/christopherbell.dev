@@ -4,10 +4,8 @@ import java.time.Instant;
 import java.util.List;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Collision-proof queue or radio state stored in the shared Music runtime collection. */
-@Document(MusicRuntimeStateDocument.COLLECTION)
 public record MusicRuntimeStateDocument(
     @Id String id,
     Kind kind,

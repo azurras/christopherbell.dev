@@ -1,5 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -7,9 +9,8 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
-import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.http.HttpStatus;
@@ -18,10 +19,13 @@ import org.springframework.web.server.ResponseStatusException;
 
 /** Bounded stable admin restaurant inventory query. */
 @Repository
-@RequiredArgsConstructor
 public class RestaurantInventoryQueryRepository {
   private static final int MAX_PAGE_SIZE = 100;
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<Restaurant> restaurants;
+
+  public RestaurantInventoryQueryRepository(DomainMongoOperationsFactory factory) {
+    this.restaurants = factory.forType(Restaurant.class);
+  }
 
   /** Applies normalized indexed filters and a stable name/id cursor. */
   public Page find(
@@ -45,17 +49,16 @@ public class RestaurantInventoryQueryRepository {
           Criteria.where("dedupeKey").gt(after.name()),
           new Criteria().andOperator(
               Criteria.where("dedupeKey").is(after.name()),
-              Criteria.where("_id").gt(after.id()))));
+              Criteria.where("id").gt(after.id()))));
     }
     query.with(Sort.by(
         Sort.Order.asc("dedupeKey"),
-        Sort.Order.asc("_id"))).limit(size + 1);
-    var found = mongo.find(query, Restaurant.class, "whatsforlunch");
+        Sort.Order.asc("id"))).limit(size + 1);
+    var found = restaurants.find(query, Pageable.unpaged());
     var hasMore = found.size() > size;
     var items = List.copyOf(found.subList(0, Math.min(size, found.size())));
     var nextCursor = hasMore && !items.isEmpty() ? encodeCursor(items.getLast()) : null;
-    var total = mongo.count(
-        query(normalizedName, normalizedCity, normalizedState), "whatsforlunch");
+    var total = restaurants.count(query(normalizedName, normalizedCity, normalizedState));
     return new Page(items, nextCursor, total);
   }
 

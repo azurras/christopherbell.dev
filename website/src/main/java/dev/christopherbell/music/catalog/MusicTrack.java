@@ -5,10 +5,8 @@ import java.time.Instant;
 import java.util.UUID;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Durable metadata for one file below the configured Music root. */
-@Document("music_tracks")
 public record MusicTrack(
     @Id String id,
     @Indexed(unique = true) String path,

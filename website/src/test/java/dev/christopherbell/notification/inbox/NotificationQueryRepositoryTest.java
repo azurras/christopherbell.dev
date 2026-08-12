@@ -15,6 +15,7 @@ import dev.christopherbell.libs.pagination.StableCursorCodec;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,7 +36,9 @@ class NotificationQueryRepositoryTest {
   @BeforeEach
   void setUp() {
     cursorCodec = new StableCursorCodec();
-    repository = new NotificationQueryRepository(mongo, cursorCodec);
+    repository = new NotificationQueryRepository(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo),
+        cursorCodec);
   }
 
   @Test
@@ -44,17 +47,24 @@ class NotificationQueryRepositoryTest {
     var timestamp = Instant.parse("2026-07-26T12:00:00Z");
     var first = notification("n2", timestamp);
     var extra = notification("n1", timestamp.minusSeconds(1));
-    when(mongo.find(any(Query.class), eq(Notification.class))).thenReturn(List.of(first, extra));
+    var documents = List.of(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, first),
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .envelope(mongo, extra));
+    when(mongo.find(any(Query.class), eq(Document.class), eq("communications")))
+        .thenReturn(documents);
 
     var result = repository.page(
         "recipient", Optional.of(new StableCursor(timestamp, "n3")), 1);
 
     var query = ArgumentCaptor.forClass(Query.class);
-    verify(mongo).find(query.capture(), eq(Notification.class));
+    verify(mongo).find(query.capture(), eq(Document.class), eq("communications"));
     assertThat(query.getValue().getQueryObject().toString())
-        .contains("accountId=recipient", "createdOn", "$lt", "_id");
+        .contains("_kind=notification", "payload.accountId=recipient", "payload.createdOn", "$lt",
+            "_id.legacyId");
     assertThat(query.getValue().getSortObject().toString())
-        .contains("createdOn=-1", "_id=-1");
+        .contains("payload.createdOn=-1", "_id.legacyId=-1");
     assertThat(query.getValue().getLimit()).isEqualTo(2);
     assertThat(result.items()).extracting(NotificationDetail::id).containsExactly("n2");
     assertThat(cursorCodec.decode(result.nextCursor()))
@@ -64,17 +74,19 @@ class NotificationQueryRepositoryTest {
   @Test
   @DisplayName("Mark all read updates only unread rows owned by the caller")
   void markAllRead_isAtomicAndOwnerScoped() {
-    when(mongo.updateMulti(any(Query.class), any(Update.class), eq(Notification.class)))
+    when(mongo.updateMulti(any(Query.class), any(Update.class), eq(Document.class),
+        eq("communications")))
         .thenReturn(UpdateResult.acknowledged(4, 3L, null));
 
     var result = repository.markAllRead("recipient");
 
     var query = ArgumentCaptor.forClass(Query.class);
     var update = ArgumentCaptor.forClass(Update.class);
-    verify(mongo).updateMulti(query.capture(), update.capture(), eq(Notification.class));
+    verify(mongo).updateMulti(query.capture(), update.capture(), eq(Document.class),
+        eq("communications"));
     assertThat(query.getValue().getQueryObject().toString())
-        .contains("accountId=recipient", "read", "$ne");
-    assertThat(update.getValue().getUpdateObject().toString()).contains("read=true");
+        .contains("_kind=notification", "payload.accountId=recipient", "payload.read", "$ne");
+    assertThat(update.getValue().getUpdateObject().toString()).contains("payload.read=true");
     assertThat(result.updatedCount()).isEqualTo(3);
   }
 

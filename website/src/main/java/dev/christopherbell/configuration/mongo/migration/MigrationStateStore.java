@@ -1,9 +1,9 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
+import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.time.Instant;
 import java.util.Optional;
-import lombok.RequiredArgsConstructor;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -11,12 +11,19 @@ import org.springframework.stereotype.Repository;
 
 /** Persists owner-scoped migration lifecycle transitions. */
 @Repository
-@RequiredArgsConstructor
 public class MigrationStateStore {
-  private final MongoTemplate mongo;
+  private final KindScopedMongoOperations<MigrationRecord> mongo;
+
+  public MigrationStateStore(DomainMongoOperationsFactory factory) {
+    this.mongo = factory.forType(MigrationRecord.class);
+  }
+
+  MigrationStateStore(KindScopedMongoOperations<MigrationRecord> mongo) {
+    this.mongo = mongo;
+  }
 
   public Optional<MigrationRecord> find(String id) {
-    return Optional.ofNullable(mongo.findById(id, MigrationRecord.class));
+    return mongo.findById(id);
   }
 
   public void start(ApplicationMigration migration, String ownerToken, Instant startedAt) {
@@ -39,10 +46,10 @@ public class MigrationStateStore {
   }
 
   private void transition(String id, String ownerToken, Update update) {
-    var query = Query.query(Criteria.where("_id").is(id)
+    var query = Query.query(Criteria.where("id").is(id)
         .and("ownerToken").is(ownerToken)
         .and("status").is(MigrationStatus.RUNNING));
-    var result = mongo.updateFirst(query, update, MigrationRecord.class);
+    var result = mongo.updateFirst(query, update);
     if (result.getMatchedCount() != 1) {
       throw new IllegalStateException("Migration state ownership was lost for " + id + ".");
     }

@@ -5,10 +5,8 @@ import java.util.List;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** One global optimistic playlist shared by every Music listener. */
-@Document("music_playlists")
 public record MusicPlaylist(
     @Id String id,
     @Indexed(unique = true) String normalizedName,

@@ -522,10 +522,12 @@ With GNU Make, run the identical inventory command:
 make prod-mongo-inventory
 ```
 
-The command connects only to `mongodb://127.0.0.1:27017/admin`, selects the
+The command connects only to the fixed loopback MongoDB listener, selects the
 `christopherbell` database inside the audited script, and returns collection
 names/types (including time-series namespaces), strictly allowlisted collection
-options, counts, storage/index sizes, and index definitions. Time-series counts
+options, counts, storage/index sizes, index definitions, the fixed manifest
+digest, compliance flags, and one metadata-only count for each of the 52
+allowlisted kinds. Time-series counts
 are `null` because `collStats` does not expose a measurement count; their size
 and index metadata remain populated. Compound-index key order is preserved.
 Integer-only collection metadata, including capped size/count limits,
@@ -549,6 +551,82 @@ Collection cleanup requires a separate approved plan with a current compressed
 backup, SHA-256, restore validation, exact-namespace backup, impact report,
 one-at-a-time removal, rollback retention, and Mongo-backed website verification.
 This command cannot rename, merge, drop, compact, repair, or clean collections.
+
+## Domain Collection Consolidation
+
+Preview without mutation:
+
+```powershell
+.\prod.cmd mongo-consolidation-preview
+```
+
+During an approved maintenance window, execute the single-lock cutover with the
+exact confirmation switch:
+
+```powershell
+.\prod.cmd mongo-consolidate -ConfirmDomainCollectionCutover
+```
+
+The command proves a fresh hash-bound, dry-restored backup and an isolated
+candidate database/port before stopping the live writer. SCM recovery remains
+suspended for live mutation. It stages and verifies the 14 targets, publishes
+the target startup barrier, re-proves the exact target snapshot while the writer
+remains stopped, and only then drops legacy collections one at a time. After the
+target-active marker is durable, it starts and verifies the target release once.
+Automatic deployment cannot initiate or confirm it.
+
+For guarded recovery use:
+
+```powershell
+.\prod.cmd mongo-consolidation-rollback -WhatIf
+.\prod.cmd mongo-consolidation-rollback -ConfirmDomainCollectionRollback
+```
+
+Before deletion, rollback reverses publication when needed and removes only
+manifest-owned staging residue before proving the legacy snapshot. After
+deletion, it first proves the stopped target snapshot is unchanged, removes
+every manifest-owned namespace, restores the exact bound backup without relying
+on `mongorestore --drop`, and independently verifies the restored evidence
+before selecting or starting the old writer. If any identity or postcondition
+cannot be proved, leave `ChristopherBellDev` stopped and preserve all evidence.
+
+Rollback crash states are durable startup gates. `ROLLBACK_IN_PROGRESS` blocks
+every service, boot, recovery, restart, and deploy launch;
+`LEGACY_DATA_VERIFIED` proves the bound archive has already been restored and
+verified; and `ROLLBACK_READY` is persisted before the compatible marker or
+legacy writer is enabled. Retry from either post-restore state never reruns
+`mongorestore`. Any finalization failure re-stops the writer and suspends SCM
+recovery before returning control to the operator. A terminal state committed
+before a later protection/readback fault is reconciled only when its exact
+legacy-compatible marker, active release, and legacy schema still match; retry
+does not perform cleanup or restore. The retry also requires and consumes the
+protected one-shot terminal reconciliation authorization; a fully completed
+rollback is not replayable.
+
+An exact completed rollback can begin a future guarded consolidation. Preview is
+read-only; confirmed cutover preserves the prior terminal JSON in protected
+`state\history` and retains its archive/evidence while creating a new backup,
+evidence, owner token, and isolated candidate. Any nonterminal or mismatched
+state/marker/release/schema blocks before those cutover effects.
+
+Before candidate work, a new consolidation writes an immutable protected
+prepublication binding, a protected one-sided reconciliation pointer, the v2
+`ROLLBACK_IN_PROGRESS` startup/deploy barrier, and then protected `PREVIEWED`
+state, all under the same `deploy.lock`. The binding includes the fresh target,
+backup, evidence, owner and candidate identities plus the exact prior marker and
+terminal-history hash. The barrier authorizes no writer start or deployment.
+Marker-first interruption restores the exact prior marker/no-marker boundary;
+committed `PREVIEWED`, `CANDIDATE_VERIFIED`, or `LIVE_PUBLISHED` state is accepted
+only with the matching barrier and binding. Candidate failure performs guarded
+`recover-prepublication` while stopped with recovery suspended, resumes the exact
+legacy release, and leaves a terminal state from which preview or a newly
+confirmed cutover may safely create fresh identities. A confirmed cutover retry
+performs the same exact cleanup before starting its new context; read-only
+preview never mutates recovery state.
+
+Routine target-schema deployments preserve the original cutover target,
+evidence digest, backup identity, and legacy release in the v2 marker while
+advancing only its current target release.
 
 ## Native MongoDB Backup and Restore
 
@@ -657,6 +735,9 @@ sidecar.
   verification: the website remains stopped and unready. Do not restart the
   prior binary; preserve the verified backup and repair forward. Restore live
   data only as a separate, explicitly approved maintenance operation.
+- Domain consolidation failure: use the protected cutover state and
+  `mongo-consolidation-rollback`; post-deletion recovery restores the bound
+  archive before the prior writer starts. Do not use generic `rollback`.
 - MongoDB failure: stop deployment activity, inspect the native MongoDB service
   and logs, and restore only from a verified archive after explicit approval.
 - cloudflared failure: restart the native service, inspect Windows events, and

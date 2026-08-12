@@ -31,22 +31,28 @@ class MongoBrowserSessionAuthenticationStoreTest {
             Role.USER,
             Set.of(AccountPermission.SHARED_FOLDER_READ),
             AccountStatus.ACTIVE));
+    var factory = dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        .create(mongo);
+    var expectedDocument =
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+            .mappedDocument(mongo, expected);
     when(mongo.aggregate(
         any(Aggregation.class),
-        eq("browser_sessions"),
-        eq(BrowserSessionAuthentication.class)))
-        .thenReturn(new AggregationResults<>(List.of(expected), new Document()));
-    var store = new MongoBrowserSessionAuthenticationStore(mongo);
+        eq("sessions"),
+        eq(Document.class)))
+        .thenReturn(new AggregationResults<>(List.of(expectedDocument), new Document()));
+    var store = new MongoBrowserSessionAuthenticationStore(factory);
 
-    assertThat(store.findById("session-1")).containsSame(expected);
+    assertThat(store.findById("session-1")).contains(expected);
 
     var aggregation = ArgumentCaptor.forClass(Aggregation.class);
     verify(mongo).aggregate(
         aggregation.capture(),
-        eq("browser_sessions"),
-        eq(BrowserSessionAuthentication.class));
+        eq("sessions"),
+        eq(Document.class));
     assertThat(aggregation.getValue().toString())
-        .contains("$match", "session-1", "$limit", "1", "$lookup", "accounts")
+        .contains("$match", "_kind", "browser_session", "session-1", "$limit", "1", "$lookup",
+            "accounts", "account")
         .contains("passwordHash", "role", "permissions", "status")
         .doesNotContain("email", "firstName", "lastName", "username");
   }
@@ -54,13 +60,16 @@ class MongoBrowserSessionAuthenticationStoreTest {
   @Test
   void findByIdReturnsEmptyWhenTheSessionCannotJoinACurrentAccount() {
     var mongo = org.mockito.Mockito.mock(MongoTemplate.class);
+    var factory = dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
+        .create(mongo);
     when(mongo.aggregate(
         any(Aggregation.class),
-        eq("browser_sessions"),
-        eq(BrowserSessionAuthentication.class)))
+        eq("sessions"),
+        eq(Document.class)))
         .thenReturn(new AggregationResults<>(List.of(), new Document()));
 
-    assertThat(new MongoBrowserSessionAuthenticationStore(mongo).findById("session-1"))
+    assertThat(new MongoBrowserSessionAuthenticationStore(factory)
+        .findById("session-1"))
         .isEmpty();
   }
 }

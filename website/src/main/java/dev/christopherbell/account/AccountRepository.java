@@ -5,18 +5,15 @@ import dev.christopherbell.account.model.AccountStatus;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.mongodb.repository.MongoRepository;
-import org.springframework.stereotype.Repository;
 
 /**
  * Repository interface for managing {@link Account} entities in MongoDB.
  *
  * <p>
- * This interface extends {@link MongoRepository}, providing CRUD operations
- * and custom query methods for the {@link Account} entity. It leverages
- * Spring Data's repository abstraction to simplify data access and manipulation.
+ * This explicit port preserves the service-facing account persistence contract.
  * </p>
  *
  * <p>
@@ -29,11 +26,15 @@ import org.springframework.stereotype.Repository;
  * queries without the need for boilerplate code.
  * </p>
  *
- * @see MongoRepository
  * @see Account
  */
-@Repository
-public interface AccountRepository extends MongoRepository<Account, String> {
+public interface AccountRepository {
+  Account save(Account account);
+  Optional<Account> findById(String id);
+  boolean existsById(String id);
+  void deleteById(String id);
+  Page<Account> findAll(Pageable pageable);
+  List<Account> findAllById(Iterable<String> ids);
 
   /**
    * Retrieves an {@link Account} by its unique email address.
@@ -93,10 +94,15 @@ public interface AccountRepository extends MongoRepository<Account, String> {
    *
    * @param username the username to search for (must not be null)
    * @return an {@link Optional} containing the matching account if found
+   * @throws IncorrectResultSizeDataAccessException if stored username case is ambiguous
    */
   Optional<Account> findByUsernameIgnoreCase(String username);
 
-  /** Resolves an active account that explicitly exposes a local federation actor. */
+  /**
+   * Resolves an active account that explicitly exposes a local federation actor.
+   *
+   * @throws IncorrectResultSizeDataAccessException if eligible stored username case is ambiguous
+   */
   Optional<Account> findByUsernameIgnoreCaseAndStatusAndFederationEnabledTrue(
       String username,
       AccountStatus status);

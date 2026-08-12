@@ -13,7 +13,9 @@ Describe 'native Windows production command surface' {
         ($output -join "`n") | Should -Match 'sensor-status'
         ($output -join "`n") | Should -Match 'sensor-enable'
         ($output -join "`n") | Should -Match 'sensor-disable'
-        ($output -join "`n") | Should -Match 'music-runtime-rollback'
+        ($output -join "`n") | Should -Match 'mongo-consolidation-preview'
+        ($output -join "`n") | Should -Match 'mongo-consolidate'
+        ($output -join "`n") | Should -Match 'mongo-consolidation-rollback'
         $LASTEXITCODE | Should -Be 0
     }
 
@@ -34,7 +36,7 @@ Describe 'native Windows production command surface' {
     It 'keeps every command handler exported after loading all modules' {
         $moduleRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\modules')).Path
         Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
-        foreach ($module in 'Production.Deploy','Production.SharedFolder','Production.Install','Production.Operations','Production.MusicRuntime','Production.AutoDeploy','Production.Sensors') {
+        foreach ($module in 'Production.Deploy','Production.DomainCollections','Production.SharedFolder','Production.Install','Production.Operations','Production.MusicRuntime','Production.AutoDeploy','Production.Sensors') {
             Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
         }
 
@@ -43,6 +45,11 @@ Describe 'native Windows production command surface' {
         }
         Get-Command Invoke-ProductionMigrationAwareRollback -ErrorAction SilentlyContinue |
             Should -Not -BeNullOrEmpty
+        foreach ($command in 'Get-ProductionDomainCollectionPreview',
+            'Invoke-ProductionDomainCollectionCutover',
+            'Invoke-ProductionDomainCollectionRollback') {
+            Get-Command $command -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
         foreach ($command in 'Install-PawnIoProvider','Get-ProductionSensorStatus','Set-ProductionSensorState') {
             Get-Command $command -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
@@ -126,50 +133,66 @@ Describe 'native Windows production command surface' {
         $makefile | Should -Match '\bprod-mongo-inventory\b'
     }
 
-    It 'routes only the bounded Music runtime rollback switches' {
+    It 'routes the read-only domain collection preview without a confirmation switch' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
-        Mock Invoke-ProductionMigrationAwareRollback {
-            [pscustomobject]@{ complete = $true }
-        }
+        Mock Get-ProductionDomainCollectionPreview { [pscustomobject]@{ complete = $true } }
 
-        $null = Invoke-ProductionCommand `
-            -Command 'music-runtime-rollback' `
-            -WhatIf `
-            -ConfirmMusicRuntimeRollback
+        $null = Invoke-ProductionCommand -Command 'mongo-consolidation-preview'
 
-        Should -Invoke Invoke-ProductionMigrationAwareRollback -Times 1 -Exactly `
-            -ParameterFilter { $WhatIf -and $Confirm }
+        Should -Invoke Get-ProductionDomainCollectionPreview -Times 1 -Exactly
     }
 
-    It 'routes confirmed Music rollback through the coordinated binary rollback boundary' {
+    It 'requires the exact domain collection cutover confirmation before routing mutation' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
-        Mock Invoke-ProductionRollback { throw 'generic rollback is unsafe' }
-        Mock Invoke-ProductionMigrationAwareRollback { }
+        Mock Invoke-ProductionDomainCollectionCutover { }
 
-        Invoke-ProductionCommand `
-            -Command 'music-runtime-rollback' `
-            -ConfirmMusicRuntimeRollback
+        { Invoke-ProductionCommand -Command 'mongo-consolidate' } |
+            Should -Throw '*requires explicit confirmation*'
+        Invoke-ProductionCommand -Command 'mongo-consolidate' `
+            -ConfirmDomainCollectionCutover
 
-        Should -Invoke Invoke-ProductionMigrationAwareRollback -Times 1 -Exactly `
+        Should -Invoke Invoke-ProductionDomainCollectionCutover -Times 1 -Exactly `
             -ParameterFilter { $Confirm -and -not $WhatIf }
-        Should -Invoke Invoke-ProductionRollback -Times 0
     }
 
-    It 'routes the explicit first Music cutover switch only to manual deploy' {
+    It 'requires the exact domain collection rollback confirmation before routing mutation' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
+        Mock Invoke-ProductionDomainCollectionRollback { }
+
+        { Invoke-ProductionCommand -Command 'mongo-consolidation-rollback' } |
+            Should -Throw '*requires explicit confirmation*'
+        Invoke-ProductionCommand -Command 'mongo-consolidation-rollback' `
+            -ConfirmDomainCollectionRollback
+
+        Should -Invoke Invoke-ProductionDomainCollectionRollback -Times 1 -Exactly `
+            -ParameterFilter { $Confirm -and -not $WhatIf }
+    }
+
+    It 'does not expose domain mutation confirmations to automatic deploy' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $script = Get-Content (Join-Path $root 'ops\production\windows\prod.ps1') -Raw
+
+        $script | Should -Match '\[switch\]\$ConfirmDomainCollectionCutover'
+        $script | Should -Match '\[switch\]\$ConfirmDomainCollectionRollback'
+        $script | Should -Not -Match "'auto-deploy'\s*=\s*\{[^}]*(ConfirmDomainCollectionCutover|ConfirmDomainCollectionRollback)"
+        $script | Should -Not -Match '\[switch\]\$MusicSchemaCutover'
+        $script | Should -Not -Match '\[switch\]\$ConfirmMusicRuntimeRollback'
+        $script | Should -Not -Match "'music-runtime-rollback'"
+    }
+
+    It 'routes ordinary deploy without any schema mutation switch' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
         Mock Invoke-ProductionDeploy { }
 
-        Invoke-ProductionCommand -Command deploy -MusicSchemaCutover
+        Invoke-ProductionCommand -Command deploy
 
         Should -Invoke Invoke-ProductionDeploy -Times 1 -Exactly -ParameterFilter {
-            $MusicSchemaCutover -and -not $Automatic
+            -not $Automatic
         }
-        $script = Get-Content (Join-Path $root 'ops\production\windows\prod.ps1') -Raw
-        $script | Should -Match '\[switch\]\$MusicSchemaCutover'
-        $script | Should -Not -Match "'auto-deploy'\s*=\s*\{[^}]*MusicSchemaCutover"
     }
 
     It 'rejects unknown commands' {

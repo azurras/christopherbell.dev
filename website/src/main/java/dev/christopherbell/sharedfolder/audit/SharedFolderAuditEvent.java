@@ -5,10 +5,8 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.index.Indexed;
-import org.springframework.data.mongodb.core.mapping.Document;
 
 /** Bounded persisted shared-folder audit event with a MongoDB TTL deadline. */
-@Document("shared_folder_audit")
 @CompoundIndexes({
     @CompoundIndex(name = "shared_audit_occurred_desc", def = "{'occurredAt': -1}"),
     @CompoundIndex(name = "shared_audit_account_occurred_desc",
