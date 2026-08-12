@@ -837,8 +837,9 @@ function Read-ProductionDomainCollectionPrepublicationBinding {
         $priorStateSha = [string]$value.priorStateSha256
         $historyFile = [string]$value.historyFile
         if ([string]::IsNullOrEmpty($priorStateSha)) {
-            if (-not [string]::IsNullOrEmpty($historyFile) -or
-                -not [string]::IsNullOrEmpty([string]$value.priorMarkerBase64)) {
+            # The Music schema marker predates the domain-cutover state file,
+            # so the first domain cutover may legitimately preserve a marker.
+            if (-not [string]::IsNullOrEmpty($historyFile)) {
                 throw 'First prepublication binding contains prior history.'
             }
         } else {

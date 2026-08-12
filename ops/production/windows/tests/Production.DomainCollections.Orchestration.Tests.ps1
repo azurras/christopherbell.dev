@@ -624,6 +624,36 @@ Describe 'guarded domain collection cutover orchestration' {
                 -ParameterFilter { $Config -eq $config }
         }
 
+        It 'preserves an existing schema marker on the first domain cutover' {
+            $root = Join-Path $TestDrive 'first-cutover-existing-marker'
+            $stateRoot = Join-Path $root 'state'
+            New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+            $markerBytes = [Text.Encoding]::UTF8.GetBytes('{"version":1,"state":"TARGET"}')
+            $context = [pscustomobject]@{
+                config = [pscustomobject]@{ programDataRoot = $root }
+                targetRelease = '2' * 40
+                legacyRelease = '1' * 40
+                backupIdentity = 'a' * 64
+                evidenceDigest = 'b' * 64
+                evidenceFileSha256 = 'c' * 64
+                ownerToken = 'd' * 32
+                candidateDatabase = 'cbell_candidate_' + ('e' * 12) + '_' + ('f' * 24)
+                priorMarkerBase64 = [Convert]::ToBase64String($markerBytes)
+                priorStateSha256 = ''
+                historyFile = ''
+            }
+            Mock Protect-ProductionPath { }
+            Mock Assert-ProtectedProductionPath { }
+            Mock Assert-ProductionPathNotReparse { }
+
+            $binding = Write-ProductionDomainCollectionPrepublicationBinding `
+                -Context $context
+
+            $binding.priorMarkerBase64 | Should -BeExactly $context.priorMarkerBase64
+            $binding.priorStateSha256 | Should -BeExactly ''
+            $binding.historyFile | Should -BeExactly ''
+        }
+
         It 'allows preview only from an exact terminal legacy rollback state' {
             $config = [pscustomobject]@{
                 programDataRoot = 'C:\ProgramData\christopherbell.dev'
