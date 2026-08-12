@@ -774,6 +774,14 @@ function Get-ProductionDomainCollectionPrepublicationReconciliationPath {
         'state\domain-collection-prepublication-reconciliation.json'
 }
 
+function Get-ProductionDomainCollectionPriorMarkerBase64 {
+    param([Parameter(Mandatory)]$Config)
+    $path = Get-ProductionMusicSchemaDirectionPath -Config $Config
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return '' }
+    $null = Read-ProductionMusicSchemaDirection -Config $Config
+    [Convert]::ToBase64String([IO.File]::ReadAllBytes($path))
+}
+
 function Read-ProductionDomainCollectionPrepublicationBinding {
     param(
         [Parameter(Mandatory)]$Config,
@@ -837,8 +845,9 @@ function Read-ProductionDomainCollectionPrepublicationBinding {
         $priorStateSha = [string]$value.priorStateSha256
         $historyFile = [string]$value.historyFile
         if ([string]::IsNullOrEmpty($priorStateSha)) {
-            if (-not [string]::IsNullOrEmpty($historyFile) -or
-                -not [string]::IsNullOrEmpty([string]$value.priorMarkerBase64)) {
+            # The Music schema marker predates the domain-cutover state file,
+            # so the first domain cutover may legitimately preserve a marker.
+            if (-not [string]::IsNullOrEmpty($historyFile)) {
                 throw 'First prepublication binding contains prior history.'
             }
         } else {
@@ -1176,10 +1185,8 @@ function New-ProductionDomainCollectionCutoverContext {
             -Config $Config -Release $legacyPath -Sha $legacyRelease) -cne 'LEGACY') {
         throw 'Domain collection cutover requires a proven legacy domain-schema release.'
     }
-    $markerPath = Get-ProductionMusicSchemaDirectionPath -Config $Config
-    $priorMarkerBase64 = if (Test-Path -LiteralPath $markerPath -PathType Leaf) {
-        [Convert]::ToBase64String([IO.File]::ReadAllBytes($markerPath))
-    } else { '' }
+    $priorMarkerBase64 = Get-ProductionDomainCollectionPriorMarkerBase64 `
+        -Config $Config
     $backup = New-ProductionDomainCollectionVerifiedBackup -Config $Config
     $owner = [guid]::NewGuid().ToString('N')
     $preview = Invoke-ProductionDomainCollectionEngine `
