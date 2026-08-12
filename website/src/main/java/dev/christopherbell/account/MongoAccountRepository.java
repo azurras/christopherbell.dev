@@ -9,6 +9,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -55,12 +56,12 @@ public final class MongoAccountRepository extends KindScopedRepositorySupport<Ac
     return findOne(Query.query(Criteria.where("username").is(username).and("status").is(status)));
   }
   @Override public Optional<Account> findByUsernameIgnoreCase(String username) {
-    return findOne(Query.query(Criteria.where("username").regex(exactIgnoreCase(username))));
+    return findUnique(Query.query(Criteria.where("username").regex(exactIgnoreCase(username))));
   }
   @Override
   public Optional<Account> findByUsernameIgnoreCaseAndStatusAndFederationEnabledTrue(
       String username, AccountStatus status) {
-    return findOne(Query.query(Criteria.where("username").regex(exactIgnoreCase(username))
+    return findUnique(Query.query(Criteria.where("username").regex(exactIgnoreCase(username))
         .and("status").is(status).and("federationEnabled").is(true)));
   }
   @Override public long countByStatus(AccountStatus status) {
@@ -89,5 +90,14 @@ public final class MongoAccountRepository extends KindScopedRepositorySupport<Ac
 
   private static Pattern exactIgnoreCase(String value) {
     return Pattern.compile("^" + Pattern.quote(value) + "$", Pattern.CASE_INSENSITIVE);
+  }
+
+  private Optional<Account> findUnique(Query query) {
+    query.limit(2);
+    var matches = find(query);
+    if (matches.size() > 1) {
+      throw new IncorrectResultSizeDataAccessException(1);
+    }
+    return matches.stream().findFirst();
   }
 }

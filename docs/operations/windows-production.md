@@ -569,9 +569,11 @@ exact confirmation switch:
 
 The command proves a fresh hash-bound, dry-restored backup and an isolated
 candidate database/port before stopping the live writer. SCM recovery remains
-suspended for live mutation. It stages and verifies the 14 targets, starts and
-verifies the target release, stops the writer again, and only then drops legacy
-collections one at a time. Automatic deployment cannot initiate or confirm it.
+suspended for live mutation. It stages and verifies the 14 targets, publishes
+the target startup barrier, re-proves the exact target snapshot while the writer
+remains stopped, and only then drops legacy collections one at a time. After the
+target-active marker is durable, it starts and verifies the target release once.
+Automatic deployment cannot initiate or confirm it.
 
 For guarded recovery use:
 

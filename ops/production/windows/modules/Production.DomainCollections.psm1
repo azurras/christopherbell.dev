@@ -1196,7 +1196,7 @@ function Invoke-ProductionDomainCollectionStageAndPublish {
     Save-ProductionDomainCollectionContextState -Context $Context -State LIVE_PUBLISHED
 }
 
-function Start-ProductionDomainCollectionTargetForVerification {
+function Prepare-ProductionDomainCollectionTargetCutover {
     param([Parameter(Mandatory)]$Context)
     Write-ProductionDomainSchemaDirection `
         -Config $Context.config -State TARGET_CUTOVER_IN_PROGRESS `
@@ -1205,12 +1205,6 @@ function Start-ProductionDomainCollectionTargetForVerification {
         -EvidenceDigest $Context.evidenceDigest `
         -BackupIdentity $Context.backupIdentity -LegacyDropped:$false | Out-Null
     Save-ProductionDomainCollectionContextState -Context $Context -State TARGET_START_PENDING
-    Switch-ProductionRelease `
-        -Config $Context.config -Release $Context.targetPath `
-        -AuthorizationMarkerState TARGET_CUTOVER_IN_PROGRESS `
-        -AuthorizationPurpose TARGET_CUTOVER `
-        -AuthorizationRelease $Context.targetRelease `
-        -KeepRecoverySuspended -WriterAlreadyStopped
 }
 
 function Invoke-ProductionDomainCollectionDropLegacy {
@@ -1688,12 +1682,17 @@ function Invoke-ProductionDomainCollectionCutover {
             Stop-ProductionDomainCollectionWriter -Context $context
             $context.writerStopped = $true
             Invoke-ProductionDomainCollectionStageAndPublish -Context $context
-            Start-ProductionDomainCollectionTargetForVerification -Context $context
-            Stop-ProductionDomainCollectionWriter -Context $context
+            Prepare-ProductionDomainCollectionTargetCutover -Context $context
             Assert-ProductionFixedRootBoundary `
                 -Config $config `
                 -FixedRoot $script:FixedProductionRoot `
                 -ExpectedBoundary $guard.Boundary | Out-Null
+            $null = Invoke-ProductionDomainCollectionEngine `
+                -Config $context.config -Database $script:ProductionDatabase `
+                -Action verify-live -OwnerToken $context.ownerToken `
+                -Release $context.targetRelease `
+                -BackupIdentity $context.backupIdentity `
+                -EvidenceDigest $context.evidenceDigest -Evidence $context.evidence
             Invoke-ProductionDomainCollectionDropLegacy -Context $context
             Complete-ProductionDomainCollectionCutover -Context $context
         } catch {

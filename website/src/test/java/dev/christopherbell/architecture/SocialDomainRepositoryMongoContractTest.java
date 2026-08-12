@@ -53,6 +53,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -144,6 +145,28 @@ class SocialDomainRepositoryMongoContractTest {
 
     repository.deleteById(alpha.getId());
     assertThat(repository.existsById(alpha.getId())).isFalse();
+  }
+
+  @Test
+  void caseInsensitiveAccountLookupRejectsStoredUsernameAmbiguity() {
+    var repository = new dev.christopherbell.account.MongoAccountRepository(factory);
+    var first = account("account-a", "alpha-a@example.test", "Alpha", AccountStatus.ACTIVE, true);
+    var second = account("account-b", "alpha-b@example.test", "alpha", AccountStatus.ACTIVE, true);
+
+    createUniqueIndex(Account.class, "username", "account_username_unique");
+    repository.save(first);
+    assertThat(repository.findByUsernameIgnoreCase("ALPHA")).contains(first);
+    assertThat(repository.findByUsernameIgnoreCaseAndStatusAndFederationEnabledTrue(
+        "ALPHA", AccountStatus.ACTIVE)).contains(first);
+
+    repository.save(second);
+    assertThatThrownBy(() -> repository.findByUsernameIgnoreCase("ALPHA"))
+        .isInstanceOf(IncorrectResultSizeDataAccessException.class);
+    assertThatThrownBy(() -> repository.findByUsernameIgnoreCase("alpha"))
+        .isInstanceOf(IncorrectResultSizeDataAccessException.class);
+    assertThatThrownBy(() -> repository
+        .findByUsernameIgnoreCaseAndStatusAndFederationEnabledTrue("ALPHA", AccountStatus.ACTIVE))
+        .isInstanceOf(IncorrectResultSizeDataAccessException.class);
   }
 
   @Test

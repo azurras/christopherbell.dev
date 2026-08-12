@@ -3,271 +3,185 @@ package dev.christopherbell.architecture;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
-import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
-import org.springframework.core.annotation.AnnotatedElementUtils;
-import org.springframework.core.type.filter.AnnotationTypeFilter;
-import org.springframework.data.mongodb.core.mapping.Document;
-import org.springframework.util.ClassUtils;
 
 class MongoCollectionCatalogTest {
   private static final Path CATALOG =
       repositoryRoot().resolve("docs/operations/mongodb-collection-catalog.md");
   private static final String CATALOG_HEADER =
-      "| Physical name | Logical name | Owner and mapping | Role | Cardinality and retention | Index contract | Sensitivity | Status |";
+      "| Physical collection | Owning module | Kind | Legacy source | Schema version | Count | Index contract | Status |";
   private static final String CATALOG_SEPARATOR =
       "| --- | --- | --- | --- | --- | --- | --- | --- |";
-  private static final String MANUAL_PROVENANCE_HEADER =
-      "| Manual owner type | Physical names |";
-  private static final String MANUAL_PROVENANCE_SEPARATOR = "| --- | --- |";
-  private static final Pattern PHYSICAL_NAME = Pattern.compile("[a-z][a-z0-9_]*");
-  private static final Pattern CODE_TOKEN = Pattern.compile("`([^`]+)`");
-  private static final Set<String> VALID_ROLES = Set.of(
-      "audit", "cache", "edge", "entity", "event-history", "job", "lease",
-      "preference", "singleton-state");
-  private static final Set<String> VALID_SENSITIVITY = Set.of(
-      "audit", "confidential", "internal", "public-reference", "security", "user");
-  private static final Set<String> VALID_STATUSES = Set.of(
-      "active", "legacy-named", "rollback-retained", "orphan-candidate", "system-managed");
-  private static final Set<String> SOURCE_BACKED_STATUSES = Set.of(
-      "active", "legacy-named", "rollback-retained");
-  private static final Map<String, Set<String>> APPROVED_SHARED_DOCUMENT_MAPPINGS = Map.of();
-  private static final Map<String, Set<String>> MANUAL_COLLECTIONS_BY_OWNER = Map.ofEntries(
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V001EnsureMigrationInfrastructure",
-          "application_leases", "application_migrations"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V002EnsureRestaurantImportPreviewIndexes",
-          "restaurant_import_previews"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V003EnsureVinPreviewCollectorIndexes",
-          "post_link_preview_cache", "scheduled_collector_runs", "vehicle_vin_decode_cache"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V004EnsureVoidDiscoveryIndexes",
-          "posts"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V005EnsureVoidPeopleDiscoveryIndexes",
-          "account_trust_relationships", "posts"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V006EnsureFederationActorIndex",
-          "accounts"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V007EnsureFederationOutboundIndexes",
-          "federation_delivery_jobs", "posts"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V008RemoveAccountApprovalFields",
-          "accounts"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V009MoveSocialRelationshipsToEdges",
-          "account_follows", "accounts", "post_likes", "posts"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V010BackfillPostExpirationMetrics",
-          "posts"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V011HardenWhatsForLunchData",
-          "whatsforlunch", "whatsforlunch_sessions"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V012RetainSharedFolderWork",
-          "shared_folder_media_jobs", "shared_folder_radio", "shared_folder_upload_sessions"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V013ConvertRestaurantRatingsToVotes",
-          "whatsforlunch_ratings"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V014ConsolidateMusicRuntimeState",
-          "music_queue_state", "music_radio_state", "music_runtime_state"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.DomainCollectionCutoverLedger",
-          "application_migrations"),
-      manualOwner("dev.christopherbell.configuration.mongo.migration.V015RequireDomainCollectionSchema",
-          "application_migrations"));
-  private static final Set<String> MONGO_TEMPLATE_INFRASTRUCTURE_OWNERS = Set.of(
-      "dev.christopherbell.admin.commandcenter.metrics.CommandCenterMetricsService",
-      "dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory",
-      "dev.christopherbell.configuration.mongo.domain.MongoKindScopedOperations",
-      "dev.christopherbell.configuration.mongo.migration.ApplicationMigration",
-      "dev.christopherbell.configuration.mongo.migration.MongoMigrationRunner");
+  private static final Pattern CANONICAL_NAME = Pattern.compile("[a-z][a-z0-9_]*");
+  private static final String MANIFEST_DIGEST =
+      "576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24";
+  private static final Set<String> EXPECTED_COLLECTIONS = Set.of(
+      "accounts", "sessions", "communications", "content", "federation", "music",
+      "whatsforlunch", "shared_folder", "vehicles", "location", "canes_box_tracker",
+      "application_runtime", "application_migrations", "admin_activity");
+  private static final Set<String> APPROVED_MODULES = Set.of(
+      "account", "admin", "canesboxtracker", "cbell-lib", "configuration", "federation",
+      "location", "message", "music", "notification", "post", "report", "sharedfolder",
+      "vehicle", "whatsforlunch");
 
   @Test
-  void catalogEntriesAreCompleteAndValid() throws IOException {
-    assertCatalogEntriesAreValid(readCatalog());
+  void catalogMatchesTheExactManifestKindByKind() throws IOException {
+    var entries = readCatalog();
+
+    assertThat(entries).containsExactlyElementsOf(expectedEntries());
+    assertThat(entries).hasSize(52);
+    assertThat(entries.stream().map(CatalogEntry::physicalCollection).collect(Collectors.toSet()))
+        .containsExactlyInAnyOrderElementsOf(EXPECTED_COLLECTIONS);
+    assertThat(entries.stream().mapToInt(CatalogEntry::kindIndexCount).sum()).isEqualTo(112);
   }
 
   @Test
-  void catalogValidationAcceptsTheFullStatusVocabulary() {
-    var entries = VALID_STATUSES.stream()
-        .map(status -> new CatalogEntry(
-            status.replace('-', '_'),
-            "Status fixture",
-            "test and `StatusDocument`",
-            "entity",
-            "One fixture",
-            "`_id`",
-            "internal",
-            status))
-        .toList();
-
-    assertCatalogEntriesAreValid(entries);
+  void manifestMatchesTheIndependentCatalogContractKindByKind() {
+    assertThat(manifestEntries()).containsExactlyElementsOf(expectedEntries());
+    assertThat(DomainCollectionManifest.ALL_COLLECTIONS)
+        .containsExactlyInAnyOrderElementsOf(EXPECTED_COLLECTIONS);
+    assertThat(DomainCollectionManifest.DIGEST).isEqualTo(MANIFEST_DIGEST);
   }
 
-  private static void assertCatalogEntriesAreValid(List<CatalogEntry> entries) {
-    assertThat(entries).extracting(CatalogEntry::physicalName).doesNotHaveDuplicates();
-    assertThat(entries).allSatisfy(entry -> {
-      assertThat(entry.physicalName()).matches(PHYSICAL_NAME);
-      assertThat(entry.logicalName()).isNotBlank();
-      assertThat(entry.ownerAndMapping()).isNotBlank();
-      assertThat(entry.role()).isIn(VALID_ROLES);
-      assertThat(entry.cardinalityAndRetention()).isNotBlank();
-      assertThat(entry.indexContract()).isNotBlank();
-      assertThat(entry.sensitivity()).isIn(VALID_SENSITIVITY);
-      assertThat(entry.status()).isIn(VALID_STATUSES);
+  @Test
+  void catalogEntriesUseOnlyCanonicalOperationalValues() throws IOException {
+    assertThat(readCatalog()).allSatisfy(entry -> {
+      assertThat(entry.physicalCollection()).matches(CANONICAL_NAME);
+      assertThat(entry.owningModule()).isIn(APPROVED_MODULES);
+      assertThat(entry.kind()).matches(CANONICAL_NAME);
+      assertThat(entry.legacySource())
+          .matches(source -> source.equals("cutover-created") || CANONICAL_NAME.matcher(source).matches());
+      assertThat(entry.schemaVersion()).isPositive();
+      assertThat(entry.count()).isEqualTo("runtime inventory");
+      assertThat(entry.manifestDigest()).isEqualTo(MANIFEST_DIGEST);
+      assertThat(entry.status()).isEqualTo("target");
     });
-  }
-
-  @Test
-  void everySourceBackedCollectionIsCatalogedSeparatelyFromClassifiedEntries() throws IOException {
-    var expected = sourceBackedCollectionNames();
-
-    assertThat(expected).hasSize(52);
-    assertSourceCoverage(readCatalog(), expected);
-  }
-
-  @Test
-  void musicRuntimeStateLifecycleHasExactStatusMembership() throws IOException {
-    var statusesByPhysicalName = readCatalog().stream()
-        .collect(Collectors.toMap(CatalogEntry::physicalName, CatalogEntry::status));
-
-    assertThat(statusesByPhysicalName)
-        .containsEntry("music_queue_state", "rollback-retained")
-        .containsEntry("music_radio_state", "rollback-retained")
-        .containsEntry("music_runtime_state", "active");
-    assertThat(statusesByPhysicalName.entrySet().stream()
-        .filter(entry -> entry.getValue().equals("rollback-retained"))
-        .map(Map.Entry::getKey))
-        .containsExactlyInAnyOrder("music_queue_state", "music_radio_state");
-  }
-
-  @Test
-  void sourceCoverageAllowsSeparatelyClassifiedNonSourceEntries() {
-    var entries = List.of(
-        catalogEntry("mapped_source", "active"),
-        catalogEntry("reviewed_extra", "orphan-candidate"),
-        catalogEntry("system_namespace", "system-managed"));
-
-    assertSourceCoverage(entries, Set.of("mapped_source"));
-  }
-
-  private static void assertSourceCoverage(
-      List<CatalogEntry> entries, Set<String> expectedSourceNames) {
-    assertThat(entries.stream()
-        .filter(entry -> SOURCE_BACKED_STATUSES.contains(entry.status()))
-        .map(CatalogEntry::physicalName))
-        .containsExactlyInAnyOrderElementsOf(expectedSourceNames);
-    assertThat(entries.stream()
-        .filter(entry -> !SOURCE_BACKED_STATUSES.contains(entry.status()))
-        .map(CatalogEntry::physicalName))
-        .doesNotContainAnyElementsOf(expectedSourceNames);
-  }
-
-  @Test
-  void catalogRecordsEveryMappedAndManualOwner() throws IOException {
-    var entriesByName = readCatalog().stream()
-        .collect(Collectors.toMap(CatalogEntry::physicalName, Function.identity()));
-    mappedDocumentOwners().forEach((collection, ownerTypes) -> {
-      var entry = entriesByName.get(collection);
-      assertThat(entry).as("catalog entry for %s", collection).isNotNull();
-      var documentedTypes = codeTokens(entry.ownerAndMapping());
-      assertThat(documentedTypes)
-          .as("mapped owner types for %s", collection)
-          .containsAll(ownerTypes.stream().map(MongoCollectionCatalogTest::simpleName).toList());
-    });
-
-    assertThat(readManualProvenance()).isEqualTo(MANUAL_COLLECTIONS_BY_OWNER);
-    var expectedMongoTemplateOwners = new TreeSet<>(MANUAL_COLLECTIONS_BY_OWNER.keySet());
-    expectedMongoTemplateOwners.addAll(MONGO_TEMPLATE_INFRASTRUCTURE_OWNERS);
-    assertThat(mongoTemplateOwnerTypes()).containsExactlyInAnyOrderElementsOf(
-        expectedMongoTemplateOwners);
-  }
-
-  @Test
-  void runtimeDomainModelsOwnNoPhysicalCollectionMappings() {
-    assertSharedDocumentMappings(mappedDocumentOwners(), APPROVED_SHARED_DOCUMENT_MAPPINGS);
-  }
-
-  @Test
-  void sharedMappingValidationRejectsAnUndocumentedPair() {
-    var owners = Map.of(
-        "unexpected_shared", Set.of("example.FirstDocument", "example.SecondDocument"));
-
-    assertThatThrownBy(() -> assertSharedDocumentMappings(owners, Map.of()))
-        .isInstanceOf(AssertionError.class)
-        .hasMessageContaining("shared document mappings");
-  }
-
-  @Test
-  void sharedMappingValidationRejectsABroadenedApprovedPair() {
-    var owners = Map.of("vehicle_import_state", Set.of(
-        "dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState",
-        "dev.christopherbell.vehicle.randomvin.model.RandomVinImportState",
-        "example.UnreviewedImportState"));
-
-    assertThatThrownBy(() -> assertSharedDocumentMappings(
-        owners, APPROVED_SHARED_DOCUMENT_MAPPINGS))
-        .isInstanceOf(AssertionError.class)
-        .hasMessageContaining("shared document mappings");
   }
 
   @Test
   void catalogRejectsMalformedDataRow(@TempDir Path temporaryDirectory) throws IOException {
     var catalog = temporaryDirectory.resolve("catalog.md");
     Files.writeString(catalog, """
-        | Physical name | Logical name | Owner and mapping | Role | Cardinality and retention | Index contract | Sensitivity | Status |
+        | Physical collection | Owning module | Kind | Legacy source | Schema version | Count | Index contract | Status |
         | --- | --- | --- | --- | --- | --- | --- | --- |
-        | `valid_collection` | Valid collection | test | entity | One document | `_id` | internal | active |
-        | malformed_collection | Malformed collection | test | entity | One document | `_id` | internal | active |
+        | `accounts` | `account` | account | `accounts` | 1 | runtime inventory | 4 kind-scoped; manifest `576fa007a848780ff8f1e21e4a492f3758ad92ed72d829a75819bdfaf41a9b24` | target |
         """);
 
     assertThatThrownBy(() -> readCatalog(catalog))
         .isInstanceOf(AssertionError.class)
-        .hasMessageContaining("catalog table row 4");
+        .hasMessageContaining("catalog table row 3 kind");
   }
 
-  private static Map<String, Set<String>> mappedDocumentOwners() {
-    var scanner = new ClassPathScanningCandidateComponentProvider(false);
-    scanner.addIncludeFilter(new AnnotationTypeFilter(Document.class));
-    var classLoader = MongoCollectionCatalogTest.class.getClassLoader();
-    var owners = new HashMap<String, Set<String>>();
-    for (var candidate : scanner.findCandidateComponents("dev.christopherbell")) {
-      var className = candidate.getBeanClassName();
-      assertThat(className).isNotBlank();
-      var documentType = ClassUtils.resolveClassName(className, classLoader);
-      var document = AnnotatedElementUtils.findMergedAnnotation(documentType, Document.class);
-      assertThat(document).as("@Document on %s", className).isNotNull();
-      assertThat(document.collection()).as("explicit collection for %s", className).isNotBlank();
-      owners.computeIfAbsent(document.collection(), ignored -> new TreeSet<>()).add(className);
+  private static List<CatalogEntry> expectedEntries() {
+    return List.of(
+      entry("accounts", "account", "account", "accounts", 4),
+      entry("accounts", "account", "account_follow", "account_follows", 2),
+      entry("accounts", "account", "account_trust_relationship", "account_trust_relationships", 4),
+      entry("accounts", "account", "account_deletion_job", "account_deletion_jobs", 0),
+      entry("sessions", "configuration", "browser_session", "browser_sessions", 2),
+      entry("sessions", "message", "conversation_archive_state", "conversation_archive_states", 1),
+      entry("communications", "message", "message", "messages", 5),
+      entry("communications", "notification", "notification", "notifications", 2),
+      entry("communications", "notification", "notification_preference", "notification_preferences", 1),
+      entry("communications", "notification", "notification_delivery_guard", "notification_delivery_guards", 1),
+      entry("communications", "notification", "notification_rate_limit", "notification_rate_limits", 1),
+      entry("content", "post", "post", "posts", 13),
+      entry("content", "post", "post_like", "post_likes", 1),
+      entry("content", "report", "post_report", "post_reports", 5),
+      entry("content", "post", "hidden_post_thread", "hidden_post_threads", 3),
+      entry("content", "post", "post_link_preview_cache", "post_link_preview_cache", 1),
+      entry("federation", "federation", "federation_scan_state", "federation_scan_state", 0),
+      entry("federation", "federation", "federation_delivery_job", "federation_delivery_jobs", 3),
+      entry("music", "music", "music_track", "music_tracks", 4),
+      entry("music", "music", "music_playlist", "music_playlists", 1),
+      entry("music", "music", "music_metadata_edit", "music_metadata_edits", 2),
+      entry("music", "music", "music_runtime_state", "music_runtime_state", 0),
+      entry("music", "music", "music_radio_history", "music_radio_history", 2),
+      entry("music", "music", "music_access_attempt", "music_access_attempts", 1),
+      entry("whatsforlunch", "whatsforlunch", "restaurant", "whatsforlunch", 6),
+      entry("whatsforlunch", "whatsforlunch", "vote", "whatsforlunch_ratings", 2),
+      entry("whatsforlunch", "whatsforlunch", "favorite", "whatsforlunch_favorites", 3),
+      entry("whatsforlunch", "whatsforlunch", "preference", "whatsforlunch_preferences", 0),
+      entry("whatsforlunch", "whatsforlunch", "session", "whatsforlunch_sessions", 4),
+      entry("whatsforlunch", "whatsforlunch", "daily_picks", "whatsforlunch_daily_picks", 0),
+      entry("whatsforlunch", "whatsforlunch", "import_state", "restaurant_import_state", 0),
+      entry("whatsforlunch", "whatsforlunch", "import_preview", "restaurant_import_previews", 2),
+      entry("shared_folder", "sharedfolder", "audit_event", "shared_folder_audit", 9),
+      entry("shared_folder", "sharedfolder", "maintenance_lease", "shared_folder_maintenance_leases", 0),
+      entry("shared_folder", "sharedfolder", "media_job", "shared_folder_media_jobs", 8),
+      entry("shared_folder", "sharedfolder", "mutation_recovery", "shared_folder_mutation_recoveries", 2),
+      entry("shared_folder", "sharedfolder", "radio_state", "shared_folder_radio", 0),
+      entry("shared_folder", "sharedfolder", "recycle_item", "shared_folder_recycle_items", 3),
+      entry("shared_folder", "sharedfolder", "upload_session", "shared_folder_upload_sessions", 5),
+      entry("vehicles", "vehicle", "vehicle", "vehicles", 1),
+      entry("vehicles", "vehicle", "vin_decode_cache", "vehicle_vin_decode_cache", 1),
+      entry("vehicles", "vehicle", "nhtsa_import_state", "vehicle_import_state", 0),
+      entry("vehicles", "vehicle", "random_vin_import_state", "vehicle_import_state", 0),
+      entry("location", "location", "zip_coordinate", "location_zip_coordinates", 0),
+      entry("location", "location", "zip_import_state", "zip_coordinate_import_state", 0),
+      entry("canes_box_tracker", "canesboxtracker", "price_snapshot", "canes_box_price_snapshots", 0),
+      entry("application_runtime", "cbell-lib", "application_lease", "application_leases", 1),
+      entry("application_runtime", "cbell-lib", "scheduled_collector_run", "scheduled_collector_runs", 1),
+      entry("application_migrations", "configuration", "migration_record", "application_migrations", 1),
+      entry("application_migrations", "configuration", "domain_collection_cutover", "cutover-created", 0),
+      entry("admin_activity", "admin", "admin_activity", "admin_activity", 4),
+      entry("admin_activity", "admin", "pending_action", "command_center_pending_actions", 0));
+  }
+
+  private static CatalogEntry entry(
+      String physicalCollection,
+      String owningModule,
+      String kind,
+      String legacySource,
+      int kindIndexCount) {
+    return new CatalogEntry(
+        physicalCollection,
+        owningModule,
+        kind,
+        legacySource,
+        1,
+        "runtime inventory",
+        kindIndexCount,
+        MANIFEST_DIGEST,
+        "target");
+  }
+
+  private static List<CatalogEntry> manifestEntries() {
+    return DomainCollectionManifest.ALL_KINDS.stream()
+        .map(kind -> new CatalogEntry(
+            kind.collection(),
+            owningModule(kind.ownerTypeName()),
+            kind.kind(),
+            kind.legacySource().orElse("cutover-created"),
+            kind.schemaVersion(),
+            "runtime inventory",
+            kind.indexes().size(),
+            DomainCollectionManifest.DIGEST,
+            "target"))
+        .toList();
+  }
+
+  private static String owningModule(String ownerTypeName) {
+    var prefix = "dev.christopherbell.";
+    assertThat(ownerTypeName).startsWith(prefix);
+    var relativeName = ownerTypeName.substring(prefix.length());
+    if (relativeName.startsWith("libs.")) {
+      return "cbell-lib";
     }
-    return owners.entrySet().stream().collect(Collectors.toUnmodifiableMap(
-        Map.Entry::getKey, entry -> Set.copyOf(entry.getValue())));
-  }
-
-  private static Set<String> sourceBackedCollectionNames() {
-    var names = new TreeSet<>(mappedDocumentOwners().keySet());
-    DomainCollectionManifest.ALL_KINDS.stream()
-        .flatMap(kind -> kind.legacySource().stream())
-        .forEach(names::add);
-    MANUAL_COLLECTIONS_BY_OWNER.values().forEach(names::addAll);
-    return names;
-  }
-
-  private static void assertSharedDocumentMappings(
-      Map<String, Set<String>> ownersByCollection,
-      Map<String, Set<String>> approvedSharedMappings
-  ) {
-    var actualSharedMappings = ownersByCollection.entrySet().stream()
-        .filter(entry -> entry.getValue().size() > 1)
-        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-    assertThat(actualSharedMappings)
-        .as("shared document mappings")
-        .isEqualTo(approvedSharedMappings);
+    var separator = relativeName.indexOf('.');
+    assertThat(separator).isPositive();
+    return relativeName.substring(0, separator);
   }
 
   private static List<CatalogEntry> readCatalog() throws IOException {
@@ -285,92 +199,12 @@ class MongoCollectionCatalogTest {
     for (var index = headerIndex + 2; index < lines.size(); index++) {
       var line = lines.get(index);
       if (line.isBlank()) {
-        return entries;
+        return List.copyOf(entries);
       }
       assertThat(line).as("catalog table row %s", index + 1).startsWith("|").endsWith("|");
       entries.add(parseCatalogRow(line, index + 1));
     }
-    return entries;
-  }
-
-  private static Map<String, Set<String>> readManualProvenance() throws IOException {
-    var lines = Files.readAllLines(CATALOG);
-    var headerIndex = lines.indexOf(MANUAL_PROVENANCE_HEADER);
-    assertThat(headerIndex).as("manual provenance header").isGreaterThanOrEqualTo(0);
-    assertThat(lines).as("manual provenance separator").hasSizeGreaterThan(headerIndex + 1);
-    assertThat(lines.get(headerIndex + 1))
-        .as("manual provenance separator")
-        .isEqualTo(MANUAL_PROVENANCE_SEPARATOR);
-
-    var provenance = new HashMap<String, Set<String>>();
-    for (var index = headerIndex + 2; index < lines.size(); index++) {
-      var line = lines.get(index);
-      if (line.isBlank()) {
-        break;
-      }
-      var cells = Arrays.stream(line.substring(1, line.length() - 1).split("\\|", -1))
-          .map(String::trim)
-          .toList();
-      assertThat(cells).as("manual provenance row %s: %s", index + 1, line).hasSize(2);
-      var owner = unquoteCode(cells.get(0), index + 1);
-      var collections = new TreeSet<>(codeTokens(cells.get(1)));
-      assertThat(collections).as("manual provenance collections for %s", owner).isNotEmpty();
-      assertThat(provenance.put(owner, Set.copyOf(collections)))
-          .as("duplicate manual provenance owner %s", owner)
-          .isNull();
-    }
-    return Map.copyOf(provenance);
-  }
-
-  private static Set<String> mongoTemplateOwnerTypes() throws IOException {
-    var sourceRoot = repositoryRoot().resolve("website/src/main/java");
-    try (var files = Files.walk(sourceRoot)) {
-      return files
-          .filter(path -> path.toString().endsWith(".java"))
-          .filter(path -> {
-            try {
-              return Files.readString(path).contains(
-                  "import org.springframework.data.mongodb.core.MongoTemplate;");
-            } catch (IOException failure) {
-              throw new IllegalStateException("Cannot read " + path, failure);
-            }
-          })
-          .map(sourceRoot::relativize)
-          .map(Path::toString)
-          .map(path -> path.substring(0, path.length() - ".java".length()))
-          .map(path -> path.replace('\\', '.').replace('/', '.'))
-          .collect(Collectors.toCollection(TreeSet::new));
-    }
-  }
-
-  private static Set<String> codeTokens(String value) {
-    var matcher = CODE_TOKEN.matcher(value);
-    var tokens = new TreeSet<String>();
-    while (matcher.find()) {
-      tokens.add(matcher.group(1));
-    }
-    return tokens;
-  }
-
-  private static String simpleName(String className) {
-    return className.substring(className.lastIndexOf('.') + 1);
-  }
-
-  private static Map.Entry<String, Set<String>> manualOwner(
-      String ownerType, String... collectionNames) {
-    return Map.entry(ownerType, Set.of(collectionNames));
-  }
-
-  private static CatalogEntry catalogEntry(String physicalName, String status) {
-    return new CatalogEntry(
-        physicalName,
-        "Fixture",
-        "test and `FixtureDocument`",
-        "entity",
-        "One fixture",
-        "`_id`",
-        "internal",
-        status);
+    return List.copyOf(entries);
   }
 
   private static CatalogEntry parseCatalogRow(String line, int lineNumber) {
@@ -378,19 +212,40 @@ class MongoCollectionCatalogTest {
         .map(String::trim)
         .toList();
     assertThat(cells).as("catalog table row %s: %s", lineNumber, line).hasSize(8);
+    var indexCells = cells.get(6).split("; manifest ", -1);
+    assertThat(indexCells).as("catalog table row %s index contract", lineNumber).hasSize(2);
+    assertThat(indexCells[0]).as("catalog table row %s index count", lineNumber)
+        .endsWith(" kind-scoped");
     return new CatalogEntry(
-        unquoteCode(cells.get(0), lineNumber),
-        cells.get(1),
-        cells.get(2),
-        cells.get(3),
-        cells.get(4),
+        unquoteCode(cells.get(0), lineNumber, "physical collection"),
+        unquoteCode(cells.get(1), lineNumber, "owning module"),
+        unquoteCode(cells.get(2), lineNumber, "kind"),
+        cells.get(3).equals("cutover-created")
+            ? cells.get(3)
+            : unquoteCode(cells.get(3), lineNumber, "legacy source"),
+        parsePositiveInt(cells.get(4), lineNumber, "schema version"),
         cells.get(5),
-        cells.get(6),
+        parseNonNegativeInt(
+            indexCells[0].substring(0, indexCells[0].length() - " kind-scoped".length()),
+            lineNumber,
+            "index count"),
+        unquoteCode(indexCells[1], lineNumber, "manifest digest"),
         cells.get(7));
   }
 
-  private static String unquoteCode(String value, int lineNumber) {
-    assertThat(value).as("catalog table row %s physical name", lineNumber)
+  private static int parsePositiveInt(String value, int lineNumber, String field) {
+    var parsed = parseNonNegativeInt(value, lineNumber, field);
+    assertThat(parsed).as("catalog table row %s %s", lineNumber, field).isPositive();
+    return parsed;
+  }
+
+  private static int parseNonNegativeInt(String value, int lineNumber, String field) {
+    assertThat(value).as("catalog table row %s %s", lineNumber, field).matches("0|[1-9][0-9]*");
+    return Integer.parseInt(value);
+  }
+
+  private static String unquoteCode(String value, int lineNumber, String field) {
+    assertThat(value).as("catalog table row %s %s", lineNumber, field)
         .startsWith("`").endsWith("`");
     return value.substring(1, value.length() - 1);
   }
@@ -408,12 +263,13 @@ class MongoCollectionCatalogTest {
   }
 
   private record CatalogEntry(
-      String physicalName,
-      String logicalName,
-      String ownerAndMapping,
-      String role,
-      String cardinalityAndRetention,
-      String indexContract,
-      String sensitivity,
+      String physicalCollection,
+      String owningModule,
+      String kind,
+      String legacySource,
+      int schemaVersion,
+      String count,
+      int kindIndexCount,
+      String manifestDigest,
       String status) {}
 }

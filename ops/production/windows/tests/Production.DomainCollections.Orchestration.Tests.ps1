@@ -12,6 +12,12 @@ Describe 'guarded domain collection cutover orchestration' {
             $script:events = [Collections.Generic.List[string]]::new()
             $script:exerciseRealCutoverContext = $false
             $script:exerciseRealRetryResolver = $false
+            $script:prepareTargetCutoverImplementation =
+                (Get-Command Prepare-ProductionDomainCollectionTargetCutover).
+                    ScriptBlock
+            $script:completeCutoverImplementation =
+                (Get-Command Complete-ProductionDomainCollectionCutover).
+                    ScriptBlock
             $script:config = [pscustomobject]@{
                 programDataRoot = 'C:\ProgramData\christopherbell.dev'
                 productionPort = 8080
@@ -21,6 +27,7 @@ Describe 'guarded domain collection cutover orchestration' {
             $script:context = [pscustomobject][ordered]@{
                 config = $script:config
                 targetRelease = '2' * 40
+                targetPath = 'C:\ProgramData\christopherbell.dev\releases\' + ('2' * 40)
                 legacyRelease = '1' * 40
                 archive = 'A:\backups\verified.archive.gz'
                 backupIdentity = 'a' * 64
@@ -78,8 +85,15 @@ Describe 'guarded domain collection cutover orchestration' {
             Mock Invoke-ProductionDomainCollectionStageAndPublish {
                 [void]$script:events.Add('stage-publish')
             }
-            Mock Start-ProductionDomainCollectionTargetForVerification {
-                [void]$script:events.Add('target-start-verify')
+            Mock Prepare-ProductionDomainCollectionTargetCutover {
+                [void]$script:events.Add('target-cutover-prepare')
+            }
+            Mock Invoke-ProductionDomainCollectionEngine {
+                if ($Action -cne 'verify-live') {
+                    throw "unexpected engine action $Action"
+                }
+                [void]$script:events.Add('stopped-target-proof')
+                [pscustomobject]@{ complete = $true }
             }
             Mock Invoke-ProductionDomainCollectionDropLegacy {
                 $Context.dropStarted = $true
@@ -112,13 +126,69 @@ Describe 'guarded domain collection cutover orchestration' {
                 'root:recheck',
                 'stop-suspended',
                 'stage-publish',
-                'target-start-verify',
-                'stop-suspended',
+                'target-cutover-prepare',
                 'root:recheck',
+                'stopped-target-proof',
                 'drop-legacy',
                 'marker-recovery-auto',
                 'lock:release')
             Should -Invoke Enter-ProductionFixedRootDeploymentLock -Times 1 -Exactly
+        }
+
+        It 'keeps the public target writer disabled until legacy deletion completes' {
+            $script:publicWriterEnabledBeforeDeletion = $false
+            $script:finalTargetVerified = $false
+            Mock Prepare-ProductionDomainCollectionTargetCutover {
+                & $script:prepareTargetCutoverImplementation -Context $Context
+            }
+            Mock Write-ProductionDomainSchemaDirection { }
+            Mock Save-ProductionDomainCollectionContextState { }
+            Mock Switch-ProductionRelease {
+                if (-not $script:context.dropStarted) {
+                    $script:publicWriterEnabledBeforeDeletion = $true
+                } else {
+                    $script:finalTargetVerified = $true
+                }
+            }
+            Mock Invoke-ProductionDomainCollectionEngine {
+                if ($Action -cne 'verify-live') {
+                    throw "unexpected engine action $Action"
+                }
+                [pscustomobject]@{ complete = $true }
+            }
+            Mock Invoke-ProductionDomainCollectionDropLegacy {
+                if ($script:publicWriterEnabledBeforeDeletion) {
+                    throw 'public target writer was enabled before legacy deletion'
+                }
+                $Context.dropStarted = $true
+            }
+            Mock Complete-ProductionDomainCollectionCutover {
+                & $script:completeCutoverImplementation -Context $Context
+            }
+            Mock Set-ProductionWebsiteRecoveryPolicy { }
+            Mock Update-ProductionAutoDeployToolsUnderHeldLock { }
+
+            { Invoke-ProductionDomainCollectionCutover -Confirm } |
+                Should -Not -Throw
+
+            $script:publicWriterEnabledBeforeDeletion | Should -BeFalse
+            $script:context.dropStarted | Should -BeTrue
+            $script:finalTargetVerified | Should -BeTrue
+        }
+
+        It 'continues to deletion when the stopped target evidence remains exact' {
+            Mock Invoke-ProductionDomainCollectionEngine {
+                if ($Action -cne 'verify-live') {
+                    throw "unexpected engine action $Action"
+                }
+                [pscustomobject]@{ complete = $true }
+            }
+
+            Invoke-ProductionDomainCollectionCutover -Confirm
+
+            $script:context.dropStarted | Should -BeTrue
+            Should -Invoke Invoke-ProductionDomainCollectionDropLegacy -Times 1 -Exactly
+            Should -Invoke Invoke-ProductionDomainCollectionFailureRecovery -Times 0
         }
 
         It 'recovers a persisted prepublication attempt under the same cutover lock' {

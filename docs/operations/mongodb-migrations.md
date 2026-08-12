@@ -76,10 +76,11 @@ Run the mutating command only in an approved maintenance window:
 The confirmation is exact; `deploy` and `auto-deploy` cannot supply it. One
 fixed `locks\deploy.lock` is held from the fresh hash-bound backup and second
 dry restore through isolated candidate proof, writer stop with SCM recovery
-suspended, live stage/publication, target start and verification, second writer
-stop, one-at-a-time legacy deletion, marker finalization, target restart,
-recovery restoration, and auto-deploy refresh. The candidate uses only a
-generated non-production database and configured candidate port.
+suspended, live stage/publication, target startup-barrier publication, stopped
+target-snapshot re-verification, one-at-a-time legacy deletion, target-active
+marker finalization, one target start and verification, recovery restoration,
+and auto-deploy refresh. The candidate uses only a generated non-production
+database and configured candidate port.
 
 Deletion is last. Before the first deletion intent, recovery reverses the
 publication when needed, removes only manifest-owned staging namespaces, proves

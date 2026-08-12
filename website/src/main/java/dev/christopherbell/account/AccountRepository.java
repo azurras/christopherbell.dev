@@ -5,6 +5,7 @@ import dev.christopherbell.account.model.AccountStatus;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -93,10 +94,15 @@ public interface AccountRepository {
    *
    * @param username the username to search for (must not be null)
    * @return an {@link Optional} containing the matching account if found
+   * @throws IncorrectResultSizeDataAccessException if stored username case is ambiguous
    */
   Optional<Account> findByUsernameIgnoreCase(String username);
 
-  /** Resolves an active account that explicitly exposes a local federation actor. */
+  /**
+   * Resolves an active account that explicitly exposes a local federation actor.
+   *
+   * @throws IncorrectResultSizeDataAccessException if eligible stored username case is ambiguous
+   */
   Optional<Account> findByUsernameIgnoreCaseAndStatusAndFederationEnabledTrue(
       String username,
       AccountStatus status);
