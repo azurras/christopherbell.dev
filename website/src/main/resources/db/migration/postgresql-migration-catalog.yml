@@ -150,8 +150,8 @@ kinds:
     identifierType: string
     targetSchema: communication
     targetTables: [conversation_archive_state, conversation_archive_participant]
-    loadOrder: 200
-    dependsOnKinds: [account]
+    loadOrder: 215
+    dependsOnKinds: [account, message]
     keyMapping: {sourcePath: id, targetColumn: conversation_archive_state.archive_state_id, preservation: exact}
     fieldMappings:
       ownerAccountId: {targets: [conversation_archive_state.owner_account_id], conversion: string, missing: reject, nullValue: reject}
@@ -201,8 +201,8 @@ kinds:
     identifierType: string
     targetSchema: communication
     targetTables: [notification]
-    loadOrder: 220
-    dependsOnKinds: [account]
+    loadOrder: 645
+    dependsOnKinds: [account, message, post, session]
     keyMapping: {sourcePath: id, targetColumn: notification.notification_id, preservation: exact}
     fieldMappings:
       type: {targets: [], conversion: constant-kind, missing: allow, nullValue: allow}
@@ -681,7 +681,7 @@ kinds:
     targetSchema: lunch
     targetTables: [restaurant]
     loadOrder: 600
-    dependsOnKinds: []
+    dependsOnKinds: [account]
     keyMapping: {sourcePath: id, targetColumn: restaurant.restaurant_id, preservation: exact}
     fieldMappings:
       type: {targets: [], conversion: constant-kind, missing: allow, nullValue: allow}
@@ -1126,7 +1126,7 @@ kinds:
     targetSchema: mobility
     targetTables: [vehicle, vehicle_decoded_value]
     loadOrder: 800
-    dependsOnKinds: []
+    dependsOnKinds: [account]
     keyMapping: {sourcePath: id, targetColumn: vehicle.vehicle_id, preservation: exact}
     fieldMappings:
       type: {targets: [], conversion: constant-kind, missing: allow, nullValue: allow}
@@ -1184,7 +1184,7 @@ kinds:
     dependsOnKinds: []
     keyMapping: {sourcePath: vin, targetColumn: vin_decode_cache.vin, preservation: exact}
     fieldMappings:
-      response: {targets: [vin_decode_cache.response_vin, vin_decode_cache.make, vin_decode_cache.model, vin_decode_cache.model_year, vin_decode_cache.body, vin_decode_cache.plant_city, vin_decode_cache.plant_state, vin_decode_cache.plant_country, vin_decode_cache.error_code, vin_decode_cache.error_text, vin_decode_raw_value.field_name, vin_decode_raw_value.field_value], conversion: record-flattened, missing: allow, nullValue: allow}
+      response: {targets: [vin_decode_cache.response_vin, vin_decode_cache.make, vin_decode_cache.model, vin_decode_cache.model_year, vin_decode_cache.body, vin_decode_cache.plant_city, vin_decode_cache.plant_state, vin_decode_cache.plant_country, vin_decode_cache.error_code, vin_decode_cache.error_text, vin_decode_raw_value.field_name, vin_decode_raw_value.field_value], conversion: vin-response-flattened, missing: allow, nullValue: allow}
       decoderVersion: {targets: [vin_decode_cache.decoder_version], conversion: string, missing: allow, nullValue: allow}
       refreshedOn: {targets: [vin_decode_cache.refreshed_on], conversion: instant-utc, missing: allow, nullValue: allow}
       expiresOn: {targets: [vin_decode_cache.expires_on], conversion: instant-utc, missing: allow, nullValue: allow}

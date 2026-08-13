@@ -37,7 +37,7 @@ class PostgresqlJooqSchemaToolTest {
         "JOOQ_CODEGEN_JDBC_URL", required("SPRING_DATASOURCE_URL"),
         "JOOQ_CODEGEN_USERNAME", required("SPRING_DATASOURCE_USERNAME"),
         "JOOQ_CODEGEN_PASSWORD", required("SPRING_DATASOURCE_PASSWORD"),
-        "JOOQ_CODEGEN_SCHEMA", prefix);
+        "JOOQ_CODEGEN_SCHEMA_PREFIX", prefix);
 
     PostgresqlJooqSchemaTool.run("prepare", environment, temporaryDirectory);
     var ownershipFile = onlyOwnershipFile();

@@ -1,6 +1,7 @@
 package dev.christopherbell.configuration.persistence.migration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import java.io.InputStream;
@@ -70,6 +71,48 @@ class PostgresqlMigrationCatalogTest {
     });
   }
 
+  @Test
+  void nullableSourceStatesAndVinResponseUseLosslessConversions() {
+    var byKind = loadCatalog().kinds().stream().collect(Collectors.toUnmodifiableMap(
+        PostgresqlMigrationCatalog.Kind::sourceKind, Function.identity()));
+
+    var vinCache = byKind.get("vin_decode_cache");
+    assertThat(vinCache.fieldMappings().get("response"))
+        .extracting(
+            PostgresqlMigrationCatalog.FieldMapping::conversion,
+            PostgresqlMigrationCatalog.FieldMapping::missing,
+            PostgresqlMigrationCatalog.FieldMapping::nullValue)
+        .containsExactly("vin-response-flattened", "allow", "allow");
+    assertThat(Set.of("createdOn", "expiresOn", "lastUpdatedOn", "refreshedOn"))
+        .allSatisfy(field -> assertThat(vinCache.fieldMappings().get(field))
+            .extracting(
+                PostgresqlMigrationCatalog.FieldMapping::missing,
+                PostgresqlMigrationCatalog.FieldMapping::nullValue)
+            .containsExactly("allow", "allow"));
+
+    assertThat(byKind.get("preference").fieldMappings().get("radiusMiles"))
+        .extracting(
+            PostgresqlMigrationCatalog.FieldMapping::conversion,
+            PostgresqlMigrationCatalog.FieldMapping::missing,
+            PostgresqlMigrationCatalog.FieldMapping::nullValue)
+        .containsExactly("integer", "allow", "allow");
+  }
+
+  @Test
+  void referencedKindCannotLoadAfterItsReferencingKind() {
+    var catalog = loadCatalog();
+    var invalidKinds = catalog.kinds().stream()
+        .map(kind -> kind.sourceKind().equals("notification")
+            ? withLoadOrder(kind, 205)
+            : kind)
+        .toList();
+
+    assertThatThrownBy(() -> PostgresqlMigrationCatalogValidator.validate(
+        new PostgresqlMigrationCatalog(catalog.version(), invalidKinds)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("notification.dependsOnKinds");
+  }
+
   private static PostgresqlMigrationCatalog loadCatalog() {
     try (InputStream input = PostgresqlMigrationCatalogTest.class.getClassLoader()
         .getResourceAsStream(RESOURCE)) {
@@ -78,6 +121,29 @@ class PostgresqlMigrationCatalogTest {
     } catch (java.io.IOException failure) {
       throw new IllegalStateException("Migration catalog resource could not be closed.", failure);
     }
+  }
+
+  private static PostgresqlMigrationCatalog.Kind withLoadOrder(
+      PostgresqlMigrationCatalog.Kind kind, int loadOrder) {
+    return new PostgresqlMigrationCatalog.Kind(
+        kind.sourceCollection(),
+        kind.sourceKind(),
+        kind.sourceSchemaVersion(),
+        kind.transformerVersion(),
+        kind.identifierType(),
+        kind.targetSchema(),
+        kind.targetTables(),
+        loadOrder,
+        kind.dependsOnKinds(),
+        kind.keyMapping(),
+        kind.fieldMappings(),
+        kind.deleteBehavior(),
+        kind.versionSemantics(),
+        kind.expirySemantics(),
+        kind.canonicalHash(),
+        kind.reconciliation(),
+        kind.portQueries(),
+        kind.transformerClass());
   }
 
   private static Set<String> persistedFields(

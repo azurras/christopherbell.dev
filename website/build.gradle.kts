@@ -97,14 +97,29 @@ val canonicalJooqSchemas = listOf(
 val jooqJdbcUrl = providers.environmentVariable("JOOQ_CODEGEN_JDBC_URL")
 val jooqUsername = providers.environmentVariable("JOOQ_CODEGEN_USERNAME")
 val jooqPassword = providers.environmentVariable("JOOQ_CODEGEN_PASSWORD")
-val jooqSchemaPrefix = providers.environmentVariable("JOOQ_CODEGEN_SCHEMA")
-val jooqEnvironment = listOf(jooqJdbcUrl, jooqUsername, jooqPassword, jooqSchemaPrefix)
-val jooqEnvironmentConfigured = jooqEnvironment.all { it.isPresent }
+val jooqSchemaPrefix = providers.environmentVariable("JOOQ_CODEGEN_SCHEMA_PREFIX")
+val jooqEnvironment = listOf(
+    "JOOQ_CODEGEN_JDBC_URL" to jooqJdbcUrl,
+    "JOOQ_CODEGEN_USERNAME" to jooqUsername,
+    "JOOQ_CODEGEN_PASSWORD" to jooqPassword,
+    "JOOQ_CODEGEN_SCHEMA_PREFIX" to jooqSchemaPrefix)
+val presentJooqEnvironment = jooqEnvironment.filter { (_, value) -> value.isPresent }
+val invalidJooqEnvironment = jooqEnvironment.filterNot { (_, value) ->
+    value.isPresent && value.get().isNotBlank()
+}
+if (presentJooqEnvironment.isNotEmpty() && invalidJooqEnvironment.isNotEmpty()) {
+    throw GradleException(
+        "Partial jOOQ generation environment is not allowed; missing or blank: "
+            + "${invalidJooqEnvironment.map { (name, _) -> name }.joinToString()}.")
+}
+val jooqEnvironmentConfigured = invalidJooqEnvironment.isEmpty()
 val generatedJooqDirectory = layout.buildDirectory.dir("generated-src/jooq/main")
 val jooqOwnershipDirectory = layout.buildDirectory.dir("jooq/ownership")
 
 sourceSets.named("main") {
-    java.srcDir(generatedJooqDirectory)
+    if (jooqEnvironmentConfigured) {
+        java.srcDir(generatedJooqDirectory)
+    }
 }
 
 val jooqPreparation = sourceSets.create("jooqPreparation") {
@@ -117,11 +132,7 @@ configurations[jooqPreparation.runtimeOnlyConfigurationName]
     .extendsFrom(configurations["runtimeOnly"])
 
 fun requireCompleteJooqEnvironment() {
-    val missing = listOf(
-        "JOOQ_CODEGEN_JDBC_URL" to jooqJdbcUrl,
-        "JOOQ_CODEGEN_USERNAME" to jooqUsername,
-        "JOOQ_CODEGEN_PASSWORD" to jooqPassword,
-        "JOOQ_CODEGEN_SCHEMA" to jooqSchemaPrefix)
+    val missing = jooqEnvironment
         .filterNot { (_, value) -> value.isPresent && value.get().isNotBlank() }
         .map { (name, _) -> name }
     if (missing.isNotEmpty()) {
@@ -198,7 +209,11 @@ jooq {
 tasks.named("jooqCodegen") {
     dependsOn(prepareJooqSchema)
     finalizedBy(cleanJooqSchema)
-    doFirst { requireCompleteJooqEnvironment() }
+    outputs.upToDateWhen { false }
+    doFirst {
+        requireCompleteJooqEnvironment()
+        delete(generatedJooqDirectory)
+    }
 }
 
 if (jooqEnvironmentConfigured) {

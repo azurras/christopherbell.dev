@@ -54,18 +54,18 @@ public final class PostgresqlJooqSchemaTool {
   static void requireOwnedPrefix(String prefix) {
     if (!OWNED_PREFIX.matcher(prefix).matches()) {
       throw new IllegalStateException(
-          "JOOQ_CODEGEN_SCHEMA must be an owned cbtest_<run>_ prefix.");
+          "JOOQ_CODEGEN_SCHEMA_PREFIX must be an owned cbtest_<run>_ prefix.");
     }
     if (prefix.length() + LONGEST_DOMAIN.length() > POSTGRESQL_IDENTIFIER_LIMIT) {
       throw new IllegalStateException(
-          "JOOQ_CODEGEN_SCHEMA must keep every full schema identifier within 63 bytes.");
+          "JOOQ_CODEGEN_SCHEMA_PREFIX must keep every full schema identifier within 63 bytes.");
     }
   }
 
   private record Configuration(
       String url, String username, String password, String prefix, Path ownershipDirectory) {
     static Configuration from(Map<String, String> environment, Path ownershipDirectory) {
-      var prefix = required(environment, "JOOQ_CODEGEN_SCHEMA");
+      var prefix = required(environment, "JOOQ_CODEGEN_SCHEMA_PREFIX");
       requireOwnedPrefix(prefix);
       return new Configuration(
           required(environment, "JOOQ_CODEGEN_JDBC_URL"),
@@ -95,8 +95,8 @@ public final class PostgresqlJooqSchemaTool {
         cleanTargetClaimed = true;
         try {
           var result = flyway().migrate();
-          if (result.migrationsExecuted != 4) {
-            throw new IllegalStateException("Expected exactly four canonical Flyway migrations.");
+          if (result.migrationsExecuted != 5) {
+            throw new IllegalStateException("Expected exactly five canonical Flyway migrations.");
           }
           insertOwnershipMarker(lockConnection, ownerToken);
           prepared = true;

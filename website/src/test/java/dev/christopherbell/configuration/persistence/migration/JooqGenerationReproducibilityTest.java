@@ -3,14 +3,18 @@ package dev.christopherbell.configuration.persistence.migration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
+import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import javax.tools.ToolProvider;
+import org.jooq.Field;
 import org.jooq.codegen.GenerationTool;
 import org.jooq.meta.jaxb.Configuration;
 import org.jooq.meta.jaxb.Database;
@@ -42,7 +46,52 @@ class JooqGenerationReproducibilityTest {
         .allMatch(source -> !source.contains(first.prefix()) && !source.contains(second.prefix()));
     assertThat(first.sources().keySet()).anyMatch(path -> path.endsWith("Identity.java"));
     assertThat(first.sources().keySet()).anyMatch(path -> path.endsWith("Restaurant.java"));
+    assertGeneratedVinAndPreferenceTypes(first);
     System.out.println("Canonical jOOQ source SHA-256: " + firstHash);
+  }
+
+  private void assertGeneratedVinAndPreferenceTypes(GeneratedSources generated) throws Exception {
+    var classes = temporaryDirectory.resolve("compiled-generated");
+    Files.createDirectories(classes);
+    var compiler = ToolProvider.getSystemJavaCompiler();
+    assertThat(compiler).as("JDK compiler").isNotNull();
+    try (var files = compiler.getStandardFileManager(null, null, StandardCharsets.UTF_8)) {
+      var sourcePaths = generated.sources().keySet().stream()
+          .map(generated.root()::resolve)
+          .toList();
+      var units = files.getJavaFileObjectsFromPaths(sourcePaths);
+      var compiled = compiler.getTask(
+          null,
+          files,
+          null,
+          List.of("-classpath", System.getProperty("java.class.path"), "-d", classes.toString()),
+          null,
+          units).call();
+      assertThat(compiled).isTrue();
+    }
+
+    try (var loader = new URLClassLoader(
+        new java.net.URL[] {classes.toUri().toURL()}, getClass().getClassLoader())) {
+      var vinTable = generatedTable(loader,
+          "dev.christopherbell.persistence.jooq.mobility.tables.VinDecodeCache",
+          "VIN_DECODE_CACHE");
+      var body = (Field<?>) vinTable.getClass().getField("BODY").get(vinTable);
+      assertThat(body.getDataType().getType()).isEqualTo(String.class);
+      assertThat(body.getDataType().nullable()).isTrue();
+
+      var preferenceTable = generatedTable(loader,
+          "dev.christopherbell.persistence.jooq.lunch.tables.LunchPreference",
+          "LUNCH_PREFERENCE");
+      var radius = (Field<?>) preferenceTable.getClass().getField("RADIUS_MILES")
+          .get(preferenceTable);
+      assertThat(radius.getDataType().nullable()).isTrue();
+    }
+  }
+
+  private static Object generatedTable(
+      ClassLoader loader, String className, String singletonField) throws Exception {
+    var tableClass = Class.forName(className, true, loader);
+    return tableClass.getField(singletonField).get(null);
   }
 
   private static GeneratedSources generateFromCleanSchema(Path target) throws Exception {
@@ -81,7 +130,7 @@ class JooqGenerationReproducibilityTest {
               .withTarget(new Target()
                   .withPackageName(PACKAGE_NAME)
                   .withDirectory(target.toString()))));
-      return new GeneratedSources(database.prefix(), readSources(target));
+      return new GeneratedSources(database.prefix(), target, readSources(target));
     }
   }
 
@@ -119,5 +168,5 @@ class JooqGenerationReproducibilityTest {
     }
   }
 
-  private record GeneratedSources(String prefix, Map<String, String> sources) {}
+  private record GeneratedSources(String prefix, Path root, Map<String, String> sources) {}
 }

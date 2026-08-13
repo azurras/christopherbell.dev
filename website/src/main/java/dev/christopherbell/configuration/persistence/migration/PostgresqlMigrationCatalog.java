@@ -23,8 +23,9 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
   private static final Set<String> CONVERSIONS = Set.of(
       "string", "uuid-string", "enum-name", "instant-utc", "local-date", "integer",
       "long", "boolean", "decimal-12-2", "decimal-20-9", "double", "byte-array",
-      "record-flattened", "record-child", "string-list-child", "string-set-child",
-      "string-map-child", "record-list-child", "constant-kind", "preserve-ledger");
+      "record-flattened", "vin-response-flattened", "record-child", "string-list-child",
+      "string-set-child", "string-map-child", "record-list-child", "constant-kind",
+      "preserve-ledger");
   private static final Set<String> PRESENCE_RULES = Set.of("reject", "allow", "empty", "default");
   private static final Set<String> DELETE_BEHAVIORS = Set.of(
       "preserve", "cascade", "set-null", "restrict", "ledger-state");
