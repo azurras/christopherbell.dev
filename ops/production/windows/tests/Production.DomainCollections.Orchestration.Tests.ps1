@@ -2061,6 +2061,43 @@ Describe 'domain collection rollback and isolated candidate boundaries' {
                     -CandidatePort 8080 -ProductionPort 8080 } |
                 Should -Throw '*candidate port*'
         }
+
+        It 'deletes and verifies candidate legacy data before candidate smoke can write' {
+            $events = [Collections.Generic.List[string]]::new()
+            $context = [pscustomobject]@{
+                config = [pscustomobject]@{ candidatePort=8081; productionPort=8080 }
+                candidateDatabase = 'cbell_candidate_aaaaaaaaaaaa_aaaaaaaaaaaaaaaaaaaaaaaa'
+                archive = 'A:\backups\exact.archive.gz'
+                ownerToken = '1' * 32
+                targetRelease = '2' * 40
+                targetPath = 'A:\releases\target'
+                backupIdentity = '3' * 64
+                evidenceDigest = '4' * 64
+                evidence = [pscustomobject]@{ version=1 }
+            }
+            Mock Assert-ProductionDomainCollectionCandidateIsolation { }
+            Mock Restore-CandidateDatabaseFromBackup { }
+            Mock Invoke-ProductionDomainCollectionUntilComplete {
+                [void]$events.Add("engine:$Action")
+                [pscustomobject]@{ complete=$true }
+            }
+            Mock Invoke-ProductionDomainCollectionEngine {
+                [void]$events.Add("verify:$Action")
+                [pscustomobject]@{ complete=$true }
+            }
+            Mock Test-CandidateRelease { [void]$events.Add('candidate-smoke') }
+            Mock Save-ProductionDomainCollectionContextState {
+                [void]$events.Add("state:$State")
+            }
+            Mock Remove-CandidateDatabase { }
+
+            Invoke-ProductionDomainCollectionCandidateProof -Context $context
+
+            $events | Should -Be @(
+                'verify:restore-verify','engine:stage','verify:verify-stage','engine:publish-next',
+                'verify:verify-live','engine:drop-legacy','verify:verify-live',
+                'candidate-smoke','state:CANDIDATE_VERIFIED')
+        }
     }
 }
 

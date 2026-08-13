@@ -1344,8 +1344,6 @@ function Invoke-ProductionDomainCollectionCandidateProof {
             -OwnerToken $Context.ownerToken -Release $Context.targetRelease `
             -BackupIdentity $Context.backupIdentity `
             -EvidenceDigest $Context.evidenceDigest -Evidence $Context.evidence
-        Test-CandidateRelease `
-            -Config $Context.config -Release $Context.targetPath -Database $database
         $null = Invoke-ProductionDomainCollectionUntilComplete `
             -Context $Context -Database $database -Action drop-legacy
         $null = Invoke-ProductionDomainCollectionEngine `
@@ -1353,6 +1351,8 @@ function Invoke-ProductionDomainCollectionCandidateProof {
             -OwnerToken $Context.ownerToken -Release $Context.targetRelease `
             -BackupIdentity $Context.backupIdentity `
             -EvidenceDigest $Context.evidenceDigest -Evidence $Context.evidence
+        Test-CandidateRelease `
+            -Config $Context.config -Release $Context.targetPath -Database $database
         Save-ProductionDomainCollectionContextState `
             -Context $Context -State CANDIDATE_VERIFIED
     } finally {

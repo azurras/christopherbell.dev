@@ -82,7 +82,9 @@ publication, stopped target-snapshot re-verification, one-at-a-time legacy
 deletion, target-active marker finalization, one target start and verification,
 recovery restoration, and auto-deploy refresh. The maintenance window therefore
 includes candidate verification. The candidate uses only a generated
-non-production database and configured candidate port.
+non-production database and configured candidate port; its legacy collections
+are deleted and the resulting target snapshot is verified before application
+smoke traffic can create target-schema runtime records.
 
 Deletion is last. Before the first deletion intent, recovery reverses the
 publication when needed, removes only manifest-owned staging namespaces, proves

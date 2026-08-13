@@ -569,8 +569,10 @@ exact confirmation switch:
 
 The command first stops the exact live legacy writer with SCM recovery
 suspended, then creates the fresh hash-bound backup and protected evidence from
-that quiesced snapshot. It dry-restores and proves an isolated candidate
-database/port against the same snapshot, stages and verifies the 14 live targets,
+that quiesced snapshot. It dry-restores an isolated candidate, stages and verifies
+the 14 candidate targets, deletes and verifies candidate legacy data, and only
+then boots the candidate application on its isolated database/port. It next
+stages and verifies the 14 live targets,
 publishes the target startup barrier, re-proves the exact target snapshot while
 the writer remains stopped, and only then drops legacy collections one at a
 time. The maintenance window includes candidate verification. A failed writer
