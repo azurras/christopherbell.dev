@@ -14,9 +14,8 @@ class DomainCollectionReleaseMetadataTest {
   private static final String RELEASE = "a".repeat(40);
 
   @Test
-  void springSelectsTheProductionInjectionConstructor() {
+  void springCreatesProductionMetadataWithoutAnObjectMapperBean() {
     try (var context = new AnnotationConfigApplicationContext()) {
-      context.registerBean(ObjectMapper.class);
       context.register(DomainCollectionReleaseMetadata.class);
       context.refresh();
 

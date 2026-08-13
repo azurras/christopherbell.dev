@@ -24,9 +24,9 @@ public final class DomainCollectionReleaseMetadata {
 
   @Autowired
   public DomainCollectionReleaseMetadata(
-      ObjectMapper mapper,
       @Value("${GIT_COMMIT:}") String expectedRelease) {
-    this(mapper, expectedRelease, Path.of("release.json").toAbsolutePath().normalize());
+    this(new ObjectMapper(), expectedRelease,
+        Path.of("release.json").toAbsolutePath().normalize());
   }
 
   DomainCollectionReleaseMetadata(
