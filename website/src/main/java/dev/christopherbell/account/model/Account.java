@@ -18,6 +18,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
 
 /**
@@ -41,6 +42,9 @@ public class Account {
 
   @Id
   private String id;
+
+  @Version
+  private Long version;
 
   @CreatedBy
   private String createdBy;

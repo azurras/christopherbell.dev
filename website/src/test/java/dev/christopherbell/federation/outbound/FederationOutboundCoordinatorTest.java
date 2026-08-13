@@ -3,6 +3,8 @@ package dev.christopherbell.federation.outbound;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.nullable;
 
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
@@ -123,6 +125,9 @@ class FederationOutboundCoordinatorTest {
     var posts = mock(PostRepository.class);
     var accounts = mock(AccountRepository.class);
     when(posts.findById("post-1")).thenReturn(Optional.of(post("post-1", true)));
+    when(posts.findFederationEligibleAfter(
+        nullable(Instant.class), nullable(String.class), anyInt()))
+        .thenReturn(List.copyOf(store.scan));
     when(accounts.findById("account-123")).thenReturn(Optional.of(account));
     return new FederationOutboundCoordinator(
         properties,
@@ -211,11 +216,6 @@ class FederationOutboundCoordinatorTest {
     @Override
     public FederationScanCursor loadCursor() {
       return cursor;
-    }
-
-    @Override
-    public List<Post> scanEligibleAfter(FederationScanCursor ignored, int limit) {
-      return List.copyOf(scan);
     }
 
     @Override

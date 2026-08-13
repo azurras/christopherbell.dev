@@ -35,6 +35,7 @@ kinds:
       status: {targets: [account.status], conversion: enum-name, missing: reject, nullValue: reject}
       pendingModerationAudit: {targets: [account_moderation_audit.event_id, account_moderation_audit.actor_account_id, account_moderation_audit.actor_username, account_moderation_audit.action, account_moderation_audit.target_type, account_moderation_audit.target_id, account_moderation_audit.target_label, account_moderation_audit.reason, account_moderation_audit.message, account_moderation_audit_value.value], conversion: record-child, missing: allow, nullValue: allow}
       username: {targets: [account.username], conversion: string, missing: reject, nullValue: reject}
+      version: {targets: [account.version], conversion: long, missing: default, nullValue: default}
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: preserve-deadline

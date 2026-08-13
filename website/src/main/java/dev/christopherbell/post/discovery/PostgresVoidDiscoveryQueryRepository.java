@@ -72,8 +72,8 @@ public final class PostgresVoidDiscoveryQueryRepository implements VoidDiscovery
     var loaded = database.selectFrom(POST).where(condition)
         .orderBy(POST.CREATED_ON.desc(), POST.POST_ID.desc())
         .limit(size + 1)
-        .fetch(record -> PostgresPostMapper.map(database, record));
-    return postPage(loaded, size, Post::getCreatedOn);
+        .fetch();
+    return postPage(PostgresPostMapper.mapAll(database, loaded), size, Post::getCreatedOn);
   }
 
   @Override
@@ -125,8 +125,8 @@ public final class PostgresVoidDiscoveryQueryRepository implements VoidDiscovery
     var loaded = database.selectFrom(POST).where(condition)
         .orderBy(field.sort(direction), POST.POST_ID.sort(direction))
         .limit(size + 1)
-        .fetch(record -> PostgresPostMapper.map(database, record));
-    return postPage(loaded, size, timestamp);
+        .fetch();
+    return postPage(PostgresPostMapper.mapAll(database, loaded), size, timestamp);
   }
 
   private VoidDiscoveryPage<Post> postPage(

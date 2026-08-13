@@ -24,12 +24,13 @@ Owns Void posts and feed behavior.
 
 - `PostService` delegates business rules to subfeature services so creation,
   feeds, threads, interactions, expiration, and link previews can change independently.
-- `PostRepository` is the Mongo boundary. Service code asks it for already-sorted
-  post sets instead of sorting in memory.
-- The post document declares targeted Mongo indexes for global/user feeds,
-  account reply counts, thread reads, parent reply counts, and expiration
-  cleanup. Production rollout should allow time for these indexes to build on
-  existing collections.
+- `PostRepository` is the persistence-neutral boundary. The selected MongoDB or
+  PostgreSQL adapter returns already-sorted post sets instead of making service
+  code sort in memory.
+- MongoDB document indexes and PostgreSQL relational indexes cover global/user
+  feeds, account reply counts, thread reads, parent reply counts, and expiration
+  cleanup. Migration rollout must verify the matching index strategy before
+  selecting either backend.
 - `PostMapper` maps persistence entities to detail DTOs when feed-specific
   fields are not needed.
 - Feed endpoints use the feed service for page sizing,
@@ -68,7 +69,7 @@ Owns Void posts and feed behavior.
   SNI, and TLS hostname identity remain intact; network deadlines,
   redirect count, bytes, content types, URL count, and metadata lengths are
   configured under `posts.link-previews`. Successes and safe failure categories
-  use separate Mongo TTLs. The server does not execute JavaScript or proxy
+  use equivalent expiry cleanup in MongoDB and PostgreSQL. The server does not execute JavaScript or proxy
   preview images. A preview fetch failure leaves the
   post intact; shared browser rendering still makes the raw URL clickable. The
   shared feed renderer upgrades allowlisted providers into richer cards without

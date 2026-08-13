@@ -38,10 +38,11 @@ public final class PostgresReportQueryService implements ReportQueryPort {
         .orderBy(POST_REPORT.CREATED_ON.desc(), POST_REPORT.POST_REPORT_ID.desc())
         .limit(request.size())
         .offset(Math.multiplyExact(request.page(), request.size()))
-        .fetch(record -> PostgresReportRepository.map(database, record));
-    includeRepeatReportContext(items);
+        .fetch();
+    var mapped = PostgresReportRepository.mapAll(database, items);
+    includeRepeatReportContext(mapped);
     int pages = total == 0 ? 0 : Math.toIntExact(((total - 1) / request.size()) + 1);
-    return new ReportPage(items, request.page(), request.size(), total, pages);
+    return new ReportPage(mapped, request.page(), request.size(), total, pages);
   }
 
   private static Condition condition(ReportQuery request) {
@@ -61,13 +62,24 @@ public final class PostgresReportQueryService implements ReportQueryPort {
   }
 
   private void includeRepeatReportContext(List<PostReport> items) {
+    var accountIds = items.stream().map(PostReport::getReportedAccountId)
+        .filter(id -> id != null && !id.isBlank()).collect(java.util.stream.Collectors.toSet());
     var counts = new HashMap<String, long[]>();
+    if (!accountIds.isEmpty()) {
+      database.select(POST_REPORT.REPORTED_ACCOUNT_ID, POST_REPORT.STATUS, DSL.count())
+          .from(POST_REPORT)
+          .where(POST_REPORT.REPORTED_ACCOUNT_ID.in(accountIds))
+          .groupBy(POST_REPORT.REPORTED_ACCOUNT_ID, POST_REPORT.STATUS)
+          .forEach(row -> {
+            var values = counts.computeIfAbsent(row.value1(), ignored -> new long[2]);
+            if (ReportStatus.OPEN.name().equals(row.value2())) values[0] = row.value3();
+            if (ReportStatus.RESOLVED.name().equals(row.value2())) values[1] = row.value3();
+          });
+    }
     for (var report : items) {
       var accountId = report.getReportedAccountId();
       if (accountId == null || accountId.isBlank()) continue;
-      var values = counts.computeIfAbsent(accountId, ignored -> new long[] {
-          reports.countByReportedAccountIdAndStatus(accountId, ReportStatus.OPEN),
-          reports.countByReportedAccountIdAndStatus(accountId, ReportStatus.RESOLVED)});
+      var values = counts.getOrDefault(accountId, new long[2]);
       report.setOpenReportsForAccount(values[0]);
       report.setResolvedReportsForAccount(values[1]);
     }

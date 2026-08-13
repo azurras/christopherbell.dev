@@ -4,6 +4,7 @@ import static dev.christopherbell.persistence.jooq.social.Tables.POST_LINK_PREVI
 
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
 import dev.christopherbell.post.model.PostLinkPreview;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import org.jooq.DSLContext;
@@ -59,6 +60,19 @@ public final class PostgresPostLinkPreviewCacheRepository
         .set(POST_LINK_PREVIEW_CACHE.VERSION, POST_LINK_PREVIEW_CACHE.VERSION.plus(1L))
         .execute();
     return findById(entry.getUrl()).orElseThrow();
+  }
+
+  @Override
+  public int deleteExpired(Instant cutoff, int batchLimit) {
+    if (batchLimit < 1) throw new IllegalArgumentException("Cleanup batch limit must be positive");
+    var candidates = database.select(POST_LINK_PREVIEW_CACHE.URL)
+        .from(POST_LINK_PREVIEW_CACHE)
+        .where(POST_LINK_PREVIEW_CACHE.EXPIRES_ON.le(cutoff.atOffset(ZoneOffset.UTC)))
+        .orderBy(POST_LINK_PREVIEW_CACHE.EXPIRES_ON.asc(), POST_LINK_PREVIEW_CACHE.URL.asc())
+        .limit(batchLimit);
+    return database.deleteFrom(POST_LINK_PREVIEW_CACHE)
+        .where(POST_LINK_PREVIEW_CACHE.URL.in(candidates))
+        .execute();
   }
 
   private static PostLinkPreviewCacheEntry map(

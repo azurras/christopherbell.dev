@@ -3,6 +3,7 @@ package dev.christopherbell.federation.outbound;
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.ActivityPubCreate;
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.ActivityPubNote;
+import dev.christopherbell.federation.discovery.FederationOutboxEntry;
 import dev.christopherbell.post.model.Post;
 import java.util.List;
 import java.util.Objects;
@@ -30,19 +31,35 @@ public final class FederationActivityFactory {
     if (post.getId() == null || post.getId().isBlank()) {
       throw new IllegalArgumentException("Federation activity post ID must not be blank");
     }
-    String objectId = publicOrigin + "/void/" + post.getId();
+    return create(actorId, new FederationOutboxEntry(
+        post.getId(),
+        post.getText(),
+        post.getParentId(),
+        post.getCreatedOn(),
+        post.getLastUpdatedOn()));
+  }
+
+  public ActivityPubCreate create(String actorId, FederationOutboxEntry entry) {
+    if (actorId == null || actorId.isBlank()) {
+      throw new IllegalArgumentException("Federation activity actor ID must not be blank");
+    }
+    Objects.requireNonNull(entry, "entry");
+    if (entry.id() == null || entry.id().isBlank()) {
+      throw new IllegalArgumentException("Federation activity post ID must not be blank");
+    }
+    String objectId = publicOrigin + "/void/" + entry.id();
     List<String> to = List.of(PUBLIC);
     List<String> cc = List.of(actorId + "/followers");
-    String reply = post.getParentId() == null
+    String reply = entry.parentId() == null
         ? null
-        : publicOrigin + "/void/" + post.getParentId();
+        : publicOrigin + "/void/" + entry.parentId();
     var note = new ActivityPubNote(
         objectId,
         "Note",
         actorId,
-        HtmlUtils.htmlEscape(String.valueOf(post.getText() == null ? "" : post.getText())),
-        post.getCreatedOn(),
-        post.getLastUpdatedOn(),
+        HtmlUtils.htmlEscape(String.valueOf(entry.text() == null ? "" : entry.text())),
+        entry.createdOn(),
+        entry.lastUpdatedOn(),
         reply,
         to,
         cc,
@@ -51,7 +68,7 @@ public final class FederationActivityFactory {
         objectId + "#activity",
         "Create",
         actorId,
-        post.getCreatedOn(),
+        entry.createdOn(),
         to,
         cc,
         note);

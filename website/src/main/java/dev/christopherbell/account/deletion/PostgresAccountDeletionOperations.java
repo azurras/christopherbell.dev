@@ -12,11 +12,15 @@ import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT;
 import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT_FOLLOW;
 import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT_TRUST_RELATIONSHIP;
 import static dev.christopherbell.persistence.jooq.identity.Tables.BROWSER_SESSION;
+import static dev.christopherbell.persistence.jooq.identity.Tables.DELETED_ACCOUNT_PSEUDONYM;
 import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_PREFERENCE;
 import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_SESSION;
 import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_SESSION_PARTICIPANT;
 import static dev.christopherbell.persistence.jooq.lunch.Tables.RESTAURANT_FAVORITE;
+import static dev.christopherbell.persistence.jooq.lunch.Tables.RESTAURANT_IMPORT_PREVIEW;
 import static dev.christopherbell.persistence.jooq.lunch.Tables.RESTAURANT_VOTE;
+import static dev.christopherbell.persistence.jooq.music.Tables.METADATA_EDIT;
+import static dev.christopherbell.persistence.jooq.music.Tables.PLAYLIST;
 import static dev.christopherbell.persistence.jooq.platform.Tables.ADMIN_ACTIVITY;
 import static dev.christopherbell.persistence.jooq.platform.Tables.ADMIN_ACTIVITY_VALUE;
 import static dev.christopherbell.persistence.jooq.shared_folder.Tables.AUDIT_EVENT;
@@ -77,6 +81,7 @@ public final class PostgresAccountDeletionOperations implements AccountDeletionO
   public void anonymizePublicPosts(String accountId, String pseudonym) {
     database.transaction(configuration -> {
       var transaction = DSL.using(configuration);
+      registerPseudonym(transaction, pseudonym);
       transaction.update(POST).set(POST.ACCOUNT_ID, TOMBSTONE)
           .set(POST.VERSION, POST.VERSION.plus(1L))
           .where(POST.ACCOUNT_ID.eq(accountId)).execute();
@@ -128,6 +133,12 @@ public final class PostgresAccountDeletionOperations implements AccountDeletionO
       transaction.deleteFrom(LUNCH_PREFERENCE).where(LUNCH_PREFERENCE.ACCOUNT_ID.eq(accountId)).execute();
       transaction.deleteFrom(RESTAURANT_FAVORITE).where(RESTAURANT_FAVORITE.ACCOUNT_ID.eq(accountId)).execute();
       transaction.deleteFrom(RESTAURANT_VOTE).where(RESTAURANT_VOTE.ACCOUNT_ID.eq(accountId)).execute();
+      transaction.deleteFrom(RESTAURANT_IMPORT_PREVIEW)
+          .where(RESTAURANT_IMPORT_PREVIEW.ACTOR_ACCOUNT_ID.eq(accountId)).execute();
+      transaction.update(PLAYLIST).set(PLAYLIST.UPDATED_BY_ACCOUNT_ID, TOMBSTONE)
+          .where(PLAYLIST.UPDATED_BY_ACCOUNT_ID.eq(accountId)).execute();
+      transaction.update(METADATA_EDIT).set(METADATA_EDIT.EDITED_BY_ACCOUNT_ID, TOMBSTONE)
+          .where(METADATA_EDIT.EDITED_BY_ACCOUNT_ID.eq(accountId)).execute();
     });
   }
 
@@ -140,6 +151,7 @@ public final class PostgresAccountDeletionOperations implements AccountDeletionO
   public void pseudonymizeRetainedRecords(String accountId, String pseudonym) {
     database.transaction(configuration -> {
       var transaction = DSL.using(configuration);
+      registerPseudonym(transaction, pseudonym);
       transaction.update(POST_REPORT)
           .set(POST_REPORT.REPORTER_ACCOUNT_ID, pseudonym)
           .set(POST_REPORT.REPORTER_USERNAME, TOMBSTONE)
@@ -191,5 +203,13 @@ public final class PostgresAccountDeletionOperations implements AccountDeletionO
           .where(FEDERATION_DELIVERY_JOB.ACCOUNT_ID.eq(accountId)).execute();
       transaction.deleteFrom(ACCOUNT).where(ACCOUNT.ACCOUNT_ID.eq(accountId)).execute();
     });
+  }
+
+  private static void registerPseudonym(DSLContext transaction, String pseudonym) {
+    transaction.insertInto(DELETED_ACCOUNT_PSEUDONYM)
+        .set(DELETED_ACCOUNT_PSEUDONYM.PSEUDONYM_ID, pseudonym)
+        .onConflict(DELETED_ACCOUNT_PSEUDONYM.PSEUDONYM_ID)
+        .doNothing()
+        .execute();
   }
 }

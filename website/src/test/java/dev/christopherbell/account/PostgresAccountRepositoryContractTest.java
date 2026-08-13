@@ -1,6 +1,7 @@
 package dev.christopherbell.account;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountPermission;
@@ -14,11 +15,14 @@ import java.util.HashSet;
 import java.util.Map;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 @EnabledIfEnvironmentVariable(named = "POSTGRESQL_INTEGRATION_TESTS", matches = "enabled")
-class PostgresAccountRepositoryContractTest implements PersistencePortContract<Account> {
+class PostgresAccountRepositoryContractTest
+    implements PersistencePortContract<Account>, AccountRepositoryParityContract {
   private static Task3PostgresqlTestSupport schemas;
   private static Task3PostgresqlTestSupport.Database database;
   private static AccountRepository accounts;
@@ -34,6 +38,13 @@ class PostgresAccountRepositoryContractTest implements PersistencePortContract<A
   static void cleanupDatabase() throws Exception {
     if (database != null) database.close();
     if (schemas != null) schemas.close();
+  }
+
+  @BeforeEach
+  void removeContractFixtures() {
+    accounts.deleteById("account-contract");
+    accounts.deleteById("account-moderation-contract");
+    accounts.deleteById("account-two-writer-contract");
   }
 
   @Test
@@ -73,6 +84,27 @@ class PostgresAccountRepositoryContractTest implements PersistencePortContract<A
         .isNull();
   }
 
+  @Test
+  void rejectsTheSecondWriterWhenTwoReadersSaveTheSameVersion() {
+    var fixture = createFixture();
+    fixture.setId("account-two-writer-contract");
+    fixture.setEmail("two-writer@example.test");
+    fixture.setUsername("two-writer");
+    accounts.save(fixture);
+
+    var firstWriter = accounts.findById(fixture.getId()).orElseThrow();
+    var secondWriter = accounts.findById(fixture.getId()).orElseThrow();
+    firstWriter.setFirstName("first writer won");
+    secondWriter.setFirstName("stale writer");
+
+    accounts.save(firstWriter);
+
+    assertThatThrownBy(() -> accounts.save(secondWriter))
+        .isInstanceOf(OptimisticLockingFailureException.class);
+    assertThat(accounts.findById(fixture.getId()).orElseThrow().getFirstName())
+        .isEqualTo("first writer won");
+  }
+
   @Override
   public Account createFixture() {
     return Account.builder()
@@ -108,5 +140,10 @@ class PostgresAccountRepositoryContractTest implements PersistencePortContract<A
   @Override
   public String identityOf(Account value) {
     return value.getId();
+  }
+
+  @Override
+  public AccountRepository parityRepository() {
+    return accounts;
   }
 }

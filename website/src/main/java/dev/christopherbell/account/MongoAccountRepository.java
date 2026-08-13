@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import org.springframework.dao.IncorrectResultSizeDataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -28,7 +29,14 @@ public class MongoAccountRepository extends KindScopedRepositorySupport<Account>
     super(factory, Account.class);
   }
 
-  @Override public Account save(Account account) { return saveValue(account); }
+  @Override
+  public Account save(Account account) {
+    try {
+      return saveValue(account);
+    } catch (DuplicateKeyException failure) {
+      throw new DuplicateKeyException("MongoDB rejected a duplicate account identity", failure);
+    }
+  }
   @Override public Optional<Account> findById(String id) { return findValueById(id); }
   @Override public boolean existsById(String id) {
     return mongo.exists(Query.query(Criteria.where("id").is(id)));

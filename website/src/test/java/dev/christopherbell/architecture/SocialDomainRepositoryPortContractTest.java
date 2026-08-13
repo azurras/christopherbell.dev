@@ -78,6 +78,8 @@ class SocialDomainRepositoryPortContractTest {
         "findByExpiresOnAfter(Instant,Pageable)",
         "findByExpiresOnIsNull(Pageable)",
         "findByExpiresOnLessThanEqual(Instant,Pageable)",
+        "findFederationEligibleAfter(Instant,String,int)",
+        "findFederationOutboxPage(String,Instant,String,int,Instant)",
         "findById(String)",
         "findByRootIdOrderByCreatedOnAsc(String)",
         "save(Post)"));
@@ -87,7 +89,7 @@ class SocialDomainRepositoryPortContractTest {
         "findByAccountIdAndRootPostId(String,String)",
         "save(HiddenPostThread)"));
     assertPort(PostLinkPreviewCacheRepository.class, Set.of(
-        "findById(String)", "save(PostLinkPreviewCacheEntry)"));
+        "deleteExpired(Instant,int)", "findById(String)", "save(PostLinkPreviewCacheEntry)"));
     assertPort(ReportRepository.class, Set.of(
         "countByReportedAccountIdAndStatus(String,ReportStatus)",
         "findAllByOrderByCreatedOnDesc()",

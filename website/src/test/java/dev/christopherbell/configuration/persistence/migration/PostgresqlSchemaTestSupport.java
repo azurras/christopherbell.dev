@@ -27,6 +27,10 @@ final class PostgresqlSchemaTestSupport {
   private PostgresqlSchemaTestSupport() {}
 
   static MigratedDatabase migrate() throws SQLException {
+    return migrateThrough(null);
+  }
+
+  static MigratedDatabase migrateThrough(String targetVersion) throws SQLException {
     var prefix = PostgresqlTestSchemaName.create("cbtest_t2_").value() + '_';
     if (!OWNED_PREFIX.matcher(prefix).matches()
         || DOMAINS.stream().anyMatch(domain -> prefix.length() + domain.length() > 63)) {
@@ -38,7 +42,7 @@ final class PostgresqlSchemaTestSupport {
     requireSafeDatabase(url, username, password, prefix);
     System.out.println("Task 2 PostgreSQL schema prefix: " + prefix);
     try {
-      var result = Flyway.configure()
+      var configuration = Flyway.configure()
           .dataSource(url, username, password)
           .locations("classpath:db/migration")
           .schemas("public")
@@ -50,8 +54,11 @@ final class PostgresqlSchemaTestSupport {
           .baselineDescription("Task 2 isolated schema-history bootstrap")
           .cleanDisabled(true)
           .placeholders(Map.of("schema_prefix", prefix))
-          .validateMigrationNaming(true)
-          .load()
+          .validateMigrationNaming(true);
+      if (targetVersion != null) {
+        configuration.target(targetVersion);
+      }
+      var result = configuration.load()
           .migrate();
       return new MigratedDatabase(
           url, username, password, prefix, result.migrationsExecuted);
@@ -146,6 +153,25 @@ final class PostgresqlSchemaTestSupport {
 
     JdbcConfiguration jdbcConfiguration() {
       return new JdbcConfiguration(url, username, password);
+    }
+
+    int migrateToLatest() {
+      return Flyway.configure()
+          .dataSource(url, username, password)
+          .locations("classpath:db/migration")
+          .schemas("public")
+          .defaultSchema("public")
+          .table(historyTable(prefix))
+          .createSchemas(false)
+          .baselineOnMigrate(true)
+          .baselineVersion("0")
+          .baselineDescription("Task 2 isolated schema-history bootstrap")
+          .cleanDisabled(true)
+          .placeholders(Map.of("schema_prefix", prefix))
+          .validateMigrationNaming(true)
+          .load()
+          .migrate()
+          .migrationsExecuted;
     }
 
     @Override

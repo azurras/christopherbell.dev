@@ -7,6 +7,7 @@ import static dev.christopherbell.persistence.jooq.social.Tables.POST_REPORT_MOD
 import dev.christopherbell.admin.activity.ModerationAuditCommand;
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
 import dev.christopherbell.persistence.jooq.social.tables.records.PostReportRecord;
+import dev.christopherbell.persistence.jooq.social.tables.records.PostReportModerationAuditRecord;
 import dev.christopherbell.report.model.PostReport;
 import dev.christopherbell.report.model.ReportResolution;
 import dev.christopherbell.report.model.ReportStatus;
@@ -17,6 +18,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.Optional;
 import org.jooq.DSLContext;
 import org.jooq.impl.DSL;
@@ -135,9 +137,10 @@ public final class PostgresReportRepository implements ReportRepository {
 
   @Override
   public List<PostReport> findByStatusOrderByCreatedOnDesc(ReportStatus status) {
-    return database.selectFrom(POST_REPORT).where(POST_REPORT.STATUS.eq(status.name()))
+    var records = database.selectFrom(POST_REPORT).where(POST_REPORT.STATUS.eq(status.name()))
         .orderBy(POST_REPORT.CREATED_ON.desc(), POST_REPORT.POST_REPORT_ID.desc())
-        .fetch(record -> map(database, record));
+        .fetch();
+    return mapAll(database, records);
   }
 
   @Override
@@ -149,10 +152,11 @@ public final class PostgresReportRepository implements ReportRepository {
   public List<PostReport> findAllByOrderByCreatedOnDesc(Pageable pageable) {
     var query = database.selectFrom(POST_REPORT)
         .orderBy(POST_REPORT.CREATED_ON.desc(), POST_REPORT.POST_REPORT_ID.desc());
-    return pageable.isPaged()
+    var records = pageable.isPaged()
         ? query.limit(pageable.getPageSize()).offset(Math.toIntExact(pageable.getOffset()))
-            .fetch(record -> map(database, record))
-        : query.fetch(record -> map(database, record));
+            .fetch()
+        : query.fetch();
+    return mapAll(database, records);
   }
 
   @Override
@@ -178,16 +182,30 @@ public final class PostgresReportRepository implements ReportRepository {
   }
 
   public static PostReport map(DSLContext context, PostReportRecord record) {
-    var audit = context.selectFrom(POST_REPORT_MODERATION_AUDIT)
-        .where(POST_REPORT_MODERATION_AUDIT.POST_REPORT_ID.eq(record.getPostReportId()))
-        .fetchOptional(value -> new ModerationAuditCommand(
-            value.getEventId(), value.getActorAccountId(), value.getActorUsername(),
-            value.getAction(), value.getTargetType(), value.getTargetId(), value.getTargetLabel(),
-            value.getReason(), value.getMessage(),
-            auditValues(context, record.getPostReportId(), "before"),
-            auditValues(context, record.getPostReportId(), "after"),
-            auditValues(context, record.getPostReportId(), "metadata")))
-        .orElse(null);
+    return mapAll(context, List.of(record)).getFirst();
+  }
+
+  public static List<PostReport> mapAll(DSLContext context, List<PostReportRecord> records) {
+    if (records.isEmpty()) return List.of();
+    var reportIds = records.stream().map(PostReportRecord::getPostReportId).toList();
+    Map<String, PostReportModerationAuditRecord> audits = context
+        .selectFrom(POST_REPORT_MODERATION_AUDIT)
+        .where(POST_REPORT_MODERATION_AUDIT.POST_REPORT_ID.in(reportIds))
+        .fetchMap(POST_REPORT_MODERATION_AUDIT.POST_REPORT_ID);
+    var values = new HashMap<AuditPartition, LinkedHashMap<String, String>>();
+    context.selectFrom(POST_REPORT_MODERATION_AUDIT_VALUE)
+        .where(POST_REPORT_MODERATION_AUDIT_VALUE.POST_REPORT_ID.in(reportIds))
+        .orderBy(POST_REPORT_MODERATION_AUDIT_VALUE.POST_REPORT_ID.asc(),
+            POST_REPORT_MODERATION_AUDIT_VALUE.PARTITION_NAME.asc(),
+            POST_REPORT_MODERATION_AUDIT_VALUE.VALUE_KEY.asc())
+        .forEach(row -> values.computeIfAbsent(
+            new AuditPartition(row.getPostReportId(), row.getPartitionName()),
+            ignored -> new LinkedHashMap<>()).put(row.getValueKey(), row.getValue()));
+    return records.stream().map(record -> map(record, moderationAudit(
+        audits.get(record.getPostReportId()), values))).toList();
+  }
+
+  private static PostReport map(PostReportRecord record, ModerationAuditCommand audit) {
     return PostReport.builder()
         .id(record.getPostReportId())
         .postId(record.getPostId())
@@ -214,18 +232,25 @@ public final class PostgresReportRepository implements ReportRepository {
         .build();
   }
 
+  private static ModerationAuditCommand moderationAudit(
+      PostReportModerationAuditRecord audit,
+      Map<AuditPartition, LinkedHashMap<String, String>> values) {
+    if (audit == null) return null;
+    return new ModerationAuditCommand(
+        audit.getEventId(), audit.getActorAccountId(), audit.getActorUsername(),
+        audit.getAction(), audit.getTargetType(), audit.getTargetId(), audit.getTargetLabel(),
+        audit.getReason(), audit.getMessage(),
+        auditValues(values, audit.getPostReportId(), "before"),
+        auditValues(values, audit.getPostReportId(), "after"),
+        auditValues(values, audit.getPostReportId(), "metadata"));
+  }
+
   private static Map<String, String> auditValues(
-      DSLContext context, String reportId, String partition) {
-    var values = new LinkedHashMap<String, String>();
-    context.select(
-            POST_REPORT_MODERATION_AUDIT_VALUE.VALUE_KEY,
-            POST_REPORT_MODERATION_AUDIT_VALUE.VALUE)
-        .from(POST_REPORT_MODERATION_AUDIT_VALUE)
-        .where(POST_REPORT_MODERATION_AUDIT_VALUE.POST_REPORT_ID.eq(reportId)
-            .and(POST_REPORT_MODERATION_AUDIT_VALUE.PARTITION_NAME.eq(partition)))
-        .orderBy(POST_REPORT_MODERATION_AUDIT_VALUE.VALUE_KEY.asc())
-        .forEach(row -> values.put(row.value1(), row.value2()));
-    return Map.copyOf(values);
+      Map<AuditPartition, LinkedHashMap<String, String>> values,
+      String reportId,
+      String partition) {
+    return Map.copyOf(values.getOrDefault(
+        new AuditPartition(reportId, partition), new LinkedHashMap<>()));
   }
 
   private static OffsetDateTime timestamp(java.time.Instant value) {
@@ -235,4 +260,6 @@ public final class PostgresReportRepository implements ReportRepository {
   private static java.time.Instant instant(OffsetDateTime value) {
     return value == null ? null : value.toInstant();
   }
+
+  private record AuditPartition(String reportId, String partition) {}
 }

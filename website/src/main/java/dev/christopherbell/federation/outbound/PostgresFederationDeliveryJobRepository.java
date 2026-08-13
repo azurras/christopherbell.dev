@@ -2,23 +2,22 @@ package dev.christopherbell.federation.outbound;
 
 import static dev.christopherbell.persistence.jooq.federation.Tables.FEDERATION_DELIVERY_JOB;
 import static dev.christopherbell.persistence.jooq.federation.Tables.FEDERATION_SCAN_STATE;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST;
 
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
 import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
 import dev.christopherbell.persistence.jooq.federation.tables.records.FederationDeliveryJobRecord;
-import dev.christopherbell.post.PostgresPostMapper;
 import dev.christopherbell.post.model.Post;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Optional;
 import org.jooq.DSLContext;
+import org.jooq.Field;
 import org.jooq.impl.DSL;
 
 /** PostgreSQL owner of federation scan, enqueue, claim, and exact-owner transitions. */
@@ -37,21 +36,6 @@ final class PostgresFederationDeliveryJobRepository implements FederationDeliver
         .fetchOptional(record -> record.getCreatedOn() == null || record.getPostId() == null
             ? null : new FederationScanCursor(record.getCreatedOn().toInstant(), record.getPostId()))
         .orElse(null);
-  }
-
-  @Override
-  public List<Post> scanEligibleAfter(FederationScanCursor cursor, int limit) {
-    var condition = POST.FEDERATION_OUTBOUND_ELIGIBLE.isTrue();
-    if (cursor != null) {
-      var timestamp = cursor.createdOn().atOffset(ZoneOffset.UTC);
-      condition = condition.and(POST.CREATED_ON.gt(timestamp)
-          .or(POST.CREATED_ON.eq(timestamp).and(POST.POST_ID.gt(cursor.postId()))));
-    }
-    return database.selectFrom(POST)
-        .where(condition)
-        .orderBy(POST.CREATED_ON.asc(), POST.POST_ID.asc())
-        .limit(limit)
-        .fetch(record -> PostgresPostMapper.map(database, record));
   }
 
   @Override
@@ -91,13 +75,18 @@ final class PostgresFederationDeliveryJobRepository implements FederationDeliver
   @Override
   public Optional<FederationDeliveryJob> claimDue(
       String owner, Instant now, Instant leaseUntil) {
+    var leaseDuration = Duration.between(now, leaseUntil);
+    if (leaseDuration.isZero() || leaseDuration.isNegative()) {
+      throw new IllegalArgumentException("Federation delivery lease must be positive");
+    }
     return database.transactionResult(configuration -> {
       var transaction = DSL.using(configuration);
+      var databaseTime = DSL.currentOffsetDateTime();
       var due = FEDERATION_DELIVERY_JOB.STATE.in(
               FederationDeliveryState.PENDING.name(), FederationDeliveryState.RETRY.name())
-          .and(FEDERATION_DELIVERY_JOB.NEXT_ATTEMPT_ON.le(timestamp(now)))
+          .and(FEDERATION_DELIVERY_JOB.NEXT_ATTEMPT_ON.le(databaseTime))
           .or(FEDERATION_DELIVERY_JOB.STATE.eq(FederationDeliveryState.CLAIMED.name())
-              .and(FEDERATION_DELIVERY_JOB.CLAIM_UNTIL.le(timestamp(now))));
+              .and(FEDERATION_DELIVERY_JOB.CLAIM_UNTIL.le(databaseTime)));
       var id = transaction.select(FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID)
           .from(FEDERATION_DELIVERY_JOB)
           .where(due)
@@ -112,8 +101,8 @@ final class PostgresFederationDeliveryJobRepository implements FederationDeliver
       return transaction.update(FEDERATION_DELIVERY_JOB)
           .set(FEDERATION_DELIVERY_JOB.STATE, FederationDeliveryState.CLAIMED.name())
           .set(FEDERATION_DELIVERY_JOB.CLAIM_OWNER, owner)
-          .set(FEDERATION_DELIVERY_JOB.CLAIM_UNTIL, timestamp(leaseUntil))
-          .set(FEDERATION_DELIVERY_JOB.UPDATED_ON, timestamp(now))
+          .set(FEDERATION_DELIVERY_JOB.CLAIM_UNTIL, databaseLeaseUntil(leaseDuration))
+          .set(FEDERATION_DELIVERY_JOB.UPDATED_ON, databaseTime)
           .set(FEDERATION_DELIVERY_JOB.ATTEMPTS,
               FEDERATION_DELIVERY_JOB.ATTEMPTS.plus(1))
           .set(FEDERATION_DELIVERY_JOB.VERSION, FEDERATION_DELIVERY_JOB.VERSION.plus(1L))
@@ -165,13 +154,14 @@ final class PostgresFederationDeliveryJobRepository implements FederationDeliver
                 : DSL.val(timestamp(nextAttempt)))
         .set(FEDERATION_DELIVERY_JOB.LAST_STATUS, status)
         .set(FEDERATION_DELIVERY_JOB.LAST_OUTCOME, outcome)
-        .set(FEDERATION_DELIVERY_JOB.UPDATED_ON, timestamp(now))
+        .set(FEDERATION_DELIVERY_JOB.UPDATED_ON, DSL.currentOffsetDateTime())
         .setNull(FEDERATION_DELIVERY_JOB.CLAIM_OWNER)
         .setNull(FEDERATION_DELIVERY_JOB.CLAIM_UNTIL)
         .set(FEDERATION_DELIVERY_JOB.VERSION, FEDERATION_DELIVERY_JOB.VERSION.plus(1L))
         .where(FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID.eq(jobId)
             .and(FEDERATION_DELIVERY_JOB.STATE.eq(FederationDeliveryState.CLAIMED.name()))
-            .and(FEDERATION_DELIVERY_JOB.CLAIM_OWNER.eq(owner)))
+            .and(FEDERATION_DELIVERY_JOB.CLAIM_OWNER.eq(owner))
+            .and(FEDERATION_DELIVERY_JOB.CLAIM_UNTIL.gt(DSL.currentOffsetDateTime())))
         .execute() == 1;
   }
 
@@ -206,5 +196,13 @@ final class PostgresFederationDeliveryJobRepository implements FederationDeliver
 
   private static Instant instant(OffsetDateTime value) {
     return value == null ? null : value.toInstant();
+  }
+
+  private static Field<OffsetDateTime> databaseLeaseUntil(Duration leaseDuration) {
+    return DSL.field(
+        "{0} + ({1} * interval '1 millisecond')",
+        OffsetDateTime.class,
+        DSL.currentOffsetDateTime(),
+        DSL.val(leaseDuration.toMillis()));
   }
 }

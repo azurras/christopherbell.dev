@@ -47,13 +47,14 @@ public final class PostgresConversationQueryRepository implements ConversationQu
         .where(CONVERSATION_ARCHIVE_STATE.OWNER_ACCOUNT_ID.eq(ownerAccountId)
             .and(CONVERSATION_ARCHIVE_STATE.CONVERSATION_KEY.eq(MESSAGE.CONVERSATION_KEY))
             .and(CONVERSATION_ARCHIVE_STATE.ARCHIVED_THROUGH_MESSAGE_ID.eq(MESSAGE.MESSAGE_ID))));
-    return database.selectFrom(MESSAGE)
+    var records = database.selectFrom(MESSAGE)
         .where(participates)
         .and(MESSAGE.MESSAGE_ID.eq(latestId))
         .andNot(archivedAtLatest)
         .orderBy(MESSAGE.CREATED_ON.desc(), MESSAGE.MESSAGE_ID.desc())
         .limit(limit)
-        .fetch(record -> PostgresMessageRepository.map(database, record));
+        .fetch();
+    return PostgresMessageRepository.mapAll(database, records);
   }
 
   @Override
@@ -83,11 +84,12 @@ public final class PostgresConversationQueryRepository implements ConversationQu
       condition = condition.and(MESSAGE.CREATED_ON.lt(timestamp)
           .or(MESSAGE.CREATED_ON.eq(timestamp).and(MESSAGE.MESSAGE_ID.lt(boundary.id()))));
     }
-    var loaded = database.selectFrom(MESSAGE)
+    var records = database.selectFrom(MESSAGE)
         .where(condition)
         .orderBy(MESSAGE.CREATED_ON.desc(), MESSAGE.MESSAGE_ID.desc())
         .limit(size + 1)
-        .fetch(record -> PostgresMessageRepository.map(database, record));
+        .fetch();
+    var loaded = PostgresMessageRepository.mapAll(database, records);
     var hasNext = loaded.size() > size;
     var items = loaded.stream().limit(size).toList();
     String nextCursor = null;

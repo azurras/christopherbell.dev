@@ -29,7 +29,7 @@ public class FederationOutboxQueryRepository implements FederationOutboxQueryPor
     this.cursors = cursors;
   }
 
-  public FederationPage<Post> page(
+  public FederationPage<FederationOutboxEntry> page(
       String accountId,
       Optional<StableCursor> cursor,
       int requestedSize,
@@ -47,13 +47,22 @@ public class FederationOutboxQueryRepository implements FederationOutboxQueryPor
         .limit(size + 1);
     var loaded = mongo.find(query, org.springframework.data.domain.Pageable.unpaged());
     boolean hasNext = loaded.size() > size;
-    var items = loaded.stream().limit(size).toList();
+    var items = loaded.stream().limit(size).map(FederationOutboxQueryRepository::entry).toList();
     String nextCursor = null;
     if (hasNext && !items.isEmpty()) {
-      Post boundary = items.get(items.size() - 1);
-      nextCursor = cursors.encode(new StableCursor(boundary.getCreatedOn(), boundary.getId()));
+      var boundary = items.get(items.size() - 1);
+      nextCursor = cursors.encode(new StableCursor(boundary.createdOn(), boundary.id()));
     }
     return new FederationPage<>(items, nextCursor);
+  }
+
+  private static FederationOutboxEntry entry(Post post) {
+    return new FederationOutboxEntry(
+        post.getId(),
+        post.getText(),
+        post.getParentId(),
+        post.getCreatedOn(),
+        post.getLastUpdatedOn());
   }
 
   public long count(String accountId, Instant now) {

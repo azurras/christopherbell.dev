@@ -208,13 +208,50 @@ public final class PostgresPostRepository implements PostRepository {
         POST.ACCOUNT_ID.eq(accountId).and(POST.PARENT_POST_ID.isNotNull()));
   }
 
+  @Override
+  public List<Post> findFederationEligibleAfter(Instant createdOn, String postId, int limit) {
+    var condition = POST.FEDERATION_OUTBOUND_ELIGIBLE.isTrue();
+    if (createdOn != null && postId != null) {
+      var boundary = timestamp(createdOn);
+      condition = condition.and(POST.CREATED_ON.gt(boundary)
+          .or(POST.CREATED_ON.eq(boundary).and(POST.POST_ID.gt(postId))));
+    }
+    var records = database.selectFrom(POST)
+        .where(condition)
+        .orderBy(POST.CREATED_ON.asc(), POST.POST_ID.asc())
+        .limit(limit)
+        .fetch();
+    return PostgresPostMapper.mapAll(database, records);
+  }
+
+  @Override
+  public List<Post> findFederationOutboxPage(
+      String accountId, Instant createdOn, String postId, int limit, Instant expiresAfter) {
+    var condition = POST.ACCOUNT_ID.eq(accountId)
+        .and(POST.FEDERATION_OUTBOUND_ELIGIBLE.isTrue())
+        .and(POST.EXPIRES_ON.gt(timestamp(expiresAfter)))
+        .and(POST.CREATED_ON.isNotNull());
+    if (createdOn != null && postId != null) {
+      var boundary = timestamp(createdOn);
+      condition = condition.and(POST.CREATED_ON.lt(boundary)
+          .or(POST.CREATED_ON.eq(boundary).and(POST.POST_ID.lt(postId))));
+    }
+    var records = database.selectFrom(POST)
+        .where(condition)
+        .orderBy(POST.CREATED_ON.desc(), POST.POST_ID.desc())
+        .limit(limit)
+        .fetch();
+    return PostgresPostMapper.mapAll(database, records);
+  }
+
   private List<Post> fetch(
       org.jooq.Condition condition, List<SortField<?>> order, Pageable pageable) {
     var query = database.selectFrom(POST).where(condition).orderBy(order);
-    return pageable.isPaged()
+    var records = pageable.isPaged()
         ? query.limit(pageable.getPageSize()).offset(Math.toIntExact(pageable.getOffset()))
-            .fetch(record -> PostgresPostMapper.map(database, record))
-        : query.fetch(record -> PostgresPostMapper.map(database, record));
+            .fetch()
+        : query.fetch();
+    return PostgresPostMapper.mapAll(database, records);
   }
 
   private Page<Post> page(

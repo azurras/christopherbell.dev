@@ -1,9 +1,12 @@
 package dev.christopherbell.configuration.security.browser;
 
+import dev.christopherbell.configuration.persistence.PostgresPersistenceSupport;
+
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.persistence.jooq.identity.tables.records.BrowserSessionRecord;
 import java.time.OffsetDateTime;
 
+@PostgresPersistenceSupport
 final class PostgresBrowserSessionMapper {
   private PostgresBrowserSessionMapper() {}
 

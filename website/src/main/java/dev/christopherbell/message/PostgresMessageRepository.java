@@ -9,6 +9,8 @@ import dev.christopherbell.persistence.jooq.communication.tables.records.Message
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.List;
 import org.jooq.DSLContext;
 import org.jooq.impl.DSL;
@@ -76,10 +78,11 @@ public final class PostgresMessageRepository implements MessageRepository {
     var query = database.selectFrom(MESSAGE)
         .where(MESSAGE.CONVERSATION_KEY.eq(conversationKey))
         .orderBy(MESSAGE.CREATED_ON.asc(), MESSAGE.MESSAGE_ID.asc());
-    return pageable.isPaged()
+    var records = pageable.isPaged()
         ? query.limit(pageable.getPageSize()).offset(Math.toIntExact(pageable.getOffset()))
-            .fetch(record -> map(database, record))
-        : query.fetch(record -> map(database, record));
+            .fetch()
+        : query.fetch();
+    return mapAll(database, records);
   }
 
   @Override
@@ -89,17 +92,31 @@ public final class PostgresMessageRepository implements MessageRepository {
         .join(MESSAGE_PARTICIPANT).on(MESSAGE_PARTICIPANT.MESSAGE_ID.eq(MESSAGE.MESSAGE_ID))
         .where(MESSAGE_PARTICIPANT.ACCOUNT_ID.eq(accountId))
         .orderBy(MESSAGE.CREATED_ON.desc(), MESSAGE.MESSAGE_ID.desc());
-    return pageable.isPaged()
+    var records = pageable.isPaged()
         ? query.limit(pageable.getPageSize()).offset(Math.toIntExact(pageable.getOffset()))
-            .fetch(record -> map(database, record.into(MESSAGE)))
-        : query.fetch(record -> map(database, record.into(MESSAGE)));
+            .fetch(record -> record.into(MESSAGE))
+        : query.fetch(record -> record.into(MESSAGE));
+    return mapAll(database, records);
   }
 
   public static Message map(DSLContext context, MessageRecord record) {
-    var participants = new LinkedHashSet<>(context.select(MESSAGE_PARTICIPANT.ACCOUNT_ID)
+    return mapAll(context, List.of(record)).getFirst();
+  }
+
+  public static List<Message> mapAll(DSLContext context, List<MessageRecord> records) {
+    if (records.isEmpty()) return List.of();
+    Map<String, LinkedHashSet<String>> participants = new LinkedHashMap<>();
+    records.forEach(record -> participants.put(record.getMessageId(), new LinkedHashSet<>()));
+    context.select(MESSAGE_PARTICIPANT.MESSAGE_ID, MESSAGE_PARTICIPANT.ACCOUNT_ID)
         .from(MESSAGE_PARTICIPANT)
-        .where(MESSAGE_PARTICIPANT.MESSAGE_ID.eq(record.getMessageId()))
-        .fetch(MESSAGE_PARTICIPANT.ACCOUNT_ID));
+        .where(MESSAGE_PARTICIPANT.MESSAGE_ID.in(participants.keySet()))
+        .orderBy(MESSAGE_PARTICIPANT.MESSAGE_ID.asc(), MESSAGE_PARTICIPANT.ACCOUNT_ID.asc())
+        .forEach(row -> participants.get(row.value1()).add(row.value2()));
+    return records.stream().map(record -> map(record, participants.get(record.getMessageId())))
+        .toList();
+  }
+
+  private static Message map(MessageRecord record, LinkedHashSet<String> participants) {
     return Message.builder()
         .id(record.getMessageId())
         .conversationKey(record.getConversationKey())

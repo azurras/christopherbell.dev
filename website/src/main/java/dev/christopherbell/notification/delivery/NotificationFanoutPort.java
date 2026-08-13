@@ -9,4 +9,6 @@ public interface NotificationFanoutPort {
       NotificationEventIdentity identity, Instant now);
 
   void release(NotificationDeliveryPermit permit);
+
+  NotificationCleanupResult deleteExpired(Instant cutoff, int batchLimit);
 }

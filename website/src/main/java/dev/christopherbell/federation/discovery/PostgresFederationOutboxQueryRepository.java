@@ -5,7 +5,7 @@ import static dev.christopherbell.persistence.jooq.social.Tables.POST;
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
-import dev.christopherbell.post.PostgresPostMapper;
+import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -20,37 +20,46 @@ public final class PostgresFederationOutboxQueryRepository
   private static final int MAX_PAGE_SIZE = 20;
   private final DSLContext database;
   private final StableCursorCodec cursors;
+  private final PostRepository posts;
 
   public PostgresFederationOutboxQueryRepository(
-      DSLContext database, StableCursorCodec cursors) {
+      DSLContext database, StableCursorCodec cursors, PostRepository posts) {
     this.database = database;
     this.cursors = cursors;
+    this.posts = posts;
   }
 
   @Override
-  public FederationPage<Post> page(
-      String accountId, Optional<StableCursor> cursor, int requestedSize, Instant now) {
+  public FederationPage<FederationOutboxEntry> page(
+    String accountId, Optional<StableCursor> cursor, int requestedSize, Instant now) {
     var size = Math.max(1, Math.min(requestedSize, MAX_PAGE_SIZE));
-    Condition condition = activeOwned(accountId, now);
-    if (cursor.isPresent()) {
-      var boundary = cursor.orElseThrow();
-      var timestamp = boundary.timestamp().atOffset(ZoneOffset.UTC);
-      condition = condition.and(POST.CREATED_ON.lt(timestamp)
-          .or(POST.CREATED_ON.eq(timestamp).and(POST.POST_ID.lt(boundary.id()))));
-    }
-    var loaded = database.selectFrom(POST)
-        .where(condition)
-        .orderBy(POST.CREATED_ON.desc(), POST.POST_ID.desc())
-        .limit(size + 1)
-        .fetch(record -> PostgresPostMapper.map(database, record));
-    var hasNext = loaded.size() > size;
-    var items = loaded.stream().limit(size).toList();
+    var boundary = cursor.orElse(null);
+    var mapped = posts.findFederationOutboxPage(
+        accountId,
+        boundary == null ? null : boundary.timestamp(),
+        boundary == null ? null : boundary.id(),
+        size + 1,
+        now);
+    var hasNext = mapped.size() > size;
+    var items = mapped.stream().limit(size)
+        .map(PostgresFederationOutboxQueryRepository::entry)
+        .toList();
     String nextCursor = null;
     if (hasNext && !items.isEmpty()) {
-      var boundary = items.getLast();
-      nextCursor = cursors.encode(new StableCursor(boundary.getCreatedOn(), boundary.getId()));
+      var nextBoundary = items.getLast();
+      nextCursor = cursors.encode(
+          new StableCursor(nextBoundary.createdOn(), nextBoundary.id()));
     }
     return new FederationPage<>(items, nextCursor);
+  }
+
+  private static FederationOutboxEntry entry(Post post) {
+    return new FederationOutboxEntry(
+        post.getId(),
+        post.getText(),
+        post.getParentId(),
+        post.getCreatedOn(),
+        post.getLastUpdatedOn());
   }
 
   @Override

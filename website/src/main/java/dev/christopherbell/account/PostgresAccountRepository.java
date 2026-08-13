@@ -15,6 +15,8 @@ import dev.christopherbell.configuration.persistence.PostgresPersistence;
 import dev.christopherbell.federation.identity.EncryptedPrivateKey;
 import dev.christopherbell.federation.identity.FederationIdentity;
 import dev.christopherbell.persistence.jooq.identity.tables.records.AccountRecord;
+import dev.christopherbell.persistence.jooq.identity.tables.records.AccountFederationIdentityRecord;
+import dev.christopherbell.persistence.jooq.identity.tables.records.AccountModerationAuditRecord;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -26,11 +28,14 @@ import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.HashMap;
 import org.jooq.DSLContext;
 import org.jooq.Field;
 import org.jooq.SortField;
 import org.jooq.impl.DSL;
 import org.springframework.dao.IncorrectResultSizeDataAccessException;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -47,11 +52,35 @@ public final class PostgresAccountRepository implements AccountRepository {
 
   @Override
   public Account save(Account account) {
-    return database.transactionResult(configuration -> save(DSL.using(configuration), account));
+    try {
+      var saved = database.transactionResult(
+          configuration -> save(DSL.using(configuration), account));
+      account.setVersion(saved.getVersion());
+      return saved;
+    } catch (org.jooq.exception.IntegrityConstraintViolationException failure) {
+      if ("23505".equals(failure.sqlState())) {
+        throw new DuplicateKeyException("PostgreSQL rejected a duplicate account identity", failure);
+      }
+      throw failure;
+    }
   }
 
   private static Account save(DSLContext transaction, Account account) {
-    transaction.insertInto(ACCOUNT)
+    int affected = account.getVersion() == null
+        ? insert(transaction, account)
+        : update(transaction, account);
+    if (affected != 1) {
+      throw new OptimisticLockingFailureException(
+          "Account " + account.getId() + " was changed by another writer");
+    }
+    replacePermissions(transaction, account);
+    replaceFederationIdentity(transaction, account);
+    replaceModerationAudit(transaction, account);
+    return findById(transaction, account.getId()).orElseThrow();
+  }
+
+  private static int insert(DSLContext transaction, Account account) {
+    return transaction.insertInto(ACCOUNT)
         .set(ACCOUNT.ACCOUNT_ID, account.getId())
         .set(ACCOUNT.CREATED_BY, account.getCreatedBy())
         .set(ACCOUNT.CREATED_ON, timestamp(account.getCreatedOn()))
@@ -75,8 +104,12 @@ public final class PostgresAccountRepository implements AccountRepository {
         .set(ACCOUNT.ROLE, account.getRole().name())
         .set(ACCOUNT.STATUS, account.getStatus().name())
         .set(ACCOUNT.USERNAME, account.getUsername())
-        .onConflict(ACCOUNT.ACCOUNT_ID)
-        .doUpdate()
+        .set(ACCOUNT.VERSION, 0L)
+        .execute();
+  }
+
+  private static int update(DSLContext transaction, Account account) {
+    return transaction.update(ACCOUNT)
         .set(ACCOUNT.CREATED_BY, account.getCreatedBy())
         .set(ACCOUNT.CREATED_ON, timestamp(account.getCreatedOn()))
         .set(ACCOUNT.EMAIL, account.getEmail())
@@ -100,11 +133,9 @@ public final class PostgresAccountRepository implements AccountRepository {
         .set(ACCOUNT.STATUS, account.getStatus().name())
         .set(ACCOUNT.USERNAME, account.getUsername())
         .set(ACCOUNT.VERSION, ACCOUNT.VERSION.plus(1L))
+        .where(ACCOUNT.ACCOUNT_ID.eq(account.getId())
+            .and(ACCOUNT.VERSION.eq(account.getVersion())))
         .execute();
-    replacePermissions(transaction, account);
-    replaceFederationIdentity(transaction, account);
-    replaceModerationAudit(transaction, account);
-    return findById(transaction, account.getId()).orElseThrow();
   }
 
   private static void replacePermissions(DSLContext transaction, Account account) {
@@ -209,9 +240,10 @@ public final class PostgresAccountRepository implements AccountRepository {
     var requested = new ArrayList<String>();
     ids.forEach(requested::add);
     if (requested.isEmpty()) return List.of();
-    return database.selectFrom(ACCOUNT)
+    var records = database.selectFrom(ACCOUNT)
         .where(ACCOUNT.ACCOUNT_ID.in(requested))
-        .fetch(record -> map(database, record));
+        .fetch();
+    return mapAll(database, records);
   }
 
   @Override
@@ -265,34 +297,37 @@ public final class PostgresAccountRepository implements AccountRepository {
   @Override
   public List<Account> findByUsernameStartingWithIgnoreCaseAndStatusOrderByUsernameAsc(
       String usernamePrefix, AccountStatus status, Pageable pageable) {
-    return database.selectFrom(ACCOUNT)
+    var records = database.selectFrom(ACCOUNT)
         .where(DSL.lower(ACCOUNT.USERNAME).like(escapeLike(normalize(usernamePrefix)) + '%', '\\')
             .and(ACCOUNT.STATUS.eq(status.name())))
         .orderBy(ACCOUNT.USERNAME.asc(), ACCOUNT.ACCOUNT_ID.asc())
         .limit(pageable.isPaged() ? pageable.getPageSize() : Integer.MAX_VALUE)
         .offset(pageable.isPaged() ? Math.toIntExact(pageable.getOffset()) : 0)
-        .fetch(record -> map(database, record));
+        .fetch();
+    return mapAll(database, records);
   }
 
   @Override
   public List<Account> findByIdInAndStatusAndFederationEnabledTrueOrderByUsernameAsc(
       Collection<String> accountIds, AccountStatus status, Pageable pageable) {
     if (accountIds.isEmpty()) return List.of();
-    return database.selectFrom(ACCOUNT)
+    var records = database.selectFrom(ACCOUNT)
         .where(ACCOUNT.ACCOUNT_ID.in(accountIds)
             .and(ACCOUNT.STATUS.eq(status.name()))
             .and(ACCOUNT.FEDERATION_ENABLED.isTrue()))
         .orderBy(ACCOUNT.USERNAME.asc(), ACCOUNT.ACCOUNT_ID.asc())
         .limit(pageable.isPaged() ? pageable.getPageSize() : Integer.MAX_VALUE)
         .offset(pageable.isPaged() ? Math.toIntExact(pageable.getOffset()) : 0)
-        .fetch(record -> map(database, record));
+        .fetch();
+    return mapAll(database, records);
   }
 
   private Optional<Account> findOne(org.jooq.Condition condition, boolean requireUnique) {
-    var matches = database.selectFrom(ACCOUNT)
+    var records = database.selectFrom(ACCOUNT)
         .where(condition)
         .limit(requireUnique ? 2 : 1)
-        .fetch(record -> map(database, record));
+        .fetch();
+    var matches = mapAll(database, records);
     if (requireUnique && matches.size() > 1) {
       throw new IncorrectResultSizeDataAccessException(1);
     }
@@ -304,10 +339,11 @@ public final class PostgresAccountRepository implements AccountRepository {
     var query = database.selectFrom(ACCOUNT)
         .where(condition)
         .orderBy(sortFields(pageable));
-    var values = pageable.isPaged()
+    var records = pageable.isPaged()
         ? query.limit(pageable.getPageSize()).offset(Math.toIntExact(pageable.getOffset()))
-            .fetch(record -> map(database, record))
-        : query.fetch(record -> map(database, record));
+            .fetch()
+        : query.fetch();
+    var values = mapAll(database, records);
     return new PageImpl<>(values, pageable, total);
   }
 
@@ -335,35 +371,50 @@ public final class PostgresAccountRepository implements AccountRepository {
   }
 
   public static Account map(DSLContext context, AccountRecord record) {
-    var permissions = context.select(ACCOUNT_PERMISSION.PERMISSION)
+    return mapAll(context, List.of(record)).getFirst();
+  }
+
+  public static List<Account> mapAll(DSLContext context, List<AccountRecord> records) {
+    if (records.isEmpty()) return List.of();
+    var accountIds = records.stream().map(AccountRecord::getAccountId).toList();
+    var permissions = new HashMap<String, HashSet<AccountPermission>>();
+    accountIds.forEach(id -> permissions.put(id, new HashSet<>()));
+    context.select(ACCOUNT_PERMISSION.ACCOUNT_ID, ACCOUNT_PERMISSION.PERMISSION)
         .from(ACCOUNT_PERMISSION)
-        .where(ACCOUNT_PERMISSION.ACCOUNT_ID.eq(record.getAccountId()))
-        .fetchSet(ACCOUNT_PERMISSION.PERMISSION).stream()
-        .map(AccountPermission::valueOf)
-        .collect(java.util.stream.Collectors.toCollection(HashSet::new));
-    var federationIdentity = context.selectFrom(ACCOUNT_FEDERATION_IDENTITY)
-        .where(ACCOUNT_FEDERATION_IDENTITY.ACCOUNT_ID.eq(record.getAccountId()))
-        .fetchOptional(identity -> new FederationIdentity(
-            identity.getActorId(),
-            identity.getKeyId(),
-            identity.getPublicKeyPem(),
-            new EncryptedPrivateKey(
-                identity.getPrivateKeyNonce(), identity.getPrivateKeyCiphertext()),
-            identity.getKeyVersion(),
-            instant(identity.getCreatedOn())))
-        .orElse(null);
-    var moderationAudit = context.selectFrom(ACCOUNT_MODERATION_AUDIT)
-        .where(ACCOUNT_MODERATION_AUDIT.ACCOUNT_ID.eq(record.getAccountId()))
-        .fetchOptional(audit -> new ModerationAuditCommand(
-            audit.getEventId(), audit.getActorAccountId(), audit.getActorUsername(),
-            audit.getAction(), audit.getTargetType(), audit.getTargetId(), audit.getTargetLabel(),
-            audit.getReason(), audit.getMessage(),
-            auditValues(context, record.getAccountId(), "before"),
-            auditValues(context, record.getAccountId(), "after"),
-            auditValues(context, record.getAccountId(), "metadata")))
-        .orElse(null);
+        .where(ACCOUNT_PERMISSION.ACCOUNT_ID.in(accountIds))
+        .forEach(row -> permissions.get(row.value1()).add(AccountPermission.valueOf(row.value2())));
+    Map<String, AccountFederationIdentityRecord> identities = context
+        .selectFrom(ACCOUNT_FEDERATION_IDENTITY)
+        .where(ACCOUNT_FEDERATION_IDENTITY.ACCOUNT_ID.in(accountIds))
+        .fetchMap(ACCOUNT_FEDERATION_IDENTITY.ACCOUNT_ID);
+    Map<String, AccountModerationAuditRecord> audits = context
+        .selectFrom(ACCOUNT_MODERATION_AUDIT)
+        .where(ACCOUNT_MODERATION_AUDIT.ACCOUNT_ID.in(accountIds))
+        .fetchMap(ACCOUNT_MODERATION_AUDIT.ACCOUNT_ID);
+    var auditValues = new HashMap<AuditPartition, LinkedHashMap<String, String>>();
+    context.selectFrom(ACCOUNT_MODERATION_AUDIT_VALUE)
+        .where(ACCOUNT_MODERATION_AUDIT_VALUE.ACCOUNT_ID.in(accountIds))
+        .orderBy(ACCOUNT_MODERATION_AUDIT_VALUE.ACCOUNT_ID.asc(),
+            ACCOUNT_MODERATION_AUDIT_VALUE.PARTITION_NAME.asc(),
+            ACCOUNT_MODERATION_AUDIT_VALUE.VALUE_KEY.asc())
+        .forEach(row -> auditValues.computeIfAbsent(
+            new AuditPartition(row.getAccountId(), row.getPartitionName()),
+            ignored -> new LinkedHashMap<>()).put(row.getValueKey(), row.getValue()));
+    return records.stream().map(record -> map(
+        record,
+        permissions.get(record.getAccountId()),
+        federationIdentity(identities.get(record.getAccountId())),
+        moderationAudit(audits.get(record.getAccountId()), auditValues))).toList();
+  }
+
+  private static Account map(
+      AccountRecord record,
+      HashSet<AccountPermission> permissions,
+      FederationIdentity federationIdentity,
+      ModerationAuditCommand moderationAudit) {
     return Account.builder()
         .id(record.getAccountId())
+        .version(record.getVersion())
         .createdBy(record.getCreatedBy())
         .createdOn(instant(record.getCreatedOn()))
         .email(record.getEmail())
@@ -390,18 +441,33 @@ public final class PostgresAccountRepository implements AccountRepository {
         .build();
   }
 
+  private static FederationIdentity federationIdentity(AccountFederationIdentityRecord identity) {
+    if (identity == null) return null;
+    return new FederationIdentity(
+        identity.getActorId(), identity.getKeyId(), identity.getPublicKeyPem(),
+        new EncryptedPrivateKey(identity.getPrivateKeyNonce(), identity.getPrivateKeyCiphertext()),
+        identity.getKeyVersion(), instant(identity.getCreatedOn()));
+  }
+
+  private static ModerationAuditCommand moderationAudit(
+      AccountModerationAuditRecord audit,
+      Map<AuditPartition, LinkedHashMap<String, String>> values) {
+    if (audit == null) return null;
+    return new ModerationAuditCommand(
+        audit.getEventId(), audit.getActorAccountId(), audit.getActorUsername(),
+        audit.getAction(), audit.getTargetType(), audit.getTargetId(), audit.getTargetLabel(),
+        audit.getReason(), audit.getMessage(),
+        auditValues(values, audit.getAccountId(), "before"),
+        auditValues(values, audit.getAccountId(), "after"),
+        auditValues(values, audit.getAccountId(), "metadata"));
+  }
+
   private static Map<String, String> auditValues(
-      DSLContext context, String accountId, String partition) {
-    var values = new LinkedHashMap<String, String>();
-    context.select(
-            ACCOUNT_MODERATION_AUDIT_VALUE.VALUE_KEY,
-            ACCOUNT_MODERATION_AUDIT_VALUE.VALUE)
-        .from(ACCOUNT_MODERATION_AUDIT_VALUE)
-        .where(ACCOUNT_MODERATION_AUDIT_VALUE.ACCOUNT_ID.eq(accountId)
-            .and(ACCOUNT_MODERATION_AUDIT_VALUE.PARTITION_NAME.eq(partition)))
-        .orderBy(ACCOUNT_MODERATION_AUDIT_VALUE.VALUE_KEY.asc())
-        .forEach(row -> values.put(row.value1(), row.value2()));
-    return Map.copyOf(values);
+      Map<AuditPartition, LinkedHashMap<String, String>> values,
+      String accountId,
+      String partition) {
+    return Map.copyOf(values.getOrDefault(
+        new AuditPartition(accountId, partition), new LinkedHashMap<>()));
   }
 
   private static String normalize(String value) {
@@ -419,4 +485,6 @@ public final class PostgresAccountRepository implements AccountRepository {
   private static Instant instant(OffsetDateTime value) {
     return value == null ? null : value.toInstant();
   }
+
+  private record AuditPartition(String accountId, String partition) {}
 }

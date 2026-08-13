@@ -11,7 +11,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -23,12 +22,10 @@ import org.springframework.stereotype.Repository;
 @MongoPersistence
 @Repository
 class FederationDeliveryJobRepository implements FederationDeliveryStore {
-  private final KindScopedMongoOperations<Post> posts;
   private final KindScopedMongoOperations<FederationScanState> scans;
   private final KindScopedMongoOperations<FederationDeliveryJob> jobs;
 
   FederationDeliveryJobRepository(DomainMongoOperationsFactory factory) {
-    this.posts = factory.forType(Post.class);
     this.scans = factory.forType(FederationScanState.class);
     this.jobs = factory.forType(FederationDeliveryJob.class);
   }
@@ -37,23 +34,6 @@ class FederationDeliveryJobRepository implements FederationDeliveryStore {
   public FederationScanCursor loadCursor() {
     return scans.findById(FederationScanState.OUTBOUND_CREATE)
         .map(FederationScanState::cursor).orElse(null);
-  }
-
-  @Override
-  public List<Post> scanEligibleAfter(FederationScanCursor cursor, int limit) {
-    var eligible = Criteria.where("federationOutboundEligible").is(true);
-    Criteria criteria = eligible;
-    if (cursor != null) {
-      criteria = new Criteria().andOperator(eligible, new Criteria().orOperator(
-          Criteria.where("createdOn").gt(cursor.createdOn()),
-          new Criteria().andOperator(
-              Criteria.where("createdOn").is(cursor.createdOn()),
-              Criteria.where("id").gt(cursor.postId()))));
-    }
-    var query = Query.query(criteria)
-        .with(Sort.by(Sort.Order.asc("createdOn"), Sort.Order.asc("id")))
-        .limit(limit);
-    return posts.find(query, org.springframework.data.domain.Pageable.unpaged());
   }
 
   @Override

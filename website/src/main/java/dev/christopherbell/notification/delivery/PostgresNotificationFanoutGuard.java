@@ -91,6 +91,32 @@ public final class PostgresNotificationFanoutGuard implements NotificationFanout
     database.transaction(configuration -> release(DSL.using(configuration), permit));
   }
 
+  @Override
+  public NotificationCleanupResult deleteExpired(Instant cutoff, int batchLimit) {
+    if (batchLimit < 1) throw new IllegalArgumentException("Cleanup batch limit must be positive");
+    var timestamp = cutoff.atOffset(ZoneOffset.UTC);
+    return database.transactionResult(configuration -> {
+      var transaction = DSL.using(configuration);
+      var guards = transaction.select(NOTIFICATION_DELIVERY_GUARD.GUARD_ID)
+          .from(NOTIFICATION_DELIVERY_GUARD)
+          .where(NOTIFICATION_DELIVERY_GUARD.EXPIRES_AT.le(timestamp))
+          .orderBy(NOTIFICATION_DELIVERY_GUARD.EXPIRES_AT.asc(),
+              NOTIFICATION_DELIVERY_GUARD.GUARD_ID.asc())
+          .limit(batchLimit);
+      var rates = transaction.select(NOTIFICATION_RATE_LIMIT.RATE_LIMIT_ID)
+          .from(NOTIFICATION_RATE_LIMIT)
+          .where(NOTIFICATION_RATE_LIMIT.EXPIRES_AT.le(timestamp))
+          .orderBy(NOTIFICATION_RATE_LIMIT.EXPIRES_AT.asc(),
+              NOTIFICATION_RATE_LIMIT.RATE_LIMIT_ID.asc())
+          .limit(batchLimit);
+      var guardsDeleted = transaction.deleteFrom(NOTIFICATION_DELIVERY_GUARD)
+          .where(NOTIFICATION_DELIVERY_GUARD.GUARD_ID.in(guards)).execute();
+      var ratesDeleted = transaction.deleteFrom(NOTIFICATION_RATE_LIMIT)
+          .where(NOTIFICATION_RATE_LIMIT.RATE_LIMIT_ID.in(rates)).execute();
+      return new NotificationCleanupResult(guardsDeleted, ratesDeleted);
+    });
+  }
+
   private static void release(DSLContext transaction, NotificationDeliveryPermit permit) {
     transaction.update(NOTIFICATION_RATE_LIMIT)
         .set(NOTIFICATION_RATE_LIMIT.DELIVERY_COUNT,

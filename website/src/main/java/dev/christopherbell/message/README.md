@@ -10,9 +10,9 @@ Owns direct user-to-user messaging.
   browser assets own the conversation rail, recipient autocomplete, and private
   thread rendering.
 - Conversation listing, individual conversation retrieval, and read-state updates under `conversation`.
-- Mongo indexes cover conversation ordering, participant inbox ordering, and
-  unread sender/recipient counts. Production rollout should account for index
-  creation on existing message data.
+- MongoDB document indexes and PostgreSQL relational indexes cover conversation
+  ordering, participant inbox ordering, and unread sender/recipient counts.
+  Migration rollout verifies both index strategies against existing message data.
 - Send permissions reject suspended sender accounts, so suspended users cannot
   continue sending direct messages with an existing session.
 - Send permissions reject messages when either participant has blocked the other

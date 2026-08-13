@@ -12,6 +12,8 @@ import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.library.freeze.FreezingArchRule;
+import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresPersistenceSupport;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -159,13 +161,8 @@ final class LegacyModuleDependencyRules {
 
     // PostgreSQL adapters are governed by the stricter transition-specific rules.
     // Keep this frozen legacy-debt baseline focused on the pre-migration application.
-    if (source.getSimpleName().startsWith("Postgres")) {
-      return Optional.empty();
-    }
-
-    if (kind == ViolationKind.INTERNAL_ACCESS
-        && source.isInterface()
-        && source.getSimpleName().endsWith("Port")) {
+    if (source.isAnnotatedWith(PostgresPersistence.class)
+        || source.isAnnotatedWith(PostgresPersistenceSupport.class)) {
       return Optional.empty();
     }
 

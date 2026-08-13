@@ -62,6 +62,40 @@ class MongoPostRepository extends KindScopedRepositorySupport<Post>
         .and("parentId").ne(null)));
   }
 
+  @Override
+  public List<Post> findFederationEligibleAfter(Instant createdOn, String postId, int limit) {
+    var eligible = Criteria.where("federationOutboundEligible").is(true);
+    Criteria criteria = eligible;
+    if (createdOn != null && postId != null) {
+      criteria = new Criteria().andOperator(eligible, new Criteria().orOperator(
+          Criteria.where("createdOn").gt(createdOn),
+          new Criteria().andOperator(
+              Criteria.where("createdOn").is(createdOn), Criteria.where("id").gt(postId))));
+    }
+    return find(Query.query(criteria)
+        .with(Sort.by(Sort.Order.asc("createdOn"), Sort.Order.asc("id")))
+        .limit(limit));
+  }
+
+  @Override
+  public List<Post> findFederationOutboxPage(
+      String accountId, Instant createdOn, String postId, int limit, Instant expiresAfter) {
+    var active = Criteria.where("accountId").is(accountId)
+        .and("federationOutboundEligible").is(true)
+        .and("expiresOn").gt(expiresAfter)
+        .and("createdOn").ne(null);
+    Criteria criteria = active;
+    if (createdOn != null && postId != null) {
+      criteria = new Criteria().andOperator(active, new Criteria().orOperator(
+          Criteria.where("createdOn").lt(createdOn),
+          new Criteria().andOperator(
+              Criteria.where("createdOn").is(createdOn), Criteria.where("id").lt(postId))));
+    }
+    return find(Query.query(criteria)
+        .with(Sort.by(Sort.Order.desc("createdOn"), Sort.Order.desc("id")))
+        .limit(limit));
+  }
+
   private static Query accountQuery(String accountId) {
     return Query.query(Criteria.where("accountId").is(accountId))
         .with(Sort.by(Sort.Direction.DESC, "createdOn"));

@@ -85,8 +85,8 @@ public final class PostgresPostFeedQueryRepository implements PostFeedQueryPort 
         .where(condition)
         .orderBy(POST.CREATED_ON.desc(), POST.POST_ID.desc())
         .limit(size + 1)
-        .fetch(record -> PostgresPostMapper.map(database, record));
-    return slice(loaded, size);
+        .fetch();
+    return slice(PostgresPostMapper.mapAll(database, loaded), size);
   }
 
   private static Condition visible(

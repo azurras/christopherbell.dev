@@ -163,7 +163,8 @@ final class DomainDocumentCodec<T> {
 
   T decode(Document envelope) {
     try {
-      if (envelope == null || !List.copyOf(envelope.keySet()).equals(ENVELOPE_FIELDS)) {
+      if (envelope == null
+          || !java.util.Set.copyOf(envelope.keySet()).equals(java.util.Set.copyOf(ENVELOPE_FIELDS))) {
         throw new MalformedDomainDocumentException();
       }
       if (!kind.kind().equals(envelope.get("_kind"))

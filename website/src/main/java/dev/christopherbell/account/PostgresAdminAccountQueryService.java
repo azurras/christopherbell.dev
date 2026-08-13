@@ -27,12 +27,14 @@ public final class PostgresAdminAccountQueryService implements AdminAccountQuery
   public AdminAccountPage getAccounts(AdminAccountQuery request) {
     var condition = condition(request);
     long total = database.fetchCount(ACCOUNT, condition);
-    var items = database.selectFrom(ACCOUNT)
+    var records = database.selectFrom(ACCOUNT)
         .where(condition)
         .orderBy(order(request))
         .limit(request.size())
         .offset(Math.multiplyExact(request.page(), request.size()))
-        .fetch(record -> mapper.toAccount(PostgresAccountRepository.map(database, record)));
+        .fetch();
+    var items = PostgresAccountRepository.mapAll(database, records).stream()
+        .map(mapper::toAccount).toList();
     int pages = total == 0 ? 0 : Math.toIntExact(((total - 1) / request.size()) + 1);
     return new AdminAccountPage(items, request.page(), request.size(), total, pages,
         request.sort(), request.direction().name());

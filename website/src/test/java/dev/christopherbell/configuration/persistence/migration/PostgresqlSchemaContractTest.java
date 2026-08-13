@@ -27,8 +27,8 @@ class PostgresqlSchemaContractTest {
     try (var first = PostgresqlSchemaTestSupport.migrate();
          var second = PostgresqlSchemaTestSupport.migrate();
          var connection = first.connect()) {
-      assertThat(first.migrationsExecuted()).isEqualTo(6);
-      assertThat(second.migrationsExecuted()).isEqualTo(6);
+      assertThat(first.migrationsExecuted()).isEqualTo(7);
+      assertThat(second.migrationsExecuted()).isEqualTo(7);
       assertThat(ownedSchemas(connection, first.prefix()))
           .hasSize(PostgresqlSchemaTestSupport.DOMAINS.size());
       assertThat(ownedSchemas(connection, second.prefix()))
@@ -41,7 +41,7 @@ class PostgresqlSchemaContractTest {
   void emptyFlywayMigrationCreatesExactlyTheTenOwnedCatalogSchemasAndTables() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate();
          var connection = database.connect()) {
-      assertThat(database.migrationsExecuted()).isEqualTo(6);
+      assertThat(database.migrationsExecuted()).isEqualTo(7);
       assertThat(ownedSchemas(connection, database.prefix()))
           .containsExactlyInAnyOrderElementsOf(PostgresqlSchemaTestSupport.DOMAINS.stream()
               .map(database.prefix()::concat)
@@ -174,6 +174,95 @@ class PostgresqlSchemaContractTest {
   }
 
   @Test
+  void versionSixPseudonymsUpgradeIntoTheGuardedRegistry() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("6");
+         var connection = database.connect()) {
+      assertThat(database.migrationsExecuted()).isEqualTo(6);
+      var identity = quoted(database.prefix() + "identity");
+      var social = quoted(database.prefix() + "social");
+      execute(connection, "insert into " + identity
+          + ".account (account_id, email, normalized_email, role, status, username) values "
+          + "('upgrade-owner', 'upgrade@example.test', 'upgrade@example.test', "
+          + "'USER', 'ACTIVE', 'upgrade-owner')");
+      execute(connection, "insert into " + social
+          + ".post (post_id, account_id, post_text, root_post_id, created_on) values "
+          + "('upgrade-post', 'upgrade-owner', 'before', 'upgrade-post', transaction_timestamp())");
+      execute(connection, "insert into " + social
+          + ".post_edit_audit (post_id, ordinal, editor_account_id, before_text, after_text, "
+          + "edited_on) values ('upgrade-post', 0, 'deleted:abcdef012345', 'before', 'after', "
+          + "transaction_timestamp())");
+
+      assertThat(database.migrateToLatest()).isOne();
+      assertThat(longScalar(connection, "select count(*) from " + identity
+          + ".deleted_account_pseudonym where pseudonym_id = 'deleted:abcdef012345'"))
+          .isOne();
+      assertForeignKeyViolation(() -> execute(connection, "update " + social
+          + ".post_edit_audit set editor_account_id = 'arbitrary-dangling-id' "
+          + "where post_id = 'upgrade-post'"));
+    }
+  }
+
+  @Test
+  void retainedIdentifierConstraintsRejectUnknownAccountsAcrossEveryUnlinkedColumn()
+      throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var connection = database.connect()) {
+      var identity = quoted(database.prefix() + "identity");
+      var social = quoted(database.prefix() + "social");
+      var platform = quoted(database.prefix() + "platform");
+      var sharedFolder = quoted(database.prefix() + "shared_folder");
+      execute(connection, "insert into " + identity
+          + ".account (account_id, email, normalized_email, role, status, username) values "
+          + "('guard-owner', 'guard@example.test', 'guard@example.test', "
+          + "'USER', 'ACTIVE', 'guard-owner')");
+      execute(connection, "insert into " + social
+          + ".post (post_id, account_id, post_text, root_post_id, created_on) values "
+          + "('guard-post', 'guard-owner', 'before', 'guard-post', transaction_timestamp())");
+      execute(connection, "insert into " + social
+          + ".post_edit_audit (post_id, ordinal, editor_account_id, before_text, after_text, "
+          + "edited_on) values ('guard-post', 0, 'guard-owner', 'before', 'after', "
+          + "transaction_timestamp())");
+      execute(connection, "insert into " + social
+          + ".post_report (post_report_id, reported_account_id, reporter_account_id, report_type, "
+          + "target_type, reason, status, created_on) values "
+          + "('guard-report', 'guard-owner', 'guard-owner', 'SPAM', 'POST', 'guard', 'OPEN', "
+          + "transaction_timestamp())");
+      execute(connection, "insert into " + platform
+          + ".admin_activity (admin_activity_id, actor_account_id, actor_username, action, "
+          + "target_type, target_id, target_label, reason, message, created_on) values "
+          + "('guard-activity', 'guard-owner', 'guard-owner', 'GUARD', 'ACCOUNT', "
+          + "'guard-owner', 'guard-owner', 'guard', 'guard', transaction_timestamp())");
+      execute(connection, "insert into " + sharedFolder
+          + ".audit_event (audit_event_id, account_id, action, outcome, client_ip, occurred_at, "
+          + "expires_at) values ('guard-audit', 'guard-owner', 'GUARD', 'SUCCESS', "
+          + "inet '127.0.0.1', transaction_timestamp(), transaction_timestamp() + interval '1 day')");
+      execute(connection, "insert into " + sharedFolder
+          + ".recycle_item (recycle_item_id, original_path, deleted_by_account_id, deleted_at, "
+          + "expires_at, payload_key, size_bytes, source_fingerprint, state, source_identity, "
+          + "retry_after) values ('guard-recycle', '/guard', 'guard-owner', transaction_timestamp(), "
+          + "transaction_timestamp() + interval '1 day', 'payload', 1, 'fingerprint', 'READY', "
+          + "'source', transaction_timestamp())");
+
+      assertForeignKeyViolation(() -> execute(connection, "update " + social
+          + ".post_edit_audit set editor_account_id = 'dangling-editor' where post_id = 'guard-post'"));
+      assertForeignKeyViolation(() -> execute(connection, "update " + social
+          + ".post_report set reported_account_id = 'dangling-reported' "
+          + "where post_report_id = 'guard-report'"));
+      assertForeignKeyViolation(() -> execute(connection, "update " + social
+          + ".post_report set reporter_account_id = 'dangling-reporter' "
+          + "where post_report_id = 'guard-report'"));
+      assertForeignKeyViolation(() -> execute(connection, "update " + platform
+          + ".admin_activity set actor_account_id = 'dangling-actor' "
+          + "where admin_activity_id = 'guard-activity'"));
+      assertForeignKeyViolation(() -> execute(connection, "update " + sharedFolder
+          + ".audit_event set account_id = 'dangling-auditor' where audit_event_id = 'guard-audit'"));
+      assertForeignKeyViolation(() -> execute(connection, "update " + sharedFolder
+          + ".recycle_item set deleted_by_account_id = 'dangling-deleter' "
+          + "where recycle_item_id = 'guard-recycle'"));
+    }
+  }
+
+  @Test
   void coordinatePlaylistAndLeaseContractsFailOrTransitionAtTheDatabaseBoundary() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate();
          var connection = database.connect()) {
@@ -268,6 +357,7 @@ class PostgresqlSchemaContractTest {
         .collect(Collectors.toCollection(HashSet::new));
     tables.add("platform.persistence_migration_run");
     tables.add("platform.persistence_migration_source");
+    tables.add("identity.deleted_account_pseudonym");
     return Set.copyOf(tables);
   }
 
@@ -648,6 +738,17 @@ class PostgresqlSchemaContractTest {
     }
   }
 
+  private static void assertForeignKeyViolation(SqlAction action) {
+    assertThatThrownBy(action::run)
+        .isInstanceOf(SQLException.class)
+        .extracting(failure -> ((SQLException) failure).getSQLState())
+        .isEqualTo("23503");
+  }
+
+  private static String quoted(String identifier) {
+    return '"' + identifier.replace("\"", "\"\"") + '"';
+  }
+
   private static int executeUpdate(Connection connection, String sql) throws SQLException {
     try (var statement = connection.createStatement()) {
       return statement.executeUpdate(sql);
@@ -662,6 +763,11 @@ class PostgresqlSchemaContractTest {
   }
 
   private record TargetColumn(String table, String column) {}
+
+  @FunctionalInterface
+  private interface SqlAction {
+    void run() throws SQLException;
+  }
 
   private record IndexColumn(String name, int direction) {}
 
