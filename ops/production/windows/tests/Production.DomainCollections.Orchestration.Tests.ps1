@@ -456,6 +456,39 @@ Describe 'guarded domain collection cutover orchestration' {
                 -Times 0 -Exactly
         }
 
+        It 're-stops the legacy writer when recovery normalization fails after restart' {
+            $state = [pscustomobject]@{
+                config = $script:config
+                priorMarkerBase64 = 'cHJpb3I='
+                legacyPath = 'C:\ProgramData\christopherbell.dev\releases\' + ('1' * 40)
+            }
+            $script:stopCount = 0
+            Mock Resolve-ProductionDomainCollectionPrepublicationPublication { }
+            Mock Read-ProductionDomainSchemaDirection { $null }
+            Mock Restore-ProductionDomainCollectionLegacyRelease {
+                [void]$script:events.Add('marker:restore')
+            }
+            Mock Start-ProductionDomainCollectionLegacy {
+                [void]$script:events.Add('legacy:start')
+            }
+            Mock Set-ProductionWebsiteRecoveryPolicy {
+                [void]$script:events.Add("recovery:$Policy")
+                throw 'normalization failed'
+            } -ParameterFilter { $Policy -eq 'Normal' }
+            Mock Stop-ProductionDomainCollectionWriter {
+                $script:stopCount++
+                [void]$script:events.Add('stop-suspended')
+            }
+
+            { Restore-ProductionDomainCollectionSnapshotInitializationFailure `
+                    -Context $state } |
+                Should -Throw '*normalization failed*'
+
+            $script:events | Should -Be @(
+                'marker:restore','legacy:start','recovery:Normal','stop-suspended')
+            $script:stopCount | Should -Be 1
+        }
+
         It 'keeps the public target writer disabled until legacy deletion completes' {
             $script:publicWriterEnabledBeforeDeletion = $false
             $script:finalTargetVerified = $false

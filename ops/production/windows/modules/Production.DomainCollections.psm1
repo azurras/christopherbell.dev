@@ -1181,7 +1181,19 @@ function Restore-ProductionDomainCollectionSnapshotInitializationFailure {
     }
     Restore-ProductionDomainCollectionLegacyRelease -State $Context
     Start-ProductionDomainCollectionLegacy -State $Context
-    Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+    try {
+        Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+    } catch {
+        $normalizationFailure = $_.Exception
+        try {
+            Stop-ProductionDomainCollectionWriter -Context $Context
+        } catch {
+            throw [AggregateException]::new(
+                'Legacy recovery normalization and writer containment both failed.',
+                [Exception[]]@($normalizationFailure, $_.Exception))
+        }
+        throw $normalizationFailure
+    }
 }
 
 function New-ProductionDomainCollectionCutoverContext {
