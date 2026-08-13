@@ -1,3 +1,5 @@
 org.springframework.context.ApplicationContextInitializer=\
 dev.christopherbell.configuration.FederationSecretApplicationContextInitializer,\
 dev.christopherbell.configuration.ProductionSettingsApplicationContextInitializer
+org.springframework.boot.autoconfigure.AutoConfigurationImportFilter=\
+dev.christopherbell.configuration.persistence.PersistenceBackendAutoConfigurationImportFilter

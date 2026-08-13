@@ -32,12 +32,10 @@ class PostgresqlTestSchemaIsolationIntegrationTest {
         second.setSchema(secondSchema);
         requireSafeIdentity(first);
         requireSafeIdentity(second);
-        createFixture(first);
-        createFixture(second);
-        assertThat(fixtureCount(first, firstSchema)).isEqualTo(1);
-        assertThat(fixtureCount(second, secondSchema)).isEqualTo(1);
-        assertThat(fixtureCount(first, secondSchema)).isEqualTo(0);
-        assertThat(fixtureCount(second, firstSchema)).isEqualTo(0);
+        createFixture(first, 101);
+        createFixture(second, 202);
+        assertThat(unqualifiedFixtureValue(first)).isEqualTo(101);
+        assertThat(unqualifiedFixtureValue(second)).isEqualTo(202);
       } finally {
         dropSchema(first, firstSchema);
         dropSchema(second, secondSchema);
@@ -69,16 +67,16 @@ class PostgresqlTestSchemaIsolationIntegrationTest {
     }
   }
 
-  private static void createFixture(java.sql.Connection connection) throws SQLException {
+  private static void createFixture(java.sql.Connection connection, int value) throws SQLException {
     try (var statement = connection.createStatement()) {
       statement.execute("create table fixture (value integer not null)");
-      statement.execute("insert into fixture (value) values (1)");
+      statement.execute("insert into fixture (value) values (" + value + ")");
     }
   }
 
-  private static int fixtureCount(java.sql.Connection connection, String schema) throws SQLException {
+  private static int unqualifiedFixtureValue(java.sql.Connection connection) throws SQLException {
     try (var statement = connection.createStatement();
-         var result = statement.executeQuery("select count(*) from \"" + schema + "\".fixture")) {
+         var result = statement.executeQuery("select value from fixture")) {
       result.next();
       return result.getInt(1);
     }

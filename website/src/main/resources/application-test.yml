@@ -8,10 +8,6 @@ app:
     root: build/shared-folder/test/shared
     system-root: build/shared-folder/test/system
 spring:
-  autoconfigure:
-    exclude:
-      - org.springframework.boot.mongodb.autoconfigure.MongoAutoConfiguration
-      - org.springframework.boot.data.mongodb.autoconfigure.DataMongoRepositoriesAutoConfiguration
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/test}
     username: ${SPRING_DATASOURCE_USERNAME:christopherbell_test}

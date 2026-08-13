@@ -108,6 +108,23 @@ class ProductionSettingsApplicationContextInitializerTest {
         .hasMessageNotContaining(unsafeJdbcUrl);
   }
 
+  @Test
+  void productionRejectsMissingAndUnsupportedPersistenceBackends() {
+    var missing = context("prod", Map.of(
+        "APP_JWT_SECRET", VALID_JWT,
+        "APP_MAIL_ENABLED", "false"));
+    assertThatThrownBy(() -> initializer.initialize(missing))
+        .hasMessageContaining("APP_PERSISTENCE_BACKEND");
+
+    var unsupported = context("prod", Map.of(
+        "APP_PERSISTENCE_BACKEND", "unsupported",
+        "APP_JWT_SECRET", VALID_JWT,
+        "APP_MAIL_ENABLED", "false"));
+    assertThatThrownBy(() -> initializer.initialize(unsupported))
+        .hasMessageContaining("APP_PERSISTENCE_BACKEND")
+        .hasMessageNotContaining("unsupported");
+  }
+
   private GenericApplicationContext validProductionContext(Map<String, String> overrides) {
     var values = new LinkedHashMap<String, String>();
     values.put("APP_PERSISTENCE_BACKEND", "mongodb");

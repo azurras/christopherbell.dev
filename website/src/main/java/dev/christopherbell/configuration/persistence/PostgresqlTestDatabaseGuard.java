@@ -19,7 +19,8 @@ public final class PostgresqlTestDatabaseGuard {
         throw new IllegalStateException("PostgreSQL current_schema is unavailable for test fixtures.");
       }
     } catch (DataAccessException failure) {
-      throw new IllegalStateException("PostgreSQL database identity check failed.");
+      throw new PostgresqlDatabaseIdentityCheckException(
+          new PostgresqlDatabaseIdentityCheckCause("DATA_ACCESS"));
     }
   }
 
