@@ -4,6 +4,7 @@ import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFacto
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.time.Instant;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Repository;
 public class MigrationStateStore {
   private final KindScopedMongoOperations<MigrationRecord> mongo;
 
+  @Autowired
   public MigrationStateStore(DomainMongoOperationsFactory factory) {
     this.mongo = factory.forType(MigrationRecord.class);
   }

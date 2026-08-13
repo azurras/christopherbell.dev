@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.mongodb.client.result.UpdateResult;
+import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 @ExtendWith(MockitoExtension.class)
 class MigrationStateStoreTest {
@@ -25,6 +27,20 @@ class MigrationStateStoreTest {
 
   @Mock private KindScopedMongoOperations<MigrationRecord> mongo;
   private MigrationStateStore store;
+
+  @Test
+  void springSelectsTheProductionFactoryConstructor() {
+    try (var context = new AnnotationConfigApplicationContext()) {
+      context.registerBean(
+          DomainMongoOperationsFactory.class,
+          () -> org.mockito.Mockito.mock(DomainMongoOperationsFactory.class));
+      context.register(MigrationStateStore.class);
+
+      context.refresh();
+
+      assertThat(context.getBean(MigrationStateStore.class)).isNotNull();
+    }
+  }
 
   @BeforeEach
   void setUp() {
