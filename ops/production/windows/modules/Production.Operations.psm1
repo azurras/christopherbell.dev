@@ -1163,16 +1163,17 @@ function ConvertFrom-ProductionMongoCollectionInventory {
 
 function Get-ProductionMongoCollectionInventory {
     $config = Read-ProductionConfig
+    $manifestPath = Join-Path $PSScriptRoot '..\scripts\DomainCollectionManifest.js'
+    $manifestPathLiteral = ConvertTo-Json ([IO.Path]::GetFullPath($manifestPath)) -Compress
+    $evaluation = "load($manifestPathLiteral);`n$(Get-ProductionMongoCollectionInventoryScript)"
     $json = Invoke-CheckedProcess `
         -FilePath $config.mongoShellExe `
         -ArgumentList @(
             '--quiet'
             '--norc'
             'mongodb://127.0.0.1:27017/admin'
-            '--file'
-            (Join-Path $PSScriptRoot '..\scripts\DomainCollectionManifest.js')
             '--eval'
-            (Get-ProductionMongoCollectionInventoryScript)
+            $evaluation
         ) `
         -WorkingDirectory $config.repositoryPath
     ConvertFrom-ProductionMongoCollectionInventory -Json $json
