@@ -24,13 +24,13 @@ proof, publication, deletion proof, and rollback.
 
 ## Recovery
 
-Stopping the writer must produce an explicit recovery owner even if backup or
-preview fails before a full cutover context exists. A pre-context failure must
-restart the exact active legacy release, restore its prior schema marker, and
-return website recovery policy to `Normal`. Once the protected PREVIEWED pair
-exists, failures continue through the existing evidence-bound prepublication
-recovery state machine. No failure before `DROP_STARTED` may restore the backup
-or delete legacy data.
+The existing stop boundary must prove the writer quiesced before backup begins;
+if that proof fails, cutover aborts without a snapshot effect. After quiescence
+is proven, a backup or preview failure must restart the exact active legacy
+release, restore its prior schema marker, and return website recovery policy to
+`Normal`. Once the protected PREVIEWED pair exists, failures continue through
+the existing evidence-bound prepublication recovery state machine. No failure
+before `DROP_STARTED` may restore the backup or delete legacy data.
 
 ## Rejected Alternatives
 
