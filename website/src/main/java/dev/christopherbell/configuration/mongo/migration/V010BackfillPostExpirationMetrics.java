@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
@@ -12,6 +14,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
 /** Backfills queryable root reply counts and propagates root expiration in bounded batches. */
+@MongoPersistence
 @Component
 public final class V010BackfillPostExpirationMetrics implements ApplicationMigration {
   private static final int BATCH_SIZE = 250;

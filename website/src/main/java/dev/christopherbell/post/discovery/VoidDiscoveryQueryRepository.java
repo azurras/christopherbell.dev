@@ -1,5 +1,7 @@
 package dev.christopherbell.post.discovery;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
@@ -21,6 +23,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Bounded MongoDB queries for anonymous Void discovery. */
+@MongoPersistence
 @Repository
 public class VoidDiscoveryQueryRepository {
   private static final int MAX_PAGE_SIZE = 24;

@@ -1,5 +1,7 @@
 package dev.christopherbell.federation.discovery;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.libs.pagination.StableCursor;
@@ -13,6 +15,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Bounded active-post queries for a local actor's public outbox. */
+@MongoPersistence
 @Repository
 public class FederationOutboxQueryRepository {
   private static final int MAX_PAGE_SIZE = 20;

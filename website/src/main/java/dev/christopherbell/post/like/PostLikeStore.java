@@ -1,5 +1,7 @@
 package dev.christopherbell.post.like;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
@@ -19,6 +21,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Atomic persistence and bounded aggregate queries for post-like edges. */
+@MongoPersistence
 @Repository
 public class PostLikeStore {
   private static final int MAX_RECENT_LIKES = 256;

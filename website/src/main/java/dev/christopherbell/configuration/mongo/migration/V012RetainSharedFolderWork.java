@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.SharedFolderMediaProperties;
 import dev.christopherbell.configuration.SharedFolderProperties;
 import dev.christopherbell.sharedfolder.media.MediaJobStatus;
@@ -18,6 +20,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
 /** Adds cleanup-before-TTL retention without arming active shared-folder work. */
+@MongoPersistence
 @Component
 public final class V012RetainSharedFolderWork implements ApplicationMigration {
   private static final int BATCH_SIZE = 250;

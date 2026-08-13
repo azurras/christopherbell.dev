@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.domain;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import java.util.Objects;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -8,6 +10,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Component;
 
 /** Creates type-bound operations whose physical collection and kind come only from the manifest. */
+@MongoPersistence
 @Component
 public final class DomainMongoOperationsFactory {
   private final MongoTemplate mongo;

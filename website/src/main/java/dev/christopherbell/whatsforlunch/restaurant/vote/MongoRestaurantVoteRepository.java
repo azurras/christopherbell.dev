@@ -1,5 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant.vote;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVote;
@@ -11,6 +13,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the restaurant-vote persistence port. */
+@MongoPersistence
 @Repository
 public class MongoRestaurantVoteRepository
     extends KindScopedRepositorySupport<RestaurantVote>

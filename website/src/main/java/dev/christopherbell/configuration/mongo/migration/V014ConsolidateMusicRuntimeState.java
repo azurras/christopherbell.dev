@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.music.api.MusicRuntimeStateMigrationPort;
 import java.util.List;
 import org.bson.Document;
@@ -7,6 +9,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Component;
 
 /** Additively consolidates the two legacy Music runtime singleton documents. */
+@MongoPersistence
 @Component
 public final class V014ConsolidateMusicRuntimeState implements ApplicationMigration {
   static final String LEGACY_QUEUE = "music_queue_state";

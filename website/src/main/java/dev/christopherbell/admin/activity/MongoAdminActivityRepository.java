@@ -1,5 +1,7 @@
 package dev.christopherbell.admin.activity;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.admin.model.AdminActivity;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
@@ -10,6 +12,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
+@MongoPersistence
 @Repository
 class MongoAdminActivityRepository extends KindScopedRepositorySupport<AdminActivity>
     implements AdminActivityRepository {

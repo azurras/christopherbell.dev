@@ -1,5 +1,7 @@
 package dev.christopherbell.report;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import dev.christopherbell.report.model.PostReport;
@@ -12,6 +14,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
+@MongoPersistence
 @Repository
 class MongoReportRepository extends KindScopedRepositorySupport<PostReport>
     implements ReportRepository {

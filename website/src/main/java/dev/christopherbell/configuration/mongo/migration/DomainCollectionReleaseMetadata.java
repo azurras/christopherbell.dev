@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -11,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /** Reads the active release's domain-schema direction without trusting ambient defaults. */
+@MongoPersistence
 @Component
 public final class DomainCollectionReleaseMetadata {
   private static final Pattern RELEASE = Pattern.compile("[0-9a-f]{40}");

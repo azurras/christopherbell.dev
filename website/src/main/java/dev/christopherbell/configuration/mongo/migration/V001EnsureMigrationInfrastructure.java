@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
 import org.springframework.data.domain.Sort.Direction;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -7,6 +9,7 @@ import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.stereotype.Component;
 
 /** Creates the named indexes used by the migration runner and shared lease service. */
+@MongoPersistence
 @Component
 public final class V001EnsureMigrationInfrastructure implements ApplicationMigration {
   private static final String CHECKSUM =

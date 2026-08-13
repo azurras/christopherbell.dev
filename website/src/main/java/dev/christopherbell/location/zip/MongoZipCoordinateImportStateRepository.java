@@ -1,11 +1,14 @@
 package dev.christopherbell.location.zip;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import dev.christopherbell.location.model.ZipCoordinateImportState;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
+@MongoPersistence
 @Repository
 public class MongoZipCoordinateImportStateRepository
     extends KindScopedRepositorySupport<ZipCoordinateImportState>

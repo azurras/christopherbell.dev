@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.runtime;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun;
@@ -7,6 +9,7 @@ import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRunStore;
 import org.springframework.stereotype.Repository;
 
 /** Kind-scoped durable collector history adapter. */
+@MongoPersistence
 @Repository
 public class MongoScheduledCollectorRunStore implements ScheduledCollectorRunStore {
   private final KindScopedMongoOperations<ScheduledCollectorRun> mongo;

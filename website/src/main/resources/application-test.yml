@@ -1,4 +1,23 @@
 app:
+  persistence:
+    backend: postgresql
+  database-guard:
+    required-database: test
+    schema-prefix: cbtest_
   shared-folder:
     root: build/shared-folder/test/shared
     system-root: build/shared-folder/test/system
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.mongodb.autoconfigure.MongoAutoConfiguration
+      - org.springframework.boot.data.mongodb.autoconfigure.DataMongoRepositoriesAutoConfiguration
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/test}
+    username: ${SPRING_DATASOURCE_USERNAME:christopherbell_test}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  flyway:
+    default-schema: ${APP_TEST_SCHEMA:}
+    schemas: ${APP_TEST_SCHEMA:}
+  jooq:
+    sql-dialect: POSTGRES

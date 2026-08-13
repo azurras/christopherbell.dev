@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.time.Instant;
@@ -11,6 +13,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 /** Persists owner-scoped migration lifecycle transitions. */
+@MongoPersistence
 @Repository
 public class MigrationStateStore {
   private final KindScopedMongoOperations<MigrationRecord> mongo;

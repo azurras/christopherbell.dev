@@ -1,5 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Indexed aggregation for bounded duplicate-name discovery. */
+@MongoPersistence
 @Repository
 public class RestaurantDuplicateQueryRepository {
   private static final int MAX_PAGE_SIZE = 100;

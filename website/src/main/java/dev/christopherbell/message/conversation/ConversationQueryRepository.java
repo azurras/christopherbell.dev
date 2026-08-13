@@ -1,5 +1,7 @@
 package dev.christopherbell.message.conversation;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
@@ -20,6 +22,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Mongo queries for distinct conversation summaries and stable history pages. */
+@MongoPersistence
 @Repository
 public class ConversationQueryRepository {
   private static final int MAX_PAGE_SIZE = 100;

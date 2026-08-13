@@ -1,9 +1,12 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import java.util.Objects;
 import org.springframework.stereotype.Component;
 
 /** Recurring target-release gate executed before the first migration-runner mutation. */
+@MongoPersistence
 @Component
 public final class DomainCollectionStartupPreflight {
   private final DomainCollectionReleaseMetadata metadata;

@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.vehicle.model.VehicleVinDecodeCache;
 import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun;
 import dev.christopherbell.post.preview.PostLinkPreviewCacheEntry;
@@ -10,6 +12,7 @@ import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.stereotype.Component;
 
 /** Creates lifecycle indexes for VIN, link-preview, and collector state. */
+@MongoPersistence
 @Component
 public final class V003EnsureVinPreviewCollectorIndexes implements ApplicationMigration {
   private static final String CHECKSUM =

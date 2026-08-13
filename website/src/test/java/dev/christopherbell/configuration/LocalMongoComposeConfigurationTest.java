@@ -31,6 +31,21 @@ class LocalMongoComposeConfigurationTest {
     assertThat(compose.toString()).doesNotContain("password", "RESEND", "APP_JWT_SECRET");
   }
 
+  @Test
+  void composePinsPostgresqlToLoopbackTestDatabaseWithoutAStoredPassword() throws IOException {
+    JsonNode compose = YAML.readTree(REPOSITORY_ROOT.resolve("compose.yaml").toFile());
+    JsonNode postgresql = compose.at("/services/postgresql");
+
+    assertThat(postgresql.path("image").asText()).isEqualTo("postgres:18.4");
+    assertThat(textValues(postgresql.path("ports"))).containsExactly("127.0.0.1:5432:5432");
+    assertThat(postgresql.at("/environment/POSTGRES_DB").asText()).isEqualTo("test");
+    assertThat(postgresql.at("/environment/POSTGRES_PASSWORD").asText())
+        .isEqualTo("${POSTGRES_TEST_PASSWORD:?set POSTGRES_TEST_PASSWORD}");
+    assertThat(textValues(postgresql.path("volumes")))
+        .contains("christopherbell_postgresql_data:/var/lib/postgresql");
+    assertThat(compose.at("/volumes/christopherbell_postgresql_data").isObject()).isTrue();
+  }
+
   private static List<String> textValues(JsonNode values) {
     return StreamSupport.stream(values.spliterator(), false).map(JsonNode::asText).toList();
   }

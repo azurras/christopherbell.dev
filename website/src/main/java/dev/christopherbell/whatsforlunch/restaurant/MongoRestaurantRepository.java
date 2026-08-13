@@ -1,5 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
@@ -13,6 +15,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the restaurant persistence port. */
+@MongoPersistence
 @Repository
 public class MongoRestaurantRepository extends KindScopedRepositorySupport<Restaurant>
     implements RestaurantRepository {

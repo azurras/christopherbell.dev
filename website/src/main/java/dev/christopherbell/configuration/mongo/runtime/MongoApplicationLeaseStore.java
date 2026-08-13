@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.runtime;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.libs.mongo.lease.MongoLeaseDocument;
@@ -12,6 +14,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 /** Kind-scoped application lease adapter with one atomic owner transition. */
+@MongoPersistence
 @Repository
 public class MongoApplicationLeaseStore implements MongoLeaseStore {
   private final KindScopedMongoOperations<MongoLeaseDocument> mongo;

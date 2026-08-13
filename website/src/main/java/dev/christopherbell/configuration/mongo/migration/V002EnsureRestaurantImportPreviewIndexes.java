@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewStore;
 import java.time.Duration;
 import org.springframework.data.domain.Sort.Direction;
@@ -8,6 +10,7 @@ import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.stereotype.Component;
 
 /** Creates lifecycle and lookup indexes for short-lived WFL import previews. */
+@MongoPersistence
 @Component
 public final class V002EnsureRestaurantImportPreviewIndexes implements ApplicationMigration {
   private static final String CHECKSUM =

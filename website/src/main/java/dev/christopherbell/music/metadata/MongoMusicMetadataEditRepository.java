@@ -1,5 +1,7 @@
 package dev.christopherbell.music.metadata;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import java.time.Instant;
@@ -13,6 +15,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the music metadata-edit persistence port. */
+@MongoPersistence
 @Repository
 public class MongoMusicMetadataEditRepository
     extends KindScopedRepositorySupport<MusicMetadataEdit>

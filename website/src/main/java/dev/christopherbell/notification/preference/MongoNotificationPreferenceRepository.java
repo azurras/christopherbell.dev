@@ -1,5 +1,7 @@
 package dev.christopherbell.notification.preference;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import java.util.Optional;
@@ -7,6 +9,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
+@MongoPersistence
 @Repository
 class MongoNotificationPreferenceRepository
     extends KindScopedRepositorySupport<NotificationPreference>

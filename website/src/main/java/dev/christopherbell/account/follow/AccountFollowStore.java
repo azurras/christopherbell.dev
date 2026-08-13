@@ -1,5 +1,7 @@
 package dev.christopherbell.account.follow;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.time.Instant;
@@ -12,6 +14,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.dao.DuplicateKeyException;
 
 /** Atomic persistence and bounded queries for account-follow edges. */
+@MongoPersistence
 @Repository
 public class AccountFollowStore {
   private final KindScopedMongoOperations<AccountFollow> mongo;

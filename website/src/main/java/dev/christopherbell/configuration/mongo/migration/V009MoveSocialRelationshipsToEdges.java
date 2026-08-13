@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.account.follow.AccountFollow;
 import dev.christopherbell.account.follow.AccountFollowStore;
 import dev.christopherbell.post.like.PostLike;
@@ -17,6 +19,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
 /** Copies embedded social relationships into unique edge collections. */
+@MongoPersistence
 @Component
 public final class V009MoveSocialRelationshipsToEdges implements ApplicationMigration {
   private static final int BATCH_SIZE = 250;

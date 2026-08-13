@@ -1,5 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant.vote;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
@@ -16,6 +18,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.stereotype.Repository;
 
 /** Owns bounded aggregate queries over binary restaurant votes. */
+@MongoPersistence
 @Repository
 public class RestaurantVoteQueryRepository {
   private static final int MAX_RESULTS = 50;

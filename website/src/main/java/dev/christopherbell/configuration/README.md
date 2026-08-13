@@ -4,6 +4,8 @@ Owns application-wide Spring and web infrastructure.
 
 ## What Lives Here
 
+- `persistence` owns the closed MongoDB/PostgreSQL transition selector and the PostgreSQL test database guard. Only `app.persistence.backend` selects an adapter; test contexts require database `test` and a disposable `cbtest_` schema before fixtures may write.
+
 - Security configuration and route access rules under `security`.
 - Public static browser assets such as `/favicon.ico`.
 - `PublicMetadataController` serves `/robots.txt` and `/sitemap.xml` with

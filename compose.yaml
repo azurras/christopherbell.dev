@@ -13,6 +13,24 @@ services:
       retries: 12
       start_period: 10s
     stop_grace_period: 30s
+  postgresql:
+    image: postgres:18.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: test
+      POSTGRES_USER: christopherbell_test
+      POSTGRES_PASSWORD: ${POSTGRES_TEST_PASSWORD:?set POSTGRES_TEST_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - christopherbell_postgresql_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U christopherbell_test -d test"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
 volumes:
   christopherbell_mongo_data: {}
+  christopherbell_postgresql_data: {}

@@ -1,5 +1,7 @@
 package dev.christopherbell.federation.outbound;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
@@ -18,6 +20,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 /** Mongo owner of idempotent enqueue, scan cursor, due claim, and exact-owner transitions. */
+@MongoPersistence
 @Repository
 class FederationDeliveryJobRepository implements FederationDeliveryStore {
   private final KindScopedMongoOperations<Post> posts;

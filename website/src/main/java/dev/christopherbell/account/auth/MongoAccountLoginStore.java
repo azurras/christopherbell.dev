@@ -1,5 +1,7 @@
 package dev.christopherbell.account.auth;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
@@ -12,6 +14,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 /** Mongo implementation of the conditional login update boundary. */
+@MongoPersistence
 @Repository
 class MongoAccountLoginStore implements AccountLoginStore {
   private final KindScopedMongoOperations<Account> mongo;

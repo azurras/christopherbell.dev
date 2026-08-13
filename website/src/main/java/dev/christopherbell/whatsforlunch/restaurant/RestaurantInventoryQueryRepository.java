@@ -1,5 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Bounded stable admin restaurant inventory query. */
+@MongoPersistence
 @Repository
 public class RestaurantInventoryQueryRepository {
   private static final int MAX_PAGE_SIZE = 100;

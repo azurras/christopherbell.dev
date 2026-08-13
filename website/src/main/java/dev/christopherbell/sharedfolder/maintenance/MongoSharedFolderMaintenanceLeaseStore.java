@@ -1,5 +1,7 @@
 package dev.christopherbell.sharedfolder.maintenance;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.time.Instant;
@@ -11,6 +13,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 /** Mongo implementation of the fixed-key atomic maintenance lease boundary. */
+@MongoPersistence
 @Repository
 class MongoSharedFolderMaintenanceLeaseStore implements SharedFolderMaintenanceLeaseStore {
   private final KindScopedMongoOperations<SharedFolderMaintenanceLeaseDocument> mongo;

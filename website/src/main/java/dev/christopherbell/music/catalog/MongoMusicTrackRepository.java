@@ -1,5 +1,7 @@
 package dev.christopherbell.music.catalog;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import java.util.List;
@@ -10,6 +12,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the music-track persistence port. */
+@MongoPersistence
 @Repository
 public class MongoMusicTrackRepository extends KindScopedRepositorySupport<MusicTrack>
     implements MusicTrackRepository {

@@ -1,5 +1,7 @@
 package dev.christopherbell.message;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import dev.christopherbell.message.model.Message;
@@ -11,6 +13,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
+@MongoPersistence
 @Repository
 class MongoMessageRepository extends KindScopedRepositorySupport<Message>
     implements MessageRepository {
