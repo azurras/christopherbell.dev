@@ -20,7 +20,7 @@ import org.springframework.stereotype.Service;
 public class VoidDiscoveryService {
   private static final String INVALID_TOPIC_MESSAGE = "Invalid topic.";
 
-  private final VoidDiscoveryQueryRepository queries;
+  private final VoidDiscoveryQueryPort queries;
   private final AccountRepository accounts;
   private final StableCursorCodec cursors;
   private final Clock clock;

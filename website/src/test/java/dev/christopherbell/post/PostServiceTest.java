@@ -89,7 +89,8 @@ public class PostServiceTest {
   @BeforeEach
   void setUp() {
     clock = Clock.fixed(NOW, ZoneOffset.UTC);
-    postExpirationService = new PostExpirationService(postRepository, null, clock, true);
+    postExpirationService = new PostExpirationService(
+        postRepository, (dev.christopherbell.post.expiration.PostExpirationStore) null, clock, true);
     lenient().when(accountTrustService.hiddenAccountIdsForSelf()).thenReturn(Set.of());
     lenient().when(hiddenPostThreadService.hiddenRootIdsForSelf()).thenReturn(Set.of());
     lenient().when(engagement.replyCounts(any())).thenReturn(Map.of());

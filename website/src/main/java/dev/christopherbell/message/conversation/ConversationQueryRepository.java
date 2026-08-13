@@ -24,7 +24,7 @@ import org.springframework.stereotype.Repository;
 /** Mongo queries for distinct conversation summaries and stable history pages. */
 @MongoPersistence
 @Repository
-public class ConversationQueryRepository {
+public class ConversationQueryRepository implements ConversationQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
   private final KindScopedMongoOperations<Message> messages;
   private final StableCursorCodec cursorCodec;

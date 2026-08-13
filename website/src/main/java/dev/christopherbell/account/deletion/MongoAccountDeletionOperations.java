@@ -6,14 +6,14 @@ import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.mongo.domain.DomainAccountDeletionStore;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.util.Set;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.stereotype.Component;
 
 /** Concrete idempotent Mongo effects for comprehensive account deletion. */
-@Component
+@MongoPersistence
 public final class MongoAccountDeletionOperations implements AccountDeletionOperations {
   private static final String TOMBSTONE = AccountDeletionService.TOMBSTONE_ID;
 

@@ -22,7 +22,7 @@ class PostLikeStoreTest {
 
   @Test
   void repeatedLikeReportsOnlyTheFirstEdgeAsCreated() {
-    var store = new PostLikeStore(
+    var store = new MongoPostLikeStore(
         dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
     when(mongo.insert(any(Document.class), eq("content")))
         .thenAnswer(invocation -> invocation.getArgument(0))
@@ -37,7 +37,7 @@ class PostLikeStoreTest {
     when(mongo.remove(any(Query.class), eq(Document.class), eq("content")))
         .thenReturn(DeleteResult.acknowledged(1))
         .thenReturn(DeleteResult.acknowledged(0));
-    var store = new PostLikeStore(
+    var store = new MongoPostLikeStore(
         dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
 
     assertThat(store.unlike("post", "account").removed()).isTrue();

@@ -1,10 +1,8 @@
 package dev.christopherbell.post.expiration;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
-import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.post.PostRepository;
-import dev.christopherbell.post.like.PostLike;
 import dev.christopherbell.post.model.Post;
 import java.time.Clock;
 import java.time.Duration;
@@ -18,9 +16,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -33,29 +28,36 @@ public class PostExpirationService {
   private static final int MAINTENANCE_BATCH_SIZE = 250;
 
   private final PostRepository postRepository;
-  private final KindScopedMongoOperations<Post> posts;
-  private final KindScopedMongoOperations<PostLike> likes;
+  private final PostExpirationStore store;
   private final Clock clock;
   private final boolean expirationEnabled;
 
   @Autowired
   public PostExpirationService(
       PostRepository postRepository,
-      DomainMongoOperationsFactory factory,
+      PostExpirationStore store,
       Clock clock,
       @Value("${posts.expiration.enabled:false}") boolean expirationEnabled) {
     this.postRepository = postRepository;
-    this.posts = factory == null ? null : factory.forType(Post.class);
-    this.likes = factory == null ? null : factory.forType(PostLike.class);
+    this.store = store;
     this.clock = clock;
     this.expirationEnabled = expirationEnabled;
+  }
+
+  /** Compatibility constructor used by focused Mongo persistence tests. */
+  public PostExpirationService(
+      PostRepository postRepository,
+      DomainMongoOperationsFactory factory,
+      Clock clock,
+      boolean expirationEnabled) {
+    this(postRepository, factory == null ? null : new MongoPostExpirationStore(factory),
+        clock, expirationEnabled);
   }
 
   /** Test-only compatibility constructor for focused calculation tests. */
   public PostExpirationService(PostRepository postRepository, boolean expirationEnabled) {
     this.postRepository = postRepository;
-    this.posts = null;
-    this.likes = null;
+    this.store = null;
     this.clock = Clock.systemUTC();
     this.expirationEnabled = expirationEnabled;
   }
@@ -191,13 +193,8 @@ public class PostExpirationService {
         ? post.getRootId()
         : post.getId();
     var rootExpiration = post.getExpiresOn();
-    if (posts != null) {
-      posts.updateMulti(
-          new Query(new Criteria().andOperator(
-              Criteria.where("rootId").is(rootId),
-              Criteria.where("id").ne(post.getId()),
-              Criteria.where("parentId").ne(null))),
-          new Update().set("expiresOn", rootExpiration));
+    if (store != null) {
+      store.synchronizeReplies(rootId, post.getId(), rootExpiration);
       return;
     }
     postRepository.findByRootIdOrderByCreatedOnAsc(rootId).stream()
@@ -248,13 +245,12 @@ public class PostExpirationService {
       subtree.add(post);
     }
     long removedCount;
-    if (posts == null) {
+    if (store == null) {
       postRepository.deleteAll(subtree);
       removedCount = subtree.size();
     } else {
       var postIds = subtree.stream().map(Post::getId).toList();
-      likes.remove(new Query(Criteria.where("postId").in(postIds)));
-      removedCount = posts.remove(new Query(Criteria.where("id").in(postIds))).getDeletedCount();
+      removedCount = store.deletePosts(postIds);
     }
     if (isReply(post) && removedCount > 0) {
       thread.stream()
@@ -309,7 +305,7 @@ public class PostExpirationService {
 
   private Post incrementCounter(
       Post fallback, String field, int delta, Instant changedOn, boolean extended) {
-    if (posts == null) {
+    if (store == null) {
       int current = switch (field) {
         case "likesCount" -> fallback.getLikesCount() == null ? 0 : fallback.getLikesCount();
         case "threadReplyLikesCount" -> fallback.getThreadReplyLikesCount() == null
@@ -327,29 +323,20 @@ public class PostExpirationService {
       postRepository.save(fallback);
       return fallback;
     }
-    var criteria = Criteria.where("id").is(fallback.getId());
-    if (delta < 0) {
-      criteria = new Criteria().andOperator(criteria, Criteria.where(field).gt(0));
-    }
-    var update = new Update().inc(field, delta).set("lastUpdatedOn", changedOn);
-    if (extended) {
-      update.set("lastExtendedOn", changedOn);
-    }
-    return posts.findAndUpdate(new Query(criteria), update)
-        .or(() -> posts.findById(fallback.getId())).orElse(null);
+    return store.incrementCounter(fallback.getId(), field, delta, changedOn, extended)
+        .orElse(null);
   }
 
   private void decrementReplyCount(Post root, long removedCount) {
     int delta = Math.toIntExact(Math.min(removedCount, Integer.MAX_VALUE));
     var changedOn = clock.instant();
-    if (posts == null) {
+    if (store == null) {
       var updated = incrementCounter(root, "threadReplyCount", -delta, changedOn, false);
       refreshAndPersistExpiration(updated);
       return;
     }
-    var updated = posts.decrementFloorZeroById(
-        root.getId(), "threadReplyCount", delta, "lastUpdatedOn", changedOn)
-        .or(() -> posts.findById(root.getId())).orElse(null);
+    var updated = store.decrementFloorZero(
+        root.getId(), "threadReplyCount", delta, changedOn).orElse(null);
     refreshAndPersistExpiration(updated);
   }
 
@@ -358,10 +345,8 @@ public class PostExpirationService {
       return;
     }
     refreshExpiration(post);
-    if (posts != null) {
-      posts.updateFirst(
-          new Query(Criteria.where("id").is(post.getId())),
-          new Update().set("expiresOn", post.getExpiresOn()));
+    if (store != null) {
+      store.updateExpiration(post.getId(), post.getExpiresOn());
     } else {
       postRepository.save(post);
     }

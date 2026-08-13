@@ -2,6 +2,7 @@ package dev.christopherbell.report.query;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.report.model.PostReport;
 import dev.christopherbell.report.ReportRepository;
@@ -11,11 +12,10 @@ import java.util.regex.Pattern;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.stereotype.Service;
 
 /** Validates and executes filterable stable report queue pages. */
-@Service
-public class ReportQueryService {
+@MongoPersistence
+public class ReportQueryService implements ReportQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
   private static final int MAX_REPORTER_LENGTH = 100;
   private final KindScopedMongoOperations<PostReport> mongo;
@@ -27,6 +27,7 @@ public class ReportQueryService {
   }
 
   /** Returns a page ordered by immutable creation time and id tie-breaker. */
+  @Override
   public ReportPage query(ReportQuery request) throws InvalidRequestException {
     validate(request);
     var filters = new ArrayList<Criteria>();

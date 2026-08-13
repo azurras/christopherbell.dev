@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 class DomainCollectionReleaseMetadataTest {
@@ -16,6 +17,7 @@ class DomainCollectionReleaseMetadataTest {
   @Test
   void springCreatesProductionMetadataWithoutAnObjectMapperBean() {
     try (var context = new AnnotationConfigApplicationContext()) {
+      TestPropertyValues.of("app.persistence.backend=mongodb").applyTo(context);
       context.register(DomainCollectionReleaseMetadata.class);
       context.refresh();
 

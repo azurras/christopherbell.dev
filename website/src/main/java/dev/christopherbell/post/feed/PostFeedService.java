@@ -45,7 +45,7 @@ public class PostFeedService {
   private final PostExpirationService postExpirationService;
   private final AccountTrustService accountTrustService;
   private final HiddenPostThreadService hiddenPostThreadService;
-  private final PostFeedQueryRepository postFeedQueryRepository;
+  private final PostFeedQueryPort postFeedQueryRepository;
   private final StableCursorCodec cursorCodec;
   private final PostFeedItemAssembler feedItems;
 

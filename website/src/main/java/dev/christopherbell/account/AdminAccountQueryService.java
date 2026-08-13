@@ -3,16 +3,16 @@ package dev.christopherbell.account;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.util.ArrayList;
 import java.util.regex.Pattern;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.stereotype.Service;
 
 /** Executes bounded, private-field-safe account searches for administrators. */
-@Service
-public class AdminAccountQueryService {
+@MongoPersistence
+public class AdminAccountQueryService implements AdminAccountQueryPort {
   private final KindScopedMongoOperations<Account> accounts;
   private final AccountMapper accountMapper;
 
@@ -23,6 +23,7 @@ public class AdminAccountQueryService {
   }
 
   /** Returns the requested account page and total counts. */
+  @Override
   public AdminAccountPage getAccounts(AdminAccountQuery request) {
     var countQuery = new Query(buildCriteria(request));
     var totalElements = accounts.count(countQuery);

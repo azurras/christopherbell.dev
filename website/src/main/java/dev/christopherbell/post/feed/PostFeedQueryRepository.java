@@ -21,7 +21,7 @@ import org.springframework.stereotype.Repository;
 /** Compound Mongo queries for deterministic global and author post feeds. */
 @MongoPersistence
 @Repository
-public class PostFeedQueryRepository {
+public class PostFeedQueryRepository implements PostFeedQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
   private final KindScopedMongoOperations<Post> posts;
   private final StableCursorCodec cursorCodec;

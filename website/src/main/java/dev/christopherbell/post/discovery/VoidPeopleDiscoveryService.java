@@ -27,7 +27,7 @@ public final class VoidPeopleDiscoveryService {
   static final int MAX_SUGGESTIONS = 8;
   static final int CANDIDATE_POOL_SIZE = 128;
 
-  private final VoidPeopleDiscoveryQueryRepository queries;
+  private final VoidPeopleDiscoveryQueryPort queries;
   private final AccountRepository accounts;
   private final AccountTrustRepository trust;
   private final AccountFollowStore follows;
@@ -35,7 +35,7 @@ public final class VoidPeopleDiscoveryService {
   private final Clock clock;
 
   public VoidPeopleDiscoveryService(
-      VoidPeopleDiscoveryQueryRepository queries,
+      VoidPeopleDiscoveryQueryPort queries,
       AccountRepository accounts,
       AccountTrustRepository trust,
       AccountFollowStore follows,

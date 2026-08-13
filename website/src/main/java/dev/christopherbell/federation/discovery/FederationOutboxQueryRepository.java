@@ -17,7 +17,7 @@ import org.springframework.stereotype.Repository;
 /** Bounded active-post queries for a local actor's public outbox. */
 @MongoPersistence
 @Repository
-public class FederationOutboxQueryRepository {
+public class FederationOutboxQueryRepository implements FederationOutboxQueryPort {
   private static final int MAX_PAGE_SIZE = 20;
 
   private final KindScopedMongoOperations<Post> mongo;

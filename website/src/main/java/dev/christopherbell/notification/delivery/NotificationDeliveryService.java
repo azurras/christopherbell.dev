@@ -28,7 +28,7 @@ public class NotificationDeliveryService {
   private final NotificationRepository notificationRepository;
   private final AccountRepository accountRepository;
   private final NotificationPreferenceService notificationPreferenceService;
-  private final NotificationFanoutGuard fanoutGuard;
+  private final NotificationFanoutPort fanoutGuard;
   private final Clock clock;
 
   /** Creates mention notifications for valid mentioned usernames in a post. */

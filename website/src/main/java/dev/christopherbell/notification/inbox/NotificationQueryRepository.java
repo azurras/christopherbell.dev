@@ -18,7 +18,7 @@ import org.springframework.stereotype.Repository;
 /** Stable owner-scoped reads and bulk updates for the notification inbox. */
 @MongoPersistence
 @Repository
-public class NotificationQueryRepository {
+public class NotificationQueryRepository implements NotificationQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
   private final KindScopedMongoOperations<Notification> mongo;
   private final StableCursorCodec cursorCodec;

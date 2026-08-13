@@ -2,6 +2,7 @@ package dev.christopherbell.notification.delivery;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -12,11 +13,10 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
-import org.springframework.stereotype.Service;
 
 /** Atomically claims dedupe and actor-recipient rate-limit permits before fanout. */
-@Service
-public class NotificationFanoutGuard {
+@MongoPersistence
+public class NotificationFanoutGuard implements NotificationFanoutPort {
   private final KindScopedMongoOperations<NotificationDeliveryGuard> claims;
   private final KindScopedMongoOperations<NotificationRateLimit> rates;
   private final NotificationDeliveryProperties properties;

@@ -11,7 +11,7 @@ import dev.christopherbell.report.model.ReportTargetType;
 import dev.christopherbell.report.model.ReportType;
 import dev.christopherbell.report.query.ReportPage;
 import dev.christopherbell.report.query.ReportQuery;
-import dev.christopherbell.report.query.ReportQueryService;
+import dev.christopherbell.report.query.ReportQueryPort;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -36,9 +36,9 @@ public class ReportController {
   private static final String V20250903 = "/2025-09-03";
   private static final String V20260726 = "/2026-07-26";
   private final ReportService reportService;
-  private final ReportQueryService reportQueryService;
+  private final ReportQueryPort reportQueryService;
 
-  public ReportController(ReportService reportService, ReportQueryService reportQueryService) {
+  public ReportController(ReportService reportService, ReportQueryPort reportQueryService) {
     this.reportService = reportService;
     this.reportQueryService = reportQueryService;
   }

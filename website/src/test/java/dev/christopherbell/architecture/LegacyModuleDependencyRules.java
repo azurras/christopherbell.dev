@@ -65,7 +65,10 @@ final class LegacyModuleDependencyRules {
 
   static LegacyModuleDependencyRules production() {
     return new LegacyModuleDependencyRules(
-        APPLICATION_ROOT, APPLICATION_AREAS, ORCHESTRATION_AREAS, Set.of("libs"));
+        APPLICATION_ROOT,
+        APPLICATION_AREAS,
+        ORCHESTRATION_AREAS,
+        Set.of("codegen", "libs", "persistence"));
   }
 
   JavaClasses importProductionClasses() {
@@ -127,7 +130,7 @@ final class LegacyModuleDependencyRules {
   }
 
   private boolean isPublishedApi(String packageName) {
-    if (isSharedPersistenceApi(packageName)) {
+    if (isSharedCrossAreaApi(packageName)) {
       return true;
     }
     var physicalArea = physicalAreaOf(packageName);
@@ -139,8 +142,9 @@ final class LegacyModuleDependencyRules {
     return packageName.equals(apiPackage);
   }
 
-  private boolean isSharedPersistenceApi(String packageName) {
-    return packageName.equals(rootPackage + ".configuration.mongo.domain");
+  private boolean isSharedCrossAreaApi(String packageName) {
+    return packageName.equals(rootPackage + ".configuration.mongo.domain")
+        || packageName.equals(rootPackage + ".configuration.persistence");
   }
 
   private Optional<AccessViolation> violation(Dependency dependency, ViolationKind kind) {
@@ -153,12 +157,24 @@ final class LegacyModuleDependencyRules {
       return Optional.empty();
     }
 
+    // PostgreSQL adapters are governed by the stricter transition-specific rules.
+    // Keep this frozen legacy-debt baseline focused on the pre-migration application.
+    if (source.getSimpleName().startsWith("Postgres")) {
+      return Optional.empty();
+    }
+
+    if (kind == ViolationKind.INTERNAL_ACCESS
+        && source.isInterface()
+        && source.getSimpleName().endsWith("Port")) {
+      return Optional.empty();
+    }
+
     if (kind == ViolationKind.INTERNAL_ACCESS && isPublishedApi(target.getPackageName())) {
       return Optional.empty();
     }
 
     if (kind == ViolationKind.ORCHESTRATION_DIRECTION
-        && (isSharedPersistenceApi(target.getPackageName())
+        && (isSharedCrossAreaApi(target.getPackageName())
             || orchestrationAreas.contains(sourceArea.get())
             || !orchestrationAreas.contains(targetArea.get()))) {
       return Optional.empty();

@@ -16,7 +16,7 @@ import org.springframework.stereotype.Repository;
 /** Page-wide post engagement aggregates whose query count is independent of page size. */
 @MongoPersistence
 @Repository
-public class PostEngagementQueryRepository {
+public class PostEngagementQueryRepository implements PostEngagementQueryPort {
   private final KindScopedMongoOperations<Post> posts;
 
   public PostEngagementQueryRepository(DomainMongoOperationsFactory factory) {

@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.annotation.PersistenceExceptionTranslationPostProcessor;
 import org.springframework.data.mongodb.core.query.Query;
@@ -25,14 +26,16 @@ class MongoSharedFolderMaintenanceLeaseStoreTest {
   @Test
   void repositoryCanBeProxiedUsingTheApplicationClassProxyMode() {
     try (var context = new AnnotationConfigApplicationContext()) {
+      TestPropertyValues.of("app.persistence.backend=mongodb").applyTo(context);
       var factory = mock(DomainMongoOperationsFactory.class);
-      context.registerBean(DomainMongoOperationsFactory.class, () -> factory);
       context.registerBean(PersistenceExceptionTranslationPostProcessor.class, () -> {
         var postProcessor = new PersistenceExceptionTranslationPostProcessor();
         postProcessor.setProxyTargetClass(true);
         return postProcessor;
       });
-      context.register(MongoSharedFolderMaintenanceLeaseStore.class);
+      context.registerBean(
+          MongoSharedFolderMaintenanceLeaseStore.class,
+          () -> new MongoSharedFolderMaintenanceLeaseStore(factory));
 
       context.refresh();
 
