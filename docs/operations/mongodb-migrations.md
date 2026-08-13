@@ -74,13 +74,15 @@ Run the mutating command only in an approved maintenance window:
 ```
 
 The confirmation is exact; `deploy` and `auto-deploy` cannot supply it. One
-fixed `locks\deploy.lock` is held from the fresh hash-bound backup and second
-dry restore through isolated candidate proof, writer stop with SCM recovery
-suspended, live stage/publication, target startup-barrier publication, stopped
-target-snapshot re-verification, one-at-a-time legacy deletion, target-active
-marker finalization, one target start and verification, recovery restoration,
-and auto-deploy refresh. The candidate uses only a generated non-production
-database and configured candidate port.
+fixed `locks\deploy.lock` is held while the legacy writer is stopped with SCM
+recovery suspended before the fresh hash-bound backup and protected evidence
+snapshot. That one quiesced snapshot is then used for the second dry restore,
+isolated candidate proof, live stage/publication, target startup-barrier
+publication, stopped target-snapshot re-verification, one-at-a-time legacy
+deletion, target-active marker finalization, one target start and verification,
+recovery restoration, and auto-deploy refresh. The maintenance window therefore
+includes candidate verification. The candidate uses only a generated
+non-production database and configured candidate port.
 
 Deletion is last. Before the first deletion intent, recovery reverses the
 publication when needed, removes only manifest-owned staging namespaces, proves
@@ -118,11 +120,14 @@ After a successful rollback, `mongo-consolidation-preview` and a newly confirmed
 legacy-compatible marker, active legacy release, and legacy schema still agree.
 Any outstanding one-shot rollback reconciliation must be completed first.
 The new cutover preserves the exact prior terminal JSON under protected
-`state\history`, retains its archive/evidence files, and creates a fresh backup,
-evidence record, owner token, and candidate database before publishing the new
-`PREVIEWED` state. A missing or mismatched marker, nonterminal state, active
-release mismatch, or target-schema legacy release blocks before backup or state
-publication.
+`state\history`, retains its archive/evidence files, stops the exact legacy
+writer, and creates a fresh backup, evidence record, owner token, and candidate
+database before publishing the new `PREVIEWED` state. A missing or mismatched
+marker, nonterminal state, active release mismatch, or target-schema legacy
+release blocks before writer stop, backup, or state publication. A writer-stop
+postcondition failure aborts before backup. After quiescence is proven, any
+snapshot initialization failure triggers guarded recovery of the exact prior
+marker and legacy release before normal SCM recovery is re-enabled.
 
 Every fresh consolidation now publishes a protected prepublication boundary
 before candidate work. An immutable evidence-and-owner-addressed binding records

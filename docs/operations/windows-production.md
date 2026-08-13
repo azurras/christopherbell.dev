@@ -567,13 +567,19 @@ exact confirmation switch:
 .\prod.cmd mongo-consolidate -ConfirmDomainCollectionCutover
 ```
 
-The command proves a fresh hash-bound, dry-restored backup and an isolated
-candidate database/port before stopping the live writer. SCM recovery remains
-suspended for live mutation. It stages and verifies the 14 targets, publishes
-the target startup barrier, re-proves the exact target snapshot while the writer
-remains stopped, and only then drops legacy collections one at a time. After the
-target-active marker is durable, it starts and verifies the target release once.
-Automatic deployment cannot initiate or confirm it.
+The command first stops the exact live legacy writer with SCM recovery
+suspended, then creates the fresh hash-bound backup and protected evidence from
+that quiesced snapshot. It dry-restores and proves an isolated candidate
+database/port against the same snapshot, stages and verifies the 14 live targets,
+publishes the target startup barrier, re-proves the exact target snapshot while
+the writer remains stopped, and only then drops legacy collections one at a
+time. The maintenance window includes candidate verification. A failed writer
+stop postcondition aborts before backup. After quiescence is proven, a backup,
+evidence, or candidate initialization failure runs guarded prepublication
+recovery and restarts the exact legacy release without deleting or restoring
+production data.
+After the target-active marker is durable, the command starts and verifies the
+target release once. Automatic deployment cannot initiate or confirm it.
 
 For guarded recovery use:
 

@@ -1166,6 +1166,36 @@ function Save-ProductionDomainCollectionContextState {
     }
 }
 
+function Restore-ProductionDomainCollectionSnapshotInitializationFailure {
+    param([Parameter(Mandatory)]$Context)
+
+    Resolve-ProductionDomainCollectionPrepublicationPublication `
+        -Config $Context.config
+    $marker = Read-ProductionDomainSchemaDirection -Config $Context.config
+    if ($marker -and [string]$marker.state -ceq 'ROLLBACK_IN_PROGRESS') {
+        $state = Read-ProductionDomainCollectionProtectedState `
+            -Config $Context.config
+        Invoke-ProductionDomainCollectionFailureRecovery `
+            -Context $state -PostDrop:$false
+        return
+    }
+    Restore-ProductionDomainCollectionLegacyRelease -State $Context
+    Start-ProductionDomainCollectionLegacy -State $Context
+    try {
+        Set-ProductionWebsiteRecoveryPolicy -Policy Normal
+    } catch {
+        $normalizationFailure = $_.Exception
+        try {
+            Stop-ProductionDomainCollectionWriter -Context $Context
+        } catch {
+            throw [AggregateException]::new(
+                'Legacy recovery normalization and writer containment both failed.',
+                [Exception[]]@($normalizationFailure, $_.Exception))
+        }
+        throw $normalizationFailure
+    }
+}
+
 function New-ProductionDomainCollectionCutoverContext {
     param([Parameter(Mandatory)]$Config)
 
@@ -1187,54 +1217,81 @@ function New-ProductionDomainCollectionCutoverContext {
     }
     $priorMarkerBase64 = Get-ProductionDomainCollectionPriorMarkerBase64 `
         -Config $Config
-    $backup = New-ProductionDomainCollectionVerifiedBackup -Config $Config
-    $owner = [guid]::NewGuid().ToString('N')
-    $preview = Invoke-ProductionDomainCollectionEngine `
-        -Config $Config -Database $script:ProductionDatabase -Action preview `
-        -OwnerToken $owner -Release $targetRelease `
-        -BackupIdentity $backup.backupIdentity -EvidenceDigest ('0' * 64)
-    $evidenceFile = Join-Path $Config.programDataRoot `
-        "state\domain-collection-evidence.$($preview.evidenceDigest).json"
-    Write-ProductionDomainCollectionProtectedJson `
-        -Config $Config -Path $evidenceFile -Value $preview.evidence -Depth 100
-    $evidenceFileSha = (Get-FileHash -LiteralPath $evidenceFile -Algorithm SHA256).Hash.ToLowerInvariant()
-    $candidate = New-CandidateDatabaseName -Sha $targetRelease
-    Assert-ProductionDomainCollectionCandidateIsolation `
-        -Database $candidate `
-        -CandidatePort ([int]$Config.candidatePort) `
-        -ProductionPort ([int]$Config.productionPort)
-    $historyFile = ''
-    $priorStateSha256 = ''
-    if ($terminalState) {
-        $historyFile = Archive-ProductionDomainCollectionTerminalState `
-            -State $terminalState
-        $priorStateSha256 = (Get-FileHash -LiteralPath $historyFile `
-            -Algorithm SHA256).Hash.ToLowerInvariant()
-    }
-    $context = [pscustomobject][ordered]@{
+    $snapshotContext = [pscustomobject][ordered]@{
         config = $Config
         targetRelease = $targetRelease
         targetPath = $targetPath
         currentRelease = $legacyRelease
         legacyRelease = $legacyRelease
         legacyPath = $legacyPath
-        archive = [string]$backup.archive
-        backupIdentity = [string]$backup.backupIdentity
-        evidenceDigest = [string]$preview.evidenceDigest
-        evidence = $preview.evidence
-        evidenceFile = $evidenceFile
-        evidenceFileSha256 = $evidenceFileSha
-        ownerToken = $owner
-        candidateDatabase = $candidate
         priorMarkerBase64 = $priorMarkerBase64
-        priorStateSha256 = $priorStateSha256
-        historyFile = $historyFile
         dropStarted = $false
         writerStopped = $false
         state = 'INITIALIZED'
     }
-    Publish-ProductionDomainCollectionPrepublicationContext -Context $context
-    return $context
+    Stop-ProductionDomainCollectionWriter -Context $snapshotContext
+    $snapshotContext.writerStopped = $true
+    try {
+        $backup = New-ProductionDomainCollectionVerifiedBackup -Config $Config
+        $owner = [guid]::NewGuid().ToString('N')
+        $preview = Invoke-ProductionDomainCollectionEngine `
+            -Config $Config -Database $script:ProductionDatabase -Action preview `
+            -OwnerToken $owner -Release $targetRelease `
+            -BackupIdentity $backup.backupIdentity -EvidenceDigest ('0' * 64)
+        $evidenceFile = Join-Path $Config.programDataRoot `
+            "state\domain-collection-evidence.$($preview.evidenceDigest).json"
+        Write-ProductionDomainCollectionProtectedJson `
+            -Config $Config -Path $evidenceFile -Value $preview.evidence -Depth 100
+        $evidenceFileSha = (Get-FileHash -LiteralPath $evidenceFile -Algorithm SHA256).Hash.ToLowerInvariant()
+        $candidate = New-CandidateDatabaseName -Sha $targetRelease
+        Assert-ProductionDomainCollectionCandidateIsolation `
+            -Database $candidate `
+            -CandidatePort ([int]$Config.candidatePort) `
+            -ProductionPort ([int]$Config.productionPort)
+        $historyFile = ''
+        $priorStateSha256 = ''
+        if ($terminalState) {
+            $historyFile = Archive-ProductionDomainCollectionTerminalState `
+                -State $terminalState
+            $priorStateSha256 = (Get-FileHash -LiteralPath $historyFile `
+                -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+        $context = [pscustomobject][ordered]@{
+            config = $Config
+            targetRelease = $targetRelease
+            targetPath = $targetPath
+            currentRelease = $legacyRelease
+            legacyRelease = $legacyRelease
+            legacyPath = $legacyPath
+            archive = [string]$backup.archive
+            backupIdentity = [string]$backup.backupIdentity
+            evidenceDigest = [string]$preview.evidenceDigest
+            evidence = $preview.evidence
+            evidenceFile = $evidenceFile
+            evidenceFileSha256 = $evidenceFileSha
+            ownerToken = $owner
+            candidateDatabase = $candidate
+            priorMarkerBase64 = $priorMarkerBase64
+            priorStateSha256 = $priorStateSha256
+            historyFile = $historyFile
+            dropStarted = $false
+            writerStopped = $true
+            state = 'INITIALIZED'
+        }
+        Publish-ProductionDomainCollectionPrepublicationContext -Context $context
+        return $context
+    } catch {
+        $initializationFailure = $_.Exception
+        try {
+            Restore-ProductionDomainCollectionSnapshotInitializationFailure `
+                -Context $snapshotContext
+        } catch {
+            throw [AggregateException]::new(
+                'Domain collection snapshot initialization and guarded recovery both failed.',
+                [Exception[]]@($initializationFailure, $_.Exception))
+        }
+        throw $initializationFailure
+    }
 }
 
 function Invoke-ProductionDomainCollectionUntilComplete {
@@ -1813,8 +1870,6 @@ function Invoke-ProductionDomainCollectionCutover {
                 -Config $config `
                 -FixedRoot $script:FixedProductionRoot `
                 -ExpectedBoundary $guard.Boundary | Out-Null
-            Stop-ProductionDomainCollectionWriter -Context $context
-            $context.writerStopped = $true
             Invoke-ProductionDomainCollectionStageAndPublish -Context $context
             Prepare-ProductionDomainCollectionTargetCutover -Context $context
             Assert-ProductionFixedRootBoundary `

@@ -79,6 +79,7 @@ Describe 'guarded domain collection cutover orchestration' {
                     Set-Content -LiteralPath $markerPath -Encoding utf8
             }
             Mock New-ProductionDomainCollectionCutoverContext {
+                Stop-ProductionDomainCollectionWriter -Context $script:context
                 [void]$script:events.Add('backup-and-evidence')
                 $script:context
             } -ParameterFilter { -not $script:exerciseRealCutoverContext }
@@ -389,10 +390,10 @@ Describe 'guarded domain collection cutover orchestration' {
 
             $script:events | Should -Be @(
                 'lock:acquire',
+                'stop-suspended',
                 'backup-and-evidence',
                 'candidate',
                 'root:recheck',
-                'stop-suspended',
                 'stage-publish',
                 'target-cutover-prepare',
                 'root:recheck',
@@ -401,6 +402,91 @@ Describe 'guarded domain collection cutover orchestration' {
                 'marker-recovery-auto',
                 'lock:release')
             Should -Invoke Enter-ProductionFixedRootDeploymentLock -Times 1 -Exactly
+            Should -Invoke Stop-ProductionDomainCollectionWriter -Times 1 -Exactly
+        }
+
+        It 'restarts the exact legacy writer when stopped snapshot initialization fails' {
+            $script:exerciseRealCutoverContext = $true
+            $targetRelease = '2' * 40
+            $legacyRelease = '1' * 40
+            $targetPath = Join-Path $TestDrive "releases\$targetRelease"
+            $legacyPath = Join-Path $TestDrive "releases\$legacyRelease"
+            New-Item -ItemType Directory -Path $targetPath,$legacyPath -Force |
+                Out-Null
+            Mock Get-ProductionDomainCollectionTerminalReinitializationState { $null }
+            Mock Resolve-OriginMainRelease { $targetRelease }
+            Mock New-ReleaseFromOriginMain { $targetPath }
+            Mock Get-ProductionDomainCollectionReleaseSchema {
+                if ($Sha -ceq $targetRelease) { return 'TARGET' }
+                if ($Sha -ceq $legacyRelease) { return 'LEGACY' }
+                throw 'unexpected release'
+            }
+            Mock Get-JunctionTarget { $legacyPath }
+            Mock Get-ProductionDomainCollectionPriorMarkerBase64 { 'cHJpb3I=' }
+            Mock New-ProductionDomainCollectionVerifiedBackup {
+                [void]$script:events.Add('backup')
+                throw 'backup failed'
+            }
+            Mock Resolve-ProductionDomainCollectionPrepublicationPublication { }
+            Mock Read-ProductionDomainSchemaDirection { $null }
+            Mock Restore-ProductionDomainCollectionLegacyRelease {
+                [void]$script:events.Add('marker:restore')
+            }
+            Mock Start-ProductionDomainCollectionLegacy {
+                [void]$script:events.Add('legacy:start')
+            }
+            Mock Set-ProductionWebsiteRecoveryPolicy {
+                [void]$script:events.Add("recovery:$Policy")
+            }
+            Mock Invoke-ProductionDomainCollectionEngine {
+                throw 'preview must not run after backup failure'
+            }
+            Mock Publish-ProductionDomainCollectionPrepublicationContext {
+                throw 'publication must not run after backup failure'
+            }
+
+            { New-ProductionDomainCollectionCutoverContext -Config $script:config } |
+                Should -Throw '*backup failed*'
+
+            $script:events | Should -Be @(
+                'stop-suspended','backup','marker:restore','legacy:start','recovery:Normal')
+            Should -Invoke Stop-ProductionDomainCollectionWriter -Times 1 -Exactly
+            Should -Invoke Invoke-ProductionDomainCollectionEngine -Times 0 -Exactly
+            Should -Invoke Publish-ProductionDomainCollectionPrepublicationContext `
+                -Times 0 -Exactly
+        }
+
+        It 're-stops the legacy writer when recovery normalization fails after restart' {
+            $state = [pscustomobject]@{
+                config = $script:config
+                priorMarkerBase64 = 'cHJpb3I='
+                legacyPath = 'C:\ProgramData\christopherbell.dev\releases\' + ('1' * 40)
+            }
+            $script:stopCount = 0
+            Mock Resolve-ProductionDomainCollectionPrepublicationPublication { }
+            Mock Read-ProductionDomainSchemaDirection { $null }
+            Mock Restore-ProductionDomainCollectionLegacyRelease {
+                [void]$script:events.Add('marker:restore')
+            }
+            Mock Start-ProductionDomainCollectionLegacy {
+                [void]$script:events.Add('legacy:start')
+            }
+            Mock Set-ProductionWebsiteRecoveryPolicy {
+                [void]$script:events.Add("recovery:$Policy")
+                throw 'normalization failed'
+            } -ParameterFilter { $Policy -eq 'Normal' }
+            Mock Stop-ProductionDomainCollectionWriter {
+                $script:stopCount++
+                [void]$script:events.Add('stop-suspended')
+            }
+
+            { Restore-ProductionDomainCollectionSnapshotInitializationFailure `
+                    -Context $state } |
+                Should -Throw '*normalization failed*'
+
+            $script:events | Should -Be @(
+                'marker:restore','legacy:start','recovery:Normal','stop-suspended')
+            $script:stopCount | Should -Be 1
         }
 
         It 'keeps the public target writer disabled until legacy deletion completes' {
@@ -507,7 +593,7 @@ Describe 'guarded domain collection cutover orchestration' {
             { Invoke-ProductionDomainCollectionCutover -Confirm } |
                 Should -Throw '*candidate failed*'
 
-            Should -Invoke Stop-ProductionDomainCollectionWriter -Times 0
+            Should -Invoke Stop-ProductionDomainCollectionWriter -Times 1 -Exactly
             Should -Invoke Invoke-ProductionDomainCollectionFailureRecovery -Times 1 -Exactly `
                 -ParameterFilter { -not $PostDrop }
             Should -Invoke Invoke-ProductionDomainCollectionDropLegacy -Times 0
