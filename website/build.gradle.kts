@@ -16,6 +16,7 @@ import org.gradle.language.jvm.tasks.ProcessResources
 plugins {
     id("org.springframework.boot")
     id("io.spring.dependency-management")
+    id("org.jooq.jooq-codegen-gradle")
     java
 }
 
@@ -44,12 +45,14 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
     implementation("io.projectreactor.netty:reactor-netty-http")
     implementation("io.jsonwebtoken:jjwt-api:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")
     runtimeOnly("org.flywaydb:flyway-database-postgresql")
     runtimeOnly("org.postgresql:postgresql")
+    jooqCodegen("org.postgresql:postgresql")
 
     // Host metrics; Windows sensor binaries are pinned generated resources below.
     implementation("com.github.oshi:oshi-core:7.4.2")
@@ -77,15 +80,131 @@ dependencies {
     annotationProcessor("org.projectlombok:lombok-mapstruct-binding:0.2.0")
 
     // Testing
-    testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("org.springframework.modulith:spring-modulith-starter-test")
     testImplementation(testFixtures(project(":cbell-lib")))
+    testImplementation("org.jooq:jooq-codegen:3.21.5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testAnnotationProcessor("org.projectlombok:lombok:1.18.46")
     testCompileOnly("org.projectlombok:lombok:1.18.46")
+}
+
+val canonicalJooqSchemas = listOf(
+    "identity", "social", "communication", "federation", "music", "shared_folder",
+    "mobility", "lunch", "canes", "platform")
+val jooqJdbcUrl = providers.environmentVariable("JOOQ_CODEGEN_JDBC_URL")
+val jooqUsername = providers.environmentVariable("JOOQ_CODEGEN_USERNAME")
+val jooqPassword = providers.environmentVariable("JOOQ_CODEGEN_PASSWORD")
+val jooqSchemaPrefix = providers.environmentVariable("JOOQ_CODEGEN_SCHEMA")
+val jooqEnvironment = listOf(jooqJdbcUrl, jooqUsername, jooqPassword, jooqSchemaPrefix)
+val jooqEnvironmentConfigured = jooqEnvironment.all { it.isPresent }
+val generatedJooqDirectory = layout.buildDirectory.dir("generated-src/jooq/main")
+val jooqOwnershipDirectory = layout.buildDirectory.dir("jooq/ownership")
+
+sourceSets.named("main") {
+    java.srcDir(generatedJooqDirectory)
+}
+
+val jooqPreparation = sourceSets.create("jooqPreparation") {
+    resources.srcDir("src/main/resources")
+}
+dependencies.add("testImplementation", jooqPreparation.output)
+configurations[jooqPreparation.implementationConfigurationName]
+    .extendsFrom(configurations["implementation"])
+configurations[jooqPreparation.runtimeOnlyConfigurationName]
+    .extendsFrom(configurations["runtimeOnly"])
+
+fun requireCompleteJooqEnvironment() {
+    val missing = listOf(
+        "JOOQ_CODEGEN_JDBC_URL" to jooqJdbcUrl,
+        "JOOQ_CODEGEN_USERNAME" to jooqUsername,
+        "JOOQ_CODEGEN_PASSWORD" to jooqPassword,
+        "JOOQ_CODEGEN_SCHEMA" to jooqSchemaPrefix)
+        .filterNot { (_, value) -> value.isPresent && value.get().isNotBlank() }
+        .map { (name, _) -> name }
+    if (missing.isNotEmpty()) {
+        throw GradleException(
+            "jOOQ generation requires nonblank environment variables: ${missing.joinToString()}.")
+    }
+}
+
+val prepareJooqSchema = tasks.register<JavaExec>("prepareJooqSchema") {
+    group = "jooq"
+    description = "Applies canonical Flyway migrations to an owned jOOQ schema prefix."
+    dependsOn(jooqPreparation.classesTaskName)
+    classpath = jooqPreparation.runtimeClasspath
+    mainClass.set("dev.christopherbell.codegen.PostgresqlJooqSchemaTool")
+    args("prepare", jooqOwnershipDirectory.get().asFile.absolutePath)
+    doFirst { requireCompleteJooqEnvironment() }
+}
+
+val cleanJooqSchema = tasks.register<JavaExec>("cleanJooqSchema") {
+    group = "jooq"
+    description = "Drops only the exact owned jOOQ schema prefix after generation."
+    dependsOn(jooqPreparation.classesTaskName)
+    classpath = jooqPreparation.runtimeClasspath
+    mainClass.set("dev.christopherbell.codegen.PostgresqlJooqSchemaTool")
+    args("clean", jooqOwnershipDirectory.get().asFile.absolutePath)
+    doFirst { requireCompleteJooqEnvironment() }
+}
+
+jooq {
+    configuration {
+        jdbc {
+            driver = "org.postgresql.Driver"
+            url = jooqJdbcUrl.orElse("").get()
+            user = jooqUsername.orElse("").get()
+            password = jooqPassword.orElse("").get()
+        }
+        generator {
+            database {
+                name = "org.jooq.meta.postgres.PostgresDatabase"
+                includes = ".*"
+                excludes = "flyway_schema_history"
+                isIncludeIndexes = true
+                isIncludePrimaryKeys = true
+                isIncludeUniqueKeys = true
+                isIncludeForeignKeys = true
+                schemata {
+                    canonicalJooqSchemas.forEach { canonicalSchema ->
+                        schema {
+                            inputSchema = jooqSchemaPrefix.orElse("").get() + canonicalSchema
+                            outputSchema = canonicalSchema
+                        }
+                    }
+                }
+            }
+            generate {
+                isDeprecated = false
+                isRecords = true
+                isPojos = false
+                isDaos = false
+                isImplicitJoinPathsToOne = false
+                isImplicitJoinPathsToMany = false
+                isImplicitJoinPathsManyToMany = false
+                isGeneratedAnnotationDate = false
+                isGeneratedAnnotationJooqVersion = false
+            }
+            target {
+                packageName = "dev.christopherbell.persistence.jooq"
+                directory = generatedJooqDirectory.get().asFile.absolutePath
+            }
+        }
+    }
+}
+
+tasks.named("jooqCodegen") {
+    dependsOn(prepareJooqSchema)
+    finalizedBy(cleanJooqSchema)
+    doFirst { requireCompleteJooqEnvironment() }
+}
+
+if (jooqEnvironmentConfigured) {
+    tasks.named("compileJava") {
+        dependsOn("jooqCodegen")
+    }
 }
 
 val forwardedArchitectureTestSystemProperties = listOf(
