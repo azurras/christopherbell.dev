@@ -98,3 +98,48 @@ DONE_WITH_CONCERNS
 - Command: `POSTGRESQL_INTEGRATION_TESTS=enabled; SPRING_DATASOURCE_URL=jdbc:postgresql://127.0.0.1:55432/test; SPRING_DATASOURCE_USERNAME=christopherbell_test; SPRING_DATASOURCE_PASSWORD=unused-for-disposable-trust-cluster; GRADLE_USER_HOME=A:\Projects\christopherbell.dev-gradle\postgresql-migration; .\gradlew.bat :website:test --tests 'dev.christopherbell.configuration.persistence.PostgresqlTestSchemaIsolationIntegrationTest' --console=plain`
 - Result: PASS. `guardedDisposableSchemasKeepConcurrentFixturesIsolated()` created two unique `cbtest_*` schemas, selected each connection's schema, and read distinct unqualified fixture values (`101` and `202`). Cleanup dropped only those generated schemas.
 - This supersedes the earlier unavailable-database concern. Docker CLI remains unavailable; the repository's parsed-Compose test remains the Compose validation evidence.
+
+## Fix Round 2 — Exhaustive Framework Selector Classification
+
+### Before-Edit Brief
+
+- **Behavior:** The sole `app.persistence.backend` selector must gate every resolved Spring Boot 4.1 MongoDB/data-Mongo and JDBC/jOOQ/Flyway persistence auto-configuration, including reactive, initialization, metrics, and endpoint variants.
+- **Invariants:** PostgreSQL admits all and only the resolved relational family; MongoDB admits all and only the resolved Mongo family; missing and unsupported values admit neither family; unrelated Boot auto-configuration remains allowed.
+- **Boundary/API:** `PersistenceBackendAutoConfigurationImportFilter` classifies the Boot auto-configuration package families. Its test reads the actual `AutoConfiguration.imports` resources available to the test runtime and verifies each candidate's family and result for all four selector states.
+- **Effects and failures:** Import filtering remains pure and has no database effect. The real schema test remains opt-in and may write fixtures only after the identity guard validates database `test` and a generated `cbtest_*` schema.
+- **Tests and evidence:** RED is the actual resolved-import selector contract against the prior exact-name set. GREEN reruns that contract, the backend contexts and production/profile/boundary tests, compilation, and the supplied PostgreSQL 18.4 schema-isolation integration test.
+
+### Files Changed
+
+- `website/src/main/java/dev/christopherbell/configuration/persistence/PersistenceBackendAutoConfigurationImportFilter.java`: replaces the incomplete class-name allowlists with reviewed Mongo/data-Mongo and JDBC/jOOQ/Flyway package-family classification.
+- `website/src/test/java/dev/christopherbell/configuration/persistence/PersistenceBackendAutoConfigurationTest.java`: loads all resolved Boot auto-configuration import resources, rejects unclassified persistence candidates, and validates MongoDB, PostgreSQL, missing, and unsupported selector results.
+- `.superpowers/sdd/2026-08-13-christopherbell-dev-postgresql-migration/task-1-report.md`: Fix Round 2 evidence.
+
+### RED Evidence
+
+- Command: `GRADLE_USER_HOME=A:\Projects\christopherbell.dev-gradle\postgresql-migration; .\gradlew.bat :website:test --tests 'dev.christopherbell.configuration.persistence.PersistenceBackendAutoConfigurationTest' --console=plain`
+  - Result: expected failure after test-only change: `selectorGatesEveryResolvedPersistenceAutoConfiguration()` failed at the selector assertion; 1 of 5 tests failed. The existing exact-name filter default-allowed four of the resolved candidates under the MongoDB selection (and correspondingly admitted Mongo candidates under PostgreSQL): the data-Mongo auto-configurations and the Mongo metrics auto-configuration. The complete contract also covers the unresolved relational initialization, JDBC client, pool-metrics, and Flyway endpoint candidates.
+
+### GREEN Evidence
+
+- Command: `GRADLE_USER_HOME=A:\Projects\christopherbell.dev-gradle\postgresql-migration; .\gradlew.bat :website:test --tests 'dev.christopherbell.configuration.persistence.PersistenceBackendAutoConfigurationTest' --console=plain`
+  - Result: PASS, 5 tests. The resolved-import contract discovered and classified all 21 actual persistence candidates: 9 Mongo/data-Mongo candidates and 12 JDBC/jOOQ/Flyway candidates. It verifies both selected values and fail-closed missing/unsupported values. A first post-change run exposed a test-only null `switch` expectation; the expectation was made explicit, then this same command passed.
+- Command: `POSTGRESQL_INTEGRATION_TESTS=enabled; SPRING_DATASOURCE_URL=jdbc:postgresql://127.0.0.1:55432/test; SPRING_DATASOURCE_USERNAME=christopherbell_test; SPRING_DATASOURCE_PASSWORD=unused-for-disposable-trust-cluster; GRADLE_USER_HOME=A:\Projects\christopherbell.dev-gradle\postgresql-migration; .\gradlew.bat :website:compileJava :website:test --tests 'dev.christopherbell.configuration.PersistenceProfileConfigurationTest' --tests 'dev.christopherbell.configuration.persistence.PersistenceBackendAutoConfigurationTest' --tests 'dev.christopherbell.configuration.persistence.PersistenceBackendSelectionTest' --tests 'dev.christopherbell.configuration.ProductionSettingsApplicationContextInitializerTest' --tests 'dev.christopherbell.architecture.MongoPersistenceBoundaryRulesTest' --tests 'dev.christopherbell.architecture.MongoPersistenceAdapterSelectionTest' --tests 'dev.christopherbell.configuration.persistence.PostgresqlTestDatabaseGuardTest' --tests 'dev.christopherbell.configuration.persistence.PostgresqlTestSchemaIsolationIntegrationTest' --console=plain`
+  - Result: PASS: `:website:compileJava` and 31 focused configuration, backend-selection, Mongo-boundary, database-guard, and real schema-isolation tests. The integration test passed after the guard selected disposable schemas and read distinct unqualified fixture values.
+- `git diff --check`
+  - Result: PASS.
+
+### Database Identity Evidence
+
+- The supplied isolated PostgreSQL cluster was independently verified before the integration command as PostgreSQL `18.4`, `current_database() = test`, `current_user = christopherbell_test`, server `127.0.0.1:55432`.
+- The enabled integration run used exactly `jdbc:postgresql://127.0.0.1:55432/test` with the disposable trust-authentication placeholder password. `PostgresqlTestSchemaIsolationIntegrationTest` passed after its guard checked the `test` database and generated `cbtest_*` schema names before fixture writes; cleanup dropped only those schemas.
+
+### Self-Review and Commit
+
+- The source classifier covers all package families containing the 21 resolved candidates and preserves non-persistence Boot auto-configuration. The test independently discovers candidate import resources and fails if any Mongo/data-Mongo/JDBC/jOOQ/Flyway candidate lacks a reviewed backend classification.
+- Missing or unsupported selector values parse to no backend, causing both persistence families to be excluded. Existing typed binding and production initializer tests continue to fail invalid application startup.
+- No domain/service persistence coupling, relational schema, jOOQ generation, live service, or Builder repository change was introduced. No actionable finding remains in the final diff.
+
+### Concerns
+
+- Docker CLI remains unavailable, so Compose validation remains the parsed repository configuration test rather than `docker compose config`; this does not affect the verified isolated PostgreSQL 18.4 integration evidence.
