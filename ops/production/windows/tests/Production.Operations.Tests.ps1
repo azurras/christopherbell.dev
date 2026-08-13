@@ -916,7 +916,8 @@ Describe 'native Windows production operations' {
                 'const indexes = info.type === ''view''\s*\?\s*\[\]')
         }
 
-        It 'invokes mongosh against only the fixed loopback production database' {
+        It 'loads the immutable manifest before evaluating the inventory against the fixed database' {
+            $script:inventoryProcessArguments = $null
             Mock Read-ProductionConfig {
                 [pscustomobject]@{
                     mongoShellExe = 'C:\tools\mongosh.exe'
@@ -924,6 +925,7 @@ Describe 'native Windows production operations' {
                 }
             }
             Mock Invoke-CheckedProcess {
+                $script:inventoryProcessArguments = @($ArgumentList)
                 '{"complete":true,"database":"christopherbell","generatedAt":"2026-08-09T12:00:00.000Z","collections":[]}'
             }
 
@@ -932,16 +934,18 @@ Describe 'native Windows production operations' {
             $inventory.complete | Should -BeTrue
             $inventory.database | Should -Be 'christopherbell'
             Should -Invoke Invoke-CheckedProcess -Times 1 -Exactly -ParameterFilter {
-                $FilePath -eq 'C:\tools\mongosh.exe' -and
-                $WorkingDirectory -eq 'C:\repo' -and
-                $ArgumentList.Count -eq 7 -and
-                $ArgumentList[0] -eq '--quiet' -and
-                $ArgumentList[1] -eq '--norc' -and
-                $ArgumentList[2] -eq 'mongodb://127.0.0.1:27017/admin' -and
-                $ArgumentList[3] -eq '--file' -and
-                $ArgumentList[4] -match 'DomainCollectionManifest\.js$' -and
-                $ArgumentList[5] -eq '--eval'
+                $FilePath -eq 'C:\tools\mongosh.exe' -and $WorkingDirectory -eq 'C:\repo'
             }
+            $script:inventoryProcessArguments.Count | Should -Be 5
+            $script:inventoryProcessArguments[0..3] | Should -Be @(
+                '--quiet'
+                '--norc'
+                'mongodb://127.0.0.1:27017/admin'
+                '--eval'
+            )
+            $script:inventoryProcessArguments[4] | Should -Match (
+                '(?s)^load\(".*DomainCollectionManifest\.js"\);\r?\n' +
+                'const manifest = DomainCollectionManifest\.MANIFEST;')
         }
 
         It 'routes a domain marker rollback only to the guarded domain recovery command' {
