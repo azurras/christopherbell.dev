@@ -57,9 +57,12 @@ public class PostgresAdminActivityRepository implements AdminActivityRepository 
           .set(ADMIN_ACTIVITY.ACTION, activity.getAction())
           .set(ADMIN_ACTIVITY.TARGET_TYPE, activity.getTargetType())
           .set(ADMIN_ACTIVITY.TARGET_ID, activity.getTargetId())
-          .set(ADMIN_ACTIVITY.TARGET_LABEL, value(activity.getTargetLabel()))
-          .set(ADMIN_ACTIVITY.REASON, value(activity.getReason()))
-          .set(ADMIN_ACTIVITY.MESSAGE, value(activity.getMessage()))
+          .set(ADMIN_ACTIVITY.TARGET_LABEL, activity.getTargetLabel())
+          .set(ADMIN_ACTIVITY.REASON, activity.getReason())
+          .set(ADMIN_ACTIVITY.MESSAGE, activity.getMessage())
+          .set(ADMIN_ACTIVITY.BEFORE_VALUES_PRESENT, activity.getBeforeValues() != null)
+          .set(ADMIN_ACTIVITY.AFTER_VALUES_PRESENT, activity.getAfterValues() != null)
+          .set(ADMIN_ACTIVITY.METADATA_PRESENT, activity.getMetadata() != null)
           .set(ADMIN_ACTIVITY.CREATED_ON, activity.getCreatedOn().atOffset(ZoneOffset.UTC))
           .execute();
         insertValues(transaction, id, "before", activity.getBeforeValues());
@@ -89,9 +92,9 @@ public class PostgresAdminActivityRepository implements AdminActivityRepository 
             .targetLabel(row.getTargetLabel())
             .reason(row.getReason())
             .message(row.getMessage())
-            .beforeValues(values(context, id, "before"))
-            .afterValues(values(context, id, "after"))
-            .metadata(values(context, id, "metadata"))
+            .beforeValues(values(context, id, "before", row.getBeforeValuesPresent()))
+            .afterValues(values(context, id, "after", row.getAfterValuesPresent()))
+            .metadata(values(context, id, "metadata", row.getMetadataPresent()))
             .createdOn(row.getCreatedOn().toInstant())
             .build());
   }
@@ -108,7 +111,9 @@ public class PostgresAdminActivityRepository implements AdminActivityRepository 
             .execute());
   }
 
-  private static Map<String, String> values(DSLContext context, String id, String partition) {
+  private static Map<String, String> values(
+      DSLContext context, String id, String partition, Boolean present) {
+    if (!Boolean.TRUE.equals(present)) return null;
     var result = new LinkedHashMap<String, String>();
     context.select(ADMIN_ACTIVITY_VALUE.VALUE_KEY, ADMIN_ACTIVITY_VALUE.VALUE_TEXT)
         .from(ADMIN_ACTIVITY_VALUE)
@@ -128,5 +133,4 @@ public class PostgresAdminActivityRepository implements AdminActivityRepository 
   }
 
   private static boolean blank(String value) { return value == null || value.isBlank(); }
-  private static String value(String value) { return value == null ? "" : value; }
 }

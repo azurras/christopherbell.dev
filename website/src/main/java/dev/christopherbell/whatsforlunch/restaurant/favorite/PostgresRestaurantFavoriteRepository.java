@@ -3,14 +3,13 @@ package dev.christopherbell.whatsforlunch.restaurant.favorite;
 import static dev.christopherbell.persistence.jooq.lunch.Tables.RESTAURANT_FAVORITE;
 
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
-import dev.christopherbell.configuration.persistence.PostgresqlConstraintViolationCause;
+import dev.christopherbell.configuration.persistence.PostgresqlIntegrityViolationTranslator;
 import dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite;
 import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.jooq.DSLContext;
-import org.springframework.dao.DuplicateKeyException;
 
 /** PostgreSQL one-favorite-per-account-and-restaurant adapter. */
 @PostgresPersistence
@@ -30,8 +29,10 @@ public class PostgresRestaurantFavoriteRepository implements RestaurantFavoriteR
           .set(RESTAURANT_FAVORITE.CREATED_ON, value.getCreatedOn().atOffset(ZoneOffset.UTC)).execute();
       return findByRestaurantIdAndAccountId(value.getRestaurantId(), value.getAccountId()).orElseThrow();
     } catch (org.jooq.exception.IntegrityConstraintViolationException failure) {
-      throw new DuplicateKeyException("PostgreSQL rejected a duplicate restaurant favorite.",
-          new PostgresqlConstraintViolationCause(failure.sqlState()));
+      throw PostgresqlIntegrityViolationTranslator.translate(
+          failure.sqlState(),
+          "PostgreSQL rejected a duplicate restaurant favorite.",
+          "PostgreSQL rejected restaurant favorite data.");
     }
   }
   @Override public void deleteByRestaurantIdAndAccountId(String restaurantId, String accountId) {

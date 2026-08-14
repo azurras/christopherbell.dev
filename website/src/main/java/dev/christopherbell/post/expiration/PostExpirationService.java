@@ -1,6 +1,5 @@
 package dev.christopherbell.post.expiration;
 
-import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
@@ -42,16 +41,6 @@ public class PostExpirationService {
     this.store = store;
     this.clock = clock;
     this.expirationEnabled = expirationEnabled;
-  }
-
-  /** Compatibility constructor used by focused Mongo persistence tests. */
-  public PostExpirationService(
-      PostRepository postRepository,
-      DomainMongoOperationsFactory factory,
-      Clock clock,
-      boolean expirationEnabled) {
-    this(postRepository, factory == null ? null : new MongoPostExpirationStore(factory),
-        clock, expirationEnabled);
   }
 
   /** Test-only compatibility constructor for focused calculation tests. */

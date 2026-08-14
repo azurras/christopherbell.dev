@@ -722,7 +722,7 @@ kinds:
       type: {targets: [], conversion: constant-kind, missing: allow, nullValue: allow}
       restaurantId: {targets: [restaurant_vote.restaurant_id], conversion: string, missing: reject, nullValue: reject}
       accountId: {targets: [restaurant_vote.account_id], conversion: string, missing: reject, nullValue: reject}
-      vote: {targets: [restaurant_vote.vote_value], conversion: enum-name, missing: reject, nullValue: reject}
+      vote: {targets: [restaurant_vote.vote_value], conversion: enum-name, missing: allow, nullValue: allow}
       createdOn: {targets: [restaurant_vote.created_on], conversion: instant-utc, missing: allow, nullValue: allow}
       lastUpdatedOn: {targets: [restaurant_vote.last_updated_on], conversion: instant-utc, missing: allow, nullValue: allow}
     deleteBehavior: cascade
@@ -1186,7 +1186,7 @@ kinds:
     dependsOnKinds: []
     keyMapping: {sourcePath: vin, targetColumn: vin_decode_cache.vin, preservation: exact}
     fieldMappings:
-      response: {targets: [vin_decode_cache.response_vin, vin_decode_cache.make, vin_decode_cache.model, vin_decode_cache.model_year, vin_decode_cache.body, vin_decode_cache.plant_city, vin_decode_cache.plant_state, vin_decode_cache.plant_country, vin_decode_cache.error_code, vin_decode_cache.error_text, vin_decode_raw_value.field_name, vin_decode_raw_value.field_value], conversion: vin-response-flattened, missing: allow, nullValue: allow}
+      response: {targets: [vin_decode_cache.response_present, vin_decode_cache.response_vin, vin_decode_cache.make, vin_decode_cache.model, vin_decode_cache.model_year, vin_decode_cache.body, vin_decode_cache.plant_city, vin_decode_cache.plant_state, vin_decode_cache.plant_country, vin_decode_cache.error_code, vin_decode_cache.error_text, vin_decode_raw_value.field_name, vin_decode_raw_value.field_value], conversion: vin-response-flattened, missing: allow, nullValue: allow}
       decoderVersion: {targets: [vin_decode_cache.decoder_version], conversion: string, missing: allow, nullValue: allow}
       refreshedOn: {targets: [vin_decode_cache.refreshed_on], conversion: instant-utc, missing: allow, nullValue: allow}
       expiresOn: {targets: [vin_decode_cache.expires_on], conversion: instant-utc, missing: allow, nullValue: allow}
@@ -1221,7 +1221,7 @@ kinds:
       lifetimeCalls: {targets: [nhtsa_import_state.lifetime_calls], conversion: long, missing: allow, nullValue: allow}
       lifetimeVinsProcessed: {targets: [nhtsa_import_state.lifetime_vins_processed], conversion: long, missing: allow, nullValue: allow}
       notes: {targets: [nhtsa_import_state.notes], conversion: string, missing: allow, nullValue: allow}
-      permanentlyDisabled: {targets: [nhtsa_import_state.permanently_disabled], conversion: boolean, missing: default, nullValue: default}
+      permanentlyDisabled: {targets: [nhtsa_import_state.permanently_disabled], conversion: boolean, missing: allow, nullValue: allow}
       vinsProcessedToday: {targets: [nhtsa_import_state.vins_processed_today], conversion: integer, missing: allow, nullValue: allow}
     deleteBehavior: preserve
     versionSemantics: initialize-zero
@@ -1252,8 +1252,8 @@ kinds:
       lifetimeCalls: {targets: [random_vin_import_state.lifetime_calls], conversion: long, missing: allow, nullValue: allow}
       lifetimeVinsProcessed: {targets: [random_vin_import_state.lifetime_vins_processed], conversion: long, missing: allow, nullValue: allow}
       notes: {targets: [random_vin_import_state.notes], conversion: string, missing: allow, nullValue: allow}
-      permanentlyDisabled: {targets: [random_vin_import_state.permanently_disabled], conversion: boolean, missing: default, nullValue: default}
-      robotsPolicy: {targets: [random_vin_import_state.robots_checked_on, random_vin_import_state.robots_allowed, random_vin_import_state.robots_reason, random_vin_import_state.robots_fail_closed], conversion: record-flattened, missing: allow, nullValue: allow}
+      permanentlyDisabled: {targets: [random_vin_import_state.permanently_disabled], conversion: boolean, missing: allow, nullValue: allow}
+      robotsPolicy: {targets: [random_vin_import_state.robots_policy_present, random_vin_import_state.robots_checked_on, random_vin_import_state.robots_allowed, random_vin_import_state.robots_reason, random_vin_import_state.robots_fail_closed], conversion: record-flattened, missing: allow, nullValue: allow}
       vinsProcessedToday: {targets: [random_vin_import_state.vins_processed_today], conversion: integer, missing: allow, nullValue: allow}
     deleteBehavior: preserve
     versionSemantics: initialize-zero
@@ -1465,12 +1465,12 @@ kinds:
       action: {targets: [admin_activity.action], conversion: string, missing: reject, nullValue: reject}
       targetType: {targets: [admin_activity.target_type], conversion: string, missing: reject, nullValue: reject}
       targetId: {targets: [admin_activity.target_id], conversion: string, missing: reject, nullValue: reject}
-      targetLabel: {targets: [admin_activity.target_label], conversion: string, missing: reject, nullValue: reject}
-      reason: {targets: [admin_activity.reason], conversion: string, missing: reject, nullValue: reject}
-      message: {targets: [admin_activity.message], conversion: string, missing: reject, nullValue: reject}
-      beforeValues: {targets: [admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: empty, nullValue: empty}
-      afterValues: {targets: [admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: empty, nullValue: empty}
-      metadata: {targets: [admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: empty, nullValue: empty}
+      targetLabel: {targets: [admin_activity.target_label], conversion: string, missing: allow, nullValue: allow}
+      reason: {targets: [admin_activity.reason], conversion: string, missing: allow, nullValue: allow}
+      message: {targets: [admin_activity.message], conversion: string, missing: allow, nullValue: allow}
+      beforeValues: {targets: [admin_activity.before_values_present, admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: allow, nullValue: allow}
+      afterValues: {targets: [admin_activity.after_values_present, admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: allow, nullValue: allow}
+      metadata: {targets: [admin_activity.metadata_present, admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: allow, nullValue: allow}
       createdOn: {targets: [admin_activity.created_on], conversion: instant-utc, missing: reject, nullValue: reject}
     deleteBehavior: preserve
     versionSemantics: initialize-zero

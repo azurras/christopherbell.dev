@@ -24,7 +24,8 @@ public class PostgresRestaurantVoteQueryRepository implements RestaurantVoteQuer
     var count = DSL.count();
     var approval = upVotes.cast(BigDecimal.class).div(count.cast(BigDecimal.class));
     return database.select(RESTAURANT_VOTE.RESTAURANT_ID, upVotes, downVotes, count)
-        .from(RESTAURANT_VOTE).groupBy(RESTAURANT_VOTE.RESTAURANT_ID)
+        .from(RESTAURANT_VOTE).where(RESTAURANT_VOTE.VOTE_VALUE.in(1, -1))
+        .groupBy(RESTAURANT_VOTE.RESTAURANT_ID)
         .orderBy(approval.desc(), count.desc(), RESTAURANT_VOTE.RESTAURANT_ID.asc()).limit(limit)
         .fetch(row -> new RestaurantVoteSummary(row.value1(), row.value2().intValueExact(),
             row.value3().intValueExact(), row.value4()));
@@ -37,7 +38,8 @@ public class PostgresRestaurantVoteQueryRepository implements RestaurantVoteQuer
     var downVotes = DSL.sum(DSL.when(RESTAURANT_VOTE.VOTE_VALUE.eq(-1), 1).otherwise(0));
     var count = DSL.count();
     return database.select(RESTAURANT_VOTE.RESTAURANT_ID, upVotes, downVotes, count)
-        .from(RESTAURANT_VOTE).where(RESTAURANT_VOTE.RESTAURANT_ID.in(ids))
+        .from(RESTAURANT_VOTE).where(RESTAURANT_VOTE.RESTAURANT_ID.in(ids)
+            .and(RESTAURANT_VOTE.VOTE_VALUE.in(1, -1)))
         .groupBy(RESTAURANT_VOTE.RESTAURANT_ID).orderBy(RESTAURANT_VOTE.RESTAURANT_ID)
         .fetch(row -> new RestaurantVoteSummary(row.value1(), row.value2().intValueExact(),
             row.value3().intValueExact(), row.value4()));

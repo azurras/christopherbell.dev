@@ -92,6 +92,40 @@ class PostgresqlMigrationCatalogTest {
                 PostgresqlMigrationCatalog.FieldMapping::nullValue)
             .containsExactly("allow", "allow"));
 
+    assertThat(vinCache.fieldMappings().get("response").targets())
+        .contains("vin_decode_cache.response_present");
+    assertThat(byKind.get("nhtsa_import_state").fieldMappings().get("permanentlyDisabled"))
+        .extracting(
+            PostgresqlMigrationCatalog.FieldMapping::missing,
+            PostgresqlMigrationCatalog.FieldMapping::nullValue)
+        .containsExactly("allow", "allow");
+    var randomVin = byKind.get("random_vin_import_state");
+    assertThat(randomVin.fieldMappings().get("permanentlyDisabled"))
+        .extracting(
+            PostgresqlMigrationCatalog.FieldMapping::missing,
+            PostgresqlMigrationCatalog.FieldMapping::nullValue)
+        .containsExactly("allow", "allow");
+    assertThat(randomVin.fieldMappings().get("robotsPolicy").targets())
+        .contains("random_vin_import_state.robots_policy_present");
+    assertThat(byKind.get("vote").fieldMappings().get("vote"))
+        .extracting(
+            PostgresqlMigrationCatalog.FieldMapping::missing,
+            PostgresqlMigrationCatalog.FieldMapping::nullValue)
+        .containsExactly("allow", "allow");
+    var admin = byKind.get("admin_activity");
+    assertThat(Set.of("targetLabel", "reason", "message", "beforeValues", "afterValues", "metadata"))
+        .allSatisfy(field -> assertThat(admin.fieldMappings().get(field))
+            .extracting(
+                PostgresqlMigrationCatalog.FieldMapping::missing,
+                PostgresqlMigrationCatalog.FieldMapping::nullValue)
+            .containsExactly("allow", "allow"));
+    assertThat(admin.fieldMappings().get("beforeValues").targets())
+        .contains("admin_activity.before_values_present");
+    assertThat(admin.fieldMappings().get("afterValues").targets())
+        .contains("admin_activity.after_values_present");
+    assertThat(admin.fieldMappings().get("metadata").targets())
+        .contains("admin_activity.metadata_present");
+
     assertThat(byKind.get("preference").fieldMappings().get("radiusMiles"))
         .extracting(
             PostgresqlMigrationCatalog.FieldMapping::conversion,

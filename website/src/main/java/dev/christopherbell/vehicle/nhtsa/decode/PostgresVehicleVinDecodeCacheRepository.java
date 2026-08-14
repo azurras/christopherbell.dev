@@ -50,6 +50,7 @@ public class PostgresVehicleVinDecodeCacheRepository implements VehicleVinDecode
           .set(VIN_DECODE_CACHE.PLANT_COUNTRY, response == null ? null : response.plantCountry())
           .set(VIN_DECODE_CACHE.PLANT_STATE, response == null ? null : response.plantState())
           .set(VIN_DECODE_CACHE.REFRESHED_ON, offset(cache.getRefreshedOn()))
+          .set(VIN_DECODE_CACHE.RESPONSE_PRESENT, response != null)
           .set(VIN_DECODE_CACHE.RESPONSE_VIN, response == null ? null : response.vin())
           .onConflict(VIN_DECODE_CACHE.VIN).doUpdate()
           .set(VIN_DECODE_CACHE.BODY, response == null ? null : response.body())
@@ -66,6 +67,7 @@ public class PostgresVehicleVinDecodeCacheRepository implements VehicleVinDecode
           .set(VIN_DECODE_CACHE.PLANT_COUNTRY, response == null ? null : response.plantCountry())
           .set(VIN_DECODE_CACHE.PLANT_STATE, response == null ? null : response.plantState())
           .set(VIN_DECODE_CACHE.REFRESHED_ON, offset(cache.getRefreshedOn()))
+          .set(VIN_DECODE_CACHE.RESPONSE_PRESENT, response != null)
           .set(VIN_DECODE_CACHE.RESPONSE_VIN, response == null ? null : response.vin())
           .execute();
       transaction.deleteFrom(VIN_DECODE_RAW_VALUE)
@@ -88,7 +90,7 @@ public class PostgresVehicleVinDecodeCacheRepository implements VehicleVinDecode
     context.selectFrom(VIN_DECODE_RAW_VALUE).where(VIN_DECODE_RAW_VALUE.VIN.eq(row.getVin()))
         .orderBy(VIN_DECODE_RAW_VALUE.FIELD_NAME)
         .forEach(value -> raw.put(value.getFieldName(), value.getFieldValue()));
-    boolean hasResponse = row.getResponseVin() != null || row.getBody() != null || !raw.isEmpty();
+    boolean hasResponse = Boolean.TRUE.equals(row.getResponsePresent());
     var response = hasResponse ? new VehicleVinDecodeResponse(
         row.getResponseVin(), row.getMake(), row.getModel(), row.getModelYear(), row.getBody(),
         row.getPlantCity(), row.getPlantState(), row.getPlantCountry(), row.getErrorCode(),

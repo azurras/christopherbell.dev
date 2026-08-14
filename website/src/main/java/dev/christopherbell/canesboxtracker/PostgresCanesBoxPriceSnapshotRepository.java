@@ -10,6 +10,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 import org.jooq.DSLContext;
@@ -71,37 +73,47 @@ public class PostgresCanesBoxPriceSnapshotRepository
 
   @Override
   public List<CanesBoxPriceSnapshot> findTop60ByOrderByWeekStartDateDesc() {
-    return database.select(PRICE_SNAPSHOT.PRICE_SNAPSHOT_ID)
-        .from(PRICE_SNAPSHOT)
+    var rows = database.selectFrom(PRICE_SNAPSHOT)
         .orderBy(PRICE_SNAPSHOT.WEEK_START_DATE.desc(), PRICE_SNAPSHOT.PRICE_SNAPSHOT_ID.desc())
         .limit(60)
-        .fetch(PRICE_SNAPSHOT.PRICE_SNAPSHOT_ID)
-        .stream()
-        .map(id -> findById(database, id).orElseThrow())
+        .fetch();
+    if (rows.isEmpty()) return List.of();
+    var pricesBySnapshot = new LinkedHashMap<String, List<CanesBoxMetroPrice>>();
+    rows.forEach(row -> pricesBySnapshot.put(row.getPriceSnapshotId(), new ArrayList<>()));
+    database.selectFrom(METRO_PRICE)
+        .where(METRO_PRICE.PRICE_SNAPSHOT_ID.in(pricesBySnapshot.keySet()))
+        .orderBy(METRO_PRICE.PRICE_SNAPSHOT_ID, METRO_PRICE.ORDINAL)
+        .forEach(row -> pricesBySnapshot.get(row.getPriceSnapshotId()).add(mapMetroPrice(row)));
+    return rows.stream()
+        .map(row -> mapSnapshot(row, pricesBySnapshot.get(row.getPriceSnapshotId())))
         .toList();
   }
 
   private static Optional<CanesBoxPriceSnapshot> findById(DSLContext context, String id) {
     return context.selectFrom(PRICE_SNAPSHOT)
         .where(PRICE_SNAPSHOT.PRICE_SNAPSHOT_ID.eq(id))
-        .fetchOptional(row -> {
-          var snapshot = new CanesBoxPriceSnapshot();
-          snapshot.setId(row.getPriceSnapshotId());
-          snapshot.setWeekStartDate(row.getWeekStartDate().toString());
-          snapshot.setCollectedOn(row.getCollectedOn().toInstant());
-          snapshot.setAveragePrice(row.getAveragePrice());
-          snapshot.setCurrency(row.getCurrency());
-          snapshot.setSuccessfulMetroCount(row.getSuccessfulMetroCount());
-          snapshot.setTotalMetroCount(row.getTotalMetroCount());
-          snapshot.setVerifiedMetroCount(row.getVerifiedMetroCount());
-          snapshot.setProvisionalMetroCount(row.getProvisionalMetroCount());
-          snapshot.setExcludedMetroCount(row.getExcludedMetroCount());
-          snapshot.setMetroPrices(context.selectFrom(METRO_PRICE)
-              .where(METRO_PRICE.PRICE_SNAPSHOT_ID.eq(id))
-              .orderBy(METRO_PRICE.ORDINAL)
-              .fetch(PostgresCanesBoxPriceSnapshotRepository::mapMetroPrice));
-          return snapshot;
-        });
+        .fetchOptional(row -> mapSnapshot(row, context.selectFrom(METRO_PRICE)
+            .where(METRO_PRICE.PRICE_SNAPSHOT_ID.eq(id))
+            .orderBy(METRO_PRICE.ORDINAL)
+            .fetch(PostgresCanesBoxPriceSnapshotRepository::mapMetroPrice)));
+  }
+
+  private static CanesBoxPriceSnapshot mapSnapshot(
+      dev.christopherbell.persistence.jooq.canes.tables.records.PriceSnapshotRecord row,
+      List<CanesBoxMetroPrice> metroPrices) {
+    var snapshot = new CanesBoxPriceSnapshot();
+    snapshot.setId(row.getPriceSnapshotId());
+    snapshot.setWeekStartDate(row.getWeekStartDate().toString());
+    snapshot.setCollectedOn(row.getCollectedOn().toInstant());
+    snapshot.setAveragePrice(row.getAveragePrice());
+    snapshot.setCurrency(row.getCurrency());
+    snapshot.setSuccessfulMetroCount(row.getSuccessfulMetroCount());
+    snapshot.setTotalMetroCount(row.getTotalMetroCount());
+    snapshot.setVerifiedMetroCount(row.getVerifiedMetroCount());
+    snapshot.setProvisionalMetroCount(row.getProvisionalMetroCount());
+    snapshot.setExcludedMetroCount(row.getExcludedMetroCount());
+    snapshot.setMetroPrices(List.copyOf(metroPrices));
+    return snapshot;
   }
 
   private static void insertMetroPrice(

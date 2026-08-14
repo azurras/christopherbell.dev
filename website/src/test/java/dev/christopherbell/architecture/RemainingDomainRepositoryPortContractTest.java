@@ -83,7 +83,7 @@ class RemainingDomainRepositoryPortContractTest {
       CanesBoxPriceSnapshotRepository.findById(String) => findById(value)
       CanesBoxPriceSnapshotRepository.findTop60ByOrderByWeekStartDateDesc() => find(query=Document{{}};sort=Document{{}};skip=0;limit=0, page=0/60;offset=0;sort=weekStartDate: DESC)
       CanesBoxPriceSnapshotRepository.save(CanesBoxPriceSnapshot) => save(entity:CanesBoxPriceSnapshot)
-      ZipCoordinateRepository.deleteAll(Iterable) => remove(query=Document{{id=Document{{$in=[75001, 75002]}}}};sort=Document{{}};skip=0;limit=0)
+      ZipCoordinateRepository.deleteAll(Iterable) => remove(query=Document{{zipCode=Document{{$in=[75001, 75002]}}}};sort=Document{{}};skip=0;limit=0)
       ZipCoordinateRepository.findAllBySource(String) => find(query=Document{{source=value}};sort=Document{{}};skip=0;limit=0, page=unpaged)
       ZipCoordinateRepository.findById(String) => findById(value)
       ZipCoordinateRepository.saveAll(Iterable) => save(entity:ZipCoordinate#first) && save(entity:ZipCoordinate#second)

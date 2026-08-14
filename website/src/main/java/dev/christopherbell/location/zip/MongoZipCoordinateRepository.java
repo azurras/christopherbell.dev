@@ -22,7 +22,13 @@ public class MongoZipCoordinateRepository extends KindScopedRepositorySupport<Zi
     values.forEach(value -> saved.add(saveValue(value)));
     return List.copyOf(saved);
   }
-  @Override public void deleteAll(Iterable<ZipCoordinate> values) { deleteAllValues(values, ZipCoordinate::getZipCode); }
+  @Override public void deleteAll(Iterable<ZipCoordinate> values) {
+    var ids = new ArrayList<String>();
+    values.forEach(value -> ids.add(value.getZipCode()));
+    if (!ids.isEmpty()) {
+      mongo.remove(Query.query(Criteria.where("zipCode").in(ids)));
+    }
+  }
   @Override public Optional<ZipCoordinate> findById(String id) { return findValueById(id); }
   @Override public List<ZipCoordinate> findAllBySource(String source) {
     return find(Query.query(Criteria.where("source").is(source)));

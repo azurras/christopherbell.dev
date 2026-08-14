@@ -113,7 +113,7 @@ class PostExpirationServiceTest {
         eq(org.bson.Document.class), eq("content"))).thenReturn(updatedEnvelope);
     var service = new PostExpirationService(
         postRepository,
-        factory,
+        new dev.christopherbell.post.expiration.MongoPostExpirationStore(factory),
         Clock.fixed(changedOn, ZoneOffset.UTC),
         true);
 
@@ -178,7 +178,7 @@ class PostExpirationServiceTest {
         });
     var service = new PostExpirationService(
         postRepository,
-        factory,
+        new dev.christopherbell.post.expiration.MongoPostExpirationStore(factory),
         Clock.fixed(changedOn, ZoneOffset.UTC),
         true);
 

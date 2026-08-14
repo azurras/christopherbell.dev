@@ -47,7 +47,8 @@ public class RestaurantVoteQueryRepository implements RestaurantVoteQueryPort {
     AggregationExpression up = voteCountExpression(RestaurantVoteValue.UP);
     AggregationExpression down = voteCountExpression(RestaurantVoteValue.DOWN);
     var aggregation = Aggregation.newAggregation(
-        Aggregation.match(Criteria.where("restaurantId").in(restaurantIds)),
+        Aggregation.match(Criteria.where("restaurantId").in(restaurantIds)
+            .and("vote").in(RestaurantVoteValue.UP.name(), RestaurantVoteValue.DOWN.name())),
         Aggregation.group("restaurantId")
             .sum(up).as("upVotes")
             .sum(down).as("downVotes")
@@ -61,6 +62,8 @@ public class RestaurantVoteQueryRepository implements RestaurantVoteQueryPort {
     AggregationExpression up = voteCountExpression(RestaurantVoteValue.UP);
     AggregationExpression down = voteCountExpression(RestaurantVoteValue.DOWN);
     return Aggregation.newAggregation(
+        Aggregation.match(Criteria.where("vote")
+            .in(RestaurantVoteValue.UP.name(), RestaurantVoteValue.DOWN.name())),
         Aggregation.group("restaurantId")
             .sum(up).as("upVotes")
             .sum(down).as("downVotes")

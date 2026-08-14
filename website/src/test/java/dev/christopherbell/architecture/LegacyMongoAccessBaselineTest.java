@@ -7,6 +7,7 @@ import com.tngtech.archunit.core.importer.ImportOption;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
@@ -20,6 +21,12 @@ class LegacyMongoAccessBaselineTest {
       Pattern.compile("\\bMongoRepository\\s*<");
   private static final Pattern MONGO_TEMPLATE_USAGE = Pattern.compile("\\bMongoTemplate\\b");
   private static final Pattern MONGO_COLLECTION_USAGE = Pattern.compile("\\bMongoCollection\\b");
+  private static final List<Pattern> DIRECT_MONGO_CONSUMER_USAGE = List.of(
+      Pattern.compile("\\bDomainMongoOperationsFactory\\b"),
+      Pattern.compile("\\bKindScopedMongoOperations\\b"),
+      Pattern.compile("\\bMongoTemplate\\b"),
+      Pattern.compile("\\bMongoOperations\\b"),
+      Pattern.compile("\\bMongoRepository\\b"));
   private static final List<Path> PRODUCTION_SOURCE_ROOTS = List.of(
       repositoryRoot().resolve("website/src/main/java"),
       repositoryRoot().resolve("cbell-lib/src/main/java"));
@@ -65,6 +72,33 @@ class LegacyMongoAccessBaselineTest {
   }
 
   @Test
+  void everyDiscoveredDirectMongoConsumerHasOneExplicitTransitionClassification()
+      throws IOException {
+    var classified = new java.util.EnumMap<DirectMongoConsumerKind, Set<String>>(
+        DirectMongoConsumerKind.class);
+    Arrays.stream(DirectMongoConsumerKind.values())
+        .forEach(kind -> classified.put(kind, new TreeSet<>()));
+    var discovered = ownerTypesMatchingAny(DIRECT_MONGO_CONSUMER_USAGE);
+    for (var owner : discovered) {
+      var source = sourceFor(owner);
+      var kind = owner.startsWith("dev.christopherbell.configuration.mongo.migration.")
+          ? DirectMongoConsumerKind.MIGRATION_READER
+          : source.contains("@MongoPersistence")
+              || owner.startsWith("dev.christopherbell.configuration.mongo.domain.")
+              ? DirectMongoConsumerKind.TRANSITION_ADAPTER
+              : DirectMongoConsumerKind.RETIREMENT_DELETION;
+      classified.get(kind).add(owner);
+    }
+
+    assertThat(classified.get(DirectMongoConsumerKind.TRANSITION_ADAPTER)).isNotEmpty();
+    assertThat(classified.get(DirectMongoConsumerKind.MIGRATION_READER)).isNotEmpty();
+    assertThat(classified.get(DirectMongoConsumerKind.RETIREMENT_DELETION)).isEmpty();
+    assertThat(classified.values().stream().flatMap(Set::stream).collect(
+        java.util.stream.Collectors.toSet()))
+        .containsExactlyInAnyOrderElementsOf(discovered);
+  }
+
+  @Test
   void compiledRuntimeDependenciesCannotBypassKindScopedMongoOperations() {
     var classes = new ClassFileImporter()
         .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
@@ -92,6 +126,23 @@ class LegacyMongoAccessBaselineTest {
     return Set.copyOf(owners);
   }
 
+  private static Set<String> ownerTypesMatchingAny(List<Pattern> patterns) throws IOException {
+    var owners = new TreeSet<String>();
+    for (var pattern : patterns) {
+      owners.addAll(ownerTypesMatching(pattern));
+    }
+    return Set.copyOf(owners);
+  }
+
+  private static String sourceFor(String owner) throws IOException {
+    var relative = Path.of(owner.replace('.', '/') + ".java");
+    for (var root : PRODUCTION_SOURCE_ROOTS) {
+      var source = root.resolve(relative);
+      if (Files.isRegularFile(source)) return Files.readString(source);
+    }
+    throw new IllegalStateException("Cannot locate production source for " + owner);
+  }
+
   private static boolean matches(Path path, Pattern pattern) {
     try {
       return pattern.matcher(Files.readString(path)).find();
@@ -110,5 +161,11 @@ class LegacyMongoAccessBaselineTest {
       return parent;
     }
     throw new IllegalStateException("Cannot locate repository root.");
+  }
+
+  private enum DirectMongoConsumerKind {
+    TRANSITION_ADAPTER,
+    MIGRATION_READER,
+    RETIREMENT_DELETION
   }
 }

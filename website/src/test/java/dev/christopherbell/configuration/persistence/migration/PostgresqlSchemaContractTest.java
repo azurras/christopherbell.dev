@@ -29,8 +29,8 @@ class PostgresqlSchemaContractTest {
     try (var first = PostgresqlSchemaTestSupport.migrate();
          var second = PostgresqlSchemaTestSupport.migrate();
          var connection = first.connect()) {
-      assertThat(first.migrationsExecuted()).isEqualTo(8);
-      assertThat(second.migrationsExecuted()).isEqualTo(8);
+      assertThat(first.migrationsExecuted()).isEqualTo(9);
+      assertThat(second.migrationsExecuted()).isEqualTo(9);
       assertThat(ownedSchemas(connection, first.prefix()))
           .hasSize(PostgresqlSchemaTestSupport.DOMAINS.size());
       assertThat(ownedSchemas(connection, second.prefix()))
@@ -43,7 +43,7 @@ class PostgresqlSchemaContractTest {
   void emptyFlywayMigrationCreatesExactlyTheTenOwnedCatalogSchemasAndTables() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate();
          var connection = database.connect()) {
-      assertThat(database.migrationsExecuted()).isEqualTo(8);
+      assertThat(database.migrationsExecuted()).isEqualTo(9);
       assertThat(ownedSchemas(connection, database.prefix()))
           .containsExactlyInAnyOrderElementsOf(PostgresqlSchemaTestSupport.DOMAINS.stream()
               .map(database.prefix()::concat)
@@ -194,7 +194,7 @@ class PostgresqlSchemaContractTest {
           + "edited_on) values ('upgrade-post', 0, 'deleted:abcdef012345', 'before', 'after', "
           + "transaction_timestamp())");
 
-      assertThat(database.migrateToLatest()).isEqualTo(2);
+      assertThat(database.migrateToLatest()).isEqualTo(3);
       assertThat(longScalar(connection, "select count(*) from " + identity
           + ".deleted_account_pseudonym where pseudonym_id = 'deleted:abcdef012345'"))
           .isOne();
@@ -222,9 +222,101 @@ class PostgresqlSchemaContractTest {
           + "edited_on) values ('v7-post', 0, 'v7-owner', 'before', 'after', "
           + "transaction_timestamp())");
 
-      assertThat(database.migrateToLatest()).isOne();
+      assertThat(database.migrateToLatest()).isEqualTo(2);
       assertRestrictViolation(() -> execute(connection,
           "delete from " + identity + ".account where account_id = 'v7-owner'"));
+    }
+  }
+
+  @Test
+  void versionEightRowsUpgradeWithoutInventingPresenceAndAcceptNullableSourceState()
+      throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("8");
+         var connection = database.connect()) {
+      var identity = quoted(database.prefix() + "identity");
+      var lunch = quoted(database.prefix() + "lunch");
+      var mobility = quoted(database.prefix() + "mobility");
+      var platform = quoted(database.prefix() + "platform");
+      execute(connection, "insert into " + identity
+          + ".account (account_id, email, normalized_email, role, status, username) values "
+          + "('v8-owner', 'v8@example.test', 'v8@example.test', 'USER', 'ACTIVE', 'v8-owner')");
+      execute(connection, "insert into " + lunch
+          + ".restaurant (restaurant_id, display_name, dedupe_key, search_city, search_state) "
+          + "values ('v8-restaurant', 'V8', 'v8', 'austin', 'tx')");
+      execute(connection, "insert into " + lunch
+          + ".restaurant_vote (restaurant_vote_id, account_id, restaurant_id, vote_value, "
+          + "created_on, last_updated_on) values "
+          + "('v8-vote', 'v8-owner', 'v8-restaurant', -1, transaction_timestamp(), "
+          + "transaction_timestamp())");
+      execute(connection, "insert into " + mobility
+          + ".vin_decode_cache (vin) values ('V8EMPTYRESPONSE1')");
+      execute(connection, "insert into " + mobility
+          + ".vin_decode_cache (vin, make) values ('V8FILLEDRESP0001', 'Mazda')");
+      execute(connection, "insert into " + mobility
+          + ".nhtsa_import_state (import_state_id) values ('v8-nhtsa')");
+      execute(connection, "insert into " + mobility
+          + ".random_vin_import_state (import_state_id) values ('v8-random')");
+      execute(connection, "insert into " + mobility
+          + ".random_vin_import_state (import_state_id, robots_reason) "
+          + "values ('v8-random-present', 'policy')");
+      execute(connection, "insert into " + platform
+          + ".admin_activity (admin_activity_id, actor_username, action, target_type, target_id, "
+          + "target_label, reason, message, created_on) values "
+          + "('v8-admin', 'v8-owner', 'V8', 'TEST', 'v8-target', '', '', '', "
+          + "transaction_timestamp())");
+      execute(connection, "insert into " + platform
+          + ".admin_activity_value (admin_activity_id, partition_name, value_key, value_text) "
+          + "values ('v8-admin', 'before', 'state', 'old')");
+
+      assertThat(database.migrateToLatest()).isOne();
+      assertThat(longScalar(connection, "select count(*) from " + mobility
+          + ".vin_decode_cache where vin = 'V8EMPTYRESPONSE1' and not response_present"))
+          .isOne();
+      assertThat(longScalar(connection, "select count(*) from " + mobility
+          + ".vin_decode_cache where vin = 'V8FILLEDRESP0001' and response_present"))
+          .isOne();
+      assertThat(longScalar(connection, "select count(*) from " + mobility
+          + ".random_vin_import_state where import_state_id = 'v8-random' "
+          + "and not robots_policy_present"))
+          .isOne();
+      assertThat(longScalar(connection, "select count(*) from " + mobility
+          + ".random_vin_import_state where import_state_id = 'v8-random-present' "
+          + "and robots_policy_present"))
+          .isOne();
+      assertThat(longScalar(connection, "select count(*) from " + platform
+          + ".admin_activity where admin_activity_id = 'v8-admin' "
+          + "and before_values_present and not after_values_present "
+          + "and not metadata_present"))
+          .isOne();
+      execute(connection, "insert into " + lunch
+          + ".restaurant (restaurant_id, display_name, normalized_name, dedupe_key, "
+          + "search_city, search_state) values "
+          + "('v8-restaurant-peer', 'V8 Peer', 'v8 peer', 'v8', 'austin', 'tx')");
+      assertThatThrownBy(() -> execute(connection, "insert into " + lunch
+          + ".restaurant (restaurant_id, display_name, normalized_name, dedupe_key, "
+          + "search_city, search_state) values "
+          + "('v8-restaurant-conflict', 'V8 Conflict', 'v8 peer', 'v8-conflict', "
+          + "'austin', 'tx')"))
+          .isInstanceOf(SQLException.class)
+          .extracting(failure -> ((SQLException) failure).getSQLState())
+          .isEqualTo("23505");
+
+      execute(connection, "update " + mobility + ".nhtsa_import_state set calls_today = null, "
+          + "lifetime_calls = null, lifetime_vins_processed = null, "
+          + "permanently_disabled = null, vins_processed_today = null "
+          + "where import_state_id = 'v8-nhtsa'");
+      execute(connection, "update " + mobility + ".random_vin_import_state set "
+          + "calls_today = null, lifetime_calls = null, lifetime_vins_processed = null, "
+          + "permanently_disabled = null, robots_allowed = null, robots_fail_closed = null, "
+          + "vins_processed_today = null where import_state_id = 'v8-random'");
+      execute(connection, "update " + lunch
+          + ".restaurant_vote set vote_value = null where restaurant_vote_id = 'v8-vote'");
+      execute(connection, "update " + platform
+          + ".admin_activity set target_label = null, reason = null, message = null "
+          + "where admin_activity_id = 'v8-admin'");
+      assertThat(longScalar(connection, "select count(*) from " + lunch
+          + ".restaurant_vote where restaurant_vote_id = 'v8-vote' and vote_value is null"))
+          .isOne();
     }
   }
 

@@ -1,6 +1,7 @@
 package dev.christopherbell.admin.commandcenter.metrics;
 
 import dev.christopherbell.configuration.persistence.MongoBackendComponent;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.time.Duration;
 import java.util.concurrent.FutureTask;
 import org.bson.Document;
@@ -8,6 +9,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 
 /** Bounded MongoDB connectivity probe selected only for the transition backend. */
 @MongoBackendComponent
+@MongoPersistence
 public class MongoDatabaseConnectivityProbe implements DatabaseConnectivityProbe {
   private final MongoTemplate mongo;
 

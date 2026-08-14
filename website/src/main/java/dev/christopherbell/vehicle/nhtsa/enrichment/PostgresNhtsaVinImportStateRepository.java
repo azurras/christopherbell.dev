@@ -31,35 +31,33 @@ public class PostgresNhtsaVinImportStateRepository implements NhtsaVinImportStat
     database.insertInto(NHTSA_IMPORT_STATE)
         .set(NHTSA_IMPORT_STATE.IMPORT_STATE_ID, state.getId())
         .set(NHTSA_IMPORT_STATE.CALLS_ON_DATE, state.getCallsOnDate())
-        .set(NHTSA_IMPORT_STATE.CALLS_TODAY, value(state.getCallsToday()))
+        .set(NHTSA_IMPORT_STATE.CALLS_TODAY, state.getCallsToday())
         .set(NHTSA_IMPORT_STATE.DISABLED_UNTIL, offset(state.getDisabledUntil()))
         .set(NHTSA_IMPORT_STATE.FORBIDDEN_ON, offset(state.getForbiddenOn()))
         .set(NHTSA_IMPORT_STATE.LAST_ATTEMPT_ON, offset(state.getLastAttemptOn()))
         .set(NHTSA_IMPORT_STATE.LAST_FAILURE_ON, offset(state.getLastFailureOn()))
         .set(NHTSA_IMPORT_STATE.LAST_FAILURE_STATUS, state.getLastFailureStatus())
-        .set(NHTSA_IMPORT_STATE.LIFETIME_CALLS, value(state.getLifetimeCalls()))
-        .set(NHTSA_IMPORT_STATE.LIFETIME_VINS_PROCESSED, value(state.getLifetimeVinsProcessed()))
+        .set(NHTSA_IMPORT_STATE.LIFETIME_CALLS, state.getLifetimeCalls())
+        .set(NHTSA_IMPORT_STATE.LIFETIME_VINS_PROCESSED, state.getLifetimeVinsProcessed())
         .set(NHTSA_IMPORT_STATE.NOTES, state.getNotes())
-        .set(NHTSA_IMPORT_STATE.PERMANENTLY_DISABLED, Boolean.TRUE.equals(state.getPermanentlyDisabled()))
-        .set(NHTSA_IMPORT_STATE.VINS_PROCESSED_TODAY, value(state.getVinsProcessedToday()))
+        .set(NHTSA_IMPORT_STATE.PERMANENTLY_DISABLED, state.getPermanentlyDisabled())
+        .set(NHTSA_IMPORT_STATE.VINS_PROCESSED_TODAY, state.getVinsProcessedToday())
         .onConflict(NHTSA_IMPORT_STATE.IMPORT_STATE_ID).doUpdate()
         .set(NHTSA_IMPORT_STATE.CALLS_ON_DATE, state.getCallsOnDate())
-        .set(NHTSA_IMPORT_STATE.CALLS_TODAY, value(state.getCallsToday()))
+        .set(NHTSA_IMPORT_STATE.CALLS_TODAY, state.getCallsToday())
         .set(NHTSA_IMPORT_STATE.DISABLED_UNTIL, offset(state.getDisabledUntil()))
         .set(NHTSA_IMPORT_STATE.FORBIDDEN_ON, offset(state.getForbiddenOn()))
         .set(NHTSA_IMPORT_STATE.LAST_ATTEMPT_ON, offset(state.getLastAttemptOn()))
         .set(NHTSA_IMPORT_STATE.LAST_FAILURE_ON, offset(state.getLastFailureOn()))
         .set(NHTSA_IMPORT_STATE.LAST_FAILURE_STATUS, state.getLastFailureStatus())
-        .set(NHTSA_IMPORT_STATE.LIFETIME_CALLS, value(state.getLifetimeCalls()))
-        .set(NHTSA_IMPORT_STATE.LIFETIME_VINS_PROCESSED, value(state.getLifetimeVinsProcessed()))
+        .set(NHTSA_IMPORT_STATE.LIFETIME_CALLS, state.getLifetimeCalls())
+        .set(NHTSA_IMPORT_STATE.LIFETIME_VINS_PROCESSED, state.getLifetimeVinsProcessed())
         .set(NHTSA_IMPORT_STATE.NOTES, state.getNotes())
-        .set(NHTSA_IMPORT_STATE.PERMANENTLY_DISABLED, Boolean.TRUE.equals(state.getPermanentlyDisabled()))
-        .set(NHTSA_IMPORT_STATE.VINS_PROCESSED_TODAY, value(state.getVinsProcessedToday())).execute();
+        .set(NHTSA_IMPORT_STATE.PERMANENTLY_DISABLED, state.getPermanentlyDisabled())
+        .set(NHTSA_IMPORT_STATE.VINS_PROCESSED_TODAY, state.getVinsProcessedToday()).execute();
     return findById(state.getId()).orElseThrow();
   }
 
-  private static int value(Integer value) { return value == null ? 0 : value; }
-  private static long value(Long value) { return value == null ? 0 : value; }
   private static java.time.OffsetDateTime offset(java.time.Instant value) { return value == null ? null : value.atOffset(ZoneOffset.UTC); }
   private static java.time.Instant instant(java.time.OffsetDateTime value) { return value == null ? null : value.toInstant(); }
 }

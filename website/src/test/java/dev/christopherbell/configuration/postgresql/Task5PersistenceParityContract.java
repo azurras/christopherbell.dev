@@ -30,6 +30,7 @@ import dev.christopherbell.vehicle.nhtsa.enrichment.NhtsaVinImportStateRepositor
 import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
 import dev.christopherbell.vehicle.randomvin.importing.RandomVinImportStateRepository;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
+import dev.christopherbell.vehicle.randomvin.model.RandomVinRobotsPolicyState;
 import dev.christopherbell.whatsforlunch.restaurant.DailyLunchPicksRepository;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantDuplicateQueryPort;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantImportStateRepository;
@@ -61,6 +62,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.PageRequest;
@@ -100,6 +104,14 @@ interface Task5PersistenceParityContract {
   DatabaseConnectivityProbe databaseProbe();
 
   @Test
+  @Task5ContractPorts({
+      VehicleRepository.class,
+      VehicleVinDecodeCacheRepository.class,
+      NhtsaVinImportStateRepository.class,
+      RandomVinImportStateRepository.class,
+      ZipCoordinateRepository.class,
+      ZipCoordinateImportStateRepository.class
+  })
   default void mobilityPortsPreserveVinCacheStateZipIntegrityAndStableOrdering() {
     var alpha = vehicle("task5-vehicle-a", "1HGCM82633A004352", "Mazda", "3", 2019);
     var beta = vehicle("task5-vehicle-b", "1FTFW1ET1EFA00001", "Ford", "F-150", 2022);
@@ -156,6 +168,149 @@ interface Task5PersistenceParityContract {
   }
 
   @Test
+  @Task5ContractPorts({
+      VehicleRepository.class,
+      VehicleVinDecodeCacheRepository.class,
+      NhtsaVinImportStateRepository.class,
+      RandomVinImportStateRepository.class,
+      ZipCoordinateRepository.class,
+      ZipCoordinateImportStateRepository.class
+  })
+  default void mobilityPortsPreserveUpdatesDeletesAndPresentPolicyState() {
+    var vehicle = vehicle("task5-mobility-update", "JM1BN1L30K1234567", "Mazda", "3", 2019);
+    vehicles().save(vehicle);
+    vehicle.setNotes("updated");
+    vehicles().save(vehicle);
+    assertThat(vehicles().findById(vehicle.getId()).orElseThrow().getNotes()).isEqualTo("updated");
+    vehicles().delete(vehicle);
+    assertThat(vehicles().findById(vehicle.getId())).isEmpty();
+
+    var cache = VehicleVinDecodeCache.builder().vin("T5CACHEUPDATE0001")
+        .response(VehicleVinDecodeResponse.builder().make("Before").build()).build();
+    vinCache().save(cache);
+    cache.setResponse(null);
+    vinCache().save(cache);
+    assertThat(vinCache().findById(cache.getVin()).orElseThrow().getResponse()).isNull();
+
+    var nhtsa = NhtsaVinImportState.builder().id("task5-nhtsa-update").callsToday(1).build();
+    nhtsaState().save(nhtsa);
+    nhtsa.setCallsToday(2);
+    assertThat(nhtsaState().save(nhtsa).getCallsToday()).isEqualTo(2);
+    var random = RandomVinImportState.builder().id("task5-random-update")
+        .robotsPolicy(new RandomVinRobotsPolicyState(NOW, true, "allowed", false)).build();
+    randomVinState().save(random);
+    random.getRobotsPolicy().setReason("updated");
+    assertThat(randomVinState().save(random).getRobotsPolicy().getReason()).isEqualTo("updated");
+
+    var coordinate = ZipCoordinate.builder().zipCode("73301").latitude(30.0).longitude(-97.0)
+        .source("TASK5_UPDATE").sourceYear(2026).createdOn(NOW).lastUpdatedOn(NOW).build();
+    zipCoordinates().saveAll(List.of(coordinate));
+    zipCoordinates().deleteAll(List.of(coordinate));
+    assertThat(zipCoordinates().findById(coordinate.getZipCode())).isEmpty();
+    var importState = ZipCoordinateImportState.builder().id("task5-zip-update")
+        .checksum("initial-checksum")
+        .source("TASK5").sourceYear(2026).importedOn(NOW)
+        .result(ZipCoordinateImportResult.builder().processed(1).created(1)
+            .source("TASK5").sourceYear(2026).checksum("initial-checksum")
+            .importedOn(NOW).build())
+        .build();
+    zipImportState().save(importState);
+    importState.setChecksum("updated-checksum");
+    assertThat(zipImportState().save(importState).getChecksum()).isEqualTo("updated-checksum");
+  }
+
+  @Test
+  @Task5ContractPorts({
+      VehicleVinDecodeCacheRepository.class,
+      NhtsaVinImportStateRepository.class,
+      RandomVinImportStateRepository.class,
+      AdminActivityRepository.class,
+      RestaurantRepository.class,
+      RestaurantVoteRepository.class
+  })
+  default void nullableSourceStatesRemainDistinctFromPresentDefaultValues() {
+    var absentResponse = VehicleVinDecodeCache.builder()
+        .vin("T5NULLRESPONSE001").response(null).build();
+    var presentEmptyResponse = VehicleVinDecodeCache.builder()
+        .vin("T5EMPTYRESPONSE01")
+        .response(VehicleVinDecodeResponse.builder().rawDecodedValues(Map.of()).build())
+        .build();
+    vinCache().save(absentResponse);
+    vinCache().save(presentEmptyResponse);
+    assertThat(vinCache().findById(absentResponse.getVin()).orElseThrow().getResponse()).isNull();
+    assertThat(vinCache().findById(presentEmptyResponse.getVin()).orElseThrow().getResponse())
+        .isNotNull()
+        .extracting(VehicleVinDecodeResponse::rawDecodedValues)
+        .isEqualTo(Map.of());
+
+    nhtsaState().save(NhtsaVinImportState.builder().id("task5-null-nhtsa").build());
+    assertThat(nhtsaState().findById("task5-null-nhtsa").orElseThrow())
+        .satisfies(state -> {
+          assertThat(state.getCallsToday()).isNull();
+          assertThat(state.getLifetimeCalls()).isNull();
+          assertThat(state.getLifetimeVinsProcessed()).isNull();
+          assertThat(state.getPermanentlyDisabled()).isNull();
+          assertThat(state.getVinsProcessedToday()).isNull();
+        });
+
+    randomVinState().save(RandomVinImportState.builder().id("task5-null-random").build());
+    assertThat(randomVinState().findById("task5-null-random").orElseThrow())
+        .satisfies(state -> {
+          assertThat(state.getCallsToday()).isNull();
+          assertThat(state.getLifetimeCalls()).isNull();
+          assertThat(state.getLifetimeVinsProcessed()).isNull();
+          assertThat(state.getPermanentlyDisabled()).isNull();
+          assertThat(state.getRobotsPolicy()).isNull();
+          assertThat(state.getVinsProcessedToday()).isNull();
+        });
+    randomVinState().save(RandomVinImportState.builder().id("task5-null-random-policy")
+        .robotsPolicy(new RandomVinRobotsPolicyState(null, null, null, null)).build());
+    assertThat(randomVinState().findById("task5-null-random-policy").orElseThrow()
+        .getRobotsPolicy()).isNotNull().satisfies(policy -> {
+          assertThat(policy.getAllowed()).isNull();
+          assertThat(policy.getFailClosed()).isNull();
+        });
+
+    adminActivities().insert(AdminActivity.builder().id("task5-null-admin")
+        .actorUsername("Task5Owner").action("NULL_PARITY").targetType("RESTAURANT")
+        .targetId("task5-null-target").createdOn(NOW).build());
+    assertThat(adminActivities().findById("task5-null-admin").orElseThrow())
+        .satisfies(activity -> {
+          assertThat(activity.getTargetLabel()).isNull();
+          assertThat(activity.getReason()).isNull();
+          assertThat(activity.getMessage()).isNull();
+          assertThat(activity.getBeforeValues()).isNull();
+          assertThat(activity.getAfterValues()).isNull();
+          assertThat(activity.getMetadata()).isNull();
+        });
+
+    var restaurant = restaurant(
+        "task5-null-vote-restaurant", "Null Vote Cafe", "null vote cafe", "Austin", "TX");
+    restaurants().save(restaurant);
+    votes().save(RestaurantVote.builder().id("task5-null-vote")
+        .restaurantId(restaurant.getId()).accountId(OWNER_ID).vote(null)
+        .createdOn(NOW).lastUpdatedOn(NOW).build());
+    assertThat(votes().findById("task5-null-vote").orElseThrow().getVote()).isNull();
+    assertThat(voteQueries().summariesForRestaurants(List.of(restaurant.getId()))).isEmpty();
+    assertThat(voteQueries().topLiked(50))
+        .extracting(summary -> summary.restaurantId()).doesNotContain(restaurant.getId());
+  }
+
+  @Test
+  @Task5ContractPorts({
+      RestaurantRepository.class,
+      DailyLunchPicksRepository.class,
+      RestaurantImportStateRepository.class,
+      RestaurantImportPreviewPort.class,
+      RestaurantFavoriteRepository.class,
+      WhatsForLunchPreferenceRepository.class,
+      WhatsForLunchSessionRepository.class,
+      WhatsForLunchSessionMutationPort.class,
+      RestaurantVoteRepository.class,
+      RestaurantVoteQueryPort.class,
+      RestaurantInventoryQueryPort.class,
+      RestaurantDuplicateQueryPort.class
+  })
   default void lunchPortsPreserveLocationOwnershipOrderingClaimsMutationsVotesAndQueries()
       throws Exception {
     var first = restaurant("task5-restaurant-a", "Alpha Cafe", "alpha cafe", "Austin", "TX");
@@ -231,6 +386,136 @@ interface Task5PersistenceParityContract {
   }
 
   @Test
+  @Task5ContractPorts({
+      RestaurantRepository.class,
+      DailyLunchPicksRepository.class,
+      RestaurantImportStateRepository.class,
+      RestaurantImportPreviewPort.class,
+      RestaurantFavoriteRepository.class,
+      WhatsForLunchPreferenceRepository.class,
+      WhatsForLunchSessionRepository.class,
+      WhatsForLunchSessionMutationPort.class,
+      RestaurantVoteRepository.class,
+      RestaurantDuplicateQueryPort.class
+  })
+  default void lunchPortsPreserveUpdatesDeletesIdempotencyAndStaleOutcomes() {
+    var first = restaurant("task5-lunch-update-a", "Update Alpha", "update alpha", "Austin", "TX");
+    var second = restaurant("task5-lunch-update-b", "Update Beta", "update beta", "Austin", "TX");
+    first.setDedupeKey("task5-duplicate-key");
+    second.setDedupeKey("task5-duplicate-key");
+    restaurants().save(first);
+    restaurants().save(second);
+    first.setCuisine("Thai");
+    assertThat(restaurants().save(first).getCuisine()).isEqualTo("Thai");
+    assertThat(restaurants().findAllById(List.of(second.getId(), first.getId())))
+        .extracting(Restaurant::getId).containsExactly(first.getId(), second.getId());
+    assertThat(duplicateQueries().find(null, 10).keys()).contains("task5-duplicate-key");
+
+    var picks = DailyLunchPicks.builder().id("task5-picks-update").pickDate("2026-08-15")
+        .restaurantIds(List.of(first.getId(), second.getId())).generatedOn(NOW).build();
+    dailyPicks().save(picks);
+    picks.setRestaurantIds(List.of(second.getId()));
+    assertThat(dailyPicks().save(picks).getRestaurantIds()).containsExactly(second.getId());
+    var importState = RestaurantImportState.builder().id("task5-import-update")
+        .status(RestaurantImportRunStatus.RUNNING).lastStartedOn(NOW).build();
+    restaurantImportState().save(importState);
+    importState.setStatus(RestaurantImportRunStatus.SUCCEEDED);
+    importState.setLastCompletedOn(NOW.plusSeconds(1));
+    assertThat(restaurantImportState().save(importState).getStatus())
+        .isEqualTo(RestaurantImportRunStatus.SUCCEEDED);
+
+    importPreviews().save(RestaurantImportPreviewDocument.builder()
+        .id("task5-preview-conditional").actorAccountId(OWNER_ID).checksum("conditional")
+        .createdOn(NOW).expiresOn(NOW.plusSeconds(60))
+        .counts(new RestaurantImportPreviewCounts(1, 1, 0, 0, 0, 0)).build());
+    assertThat(importPreviews().claim(
+        "task5-preview-conditional", MEMBER_ID, NOW.plusSeconds(1))).isEmpty();
+    assertThat(importPreviews().claim(
+        "task5-preview-conditional", OWNER_ID, NOW.plusSeconds(1))).isPresent();
+    assertThat(importPreviews().claim(
+        "task5-preview-conditional", OWNER_ID, NOW.plusSeconds(2))).isEmpty();
+
+    var favorite = RestaurantFavorite.builder().id("task5-favorite-delete")
+        .restaurantId(first.getId()).accountId(OWNER_ID).createdOn(NOW).build();
+    favorites().save(favorite);
+    favorites().deleteByRestaurantIdAndAccountId(first.getId(), OWNER_ID);
+    assertThat(favorites().findByRestaurantIdAndAccountId(first.getId(), OWNER_ID)).isEmpty();
+    var preference = WhatsForLunchPreference.builder().accountId(OWNER_ID)
+        .cuisines(List.of("Thai")).radiusMiles(5).build();
+    preferences().save(preference);
+    preference.setRadiusMiles(20);
+    assertThat(preferences().save(preference).getRadiusMiles()).isEqualTo(20);
+
+    sessions().save(WhatsForLunchSession.builder().id("task5-session-conditional")
+        .createdByAccountId(OWNER_ID).createdByUsername("owner")
+        .participantAccountIds(List.of(OWNER_ID))
+        .participantUsernamesByAccountId(Map.of(OWNER_ID, "owner"))
+        .restaurantIds(List.of(first.getId())).votesByAccountId(Map.of())
+        .revision(0).activeUntil(NOW.plusSeconds(60)).deleteOn(NOW.plusSeconds(120))
+        .restaurantResetCount(0).restaurantResetAudit(List.of())
+        .createdOn(NOW).lastUpdatedOn(NOW).build());
+    assertThat(sessionMutations().join(
+        "task5-session-conditional", OWNER_ID, "owner", NOW.plusSeconds(1), 10).status())
+        .isEqualTo(WhatsForLunchSessionMutationStore.Status.UNCHANGED);
+    assertThat(sessionMutations().vote(
+        "task5-session-conditional", MEMBER_ID, first.getId(), NOW.plusSeconds(2)).status())
+        .isEqualTo(WhatsForLunchSessionMutationStore.Status.NOT_PARTICIPANT);
+    assertThat(sessionMutations().join(
+        "task5-missing-session", MEMBER_ID, "member", NOW.plusSeconds(1), 10).status())
+        .isEqualTo(WhatsForLunchSessionMutationStore.Status.MISSING);
+
+    var vote = RestaurantVote.builder().id("task5-vote-update").restaurantId(second.getId())
+        .accountId(OWNER_ID).vote(RestaurantVoteValue.UP)
+        .createdOn(NOW).lastUpdatedOn(NOW).build();
+    votes().save(vote);
+    vote.setVote(RestaurantVoteValue.DOWN);
+    assertThat(votes().save(vote).getVote()).isEqualTo(RestaurantVoteValue.DOWN);
+    votes().deleteById(vote.getId());
+    assertThat(votes().findById(vote.getId())).isEmpty();
+
+    second.setDedupeKey("update beta");
+    restaurants().save(second);
+    assertThat(duplicateQueries().find(null, 10).keys()).doesNotContain("task5-duplicate-key");
+
+    var deleteFirst = restaurant(
+        "task5-lunch-delete-a", "Delete Alpha", "delete alpha", "Austin", "TX");
+    var deleteSecond = restaurant(
+        "task5-lunch-delete-b", "Delete Beta", "delete beta", "Austin", "TX");
+    restaurants().save(deleteFirst);
+    restaurants().save(deleteSecond);
+    restaurants().deleteAll(List.of(deleteFirst, deleteSecond));
+    assertThat(restaurants().findAllById(List.of(deleteFirst.getId(), deleteSecond.getId())))
+        .isEmpty();
+  }
+
+  @Test
+  @Task5ContractPorts(RestaurantRepository.class)
+  default void normalizedNameRaceHasExactlyOneOwnerAcrossIndependentConnections()
+      throws Exception {
+    var first = restaurant(
+        "task5-race-a", "Task 5 Race Cafe", "task 5 race cafe", "Austin", "TX");
+    var second = restaurant(
+        "task5-race-b", "Task 5 Race Cafe", "task 5 race cafe", "Round Rock", "TX");
+    var ready = new CountDownLatch(2);
+    var start = new CountDownLatch(1);
+    try (var workers = Executors.newFixedThreadPool(2)) {
+      var firstResult = workers.submit(() -> raceSave(restaurants(), first, ready, start));
+      var secondResult = workers.submit(
+          () -> raceSave(restaurantContender(), second, ready, start));
+      assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+      start.countDown();
+      var outcomes = List.of(
+          firstResult.get(10, TimeUnit.SECONDS), secondResult.get(10, TimeUnit.SECONDS));
+      assertThat(outcomes).filteredOn(Restaurant.class::isInstance).singleElement();
+      assertThat(outcomes).filteredOn(DuplicateKeyException.class::isInstance).singleElement();
+    }
+    assertThat(restaurants().findByNormalizedName("task 5 race cafe"))
+        .isPresent().get().extracting(Restaurant::getId)
+        .isIn(first.getId(), second.getId());
+  }
+
+  @Test
+  @Task5ContractPorts(CanesBoxPriceSnapshotRepository.class)
   default void canesPortPreservesCentPrecisionAndMetroOrdering() {
     var snapshot = new CanesBoxPriceSnapshot();
     snapshot.setId("task5-canes");
@@ -252,9 +537,22 @@ interface Task5PersistenceParityContract {
         .containsExactly("Austin", "Dallas");
     assertThat(canesSnapshots().findTop60ByOrderByWeekStartDateDesc())
         .extracting(CanesBoxPriceSnapshot::getId).contains("task5-canes");
+    snapshot.setAveragePrice(new BigDecimal("10.26"));
+    snapshot.setMetroPrices(List.of(metro("Houston", "10.26")));
+    var updated = canesSnapshots().save(snapshot);
+    assertThat(updated.getAveragePrice()).isEqualByComparingTo("10.26");
+    assertThat(updated.getMetroPrices()).extracting(CanesBoxMetroPrice::getMetroName)
+        .containsExactly("Houston");
   }
 
   @Test
+  @Task5ContractPorts({
+      AdminActivityRepository.class,
+      AdminActivityQueryPort.class,
+      PendingActionStore.class,
+      ScheduledCollectorRunStore.class,
+      DatabaseConnectivityProbe.class
+  })
   default void adminAndPlatformPortsPreserveImmutableAuditAtomicReservationAndSafeRuns()
       throws Exception {
     var activity = AdminActivity.builder().id("task5-activity").actorAccountId(OWNER_ID)
@@ -280,6 +578,8 @@ interface Task5PersistenceParityContract {
     assertThat(pendingActionContender().reserve(second, NOW.plusSeconds(1))).isFalse();
     assertThat(pendingActions().active(NOW.plusSeconds(2))).contains(first);
     assertThat(pendingActions().clear(first)).isTrue();
+    assertThat(pendingActions().clear(first)).isFalse();
+    pendingActions().reconcile(NOW.plusSeconds(120));
 
     var running = ScheduledCollectorRun.builder().id("task5-run").collectorName("task5")
         .ownerToken("owner-token").status(ScheduledCollectorRunStatus.RUNNING)
@@ -321,5 +621,19 @@ interface Task5PersistenceParityContract {
     price.setQualityStatus("VERIFIED");
     price.setCollectedOn(NOW);
     return price;
+  }
+
+  private static Object raceSave(
+      RestaurantRepository repository,
+      Restaurant restaurant,
+      CountDownLatch ready,
+      CountDownLatch start) throws InterruptedException {
+    ready.countDown();
+    start.await();
+    try {
+      return repository.save(restaurant);
+    } catch (DuplicateKeyException duplicate) {
+      return duplicate;
+    }
   }
 }
