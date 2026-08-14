@@ -161,6 +161,14 @@ val cleanJooqSchema = tasks.register<JavaExec>("cleanJooqSchema") {
     doFirst { requireCompleteJooqEnvironment() }
 }
 
+tasks.register<JavaExec>("postgresqlMigration") {
+    group = "application"
+    description = "Runs the guarded standalone Mongo-to-PostgreSQL migration command."
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set(
+        "dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationCli")
+}
+
 jooq {
     configuration {
         jdbc {
