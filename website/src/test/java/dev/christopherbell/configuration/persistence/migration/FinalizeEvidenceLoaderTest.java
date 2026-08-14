@@ -16,6 +16,8 @@ import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class FinalizeEvidenceLoaderTest {
@@ -148,6 +150,49 @@ class FinalizeEvidenceLoaderTest {
         .isInstanceOf(IllegalArgumentException.class);
   }
 
+  @Test
+  void rejectsAnAuthorityRootWithUntrustedDeletePermission(@TempDir Path directory)
+      throws Exception {
+    var anchor = directory.resolve("trusted-anchor");
+    var root = anchor.resolve("authority");
+    Files.createDirectories(root);
+    protect(anchor);
+    protect(root);
+    allowUntrustedDelete(root);
+
+    assertThatThrownBy(() ->
+        FinalizeEvidenceLoader.requireProtectedPathForTest(anchor, root))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void rejectsAReparseOrSymlinkAuthorityRoot(@TempDir Path directory) throws Exception {
+    var anchor = directory.resolve("trusted-anchor");
+    var destination = directory.resolve("redirect-destination");
+    Files.createDirectories(anchor);
+    Files.createDirectories(destination);
+    protect(anchor);
+    protect(destination);
+    var root = anchor.resolve("authority");
+    try {
+      Files.createSymbolicLink(root, destination);
+    } catch (java.nio.file.FileSystemException | UnsupportedOperationException failure) {
+      org.junit.jupiter.api.Assumptions.abort("symbolic links are unavailable");
+    }
+
+    assertThatThrownBy(() -> FinalizeEvidenceLoader.requireProtectedPathForTest(anchor, root))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  @EnabledOnOs(OS.WINDOWS)
+  void actualProgramDataAnchorAcceptsOrdinarySiblingCreationRights() {
+    org.assertj.core.api.Assertions.assertThatCode(() ->
+        FinalizeEvidenceLoader.requireTrustedProductionAnchorForTest(
+            Path.of("C:\\ProgramData")))
+        .doesNotThrowAnyException();
+  }
+
   private static FrozenSourceEvidence evidence(Path lockPath, String lockText) {
     var unsigned = new FrozenSourceEvidence(
         "release-6", "a".repeat(64), "test", "test", "b".repeat(64), "c".repeat(64),
@@ -231,6 +276,27 @@ class FinalizeEvidenceLoaderTest {
         .setType(java.nio.file.attribute.AclEntryType.ALLOW)
         .setPrincipal(everyone)
         .setPermissions(java.nio.file.attribute.AclEntryPermission.DELETE_CHILD)
+        .build());
+    acl.setAcl(entries);
+  }
+
+  private static void allowUntrustedDelete(Path path) throws Exception {
+    var posix = Files.getFileAttributeView(
+        path, java.nio.file.attribute.PosixFileAttributeView.class);
+    if (posix != null) {
+      var permissions = java.util.EnumSet.copyOf(posix.readAttributes().permissions());
+      permissions.add(java.nio.file.attribute.PosixFilePermission.GROUP_WRITE);
+      posix.setPermissions(permissions);
+      return;
+    }
+    var lookup = path.getFileSystem().getUserPrincipalLookupService();
+    var everyone = lookup.lookupPrincipalByName("Everyone");
+    var acl = Files.getFileAttributeView(path, java.nio.file.attribute.AclFileAttributeView.class);
+    var entries = new java.util.ArrayList<>(acl.getAcl());
+    entries.add(java.nio.file.attribute.AclEntry.newBuilder()
+        .setType(java.nio.file.attribute.AclEntryType.ALLOW)
+        .setPrincipal(everyone)
+        .setPermissions(java.nio.file.attribute.AclEntryPermission.DELETE)
         .build());
     acl.setAcl(entries);
   }

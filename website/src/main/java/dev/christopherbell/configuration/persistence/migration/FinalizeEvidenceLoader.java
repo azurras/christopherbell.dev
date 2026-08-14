@@ -74,6 +74,19 @@ final class FinalizeEvidenceLoader {
     }
   }
 
+  static void requireTrustedProductionDirectory(Path path) {
+    if (!protectedDirectoryChain(productionAnchor(), path, true)) {
+      throw invalid();
+    }
+  }
+
+  static void requireTrustedProductionAnchorForTest(Path path) {
+    var normalized = path.toAbsolutePath().normalize();
+    if (!normalized.equals(productionAnchor()) || !protectedAnchor(normalized, true)) {
+      throw invalid();
+    }
+  }
+
   private static FrozenSourceEvidence load(
       Path authorityRoot, Path path, Path hmacKeyPath, boolean production, Clock clock) {
     var normalizedRoot = authorityRoot.toAbsolutePath().normalize();
@@ -204,7 +217,7 @@ final class FinalizeEvidenceLoader {
       return false;
     }
     var current = normalizedAnchor;
-    if (!protectedDirectory(current, production)) {
+    if (!(production ? protectedAnchor(current, true) : protectedDirectory(current, false))) {
       return false;
     }
     for (var component : normalizedAnchor.relativize(normalizedTarget)) {
@@ -214,6 +227,50 @@ final class FinalizeEvidenceLoader {
       }
     }
     return true;
+  }
+
+  private static boolean protectedAnchor(Path path, boolean production) {
+    if (path == null || !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+        || reparsePoint(path)) {
+      return false;
+    }
+    try {
+      var posix = Files.getFileAttributeView(
+          path, java.nio.file.attribute.PosixFileAttributeView.class,
+          LinkOption.NOFOLLOW_LINKS);
+      if (posix != null) {
+        var permissions = posix.readAttributes().permissions();
+        return (!production || "root".equalsIgnoreCase(
+                Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName()))
+            && java.util.Collections.disjoint(permissions, Set.of(
+            java.nio.file.attribute.PosixFilePermission.GROUP_WRITE,
+            java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE));
+      }
+      var owner = Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName();
+      if (production && !trustedProductionAnchorOwner(owner)) {
+        return false;
+      }
+      var acl = Files.getFileAttributeView(
+          path, java.nio.file.attribute.AclFileAttributeView.class,
+          LinkOption.NOFOLLOW_LINKS);
+      if (acl == null) {
+        return false;
+      }
+      var structuralMutation = Set.of(
+          java.nio.file.attribute.AclEntryPermission.WRITE_ACL,
+          java.nio.file.attribute.AclEntryPermission.WRITE_OWNER,
+          java.nio.file.attribute.AclEntryPermission.DELETE,
+          java.nio.file.attribute.AclEntryPermission.DELETE_CHILD);
+      return acl.getAcl().stream().filter(entry -> entry.type()
+              == java.nio.file.attribute.AclEntryType.ALLOW)
+          .filter(entry -> !java.util.Collections.disjoint(
+              entry.permissions(), structuralMutation))
+          .allMatch(entry -> production
+              ? trustedProductionWritePrincipal(entry.principal().getName())
+              : trustedTestPrincipal(entry.principal().getName(), owner));
+    } catch (IOException failure) {
+      return false;
+    }
   }
 
   private static boolean protectedAttributes(Path path, boolean production) {
@@ -277,6 +334,13 @@ final class FinalizeEvidenceLoader {
     var normalized = principal.toLowerCase(java.util.Locale.ROOT);
     return trustedProductionPrincipal(principal)
         || normalized.equals("builtin\\administrators");
+  }
+
+  private static boolean trustedProductionAnchorOwner(String principal) {
+    var normalized = principal.toLowerCase(java.util.Locale.ROOT);
+    return trustedProductionPrincipal(principal)
+        || normalized.equals("builtin\\administrators")
+        || normalized.endsWith("\\trustedinstaller");
   }
 
   private static boolean reparsePoint(Path path) {

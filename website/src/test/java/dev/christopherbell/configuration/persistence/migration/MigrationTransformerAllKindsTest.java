@@ -109,6 +109,50 @@ class MigrationTransformerAllKindsTest {
     }
   }
 
+  @Test
+  void everyDeclaredRequiredComplexLeafRejectsExplicitNull() throws IOException {
+    var catalog = loadCatalog();
+    var registry = MigrationTransformerRegistry.from(catalog);
+    for (var kind : catalog.kinds()) {
+      for (var mappingEntry : kind.fieldMappings().entrySet()) {
+        var field = mappingEntry.getKey();
+        var mapping = mappingEntry.getValue();
+        for (var requiredPath : mapping.requiredFields()) {
+          var payload = representativePayload(kind);
+          payload.put(field, nullRequiredPath(payload.get(field), requiredPath));
+          try {
+            registry.require(kind.sourceKind()).transform(new MigrationSourceDocument(
+                kind.sourceKind(), kind.sourceSchemaVersion(), "null-required", payload));
+            throw new AssertionError("Accepted null required leaf "
+                + kind.sourceKind() + "." + field + "." + requiredPath);
+          } catch (MigrationTransformationException expected) {
+            assertThat(expected).hasMessage("PostgreSQL migration source document is invalid.");
+          }
+        }
+      }
+    }
+  }
+
+  @Test
+  void everyDeclaredComplexInvariantRejectsItsAdversarialCounterexample() throws IOException {
+    var catalog = loadCatalog();
+    var registry = MigrationTransformerRegistry.from(catalog);
+    for (var kind : catalog.kinds()) {
+      for (var mappingEntry : kind.fieldMappings().entrySet()) {
+        for (var invariant : mappingEntry.getValue().invariants()) {
+          var payload = representativePayload(kind);
+          payload.put(mappingEntry.getKey(), violateInvariant(payload.get(mappingEntry.getKey()),
+              invariant));
+          assertThatThrownBy(() -> registry.require(kind.sourceKind()).transform(
+              new MigrationSourceDocument(
+                  kind.sourceKind(), kind.sourceSchemaVersion(), "invalid-invariant", payload)))
+              .as(kind.sourceKind() + "." + mappingEntry.getKey() + ":" + invariant)
+              .isInstanceOf(MigrationTransformationException.class);
+        }
+      }
+    }
+  }
+
   static LinkedHashMap<String, Object> representativePayload(
       PostgresqlMigrationCatalog.Kind kind) {
     var payload = new LinkedHashMap<String, Object>();
@@ -256,6 +300,142 @@ class MigrationTransformerAllKindsTest {
     return Map.of("id", id, "trackId", "track", "observedToken", "token",
         "enqueuedByAccountId", "account",
         "enqueuedAt", Instant.parse("2026-08-14T00:00:00Z"));
+  }
+
+  private static Object nullRequiredPath(Object original, String path) {
+    if (path.equals("$item")) {
+      var values = new java.util.ArrayList<>((java.util.Collection<?>) original);
+      values.set(0, null);
+      return values;
+    }
+    if (path.equals("$key") || path.equals("$value")) {
+      var values = new LinkedHashMap<>((Map<String, Object>) original);
+      var first = values.entrySet().iterator().next();
+      values.remove(first.getKey());
+      values.put(path.equals("$key") ? null : first.getKey(),
+          path.equals("$value") ? null : first.getValue());
+      return values;
+    }
+    var copy = deepMutableCopy(original);
+    if (copy instanceof java.util.List<?> records) {
+      records.forEach(record -> nullPath((Map<String, Object>) record, path));
+    } else {
+      nullPath((Map<String, Object>) copy, path);
+    }
+    return copy;
+  }
+
+  private static Object deepMutableCopy(Object value) {
+    if (value instanceof Map<?, ?> map) {
+      var result = new LinkedHashMap<String, Object>();
+      map.forEach((key, nested) -> result.put(key.toString(), deepMutableCopy(nested)));
+      return result;
+    }
+    if (value instanceof java.util.Collection<?> collection) {
+      return collection.stream().map(MigrationTransformerAllKindsTest::deepMutableCopy)
+          .collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
+    }
+    return value;
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Object violateInvariant(Object original, String invariant) {
+    var copy = deepMutableCopy(original);
+    return switch (invariant) {
+      case "string-items" -> new java.util.ArrayList<>(List.of(42));
+      case "unique-map-keys" -> {
+        var values = (Map<String, Object>) copy;
+        var value = values.values().iterator().next();
+        values.clear();
+        values.put("", value);
+        yield values;
+      }
+      case "encrypted-key-bytes" -> {
+        var values = (Map<String, Object>) copy;
+        ((Map<String, Object>) values.get("encryptedPrivateKey")).put("nonce", new byte[11]);
+        yield values;
+      }
+      case "metadata-alias-exclusive" -> {
+        var values = (Map<String, Object>) copy;
+        values.put("metadataValues", Map.of("conflict", "true"));
+        yield values;
+      }
+      case "restaurant-id-order" -> {
+        var records = (java.util.List<Map<String, Object>>) copy;
+        records.getFirst().put("restaurantIds", List.of("duplicate", "duplicate"));
+        yield records;
+      }
+      case "raw-values-scalar" -> {
+        var values = (Map<String, Object>) copy;
+        values.put("rawDecodedValues", Map.of("unsafe", Map.of("nested", "value")));
+        yield values;
+      }
+      case "fail-closed-reason" -> {
+        var values = (Map<String, Object>) copy;
+        values.put("reason", "");
+        yield values;
+      }
+      case "coordinate-pair" -> {
+        var values = (Map<String, Object>) copy;
+        values.put("latitude", 91);
+        yield values;
+      }
+      case "queue-entry-id-unique" -> {
+        var values = (Map<String, Object>) copy;
+        var entries = (java.util.List<Object>) values.get("entries");
+        entries.add(deepMutableCopy(entries.getFirst()));
+        yield values;
+      }
+      case "positive-duration" -> {
+        setFirstNumericField(copy, "durationSeconds", 0);
+        yield copy;
+      }
+      case "nonnegative-counts" -> {
+        setFirstNumericField(copy, null, -1);
+        yield copy;
+      }
+      case "nonnegative-price" -> {
+        setFirstNumericField(copy, "price", -1);
+        yield copy;
+      }
+      default -> throw new AssertionError("Missing invariant counterexample: " + invariant);
+    };
+  }
+
+  @SuppressWarnings("unchecked")
+  private static void setFirstNumericField(Object value, String preferred, Number replacement) {
+    var record = value instanceof java.util.List<?> records
+        ? (Map<String, Object>) records.getFirst() : (Map<String, Object>) value;
+    if (preferred != null) {
+      record.put(preferred, replacement);
+      return;
+    }
+    var key = record.entrySet().stream()
+        .filter(entry -> entry.getValue() instanceof Number)
+        .map(Map.Entry::getKey)
+        .findFirst()
+        .orElseThrow();
+    record.put(key, replacement);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static void nullPath(Map<String, Object> values, String path) {
+    var dot = path.indexOf('.');
+    var segment = dot < 0 ? path : path.substring(0, dot);
+    var list = segment.endsWith("[]");
+    var key = list ? segment.substring(0, segment.length() - 2) : segment;
+    if (dot < 0) {
+      values.put(key, null);
+      return;
+    }
+    var remainder = path.substring(dot + 1);
+    if (list) {
+      for (var element : (java.util.List<Object>) values.get(key)) {
+        nullPath((Map<String, Object>) element, remainder);
+      }
+    } else {
+      nullPath((Map<String, Object>) values.get(key), remainder);
+    }
   }
 
   private static PostgresqlMigrationCatalog loadCatalog() throws IOException {

@@ -254,17 +254,116 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       String mappingKey, PostgresqlMigrationCatalog.FieldMapping mapping, Object value) {
     for (var invariant : mapping.invariants()) {
       switch (invariant) {
-        case "string-items", "unique-map-keys", "encrypted-key-bytes",
-            "metadata-alias-exclusive", "restaurant-id-order", "raw-values-scalar",
-            "fail-closed-reason", "coordinate-pair" -> {
-          // The exact conversion handlers below enforce these closed shapes and scalar types.
-        }
+        case "string-items" -> requireStringItems(value);
+        case "unique-map-keys" -> requireUniqueMapKeys(asMap(value));
+        case "encrypted-key-bytes" -> requireEncryptedKeyBytes(asMap(value));
+        case "metadata-alias-exclusive" -> requireMetadataAliasExclusive(asMap(value));
+        case "restaurant-id-order" -> requireRestaurantIdOrder(asCollection(value));
+        case "raw-values-scalar" -> requireRawValuesScalar(asMap(value));
+        case "fail-closed-reason" -> requireFailClosedReason(asMap(value));
+        case "coordinate-pair" -> requireCoordinatePair(asMap(value));
         case "queue-entry-id-unique" -> requireUniqueQueueEntryIds(asMap(value));
         case "positive-duration" -> requirePositiveDurations(value, mapping.conversion());
         case "nonnegative-counts" -> requireNonnegativeNumbers(value, mapping.conversion());
         case "nonnegative-price" -> requireNonnegativePrices(value);
         default -> throw invalid();
       }
+    }
+  }
+
+  private static void requireStringItems(Object value) {
+    asCollection(value).forEach(CatalogDocumentTransformer::requireString);
+  }
+
+  private static void requireUniqueMapKeys(Map<String, Object> values) {
+    var keys = new java.util.LinkedHashSet<String>();
+    for (var entry : values.entrySet()) {
+      if (entry.getKey().isBlank() || !keys.add(entry.getKey()) || entry.getValue() == null) {
+        throw invalid();
+      }
+      requireScalarValue(entry.getValue());
+    }
+  }
+
+  private static void requireEncryptedKeyBytes(Map<String, Object> value) {
+    var encrypted = readExact(value, "encryptedPrivateKey");
+    if (!encrypted.found() || encrypted.value() == null) {
+      throw invalid();
+    }
+    var key = asMap(encrypted.value());
+    requireExactKeys(key, Set.of("nonce", "ciphertext"));
+    var nonce = binaryValue(key.get("nonce"));
+    var ciphertext = binaryValue(key.get("ciphertext"));
+    if (nonce.length != 12 || ciphertext.length < 16) {
+      throw invalid();
+    }
+  }
+
+  private static byte[] binaryValue(Object value) {
+    var normalized = normalizeBson(value);
+    if (normalized instanceof byte[] bytes) {
+      return bytes;
+    }
+    throw invalid();
+  }
+
+  private static void requireMetadataAliasExclusive(Map<String, Object> value) {
+    if (value.containsKey("metadata") && value.containsKey("metadataValues")) {
+      throw invalid();
+    }
+  }
+
+  private static void requireRestaurantIdOrder(Collection<?> values) {
+    for (var raw : values) {
+      var restaurants = readExact(asMap(raw), "restaurantIds");
+      if (!restaurants.found() || restaurants.value() == null) {
+        throw invalid();
+      }
+      var seen = new java.util.LinkedHashSet<String>();
+      for (var restaurant : asCollection(restaurants.value())) {
+        var id = requireString(normalizeBson(restaurant));
+        if (id.isBlank() || !seen.add(id)) {
+          throw invalid();
+        }
+      }
+    }
+  }
+
+  private static void requireRawValuesScalar(Map<String, Object> value) {
+    var raw = readExact(value, "rawDecodedValues");
+    if (raw.found()) {
+      if (raw.value() == null) {
+        throw invalid();
+      }
+      requireScalarValues(asMap(raw.value()));
+    }
+  }
+
+  private static void requireFailClosedReason(Map<String, Object> value) {
+    var allowed = readExact(value, "allowed");
+    var failClosed = readExact(value, "failClosed");
+    var reason = readExact(value, "reason");
+    if (!allowed.found() || !(allowed.value() instanceof Boolean)
+        || !failClosed.found() || !(failClosed.value() instanceof Boolean)
+        || !reason.found() || !(reason.value() instanceof String text) || text.isBlank()) {
+      throw invalid();
+    }
+  }
+
+  private static void requireCoordinatePair(Map<String, Object> value) {
+    var latitude = readExact(value, "latitude");
+    var longitude = readExact(value, "longitude");
+    if (!latitude.found() || !longitude.found()
+        || latitude.value() == null || longitude.value() == null) {
+      throw invalid();
+    }
+    var latitudeValue = number(latitude.value());
+    var longitudeValue = number(longitude.value());
+    if (latitudeValue.compareTo(BigDecimal.valueOf(-90)) < 0
+        || latitudeValue.compareTo(BigDecimal.valueOf(90)) > 0
+        || longitudeValue.compareTo(BigDecimal.valueOf(-180)) < 0
+        || longitudeValue.compareTo(BigDecimal.valueOf(180)) > 0) {
+      throw invalid();
     }
   }
 
@@ -386,6 +485,9 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     var nested = value.get(head);
     var suffix = path.substring(head.length());
     if (suffix.isEmpty()) {
+      if (required && nested == null) {
+        throw invalid();
+      }
       return;
     }
     if (nested == null) {

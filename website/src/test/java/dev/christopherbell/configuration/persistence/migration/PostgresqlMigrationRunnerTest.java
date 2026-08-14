@@ -85,12 +85,55 @@ class PostgresqlMigrationRunnerTest {
     assertThat(target.publications).isZero();
   }
 
+  @Test
+  void finalizeHoldsTheWriteFreezeThroughTargetCommitAndReleasesItAfterward() {
+    var guard = new RecordingFreezeGuard();
+    var target = new RecordingTarget();
+    target.beforeCommit = () -> assertThat(guard.open).isTrue();
+
+    runner(target, (context, item, cursor, limit) -> SourceBatch.of(List.of()),
+        expected -> expected, (context, evidence) -> guard)
+        .run(request(PostgresqlMigrationCommand.FINALIZE));
+
+    assertThat(guard.verifications).isPositive();
+    assertThat(guard.open).isFalse();
+    assertThat(target.publications).isOne();
+  }
+
+  @Test
+  void authorityWithdrawalBeforeWriteFreezeAcquisitionAbortsWithZeroTargetMutation() {
+    var acquisitions = new java.util.concurrent.atomic.AtomicInteger();
+    var target = new RecordingTarget();
+
+    assertThatThrownBy(() -> runner(
+        target,
+        (context, item, cursor, limit) -> SourceBatch.of(List.of()),
+        expected -> null,
+        (context, evidence) -> {
+          acquisitions.incrementAndGet();
+          return new RecordingFreezeGuard();
+        }).run(request(PostgresqlMigrationCommand.FINALIZE)))
+        .isInstanceOf(MigrationReconciliationException.class);
+
+    assertThat(acquisitions).hasValue(0);
+    assertThat(target.publications).isZero();
+  }
+
   private static PostgresqlMigrationRunner runner(MigrationTargetStore target) {
     return runner(target, (context, item, cursor, limit) -> SourceBatch.of(List.of()));
   }
 
   private static PostgresqlMigrationRunner runner(
       MigrationTargetStore target, MigrationSourceReader source) {
+    return runner(target, source, expected -> expected,
+        (context, evidence) -> new RecordingFreezeGuard());
+  }
+
+  private static PostgresqlMigrationRunner runner(
+      MigrationTargetStore target,
+      MigrationSourceReader source,
+      FinalizeAuthorityProvider authority,
+      FinalizationFreezeGuardProvider freezeGuard) {
     var kind = kind();
     var catalog = new PostgresqlMigrationCatalog(1, List.of(kind));
     var preflight = new MigrationPreflight(new MigrationIdentityProbe() {
@@ -111,7 +154,7 @@ class PostgresqlMigrationRunnerTest {
         ignored -> new KindMigrationEngineTest.StubTransformer());
     return new PostgresqlMigrationRunner(
         preflight, catalog, engine, new MigrationReconciler(target), target,
-        expected -> expected);
+        authority, freezeGuard);
   }
 
   private static PostgresqlMigrationCatalog.Kind kind() {
@@ -172,6 +215,7 @@ class PostgresqlMigrationRunnerTest {
     private int reconciliations;
     private int rehearsals;
     private int publications;
+    private Runnable beforeCommit = () -> {};
 
     @Override
     public MigrationCheckpoint checkpoint(
@@ -229,11 +273,28 @@ class PostgresqlMigrationRunnerTest {
         LockedFinalizationCheck finalizationCheck) {
       finalizationCheck.revalidate();
       publications += kinds.size();
+      beforeCommit.run();
     }
 
     @Override
     public List<MigrationKindStatus> statuses(ValidatedMigrationContext context) {
       return List.of(new MigrationKindStatus("fixture", checkpoint, publications, publications > 0));
+    }
+  }
+
+  private static final class RecordingFreezeGuard implements FinalizationFreezeGuard {
+    private boolean open = true;
+    private int verifications;
+
+    @Override
+    public void requireLocked() {
+      assertThat(open).isTrue();
+      verifications++;
+    }
+
+    @Override
+    public void close() {
+      open = false;
     }
   }
 

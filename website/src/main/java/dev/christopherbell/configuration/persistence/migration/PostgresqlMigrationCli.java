@@ -49,7 +49,8 @@ public final class PostgresqlMigrationCli {
                 new MongoMigrationSourceReader(mongo), target, registry::require),
             new MigrationReconciler(target),
             target,
-            expected -> FinalizeEvidenceLoader.loadProduction());
+            expected -> FinalizeEvidenceLoader.loadProduction(),
+            (context, evidence) -> ProductionFinalizationFreezeGuard.acquire(mongo));
         var result = runner.run(request);
         output.printf(
             "command=%s kinds=%d statusDigest=%s%n",

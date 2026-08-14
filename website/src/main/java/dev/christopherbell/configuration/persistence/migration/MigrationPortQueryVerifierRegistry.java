@@ -16,18 +16,19 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import dev.christopherbell.post.api.PostMigrationFeedVerifier;
 
 /** Closed executable semantics for each catalog-declared persistence-port query. */
 final class MigrationPortQueryVerifierRegistry {
   private static final Pattern SQL_TYPE = Pattern.compile("[a-z][a-z0-9_ ]*(?:\\[\\])?");
-  private static final List<QuerySpec> SPECS = List.of(
+  private static final List<AdapterQueryStrategy> SPECS = List.of(
       spec("account", "find-by-id", "account", List.of("account_id"), List.of(asc("account_id")), null, 2),
       spec("account", "find-by-email", "account", List.of("email"), List.of(asc("email")), null, 2),
       spec("account", "find-by-username", "account", List.of("username"), List.of(asc("username")), null, 2),
       spec("account", "federation-actor-page", "account_federation_identity", List.of("actor_id"), List.of(asc("actor_id")), null, 100),
       spec("account_follow", "find-by-id", "account_follow", List.of("account_follow_id"), List.of(asc("account_follow_id")), null, 2),
-      spec("account_follow", "follower-page", "account_follow", List.of("followed_account_id"), List.of(asc("created_on"), asc("account_follow_id")), null, 100),
-      spec("account_follow", "followed-page", "account_follow", List.of("follower_account_id"), List.of(asc("created_on"), asc("account_follow_id")), null, 100),
+      spec("account_follow", "follower-page", "account_follow", List.of("followed_account_id"), List.of(ascNullsFirst("created_on"), asc("account_follow_id")), null, 100),
+      spec("account_follow", "followed-page", "account_follow", List.of("follower_account_id"), List.of(ascNullsFirst("created_on"), asc("account_follow_id")), null, 100),
       spec("account_trust_relationship", "find-by-id", "account_trust_relationship", List.of("relationship_id"), List.of(asc("relationship_id")), null, 2),
       spec("account_trust_relationship", "owner-page", "account_trust_relationship", List.of("owner_account_id"), List.of(asc("owner_account_id")), null, 100),
       spec("account_trust_relationship", "target-page", "account_trust_relationship", List.of("target_account_id"), List.of(asc("target_account_id")), null, 100),
@@ -77,7 +78,7 @@ final class MigrationPortQueryVerifierRegistry {
       spec("federation_scan_state", "find-by-id", "federation_scan_state", List.of("scan_state_id"), List.of(asc("scan_state_id")), null, 2),
       spec("federation_scan_state", "outbound-create-cursor", "federation_scan_state", List.of("scan_state_id"), List.of(asc("created_on"), asc("post_id")), null, 100),
       spec("federation_delivery_job", "find-by-id", "federation_delivery_job", List.of("delivery_job_id"), List.of(asc("delivery_job_id")), null, 2),
-      spec("federation_delivery_job", "due-job-page", "federation_delivery_job", List.of("state"), List.of(asc("next_attempt_on"), asc("created_on"), asc("delivery_job_id")), "next_attempt_on", 100),
+      spec("federation_delivery_job", "due-job-page", "federation_delivery_job", List.of("state"), List.of(ascNullsFirst("next_attempt_on"), asc("created_on"), asc("delivery_job_id")), "next_attempt_on", 100),
       spec("federation_delivery_job", "expired-claim-page", "federation_delivery_job", List.of("state"), List.of(asc("claim_until"), asc("delivery_job_id")), "claim_until", 100),
       spec("federation_delivery_job", "find-by-post-and-peer", "federation_delivery_job", List.of("post_id", "peer_inbox"), List.of(asc("post_id"), asc("peer_inbox")), null, 2),
       spec("music_track", "find-by-id", "track", List.of("track_id"), List.of(asc("track_id")), null, 2),
@@ -132,7 +133,7 @@ final class MigrationPortQueryVerifierRegistry {
       spec("maintenance_lease", "find-by-id", "maintenance_lease", List.of("lease_name"), List.of(asc("lease_name")), null, 2),
       spec("maintenance_lease", "claim-expired-lease", "maintenance_lease", List.of(), List.of(asc("expires_at"), asc("lease_name")), "expires_at", 100),
       spec("media_job", "find-by-id", "media_job", List.of("media_job_id"), List.of(asc("media_job_id")), null, 2),
-      spec("media_job", "least-recently-used-page", "media_job", List.of(), List.of(asc("updated_at")), null, 100),
+      spec("media_job", "least-recently-used-page", "media_job", List.of(), List.of(ascNullsFirst("last_accessed_at"), asc("media_job_id")), null, 100),
       spec("media_job", "cleanup-due-page", "media_job", List.of(), List.of(asc("delete_at")), "delete_at", 100),
       spec("media_job", "owner-page", "media_job", List.of("owner_id"), List.of(asc("owner_id")), null, 100),
       spec("media_job", "status-page", "media_job", List.of("status"), List.of(asc("status")), null, 100),
@@ -148,7 +149,7 @@ final class MigrationPortQueryVerifierRegistry {
       spec("recycle_item", "expiry-page", "recycle_item", List.of(), List.of(asc("expires_at")), "expires_at", 100),
       spec("upload_session", "find-by-id", "upload_session", List.of("upload_session_id"), List.of(asc("upload_session_id")), null, 2),
       spec("upload_session", "owner-state-page", "upload_session", List.of("owner_id", "finalization_state"), List.of(asc("owner_id"), asc("finalization_state")), null, 100),
-      spec("upload_session", "maintenance-due-page", "upload_session", List.of(), List.of(asc("delete_at"), asc("maintenance_attempts"), asc("append_lease_expires_at")), "delete_at", 100),
+      spec("upload_session", "maintenance-due-page", "upload_session", List.of(), List.of(ascNullsFirst("maintenance_retry_at"), asc("expires_at"), asc("upload_session_id")), "expires_at", 100),
       spec("upload_session", "expiration-page", "upload_session", List.of(), List.of(asc("delete_at"), asc("append_lease_expires_at")), "delete_at", 100),
       spec("vehicle", "find-by-id", "vehicle", List.of("vehicle_id"), List.of(asc("vehicle_id")), null, 2),
       spec("vehicle", "find-by-vin", "vehicle", List.of("vin"), List.of(asc("vin")), null, 2),
@@ -179,7 +180,7 @@ final class MigrationPortQueryVerifierRegistry {
       spec("pending_action", "find-by-id", "pending_action", List.of("pending_action_id"), List.of(asc("pending_action_id")), null, 2),
       spec("pending_action", "pending-machine-power", "pending_action", List.of("action"), List.of(asc("execute_at"), asc("pending_action_id")), null, 100)
   );
-  private static final Map<Declaration, QuerySpec> RULES = rules();
+  private static final Map<Declaration, AdapterQueryStrategy> RULES = rules();
   private static final Set<String> NAMES = buildNames();
 
   private MigrationPortQueryVerifierRegistry() {}
@@ -204,6 +205,28 @@ final class MigrationPortQueryVerifierRegistry {
 
   int declarationCount() {
     return RULES.size();
+  }
+
+  String semanticFamily(String sourceKind, String queryName) {
+    var strategy = RULES.get(new Declaration(sourceKind, queryName));
+    if (strategy == null) {
+      throw new IllegalArgumentException("PostgreSQL migration port-query declaration is invalid.");
+    }
+    return strategy.semantics().family().name();
+  }
+
+  String nullPlacement(String sourceKind, String queryName, String column) {
+    var strategy = RULES.get(new Declaration(sourceKind, queryName));
+    if (strategy == null) {
+      throw new IllegalArgumentException("PostgreSQL migration port-query declaration is invalid.");
+    }
+    return strategy.order().stream().filter(order -> order.column().equals(column))
+        .findFirst().orElseThrow().nullPlacement().name();
+  }
+
+  boolean verifyConditionalClaimForTest(Connection connection, String schema, String table)
+      throws SQLException {
+    return verifyConditionalClaimUnderRollback(connection, schema, table);
   }
 
   List<String> schemaViolations(
@@ -256,7 +279,15 @@ final class MigrationPortQueryVerifierRegistry {
       Connection connection,
       String schema,
       TableSnapshot snapshot,
-      QuerySpec spec) throws SQLException {
+      AdapterQueryStrategy spec) throws SQLException {
+    if (spec.semantics().family() == SemanticFamily.CONDITIONAL_CLAIM
+        && !verifyConditionalClaimUnderRollback(connection, schema, snapshot.table())) {
+      return false;
+    }
+    if (spec.semantics().family() == SemanticFamily.KEYSET_PAGE
+        && !verifyPostFeedThroughAdapter(connection, schema, snapshot.rows(), spec)) {
+      return false;
+    }
     var metadata = snapshot.metadata();
     var sourceRows = snapshot.rows();
     var identity = metadata.primaryKeys();
@@ -311,8 +342,11 @@ final class MigrationPortQueryVerifierRegistry {
       }
       var order = spec.order().get(index);
       orderedColumns.add(order.column());
-      sql.append(quoted(order.column())).append(order.descending() ? " desc" : " asc")
-          .append(" nulls last");
+      sql.append(quoted(order.column())).append(order.descending() ? " desc" : " asc");
+      if (order.nullPlacement() != NullPlacement.NATIVE) {
+        sql.append(order.nullPlacement() == NullPlacement.FIRST
+            ? " nulls first" : " nulls last");
+      }
     }
     for (var key : identity) {
       if (!orderedColumns.contains(key)) {
@@ -336,6 +370,68 @@ final class MigrationPortQueryVerifierRegistry {
         return actual.equals(expected);
       }
     }
+  }
+
+  private static boolean verifyConditionalClaimUnderRollback(
+      Connection connection, String schema, String table) throws SQLException {
+    if (!Set.of("application_lease", "maintenance_lease").contains(table)) {
+      return false;
+    }
+    var savepoint = connection.setSavepoint("migration_port_claim_probe");
+    try {
+      var suffix = UUID.randomUUID().toString();
+      var expired = "migration-expired-" + suffix;
+      var active = "migration-active-" + suffix;
+      var insert = "insert into " + quoted(schema) + "." + quoted(table)
+          + " (lease_name, owner_token, fence_token, acquired_at, expires_at)"
+          + " values (?, 'incumbent', 7, current_timestamp, "
+          + "current_timestamp + cast(? as interval))";
+      try (var statement = connection.prepareStatement(insert)) {
+        statement.setString(1, expired);
+        statement.setString(2, "-1 minute");
+        statement.executeUpdate();
+        statement.setString(1, active);
+        statement.setString(2, "1 minute");
+        statement.executeUpdate();
+      }
+      var claim = "update " + quoted(schema) + "." + quoted(table)
+          + " set owner_token=?, fence_token=fence_token+1, acquired_at=current_timestamp,"
+          + " expires_at=current_timestamp + interval '1 minute' where lease_name=?"
+          + " and (owner_token=? or expires_at<=current_timestamp)";
+      try (var statement = connection.prepareStatement(claim)) {
+        if (claim(statement, "contender", active, "contender") != 0
+            || claim(statement, "contender", expired, "contender") != 1
+            || claim(statement, "incumbent", active, "incumbent") != 1) {
+          return false;
+        }
+      }
+      return true;
+    } finally {
+      connection.rollback(savepoint);
+      connection.releaseSavepoint(savepoint);
+    }
+  }
+
+  private static boolean verifyPostFeedThroughAdapter(
+      Connection connection,
+      String socialSchema,
+      List<ExpectedRow> sourceRows,
+      AdapterQueryStrategy strategy) {
+    return strategy.table().equals("post")
+        && PostMigrationFeedVerifier.verify(
+            connection,
+            socialSchema,
+            strategy.declaration().queryName(),
+            sourceRows.stream().map(ExpectedRow::values).toList());
+  }
+
+  private static int claim(
+      java.sql.PreparedStatement statement, String newOwner, String lease, String ownerMatch)
+      throws SQLException {
+    statement.setString(1, newOwner);
+    statement.setString(2, lease);
+    statement.setString(3, ownerMatch);
+    return statement.executeUpdate();
   }
 
   private static List<ExpectedRow> expectedRows(
@@ -455,7 +551,7 @@ final class MigrationPortQueryVerifierRegistry {
       for (var item : order) {
         var compared = compareOrdered(
             left.values().get(item.column()), right.values().get(item.column()),
-            item.descending());
+            item);
         if (compared != 0) {
           return compared;
         }
@@ -470,18 +566,20 @@ final class MigrationPortQueryVerifierRegistry {
     };
   }
 
-  private static int compareOrdered(Object left, Object right, boolean descending) {
+  private static int compareOrdered(Object left, Object right, Order order) {
     if (left == right) {
       return 0;
     }
+    var nullsFirst = order.nullPlacement() == NullPlacement.FIRST
+        || order.nullPlacement() == NullPlacement.NATIVE && order.descending();
     if (left == null) {
-      return 1;
+      return nullsFirst ? -1 : 1;
     }
     if (right == null) {
-      return -1;
+      return nullsFirst ? 1 : -1;
     }
     var compared = compareValues(left, right);
-    return descending ? -compared : compared;
+    return order.descending() ? -compared : compared;
   }
 
   private static List<String> identity(ExpectedRow row, List<String> primaryKeys) {
@@ -545,8 +643,8 @@ final class MigrationPortQueryVerifierRegistry {
     return '"' + identifier + '"';
   }
 
-  private static Map<Declaration, QuerySpec> rules() {
-    var result = new LinkedHashMap<Declaration, QuerySpec>();
+  private static Map<Declaration, AdapterQueryStrategy> rules() {
+    var result = new LinkedHashMap<Declaration, AdapterQueryStrategy>();
     for (var spec : SPECS) {
       if (result.put(spec.declaration(), spec) != null) {
         throw new IllegalStateException("Duplicate PostgreSQL port-query declaration.");
@@ -561,7 +659,7 @@ final class MigrationPortQueryVerifierRegistry {
     return java.util.Collections.unmodifiableSet(result);
   }
 
-  private static QuerySpec spec(
+  private static AdapterQueryStrategy spec(
       String kind,
       String query,
       String table,
@@ -569,29 +667,63 @@ final class MigrationPortQueryVerifierRegistry {
       List<Order> order,
       String deadlineColumn,
       int limit) {
-    return new QuerySpec(
+    return new AdapterQueryStrategy(
         new Declaration(kind, query), table, List.copyOf(filters), List.copyOf(order),
-        deadlineColumn, limit);
+        deadlineColumn, limit, semantics(kind, query, filters, deadlineColumn));
+  }
+
+  private static AdapterSemantics semantics(
+      String kind, String query, List<String> filters, String deadlineColumn) {
+    var declaration = new Declaration(kind, query);
+    var family = switch (declaration) {
+      case Declaration value when value.equals(new Declaration(
+          "application_lease", "claim-expired-lease")) -> SemanticFamily.CONDITIONAL_CLAIM;
+      case Declaration value when value.equals(new Declaration(
+          "maintenance_lease", "claim-expired-lease")) -> SemanticFamily.CONDITIONAL_CLAIM;
+      case Declaration value when value.sourceKind().equals("post")
+          && Set.of("author-feed-page", "public-feed-page")
+          .contains(value.queryName()) -> SemanticFamily.KEYSET_PAGE;
+      case Declaration value when Set.of(
+          new Declaration("message", "participant-page"),
+          new Declaration("session", "participant-session-page"),
+          new Declaration("music_playlist", "playlist-track-order"),
+          new Declaration("post_report", "moderation-page"))
+          .contains(value) -> SemanticFamily.JOINED_CHILD_PAGE;
+      case Declaration value when value.sourceKind().equals("music_track")
+          && Set.of("artist-page", "album-page", "genre-page").contains(value.queryName()) ->
+          SemanticFamily.GROUPED_PROJECTION;
+      default -> deadlineColumn != null ? SemanticFamily.DEADLINE_PAGE
+          : filters.isEmpty() ? SemanticFamily.ORDERED_PAGE
+          : query.startsWith("find-") ? SemanticFamily.LOOKUP
+          : SemanticFamily.FILTERED_PAGE;
+    };
+    return new AdapterSemantics(family, family == SemanticFamily.KEYSET_PAGE, 1,
+        family == SemanticFamily.CONDITIONAL_CLAIM);
   }
 
   private static Order asc(String column) {
-    return new Order(column, false);
+    return new Order(column, false, NullPlacement.NATIVE);
+  }
+
+  private static Order ascNullsFirst(String column) {
+    return new Order(column, false, NullPlacement.FIRST);
   }
 
   private static Order desc(String column) {
-    return new Order(column, true);
+    return new Order(column, true, NullPlacement.NATIVE);
   }
 
   private record Declaration(String sourceKind, String queryName) {}
 
-  private record QuerySpec(
+  private record AdapterQueryStrategy(
       Declaration declaration,
       String table,
       List<String> filters,
       List<Order> order,
       String deadlineColumn,
-      int limit) {
-    private QuerySpec {
+      int limit,
+      AdapterSemantics semantics) {
+    private AdapterQueryStrategy {
       if (filters.isEmpty() && order.isEmpty() || limit < 1) {
         throw new IllegalArgumentException("PostgreSQL migration query semantics are invalid.");
       }
@@ -606,7 +738,23 @@ final class MigrationPortQueryVerifierRegistry {
     }
   }
 
-  private record Order(String column, boolean descending) {}
+  private enum SemanticFamily {
+    LOOKUP,
+    FILTERED_PAGE,
+    ORDERED_PAGE,
+    DEADLINE_PAGE,
+    KEYSET_PAGE,
+    JOINED_CHILD_PAGE,
+    GROUPED_PROJECTION,
+    CONDITIONAL_CLAIM
+  }
+
+  private enum NullPlacement { NATIVE, FIRST, LAST }
+
+  private record AdapterSemantics(
+      SemanticFamily family, boolean keysetCursor, int lookaheadRows, boolean rollbackMutation) {}
+
+  private record Order(String column, boolean descending, NullPlacement nullPlacement) {}
 
   private record ExpectedRow(Map<String, Object> values) {}
 

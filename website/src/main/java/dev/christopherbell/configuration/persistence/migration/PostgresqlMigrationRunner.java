@@ -12,6 +12,7 @@ public final class PostgresqlMigrationRunner {
   private final MigrationReconciler reconciler;
   private final MigrationTargetStore target;
   private final FinalizeAuthorityProvider finalizeAuthority;
+  private final FinalizationFreezeGuardProvider freezeGuard;
 
   public PostgresqlMigrationRunner(
       MigrationPreflight preflight,
@@ -19,7 +20,8 @@ public final class PostgresqlMigrationRunner {
       KindMigrationEngine engine,
       MigrationReconciler reconciler,
       MigrationTargetStore target,
-      FinalizeAuthorityProvider finalizeAuthority) {
+      FinalizeAuthorityProvider finalizeAuthority,
+      FinalizationFreezeGuardProvider freezeGuard) {
     this.preflight = preflight;
     this.catalog = catalog;
     this.engine = engine;
@@ -27,6 +29,7 @@ public final class PostgresqlMigrationRunner {
     this.target = target;
     this.finalizeAuthority = java.util.Objects.requireNonNull(
         finalizeAuthority, "finalizeAuthority");
+    this.freezeGuard = java.util.Objects.requireNonNull(freezeGuard, "freezeGuard");
   }
 
   public MigrationRunResult run(MigrationRequest request) {
@@ -66,8 +69,15 @@ public final class PostgresqlMigrationRunner {
           || !evidence.sourceDigest().equals(MigrationSourceSnapshot.runDigest(snapshots))) {
         throw new MigrationReconciliationException();
       }
-      target.finalizeRun(context, kinds, reconciliations,
-          () -> revalidateFrozenBoundary(context, kinds, reconciliations));
+      var verifiedEvidence = finalizeAuthority.reload(evidence);
+      if (verifiedEvidence == null || !verifiedEvidence.equals(evidence)) {
+        throw new MigrationReconciliationException();
+      }
+      try (var guard = freezeGuard.acquire(context, verifiedEvidence)) {
+        guard.requireLocked();
+        target.finalizeRun(context, kinds, reconciliations,
+            () -> revalidateFrozenBoundary(context, kinds, reconciliations, guard));
+      }
     } else {
       target.rehearseShadow(context, kinds, reconciliations);
     }
@@ -76,8 +86,10 @@ public final class PostgresqlMigrationRunner {
   private FrozenSourceEvidence revalidateFrozenBoundary(
       ValidatedMigrationContext context,
       List<PostgresqlMigrationCatalog.Kind> kinds,
-      List<MigrationReconciliation> reconciliations) {
+      List<MigrationReconciliation> reconciliations,
+      FinalizationFreezeGuard guard) {
     var expected = context.request().frozenSourceEvidence();
+    guard.requireLocked();
     var before = finalizeAuthority.reload(expected);
     if (before == null || !before.equals(expected)) {
       throw new MigrationReconciliationException();
@@ -99,6 +111,7 @@ public final class PostgresqlMigrationRunner {
     if (!before.equals(after)) {
       throw new MigrationReconciliationException();
     }
+    guard.requireLocked();
     return after;
   }
 

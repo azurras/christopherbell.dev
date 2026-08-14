@@ -21,6 +21,19 @@ class MigrationPortQueryVerifierRegistryTest {
     assertThat(registry.declarationCount()).isEqualTo(153);
     assertThat(catalog.kinds().stream().mapToInt(kind -> kind.portQueries().size()).sum())
         .isEqualTo(153);
+    assertThat(registry.semanticFamily("post", "author-feed-page"))
+        .isEqualTo("KEYSET_PAGE");
+    assertThat(registry.semanticFamily("application_lease", "claim-expired-lease"))
+        .isEqualTo("CONDITIONAL_CLAIM");
+    assertThat(registry.semanticFamily("message", "participant-page"))
+        .isEqualTo("JOINED_CHILD_PAGE");
+    assertThat(registry.semanticFamily("music_track", "artist-page"))
+        .isEqualTo("GROUPED_PROJECTION");
+    assertThat(registry.nullPlacement("account_follow", "follower-page", "created_on"))
+        .isEqualTo("FIRST");
+    assertThat(registry.nullPlacement(
+        "federation_delivery_job", "due-job-page", "next_attempt_on"))
+        .isEqualTo("FIRST");
   }
 
   @Test
@@ -31,6 +44,35 @@ class MigrationPortQueryVerifierRegistryTest {
     try (var database = PostgresqlSchemaTestSupport.migrate();
          var connection = database.connect()) {
       assertThat(registry.schemaViolations(connection, database.prefix(), catalog)).isEmpty();
+    }
+  }
+
+  @Test
+  @EnabledIfEnvironmentVariable(named = "POSTGRESQL_INTEGRATION_TESTS", matches = "enabled")
+  void conditionalLeaseStrategiesUseDatabaseTimeAndRollbackEveryProbe() throws Exception {
+    var registry = MigrationPortQueryVerifierRegistry.from(loadCatalog());
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var connection = database.connect()) {
+      connection.setAutoCommit(false);
+      assertThat(registry.verifyConditionalClaimForTest(
+          connection, database.prefix() + "platform", "application_lease")).isTrue();
+      assertThat(registry.verifyConditionalClaimForTest(
+          connection, database.prefix() + "shared_folder", "maintenance_lease")).isTrue();
+      assertThat(count(connection, database.prefix() + "platform", "application_lease"))
+          .isZero();
+      assertThat(count(connection, database.prefix() + "shared_folder", "maintenance_lease"))
+          .isZero();
+      connection.rollback();
+    }
+  }
+
+  private static long count(java.sql.Connection connection, String schema, String table)
+      throws java.sql.SQLException {
+    try (var statement = connection.createStatement();
+         var rows = statement.executeQuery(
+             "select count(*) from \"" + schema + "\".\"" + table + "\"")) {
+      rows.next();
+      return rows.getLong(1);
     }
   }
 

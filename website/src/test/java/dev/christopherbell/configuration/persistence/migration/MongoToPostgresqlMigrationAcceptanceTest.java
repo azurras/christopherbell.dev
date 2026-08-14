@@ -89,7 +89,8 @@ class MongoToPostgresqlMigrationAcceptanceTest {
           target,
           expected -> directory == null ? expected : FinalizeEvidenceLoader.loadForTest(
               directory, directory.resolve("finalize.properties"),
-              directory.resolve("authority.key")));
+              directory.resolve("authority.key")),
+          (context, evidence) -> MongoFinalizationFreezeGuard.acquire(mongo));
         var request = request(database, mongoUri);
 
         var first = runner.run(request);
