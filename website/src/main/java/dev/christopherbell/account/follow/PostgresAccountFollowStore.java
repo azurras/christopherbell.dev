@@ -11,7 +11,7 @@ import org.springframework.data.domain.Pageable;
 
 /** PostgreSQL implementation of the account-follow persistence boundary. */
 @PostgresPersistence
-public final class PostgresAccountFollowStore implements AccountFollowStore {
+public class PostgresAccountFollowStore implements AccountFollowStore {
   private final DSLContext database;
 
   public PostgresAccountFollowStore(DSLContext database) {

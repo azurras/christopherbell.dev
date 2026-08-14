@@ -1352,6 +1352,7 @@ kinds:
     keyMapping: {sourcePath: id, targetColumn: application_lease.lease_name, preservation: exact}
     fieldMappings:
       ownerToken: {targets: [application_lease.owner_token], conversion: string, missing: reject, nullValue: reject}
+      fenceToken: {targets: [application_lease.fence_token], conversion: long, missing: default, nullValue: default}
       acquiredAt: {targets: [application_lease.acquired_at], conversion: instant-utc, missing: reject, nullValue: reject}
       expiresAt: {targets: [application_lease.expires_at], conversion: instant-utc, missing: reject, nullValue: reject}
     deleteBehavior: preserve

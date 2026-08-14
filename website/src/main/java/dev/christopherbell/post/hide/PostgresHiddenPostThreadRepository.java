@@ -11,7 +11,7 @@ import org.jooq.DSLContext;
 
 /** PostgreSQL persistence for per-account hidden post threads. */
 @PostgresPersistence
-public final class PostgresHiddenPostThreadRepository implements HiddenPostThreadRepository {
+public class PostgresHiddenPostThreadRepository implements HiddenPostThreadRepository {
   private final DSLContext database;
 
   public PostgresHiddenPostThreadRepository(DSLContext database) {

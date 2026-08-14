@@ -15,7 +15,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL join for a browser session and current account security state. */
 @PostgresPersistence
-public final class PostgresBrowserSessionAuthenticationStore
+public class PostgresBrowserSessionAuthenticationStore
     implements BrowserSessionAuthenticationStore {
   private final DSLContext database;
 

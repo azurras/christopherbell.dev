@@ -20,7 +20,7 @@ import org.springframework.data.mongodb.core.query.Query;
 
 /** Mongo implementation of the post-like persistence boundary. */
 @MongoPersistence
-public final class MongoPostLikeStore implements PostLikeStore {
+public class MongoPostLikeStore implements PostLikeStore {
   private static final int MAX_RECENT_LIKES = 256;
   private final KindScopedMongoOperations<PostLike> mongo;
 

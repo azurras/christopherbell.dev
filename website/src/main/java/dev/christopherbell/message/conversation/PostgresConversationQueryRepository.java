@@ -21,7 +21,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL distinct-conversation, unread-count, and stable history queries. */
 @PostgresPersistence
-public final class PostgresConversationQueryRepository implements ConversationQueryPort {
+public class PostgresConversationQueryRepository implements ConversationQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
   private final DSLContext database;
   private final StableCursorCodec cursors;

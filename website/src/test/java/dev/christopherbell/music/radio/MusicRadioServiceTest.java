@@ -9,7 +9,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.lease.LeaseService;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicProbeResult;
 import dev.christopherbell.music.catalog.MusicProperties;
@@ -167,7 +167,7 @@ class MusicRadioServiceTest {
       MusicRadioHistoryRepository history,
       MusicQueueService queue,
       MusicRadioSelector selector) {
-    var leases = mock(MongoLeaseService.class);
+    var leases = mock(LeaseService.class);
     when(leases.tryAcquire(anyString(), anyString(), any(), any())).thenReturn(true);
     when(leases.release(anyString(), anyString())).thenReturn(true);
     return new MusicRadioService(

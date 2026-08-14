@@ -17,7 +17,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL stable report queue query. */
 @PostgresPersistence
-public final class PostgresReportQueryService implements ReportQueryPort {
+public class PostgresReportQueryService implements ReportQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
   private static final int MAX_REPORTER_LENGTH = 100;
   private final DSLContext database;

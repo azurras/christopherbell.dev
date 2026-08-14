@@ -14,7 +14,7 @@ import org.springframework.data.mongodb.core.query.Query;
 
 /** Concrete idempotent Mongo effects for comprehensive account deletion. */
 @MongoPersistence
-public final class MongoAccountDeletionOperations implements AccountDeletionOperations {
+public class MongoAccountDeletionOperations implements AccountDeletionOperations {
   private static final String TOMBSTONE = AccountDeletionService.TOMBSTONE_ID;
 
   private final KindScopedMongoOperations<Account> accounts;

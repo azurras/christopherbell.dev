@@ -1,13 +1,11 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 
 import java.util.Objects;
-import org.springframework.stereotype.Component;
 
 /** Recurring target-release gate executed before the first migration-runner mutation. */
-@MongoPersistence
-@Component
+@MongoBackendComponent
 public final class DomainCollectionStartupPreflight {
   private final DomainCollectionReleaseMetadata metadata;
   private final DomainCollectionCutoverLedger ledger;

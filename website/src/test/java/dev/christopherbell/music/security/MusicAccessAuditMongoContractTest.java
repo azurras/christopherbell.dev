@@ -78,7 +78,8 @@ class MusicAccessAuditMongoContractTest {
     var aggregated = recorder.deniedIp("203.0.113.7", "SIGN_IN_REQUIRED");
 
     assertThat(aggregated.count()).isEqualTo(2);
-    assertThat(new MusicAccessAuditQueryService(factory).recent(100))
+    assertThat(new MusicAccessAuditQueryService(
+        new MongoMusicAccessAttemptRepository(factory)).recent(100))
         .containsExactly(aggregated);
     assertCanonicalEnvelope(aggregated.id());
   }
@@ -103,7 +104,8 @@ class MusicAccessAuditMongoContractTest {
       executor.shutdownNow();
     }
 
-    var stored = new MusicAccessAuditQueryService(factory).recent(100);
+    var stored = new MusicAccessAuditQueryService(
+        new MongoMusicAccessAttemptRepository(factory)).recent(100);
     assertThat(stored).singleElement().satisfies(attempt -> {
       assertThat(attempt.count()).isEqualTo(writerCount);
       assertCanonicalEnvelope(attempt.id());
@@ -131,7 +133,8 @@ class MusicAccessAuditMongoContractTest {
   }
 
   private MusicAccessAuditRecorder recorder() {
-    return new MusicAccessAuditRecorder(factory, Clock.fixed(NOW, ZoneOffset.UTC));
+    return new MusicAccessAuditRecorder(
+        new MongoMusicAccessAttemptRepository(factory), Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
   private void assertCanonicalEnvelope(String id) {

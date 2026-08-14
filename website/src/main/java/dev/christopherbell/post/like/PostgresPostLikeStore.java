@@ -15,7 +15,7 @@ import org.jooq.DSLContext;
 
 /** PostgreSQL implementation of the post-like persistence boundary. */
 @PostgresPersistence
-public final class PostgresPostLikeStore implements PostLikeStore {
+public class PostgresPostLikeStore implements PostLikeStore {
   private static final int MAX_RECENT_LIKES = 256;
   private final DSLContext database;
 

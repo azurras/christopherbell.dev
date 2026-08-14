@@ -12,7 +12,7 @@ import org.springframework.data.mongodb.core.query.Query;
 
 /** Mongo implementation of the account-follow persistence boundary. */
 @MongoPersistence
-public final class MongoAccountFollowStore implements AccountFollowStore {
+public class MongoAccountFollowStore implements AccountFollowStore {
   private final KindScopedMongoOperations<AccountFollow> mongo;
 
   public MongoAccountFollowStore(DomainMongoOperationsFactory factory) {

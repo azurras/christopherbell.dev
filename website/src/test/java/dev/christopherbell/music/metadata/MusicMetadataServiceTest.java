@@ -11,7 +11,7 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.libs.mongo.lease.CollectorLeaseGuard;
 import dev.christopherbell.libs.mongo.lease.LeaseOwnershipLostException;
-import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.lease.LeaseService;
 import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.music.catalog.MusicArtworkService;
 import dev.christopherbell.music.catalog.MusicCatalog;
@@ -205,7 +205,7 @@ class MusicMetadataServiceTest {
       ScheduledCollectorCoordinator scheduledCollectors) {
     var access = mock(MusicAccessService.class);
     when(access.requireWrite()).thenReturn(Account.builder().id("writer").build());
-    var leases = mock(MongoLeaseService.class);
+    var leases = mock(LeaseService.class);
     when(leases.tryAcquire(any(), any(), any(), any())).thenReturn(true);
     var properties = metadataProperties();
     return new MusicMetadataService(

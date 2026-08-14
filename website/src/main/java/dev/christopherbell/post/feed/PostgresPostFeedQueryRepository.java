@@ -19,7 +19,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL keyset queries for deterministic global, author, and following feeds. */
 @PostgresPersistence
-public final class PostgresPostFeedQueryRepository implements PostFeedQueryPort {
+public class PostgresPostFeedQueryRepository implements PostFeedQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
   private final DSLContext database;
   private final StableCursorCodec cursors;

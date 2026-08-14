@@ -13,7 +13,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL owner-scoped conversation archive transition. */
 @PostgresPersistence
-public final class PostgresConversationArchiveService implements ConversationArchivePort {
+public class PostgresConversationArchiveService implements ConversationArchivePort {
   private final DSLContext database;
   private final Clock clock;
 

@@ -28,7 +28,7 @@ class MusicAccessAuditRecorderTest {
     var attempts = (KindScopedMongoOperations<MusicAccessAttempt>) mock(KindScopedMongoOperations.class);
     when(factory.forType(MusicAccessAttempt.class)).thenReturn(attempts);
     var clock = Clock.fixed(Instant.parse("2026-07-28T12:34:56Z"), ZoneOffset.UTC);
-    var recorder = new MusicAccessAuditRecorder(factory, clock);
+    var recorder = new MusicAccessAuditRecorder(new MongoMusicAccessAttemptRepository(factory), clock);
     var inserts = ArgumentCaptor.forClass(MusicAccessAttempt.class);
     var updates = ArgumentCaptor.forClass(Update.class);
     var aggregated = mock(MusicAccessAttempt.class);
@@ -60,7 +60,7 @@ class MusicAccessAuditRecorderTest {
     var attempts = (KindScopedMongoOperations<MusicAccessAttempt>) mock(KindScopedMongoOperations.class);
     when(factory.forType(MusicAccessAttempt.class)).thenReturn(attempts);
     var recorder = new MusicAccessAuditRecorder(
-        factory,
+        new MongoMusicAccessAttemptRepository(factory),
         Clock.fixed(Instant.parse("2026-07-28T12:34:56Z"), ZoneOffset.UTC));
     var winner = mock(MusicAccessAttempt.class);
     when(attempts.findAndUpdate(any(Query.class), any(Update.class)))

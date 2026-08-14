@@ -23,7 +23,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL anonymous Void discovery with stable keyset cursors. */
 @PostgresPersistence
-public final class PostgresVoidDiscoveryQueryRepository implements VoidDiscoveryQueryPort {
+public class PostgresVoidDiscoveryQueryRepository implements VoidDiscoveryQueryPort {
   private static final int MAX_PAGE_SIZE = 24;
   private final DSLContext database;
   private final StableCursorCodec cursors;

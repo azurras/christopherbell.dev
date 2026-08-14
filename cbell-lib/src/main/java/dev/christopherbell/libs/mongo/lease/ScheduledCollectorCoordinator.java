@@ -3,17 +3,37 @@ package dev.christopherbell.libs.mongo.lease;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.UUID;
+import dev.christopherbell.libs.lease.LeaseService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-/** Serializes collector work through owner-scoped Mongo leases and records safe status. */
+/** Serializes collector work through owner-scoped leases and records safe status. */
 @Service
 public class ScheduledCollectorCoordinator {
-  private final MongoLeaseService leases;
+  private final LeaseAccess leases;
   private final ScheduledCollectorRunStore runs;
   private final Clock clock;
 
+  @Autowired
   public ScheduledCollectorCoordinator(
-      MongoLeaseService leases, ScheduledCollectorRunStore runs, Clock clock) {
+      LeaseService leases, ScheduledCollectorRunStore runs, Clock clock) {
+    this(new LeaseAccess() {
+      @Override public boolean tryAcquire(
+          String name, String owner, java.time.Instant now, java.time.Instant expiresAt) {
+        return leases.tryAcquire(name, owner, now, expiresAt);
+      }
+      @Override public boolean renew(
+          String name, String owner, java.time.Instant now, java.time.Instant expiresAt) {
+        return leases.renew(name, owner, now, expiresAt);
+      }
+      @Override public boolean release(String name, String owner) {
+        return leases.release(name, owner);
+      }
+    }, runs, clock);
+  }
+
+  private ScheduledCollectorCoordinator(
+      LeaseAccess leases, ScheduledCollectorRunStore runs, Clock clock) {
     this.leases = leases;
     this.runs = runs;
     this.clock = clock;
@@ -37,7 +57,7 @@ public class ScheduledCollectorCoordinator {
     }
 
     var guard = new RenewingMongoLease(
-        leases, clock, collectorName, ownerToken, leaseDuration, startedOn);
+        leases::renew, clock, collectorName, ownerToken, leaseDuration, startedOn);
     try {
       run.setStatus(ScheduledCollectorRunStatus.RUNNING);
       runs.save(run);
@@ -82,4 +102,12 @@ public class ScheduledCollectorCoordinator {
   }
 
   public record Outcome<T>(ScheduledCollectorRunStatus status, T value) {}
+
+  private interface LeaseAccess {
+    boolean tryAcquire(
+        String name, String owner, java.time.Instant now, java.time.Instant expiresAt);
+    boolean renew(
+        String name, String owner, java.time.Instant now, java.time.Instant expiresAt);
+    boolean release(String name, String owner);
+  }
 }

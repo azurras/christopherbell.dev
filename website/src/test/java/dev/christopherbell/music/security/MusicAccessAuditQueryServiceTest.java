@@ -23,7 +23,8 @@ class MusicAccessAuditQueryServiceTest {
     var query = ArgumentCaptor.forClass(Query.class);
     when(attempts.find(query.capture(), any(Pageable.class))).thenReturn(List.of());
 
-    assertThat(new MusicAccessAuditQueryService(factory).recent(Integer.MAX_VALUE)).isEmpty();
+    assertThat(new MusicAccessAuditQueryService(
+        new MongoMusicAccessAttemptRepository(factory)).recent(Integer.MAX_VALUE)).isEmpty();
 
     assertThat(query.getValue().getLimit()).isEqualTo(100);
     assertThat(query.getValue().getSortObject().get("lastAttemptAt")).isEqualTo(-1);

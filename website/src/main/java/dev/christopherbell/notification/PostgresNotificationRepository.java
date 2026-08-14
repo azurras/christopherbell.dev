@@ -14,7 +14,7 @@ import org.springframework.data.domain.Pageable;
 
 /** PostgreSQL implementation of the notification persistence port. */
 @PostgresPersistence
-public final class PostgresNotificationRepository implements NotificationRepository {
+public class PostgresNotificationRepository implements NotificationRepository {
   private final DSLContext database;
 
   public PostgresNotificationRepository(DSLContext database) {

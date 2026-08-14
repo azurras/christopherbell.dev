@@ -14,7 +14,7 @@ import org.springframework.data.domain.Sort;
 
 /** PostgreSQL administrative account search with bounded literal filters. */
 @PostgresPersistence
-public final class PostgresAdminAccountQueryService implements AdminAccountQueryPort {
+public class PostgresAdminAccountQueryService implements AdminAccountQueryPort {
   private final DSLContext database;
   private final AccountMapper mapper;
 

@@ -18,7 +18,7 @@ import org.springframework.data.domain.Pageable;
 
 /** PostgreSQL implementation of the direct-message persistence port. */
 @PostgresPersistence
-public final class PostgresMessageRepository implements MessageRepository {
+public class PostgresMessageRepository implements MessageRepository {
   private final DSLContext database;
 
   public PostgresMessageRepository(DSLContext database) {

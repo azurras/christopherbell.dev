@@ -10,7 +10,7 @@ import org.jooq.DSLContext;
 
 /** PostgreSQL conditional transitions for authenticated browser-session activity. */
 @PostgresPersistence
-public final class PostgresBrowserSessionActivityStore implements BrowserSessionActivityStore {
+public class PostgresBrowserSessionActivityStore implements BrowserSessionActivityStore {
   private final DSLContext database;
 
   public PostgresBrowserSessionActivityStore(DSLContext database) {

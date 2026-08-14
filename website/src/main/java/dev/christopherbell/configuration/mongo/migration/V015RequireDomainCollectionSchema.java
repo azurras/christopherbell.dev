@@ -1,14 +1,11 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.stereotype.Component;
 
 /** Blocks a target-schema release until the exact domain cutover is active. */
-@MongoPersistence
-@Component
+@MongoBackendComponent
 public final class V015RequireDomainCollectionSchema implements ApplicationMigration {
   private final DomainCollectionCutoverLedger ledger;
 

@@ -26,7 +26,7 @@ import org.springframework.data.domain.Pageable;
 
 /** PostgreSQL implementation of the post-report persistence port. */
 @PostgresPersistence
-public final class PostgresReportRepository implements ReportRepository {
+public class PostgresReportRepository implements ReportRepository {
   private final DSLContext database;
 
   public PostgresReportRepository(DSLContext database) {

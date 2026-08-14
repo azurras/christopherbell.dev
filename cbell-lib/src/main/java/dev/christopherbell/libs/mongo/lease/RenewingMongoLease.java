@@ -3,10 +3,11 @@ package dev.christopherbell.libs.mongo.lease;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import dev.christopherbell.libs.lease.LeaseService;
 
 /** Owner-scoped lease guard that renews at half of the configured lease duration. */
 public final class RenewingMongoLease implements CollectorLeaseGuard {
-  private final MongoLeaseService leases;
+  private final LeaseRenewal leases;
   private final Clock clock;
   private final String leaseName;
   private final String ownerToken;
@@ -16,6 +17,29 @@ public final class RenewingMongoLease implements CollectorLeaseGuard {
 
   public RenewingMongoLease(
       MongoLeaseService leases,
+      Clock clock,
+      String leaseName,
+      String ownerToken,
+      Duration duration,
+      Instant acquiredOn
+  ) {
+    this(leases::renew, clock, leaseName, ownerToken, duration, acquiredOn);
+  }
+
+  /** Transition constructor for persistence-neutral lease callers. */
+  public RenewingMongoLease(
+      LeaseService leases,
+      Clock clock,
+      String leaseName,
+      String ownerToken,
+      Duration duration,
+      Instant acquiredOn
+  ) {
+    this(leases::renew, clock, leaseName, ownerToken, duration, acquiredOn);
+  }
+
+  RenewingMongoLease(
+      LeaseRenewal leases,
       Clock clock,
       String leaseName,
       String ownerToken,
@@ -41,5 +65,10 @@ public final class RenewingMongoLease implements CollectorLeaseGuard {
       throw new LeaseOwnershipLostException(leaseName);
     }
     nextRenewal = now.plus(renewalInterval);
+  }
+
+  @FunctionalInterface
+  interface LeaseRenewal {
+    boolean renew(String leaseName, String ownerToken, Instant now, Instant expiresAt);
   }
 }

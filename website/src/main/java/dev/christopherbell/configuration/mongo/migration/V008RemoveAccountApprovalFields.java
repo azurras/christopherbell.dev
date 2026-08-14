@@ -1,15 +1,13 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
-import org.springframework.stereotype.Component;
 
 /** Removes the retired approval fields after account status became authoritative. */
-@MongoPersistence
-@Component
+@MongoBackendComponent
 public final class V008RemoveAccountApprovalFields implements ApplicationMigration {
   private static final String CHECKSUM =
       "498c9c6fd6622cc1734199544cf888a14cf5e72015a1c71cda71db229077fd28";

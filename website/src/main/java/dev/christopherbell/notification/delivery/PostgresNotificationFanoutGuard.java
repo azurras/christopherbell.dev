@@ -16,7 +16,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL atomic notification dedupe and fixed-window rate-limit implementation. */
 @PostgresPersistence
-public final class PostgresNotificationFanoutGuard implements NotificationFanoutPort {
+public class PostgresNotificationFanoutGuard implements NotificationFanoutPort {
   private final DSLContext database;
   private final NotificationDeliveryProperties properties;
 

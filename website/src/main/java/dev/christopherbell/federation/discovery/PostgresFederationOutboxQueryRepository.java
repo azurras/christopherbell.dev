@@ -13,7 +13,7 @@ import org.jooq.DSLContext;
 
 /** PostgreSQL active-post queries for a local actor public outbox. */
 @PostgresPersistence
-public final class PostgresFederationOutboxQueryRepository
+public class PostgresFederationOutboxQueryRepository
     implements FederationOutboxQueryPort {
   private static final int MAX_PAGE_SIZE = 20;
   private final DSLContext database;

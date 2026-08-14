@@ -15,7 +15,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL atomic storage effects for post expiration. */
 @PostgresPersistence
-public final class PostgresPostExpirationStore implements PostExpirationStore {
+public class PostgresPostExpirationStore implements PostExpirationStore {
   private final DSLContext database;
 
   public PostgresPostExpirationStore(DSLContext database) {

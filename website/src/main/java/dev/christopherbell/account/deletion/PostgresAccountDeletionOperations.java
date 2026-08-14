@@ -40,7 +40,7 @@ import org.jooq.impl.DSL;
 
 /** Idempotent PostgreSQL effects for durable account deletion steps. */
 @PostgresPersistence
-public final class PostgresAccountDeletionOperations implements AccountDeletionOperations {
+public class PostgresAccountDeletionOperations implements AccountDeletionOperations {
   private static final String TOMBSTONE = AccountDeletionService.TOMBSTONE_ID;
   private static final String RETAINED_MESSAGE =
       "Account-related activity retained after account deletion.";

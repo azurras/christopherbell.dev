@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -17,6 +18,7 @@ public final class PostLinkPreviewCleanupJob {
   private final Clock clock;
   private final int batchLimit;
 
+  @Autowired
   public PostLinkPreviewCleanupJob(PostLinkPreviewCacheRepository cache) {
     this(cache, Clock.systemUTC(), DEFAULT_BATCH_LIMIT);
   }

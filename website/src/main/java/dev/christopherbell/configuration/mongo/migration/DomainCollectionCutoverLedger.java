@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
 /** Startup-only validation of the durable domain-collection cutover ledger. */
 @MongoPersistence
 @Component
-public final class DomainCollectionCutoverLedger {
+public class DomainCollectionCutoverLedger {
   public static final String LEGACY_ID = "domain-collection-cutover";
   private static final String COLLECTION = "application_migrations";
   private static final String KIND = "domain_collection_cutover";

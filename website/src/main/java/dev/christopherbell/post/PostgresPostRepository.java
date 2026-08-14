@@ -26,7 +26,7 @@ import org.springframework.data.domain.Sort;
 
 /** PostgreSQL implementation of the post persistence port. */
 @PostgresPersistence
-public final class PostgresPostRepository implements PostRepository {
+public class PostgresPostRepository implements PostRepository {
   private final DSLContext database;
 
   public PostgresPostRepository(DSLContext database) {

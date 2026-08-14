@@ -11,7 +11,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL page-wide post engagement aggregates. */
 @PostgresPersistence
-public final class PostgresPostEngagementQueryRepository implements PostEngagementQueryPort {
+public class PostgresPostEngagementQueryRepository implements PostEngagementQueryPort {
   private final DSLContext database;
 
   public PostgresPostEngagementQueryRepository(DSLContext database) {

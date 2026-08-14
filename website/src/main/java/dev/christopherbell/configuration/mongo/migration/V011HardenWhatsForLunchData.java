@@ -1,7 +1,6 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
-
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantWebsiteUrlPolicy;
 import java.time.Duration;
 import java.time.Instant;
@@ -15,11 +14,9 @@ import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
-import org.springframework.stereotype.Component;
 
 /** Backfills bounded WFL session lifecycle and indexed safe restaurant query fields. */
-@MongoPersistence
-@Component
+@MongoBackendComponent
 public final class V011HardenWhatsForLunchData implements ApplicationMigration {
   private static final int BATCH_SIZE = 250;
   private static final Duration ACTIVE_LIFETIME = Duration.ofHours(24);

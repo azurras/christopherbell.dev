@@ -1,6 +1,6 @@
 package dev.christopherbell.whatsforlunch.restaurant.importing;
 
-import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.lease.LeaseService;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantImportStateRepository;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantService;
@@ -31,7 +31,7 @@ import static org.mockito.Mockito.when;
 class RestaurantImportWorkflowServiceTest {
   private static final Instant NOW = Instant.parse("2026-07-26T12:00:00Z");
 
-  @Mock private MongoLeaseService leases;
+  @Mock private LeaseService leases;
   @Mock private PermissionService permissionService;
   @Mock private RestaurantImportPreviewStore previews;
   @Mock private RestaurantImportStateRepository states;

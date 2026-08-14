@@ -10,7 +10,7 @@ import org.jooq.DSLContext;
 
 /** PostgreSQL persistence for account notification preferences. */
 @PostgresPersistence
-public final class PostgresNotificationPreferenceRepository
+public class PostgresNotificationPreferenceRepository
     implements NotificationPreferenceRepository {
   private final DSLContext database;
 

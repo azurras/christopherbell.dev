@@ -14,7 +14,7 @@ import org.jooq.DSLContext;
 
 /** PostgreSQL conditional login update that rejects stale observed credentials. */
 @PostgresPersistence
-public final class PostgresAccountLoginStore implements AccountLoginStore {
+public class PostgresAccountLoginStore implements AccountLoginStore {
   private final DSLContext database;
   private final AccountRepository accounts;
 

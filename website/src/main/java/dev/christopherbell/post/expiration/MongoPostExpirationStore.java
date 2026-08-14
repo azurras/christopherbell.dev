@@ -14,7 +14,7 @@ import org.springframework.data.mongodb.core.query.Update;
 
 /** Mongo atomic storage effects for post expiration. */
 @MongoPersistence
-public final class MongoPostExpirationStore implements PostExpirationStore {
+public class MongoPostExpirationStore implements PostExpirationStore {
   private final KindScopedMongoOperations<Post> posts;
   private final KindScopedMongoOperations<PostLike> likes;
 

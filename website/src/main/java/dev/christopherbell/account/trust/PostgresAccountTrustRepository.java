@@ -14,7 +14,7 @@ import org.jooq.DSLContext;
 
 /** PostgreSQL persistence for mute and block relationships. */
 @PostgresPersistence
-public final class PostgresAccountTrustRepository implements AccountTrustRepository {
+public class PostgresAccountTrustRepository implements AccountTrustRepository {
   private final DSLContext database;
 
   public PostgresAccountTrustRepository(DSLContext database) {

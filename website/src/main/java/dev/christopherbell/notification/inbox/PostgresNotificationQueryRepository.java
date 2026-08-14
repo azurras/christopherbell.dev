@@ -16,7 +16,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL stable owner-scoped notification reads and bulk read-state updates. */
 @PostgresPersistence
-public final class PostgresNotificationQueryRepository implements NotificationQueryPort {
+public class PostgresNotificationQueryRepository implements NotificationQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
   private final DSLContext database;
   private final StableCursorCodec cursors;

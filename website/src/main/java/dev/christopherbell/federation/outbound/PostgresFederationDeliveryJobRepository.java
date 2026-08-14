@@ -21,7 +21,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL owner of federation scan, enqueue, claim, and exact-owner transitions. */
 @PostgresPersistence
-final class PostgresFederationDeliveryJobRepository implements FederationDeliveryStore {
+class PostgresFederationDeliveryJobRepository implements FederationDeliveryStore {
   private final DSLContext database;
 
   PostgresFederationDeliveryJobRepository(DSLContext database) {

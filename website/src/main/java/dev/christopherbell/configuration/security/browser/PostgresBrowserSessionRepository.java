@@ -9,7 +9,7 @@ import org.jooq.DSLContext;
 
 /** PostgreSQL persistence for revocable browser sessions. */
 @PostgresPersistence
-public final class PostgresBrowserSessionRepository implements BrowserSessionRepository {
+public class PostgresBrowserSessionRepository implements BrowserSessionRepository {
   private final DSLContext database;
 
   public PostgresBrowserSessionRepository(DSLContext database) {

@@ -43,7 +43,7 @@ import org.springframework.data.domain.Sort;
 
 /** PostgreSQL implementation of the service-facing account persistence port. */
 @PostgresPersistence
-public final class PostgresAccountRepository implements AccountRepository {
+public class PostgresAccountRepository implements AccountRepository {
   private final DSLContext database;
 
   public PostgresAccountRepository(DSLContext database) {

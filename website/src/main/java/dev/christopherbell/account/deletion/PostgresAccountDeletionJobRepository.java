@@ -11,7 +11,7 @@ import org.jooq.DSLContext;
 
 /** PostgreSQL persistence for durable account-deletion checkpoints. */
 @PostgresPersistence
-public final class PostgresAccountDeletionJobRepository implements AccountDeletionJobRepository {
+public class PostgresAccountDeletionJobRepository implements AccountDeletionJobRepository {
   private final DSLContext database;
 
   public PostgresAccountDeletionJobRepository(DSLContext database) {

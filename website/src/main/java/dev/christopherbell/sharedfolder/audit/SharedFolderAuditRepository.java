@@ -3,7 +3,7 @@ package dev.christopherbell.sharedfolder.audit;
 import java.time.Instant;
 import java.util.List;
 
-/** Mongo persistence for bounded shared-folder audit events. */
+/** Persistence boundary for bounded shared-folder audit events. */
 public interface SharedFolderAuditRepository {
   SharedFolderAuditEvent save(SharedFolderAuditEvent event);
   List<SharedFolderAuditEvent> search(

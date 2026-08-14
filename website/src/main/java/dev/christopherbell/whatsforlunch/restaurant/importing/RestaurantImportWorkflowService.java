@@ -1,6 +1,6 @@
 package dev.christopherbell.whatsforlunch.restaurant.importing;
 
-import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.lease.LeaseService;
 import dev.christopherbell.libs.mongo.lease.RenewingMongoLease;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantImportStateRepository;
@@ -33,7 +33,7 @@ public class RestaurantImportWorkflowService {
   private static final int PUBLIC_FRESHNESS_DAYS = 45;
 
   private final Clock clock;
-  private final MongoLeaseService leases;
+  private final LeaseService leases;
   private final PermissionService permissionService;
   private final RestaurantImportPreviewStore previews;
   private final RestaurantImportStateRepository states;

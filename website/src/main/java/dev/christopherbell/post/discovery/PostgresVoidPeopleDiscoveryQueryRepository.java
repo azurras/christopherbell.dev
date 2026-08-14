@@ -18,7 +18,7 @@ import org.jooq.impl.DSL;
 
 /** PostgreSQL active-post query used by privacy-aware people discovery. */
 @PostgresPersistence
-public final class PostgresVoidPeopleDiscoveryQueryRepository
+public class PostgresVoidPeopleDiscoveryQueryRepository
     implements VoidPeopleDiscoveryQueryPort {
   private static final int MAX_INTEREST_POSTS = 256;
   private static final int MAX_CANDIDATES = 128;

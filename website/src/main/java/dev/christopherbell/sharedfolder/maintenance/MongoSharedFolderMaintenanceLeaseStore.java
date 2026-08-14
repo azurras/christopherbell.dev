@@ -15,11 +15,12 @@ import org.springframework.stereotype.Repository;
 /** Mongo implementation of the fixed-key atomic maintenance lease boundary. */
 @MongoPersistence
 @Repository
-class MongoSharedFolderMaintenanceLeaseStore implements SharedFolderMaintenanceLeaseStore {
+public class MongoSharedFolderMaintenanceLeaseStore
+    implements SharedFolderMaintenanceLeaseStore {
   private final KindScopedMongoOperations<SharedFolderMaintenanceLeaseDocument> mongo;
 
   @Autowired
-  MongoSharedFolderMaintenanceLeaseStore(DomainMongoOperationsFactory factory) {
+  public MongoSharedFolderMaintenanceLeaseStore(DomainMongoOperationsFactory factory) {
     this.mongo = factory.forType(SharedFolderMaintenanceLeaseDocument.class);
   }
 

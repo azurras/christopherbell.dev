@@ -1,15 +1,13 @@
 package dev.christopherbell.configuration.mongo.migration;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 
 import org.springframework.data.domain.Sort.Direction;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
-import org.springframework.stereotype.Component;
 
 /** Creates the post and trust indexes used by bounded people discovery. */
-@MongoPersistence
-@Component
+@MongoBackendComponent
 public final class V005EnsureVoidPeopleDiscoveryIndexes implements ApplicationMigration {
   private static final String CHECKSUM =
       "e9f91fdcd36d40e9090fdc1a7e199f0a9a61a35f334c1fd37a9774439da31af4";

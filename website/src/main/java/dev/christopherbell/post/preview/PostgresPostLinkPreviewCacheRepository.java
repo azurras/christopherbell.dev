@@ -11,7 +11,7 @@ import org.jooq.DSLContext;
 
 /** PostgreSQL persistence for bounded link-preview success and failure cache entries. */
 @PostgresPersistence
-public final class PostgresPostLinkPreviewCacheRepository
+public class PostgresPostLinkPreviewCacheRepository
     implements PostLinkPreviewCacheRepository {
   private final DSLContext database;
 

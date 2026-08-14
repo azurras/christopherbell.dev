@@ -1,6 +1,6 @@
 package dev.christopherbell.music.radio;
 
-import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.lease.LeaseService;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicProperties;
 import dev.christopherbell.music.catalog.MusicTrack;
@@ -32,7 +32,7 @@ public final class MusicRadioService {
   private final MusicQueueService queue;
   private final MusicRadioSelector selector;
   private final MusicAccessService access;
-  private final MongoLeaseService leases;
+  private final LeaseService leases;
   private final Clock clock;
   private final String leaseOwner = UUID.randomUUID().toString();
   private final Object localTransitionLock = new Object();
@@ -46,7 +46,7 @@ public final class MusicRadioService {
       MusicQueueService queue,
       MusicRadioSelector selector,
       MusicAccessService access,
-      MongoLeaseService leases,
+      LeaseService leases,
       Clock clock) {
     this.musicProperties = musicProperties;
     this.radioProperties = radioProperties;
