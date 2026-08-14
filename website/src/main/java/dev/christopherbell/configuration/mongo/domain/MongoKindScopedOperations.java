@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.domain;
 
+import com.mongodb.MongoException;
+
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import java.util.List;
@@ -496,9 +498,14 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
   }
 
   private static DuplicateKeyException duplicate(DuplicateKeyException cause) {
-    return cause.getCause() == null
-        ? new DuplicateKeyException(DUPLICATE_MESSAGE)
-        : new DuplicateKeyException(DUPLICATE_MESSAGE, cause.getCause());
+    for (Throwable candidate = cause.getCause(); candidate != null;
+        candidate = candidate.getCause()) {
+      if (candidate instanceof MongoException mongoFailure) {
+        return new DuplicateKeyException(
+            DUPLICATE_MESSAGE, new SanitizedMongoDuplicateKeyCause(mongoFailure.getCode()));
+      }
+    }
+    return new DuplicateKeyException(DUPLICATE_MESSAGE);
   }
 
   private static RuntimeException translateMalformed(RuntimeException failure) {

@@ -4,6 +4,7 @@ import dev.christopherbell.configuration.persistence.MongoPersistence;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.MongoDatabaseLeaseMutation;
 import dev.christopherbell.libs.mongo.lease.MongoLeaseDocument;
 import dev.christopherbell.libs.mongo.lease.MongoLeaseStore;
 import dev.christopherbell.libs.lease.LeaseGrant;
@@ -79,24 +80,29 @@ public class MongoApplicationLeaseStore implements MongoLeaseStore, LeaseStore {
   @Override
   public Optional<LeaseGrant> tryAcquire(String name, String ownerToken, Duration duration) {
     new LeaseIdentity(name, ownerToken);
-    Instant now = Instant.now();
-    if (!tryAcquire(name, ownerToken, now, now.plus(requireDuration(duration)))) {
-      return Optional.empty();
-    }
-    return grant(name, ownerToken);
+    var query = Query.query(Criteria.where("id").is(name));
+    var update = new Update()
+        .set("ownerToken", ownerToken)
+        .inc("fenceToken", 1L)
+        .currentDate("acquiredAt");
+    var seed = new MongoLeaseDocument();
+    seed.setId(name);
+    seed.setOwnerToken("unclaimed");
+    seed.setFenceToken(0L);
+    seed.setAcquiredAt(Instant.EPOCH);
+    seed.setExpiresAt(Instant.EPOCH);
+    return mongo.acquireDatabaseLease(query, MongoDatabaseLeaseMutation.acquire(
+            update, "expiresAt", duration, "ownerToken", ownerToken), seed)
+        .map(MongoApplicationLeaseStore::grant);
   }
 
   @Override
   public Optional<LeaseGrant> renew(LeaseGrant grant, Duration duration) {
-    Instant now = Instant.now();
     var query = Query.query(Criteria.where("id").is(grant.leaseName())
-        .and("ownerToken").is(grant.ownerId()).and("fenceToken").is(grant.fenceToken())
-        .and("expiresAt").gt(now));
-    if (mongo.updateFirst(query, new Update().set("expiresAt", now.plus(requireDuration(duration))))
-        .getMatchedCount() != 1) {
-      return Optional.empty();
-    }
-    return grant(grant.leaseName(), grant.ownerId());
+        .and("ownerToken").is(grant.ownerId()).and("fenceToken").is(grant.fenceToken()));
+    return mongo.findAndUpdateDatabaseLease(query, MongoDatabaseLeaseMutation.renew(
+            new Update().set("ownerToken", grant.ownerId()), "expiresAt", duration, false))
+        .map(MongoApplicationLeaseStore::grant);
   }
 
   @Override
@@ -108,16 +114,9 @@ public class MongoApplicationLeaseStore implements MongoLeaseStore, LeaseStore {
         .getMatchedCount() == 1;
   }
 
-  private Optional<LeaseGrant> grant(String name, String ownerToken) {
-    return mongo.findById(name).filter(value -> ownerToken.equals(value.getOwnerToken()))
-        .map(value -> new LeaseGrant(name, ownerToken,
-            value.getFenceToken() == null ? 1L : value.getFenceToken(), value.getExpiresAt()));
+  private static LeaseGrant grant(MongoLeaseDocument value) {
+    return new LeaseGrant(value.getId(), value.getOwnerToken(), value.getFenceToken(),
+        value.getExpiresAt());
   }
 
-  private static Duration requireDuration(Duration duration) {
-    if (duration == null || duration.isZero() || duration.isNegative()) {
-      throw new IllegalArgumentException("Lease duration must be positive.");
-    }
-    return duration;
-  }
 }

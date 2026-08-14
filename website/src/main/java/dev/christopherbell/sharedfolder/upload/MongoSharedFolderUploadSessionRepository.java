@@ -48,6 +48,45 @@ public class MongoSharedFolderUploadSessionRepository
     return update(Query.query(Criteria.where("id").is(id).and("state").is(SharedFolderUploadState.EXPIRED).andOperator(attempts)),
         new Update().set("maintenanceRetryAt", retryAt).set("maintenanceAttempts", next).set("updatedAt", updatedAt));
   }
+  @Override public Optional<Instant> acquireAppendLease(
+      String id, String token, long offset, Duration duration) {
+    return mongo.findAndUpdateDatabaseLease(Query.query(Criteria.where("id").is(id)
+            .and("state").is(SharedFolderUploadState.APPENDING)
+            .and("appendLeaseToken").is(null).and("appendOffset").is(offset)
+            .and("appendLeaseExpiresAt").is(null)),
+        MongoDatabaseLeaseMutation.claimExpired(
+            new Update().set("appendLeaseToken", token).currentDate("updatedAt"),
+            "appendLeaseExpiresAt", duration, true))
+        .map(SharedFolderUploadSession::getAppendLeaseExpiresAt);
+  }
+  @Override public Optional<Instant> acquireFinalizationLease(String id, String token,
+      SharedFolderUploadFinalizationState state, Duration duration) {
+    return mongo.findAndUpdateDatabaseLease(Query.query(Criteria.where("id").is(id)
+            .and("state").is(SharedFolderUploadState.FINALIZING)
+            .and("finalizationLeaseToken").is(null).and("finalizationState").is(state)
+            .and("finalizationLeaseExpiresAt").is(null)),
+        MongoDatabaseLeaseMutation.claimExpired(
+            new Update().set("finalizationLeaseToken", token).currentDate("updatedAt"),
+            "finalizationLeaseExpiresAt", duration, true))
+        .map(SharedFolderUploadSession::getFinalizationLeaseExpiresAt);
+  }
+  @Override public boolean relinquishAppendLease(String id, String token, long offset) {
+    return mongo.findAndUpdateDatabaseLease(Query.query(Criteria.where("id").is(id)
+            .and("state").is(SharedFolderUploadState.APPENDING)
+            .and("appendLeaseToken").is(token).and("appendOffset").is(offset)),
+        MongoDatabaseLeaseMutation.release(
+            new Update().currentDate("appendLeaseExpiresAt").currentDate("updatedAt"),
+            "appendLeaseExpiresAt", true)).isPresent();
+  }
+  @Override public boolean relinquishFinalizationLease(String id, String token,
+      SharedFolderUploadFinalizationState state) {
+    return mongo.findAndUpdateDatabaseLease(Query.query(Criteria.where("id").is(id)
+            .and("state").is(SharedFolderUploadState.FINALIZING)
+            .and("finalizationLeaseToken").is(token).and("finalizationState").is(state)),
+        MongoDatabaseLeaseMutation.release(
+            new Update().currentDate("finalizationLeaseExpiresAt").currentDate("updatedAt"),
+            "finalizationLeaseExpiresAt", true)).isPresent();
+  }
   @Override public Optional<Instant> renewFinalizationLease(String id, String token,
       SharedFolderUploadFinalizationState state, Duration duration) {
     return mongo.findAndUpdateDatabaseLease(Query.query(Criteria.where("id").is(id)

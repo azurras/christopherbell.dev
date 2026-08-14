@@ -31,6 +31,16 @@ public class MongoSharedFolderMutationRecoveryRepository
   @Override public List<SharedFolderMutationRecovery> findTop100ByOrderByUpdatedAtAsc() {
     return find(new Query(), PageRequest.of(0, 100, Sort.by("updatedAt")));
   }
+  @Override public Optional<Instant> acquireOperationLease(
+      String id, String token, SharedFolderMutationRecoveryState state, Duration duration) {
+    return mongo.findAndUpdateDatabaseLease(Query.query(Criteria.where("id").is(id)
+            .and("operationLeaseToken").is(null).and("state").is(state)
+            .and("operationLeaseExpiresAt").is(null)),
+        MongoDatabaseLeaseMutation.claimExpired(
+            new Update().set("operationLeaseToken", token).currentDate("updatedAt"),
+            "operationLeaseExpiresAt", duration, false))
+        .map(SharedFolderMutationRecovery::getOperationLeaseExpiresAt);
+  }
   @Override public Optional<Instant> renewOperationLease(
       String id, String token, SharedFolderMutationRecoveryState state, Duration duration) {
     return mongo.findAndUpdateDatabaseLease(Query.query(Criteria.where("id").is(id)

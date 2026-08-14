@@ -504,6 +504,28 @@ class MongoKindScopedOperationsTest {
   }
 
   @Test
+  void duplicateInsertSanitizesNativeDiagnosticCause() {
+    var value = new SampleDocument(
+        "legacy-id", "Ada", 1L, new Decimal128(1L), null);
+    var nativeFailure = commandFailure(
+        11000, "duplicate key index secret-index key secret-id payload secret-value");
+    when(mongo.insert(any(Document.class), eq("content")))
+        .thenThrow(new DuplicateKeyException("spring secret payload", nativeFailure));
+
+    assertThatThrownBy(() -> operations.insert(value))
+        .isInstanceOf(DuplicateKeyException.class)
+        .hasMessage("Mongo domain identity already exists.")
+        .satisfies(failure -> {
+          assertThat(failure.getCause())
+              .isNotNull()
+              .isNotSameAs(nativeFailure)
+              .hasMessage("MongoDB duplicate key conflict (code 11000).");
+          assertThat(stackTrace(failure)).doesNotContain(
+              "secret-index", "secret-id", "secret-value", "payload");
+        });
+  }
+
+  @Test
   void versionedInsertRaceIsRedactedAsOptimisticContention() {
     var value = new SampleDocument(
         "legacy-id", "Ada", 1L, new Decimal128(1L), null);

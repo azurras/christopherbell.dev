@@ -51,6 +51,7 @@ class MongoTask4ParityContractTest implements Task4PersistenceParityContract {
   private static MongoClient contenderClient;
   private static MongoTemplate mongo;
   private static LeaseStore applicationLeases;
+  private static LeaseStore applicationLeaseContender;
   private static MusicTrackRepository tracks;
   private static MusicCatalogQueryRepository catalog;
   private static MusicPlaylistRepository playlists;
@@ -105,6 +106,7 @@ class MongoTask4ParityContractTest implements Task4PersistenceParityContract {
     contenderClient = MongoClients.create(connection);
     var contenderFactory = DomainMongoOperationsTestFactory.createForDisposableMongo(
         new MongoTemplate(contenderClient, "test"));
+    applicationLeaseContender = new MongoApplicationLeaseStore(contenderFactory);
     maintenanceLeaseContender = new MongoSharedFolderMaintenanceLeaseStore(contenderFactory);
     recoveryContender = new MongoSharedFolderMutationRecoveryRepository(contenderFactory);
     uploadSessionContender = new MongoSharedFolderUploadSessionRepository(contenderFactory);
@@ -122,6 +124,22 @@ class MongoTask4ParityContractTest implements Task4PersistenceParityContract {
   }
 
   @Override public LeaseStore applicationLeases() { return applicationLeases; }
+  @Override public LeaseStore applicationLeaseContender() { return applicationLeaseContender; }
+  @Override public Instant persistenceNow() {
+    return mongo.executeCommand(new org.bson.Document("hello", 1))
+        .getDate("localTime").toInstant();
+  }
+  @Override public void expireApplicationLease(LeaseGrant grant) {
+    var result = mongo.getCollection("application_runtime").updateOne(
+        new org.bson.Document("_kind", "application_lease")
+            .append("_id.legacyId", grant.leaseName())
+            .append("payload.fenceToken", grant.fenceToken()),
+        new org.bson.Document("$set", new org.bson.Document(
+            "payload.expiresAt", java.util.Date.from(Instant.EPOCH))));
+    if (result.getModifiedCount() != 1) {
+      throw new IllegalStateException("Mongo application lease expiry fixture did not match.");
+    }
+  }
   @Override public MusicTrackRepository tracks() { return tracks; }
   @Override public MusicCatalogQueryRepository catalog() { return catalog; }
   @Override public MusicPlaylistRepository playlists() { return playlists; }

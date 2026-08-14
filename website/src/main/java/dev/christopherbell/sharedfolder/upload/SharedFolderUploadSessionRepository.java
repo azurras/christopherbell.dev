@@ -34,6 +34,26 @@ public interface SharedFolderUploadSessionRepository {
       int newAttempts,
       Instant updatedAt);
 
+  /** Issues the initial APPENDING deadline after the durable intent is persisted. */
+  Optional<Instant> acquireAppendLease(
+      String id, String appendLeaseToken, long appendOffset, Duration duration);
+
+  /** Issues the initial FINALIZING deadline after the durable intent is persisted. */
+  Optional<Instant> acquireFinalizationLease(
+      String id,
+      String finalizationLeaseToken,
+      SharedFolderUploadFinalizationState finalizationState,
+      Duration duration);
+
+  /** Relinquishes the exact live APPENDING writer at database time for retry reconciliation. */
+  boolean relinquishAppendLease(String id, String appendLeaseToken, long appendOffset);
+
+  /** Relinquishes the exact live FINALIZING writer at database time for retry reconciliation. */
+  boolean relinquishFinalizationLease(
+      String id,
+      String finalizationLeaseToken,
+      SharedFolderUploadFinalizationState finalizationState);
+
   /** Extends only the exact FINALIZING writer and phase, advancing its optimistic-lock version. */
   Optional<Instant> renewFinalizationLease(
       String id,

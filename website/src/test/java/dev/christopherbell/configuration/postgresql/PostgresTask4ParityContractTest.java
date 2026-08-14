@@ -7,6 +7,7 @@ import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.persistence.PostgresApplicationLeaseStore;
 import dev.christopherbell.libs.lease.LeaseStore;
 import dev.christopherbell.libs.lease.LeaseGrant;
+import static dev.christopherbell.persistence.jooq.platform.Tables.APPLICATION_LEASE;
 import static dev.christopherbell.persistence.jooq.shared_folder.Tables.MAINTENANCE_LEASE;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -49,6 +50,7 @@ class PostgresTask4ParityContractTest implements Task4PersistenceParityContract 
   private static Task3PostgresqlTestSupport.Database database;
   private static Task3PostgresqlTestSupport.Database contenderDatabase;
   private static LeaseStore applicationLeases;
+  private static LeaseStore applicationLeaseContender;
   private static MusicTrackRepository tracks;
   private static MusicCatalogQueryRepository catalog;
   private static MusicPlaylistRepository playlists;
@@ -77,6 +79,7 @@ class PostgresTask4ParityContractTest implements Task4PersistenceParityContract 
         .passwordHash("hash").role(Role.USER).status(AccountStatus.ACTIVE)
         .username("task4-parity-owner").build());
     applicationLeases = new PostgresApplicationLeaseStore(database.dsl());
+    applicationLeaseContender = new PostgresApplicationLeaseStore(contenderDatabase.dsl());
     tracks = new PostgresMusicTrackRepository(database.dsl());
     catalog = new PostgresMusicCatalogQueryRepository(database.dsl());
     playlists = new PostgresMusicPlaylistRepository(database.dsl());
@@ -107,6 +110,18 @@ class PostgresTask4ParityContractTest implements Task4PersistenceParityContract 
   }
 
   @Override public LeaseStore applicationLeases() { return applicationLeases; }
+  @Override public LeaseStore applicationLeaseContender() { return applicationLeaseContender; }
+  @Override public Instant persistenceNow() {
+    return database.dsl().select(org.jooq.impl.DSL.currentOffsetDateTime())
+        .fetchOne(0, java.time.OffsetDateTime.class).toInstant();
+  }
+  @Override public void expireApplicationLease(LeaseGrant grant) {
+    database.dsl().update(APPLICATION_LEASE)
+        .set(APPLICATION_LEASE.EXPIRES_AT, Instant.EPOCH.atOffset(ZoneOffset.UTC))
+        .where(APPLICATION_LEASE.LEASE_NAME.eq(grant.leaseName())
+            .and(APPLICATION_LEASE.FENCE_TOKEN.eq(grant.fenceToken())))
+        .execute();
+  }
   @Override public MusicTrackRepository tracks() { return tracks; }
   @Override public MusicCatalogQueryRepository catalog() { return catalog; }
   @Override public MusicPlaylistRepository playlists() { return playlists; }

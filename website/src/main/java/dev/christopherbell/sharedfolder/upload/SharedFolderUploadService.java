@@ -431,8 +431,7 @@ public class SharedFolderUploadService {
     }
     Boolean pendingReplace = session.getFinalizingReplace();
     session = reconcilePending(session);
-    if (session.getState() == SharedFolderUploadState.FINALIZING
-        && finalizationLeaseIsLive(session)) {
+    if (session.getState() == SharedFolderUploadState.FINALIZING) {
       throw conflict();
     }
     if (pendingReplace != null && session.getState() == SharedFolderUploadState.ACTIVE) {
@@ -738,16 +737,27 @@ public class SharedFolderUploadService {
       throw conflict();
     }
     current.setState(SharedFolderUploadState.APPENDING);
-    current.setAppendLeaseToken(serviceInstanceId + ":" + UUID.randomUUID());
+    String appendLeaseToken = serviceInstanceId + ":" + UUID.randomUUID();
+    current.setAppendLeaseToken(null);
     Instant now = leaseNow();
-    current.setAppendLeaseExpiresAt(now.plus(appendLeaseDuration()));
+    current.setAppendLeaseExpiresAt(null);
     current.setAppendOffset(offset);
     current.setAppendLength(length);
     current.setAppendDigest(digest);
     current.setAppendChunkKey(chunkKey);
     current.setUpdatedAt(now);
     try {
-      return sessions.save(current);
+      var saved = sessions.save(current);
+      var expiresAt = sessions.acquireAppendLease(
+          saved.getId(), appendLeaseToken, saved.getAppendOffset(),
+          appendLeaseDuration());
+      if (expiresAt.isEmpty()) {
+        throw new AppendLeaseLostException();
+      }
+      advanceVersionAfterLeaseRenewal(saved);
+      saved.setAppendLeaseToken(appendLeaseToken);
+      saved.setAppendLeaseExpiresAt(expiresAt.orElseThrow());
+      return saved;
     } catch (RuntimeException exception) {
       throw conflict();
     }
@@ -764,7 +774,6 @@ public class SharedFolderUploadService {
   }
 
   private void renewAppendLease(SharedFolderUploadSession session) {
-    Instant now = leaseNow();
     var expiresAt = sessions.renewAppendLease(
         session.getId(), session.getAppendLeaseToken(), session.getAppendOffset(),
         appendLeaseDuration());
@@ -773,7 +782,6 @@ public class SharedFolderUploadService {
     }
     advanceVersionAfterLeaseRenewal(session);
     session.setAppendLeaseExpiresAt(expiresAt.orElseThrow());
-    session.setUpdatedAt(now);
   }
 
   /** Test seam for deterministic short append leases. */
@@ -805,10 +813,7 @@ public class SharedFolderUploadService {
 
   private SharedFolderUploadSession reconcileExpiredAppendLease(
       SharedFolderUploadSession session) {
-    Instant now = leaseNow();
-    if (session.getState() != SharedFolderUploadState.APPENDING
-        || session.getAppendLeaseExpiresAt() != null
-            && session.getAppendLeaseExpiresAt().isAfter(now)) {
+    if (session.getState() != SharedFolderUploadState.APPENDING) {
       return session;
     }
     beforeExpiredAppendLeaseClaim();
@@ -999,13 +1004,25 @@ public class SharedFolderUploadService {
     session.setFinalizingTargetIdentity(targetIdentity);
     session.setFinalizingQuarantineKey(replace ? UUID.randomUUID().toString() : null);
     session.setFinalizationState(SharedFolderUploadFinalizationState.PREPARED);
-    session.setFinalizationLeaseToken(serviceInstanceId + ":finalize:" + UUID.randomUUID());
+    String finalizationLeaseToken =
+        serviceInstanceId + ":finalize:" + UUID.randomUUID();
+    session.setFinalizationLeaseToken(null);
     Instant now = leaseNow();
-    session.setFinalizationLeaseExpiresAt(now.plus(finalizationLeaseDuration()));
+    session.setFinalizationLeaseExpiresAt(null);
     session.setState(SharedFolderUploadState.FINALIZING);
     session.setUpdatedAt(now);
     try {
-      return sessions.save(session);
+      var saved = sessions.save(session);
+      var expiresAt = sessions.acquireFinalizationLease(
+          saved.getId(), finalizationLeaseToken, saved.getFinalizationState(),
+          finalizationLeaseDuration());
+      if (expiresAt.isEmpty()) {
+        throw new FinalizationLeaseLostException();
+      }
+      advanceVersionAfterLeaseRenewal(saved);
+      saved.setFinalizationLeaseToken(finalizationLeaseToken);
+      saved.setFinalizationLeaseExpiresAt(expiresAt.orElseThrow());
+      return saved;
     } catch (RuntimeException exception) {
       session.setState(SharedFolderUploadState.ACTIVE);
       session.setFinalizingIdentity(null);
@@ -1105,7 +1122,6 @@ public class SharedFolderUploadService {
     session.setFinalizationState(state);
     Instant now = leaseNow();
     session.setUpdatedAt(now);
-    session.setFinalizationLeaseExpiresAt(now.plus(finalizationLeaseDuration()));
     try {
       return sessions.save(session);
     } catch (RuntimeException exception) {
@@ -1131,9 +1147,6 @@ public class SharedFolderUploadService {
     if (!nativeBoundary.nativeMode() && !nativeBoundary.testOnlyPortableMode()) {
       throw unavailable();
     }
-    if (finalizationLeaseIsLive(session)) {
-      return session;
-    }
     String finalizationId = session.getId();
     session = claimExpiredFinalization(session);
     if (session == null) {
@@ -1151,14 +1164,7 @@ public class SharedFolderUploadService {
     return session;
   }
 
-  private boolean finalizationLeaseIsLive(SharedFolderUploadSession session) {
-    return session.getFinalizationLeaseToken() != null
-        && session.getFinalizationLeaseExpiresAt() != null
-        && session.getFinalizationLeaseExpiresAt().isAfter(leaseNow());
-  }
-
   private SharedFolderUploadSession claimExpiredFinalization(SharedFolderUploadSession session) {
-    Instant now = leaseNow();
     String recoveryToken = serviceInstanceId + ":recovery:" + UUID.randomUUID();
     var claimedExpiry = sessions.claimExpiredFinalizationLease(
         session.getId(), session.getFinalizationLeaseToken(), session.getFinalizationState(),
@@ -1264,7 +1270,6 @@ public class SharedFolderUploadService {
     session.setFinalizationState(SharedFolderUploadFinalizationState.RESTORE_PENDING);
     Instant now = leaseNow();
     session.setUpdatedAt(now);
-    session.setFinalizationLeaseExpiresAt(now.plus(finalizationLeaseDuration()));
     try {
       return sessions.save(session);
     } catch (RuntimeException ignored) {
@@ -1283,7 +1288,6 @@ public class SharedFolderUploadService {
   }
 
   private void renewFinalizationLease(SharedFolderUploadSession session) {
-    Instant now = leaseNow();
     var expiresAt = sessions.renewFinalizationLease(
         session.getId(), session.getFinalizationLeaseToken(), session.getFinalizationState(),
         finalizationLeaseDuration());
@@ -1292,7 +1296,6 @@ public class SharedFolderUploadService {
     }
     advanceVersionAfterLeaseRenewal(session);
     session.setFinalizationLeaseExpiresAt(expiresAt.orElseThrow());
-    session.setUpdatedAt(now);
   }
 
   /** Keeps the in-memory aggregate aligned with the repository's atomic version increment. */
@@ -1813,10 +1816,11 @@ public class SharedFolderUploadService {
         && Objects.equals(reloaded.getAppendOffset(), offset)
         && Objects.equals(reloaded.getAppendLength(), length)
         && constantTimeEquals(reloaded.getAppendDigest(), digest)) {
-      reloaded.setAppendLeaseExpiresAt(Instant.now().minusSeconds(1));
-      reloaded.setUpdatedAt(Instant.now());
       try {
-        reconcileExpiredAppendLease(sessions.save(reloaded));
+        sessions.relinquishAppendLease(
+            reloaded.getId(), reloaded.getAppendLeaseToken(), reloaded.getAppendOffset());
+        reconcileExpiredAppendLease(
+            sessions.findById(reloaded.getId()).orElseThrow(this::conflict));
       } catch (RuntimeException exception) {
         throw conflict();
       }
@@ -1833,10 +1837,10 @@ public class SharedFolderUploadService {
     if (reloaded.getState() == SharedFolderUploadState.FINALIZING
         && Objects.equals(
             reloaded.getFinalizationLeaseToken(), completedFinalizationLeaseToken)) {
-      reloaded.setFinalizationLeaseExpiresAt(Instant.now().minusSeconds(1));
-      reloaded.setUpdatedAt(Instant.now());
       try {
-        sessions.save(reloaded);
+        sessions.relinquishFinalizationLease(
+            reloaded.getId(), reloaded.getFinalizationLeaseToken(),
+            reloaded.getFinalizationState());
       } catch (RuntimeException ignored) {
         // A later status call will retry once the still-durable lease expires naturally.
       }

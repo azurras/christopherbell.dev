@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.model.Account;
@@ -855,7 +856,11 @@ class SharedFolderMutationServiceTest {
         .renewOperationLease(any(), any(), any(), any());
 
     SharedFolderMutationService recovering = new SharedFolderMutationService(
-        access, properties(root), WindowsSharedFolderMutationBoundary.inactive(), repository);
+        access, properties(root), WindowsSharedFolderMutationBoundary.inactive(), repository) {
+      @Override protected Instant leaseNow() {
+        return Instant.parse("1900-01-01T00:00:00Z");
+      }
+    };
     assertConflict(recovering::reconcileStartup);
 
     assertThat(Files.readString(docs.resolve("source.txt"))).isEqualTo("source");
@@ -864,6 +869,42 @@ class SharedFolderMutationServiceTest {
         .resolve(durable.getQuarantineKey());
     assertThat(Files.size(quarantine)).isEqualTo(256 * 1024);
     assertThat(records).hasSize(1);
+  }
+
+  @Test
+  void fastHostClockCannotAccelerateLiveMutationRecoveryOwnership() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("fast-host-live-recovery"));
+    Map<String, SharedFolderMutationRecovery> records = new ConcurrentHashMap<>();
+    SharedFolderMutationRecovery live = new SharedFolderMutationRecovery();
+    live.setId("live-recovery");
+    live.setVersion(0L);
+    live.setOwnerId("account-1");
+    live.setSourcePath("source.txt");
+    live.setDestinationParentPath("");
+    live.setName("target.txt");
+    live.setSourceIdentity("source-identity");
+    live.setNativeMode(false);
+    live.setState(SharedFolderMutationRecoveryState.PREPARED);
+    live.setOperationLeaseToken("live-owner");
+    live.setOperationLeaseExpiresAt(Instant.now().plus(Duration.ofHours(1)));
+    live.setCreatedAt(Instant.now());
+    live.setUpdatedAt(Instant.now());
+    records.put(live.getId(), live);
+    SharedFolderMutationRecoveryRepository repository = recoveryRepository(records);
+    SharedFolderMutationService recovering = new SharedFolderMutationService(
+        mock(SharedFolderAccessService.class), properties(root),
+        WindowsSharedFolderMutationBoundary.inactive(), repository) {
+      @Override protected Instant leaseNow() {
+        return Instant.parse("2200-01-01T00:00:00Z");
+      }
+    };
+
+    recovering.reconcileStartup();
+
+    verify(repository).claimExpiredOperationLease(
+        eq(live.getId()), eq("live-owner"), eq(SharedFolderMutationRecoveryState.PREPARED),
+        any(), any());
+    assertThat(records.get(live.getId()).getOperationLeaseToken()).isEqualTo("live-owner");
   }
 
   @Test
@@ -1043,6 +1084,22 @@ class SharedFolderMutationServiceTest {
     when(repository.findById(any(String.class))).thenAnswer(invocation ->
         java.util.Optional.ofNullable(records.get(invocation.getArgument(0)))
             .map(SharedFolderMutationRecovery::copy));
+    org.mockito.Mockito.doAnswer(invocation -> {
+      synchronized (records) {
+        SharedFolderMutationRecovery current = records.get(invocation.getArgument(0));
+        if (current == null
+            || current.getOperationLeaseToken() != null
+            || current.getState() != invocation.getArgument(2)
+            || current.getOperationLeaseExpiresAt() != null) {
+          return java.util.Optional.empty();
+        }
+        Instant issuedExpiry = Instant.now().plus(invocation.<Duration>getArgument(3));
+        current.setOperationLeaseToken(invocation.getArgument(1));
+        current.setOperationLeaseExpiresAt(issuedExpiry);
+        current.setUpdatedAt(Instant.now());
+        return java.util.Optional.of(issuedExpiry);
+      }
+    }).when(repository).acquireOperationLease(any(), any(), any(), any());
     org.mockito.Mockito.doAnswer(invocation -> {
       synchronized (records) {
         SharedFolderMutationRecovery current = records.get(invocation.getArgument(0));

@@ -54,6 +54,9 @@ public class MongoSharedFolderMaintenanceLeaseStore
 
   @Override
   public Optional<LeaseGrant> renew(LeaseGrant grant, Duration duration) {
+    if (!SharedFolderMaintenanceLeaseDocument.ID.equals(grant.leaseName())) {
+      return Optional.empty();
+    }
     Query query = Query.query(Criteria.where("id")
         .is(SharedFolderMaintenanceLeaseDocument.ID)
         .and("ownerToken").is(grant.ownerId())
@@ -65,6 +68,9 @@ public class MongoSharedFolderMaintenanceLeaseStore
 
   @Override
   public boolean release(LeaseGrant grant) {
+    if (!SharedFolderMaintenanceLeaseDocument.ID.equals(grant.leaseName())) {
+      return false;
+    }
     Query query = Query.query(Criteria.where("id")
         .is(SharedFolderMaintenanceLeaseDocument.ID)
         .and("ownerToken").is(grant.ownerId())

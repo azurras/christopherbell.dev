@@ -55,6 +55,9 @@ interface Task4PersistenceParityContract {
   String OWNER_ID = "task4-parity-owner";
 
   LeaseStore applicationLeases();
+  LeaseStore applicationLeaseContender();
+  Instant persistenceNow();
+  void expireApplicationLease(LeaseGrant grant);
   MusicTrackRepository tracks();
   MusicCatalogQueryRepository catalog();
   MusicPlaylistRepository playlists();
@@ -76,17 +79,23 @@ interface Task4PersistenceParityContract {
 
   @Test
   default void applicationLeasePreservesExclusiveOwnershipRenewalAndMonotonicFencing() {
+    Instant databaseBefore = persistenceNow();
     var first = applicationLeases().tryAcquire(
         "task4-parity-application", "owner-a", Duration.ofMinutes(1)).orElseThrow();
-    assertThat(applicationLeases().tryAcquire(
+    Instant databaseAfter = persistenceNow();
+    assertThat(first.expiresAt())
+        .isAfterOrEqualTo(databaseBefore.plusSeconds(59))
+        .isBeforeOrEqualTo(databaseAfter.plusSeconds(61));
+    assertThat(applicationLeaseContender().tryAcquire(
         "task4-parity-application", "owner-b", Duration.ofMinutes(1))).isEmpty();
     assertThat(applicationLeases().renew(first, Duration.ofMinutes(2))).isPresent();
-    assertThat(applicationLeases().release(first)).isTrue();
-
-    var next = applicationLeases().tryAcquire(
+    expireApplicationLease(first);
+    var next = applicationLeaseContender().tryAcquire(
         "task4-parity-application", "owner-b", Duration.ofMinutes(1)).orElseThrow();
     assertThat(next.fenceToken()).isGreaterThan(first.fenceToken());
+    assertThat(applicationLeases().renew(first, Duration.ofMinutes(1))).isEmpty();
     assertThat(applicationLeases().release(first)).isFalse();
+    assertThat(applicationLeaseContender().release(next)).isTrue();
   }
 
   @Test
@@ -183,6 +192,13 @@ interface Task4PersistenceParityContract {
         .tryAcquire("task4-owner-b", Duration.ofMinutes(1))).isEmpty();
     assertThat(maintenanceLeases().renew(firstMaintenanceGrant, Duration.ofMinutes(2)))
         .isPresent();
+    var wrongNameGrant = new LeaseGrant(
+        firstMaintenanceGrant.leaseName() + "-collision",
+        firstMaintenanceGrant.ownerId(),
+        firstMaintenanceGrant.fenceToken(),
+        firstMaintenanceGrant.expiresAt());
+    assertThat(maintenanceLeases().renew(wrongNameGrant, Duration.ofMinutes(2))).isEmpty();
+    assertThat(maintenanceLeases().release(wrongNameGrant)).isFalse();
     expireMaintenanceLease(firstMaintenanceGrant);
     var takeover = maintenanceLeaseContender()
         .tryAcquire("task4-owner-a", Duration.ofMinutes(1)).orElseThrow();
@@ -264,6 +280,22 @@ interface Task4PersistenceParityContract {
 
   @Test
   default void recoveryAndUploadClaimsUseDatabaseTimeAndExactFencing() throws Exception {
+    var initiallyUnissuedRecovery = recoveries().save(recovery(
+        "task4-recovery-initial-database-time", null, null));
+    var recoveryInitialExpiry = recoveries().acquireOperationLease(
+        initiallyUnissuedRecovery.getId(), "task4-recovery-initial",
+        initiallyUnissuedRecovery.getState(), Duration.ofMinutes(1));
+    assertThat(recoveryInitialExpiry).isPresent();
+    assertThat(recoveryContender().acquireOperationLease(
+        initiallyUnissuedRecovery.getId(), "task4-recovery-initial-contender",
+        initiallyUnissuedRecovery.getState(), Duration.ofMinutes(1))).isEmpty();
+
+    var abandonedRecovery = recoveries().save(recovery(
+        "task4-recovery-abandoned-before-acquire", null, null));
+    assertThat(recoveryContender().claimExpiredOperationLease(
+        abandonedRecovery.getId(), null, abandonedRecovery.getState(),
+        "task4-recovery-abandoned-owner", Duration.ofMinutes(1))).isPresent();
+
     var recovery = recoveries().save(recovery(
         "task4-recovery-fence", "task4-recovery-old", Instant.EPOCH));
     var staleRecovery = recovery.copy();
@@ -324,6 +356,27 @@ interface Task4PersistenceParityContract {
     completedAppend = uploadSessions().save(completedAppend);
     assertThat(completedAppend.getState()).isEqualTo(SharedFolderUploadState.ACTIVE);
 
+    var initiallyUnissuedAppend = uploadSessions().save(uploadWithAppendLease(
+        "task4-upload-append-initial-database-time", null, null));
+    assertThat(uploadSessions().acquireAppendLease(initiallyUnissuedAppend.getId(),
+        "task4-append-initial", 0, Duration.ofMinutes(1))).isPresent();
+    assertThat(uploadSessionContender().acquireAppendLease(initiallyUnissuedAppend.getId(),
+        "task4-append-initial-contender", 0, Duration.ofMinutes(1))).isEmpty();
+
+    var abandonedAppend = uploadSessions().save(uploadWithAppendLease(
+        "task4-upload-append-abandoned-before-acquire", null, null));
+    assertThat(uploadSessionContender().claimExpiredAppendLease(
+        abandonedAppend.getId(), null, 0,
+        "task4-append-abandoned-owner", Duration.ofMinutes(1))).isPresent();
+
+    assertThat(uploadSessionContender().relinquishAppendLease(
+        initiallyUnissuedAppend.getId(), "wrong-owner", 0)).isFalse();
+    assertThat(uploadSessions().relinquishAppendLease(
+        initiallyUnissuedAppend.getId(), "task4-append-initial", 0)).isTrue();
+    assertThat(uploadSessionContender().claimExpiredAppendLease(
+        initiallyUnissuedAppend.getId(), "task4-append-initial", 0,
+        "task4-append-relinquished-owner", Duration.ofMinutes(1))).isPresent();
+
     var finalization = uploadSessions().save(uploadWithFinalizationLease(
         "task4-upload-finalization-fence", "task4-finalization-old", Instant.EPOCH));
     assertThat(uploadSessions().renewFinalizationLease(finalization.getId(),
@@ -354,6 +407,34 @@ interface Task4PersistenceParityContract {
     completedFinalization.setFinalizationLeaseExpiresAt(null);
     completedFinalization = uploadSessions().save(completedFinalization);
     assertThat(completedFinalization.getState()).isEqualTo(SharedFolderUploadState.COMPLETED);
+
+    var initiallyUnissuedFinalization = uploadSessions().save(uploadWithFinalizationLease(
+        "task4-upload-finalization-initial-database-time", null, null));
+    assertThat(uploadSessions().acquireFinalizationLease(
+        initiallyUnissuedFinalization.getId(),
+        "task4-finalization-initial",
+        SharedFolderUploadFinalizationState.PREPARED, Duration.ofMinutes(1))).isPresent();
+    assertThat(uploadSessionContender().acquireFinalizationLease(
+        initiallyUnissuedFinalization.getId(),
+        "task4-finalization-initial-contender",
+        SharedFolderUploadFinalizationState.PREPARED, Duration.ofMinutes(1))).isEmpty();
+
+    var abandonedFinalization = uploadSessions().save(uploadWithFinalizationLease(
+        "task4-upload-finalization-abandoned-before-acquire", null, null));
+    assertThat(uploadSessionContender().claimExpiredFinalizationLease(
+        abandonedFinalization.getId(), null, SharedFolderUploadFinalizationState.PREPARED,
+        "task4-finalization-abandoned-owner", Duration.ofMinutes(1))).isPresent();
+
+    assertThat(uploadSessionContender().relinquishFinalizationLease(
+        initiallyUnissuedFinalization.getId(), "wrong-owner",
+        SharedFolderUploadFinalizationState.PREPARED)).isFalse();
+    assertThat(uploadSessions().relinquishFinalizationLease(
+        initiallyUnissuedFinalization.getId(), "task4-finalization-initial",
+        SharedFolderUploadFinalizationState.PREPARED)).isTrue();
+    assertThat(uploadSessionContender().claimExpiredFinalizationLease(
+        initiallyUnissuedFinalization.getId(), "task4-finalization-initial",
+        SharedFolderUploadFinalizationState.PREPARED,
+        "task4-finalization-relinquished-owner", Duration.ofMinutes(1))).isPresent();
   }
 
   @Test

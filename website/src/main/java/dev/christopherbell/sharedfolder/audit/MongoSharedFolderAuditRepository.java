@@ -27,7 +27,8 @@ public class MongoSharedFolderAuditRepository
         .map(SharedFolderAuditEvent::id).toList();
     int deleted = 0;
     for (String id : ids) {
-      if (mongo.remove(Query.query(Criteria.where("id").is(id))).getDeletedCount() == 1) deleted++;
+      if (mongo.remove(Query.query(Criteria.where("id").is(id)
+          .and("expiresAt").lte(cutoff))).getDeletedCount() == 1) deleted++;
     }
     return deleted;
   }

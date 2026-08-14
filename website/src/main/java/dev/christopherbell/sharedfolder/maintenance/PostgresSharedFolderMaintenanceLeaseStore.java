@@ -3,6 +3,7 @@ package dev.christopherbell.sharedfolder.maintenance;
 import static dev.christopherbell.persistence.jooq.shared_folder.Tables.MAINTENANCE_LEASE;
 
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlLeaseFields;
 import dev.christopherbell.libs.lease.LeaseGrant;
 import dev.christopherbell.libs.lease.LeaseIdentity;
 import java.time.Duration;
@@ -28,7 +29,7 @@ public class PostgresSharedFolderMaintenanceLeaseStore
   @Override public Optional<LeaseGrant> tryAcquire(String ownerToken, Duration duration) {
     new LeaseIdentity(LEASE_NAME, ownerToken);
     Field<OffsetDateTime> now = DSL.currentOffsetDateTime();
-    Field<OffsetDateTime> expiry = databaseExpiry(duration);
+    Field<OffsetDateTime> expiry = PostgresqlLeaseFields.expiresAfter(duration);
     var row = database.insertInto(MAINTENANCE_LEASE).set(MAINTENANCE_LEASE.LEASE_NAME, LEASE_NAME)
         .set(MAINTENANCE_LEASE.OWNER_TOKEN, ownerToken).set(MAINTENANCE_LEASE.FENCE_TOKEN, 1L)
         .set(MAINTENANCE_LEASE.ACQUIRED_AT, now).set(MAINTENANCE_LEASE.EXPIRES_AT, expiry)
@@ -42,9 +43,12 @@ public class PostgresSharedFolderMaintenanceLeaseStore
   }
 
   @Override public Optional<LeaseGrant> renew(LeaseGrant grant, Duration duration) {
+    if (!LEASE_NAME.equals(grant.leaseName())) {
+      return Optional.empty();
+    }
     Field<OffsetDateTime> now = DSL.currentOffsetDateTime();
     var row = database.update(MAINTENANCE_LEASE)
-        .set(MAINTENANCE_LEASE.EXPIRES_AT, databaseExpiry(duration))
+        .set(MAINTENANCE_LEASE.EXPIRES_AT, PostgresqlLeaseFields.expiresAfter(duration))
         .where(MAINTENANCE_LEASE.LEASE_NAME.eq(LEASE_NAME)
             .and(MAINTENANCE_LEASE.OWNER_TOKEN.eq(grant.ownerId()))
             .and(MAINTENANCE_LEASE.FENCE_TOKEN.eq(grant.fenceToken()))
@@ -53,6 +57,9 @@ public class PostgresSharedFolderMaintenanceLeaseStore
   }
 
   @Override public boolean release(LeaseGrant grant) {
+    if (!LEASE_NAME.equals(grant.leaseName())) {
+      return false;
+    }
     Field<OffsetDateTime> now = DSL.currentOffsetDateTime();
     return database.update(MAINTENANCE_LEASE).set(MAINTENANCE_LEASE.OWNER_TOKEN, "released")
         .set(MAINTENANCE_LEASE.EXPIRES_AT, Instant.EPOCH.atOffset(ZoneOffset.UTC))
@@ -68,18 +75,4 @@ public class PostgresSharedFolderMaintenanceLeaseStore
         row.getExpiresAt().toInstant());
   }
 
-  private static Field<OffsetDateTime> databaseExpiry(Duration duration) {
-    long microseconds;
-    try {
-      if (duration == null || duration.isZero() || duration.isNegative()) {
-        throw new IllegalArgumentException("Maintenance lease duration must be positive.");
-      }
-      microseconds = Math.addExact(Math.multiplyExact(duration.getSeconds(), 1_000_000L),
-          duration.getNano() / 1_000L);
-    } catch (ArithmeticException overflow) {
-      throw new IllegalArgumentException("Maintenance lease duration is too large.", overflow);
-    }
-    return DSL.field("current_timestamp + ({0} * interval '1 microsecond')",
-        OffsetDateTime.class, DSL.val(microseconds));
-  }
 }

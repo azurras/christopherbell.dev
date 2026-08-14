@@ -96,6 +96,23 @@ public class PostgresSharedFolderMutationRecoveryRepository
         .limit(100).fetch(PostgresSharedFolderMutationRecoveryRepository::map);
   }
 
+  @Override public Optional<Instant> acquireOperationLease(String id, String token,
+      SharedFolderMutationRecoveryState state, Duration duration) {
+    var now = DSL.currentOffsetDateTime();
+    var row = database.update(MUTATION_RECOVERY)
+        .set(MUTATION_RECOVERY.OPERATION_LEASE_EXPIRES_AT,
+            PostgresqlLeaseFields.expiresAfter(duration))
+        .set(MUTATION_RECOVERY.OPERATION_LEASE_TOKEN, token)
+        .set(MUTATION_RECOVERY.UPDATED_AT, now)
+        .where(MUTATION_RECOVERY.MUTATION_RECOVERY_ID.eq(id)
+            .and(MUTATION_RECOVERY.OPERATION_LEASE_TOKEN.isNull())
+            .and(MUTATION_RECOVERY.STATE.eq(state.name()))
+            .and(MUTATION_RECOVERY.OPERATION_LEASE_EXPIRES_AT.isNull()))
+        .returning(MUTATION_RECOVERY.OPERATION_LEASE_EXPIRES_AT).fetchOne();
+    return row == null ? Optional.empty()
+        : Optional.of(row.getOperationLeaseExpiresAt().toInstant());
+  }
+
   @Override public Optional<Instant> renewOperationLease(String id, String token,
       SharedFolderMutationRecoveryState state, Duration duration) {
     var now = DSL.currentOffsetDateTime();
@@ -121,7 +138,9 @@ public class PostgresSharedFolderMutationRecoveryRepository
             PostgresqlLeaseFields.expiresAfter(duration))
         .set(MUTATION_RECOVERY.UPDATED_AT, now)
         .where(MUTATION_RECOVERY.MUTATION_RECOVERY_ID.eq(id)
-            .and(MUTATION_RECOVERY.OPERATION_LEASE_TOKEN.eq(expiredToken))
+            .and(expiredToken == null
+                ? MUTATION_RECOVERY.OPERATION_LEASE_TOKEN.isNull()
+                : MUTATION_RECOVERY.OPERATION_LEASE_TOKEN.eq(expiredToken))
             .and(MUTATION_RECOVERY.STATE.eq(state.name()))
             .and(MUTATION_RECOVERY.OPERATION_LEASE_EXPIRES_AT.isNull()
                 .or(MUTATION_RECOVERY.OPERATION_LEASE_EXPIRES_AT.le(now))))

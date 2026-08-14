@@ -2,6 +2,7 @@ package dev.christopherbell.sharedfolder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doThrow;
@@ -404,7 +405,11 @@ class SharedFolderUploadServiceTest {
         .renewFinalizationLease(any(), any(), any(), any());
 
     SharedFolderUploadService recovering = new SharedFolderUploadService(
-        access, repository, properties(root));
+        access, repository, properties(root)) {
+      @Override protected Instant leaseNow() {
+        return Instant.parse("1900-01-01T00:00:00Z");
+      }
+    };
     assertConflict(() -> recovering.status(upload.id()));
 
     assertThat(Files.notExists(root.resolve("target.bin"))).isTrue();
@@ -550,6 +555,39 @@ class SharedFolderUploadServiceTest {
     assertThat(physicalTransitions).hasValue(1);
     assertThat(Files.size(staging)).isZero();
     assertThat(stored.get(upload.id()).getState()).isEqualTo(SharedFolderUploadState.ACTIVE);
+  }
+
+  @Test
+  void fastHostClockCannotAccelerateLiveAppendOwnership() throws Exception {
+    Path root = Files.createDirectories(temp.resolve("fast-host-live-append"));
+    Account account = new Account();
+    account.setId("account-1");
+    SharedFolderAccessService access = mock(SharedFolderAccessService.class);
+    when(access.requireWrite()).thenReturn(account);
+    Map<String, SharedFolderUploadSession> stored = new ConcurrentHashMap<>();
+    SharedFolderUploadSessionRepository repository = repository(stored);
+    SharedFolderUploadService setup = new SharedFolderUploadService(
+        access, repository, properties(root));
+    SharedFolderUploadStatus upload = setup.create(new SharedFolderUploadCreateRequest(
+        "", "target.bin", 1, null, null));
+    SharedFolderUploadSession live = stored.get(upload.id());
+    live.setState(SharedFolderUploadState.APPENDING);
+    live.setAppendLeaseToken("live-append-owner");
+    live.setAppendLeaseExpiresAt(Instant.now().plus(Duration.ofHours(1)));
+    live.setAppendOffset(0L);
+    live.setAppendLength(1L);
+    SharedFolderUploadService recovering = new SharedFolderUploadService(
+        access, repository, properties(root)) {
+      @Override protected Instant leaseNow() {
+        return Instant.parse("2200-01-01T00:00:00Z");
+      }
+    };
+
+    assertThat(recovering.status(upload.id()).state()).isEqualTo(SharedFolderUploadState.APPENDING);
+
+    verify(repository).claimExpiredAppendLease(
+        eq(upload.id()), eq("live-append-owner"), eq(0L), any(), any());
+    assertThat(stored.get(upload.id()).getAppendLeaseToken()).isEqualTo("live-append-owner");
   }
 
   @Test
@@ -2116,6 +2154,75 @@ class SharedFolderUploadServiceTest {
   private void stubFinalizationRenewal(
       SharedFolderUploadSessionRepository repository,
       Map<String, SharedFolderUploadSession> sessions) {
+    org.mockito.Mockito.doAnswer(invocation -> {
+      synchronized (sessions) {
+        SharedFolderUploadSession current = sessions.get(invocation.getArgument(0));
+        if (current == null
+            || current.getState() != SharedFolderUploadState.APPENDING
+            || !java.util.Objects.equals(current.getAppendLeaseToken(), invocation.getArgument(1))
+            || !java.util.Objects.equals(current.getAppendOffset(), invocation.getArgument(2))) {
+          return false;
+        }
+        current.setAppendLeaseExpiresAt(Instant.now());
+        current.setUpdatedAt(Instant.now());
+        current.setVersion(current.getVersion() + 1L);
+        return true;
+      }
+    }).when(repository).relinquishAppendLease(
+        any(), any(), org.mockito.ArgumentMatchers.anyLong());
+    org.mockito.Mockito.doAnswer(invocation -> {
+      synchronized (sessions) {
+        SharedFolderUploadSession current = sessions.get(invocation.getArgument(0));
+        if (current == null
+            || current.getState() != SharedFolderUploadState.FINALIZING
+            || !java.util.Objects.equals(
+                current.getFinalizationLeaseToken(), invocation.getArgument(1))
+            || current.getFinalizationState() != invocation.getArgument(2)) {
+          return false;
+        }
+        current.setFinalizationLeaseExpiresAt(Instant.now());
+        current.setUpdatedAt(Instant.now());
+        current.setVersion(current.getVersion() + 1L);
+        return true;
+      }
+    }).when(repository).relinquishFinalizationLease(any(), any(), any());
+    org.mockito.Mockito.doAnswer(invocation -> {
+      synchronized (sessions) {
+        SharedFolderUploadSession current = sessions.get(invocation.getArgument(0));
+        if (current == null
+            || current.getState() != SharedFolderUploadState.APPENDING
+            || current.getAppendLeaseToken() != null
+            || !java.util.Objects.equals(current.getAppendOffset(), invocation.getArgument(2))
+            || current.getAppendLeaseExpiresAt() != null) {
+          return java.util.Optional.empty();
+        }
+        Instant issuedExpiry = Instant.now().plus(invocation.<Duration>getArgument(3));
+        current.setAppendLeaseToken(invocation.getArgument(1));
+        current.setAppendLeaseExpiresAt(issuedExpiry);
+        current.setUpdatedAt(Instant.now());
+        current.setVersion(current.getVersion() + 1L);
+        return java.util.Optional.of(issuedExpiry);
+      }
+    }).when(repository).acquireAppendLease(
+        any(), any(), org.mockito.ArgumentMatchers.anyLong(), any());
+    org.mockito.Mockito.doAnswer(invocation -> {
+      synchronized (sessions) {
+        SharedFolderUploadSession current = sessions.get(invocation.getArgument(0));
+        if (current == null
+            || current.getState() != SharedFolderUploadState.FINALIZING
+            || current.getFinalizationLeaseToken() != null
+            || current.getFinalizationState() != invocation.getArgument(2)
+            || current.getFinalizationLeaseExpiresAt() != null) {
+          return java.util.Optional.empty();
+        }
+        Instant issuedExpiry = Instant.now().plus(invocation.<Duration>getArgument(3));
+        current.setFinalizationLeaseToken(invocation.getArgument(1));
+        current.setFinalizationLeaseExpiresAt(issuedExpiry);
+        current.setUpdatedAt(Instant.now());
+        current.setVersion(current.getVersion() + 1L);
+        return java.util.Optional.of(issuedExpiry);
+      }
+    }).when(repository).acquireFinalizationLease(any(), any(), any(), any());
     org.mockito.Mockito.doAnswer(invocation -> {
       synchronized (sessions) {
         SharedFolderUploadSession current = sessions.get(invocation.getArgument(0));

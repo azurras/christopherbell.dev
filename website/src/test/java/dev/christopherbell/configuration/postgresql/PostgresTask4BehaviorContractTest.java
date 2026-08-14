@@ -60,6 +60,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.jooq.DSLContext;
 import org.jooq.ExecuteContext;
@@ -231,6 +232,73 @@ class PostgresTask4BehaviorContractTest {
     assertThat(application.renew(first, Duration.ofMinutes(1))).isEmpty();
     assertThat(application.release(first)).isFalse();
     assertThat(application.release(next)).isTrue();
+  }
+
+  @Test
+  void retentionDeleteRechecksRowsRefreshedByAnIndependentConnection() throws Exception {
+    Instant cutoff = Instant.parse("1900-01-02T00:00:00Z");
+    Instant refreshedExpiry = Instant.parse("2200-01-01T00:00:00Z");
+    var attempts = new PostgresMusicAccessAttemptRepository(database.dsl());
+    attempts.record("retention-race-access", MusicAccessPrincipalType.IP, "127.0.0.1", "denied",
+        cutoff.minusSeconds(2), cutoff.minusSeconds(1));
+
+    try (var executor = Executors.newSingleThreadExecutor();
+         var refresher = schemas.openDatabase();
+         var deleter = schemas.openDatabase()) {
+      refresher.connection().setAutoCommit(false);
+      refresher.dsl().update(ACCESS_ATTEMPT)
+          .set(ACCESS_ATTEMPT.EXPIRES_AT, refreshedExpiry.atOffset(ZoneOffset.UTC))
+          .where(ACCESS_ATTEMPT.ACCESS_ATTEMPT_ID.eq("retention-race-access")).execute();
+      int deletingBackend = deleter.dsl()
+          .select(DSL.field("pg_backend_pid()", Integer.class)).fetchSingle().value1();
+      var deletion = executor.submit(() ->
+          new PostgresMusicAccessAttemptRepository(deleter.dsl()).deleteExpired(cutoff, 1));
+      awaitBlockedByRefresh(deletingBackend);
+      refresher.connection().commit();
+
+      assertThat(deletion.get(10, TimeUnit.SECONDS)).isZero();
+    }
+    assertThat(database.dsl().select(ACCESS_ATTEMPT.EXPIRES_AT).from(ACCESS_ATTEMPT)
+        .where(ACCESS_ATTEMPT.ACCESS_ATTEMPT_ID.eq("retention-race-access"))
+        .fetchOne(ACCESS_ATTEMPT.EXPIRES_AT)).isEqualTo(refreshedExpiry.atOffset(ZoneOffset.UTC));
+
+    var audits = new PostgresSharedFolderAuditRepository(database.dsl());
+    audits.save(new SharedFolderAuditEvent(
+        "retention-race-audit", "media-a", "READ", null, null, "SUCCESS", null,
+        "127.0.0.1", cutoff.minusSeconds(2), cutoff.minusSeconds(1)));
+    try (var executor = Executors.newSingleThreadExecutor();
+         var refresher = schemas.openDatabase();
+         var deleter = schemas.openDatabase()) {
+      refresher.connection().setAutoCommit(false);
+      refresher.dsl().update(AUDIT_EVENT)
+          .set(AUDIT_EVENT.EXPIRES_AT, refreshedExpiry.atOffset(ZoneOffset.UTC))
+          .where(AUDIT_EVENT.AUDIT_EVENT_ID.eq("retention-race-audit")).execute();
+      int deletingBackend = deleter.dsl()
+          .select(DSL.field("pg_backend_pid()", Integer.class)).fetchSingle().value1();
+      var deletion = executor.submit(() ->
+          new PostgresSharedFolderAuditRepository(deleter.dsl()).deleteExpired(cutoff, 1));
+      awaitBlockedByRefresh(deletingBackend);
+      refresher.connection().commit();
+
+      assertThat(deletion.get(10, TimeUnit.SECONDS)).isZero();
+    }
+    assertThat(database.dsl().select(AUDIT_EVENT.EXPIRES_AT).from(AUDIT_EVENT)
+        .where(AUDIT_EVENT.AUDIT_EVENT_ID.eq("retention-race-audit"))
+        .fetchOne(AUDIT_EVENT.EXPIRES_AT)).isEqualTo(refreshedExpiry.atOffset(ZoneOffset.UTC));
+  }
+
+  private static void awaitBlockedByRefresh(int deletingBackend) throws InterruptedException {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    while (System.nanoTime() < deadline) {
+      Integer blockers = database.dsl().select(DSL.field(
+          "cardinality(pg_blocking_pids({0}))", Integer.class, DSL.val(deletingBackend)))
+          .fetchSingle().value1();
+      if (blockers != null && blockers > 0) {
+        return;
+      }
+      Thread.sleep(10);
+    }
+    throw new AssertionError("Retention delete did not block on the independent refresh.");
   }
 
   @Test

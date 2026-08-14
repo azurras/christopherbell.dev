@@ -13,6 +13,13 @@ public interface SharedFolderMutationRecoveryRepository {
   List<SharedFolderMutationRecovery> findTop100ByOwnerIdOrderByUpdatedAtAsc(String ownerId);
   List<SharedFolderMutationRecovery> findTop100ByOrderByUpdatedAtAsc();
 
+  /** Issues the initial deadline for one persisted, not-yet-owned mutation intent. */
+  Optional<Instant> acquireOperationLease(
+      String id,
+      String operationLeaseToken,
+      SharedFolderMutationRecoveryState state,
+      Duration duration);
+
   /** Extends only the exact current writer's lease without advancing the document version. */
   Optional<Instant> renewOperationLease(
       String id,

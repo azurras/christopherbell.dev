@@ -510,10 +510,10 @@ public class SharedFolderMutationService {
     recovery.setQuarantineKey(UUID.randomUUID().toString());
     recovery.setNativeMode(false);
     recovery.setState(SharedFolderMutationRecoveryState.PREPARED);
-    assignOperationLease(recovery, now);
+    String operationLeaseToken = newOperationLeaseToken();
     recovery.setCreatedAt(now);
     recovery.setUpdatedAt(now);
-    return recoveries.save(recovery);
+    return saveWithOperationLease(recovery, operationLeaseToken);
   }
 
   private SharedFolderMutationRecovery prepareNativeRecovery(
@@ -534,10 +534,10 @@ public class SharedFolderMutationService {
     recovery.setQuarantineKey(UUID.randomUUID().toString());
     recovery.setNativeMode(true);
     recovery.setState(SharedFolderMutationRecoveryState.PREPARED);
-    assignOperationLease(recovery, now);
+    String operationLeaseToken = newOperationLeaseToken();
     recovery.setCreatedAt(now);
     recovery.setUpdatedAt(now);
-    return recoveries.save(recovery);
+    return saveWithOperationLease(recovery, operationLeaseToken);
   }
 
   private NativeFileMetadata replaceNativeThroughDurableQuarantine(
@@ -755,11 +755,6 @@ public class SharedFolderMutationService {
 
   private SharedFolderMutationRecovery claimExpiredRecovery(
       SharedFolderMutationRecovery candidate) {
-    Instant now = leaseNow();
-    if (candidate.getOperationLeaseExpiresAt() != null
-        && candidate.getOperationLeaseExpiresAt().isAfter(now)) {
-      return null;
-    }
     String recoveryToken = serviceInstanceId + ":recovery:" + UUID.randomUUID();
     var claimedExpiry = recoveries.claimExpiredOperationLease(
         candidate.getId(), candidate.getOperationLeaseToken(), candidate.getState(),
@@ -773,13 +768,26 @@ public class SharedFolderMutationService {
         .orElse(null);
   }
 
-  private void assignOperationLease(SharedFolderMutationRecovery recovery, Instant now) {
-    recovery.setOperationLeaseToken(serviceInstanceId + ":operation:" + UUID.randomUUID());
-    recovery.setOperationLeaseExpiresAt(now.plus(operationLeaseDuration()));
+  private String newOperationLeaseToken() {
+    return serviceInstanceId + ":operation:" + UUID.randomUUID();
+  }
+
+  private SharedFolderMutationRecovery saveWithOperationLease(
+      SharedFolderMutationRecovery recovery, String operationLeaseToken) {
+    recovery.setOperationLeaseToken(null);
+    recovery.setOperationLeaseExpiresAt(null);
+    var saved = recoveries.save(recovery);
+    var expiresAt = recoveries.acquireOperationLease(
+        saved.getId(), operationLeaseToken, saved.getState(), operationLeaseDuration());
+    if (expiresAt.isEmpty()) {
+      throw new OperationLeaseLostException();
+    }
+    saved.setOperationLeaseToken(operationLeaseToken);
+    saved.setOperationLeaseExpiresAt(expiresAt.orElseThrow());
+    return saved;
   }
 
   private void renewOperationLease(SharedFolderMutationRecovery recovery) {
-    Instant now = leaseNow();
     var expiresAt = recoveries.renewOperationLease(
         recovery.getId(), recovery.getOperationLeaseToken(), recovery.getState(),
         operationLeaseDuration());
@@ -787,7 +795,6 @@ public class SharedFolderMutationService {
       throw new OperationLeaseLostException();
     }
     recovery.setOperationLeaseExpiresAt(expiresAt.orElseThrow());
-    recovery.setUpdatedAt(now);
   }
 
   /** Test seam for deterministic short leases. */

@@ -44,12 +44,14 @@ public class PostgresMusicAccessAttemptRepository implements MusicAccessAttemptR
   }
 
   @Override public int deleteExpired(Instant cutoff, int limit) {
+    var expiresAtOrBefore = cutoff.atOffset(ZoneOffset.UTC);
     var ids = database.select(ACCESS_ATTEMPT.ACCESS_ATTEMPT_ID).from(ACCESS_ATTEMPT)
-        .where(ACCESS_ATTEMPT.EXPIRES_AT.le(cutoff.atOffset(ZoneOffset.UTC)))
+        .where(ACCESS_ATTEMPT.EXPIRES_AT.le(expiresAtOrBefore))
         .orderBy(ACCESS_ATTEMPT.EXPIRES_AT.asc(), ACCESS_ATTEMPT.ACCESS_ATTEMPT_ID.asc())
         .limit(limit);
     return database.deleteFrom(ACCESS_ATTEMPT)
-        .where(ACCESS_ATTEMPT.ACCESS_ATTEMPT_ID.in(ids)).execute();
+        .where(ACCESS_ATTEMPT.ACCESS_ATTEMPT_ID.in(ids)
+            .and(ACCESS_ATTEMPT.EXPIRES_AT.le(expiresAtOrBefore))).execute();
   }
 
   private static MusicAccessAttempt map(AccessAttemptRecord row) {

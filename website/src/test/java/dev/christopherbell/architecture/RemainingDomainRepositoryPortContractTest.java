@@ -90,7 +90,7 @@ class RemainingDomainRepositoryPortContractTest {
       ZipCoordinateImportStateRepository.findById(String) => findById(value)
       ZipCoordinateImportStateRepository.save(ZipCoordinateImportState) => save(entity:ZipCoordinateImportState)
       SharedFolderAuditRepository.save(SharedFolderAuditEvent) => save(entity:SharedFolderAuditEvent)
-      SharedFolderAuditRepository.deleteExpired(Instant,int) => find(query=Document{{expiresAt=Document{{$lte=2026-08-11T00:00:00Z}}}};sort=Document{{}};skip=0;limit=0, page=0/1;offset=0;sort=expiresAt: ASC,id: ASC) && remove(query=Document{{id=null}};sort=Document{{}};skip=0;limit=0) && remove(query=Document{{id=null}};sort=Document{{}};skip=0;limit=0)
+      SharedFolderAuditRepository.deleteExpired(Instant,int) => find(query=Document{{expiresAt=Document{{$lte=2026-08-11T00:00:00Z}}}};sort=Document{{}};skip=0;limit=0, page=0/1;offset=0;sort=expiresAt: ASC,id: ASC) && remove(query=Document{{id=null, expiresAt=Document{{$lte=2026-08-11T00:00:00Z}}}};sort=Document{{}};skip=0;limit=0) && remove(query=Document{{id=null, expiresAt=Document{{$lte=2026-08-11T00:00:00Z}}}};sort=Document{{}};skip=0;limit=0)
       SharedFolderAuditRepository.search(String,String,String,String,Instant,Instant,int) => find(query=Document{{$and=[Document{{accountId=value}}, Document{{action=value}}, Document{{outcome=value}}, Document{{relativePath=value}}, Document{{occurredAt=Document{{$gte=2026-08-11T00:00:00Z, $lte=2026-08-11T00:00:00Z}}}}]}};sort=Document{{}};skip=0;limit=0, page=0/1;offset=0;sort=occurredAt: DESC)
       MediaJobRepository.cancelActive(String,String,Instant,Instant) => updateFirst(query=Document{{id=value, ownerId=value, status=Document{{$in=[QUEUED, INSPECTING, TRANSCODING, BUFFERING]}}}};sort=Document{{}};skip=0;limit=0, update=Document{{$set=Document{{status=CANCELED, updatedAt=2026-08-11T00:00:00Z, cleanupAfter=2026-08-11T00:00:00Z, artifactsCleaned=false, descriptorPublished=false}}, $unset=Document{{activeCacheKey=1, deleteAt=1}}}})
       MediaJobRepository.countByOwnerIdAndStatusIn(String,Collection) => count(query=Document{{ownerId=value, status=Document{{$in=[QUEUED, INSPECTING]}}}};sort=Document{{}};skip=0;limit=0)
@@ -114,6 +114,7 @@ class RemainingDomainRepositoryPortContractTest {
       SharedFolderRecycleRepository.findByStateInAndRetryAfterLessThanEqualOrderByDeletedAtAscIdAsc(List,Instant,Pageable) => find(query=Document{{state=Document{{$in=[PREPARING, RECYCLED]}}, retryAfter=Document{{$lte=2026-08-11T00:00:00Z}}}};sort=Document{{deletedAt=1, id=1}};skip=0;limit=0, page=0/10;offset=0;sort=UNSORTED)
       SharedFolderRecycleRepository.findByStateOrderByDeletedAtDescIdDesc(SharedFolderRecycleState,Pageable) => find(query=Document{{state=PREPARING}};sort=Document{{deletedAt=-1, id=-1}};skip=0;limit=11, page=unpaged)
       SharedFolderRecycleRepository.save(SharedFolderRecycleItem) => save(entity:SharedFolderRecycleItem)
+      SharedFolderMutationRecoveryRepository.acquireOperationLease(String,String,SharedFolderMutationRecoveryState,Duration) => findAndUpdateDatabaseLease(query=Document{{id=value, operationLeaseToken=null, state=PREPARED, operationLeaseExpiresAt=null}};sort=Document{{}};skip=0;limit=0, databaseLeaseMutation)
       SharedFolderMutationRecoveryRepository.claimExpiredOperationLease(String,String,SharedFolderMutationRecoveryState,String,Duration) => findAndUpdateDatabaseLease(query=Document{{id=value, operationLeaseToken=value, state=PREPARED}};sort=Document{{}};skip=0;limit=0, databaseLeaseMutation)
       SharedFolderMutationRecoveryRepository.deleteById(String) => remove(query=Document{{id=value}};sort=Document{{}};skip=0;limit=0)
       SharedFolderMutationRecoveryRepository.findById(String) => findById(value)
@@ -121,6 +122,8 @@ class RemainingDomainRepositoryPortContractTest {
       SharedFolderMutationRecoveryRepository.findTop100ByOwnerIdOrderByUpdatedAtAsc(String) => find(query=Document{{ownerId=value}};sort=Document{{}};skip=0;limit=0, page=0/100;offset=0;sort=updatedAt: ASC)
       SharedFolderMutationRecoveryRepository.renewOperationLease(String,String,SharedFolderMutationRecoveryState,Duration) => findAndUpdateDatabaseLease(query=Document{{id=value, operationLeaseToken=value, state=PREPARED}};sort=Document{{}};skip=0;limit=0, databaseLeaseMutation)
       SharedFolderMutationRecoveryRepository.save(SharedFolderMutationRecovery) => save(entity:SharedFolderMutationRecovery)
+      SharedFolderUploadSessionRepository.acquireAppendLease(String,String,long,Duration) => findAndUpdateDatabaseLease(query=Document{{id=value, state=APPENDING, appendLeaseToken=null, appendOffset=1, appendLeaseExpiresAt=null}};sort=Document{{}};skip=0;limit=0, databaseLeaseMutation)
+      SharedFolderUploadSessionRepository.acquireFinalizationLease(String,String,SharedFolderUploadFinalizationState,Duration) => findAndUpdateDatabaseLease(query=Document{{id=value, state=FINALIZING, finalizationLeaseToken=null, finalizationState=PREPARED, finalizationLeaseExpiresAt=null}};sort=Document{{}};skip=0;limit=0, databaseLeaseMutation)
       SharedFolderUploadSessionRepository.claimExpiredAppendLease(String,String,long,String,Duration) => findAndUpdateDatabaseLease(query=Document{{id=value, state=APPENDING, appendLeaseToken=value, appendOffset=1}};sort=Document{{}};skip=0;limit=0, databaseLeaseMutation)
       SharedFolderUploadSessionRepository.claimExpiredFinalizationLease(String,String,SharedFolderUploadFinalizationState,String,Duration) => findAndUpdateDatabaseLease(query=Document{{id=value, state=FINALIZING, finalizationLeaseToken=value, finalizationState=PREPARED}};sort=Document{{}};skip=0;limit=0, databaseLeaseMutation)
       SharedFolderUploadSessionRepository.countByOwnerIdAndStateIn(String,Collection) => count(query=Document{{ownerId=value, state=Document{{$in=[ACTIVE, APPENDING]}}}};sort=Document{{}};skip=0;limit=0)
@@ -130,6 +133,8 @@ class RemainingDomainRepositoryPortContractTest {
       SharedFolderUploadSessionRepository.findById(String) => findById(value)
       SharedFolderUploadSessionRepository.findByOwnerIdOrderByIdAsc(String,Pageable) => find(query=Document{{ownerId=value}};sort=Document{{id=1}};skip=0;limit=11, page=unpaged)
       SharedFolderUploadSessionRepository.findDueForMaintenance(Instant,Pageable) => find(query=Document{{$or=[Document{{state=ACTIVE, expiresAt=Document{{$lte=2026-08-11T00:00:00Z}}}}, Document{{state=EXPIRED, $and=[Document{{$or=[Document{{maintenanceRetryAt=Document{{$lte=2026-08-11T00:00:00Z}}}}, Document{{maintenanceRetryAt=null}}]}}]}}]}};sort=Document{{}};skip=0;limit=11, page=unpaged)
+      SharedFolderUploadSessionRepository.relinquishAppendLease(String,String,long) => findAndUpdateDatabaseLease(query=Document{{id=value, state=APPENDING, appendLeaseToken=value, appendOffset=1}};sort=Document{{}};skip=0;limit=0, databaseLeaseMutation)
+      SharedFolderUploadSessionRepository.relinquishFinalizationLease(String,String,SharedFolderUploadFinalizationState) => findAndUpdateDatabaseLease(query=Document{{id=value, state=FINALIZING, finalizationLeaseToken=value, finalizationState=PREPARED}};sort=Document{{}};skip=0;limit=0, databaseLeaseMutation)
       SharedFolderUploadSessionRepository.renewAppendLease(String,String,long,Duration) => findAndUpdateDatabaseLease(query=Document{{id=value, state=APPENDING, appendLeaseToken=value, appendOffset=1}};sort=Document{{}};skip=0;limit=0, databaseLeaseMutation)
       SharedFolderUploadSessionRepository.renewFinalizationLease(String,String,SharedFolderUploadFinalizationState,Duration) => findAndUpdateDatabaseLease(query=Document{{id=value, state=FINALIZING, finalizationLeaseToken=value, finalizationState=PREPARED}};sort=Document{{}};skip=0;limit=0, databaseLeaseMutation)
       SharedFolderUploadSessionRepository.save(SharedFolderUploadSession) => save(entity:SharedFolderUploadSession)
@@ -194,6 +199,7 @@ class RemainingDomainRepositoryPortContractTest {
           "save(SharedFolderRecycleItem)"),
       adapter(SharedFolderMutationRecoveryRepository.class,
           MongoSharedFolderMutationRecoveryRepository.class, SharedFolderMutationRecovery.class,
+          "acquireOperationLease(String,String,SharedFolderMutationRecoveryState,Duration)",
           "claimExpiredOperationLease(String,String,SharedFolderMutationRecoveryState,String,Duration)",
           "deleteById(String)", "findById(String)", "findTop100ByOrderByUpdatedAtAsc()",
           "findTop100ByOwnerIdOrderByUpdatedAtAsc(String)",
@@ -201,12 +207,16 @@ class RemainingDomainRepositoryPortContractTest {
           "save(SharedFolderMutationRecovery)"),
       adapter(SharedFolderUploadSessionRepository.class,
           MongoSharedFolderUploadSessionRepository.class, SharedFolderUploadSession.class,
+          "acquireAppendLease(String,String,long,Duration)",
+          "acquireFinalizationLease(String,String,SharedFolderUploadFinalizationState,Duration)",
           "claimExpiredAppendLease(String,String,long,String,Duration)",
           "claimExpiredFinalizationLease(String,String,SharedFolderUploadFinalizationState,String,Duration)",
           "countByOwnerIdAndStateIn(String,Collection)",
           "deferExpiredMaintenance(String,int,Instant,int,Instant)", "deleteById(String)",
           "expireActive(String,Instant,Instant)", "findById(String)",
           "findByOwnerIdOrderByIdAsc(String,Pageable)", "findDueForMaintenance(Instant,Pageable)",
+          "relinquishAppendLease(String,String,long)",
+          "relinquishFinalizationLease(String,String,SharedFolderUploadFinalizationState)",
           "renewAppendLease(String,String,long,Duration)",
           "renewFinalizationLease(String,String,SharedFolderUploadFinalizationState,Duration)",
           "save(SharedFolderUploadSession)"),
