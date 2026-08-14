@@ -6,7 +6,7 @@ import dev.christopherbell.configuration.mongo.migration.MigrationStateStore;
 import dev.christopherbell.configuration.mongo.runtime.MongoApplicationLeaseStore;
 import dev.christopherbell.configuration.mongo.runtime.MongoScheduledCollectorRunStore;
 import dev.christopherbell.libs.mongo.lease.MongoLeaseStore;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRunStore;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStore;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService;
 import dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceLeaseStore;
 import java.lang.reflect.Method;

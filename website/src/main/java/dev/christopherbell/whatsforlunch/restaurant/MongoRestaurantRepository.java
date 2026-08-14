@@ -23,7 +23,10 @@ public class MongoRestaurantRepository extends KindScopedRepositorySupport<Resta
     super(factory, Restaurant.class);
   }
 
-  @Override public Restaurant save(Restaurant restaurant) { return saveValue(restaurant); }
+  @Override public Restaurant save(Restaurant restaurant) {
+    RestaurantLocationIntegrity.requireGenuine(restaurant);
+    return saveValue(restaurant);
+  }
   @Override public Optional<Restaurant> findById(String id) { return findValueById(id); }
   @Override public void delete(Restaurant restaurant) { super.deleteById(restaurant.getId()); }
   @Override public void deleteAll(Iterable<Restaurant> restaurants) {

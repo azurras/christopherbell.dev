@@ -4,9 +4,9 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
-import dev.christopherbell.libs.mongo.lease.CollectorLeaseGuard;
-import dev.christopherbell.libs.mongo.lease.LeaseOwnershipLostException;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.CollectorLeaseGuard;
+import dev.christopherbell.libs.lease.LeaseOwnershipLostException;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
@@ -1288,6 +1288,34 @@ public class RestaurantServiceTest {
     verify(restaurantRepository, never()).save(eq(persistedById));
     verify(restaurantRepository, never()).save(eq(normalizedNameOwner));
     verify(restaurantRepository).save(eq(laterCandidate));
+  }
+
+  @Test
+  @DisplayName("Prepared import: a unique race skips its candidate and saves the later candidate")
+  public void testApplyPreparedImport_whenUniqueRaceOccurs_continuesWithLaterCandidate()
+      throws Exception {
+    var raced = RestaurantStub.getRestaurantStub("osm:node:race-loser");
+    raced.setName("Race Winner Cafe");
+    var later = RestaurantStub.getRestaurantStub("osm:node:later");
+    later.setName("Later Candidate Cafe");
+    when(restaurantRepository.findById(any(String.class))).thenReturn(Optional.empty());
+    when(restaurantRepository.findByNormalizedName(any(String.class))).thenReturn(Optional.empty());
+    when(restaurantRepository.save(eq(raced)))
+        .thenThrow(new DuplicateKeyException("normalized name was concurrently claimed"));
+    when(restaurantRepository.save(eq(later))).thenReturn(later);
+    var snapshot = new RestaurantImportSnapshot(
+        "checksum",
+        List.of(raced, later),
+        new RestaurantImportPreviewCounts(2, 2, 0, 0, 0, 0),
+        List.of());
+
+    var result = restaurantService.applyPreparedImport(
+        snapshot, RestaurantImportLeaseGuard.NONE);
+
+    assertEquals(1, result.imported());
+    assertEquals(1, result.skippedExisting());
+    verify(restaurantRepository).save(raced);
+    verify(restaurantRepository).save(later);
   }
 
   @Test

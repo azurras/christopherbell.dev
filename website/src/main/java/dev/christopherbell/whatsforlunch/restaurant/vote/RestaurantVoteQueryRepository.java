@@ -20,7 +20,7 @@ import org.springframework.stereotype.Repository;
 /** Owns bounded aggregate queries over binary restaurant votes. */
 @MongoPersistence
 @Repository
-public class RestaurantVoteQueryRepository {
+public class RestaurantVoteQueryRepository implements RestaurantVoteQueryPort {
   private static final int MAX_RESULTS = 50;
 
   private final KindScopedMongoOperations<RestaurantVote> votes;
@@ -30,6 +30,7 @@ public class RestaurantVoteQueryRepository {
   }
 
   /** Returns restaurant vote totals in stable public leaderboard order. */
+  @Override
   public List<RestaurantVoteSummary> topLiked(int requestedLimit) {
     int limit = Math.max(1, Math.min(requestedLimit, MAX_RESULTS));
     return votes.aggregate(
@@ -37,6 +38,7 @@ public class RestaurantVoteQueryRepository {
   }
 
   /** Returns aggregate vote totals for the requested candidate restaurants. */
+  @Override
   public List<RestaurantVoteSummary> summariesForRestaurants(Collection<String> restaurantIds) {
     Objects.requireNonNull(restaurantIds, "restaurantIds");
     if (restaurantIds.isEmpty()) {

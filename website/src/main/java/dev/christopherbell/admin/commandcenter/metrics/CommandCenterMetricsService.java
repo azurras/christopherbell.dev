@@ -25,13 +25,11 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.info.BuildProperties;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.beans.factory.annotation.Qualifier;
 import dev.christopherbell.admin.commandcenter.action.CommandCenterActionService;
 import java.util.Optional;
@@ -46,7 +44,7 @@ public class CommandCenterMetricsService {
   private final CommandCenterProperties properties;
   private final Clock clock;
   private final String applicationVersion;
-  private final MongoPing mongoPing;
+  private final DatabaseConnectivityProbe databaseProbe;
   private final ExecutorService providerExecutor;
   private final PendingActionSupplier pendingActionSupplier;
   private final Instant applicationStartedAt;
@@ -62,7 +60,7 @@ public class CommandCenterMetricsService {
       List<HostMetricsProvider> providers,
       CommandCenterProperties properties,
       Clock clock,
-      MongoTemplate mongoTemplate,
+      DatabaseConnectivityProbe databaseProbe,
       ObjectProvider<BuildProperties> buildProperties,
       @Qualifier("commandCenterProviderExecutor") ExecutorService providerExecutor,
       CommandCenterActionService actionService) {
@@ -71,7 +69,7 @@ public class CommandCenterMetricsService {
         properties,
         clock,
         applicationVersion(buildProperties),
-        timeout -> boundedMongoPing(mongoTemplate, timeout),
+        databaseProbe,
         providerExecutor,
         actionService::pendingAction);
   }
@@ -93,14 +91,14 @@ public class CommandCenterMetricsService {
       CommandCenterProperties properties,
       Clock clock,
       String applicationVersion,
-      MongoPing mongoPing,
+      DatabaseConnectivityProbe databaseProbe,
       ExecutorService providerExecutor,
       PendingActionSupplier pendingActionSupplier) {
     this.providers = List.copyOf(providers);
     this.properties = properties;
     this.clock = clock;
     this.applicationVersion = applicationVersion == null ? "unknown" : applicationVersion;
-    this.mongoPing = mongoPing;
+    this.databaseProbe = databaseProbe;
     this.providerExecutor = providerExecutor;
     this.pendingActionSupplier = pendingActionSupplier;
     this.applicationStartedAt = clock.instant();
@@ -181,19 +179,21 @@ public class CommandCenterMetricsService {
       }
     }
 
-    var mongoAvailable = pingMongo();
+    var backendName = databaseProbe.backendName();
+    var databaseAvailable = pingDatabase();
     readings.put(
-        "mongodb.connectivity",
+        backendName + ".connectivity",
         new MetricReading(
-            "mongodb.connectivity",
-            "MongoDB connectivity",
-            mongoAvailable ? 1.0 : 0.0,
+            backendName + ".connectivity",
+            backendName + " connectivity",
+            databaseAvailable ? 1.0 : 0.0,
             "state",
-            mongoAvailable ? MetricStatus.AVAILABLE : MetricStatus.ERROR,
+            databaseAvailable ? MetricStatus.AVAILABLE : MetricStatus.ERROR,
             sampledAt,
-            mongoAvailable ? null : "MongoDB ping failed or timed out"));
-    if (!mongoAvailable) {
-      alerts.add(new Alert("MONGODB_UNAVAILABLE", "ERROR", "MongoDB did not answer the bounded ping."));
+            databaseAvailable ? null : backendName + " ping failed or timed out"));
+    if (!databaseAvailable) {
+      alerts.add(new Alert(backendName.toUpperCase(java.util.Locale.ROOT) + "_UNAVAILABLE",
+          "ERROR", backendName + " did not answer the bounded ping."));
     }
 
     appendAndTrimHistory(readings, sampledAt.minus(properties.getHistoryDuration()));
@@ -250,9 +250,9 @@ public class CommandCenterMetricsService {
     }
   }
 
-  private boolean pingMongo() {
+  private boolean pingDatabase() {
     try {
-      return mongoPing.ping(properties.getProviderTimeout());
+      return databaseProbe.ping(properties.getProviderTimeout());
     } catch (RuntimeException failure) {
       return false;
     }
@@ -335,32 +335,17 @@ public class CommandCenterMetricsService {
         detail == null || detail.isBlank() ? "Provider sample failed" : detail);
   }
 
-  private static boolean boundedMongoPing(MongoTemplate mongoTemplate, Duration timeout) {
-    var task = new FutureTask<>(() -> {
-      mongoTemplate.executeCommand(new Document("ping", 1));
-      return true;
-    });
-    Thread.ofVirtual().name("command-center-mongodb-ping").start(task);
-    try {
-      return task.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-    } catch (InterruptedException failure) {
-      Thread.currentThread().interrupt();
-      task.cancel(true);
-      return false;
-    } catch (Exception failure) {
-      task.cancel(true);
-      return false;
-    }
-  }
-
   private static String applicationVersion(ObjectProvider<BuildProperties> buildProperties) {
     var properties = buildProperties.getIfAvailable();
     return properties == null ? "unknown" : properties.getVersion();
   }
 
   @FunctionalInterface
-  interface MongoPing {
-    boolean ping(Duration timeout);
+  interface MongoPing extends DatabaseConnectivityProbe {
+    @Override
+    default String backendName() {
+      return "mongodb";
+    }
   }
 
   @FunctionalInterface

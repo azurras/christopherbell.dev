@@ -1,9 +1,8 @@
-package dev.christopherbell.libs.mongo.lease;
+package dev.christopherbell.libs.lease;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.util.UUID;
-import dev.christopherbell.libs.lease.LeaseService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -56,7 +55,7 @@ public class ScheduledCollectorCoordinator {
       return new Outcome<>(ScheduledCollectorRunStatus.SKIPPED_LOCKED, null);
     }
 
-    var guard = new RenewingMongoLease(
+    var guard = new RenewingLease(
         leases::renew, clock, collectorName, ownerToken, leaseDuration, startedOn);
     try {
       run.setStatus(ScheduledCollectorRunStatus.RUNNING);

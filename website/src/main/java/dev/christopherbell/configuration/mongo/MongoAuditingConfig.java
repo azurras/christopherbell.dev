@@ -54,16 +54,6 @@ public class MongoAuditingConfig {
   }
 
   /**
-   * UTC clock for deterministic auditing timestamps.
-   *
-   * @return a {@link Clock} set to UTC
-   */
-  @Bean
-  public Clock clock() {
-    return Clock.systemUTC();
-  }
-
-  /**
    * Date/time provider used by Spring Data auditing.
    *
    * <p>Uses the injected {@link Clock} (UTC) to provide the current

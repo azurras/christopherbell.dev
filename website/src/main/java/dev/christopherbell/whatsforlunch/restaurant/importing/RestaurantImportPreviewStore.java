@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
 /** Persists and atomically consumes short-lived import preview tokens. */
 @MongoPersistence
 @Repository
-public class RestaurantImportPreviewStore {
+public class RestaurantImportPreviewStore implements RestaurantImportPreviewPort {
   /** Legacy physical source retained for pre-cutover migration definitions only. */
   public static final String COLLECTION = "restaurant_import_previews";
 
@@ -24,10 +24,12 @@ public class RestaurantImportPreviewStore {
     this.previews = factory.forType(RestaurantImportPreviewDocument.class);
   }
 
+  @Override
   public RestaurantImportPreviewDocument save(RestaurantImportPreviewDocument preview) {
     return previews.save(preview);
   }
 
+  @Override
   public Optional<RestaurantImportPreviewDocument> claim(
       String token,
       String actorAccountId,

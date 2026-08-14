@@ -5,12 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import java.io.InputStream;
+import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.annotation.Id;
 
@@ -152,7 +154,7 @@ class PostgresqlMigrationCatalogTest {
       return CUTOVER_FIELDS;
     }
     var owner = Class.forName(definition.ownerTypeName());
-    return Arrays.stream(owner.getDeclaredFields())
+    return persistedFields(owner)
         .filter(field -> !Modifier.isStatic(field.getModifiers()))
         .filter(field -> !field.isSynthetic())
         .filter(field -> !field.isAnnotationPresent(Id.class))
@@ -166,11 +168,16 @@ class PostgresqlMigrationCatalogTest {
       return "id";
     }
     var owner = Class.forName(definition.ownerTypeName());
-    return Arrays.stream(owner.getDeclaredFields())
+    return persistedFields(owner)
         .filter(field -> field.isAnnotationPresent(Id.class))
         .map(java.lang.reflect.Field::getName)
         .findFirst()
         .orElseThrow(() -> new AssertionError(
             "Missing persisted ID field for " + definition.kind()));
+  }
+
+  private static Stream<Field> persistedFields(Class<?> owner) {
+    return Stream.<Class<?>>iterate(owner, type -> type != null, type -> type.getSuperclass())
+        .flatMap(type -> Arrays.stream(type.getDeclaredFields()));
   }
 }

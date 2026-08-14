@@ -1,12 +1,13 @@
 package dev.christopherbell.configuration.persistence.migration;
 
 import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
+import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.Arrays;
-import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.springframework.data.annotation.Id;
 
 /** Fails closed when catalog kinds or source fields drift from the persisted manifest. */
@@ -75,7 +76,7 @@ final class PostgresqlMigrationCatalogValidator {
     if (definition.kind().equals("domain_collection_cutover")) {
       return CUTOVER_FIELDS;
     }
-    return Arrays.stream(ownerClass(definition).getDeclaredFields())
+    return persistedFields(ownerClass(definition))
         .filter(field -> !Modifier.isStatic(field.getModifiers()))
         .filter(field -> !field.isSynthetic())
         .filter(field -> !field.isAnnotationPresent(Id.class))
@@ -88,11 +89,16 @@ final class PostgresqlMigrationCatalogValidator {
     if (definition.kind().equals("domain_collection_cutover")) {
       return "id";
     }
-    return Arrays.stream(ownerClass(definition).getDeclaredFields())
+    return persistedFields(ownerClass(definition))
         .filter(field -> field.isAnnotationPresent(Id.class))
         .map(java.lang.reflect.Field::getName)
         .findFirst()
         .orElseThrow(() -> invalid(definition.kind() + ".keyMapping.sourcePath"));
+  }
+
+  private static Stream<Field> persistedFields(Class<?> owner) {
+    return Stream.<Class<?>>iterate(owner, type -> type != null, type -> type.getSuperclass())
+        .flatMap(type -> Arrays.stream(type.getDeclaredFields()));
   }
 
   private static Class<?> ownerClass(DomainCollectionManifest.KindDefinition definition) {

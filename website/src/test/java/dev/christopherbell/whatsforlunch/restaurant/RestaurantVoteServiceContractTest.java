@@ -46,7 +46,7 @@ class RestaurantVoteServiceContractTest {
   @Mock private RestaurantVoteQueryRepository restaurantVoteQueryRepository;
   @Mock private ApprovalWeightedRestaurantSelector restaurantSelector;
   @Mock private RestaurantRepository restaurantRepository;
-  @Mock private dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator scheduledCollectors;
+  @Mock private dev.christopherbell.libs.lease.ScheduledCollectorCoordinator scheduledCollectors;
   @Mock private WhatsForLunchPreferenceRepository whatsForLunchPreferenceRepository;
   @Mock private ZipCoordinateService zipCoordinateService;
   @Mock private WflProperties wflProperties;

@@ -8,6 +8,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.libs.lease.LeaseService;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.ScheduledCollectorRun;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStatus;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStore;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;

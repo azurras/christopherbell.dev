@@ -1,4 +1,4 @@
-package dev.christopherbell.libs.mongo.lease;
+package dev.christopherbell.libs.lease;
 
 /** Durable lifecycle state for a coordinated collector attempt. */
 public enum ScheduledCollectorRunStatus {

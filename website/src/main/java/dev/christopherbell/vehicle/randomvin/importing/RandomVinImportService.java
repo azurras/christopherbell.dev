@@ -1,7 +1,7 @@
 package dev.christopherbell.vehicle.randomvin.importing;
 
-import dev.christopherbell.libs.mongo.lease.CollectorLeaseGuard;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.CollectorLeaseGuard;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.Vehicle;

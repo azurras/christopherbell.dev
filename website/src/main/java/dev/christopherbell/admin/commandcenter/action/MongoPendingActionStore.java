@@ -15,10 +15,10 @@ import org.springframework.stereotype.Repository;
 /** Mongo implementation of the fixed-key pending machine power-action boundary. */
 @MongoPersistence
 @Repository
-class MongoPendingActionStore implements PendingActionStore {
+public class MongoPendingActionStore implements PendingActionStore {
   private final KindScopedMongoOperations<PendingActionDocument> mongo;
 
-  MongoPendingActionStore(DomainMongoOperationsFactory factory) {
+  public MongoPendingActionStore(DomainMongoOperationsFactory factory) {
     this.mongo = factory.forType(PendingActionDocument.class);
   }
 

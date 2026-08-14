@@ -2,6 +2,7 @@ package dev.christopherbell.whatsforlunch.restaurant.session;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchRestaurantResetAudit;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSessionRestaurantsRequest;
@@ -15,7 +16,8 @@ import org.springframework.stereotype.Component;
 
 /** Performs bounded one-document session mutations without whole-document saves. */
 @Component
-public class WhatsForLunchSessionMutationStore {
+@MongoPersistence
+public class WhatsForLunchSessionMutationStore implements WhatsForLunchSessionMutationPort {
   private static final int RESET_AUDIT_LIMIT = 100;
   private static final Pattern SAFE_MAP_KEY = Pattern.compile("[A-Za-z0-9_-]{1,128}");
 
@@ -30,6 +32,7 @@ public class WhatsForLunchSessionMutationStore {
   }
 
   /** Atomically joins below the member cap; retries by existing members are no-ops. */
+  @Override
   public Result join(
       String sessionId,
       String accountId,
@@ -55,6 +58,7 @@ public class WhatsForLunchSessionMutationStore {
   }
 
   /** Atomically writes only the caller's vote entry. */
+  @Override
   public Result vote(String sessionId, String accountId, String restaurantId, Instant now) {
     var safeAccountId = safeMapKey(accountId);
     var query = activeSession(sessionId, now)
@@ -72,6 +76,7 @@ public class WhatsForLunchSessionMutationStore {
   }
 
   /** Atomically resets picks only for the host at the expected revision. */
+  @Override
   public Result resetRestaurants(
       String sessionId,
       String accountId,

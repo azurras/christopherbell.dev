@@ -9,8 +9,12 @@ import static org.mockito.Mockito.when;
 
 import com.mongodb.client.result.UpdateResult;
 import dev.christopherbell.libs.lease.LeaseGrant;
+import dev.christopherbell.libs.lease.LeaseOwnershipLostException;
 import dev.christopherbell.libs.lease.LeaseService;
 import dev.christopherbell.libs.lease.LeaseStore;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStatus;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStore;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;

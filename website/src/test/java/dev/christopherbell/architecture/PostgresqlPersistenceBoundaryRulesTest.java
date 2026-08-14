@@ -55,7 +55,31 @@ class PostgresqlPersistenceBoundaryRulesTest {
       entry("dev.christopherbell.sharedfolder.radio.PostgresSharedFolderRadioRepository", "shared-folder-radio"),
       entry("dev.christopherbell.sharedfolder.recycle.PostgresSharedFolderRecycleRepository", "shared-folder-recycle"),
       entry("dev.christopherbell.sharedfolder.service.PostgresSharedFolderMutationRecoveryRepository", "shared-folder-recovery"),
-      entry("dev.christopherbell.sharedfolder.upload.PostgresSharedFolderUploadSessionRepository", "shared-folder-upload"));
+      entry("dev.christopherbell.sharedfolder.upload.PostgresSharedFolderUploadSessionRepository", "shared-folder-upload"),
+      entry("dev.christopherbell.vehicle.core.PostgresVehicleRepository", "task5-mobility"),
+      entry("dev.christopherbell.vehicle.nhtsa.decode.PostgresVehicleVinDecodeCacheRepository", "task5-mobility"),
+      entry("dev.christopherbell.vehicle.nhtsa.enrichment.PostgresNhtsaVinImportStateRepository", "task5-mobility"),
+      entry("dev.christopherbell.vehicle.randomvin.importing.PostgresRandomVinImportStateRepository", "task5-mobility"),
+      entry("dev.christopherbell.location.zip.PostgresZipCoordinateRepository", "task5-mobility"),
+      entry("dev.christopherbell.location.zip.PostgresZipCoordinateImportStateRepository", "task5-mobility"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.PostgresRestaurantRepository", "task5-lunch"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.PostgresDailyLunchPicksRepository", "task5-lunch"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.PostgresRestaurantImportStateRepository", "task5-lunch"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.PostgresRestaurantInventoryQueryRepository", "task5-lunch"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.PostgresRestaurantDuplicateQueryRepository", "task5-lunch"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.favorite.PostgresRestaurantFavoriteRepository", "task5-lunch"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.importing.PostgresRestaurantImportPreviewStore", "task5-lunch"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.preference.PostgresWhatsForLunchPreferenceRepository", "task5-lunch"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.session.PostgresWhatsForLunchSessionRepository", "task5-lunch"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.session.PostgresWhatsForLunchSessionMutationStore", "task5-lunch"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.vote.PostgresRestaurantVoteRepository", "task5-lunch"),
+      entry("dev.christopherbell.whatsforlunch.restaurant.vote.PostgresRestaurantVoteQueryRepository", "task5-lunch"),
+      entry("dev.christopherbell.canesboxtracker.PostgresCanesBoxPriceSnapshotRepository", "task5-canes"),
+      entry("dev.christopherbell.admin.activity.PostgresAdminActivityRepository", "task5-platform"),
+      entry("dev.christopherbell.admin.activity.PostgresAdminActivityQueryRepository", "task5-platform"),
+      entry("dev.christopherbell.admin.commandcenter.action.PostgresPendingActionStore", "task5-platform"),
+      entry("dev.christopherbell.admin.commandcenter.metrics.PostgresDatabaseConnectivityProbe", "task5-platform"),
+      entry("dev.christopherbell.configuration.persistence.PostgresScheduledCollectorRunStore", "task5-platform"));
   private static final Set<String> SHARED_REAL_ENGINE_GROUPS = Set.of(
       "account-parity",
       "application-lease",
@@ -90,7 +114,11 @@ class PostgresqlPersistenceBoundaryRulesTest {
       "shared-folder-radio",
       "shared-folder-recovery",
       "shared-folder-recycle",
-      "shared-folder-upload");
+      "shared-folder-upload",
+      "task5-canes",
+      "task5-lunch",
+      "task5-mobility",
+      "task5-platform");
 
   @Test
   void jooqDependenciesStayInsidePostgresqlConfigurationGeneratedCodeAndAdapters() {

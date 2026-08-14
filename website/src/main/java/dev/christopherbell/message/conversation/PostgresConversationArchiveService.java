@@ -10,6 +10,7 @@ import java.time.ZoneOffset;
 import java.util.Set;
 import org.jooq.DSLContext;
 import org.jooq.impl.DSL;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /** PostgreSQL owner-scoped conversation archive transition. */
 @PostgresPersistence
@@ -17,11 +18,12 @@ public class PostgresConversationArchiveService implements ConversationArchivePo
   private final DSLContext database;
   private final Clock clock;
 
-  public PostgresConversationArchiveService(DSLContext database) {
+  PostgresConversationArchiveService(DSLContext database) {
     this(database, Clock.systemUTC());
   }
 
-  PostgresConversationArchiveService(DSLContext database, Clock clock) {
+  @Autowired
+  public PostgresConversationArchiveService(DSLContext database, Clock clock) {
     this.database = database;
     this.clock = clock;
   }

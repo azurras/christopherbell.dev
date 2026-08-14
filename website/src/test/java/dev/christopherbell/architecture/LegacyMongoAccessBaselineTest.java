@@ -25,7 +25,7 @@ class LegacyMongoAccessBaselineTest {
       repositoryRoot().resolve("cbell-lib/src/main/java"));
 
   private static final Set<String> APPROVED_DIRECT_MONGO_INFRASTRUCTURE = Set.of(
-      "dev.christopherbell.admin.commandcenter.metrics.CommandCenterMetricsService",
+      "dev.christopherbell.admin.commandcenter.metrics.MongoDatabaseConnectivityProbe",
       "dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory",
       "dev.christopherbell.configuration.mongo.domain.MongoKindScopedOperations",
       "dev.christopherbell.configuration.mongo.migration.ApplicationMigration",

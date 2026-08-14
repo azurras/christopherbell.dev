@@ -31,7 +31,7 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState,mongo
+          include: readinessState,database
 logging:
   level:
     root: INFO

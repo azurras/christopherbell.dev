@@ -1,0 +1,41 @@
+package dev.christopherbell.admin.commandcenter.metrics;
+
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
+import java.time.Duration;
+import java.util.concurrent.FutureTask;
+import org.bson.Document;
+import org.springframework.data.mongodb.core.MongoTemplate;
+
+/** Bounded MongoDB connectivity probe selected only for the transition backend. */
+@MongoBackendComponent
+public class MongoDatabaseConnectivityProbe implements DatabaseConnectivityProbe {
+  private final MongoTemplate mongo;
+
+  public MongoDatabaseConnectivityProbe(MongoTemplate mongo) {
+    this.mongo = mongo;
+  }
+
+  @Override
+  public String backendName() {
+    return "mongodb";
+  }
+
+  @Override
+  public boolean ping(Duration timeout) {
+    var task = new FutureTask<>(() -> {
+      mongo.executeCommand(new Document("ping", 1));
+      return true;
+    });
+    Thread.ofVirtual().name("command-center-mongodb-ping").start(task);
+    try {
+      return task.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+    } catch (InterruptedException failure) {
+      Thread.currentThread().interrupt();
+      task.cancel(true);
+      return false;
+    } catch (Exception failure) {
+      task.cancel(true);
+      return false;
+    }
+  }
+}
