@@ -23,7 +23,8 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
       "mobility", "lunch", "canes", "platform");
   private static final Set<String> IDENTIFIER_TYPES = Set.of("string", "uuid-string");
   private static final Set<String> CONVERSIONS = Set.of(
-      "string", "uuid-string", "enum-name", "instant-utc", "local-date", "integer",
+      "string", "uuid-string", "enum-name", "instant-utc", "local-date",
+      "year-month-first-day", "integer",
       "long", "boolean", "decimal-12-2", "decimal-20-9", "double", "byte-array",
       "record-flattened", "vin-response-flattened", "record-child", "string-list-child",
       "string-set-child", "string-map-child", "record-list-child", "constant-kind",

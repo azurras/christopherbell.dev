@@ -126,6 +126,7 @@ class MigrationTransformerAllKindsTest {
       case "enum-name" -> productionEnum(mappingKey);
       case "instant-utc" -> Instant.parse("2026-08-14T00:00:00.123456789Z");
       case "local-date" -> LocalDate.parse("2026-08-14");
+      case "year-month-first-day" -> "2026-08";
       case "integer" -> 7;
       case "long" -> 9_007_199_254_740_991L;
       case "boolean" -> true;

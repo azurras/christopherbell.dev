@@ -299,6 +299,76 @@ class JdbcMigrationTargetStoreTest {
   }
 
   @Test
+  void distinctRunPresentEmptyVinResponseClearsEveryStaleOptionalRootValue() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate()) {
+      var kind = loadCatalog().kinds().stream()
+          .filter(candidate -> candidate.sourceKind().equals("vin_decode_cache"))
+          .findFirst().orElseThrow();
+      var transformer = MigrationTransformerRegistry.from(loadCatalog()).require(kind.sourceKind());
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var firstContext = context(database,
+          UUID.fromString("00000000-0000-0000-0000-000000000618"));
+      var first = target.commitBatch(firstContext, kind, target.checkpoint(firstContext, kind),
+          List.of(transformer.transform(vinSource(Map.of("Make", "Mazda")))), "vin");
+      target.completeStaging(firstContext, kind, first);
+      target.finalizeRun(
+          firstContext, List.of(kind), List.of(target.reconcile(firstContext, kind)));
+
+      var secondContext = context(database,
+          UUID.fromString("00000000-0000-0000-0000-000000000619"));
+      var presentEmpty = new MigrationSourceDocument(
+          "vin_decode_cache", 1, "JM1BN1L30K1234567", Map.of("response", Map.of()));
+      var second = target.commitBatch(
+          secondContext, kind, target.checkpoint(secondContext, kind),
+          List.of(transformer.transform(presentEmpty)), "vin");
+      target.completeStaging(secondContext, kind, second);
+      target.finalizeRun(
+          secondContext, List.of(kind), List.of(target.reconcile(secondContext, kind)));
+
+      try (var connection = database.connect();
+           var statement = connection.createStatement();
+           var rows = statement.executeQuery("select response_present, "
+               + "raw_decoded_values_present, make, model, model_year, response_vin from \""
+               + database.prefix() + "mobility\".vin_decode_cache where vin="
+               + "'JM1BN1L30K1234567'")) {
+        assertThat(rows.next()).isTrue();
+        assertThat(rows.getBoolean(1)).isTrue();
+        assertThat(rows.getBoolean(2)).isFalse();
+        assertThat(rows.getObject(3)).isNull();
+        assertThat(rows.getObject(4)).isNull();
+        assertThat(rows.getObject(5)).isNull();
+        assertThat(rows.getObject(6)).isNull();
+        assertThat(rows.next()).isFalse();
+      }
+    }
+  }
+
+  @Test
+  void authenticatedReplayRepairsTypedTargetDriftBeforeKeepingPublishedState() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate()) {
+      var context = context(database,
+          UUID.fromString("00000000-0000-0000-0000-000000000620"));
+      var kind = applicationLeaseKind();
+      var transformed = MigrationTransformerRegistry.from(loadCatalog())
+          .require(kind.sourceKind()).transform(source("lease-replay", 17));
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var staged = target.commitBatch(
+          context, kind, target.checkpoint(context, kind), List.of(transformed), "lease-replay");
+      target.completeStaging(context, kind, staged);
+      var reconciliation = target.reconcile(context, kind);
+      target.finalizeRun(context, List.of(kind), List.of(reconciliation));
+      execute(database, "update \"" + database.prefix()
+          + "platform\".application_lease set fence_token=999 where lease_name='lease-replay'");
+
+      target.finalizeRun(context, List.of(kind), List.of(reconciliation));
+
+      assertThat(leases(database)).containsExactly(List.of("lease-replay", 17L));
+    }
+  }
+
+  @Test
   void allKindFinalizeDeletesReferencingPostBeforeItsRemovedAccount() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate()) {
       var catalog = loadCatalog();

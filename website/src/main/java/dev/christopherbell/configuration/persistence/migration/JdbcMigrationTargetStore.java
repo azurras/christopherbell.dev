@@ -20,9 +20,10 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
   private final List<String> expectedKinds;
   private final JdbcRelationalRowPublisher verifier = new JdbcRelationalRowPublisher();
   private final MigrationRowCodec codec = new MigrationRowCodec();
+  private final MigrationPortQueryVerifierRegistry portQueryVerifiers;
 
   JdbcMigrationTargetStore(DataSource dataSource, MigrationRowPublisher publisher) {
-    this(dataSource, publisher, List.of());
+    this(dataSource, publisher, List.of(), MigrationPortQueryVerifierRegistry.standard());
   }
 
   public JdbcMigrationTargetStore(
@@ -31,14 +32,19 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
       PostgresqlMigrationCatalog catalog) {
     this(dataSource, publisher, catalog.kinds().stream()
         .sorted(java.util.Comparator.comparingInt(PostgresqlMigrationCatalog.Kind::loadOrder))
-        .map(PostgresqlMigrationCatalog.Kind::sourceKind).toList());
+        .map(PostgresqlMigrationCatalog.Kind::sourceKind).toList(),
+        MigrationPortQueryVerifierRegistry.from(catalog));
   }
 
   private JdbcMigrationTargetStore(
-      DataSource dataSource, MigrationRowPublisher publisher, List<String> expectedKinds) {
+      DataSource dataSource,
+      MigrationRowPublisher publisher,
+      List<String> expectedKinds,
+      MigrationPortQueryVerifierRegistry portQueryVerifiers) {
     this.dataSource = dataSource;
     this.publisher = publisher;
     this.expectedKinds = List.copyOf(expectedKinds);
+    this.portQueryVerifiers = portQueryVerifiers;
   }
 
   @Override
@@ -125,7 +131,6 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
         statement.setString(1, "christopherbell-postgresql-migration-finalize");
         statement.executeQuery();
       }
-      var alreadyPublished = true;
       for (var index = 0; index < kinds.size(); index++) {
         var kind = kinds.get(index);
         var checkpoint = readCheckpoint(connection, context, kind, true);
@@ -134,10 +139,6 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
             || !checkpoint.complete()) {
           throw new MigrationReconciliationException();
         }
-        alreadyPublished &= published(connection, context, kind);
-      }
-      if (alreadyPublished) {
-        return null;
       }
       for (var index = kinds.size() - 1; index >= 0; index--) {
         deleteFrozenDelta(connection, context, kinds.get(index));
@@ -150,7 +151,7 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
         var actual = supplied.get(index);
         if (!typedTargetEquivalent(connection, context, kind, actual.sourceCount())
             || !relationshipsEquivalent(connection, context, kind)
-            || !portQueryEquivalent(connection, context, kind, actual.sourceCount())) {
+            || !portQueryEquivalent(connection, context, kind)) {
           throw new MigrationReconciliationException();
         }
       }
@@ -214,8 +215,9 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
         "insert into " + platform(context) + ".persistence_migration_run "
             + "(run_id, catalog_version, source_database, target_database, source_frozen, status, "
             + "release_commit, source_uri_digest, target_jdbc_url_digest, target_role, "
-            + "source_snapshot_digest, backup_digest, writer_lock_digest, finalize_evidence_digest) "
-            + "values (?, ?, ?, ?, ?, 'STAGING', ?, ?, ?, ?, ?, ?, ?, ?) "
+            + "source_snapshot_digest, backup_digest, writer_lock_digest, "
+            + "finalize_evidence_digest, finalize_reauthorization_required) "
+            + "values (?, ?, ?, ?, ?, 'STAGING', ?, ?, ?, ?, ?, ?, ?, ?, false) "
             + "on conflict (run_id) do nothing")) {
       statement.setObject(1, runId(context));
       statement.setString(2, context.request().catalogDigest());
@@ -237,7 +239,8 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
     try (var statement = connection.prepareStatement(
         "select catalog_version, source_database, target_database, source_frozen, "
             + "release_commit, source_uri_digest, target_jdbc_url_digest, target_role, "
-            + "source_snapshot_digest, backup_digest, writer_lock_digest, finalize_evidence_digest from "
+            + "source_snapshot_digest, backup_digest, writer_lock_digest, "
+            + "finalize_evidence_digest, finalize_reauthorization_required from "
             + platform(context) + ".persistence_migration_run where run_id=?")) {
       statement.setObject(1, runId(context));
       try (var rows = statement.executeQuery()) {
@@ -255,7 +258,8 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
             || !java.util.Objects.equals(evidence == null ? null : evidence.sourceDigest(), rows.getString(9))
             || !java.util.Objects.equals(evidence == null ? null : evidence.backupDigest(), rows.getString(10))
             || !java.util.Objects.equals(evidence == null ? null : evidence.writerLockDigest(), rows.getString(11))
-            || !java.util.Objects.equals(evidence == null ? null : evidence.evidenceDigest(), rows.getString(12))) {
+            || !java.util.Objects.equals(evidence == null ? null : evidence.evidenceDigest(), rows.getString(12))
+            || rows.getBoolean(13)) {
           throw new SQLException("Migration run identity does not match.");
         }
       }
@@ -726,38 +730,9 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
   private boolean portQueryEquivalent(
       Connection connection,
       ValidatedMigrationContext context,
-      PostgresqlMigrationCatalog.Kind kind,
-      long expectedCount) throws SQLException {
-    if (kind.portQueries().isEmpty()) {
-      return false;
-    }
-    var rootTable = kind.targetTables().getFirst();
-    var rootKey = kind.keyMapping().targetColumn();
-    rootKey = rootKey.substring(rootKey.indexOf('.') + 1);
-    String representative = null;
-    try (var statement = connection.prepareStatement(
-        "select source_id from " + platform(context)
-            + ".persistence_migration_source where run_id=? and source_kind=? "
-            + "order by staged_sequence limit 1")) {
-      statement.setObject(1, runId(context));
-      statement.setString(2, kind.sourceKind());
-      try (var rows = statement.executeQuery()) {
-        if (rows.next()) {
-          representative = rows.getString(1);
-        }
-      }
-    }
-    if (expectedCount == 0) {
-      return representative == null;
-    }
-    var qualified = quoted(prefix(context) + kind.targetSchema()) + "." + quoted(rootTable);
-    try (var statement = connection.prepareStatement(
-        "select count(*) from " + qualified + " where " + quoted(rootKey) + "::text=?")) {
-      statement.setString(1, representative);
-      try (var rows = statement.executeQuery()) {
-        return rows.next() && rows.getLong(1) == 1;
-      }
-    }
+      PostgresqlMigrationCatalog.Kind kind) throws SQLException {
+    return portQueryVerifiers.verify(
+        connection, prefix(context), prefix(context) + "platform", runId(context), kind, codec);
   }
 
   private void markPublished(
@@ -773,21 +748,6 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
       statement.setObject(2, runId(context));
       statement.setString(3, kind.sourceKind());
       requireOne(statement.executeUpdate());
-    }
-  }
-
-  private boolean published(
-      Connection connection,
-      ValidatedMigrationContext context,
-      PostgresqlMigrationCatalog.Kind kind) throws SQLException {
-    try (var statement = connection.prepareStatement(
-        "select published from " + platform(context)
-            + ".persistence_migration_kind where run_id=? and source_kind=?")) {
-      statement.setObject(1, runId(context));
-      statement.setString(2, kind.sourceKind());
-      try (var rows = statement.executeQuery()) {
-        return rows.next() && rows.getBoolean(1);
-      }
     }
   }
 

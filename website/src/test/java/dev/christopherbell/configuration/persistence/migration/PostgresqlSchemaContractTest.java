@@ -376,6 +376,28 @@ class PostgresqlSchemaContractTest {
   }
 
   @Test
+  void versionElevenFrozenRunUpgradesToV12AsPreservedButReauthorizationRequired()
+      throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("11");
+         var connection = database.connect()) {
+      var platform = quoted(database.prefix() + "platform");
+      execute(connection, "insert into " + platform
+          + ".persistence_migration_run "
+          + "(run_id, catalog_version, source_database, target_database, source_frozen, status) "
+          + "values ('00000000-0000-0000-0000-000000000621', 'catalog', 'test', 'test', "
+          + "true, 'STAGING')");
+
+      assertThat(database.migrateToLatest()).isEqualTo(1);
+      assertThat(longScalar(connection, "select count(*) from " + platform
+          + ".persistence_migration_run where run_id="
+          + "'00000000-0000-0000-0000-000000000621' and source_frozen "
+          + "and finalize_reauthorization_required and release_commit is null "
+          + "and finalize_evidence_digest is null"))
+          .isOne();
+    }
+  }
+
+  @Test
   void versionSixDanglingIdentifierPreventsUpgrade() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrateThrough("6");
          var connection = database.connect()) {

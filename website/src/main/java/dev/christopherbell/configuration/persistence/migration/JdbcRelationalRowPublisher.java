@@ -126,12 +126,19 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
     var values = new LinkedHashMap<>(row.values());
     values.keySet().forEach(JdbcRelationalRowPublisher::requireIdentifier);
     for (var column : metadata.values()) {
-      if (!values.containsKey(column.name()) && !column.nullable() && !column.generated()) {
-        if (column.name().equals("ordinal")) {
-          values.put(column.name(), row.targetOrdinal());
-        } else if (column.implicitSourceKey()) {
-          values.put(column.name(), row.sourceId());
-        }
+      if (values.containsKey(column.name()) || column.generated()) {
+        continue;
+      }
+      if (column.name().equals("ordinal")) {
+        values.put(column.name(), row.targetOrdinal());
+      } else if (column.implicitSourceKey() && !column.nullable()) {
+        values.put(column.name(), row.sourceId());
+      } else if (!column.nullable() && column.hasDefault()) {
+        values.put(column.name(), column.defaultValue());
+      } else if (column.nullable()) {
+        values.put(column.name(), null);
+      } else {
+        throw new SQLException("Staged row omits a required catalog-owned target column.");
       }
     }
     if (!metadata.keySet().containsAll(values.keySet())) {
@@ -196,14 +203,16 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
             rows.getInt("DATA_TYPE"),
             rows.getString("TYPE_NAME"),
             rows.getInt("NULLABLE") != java.sql.DatabaseMetaData.columnNoNulls,
-            rows.getString("COLUMN_DEF") != null || "YES".equals(rows.getString("IS_GENERATEDCOLUMN")),
+            "YES".equals(rows.getString("IS_GENERATEDCOLUMN")),
+            rows.getString("COLUMN_DEF") != null,
+            defaultValue(rows.getString("COLUMN_DEF"), rows.getInt("DATA_TYPE")),
             implicitSourceKeys.contains(name), primaryKeys.contains(name)));
       }
     }
     if (result.isEmpty()) {
       throw new SQLException("Catalog target table is absent.");
     }
-    var immutable = Map.copyOf(result);
+    var immutable = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(result));
     metadataCache.put(cacheKey, immutable);
     return immutable;
   }
@@ -228,6 +237,33 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
     }
   }
 
+  private static Object defaultValue(String expression, int jdbcType) throws SQLException {
+    if (expression == null) {
+      return null;
+    }
+    var cast = expression.indexOf("::");
+    var literal = (cast < 0 ? expression : expression.substring(0, cast)).trim();
+    try {
+      return switch (jdbcType) {
+        case Types.BOOLEAN, Types.BIT -> Boolean.valueOf(literal);
+        case Types.SMALLINT, Types.INTEGER -> Integer.valueOf(literal);
+        case Types.BIGINT -> Long.valueOf(literal);
+        case Types.NUMERIC, Types.DECIMAL -> new java.math.BigDecimal(literal);
+        case Types.VARCHAR, Types.CHAR, Types.LONGVARCHAR ->
+            literal.length() >= 2 && literal.startsWith("'") && literal.endsWith("'")
+                ? literal.substring(1, literal.length() - 1).replace("''", "'")
+                : unsupportedDefault();
+        default -> unsupportedDefault();
+      };
+    } catch (NumberFormatException failure) {
+      throw new SQLException("Catalog-owned target default is unsupported.", failure);
+    }
+  }
+
+  private static <T> T unsupportedDefault() throws SQLException {
+    throw new SQLException("Catalog-owned target default is unsupported.");
+  }
+
   private static String quoted(String identifier) {
     requireIdentifier(identifier);
     return '"' + identifier + '"';
@@ -246,6 +282,8 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
       String typeName,
       boolean nullable,
       boolean generated,
+      boolean hasDefault,
+      Object defaultValue,
       boolean implicitSourceKey,
       boolean primaryKey) {}
 

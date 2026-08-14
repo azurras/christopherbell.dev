@@ -332,6 +332,7 @@ class MongoToPostgresqlMigrationAcceptanceTest {
       String mongoUri,
       String sourceDigest,
       UUID lockToken) throws Exception {
+    protect(directory);
     var key = "task6-independent-acceptance-authority-key";
     var keyPath = directory.resolve("authority.key");
     Files.writeString(keyPath, key, StandardCharsets.UTF_8);
@@ -373,7 +374,7 @@ class MongoToPostgresqlMigrationAcceptanceTest {
       properties.store(output, null);
     }
     protect(evidencePath);
-    return FinalizeEvidenceLoader.load(evidencePath, keyPath);
+    return FinalizeEvidenceLoader.loadForTest(directory, evidencePath, keyPath);
   }
 
   private static void protect(Path path) throws Exception {

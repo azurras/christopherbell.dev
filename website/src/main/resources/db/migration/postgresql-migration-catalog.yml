@@ -846,7 +846,7 @@ kinds:
       lastStartedOn: {targets: [restaurant_import_state.last_started_on], conversion: instant-utc, missing: allow, nullValue: allow}
       lastCompletedOn: {targets: [restaurant_import_state.last_completed_on], conversion: instant-utc, missing: allow, nullValue: allow}
       lastFailedOn: {targets: [restaurant_import_state.last_failed_on], conversion: instant-utc, missing: allow, nullValue: allow}
-      lastCompletedMonth: {targets: [restaurant_import_state.last_completed_month], conversion: local-date, missing: allow, nullValue: allow}
+      lastCompletedMonth: {targets: [restaurant_import_state.last_completed_month], conversion: year-month-first-day, missing: allow, nullValue: allow}
       lastFailureMessage: {targets: [restaurant_import_state.last_failure_message], conversion: string, missing: allow, nullValue: allow}
       lastResult: {targets: [restaurant_import_state.result_source, restaurant_import_state.result_fetched, restaurant_import_state.result_imported, restaurant_import_state.result_updated, restaurant_import_state.result_skipped_existing, restaurant_import_state.result_skipped_invalid], conversion: record-flattened, missing: allow, nullValue: allow}
       status: {targets: [restaurant_import_state.status], conversion: enum-name, missing: allow, nullValue: allow}

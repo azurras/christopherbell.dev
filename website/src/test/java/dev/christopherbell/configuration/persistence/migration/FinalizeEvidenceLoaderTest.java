@@ -20,6 +20,7 @@ class FinalizeEvidenceLoaderTest {
 
   @Test
   void verifiesPersistedAuthorityAndRejectsTampering(@TempDir Path directory) throws Exception {
+    protect(directory);
     var keyPath = directory.resolve("authority.key");
     Files.writeString(keyPath, KEY, StandardCharsets.UTF_8);
     protect(keyPath);
@@ -36,7 +37,7 @@ class FinalizeEvidenceLoaderTest {
     }
     protect(path);
 
-    var loaded = FinalizeEvidenceLoader.load(path, keyPath);
+    var loaded = FinalizeEvidenceLoader.loadForTest(directory, path, keyPath);
     assertThat(loaded).isEqualTo(evidence);
 
     Files.writeString(lockPath, lockText + "state=unfrozen\n", StandardCharsets.UTF_8);
@@ -51,10 +52,27 @@ class FinalizeEvidenceLoaderTest {
     try (var output = Files.newOutputStream(path)) {
       properties.store(output, null);
     }
-    assertThatThrownBy(() -> FinalizeEvidenceLoader.load(path, keyPath))
+    assertThatThrownBy(() -> FinalizeEvidenceLoader.loadForTest(directory, path, keyPath))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("PostgreSQL migration finalization evidence is invalid.")
         .hasMessageNotContaining("f".repeat(64));
+  }
+
+  @Test
+  void productionAuthorityRootIsFixedAndSelfMintedOwnerOnlyFilesAreRejected(
+      @TempDir Path directory) throws Exception {
+    protect(directory);
+    var selfMinted = directory.resolve("finalize.properties");
+    Files.writeString(selfMinted, "self-minted", StandardCharsets.UTF_8);
+    protect(selfMinted);
+
+    assertThat(FinalizeEvidenceLoader.productionRoot().toString())
+        .endsWith(System.getProperty("os.name").toLowerCase().contains("win")
+            ? "ProgramData\\christopherbell.dev\\postgresql-migration-authority"
+            : "/etc/christopherbell.dev/postgresql-migration-authority");
+    assertThatThrownBy(() ->
+        FinalizeEvidenceLoader.requireTrustedProductionNodeForTest(selfMinted, false))
+        .isInstanceOf(IllegalArgumentException.class);
   }
 
   private static FrozenSourceEvidence evidence(Path lockPath, String lockText) {

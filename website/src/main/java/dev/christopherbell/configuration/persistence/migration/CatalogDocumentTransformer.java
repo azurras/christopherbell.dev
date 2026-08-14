@@ -3,6 +3,7 @@ package dev.christopherbell.configuration.persistence.migration;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
@@ -10,7 +11,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import org.bson.Document;
@@ -228,6 +228,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
         // Envelope kind is validated separately and has no relational value.
       }
       case "string", "uuid-string", "enum-name", "instant-utc", "local-date",
+          "year-month-first-day",
           "integer", "long", "boolean", "decimal-12-2", "decimal-20-9", "double",
           "byte-array" -> setScalarTargets(
               mapping, convertScalar(mapping.conversion(), value), rows, false);
@@ -318,7 +319,8 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
         };
         var nested = readExact(value, sourcePath);
         if (nested.found()) {
-          rows.root(target.table()).put(target.column(), nested.value());
+          rows.root(target.table()).put(
+              target.column(), convertVinResponseValue(target.column(), nested.value()));
         }
       }
     }
@@ -327,7 +329,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       var entry = entries.get(ordinal);
       var row = rows.child("vin_decode_raw_value", "field:" + entry.getKey());
       row.put("field_name", entry.getKey());
-      row.put("field_value", entry.getValue() == null ? null : entry.getValue().toString());
+      row.put("field_value", requireNullableString(entry.getValue()));
     }
   }
 
@@ -378,16 +380,17 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     }
     var ordinal = 0;
     for (var value : ordered) {
+      var stringValue = requireString(value);
       for (var table : targetTables(mapping)) {
         var rowKey = "session.participantAccountIds".equals(mappingKey)
-            ? "account:" + value : "ordinal:" + ordinal;
+            ? "account:" + stringValue : "ordinal:" + ordinal;
         var row = rows.child(table, rowKey);
         for (var targetText : mapping.targets()) {
           var target = Target.parse(targetText);
           if (!table.equals(target.table())) {
             continue;
           }
-          row.put(target.column(), target.column().equals("ordinal") ? ordinal : value);
+          row.put(target.column(), target.column().equals("ordinal") ? ordinal : stringValue);
         }
       }
       ordinal++;
@@ -420,6 +423,9 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
         "eventId", "actorAccountId", "actorUsername", "action", "targetType", "targetId",
         "targetLabel", "reason", "message", "beforeValues", "afterValues", "metadata",
         "metadataValues"));
+    if (value.containsKey("metadata") && value.containsKey("metadataValues")) {
+      throw invalid();
+    }
     var auditTable = mapping.targets().stream().map(Target::parse)
         .map(Target::table).filter(table -> !table.endsWith("_value")).findFirst()
         .orElseThrow(CatalogDocumentTransformer::invalid);
@@ -436,7 +442,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     auditColumns.forEach((column, sourcePath) -> {
       var nested = readExact(value, sourcePath);
       if (nested.found()) {
-        audit.put(column, nested.value());
+        audit.put(column, requireNullableString(nested.value()));
       }
     });
     for (var partition : List.of("before", "after", "metadata")) {
@@ -454,7 +460,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
         var row = rows.child(valueTable, partition + ":" + entry.getKey());
         row.put("partition_name", partition);
         row.put("value_key", entry.getKey());
-        row.put("value", Objects.toString(entry.getValue(), null));
+        row.put("value", requireNullableString(entry.getValue()));
       }
     }
   }
@@ -470,11 +476,11 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
           "id", "trackId", "observedToken", "enqueuedByAccountId", "enqueuedAt"));
       var row = rows.child("queue_entry", "ordinal:" + ordinal);
       row.put("ordinal", ordinal++);
-      putExact(row, "queue_entry_id", entry, "id");
-      putExact(row, "track_id", entry, "trackId");
-      putExact(row, "observed_token", entry, "observedToken");
-      putExact(row, "enqueued_by_account_id", entry, "enqueuedByAccountId");
-      putExact(row, "enqueued_at", entry, "enqueuedAt");
+      putExact(row, "queue_entry_id", entry, "id", ScalarType.STRING);
+      putExact(row, "track_id", entry, "trackId", ScalarType.STRING);
+      putExact(row, "observed_token", entry, "observedToken", ScalarType.STRING);
+      putExact(row, "enqueued_by_account_id", entry, "enqueuedByAccountId", ScalarType.STRING);
+      putExact(row, "enqueued_at", entry, "enqueuedAt", ScalarType.INSTANT);
     }
   }
 
@@ -489,10 +495,10 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
           "revision", "accountId", "username", "restaurantIds", "occurredOn"));
       var audit = rows.child("lunch_session_reset_audit", "reset:" + resetOrdinal);
       audit.put("ordinal", resetOrdinal);
-      putExact(audit, "revision", value, "revision");
-      putExact(audit, "account_id", value, "accountId");
-      putExact(audit, "username", value, "username");
-      putExact(audit, "occurred_on", value, "occurredOn");
+      putExact(audit, "revision", value, "revision", ScalarType.NUMBER);
+      putExact(audit, "account_id", value, "accountId", ScalarType.STRING);
+      putExact(audit, "username", value, "username", ScalarType.STRING);
+      putExact(audit, "occurred_on", value, "occurredOn", ScalarType.INSTANT);
       var restaurants = readExact(value, "restaurantIds");
       if (!restaurants.found()) {
         throw invalid();
@@ -503,7 +509,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
             "reset:" + resetOrdinal + ":restaurant:" + restaurantOrdinal);
         child.put("reset_ordinal", resetOrdinal);
         child.put("restaurant_ordinal", restaurantOrdinal++);
-        child.put("restaurant_id", normalizeBson(restaurantId));
+        child.put("restaurant_id", requireString(normalizeBson(restaurantId)));
       }
       resetOrdinal++;
     }
@@ -521,17 +527,17 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       case "session.participantUsernamesByAccountId" -> {
         var row = rows.child("lunch_session_participant", "account:" + key);
         row.put("account_id", key);
-        row.put("username", normalizeBson(value));
+        row.put("username", requireNullableString(value));
       }
       case "session.votesByAccountId" -> {
         var row = rows.child("lunch_session_vote", "account:" + key);
         row.put("account_id", key);
-        row.put("restaurant_id", normalizeBson(value));
+        row.put("restaurant_id", requireNullableString(value));
       }
       case "upload_session.chunkDigests" -> {
         var row = rows.child("upload_chunk", "chunk:" + key);
         row.put("chunk_key", key);
-        row.put("digest", normalizeBson(value));
+        row.put("digest", requireNullableString(value));
       }
       case "upload_session.chunkLengths" -> {
         var row = rows.child("upload_chunk", "chunk:" + key);
@@ -541,7 +547,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       case "vehicle.nhtsaDecodedValues" -> {
         var row = rows.child("vehicle_decoded_value", "field:" + key);
         row.put("field_name", key);
-        row.put("field_value", Objects.toString(value, null));
+        row.put("field_value", requireNullableString(value));
       }
       case "admin_activity.beforeValues", "admin_activity.afterValues",
           "admin_activity.metadata" -> {
@@ -550,7 +556,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
         var row = rows.child("admin_activity_value", partition + ":" + key);
         row.put("partition_name", partition);
         row.put("value_key", key);
-        row.put("value_text", Objects.toString(value, null));
+        row.put("value_text", requireNullableString(value));
       }
       default -> throw invalid();
     }
@@ -582,7 +588,8 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       } else {
         var nested = readExact(value, expression);
         if (nested.found()) {
-          destination.put(target.column(), nested.value());
+          destination.put(
+              target.column(), convertComplexScalar(expression, nested.value()));
         }
       }
     }
@@ -592,11 +599,40 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       Map<String, Object> destination,
       String targetColumn,
       Map<String, Object> source,
-      String sourcePath) {
+      String sourcePath,
+      ScalarType type) {
     var nested = readExact(source, sourcePath);
     if (nested.found()) {
-      destination.put(targetColumn, nested.value());
+      destination.put(targetColumn, switch (type) {
+        case STRING -> requireNullableString(nested.value());
+        case INSTANT -> nested.value() == null ? null : convertScalar("instant-utc", nested.value());
+        case NUMBER -> nested.value() == null ? null : requireNumber(nested.value());
+      });
     }
+  }
+
+  private static Object convertComplexScalar(String sourcePath, Object value) {
+    if (value == null) {
+      return null;
+    }
+    var leaf = sourcePath.substring(sourcePath.lastIndexOf('.') + 1);
+    if (Set.of("nonce", "ciphertext").contains(leaf)) {
+      return convertScalar("byte-array", value);
+    }
+    if (leaf.matches(".*(?:On|At|Until|Since)$")) {
+      return convertScalar("instant-utc", value);
+    }
+    if (Set.of("allowed", "failClosed", "noOp").contains(leaf)) {
+      return convertScalar("boolean", value);
+    }
+    if (Set.of(
+        "keyVersion", "stationSequence", "durationSeconds", "fetched", "imported",
+        "updated", "skippedExisting", "skippedInvalid", "created", "deleted",
+        "unchanged", "invalid", "processed", "sourceYear", "count", "revision",
+        "price", "latitude", "longitude").contains(leaf)) {
+      return requireNumber(value);
+    }
+    return requireString(value);
   }
 
   private static NestedValue readExact(Map<String, Object> values, String path) {
@@ -659,13 +695,14 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
   private static Object convertScalar(String conversion, Object value) {
     try {
       return switch (conversion) {
-        case "string" -> value.toString();
-        case "uuid-string" -> value instanceof UUID uuid ? uuid.toString() : value.toString();
-        case "enum-name" -> value instanceof Enum<?> enumeration
-            ? enumeration.name() : value.toString();
+        case "string", "enum-name" -> requireString(value);
+        case "uuid-string" -> canonicalUuid(value);
         case "instant-utc" -> value instanceof Instant instant ? instant
-            : value instanceof Date date ? date.toInstant() : Instant.parse(value.toString());
-        case "local-date" -> value instanceof LocalDate date ? date : LocalDate.parse(value.toString());
+            : value instanceof Date date ? date.toInstant() : invalidValue();
+        case "local-date" -> value instanceof LocalDate date ? date
+            : value instanceof String text ? LocalDate.parse(text) : invalidValue();
+        case "year-month-first-day" -> value instanceof String text
+            ? YearMonth.parse(text).atDay(1) : invalidValue();
         case "integer" -> number(value).intValueExact();
         case "long" -> number(value).longValueExact();
         case "boolean" -> value instanceof Boolean flag ? flag : invalidValue();
@@ -686,14 +723,54 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     }
   }
 
+  private static Object convertVinResponseValue(String targetColumn, Object value) {
+    return switch (targetColumn) {
+      case "model_year" -> convertScalar("integer", value);
+      case "response_vin", "make", "model", "body", "plant_city", "plant_state",
+          "plant_country", "error_code", "error_text" -> requireNullableString(value);
+      default -> throw invalid();
+    };
+  }
+
+  private static String canonicalUuid(Object value) {
+    if (value instanceof UUID uuid) {
+      return uuid.toString();
+    }
+    if (value instanceof String text) {
+      var parsed = UUID.fromString(text).toString();
+      if (parsed.equals(text)) {
+        return parsed;
+      }
+    }
+    throw invalid();
+  }
+
+  private static String requireString(Object value) {
+    if (value instanceof String text) {
+      return text;
+    }
+    throw invalid();
+  }
+
+  private static String requireNullableString(Object value) {
+    return value == null ? null : requireString(value);
+  }
+
   private static BigDecimal number(Object value) {
     if (value instanceof Decimal128 decimal128) {
       return decimal128.bigDecimalValue();
     }
-    if (value instanceof Number number) {
+    if (value instanceof Integer || value instanceof Long || value instanceof Double
+        || value instanceof BigDecimal) {
+      var number = (Number) value;
       return new BigDecimal(number.toString());
     }
     throw invalid();
+  }
+
+  private static Object requireNumber(Object value) {
+    number(value);
+    return normalizeBson(value);
   }
 
   private static Object defaultValue(String conversion) {
@@ -770,6 +847,8 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
   }
 
   private record NestedValue(boolean found, Object value) {}
+
+  private enum ScalarType { STRING, INSTANT, NUMBER }
 
   private static final class RowSet {
     private final String schema;

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -157,6 +158,61 @@ class CatalogDocumentTransformerProductionShapeTest {
             List.of("before", "status", "PENDING"),
             List.of("after", "status", "ACTIVE"),
             List.of("metadata", "ticket", "ABC-1"));
+  }
+
+  @Test
+  void restaurantWorkflowPersistedYearMonthMapsExactlyToFirstDayOfMonth() throws IOException {
+    var payload = new LinkedHashMap<String, Object>();
+    payload.put("lastStartedOn", NOW.minusSeconds(60));
+    payload.put("lastCompletedOn", NOW);
+    payload.put("lastCompletedMonth", "2026-08");
+    payload.put("status", "COMPLETED");
+    payload.put("trigger", "SCHEDULED");
+    payload.put("actorAccountId", "account-1");
+
+    var transformed = transform("import_state", "restaurant-import", payload);
+
+    assertThat(rows(transformed, "restaurant_import_state")).singleElement()
+        .satisfies(row -> assertThat(row.values())
+            .containsEntry("last_completed_month", LocalDate.of(2026, 8, 1)));
+  }
+
+  @Test
+  void scalarAndSpecialMappingsRejectWrongBsonTypesAndConflictingAliases() throws IOException {
+    assertThatThrownBy(() -> transform("account", "account-wrong-string", Map.of(
+        "email", new org.bson.Document("secret", "value"),
+        "role", "USER", "status", "ACTIVE", "username", "owner")))
+        .isInstanceOf(MigrationTransformationException.class);
+
+    assertThatThrownBy(() -> transform("vin_decode_cache", "JM1BN1L30K1234567", Map.of(
+        "response", Map.of("year", "2019"))))
+        .isInstanceOf(MigrationTransformationException.class);
+
+    var wrongEncryptedKey = new LinkedHashMap<String, Object>();
+    wrongEncryptedKey.put("email", "owner@example.test");
+    wrongEncryptedKey.put("role", "USER");
+    wrongEncryptedKey.put("status", "ACTIVE");
+    wrongEncryptedKey.put("username", "owner");
+    wrongEncryptedKey.put("federationIdentity", Map.of(
+        "actorId", "actor", "keyId", "key", "publicKeyPem", "pem",
+        "encryptedPrivateKey", Map.of("nonce", "not-binary", "ciphertext", new byte[16]),
+        "keyVersion", 1, "createdOn", NOW));
+    assertThatThrownBy(() -> transform("account", "account-wrong-binary", wrongEncryptedKey))
+        .isInstanceOf(MigrationTransformationException.class);
+
+    assertThatThrownBy(() -> transform("music_runtime_state", "queue-wrong-time", Map.of(
+        "kind", "QUEUE", "version", 1L,
+        "queue", Map.of("entries", List.of(Map.of(
+            "id", "queue-1", "trackId", "track-1", "observedToken", "token",
+            "enqueuedByAccountId", "account-1", "enqueuedAt", "2026-08-14"))))))
+        .isInstanceOf(MigrationTransformationException.class);
+
+    var audit = new LinkedHashMap<String, Object>(moderationAudit());
+    audit.put("metadataValues", Map.of("ticket", "conflict"));
+    assertThatThrownBy(() -> transform("account", "account-alias-conflict", Map.of(
+        "email", "owner@example.test", "role", "USER", "status", "ACTIVE",
+        "username", "owner", "pendingModerationAudit", audit)))
+        .isInstanceOf(MigrationTransformationException.class);
   }
 
   private static Map<String, Object> moderationAudit() {

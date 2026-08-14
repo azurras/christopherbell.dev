@@ -70,10 +70,7 @@ public final class PostgresqlMigrationCli {
     var lockToken = UUID.fromString(required(environment, "POSTGRESQL_MIGRATION_LOCK_TOKEN"));
     FrozenSourceEvidence evidence = null;
     if (command == PostgresqlMigrationCommand.FINALIZE) {
-      evidence = FinalizeEvidenceLoader.load(
-          java.nio.file.Path.of(required(environment, "POSTGRESQL_MIGRATION_EVIDENCE_FILE")),
-          java.nio.file.Path.of(required(
-              environment, "POSTGRESQL_MIGRATION_EVIDENCE_HMAC_KEY_FILE")));
+      evidence = FinalizeEvidenceLoader.loadProduction();
     }
     return new MigrationRequest(
         command,
