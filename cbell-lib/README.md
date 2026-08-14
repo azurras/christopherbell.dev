@@ -30,3 +30,11 @@ the reusable Mongo lease and scheduled-collector coordination types live under
 
 `TestUtil` is published only through the module's Gradle test-fixtures variant;
 it is not part of the production library artifact.
+
+## Moderation audit boundary
+
+`dev.christopherbell.libs.moderation.ModerationAuditCommand` is the neutral,
+immutable command shared by account and report moderation with the admin audit
+ledger. It owns bounded, allowlisted state and metadata plus reason redaction;
+feature packages remain responsible for deciding when to create and persist an
+audit event.

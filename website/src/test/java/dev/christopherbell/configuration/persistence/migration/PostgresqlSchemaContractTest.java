@@ -14,6 +14,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
@@ -395,6 +397,102 @@ class PostgresqlSchemaContractTest {
             + ".deleted_account_pseudonym where pseudonym_id = '"
             + reference.pseudonym() + "'"));
       }
+    }
+  }
+
+  @Test
+  void committedChildInsertMakesConcurrentLiveAccountDeleteBlockThenFail() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var setup = database.connect();
+         var child = database.connect();
+         var parent = database.connect();
+         var observer = database.connect();
+         var executor = Executors.newSingleThreadExecutor()) {
+      var identity = quoted(database.prefix() + "identity");
+      var social = quoted(database.prefix() + "social");
+      execute(setup, "insert into " + identity
+          + ".account (account_id, email, normalized_email, role, status, username) values "
+          + "('race-content', 'race-content@example.test', 'race-content@example.test', "
+          + "'USER', 'ACTIVE', 'race-content'), "
+          + "('race-live', 'race-live@example.test', 'race-live@example.test', "
+          + "'USER', 'ACTIVE', 'race-live')");
+      execute(setup, "insert into " + social
+          + ".post (post_id, account_id, post_text, root_post_id, created_on) values "
+          + "('race-post', 'race-content', 'before', 'race-post', transaction_timestamp())");
+      execute(parent, "set statement_timeout = '10s'");
+
+      child.setAutoCommit(false);
+      execute(child, "insert into " + social
+          + ".post_edit_audit (post_id, ordinal, editor_account_id, before_text, after_text, "
+          + "edited_on) values ('race-post', 0, 'race-live', 'before', 'after', "
+          + "transaction_timestamp())");
+      var childPid = Math.toIntExact(longScalar(child, "select pg_backend_pid()"));
+      var parentPid = Math.toIntExact(longScalar(parent, "select pg_backend_pid()"));
+      var deletion = executor.submit(() -> sqlState(() -> execute(parent,
+          "delete from " + identity + ".account where account_id = 'race-live'")));
+
+      awaitBlockedBy(observer, parentPid, childPid);
+      child.commit();
+
+      assertThat(deletion.get(10, TimeUnit.SECONDS)).isEqualTo("23001");
+      assertThat(longScalar(setup, "select count(*) from " + identity
+          + ".account where account_id = 'race-live'"))
+          .isOne();
+      assertThat(longScalar(setup, "select count(*) from " + social
+          + ".post_edit_audit where post_id = 'race-post' and editor_account_id = 'race-live'"))
+          .isOne();
+      assertThat(danglingPostEditAuditCount(setup, identity, social)).isZero();
+    }
+  }
+
+  @Test
+  void uncommittedPseudonymDeleteMakesConcurrentChildUpdateBlockThenFail() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var setup = database.connect();
+         var child = database.connect();
+         var parent = database.connect();
+         var observer = database.connect();
+         var executor = Executors.newSingleThreadExecutor()) {
+      var identity = quoted(database.prefix() + "identity");
+      var social = quoted(database.prefix() + "social");
+      execute(setup, "insert into " + identity
+          + ".account (account_id, email, normalized_email, role, status, username) values "
+          + "('race-update-owner', 'race-update@example.test', 'race-update@example.test', "
+          + "'USER', 'ACTIVE', 'race-update-owner')");
+      execute(setup, "insert into " + identity
+          + ".deleted_account_pseudonym (pseudonym_id) values ('deleted:face00000001')");
+      execute(setup, "insert into " + social
+          + ".post (post_id, account_id, post_text, root_post_id, created_on) values "
+          + "('race-update-post', 'race-update-owner', 'before', 'race-update-post', "
+          + "transaction_timestamp())");
+      execute(setup, "insert into " + social
+          + ".post_edit_audit (post_id, ordinal, editor_account_id, before_text, after_text, "
+          + "edited_on) values ('race-update-post', 0, 'race-update-owner', 'before', 'after', "
+          + "transaction_timestamp())");
+      execute(child, "set statement_timeout = '10s'");
+
+      parent.setAutoCommit(false);
+      assertThat(executeUpdate(parent, "delete from " + identity
+          + ".deleted_account_pseudonym where pseudonym_id = 'deleted:face00000001'"))
+          .isOne();
+      var childPid = Math.toIntExact(longScalar(child, "select pg_backend_pid()"));
+      var parentPid = Math.toIntExact(longScalar(parent, "select pg_backend_pid()"));
+      var update = executor.submit(() -> sqlState(() -> execute(child, "update " + social
+          + ".post_edit_audit set editor_account_id = 'deleted:face00000001' "
+          + "where post_id = 'race-update-post'")));
+
+      awaitBlockedBy(observer, childPid, parentPid);
+      parent.commit();
+
+      assertThat(update.get(10, TimeUnit.SECONDS)).isEqualTo("23503");
+      assertThat(longScalar(setup, "select count(*) from " + identity
+          + ".deleted_account_pseudonym where pseudonym_id = 'deleted:face00000001'"))
+          .isZero();
+      assertThat(longScalar(setup, "select count(*) from " + social
+          + ".post_edit_audit where post_id = 'race-update-post' "
+          + "and editor_account_id = 'race-update-owner'"))
+          .isOne();
+      assertThat(danglingPostEditAuditCount(setup, identity, social)).isZero();
     }
   }
 
@@ -886,6 +984,66 @@ class PostgresqlSchemaContractTest {
         .isInstanceOf(SQLException.class)
         .extracting(failure -> ((SQLException) failure).getSQLState())
         .isEqualTo("23001");
+  }
+
+  private static void awaitBlockedBy(
+      Connection observer, int waitingPid, int blockingPid) throws SQLException {
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    try (var statement = observer.prepareStatement(
+        "select ? = any(pg_blocking_pids(?))")) {
+      statement.setInt(1, blockingPid);
+      statement.setInt(2, waitingPid);
+      while (System.nanoTime() < deadline) {
+        try (var rows = statement.executeQuery()) {
+          assertThat(rows.next()).isTrue();
+          if (rows.getBoolean(1)) {
+            return;
+          }
+        }
+        Thread.onSpinWait();
+      }
+    }
+    throw new AssertionError(
+        "PostgreSQL backend " + waitingPid + " did not block on backend " + blockingPid
+            + "; " + backendDiagnostic(observer, waitingPid));
+  }
+
+  private static String backendDiagnostic(Connection observer, int pid) throws SQLException {
+    try (var statement = observer.prepareStatement("""
+        select state, wait_event_type, wait_event, pg_blocking_pids(pid), query
+        from pg_stat_activity where pid = ?
+        """)) {
+      statement.setInt(1, pid);
+      try (var rows = statement.executeQuery()) {
+        if (!rows.next()) {
+          return "backend is absent";
+        }
+        return "state=" + rows.getString(1)
+            + ", wait=" + rows.getString(2) + '/' + rows.getString(3)
+            + ", blockers=" + rows.getString(4)
+            + ", query=" + rows.getString(5);
+      }
+    }
+  }
+
+  private static String sqlState(SqlAction action) {
+    try {
+      action.run();
+      return null;
+    } catch (SQLException failure) {
+      return failure.getSQLState();
+    }
+  }
+
+  private static long danglingPostEditAuditCount(
+      Connection connection, String identity, String social) throws SQLException {
+    return longScalar(connection, "select count(*) from " + social + ".post_edit_audit audit "
+        + "left join " + identity + ".account account "
+        + "on account.account_id = audit.editor_account_id "
+        + "left join " + identity + ".deleted_account_pseudonym pseudonym "
+        + "on pseudonym.pseudonym_id = audit.editor_account_id "
+        + "where audit.editor_account_id is not null "
+        + "and account.account_id is null and pseudonym.pseudonym_id is null");
   }
 
   private static String quoted(String identifier) {
