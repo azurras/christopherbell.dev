@@ -53,6 +53,9 @@ public class PostgresAdminActivityQueryRepository implements AdminActivityQueryP
             ADMIN_ACTIVITY.TARGET_LABEL,
             ADMIN_ACTIVITY.REASON,
             ADMIN_ACTIVITY.MESSAGE,
+            ADMIN_ACTIVITY.BEFORE_VALUES_PRESENT,
+            ADMIN_ACTIVITY.AFTER_VALUES_PRESENT,
+            ADMIN_ACTIVITY.METADATA_PRESENT,
             ADMIN_ACTIVITY.CREATED_ON,
             before,
             after,
@@ -73,9 +76,12 @@ public class PostgresAdminActivityQueryRepository implements AdminActivityQueryP
             .reason(row.get(ADMIN_ACTIVITY.REASON))
             .message(row.get(ADMIN_ACTIVITY.MESSAGE))
             .createdOn(row.get(ADMIN_ACTIVITY.CREATED_ON).toInstant())
-            .beforeValues(row.get(before))
-            .afterValues(row.get(after))
-            .metadata(row.get(metadata))
+            .beforeValues(whenPresent(
+                row.get(before), row.get(ADMIN_ACTIVITY.BEFORE_VALUES_PRESENT)))
+            .afterValues(whenPresent(
+                row.get(after), row.get(ADMIN_ACTIVITY.AFTER_VALUES_PRESENT)))
+            .metadata(whenPresent(
+                row.get(metadata), row.get(ADMIN_ACTIVITY.METADATA_PRESENT)))
             .build());
     int pages = total == 0 ? 0 : Math.toIntExact((total + request.size() - 1) / request.size());
     return new AdminActivityPage(items, request.page(), request.size(), total, pages);
@@ -90,6 +96,11 @@ public class PostgresAdminActivityQueryRepository implements AdminActivityQueryP
             .and(ADMIN_ACTIVITY_VALUE.PARTITION_NAME.eq(partition)))
         .orderBy(ADMIN_ACTIVITY_VALUE.VALUE_KEY))
         .convertFrom(rows -> rows.intoMap(Record2::value1, Record2::value2));
+  }
+
+  private static Map<String, String> whenPresent(
+      Map<String, String> values, Boolean present) {
+    return Boolean.TRUE.equals(present) ? values : null;
   }
 
   private static boolean hasText(String value) {

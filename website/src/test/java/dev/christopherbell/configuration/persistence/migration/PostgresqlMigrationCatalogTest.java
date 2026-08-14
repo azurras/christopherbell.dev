@@ -93,7 +93,9 @@ class PostgresqlMigrationCatalogTest {
             .containsExactly("allow", "allow"));
 
     assertThat(vinCache.fieldMappings().get("response").targets())
-        .contains("vin_decode_cache.response_present");
+        .contains(
+            "vin_decode_cache.response_present",
+            "vin_decode_cache.raw_decoded_values_present");
     assertThat(byKind.get("nhtsa_import_state").fieldMappings().get("permanentlyDisabled"))
         .extracting(
             PostgresqlMigrationCatalog.FieldMapping::missing,

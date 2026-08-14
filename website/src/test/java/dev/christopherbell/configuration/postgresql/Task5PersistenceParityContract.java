@@ -220,8 +220,66 @@ interface Task5PersistenceParityContract {
   }
 
   @Test
+  @Task5ContractPorts(VehicleVinDecodeCacheRepository.class)
+  default void vinCachePreservesOuterResponseAndNestedRawValuePresence() {
+    var absentResponse = VehicleVinDecodeCache.builder()
+        .vin("R2VINABSENT000001").response(null).build();
+    var presentNullRawValues = VehicleVinDecodeCache.builder()
+        .vin("R2VINNULLRAW0001")
+        .response(VehicleVinDecodeResponse.builder().rawDecodedValues(null).build())
+        .build();
+    var presentEmptyRawValues = VehicleVinDecodeCache.builder()
+        .vin("R2VINEMPTYRAW001")
+        .response(VehicleVinDecodeResponse.builder().rawDecodedValues(Map.of()).build())
+        .build();
+
+    vinCache().save(absentResponse);
+    vinCache().save(presentNullRawValues);
+    vinCache().save(presentEmptyRawValues);
+
+    assertThat(vinCache().findById(absentResponse.getVin()).orElseThrow().getResponse()).isNull();
+    assertThat(vinCache().findById(presentNullRawValues.getVin()).orElseThrow().getResponse())
+        .isNotNull()
+        .extracting(VehicleVinDecodeResponse::rawDecodedValues)
+        .isNull();
+    assertThat(vinCache().findById(presentEmptyRawValues.getVin()).orElseThrow().getResponse())
+        .isNotNull()
+        .extracting(VehicleVinDecodeResponse::rawDecodedValues)
+        .isEqualTo(Map.of());
+  }
+
+  @Test
+  @Task5ContractPorts({AdminActivityRepository.class, AdminActivityQueryPort.class})
+  default void adminActivityQueryPreservesAbsentAndPresentEmptyMaps() throws Exception {
+    var absentMaps = AdminActivity.builder().id("task5-r2-admin-absent")
+        .actorUsername("Task5Owner").action("NULL_QUERY_PARITY").targetType("TEST")
+        .targetId("task5-r2-absent").createdOn(NOW).build();
+    var presentEmptyMaps = AdminActivity.builder().id("task5-r2-admin-empty")
+        .actorUsername("Task5Owner").action("NULL_QUERY_PARITY").targetType("TEST")
+        .targetId("task5-r2-empty").beforeValues(Map.of()).afterValues(Map.of())
+        .metadata(Map.of()).createdOn(NOW.plusSeconds(1)).build();
+    adminActivities().insert(absentMaps);
+    adminActivities().insert(presentEmptyMaps);
+
+    var page = adminActivityQueries().query(new AdminActivityQuery(
+        "NULL_QUERY_PARITY", null, null, null, null, 0, 10));
+
+    assertThat(page.items()).filteredOn(activity -> activity.getId().equals(absentMaps.getId()))
+        .singleElement().satisfies(activity -> {
+          assertThat(activity.getBeforeValues()).isNull();
+          assertThat(activity.getAfterValues()).isNull();
+          assertThat(activity.getMetadata()).isNull();
+        });
+    assertThat(page.items()).filteredOn(activity -> activity.getId().equals(presentEmptyMaps.getId()))
+        .singleElement().satisfies(activity -> {
+          assertThat(activity.getBeforeValues()).isEmpty();
+          assertThat(activity.getAfterValues()).isEmpty();
+          assertThat(activity.getMetadata()).isEmpty();
+        });
+  }
+
+  @Test
   @Task5ContractPorts({
-      VehicleVinDecodeCacheRepository.class,
       NhtsaVinImportStateRepository.class,
       RandomVinImportStateRepository.class,
       AdminActivityRepository.class,
@@ -229,20 +287,6 @@ interface Task5PersistenceParityContract {
       RestaurantVoteRepository.class
   })
   default void nullableSourceStatesRemainDistinctFromPresentDefaultValues() {
-    var absentResponse = VehicleVinDecodeCache.builder()
-        .vin("T5NULLRESPONSE001").response(null).build();
-    var presentEmptyResponse = VehicleVinDecodeCache.builder()
-        .vin("T5EMPTYRESPONSE01")
-        .response(VehicleVinDecodeResponse.builder().rawDecodedValues(Map.of()).build())
-        .build();
-    vinCache().save(absentResponse);
-    vinCache().save(presentEmptyResponse);
-    assertThat(vinCache().findById(absentResponse.getVin()).orElseThrow().getResponse()).isNull();
-    assertThat(vinCache().findById(presentEmptyResponse.getVin()).orElseThrow().getResponse())
-        .isNotNull()
-        .extracting(VehicleVinDecodeResponse::rawDecodedValues)
-        .isEqualTo(Map.of());
-
     nhtsaState().save(NhtsaVinImportState.builder().id("task5-null-nhtsa").build());
     assertThat(nhtsaState().findById("task5-null-nhtsa").orElseThrow())
         .satisfies(state -> {

@@ -29,8 +29,8 @@ class PostgresqlSchemaContractTest {
     try (var first = PostgresqlSchemaTestSupport.migrate();
          var second = PostgresqlSchemaTestSupport.migrate();
          var connection = first.connect()) {
-      assertThat(first.migrationsExecuted()).isEqualTo(9);
-      assertThat(second.migrationsExecuted()).isEqualTo(9);
+      assertThat(first.migrationsExecuted()).isEqualTo(10);
+      assertThat(second.migrationsExecuted()).isEqualTo(10);
       assertThat(ownedSchemas(connection, first.prefix()))
           .hasSize(PostgresqlSchemaTestSupport.DOMAINS.size());
       assertThat(ownedSchemas(connection, second.prefix()))
@@ -43,7 +43,7 @@ class PostgresqlSchemaContractTest {
   void emptyFlywayMigrationCreatesExactlyTheTenOwnedCatalogSchemasAndTables() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate();
          var connection = database.connect()) {
-      assertThat(database.migrationsExecuted()).isEqualTo(9);
+      assertThat(database.migrationsExecuted()).isEqualTo(10);
       assertThat(ownedSchemas(connection, database.prefix()))
           .containsExactlyInAnyOrderElementsOf(PostgresqlSchemaTestSupport.DOMAINS.stream()
               .map(database.prefix()::concat)
@@ -194,7 +194,7 @@ class PostgresqlSchemaContractTest {
           + "edited_on) values ('upgrade-post', 0, 'deleted:abcdef012345', 'before', 'after', "
           + "transaction_timestamp())");
 
-      assertThat(database.migrateToLatest()).isEqualTo(3);
+      assertThat(database.migrateToLatest()).isEqualTo(4);
       assertThat(longScalar(connection, "select count(*) from " + identity
           + ".deleted_account_pseudonym where pseudonym_id = 'deleted:abcdef012345'"))
           .isOne();
@@ -222,7 +222,7 @@ class PostgresqlSchemaContractTest {
           + "edited_on) values ('v7-post', 0, 'v7-owner', 'before', 'after', "
           + "transaction_timestamp())");
 
-      assertThat(database.migrateToLatest()).isEqualTo(2);
+      assertThat(database.migrateToLatest()).isEqualTo(3);
       assertRestrictViolation(() -> execute(connection,
           "delete from " + identity + ".account where account_id = 'v7-owner'"));
     }
@@ -268,7 +268,7 @@ class PostgresqlSchemaContractTest {
           + ".admin_activity_value (admin_activity_id, partition_name, value_key, value_text) "
           + "values ('v8-admin', 'before', 'state', 'old')");
 
-      assertThat(database.migrateToLatest()).isOne();
+      assertThat(database.migrateToLatest()).isEqualTo(2);
       assertThat(longScalar(connection, "select count(*) from " + mobility
           + ".vin_decode_cache where vin = 'V8EMPTYRESPONSE1' and not response_present"))
           .isOne();
@@ -317,6 +317,36 @@ class PostgresqlSchemaContractTest {
       assertThat(longScalar(connection, "select count(*) from " + lunch
           + ".restaurant_vote where restaurant_vote_id = 'v8-vote' and vote_value is null"))
           .isOne();
+    }
+  }
+
+  @Test
+  void versionNineRowsBackfillOnlyProvableRawValuePresence() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("9");
+         var connection = database.connect()) {
+      var mobility = quoted(database.prefix() + "mobility");
+      execute(connection, "insert into " + mobility
+          + ".vin_decode_cache (vin, response_present) values "
+          + "('V9AMBIGUOUS000001', true), ('V9WITHRAWVALUE001', true)");
+      execute(connection, "insert into " + mobility
+          + ".vin_decode_raw_value (vin, field_name, field_value) values "
+          + "('V9WITHRAWVALUE001', 'Make', 'Mazda')");
+
+      assertThat(database.migrateToLatest()).isOne();
+      assertThat(longScalar(connection, "select count(*) from " + mobility
+          + ".vin_decode_cache where vin = 'V9AMBIGUOUS000001' "
+          + "and not raw_decoded_values_present"))
+          .isOne();
+      assertThat(longScalar(connection, "select count(*) from " + mobility
+          + ".vin_decode_cache where vin = 'V9WITHRAWVALUE001' "
+          + "and raw_decoded_values_present"))
+          .isOne();
+      assertThatThrownBy(() -> execute(connection, "update " + mobility
+          + ".vin_decode_cache set response_present = false, "
+          + "raw_decoded_values_present = true where vin = 'V9AMBIGUOUS000001'"))
+          .isInstanceOf(SQLException.class)
+          .extracting(failure -> ((SQLException) failure).getSQLState())
+          .isEqualTo("23514");
     }
   }
 

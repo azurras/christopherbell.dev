@@ -1186,7 +1186,7 @@ kinds:
     dependsOnKinds: []
     keyMapping: {sourcePath: vin, targetColumn: vin_decode_cache.vin, preservation: exact}
     fieldMappings:
-      response: {targets: [vin_decode_cache.response_present, vin_decode_cache.response_vin, vin_decode_cache.make, vin_decode_cache.model, vin_decode_cache.model_year, vin_decode_cache.body, vin_decode_cache.plant_city, vin_decode_cache.plant_state, vin_decode_cache.plant_country, vin_decode_cache.error_code, vin_decode_cache.error_text, vin_decode_raw_value.field_name, vin_decode_raw_value.field_value], conversion: vin-response-flattened, missing: allow, nullValue: allow}
+      response: {targets: [vin_decode_cache.response_present, vin_decode_cache.raw_decoded_values_present, vin_decode_cache.response_vin, vin_decode_cache.make, vin_decode_cache.model, vin_decode_cache.model_year, vin_decode_cache.body, vin_decode_cache.plant_city, vin_decode_cache.plant_state, vin_decode_cache.plant_country, vin_decode_cache.error_code, vin_decode_cache.error_text, vin_decode_raw_value.field_name, vin_decode_raw_value.field_value], conversion: vin-response-flattened, missing: allow, nullValue: allow}
       decoderVersion: {targets: [vin_decode_cache.decoder_version], conversion: string, missing: allow, nullValue: allow}
       refreshedOn: {targets: [vin_decode_cache.refreshed_on], conversion: instant-utc, missing: allow, nullValue: allow}
       expiresOn: {targets: [vin_decode_cache.expires_on], conversion: instant-utc, missing: allow, nullValue: allow}

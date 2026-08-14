@@ -49,6 +49,8 @@ public class PostgresVehicleVinDecodeCacheRepository implements VehicleVinDecode
           .set(VIN_DECODE_CACHE.PLANT_CITY, response == null ? null : response.plantCity())
           .set(VIN_DECODE_CACHE.PLANT_COUNTRY, response == null ? null : response.plantCountry())
           .set(VIN_DECODE_CACHE.PLANT_STATE, response == null ? null : response.plantState())
+          .set(VIN_DECODE_CACHE.RAW_DECODED_VALUES_PRESENT,
+              response != null && response.rawDecodedValues() != null)
           .set(VIN_DECODE_CACHE.REFRESHED_ON, offset(cache.getRefreshedOn()))
           .set(VIN_DECODE_CACHE.RESPONSE_PRESENT, response != null)
           .set(VIN_DECODE_CACHE.RESPONSE_VIN, response == null ? null : response.vin())
@@ -66,6 +68,8 @@ public class PostgresVehicleVinDecodeCacheRepository implements VehicleVinDecode
           .set(VIN_DECODE_CACHE.PLANT_CITY, response == null ? null : response.plantCity())
           .set(VIN_DECODE_CACHE.PLANT_COUNTRY, response == null ? null : response.plantCountry())
           .set(VIN_DECODE_CACHE.PLANT_STATE, response == null ? null : response.plantState())
+          .set(VIN_DECODE_CACHE.RAW_DECODED_VALUES_PRESENT,
+              response != null && response.rawDecodedValues() != null)
           .set(VIN_DECODE_CACHE.REFRESHED_ON, offset(cache.getRefreshedOn()))
           .set(VIN_DECODE_CACHE.RESPONSE_PRESENT, response != null)
           .set(VIN_DECODE_CACHE.RESPONSE_VIN, response == null ? null : response.vin())
@@ -91,10 +95,13 @@ public class PostgresVehicleVinDecodeCacheRepository implements VehicleVinDecode
         .orderBy(VIN_DECODE_RAW_VALUE.FIELD_NAME)
         .forEach(value -> raw.put(value.getFieldName(), value.getFieldValue()));
     boolean hasResponse = Boolean.TRUE.equals(row.getResponsePresent());
+    var rawValues = Boolean.TRUE.equals(row.getRawDecodedValuesPresent())
+        ? Map.copyOf(raw)
+        : null;
     var response = hasResponse ? new VehicleVinDecodeResponse(
         row.getResponseVin(), row.getMake(), row.getModel(), row.getModelYear(), row.getBody(),
         row.getPlantCity(), row.getPlantState(), row.getPlantCountry(), row.getErrorCode(),
-        row.getErrorText(), raw.isEmpty() ? Map.of() : Map.copyOf(raw)) : null;
+        row.getErrorText(), rawValues) : null;
     return VehicleVinDecodeCache.builder().vin(row.getVin()).response(response)
         .decoderVersion(row.getDecoderVersion()).refreshedOn(instant(row.getRefreshedOn()))
         .expiresOn(instant(row.getExpiresOn())).createdOn(instant(row.getCreatedOn()))
