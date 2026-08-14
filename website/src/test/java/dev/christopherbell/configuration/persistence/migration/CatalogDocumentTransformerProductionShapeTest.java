@@ -71,6 +71,35 @@ class CatalogDocumentTransformerProductionShapeTest {
   }
 
   @Test
+  void runtimeQueueRejectsEveryMissingRequiredEntryLeaf() throws IOException {
+    for (var missing : List.of(
+        "id", "trackId", "observedToken", "enqueuedByAccountId", "enqueuedAt")) {
+      var entry = new LinkedHashMap<String, Object>(queueEntry("queue-1", "track-1", NOW));
+      entry.remove(missing);
+      assertThatThrownBy(() -> transform("music_runtime_state", "queue-missing-" + missing,
+          Map.of("kind", "QUEUE", "queue", Map.of("entries", List.of(entry)), "version", 1L)))
+          .as(missing)
+          .isInstanceOf(MigrationTransformationException.class);
+    }
+  }
+
+  @Test
+  void declaredComplexCrossFieldInvariantsRejectDuplicateQueueIdsAndNegativeCounts()
+      throws IOException {
+    assertThatThrownBy(() -> transform("music_runtime_state", "queue-duplicate", Map.of(
+        "kind", "QUEUE", "queue", Map.of("entries", List.of(
+            queueEntry("duplicate", "track-1", NOW),
+            queueEntry("duplicate", "track-2", NOW.plusSeconds(1)))), "version", 1L)))
+        .isInstanceOf(MigrationTransformationException.class);
+
+    assertThatThrownBy(() -> transform("import_preview", "negative-count", Map.of(
+        "actorAccountId", "account-1", "createdOn", NOW, "expiresOn", NOW.plusSeconds(60),
+        "counts", Map.of("fetched", 1, "created", -1, "updated", 0, "deleted", 0,
+            "unchanged", 0, "invalid", 0))))
+        .isInstanceOf(MigrationTransformationException.class);
+  }
+
+  @Test
   void lunchResetAuditExpandsNestedRestaurantsWithBothOrdinals() throws IOException {
     var payload = new LinkedHashMap<String, Object>();
     payload.put("createdByAccountId", "account-1");

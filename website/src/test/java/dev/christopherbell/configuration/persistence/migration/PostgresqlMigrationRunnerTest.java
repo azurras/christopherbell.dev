@@ -14,6 +14,7 @@ class PostgresqlMigrationRunnerTest {
     var shadowTarget = new RecordingTarget();
     runner(shadowTarget).run(request(PostgresqlMigrationCommand.SHADOW));
     assertThat(shadowTarget.reconciliations).isOne();
+    assertThat(shadowTarget.rehearsals).isOne();
     assertThat(shadowTarget.publications).isZero();
 
     var finalizeTarget = new RecordingTarget();
@@ -64,7 +65,32 @@ class PostgresqlMigrationRunnerTest {
     assertThat(target.publications).isZero();
   }
 
+  @Test
+  void finalizeRereadsSourceInsideTheLockedBoundaryAndRejectsAnInWindowMutation() {
+    var target = new RecordingTarget();
+    var reads = new java.util.concurrent.atomic.AtomicInteger();
+    MigrationSourceReader source = (context, kind, cursor, limit) -> {
+      var read = reads.incrementAndGet();
+      if (read == 3) {
+        return SourceBatch.of(List.of(new MigrationSourceDocument(
+            "fixture", 1, "mutated", Map.of("id", "mutated"))));
+      }
+      return SourceBatch.of(List.of());
+    };
+
+    assertThatThrownBy(() -> runner(target, source).run(
+        request(PostgresqlMigrationCommand.FINALIZE)))
+        .isInstanceOf(MigrationReconciliationException.class);
+    assertThat(reads).hasValueGreaterThanOrEqualTo(3);
+    assertThat(target.publications).isZero();
+  }
+
   private static PostgresqlMigrationRunner runner(MigrationTargetStore target) {
+    return runner(target, (context, item, cursor, limit) -> SourceBatch.of(List.of()));
+  }
+
+  private static PostgresqlMigrationRunner runner(
+      MigrationTargetStore target, MigrationSourceReader source) {
     var kind = kind();
     var catalog = new PostgresqlMigrationCatalog(1, List.of(kind));
     var preflight = new MigrationPreflight(new MigrationIdentityProbe() {
@@ -80,11 +106,12 @@ class PostgresqlMigrationRunnerTest {
       }
     });
     var engine = new KindMigrationEngine(
-        (context, item, cursor, limit) -> SourceBatch.of(List.of()),
+        source,
         target,
         ignored -> new KindMigrationEngineTest.StubTransformer());
     return new PostgresqlMigrationRunner(
-        preflight, catalog, engine, new MigrationReconciler(target), target);
+        preflight, catalog, engine, new MigrationReconciler(target), target,
+        expected -> expected);
   }
 
   private static PostgresqlMigrationCatalog.Kind kind() {
@@ -143,6 +170,7 @@ class PostgresqlMigrationRunnerTest {
   private static final class RecordingTarget implements MigrationTargetStore {
     private MigrationCheckpoint checkpoint = MigrationCheckpoint.initial();
     private int reconciliations;
+    private int rehearsals;
     private int publications;
 
     @Override
@@ -186,10 +214,20 @@ class PostgresqlMigrationRunnerTest {
     }
 
     @Override
-    public void finalizeRun(
+    public void rehearseShadow(
         ValidatedMigrationContext context,
         List<PostgresqlMigrationCatalog.Kind> kinds,
         List<MigrationReconciliation> reconciliations) {
+      rehearsals += kinds.size();
+    }
+
+    @Override
+    public void finalizeRun(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations,
+        LockedFinalizationCheck finalizationCheck) {
+      finalizationCheck.revalidate();
       publications += kinds.size();
     }
 
@@ -243,10 +281,19 @@ class PostgresqlMigrationRunnerTest {
     }
 
     @Override
-    public void finalizeRun(
+    public void rehearseShadow(
         ValidatedMigrationContext context,
         List<PostgresqlMigrationCatalog.Kind> kinds,
         List<MigrationReconciliation> reconciliations) {
+      throw new AssertionError("reconcile must not rehearse shadow rows");
+    }
+
+    @Override
+    public void finalizeRun(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations,
+        LockedFinalizationCheck finalizationCheck) {
       throw new AssertionError("reconcile must not finalize");
     }
 

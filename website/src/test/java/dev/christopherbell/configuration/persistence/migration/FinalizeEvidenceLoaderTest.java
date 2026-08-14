@@ -6,6 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Properties;
@@ -19,13 +22,44 @@ class FinalizeEvidenceLoaderTest {
   private static final String KEY = "independent-test-authority-key-00000001";
 
   @Test
+  void rejectsAnAuthenticWriterLeaseThatIsNotFrozenOrHasExpired(@TempDir Path directory)
+      throws Exception {
+    protect(directory);
+    var keyPath = directory.resolve("authority.key");
+    Files.writeString(keyPath, KEY, StandardCharsets.UTF_8);
+    protect(keyPath);
+    var lockPath = directory.resolve("writer.lock");
+    var active = "lockToken=00000000-0000-0000-0000-000000000016\n"
+        + "release=release-6\nstate=active\nleaseExpiresAt=2026-08-15T00:00:00Z\n";
+    Files.writeString(lockPath, active, StandardCharsets.UTF_8);
+    protect(lockPath);
+    var evidence = evidence(lockPath, active);
+    writeEvidence(directory.resolve("finalize.properties"), evidence);
+
+    var clock = Clock.fixed(Instant.parse("2026-08-14T00:00:00Z"), ZoneOffset.UTC);
+    assertThatThrownBy(() -> FinalizeEvidenceLoader.loadForTest(
+        directory, directory.resolve("finalize.properties"), keyPath, clock))
+        .isInstanceOf(IllegalArgumentException.class);
+
+    var expired = active.replace("state=active", "state=frozen")
+        .replace("2026-08-15T00:00:00Z", "2026-08-13T00:00:00Z");
+    Files.writeString(lockPath, expired, StandardCharsets.UTF_8);
+    protect(lockPath);
+    writeEvidence(directory.resolve("finalize.properties"), evidence(lockPath, expired));
+    assertThatThrownBy(() -> FinalizeEvidenceLoader.loadForTest(
+        directory, directory.resolve("finalize.properties"), keyPath, clock))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
   void verifiesPersistedAuthorityAndRejectsTampering(@TempDir Path directory) throws Exception {
     protect(directory);
     var keyPath = directory.resolve("authority.key");
     Files.writeString(keyPath, KEY, StandardCharsets.UTF_8);
     protect(keyPath);
     var lockPath = directory.resolve("writer.lock");
-    var lockText = "lockToken=00000000-0000-0000-0000-000000000016\nrelease=release-6\n";
+    var lockText = "lockToken=00000000-0000-0000-0000-000000000016\nrelease=release-6\n"
+        + "state=frozen\nleaseExpiresAt=2999-01-01T00:00:00Z\n";
     Files.writeString(lockPath, lockText, StandardCharsets.UTF_8);
     protect(lockPath);
     var evidence = evidence(lockPath, lockText);
@@ -40,7 +74,8 @@ class FinalizeEvidenceLoaderTest {
     var loaded = FinalizeEvidenceLoader.loadForTest(directory, path, keyPath);
     assertThat(loaded).isEqualTo(evidence);
 
-    Files.writeString(lockPath, lockText + "state=unfrozen\n", StandardCharsets.UTF_8);
+    Files.writeString(
+        lockPath, lockText.replace("state=frozen", "state=unfrozen"), StandardCharsets.UTF_8);
     protect(lockPath);
     assertThatThrownBy(() -> FinalizeEvidenceLoader.requireWriterLock(loaded))
         .isInstanceOf(IllegalArgumentException.class)
@@ -72,6 +107,44 @@ class FinalizeEvidenceLoaderTest {
             : "/etc/christopherbell.dev/postgresql-migration-authority");
     assertThatThrownBy(() ->
         FinalizeEvidenceLoader.requireTrustedProductionNodeForTest(selfMinted, false))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void rejectsAReparseOrSymlinkInAnAuthorityAncestor(@TempDir Path directory) throws Exception {
+    var anchor = directory.resolve("trusted-anchor");
+    var destination = directory.resolve("redirect-destination");
+    Files.createDirectories(anchor);
+    Files.createDirectories(destination.resolve("authority"));
+    protect(anchor);
+    protect(destination);
+    protect(destination.resolve("authority"));
+    var redirected = anchor.resolve("redirected");
+    try {
+      Files.createSymbolicLink(redirected, destination);
+    } catch (java.nio.file.FileSystemException | UnsupportedOperationException failure) {
+      org.junit.jupiter.api.Assumptions.abort("symbolic links are unavailable");
+    }
+
+    assertThatThrownBy(() -> FinalizeEvidenceLoader.requireProtectedPathForTest(
+        anchor, redirected.resolve("authority")))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void rejectsAnAuthorityAncestorWithUntrustedDeleteChildPermission(@TempDir Path directory)
+      throws Exception {
+    var anchor = directory.resolve("trusted-anchor");
+    var parent = anchor.resolve("parent");
+    var root = parent.resolve("authority");
+    Files.createDirectories(root);
+    protect(anchor);
+    protect(parent);
+    protect(root);
+    allowUntrustedDeleteChild(parent);
+
+    assertThatThrownBy(() ->
+        FinalizeEvidenceLoader.requireProtectedPathForTest(anchor, root))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
@@ -113,6 +186,15 @@ class FinalizeEvidenceLoaderTest {
     return HexFormat.of().formatHex(mac.doFinal(evidenceDigest.getBytes(StandardCharsets.US_ASCII)));
   }
 
+  private static void writeEvidence(Path path, FrozenSourceEvidence evidence) throws Exception {
+    var values = properties(evidence);
+    values.setProperty("signature", signature(evidence.evidenceDigest()));
+    try (var output = Files.newOutputStream(path)) {
+      values.store(output, null);
+    }
+    protect(path);
+  }
+
   private static void protect(Path path) throws Exception {
     var posix = Files.getFileAttributeView(
         path, java.nio.file.attribute.PosixFileAttributeView.class);
@@ -130,5 +212,26 @@ class FinalizeEvidenceLoaderTest {
         .setPermissions(java.util.EnumSet.allOf(
             java.nio.file.attribute.AclEntryPermission.class))
         .build()));
+  }
+
+  private static void allowUntrustedDeleteChild(Path path) throws Exception {
+    var posix = Files.getFileAttributeView(
+        path, java.nio.file.attribute.PosixFileAttributeView.class);
+    if (posix != null) {
+      var permissions = java.util.EnumSet.copyOf(posix.readAttributes().permissions());
+      permissions.add(java.nio.file.attribute.PosixFilePermission.GROUP_WRITE);
+      posix.setPermissions(permissions);
+      return;
+    }
+    var lookup = path.getFileSystem().getUserPrincipalLookupService();
+    var everyone = lookup.lookupPrincipalByName("Everyone");
+    var acl = Files.getFileAttributeView(path, java.nio.file.attribute.AclFileAttributeView.class);
+    var entries = new java.util.ArrayList<>(acl.getAcl());
+    entries.add(java.nio.file.attribute.AclEntry.newBuilder()
+        .setType(java.nio.file.attribute.AclEntryType.ALLOW)
+        .setPrincipal(everyone)
+        .setPermissions(java.nio.file.attribute.AclEntryPermission.DELETE_CHILD)
+        .build());
+    acl.setAcl(entries);
   }
 }

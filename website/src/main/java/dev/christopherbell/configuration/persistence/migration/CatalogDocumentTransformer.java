@@ -216,6 +216,8 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       Object value,
       RowSet rows) {
     var mappingKey = kind.sourceKind() + "." + sourceField;
+    validateDeclaredShape(mapping, value);
+    validateDeclaredInvariants(mappingKey, mapping, value);
     if (Set.of("record-flattened", "preserve-ledger", "vin-response-flattened",
             "record-child", "record-list-child", "string-map-child")
         .contains(mapping.conversion())
@@ -246,6 +248,167 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     if (!mapping.conversion().equals("vin-response-flattened")) {
       setPresenceTargets(mapping, rows, true);
     }
+  }
+
+  private static void validateDeclaredInvariants(
+      String mappingKey, PostgresqlMigrationCatalog.FieldMapping mapping, Object value) {
+    for (var invariant : mapping.invariants()) {
+      switch (invariant) {
+        case "string-items", "unique-map-keys", "encrypted-key-bytes",
+            "metadata-alias-exclusive", "restaurant-id-order", "raw-values-scalar",
+            "fail-closed-reason", "coordinate-pair" -> {
+          // The exact conversion handlers below enforce these closed shapes and scalar types.
+        }
+        case "queue-entry-id-unique" -> requireUniqueQueueEntryIds(asMap(value));
+        case "positive-duration" -> requirePositiveDurations(value, mapping.conversion());
+        case "nonnegative-counts" -> requireNonnegativeNumbers(value, mapping.conversion());
+        case "nonnegative-price" -> requireNonnegativePrices(value);
+        default -> throw invalid();
+      }
+    }
+  }
+
+  private static void requireUniqueQueueEntryIds(Map<String, Object> queue) {
+    var entries = readExact(queue, "entries");
+    if (!entries.found()) {
+      throw invalid();
+    }
+    var ids = new java.util.LinkedHashSet<String>();
+    for (var raw : asCollection(entries.value())) {
+      var entry = asMap(raw);
+      var id = readExact(entry, "id");
+      if (!id.found() || !ids.add(requireString(id.value()))) {
+        throw invalid();
+      }
+    }
+  }
+
+  private static void requirePositiveDurations(Object value, String conversion) {
+    var records = "record-list-child".equals(conversion)
+        ? asCollection(value) : List.of(value);
+    for (var raw : records) {
+      var record = asMap(raw);
+      var duration = readExact(record, "durationSeconds");
+      if (!duration.found() || !(normalizeBson(duration.value()) instanceof Number number)
+          || new BigDecimal(number.toString()).signum() <= 0) {
+        throw invalid();
+      }
+    }
+  }
+
+  private static void requireNonnegativeNumbers(Object value, String conversion) {
+    var records = "record-list-child".equals(conversion)
+        ? asCollection(value) : List.of(value);
+    for (var raw : records) {
+      for (var item : asMap(raw).values()) {
+        var normalized = normalizeBson(item);
+        if (normalized instanceof Number number
+            && new BigDecimal(number.toString()).signum() < 0) {
+          throw invalid();
+        }
+      }
+    }
+  }
+
+  private static void requireNonnegativePrices(Object value) {
+    for (var raw : asCollection(value)) {
+      var price = readExact(asMap(raw), "price");
+      if (!price.found() || !(normalizeBson(price.value()) instanceof Number number)
+          || new BigDecimal(number.toString()).signum() < 0) {
+        throw invalid();
+      }
+    }
+  }
+
+  private static void validateDeclaredShape(
+      PostgresqlMigrationCatalog.FieldMapping mapping, Object value) {
+    if (mapping.requiredFields().isEmpty() && mapping.optionalFields().isEmpty()) {
+      return;
+    }
+    switch (mapping.conversion()) {
+      case "record-flattened", "vin-response-flattened", "record-child" ->
+          validateMapShape(asMap(value), mapping.requiredFields(), mapping.optionalFields());
+      case "record-list-child" -> {
+        for (var element : asCollection(value)) {
+          validateMapShape(asMap(element), mapping.requiredFields(), mapping.optionalFields());
+        }
+      }
+      case "string-list-child", "string-set-child" -> {
+        if (!mapping.requiredFields().equals(List.of("$item"))
+            || !mapping.optionalFields().isEmpty()) {
+          throw invalid();
+        }
+      }
+      case "string-map-child" -> {
+        if (!mapping.requiredFields().equals(List.of("$key", "$value"))
+            || !mapping.optionalFields().isEmpty()) {
+          throw invalid();
+        }
+      }
+      default -> throw invalid();
+    }
+  }
+
+  private static void validateMapShape(
+      Map<String, Object> value, List<String> required, List<String> optional) {
+    var allowed = new java.util.LinkedHashSet<String>();
+    required.forEach(path -> allowed.add(firstSegment(path)));
+    optional.forEach(path -> allowed.add(firstSegment(path)));
+    requireExactKeys(value, allowed);
+    for (var path : required) {
+      requireDeclaredPath(value, path, true);
+    }
+    for (var path : optional) {
+      requireDeclaredPath(value, path, false);
+    }
+  }
+
+  private static String firstSegment(String path) {
+    var dot = path.indexOf('.');
+    var bracket = path.indexOf("[]");
+    var end = dot < 0 ? path.length() : dot;
+    if (bracket >= 0 && bracket < end) {
+      end = bracket;
+    }
+    return path.substring(0, end);
+  }
+
+  private static void requireDeclaredPath(
+      Map<String, Object> value, String path, boolean required) {
+    var head = firstSegment(path);
+    var found = value.containsKey(head);
+    if (!found) {
+      if (required) {
+        throw invalid();
+      }
+      return;
+    }
+    var nested = value.get(head);
+    var suffix = path.substring(head.length());
+    if (suffix.isEmpty()) {
+      return;
+    }
+    if (nested == null) {
+      throw invalid();
+    }
+    if (suffix.startsWith("[]")) {
+      var remainder = suffix.substring(2);
+      if (remainder.startsWith(".")) {
+        remainder = remainder.substring(1);
+      }
+      if (remainder.isEmpty()) {
+        asCollection(nested);
+        return;
+      }
+      for (var item : asCollection(nested)) {
+        requireDeclaredPath(asMap(item), remainder, required);
+      }
+      return;
+    }
+    if (!suffix.startsWith(".")) {
+      throw invalid();
+    }
+    requireDeclaredPath(asMap(nested), suffix.substring(1), required);
   }
 
   private static void setScalarTargets(

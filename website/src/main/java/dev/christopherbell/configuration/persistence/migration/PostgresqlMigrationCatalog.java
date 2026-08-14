@@ -29,6 +29,9 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
       "record-flattened", "vin-response-flattened", "record-child", "string-list-child",
       "string-set-child", "string-map-child", "record-list-child", "constant-kind",
       "preserve-ledger");
+  private static final Set<String> COMPLEX_CONVERSIONS = Set.of(
+      "record-flattened", "vin-response-flattened", "record-child",
+      "record-list-child", "string-list-child", "string-set-child", "string-map-child");
   private static final Set<String> PRESENCE_RULES = Set.of("reject", "allow", "empty", "default");
   private static final Set<String> DELETE_BEHAVIORS = Set.of(
       "preserve", "cascade", "set-null", "restrict", "ledger-state");
@@ -125,7 +128,18 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
 
   /** Top-level source field mapping to one or more scalar or child-row targets. */
   public record FieldMapping(
-      List<String> targets, String conversion, String missing, String nullValue) {
+      List<String> targets,
+      String conversion,
+      String missing,
+      String nullValue,
+      List<String> requiredFields,
+      List<String> optionalFields,
+      List<String> invariants) {
+    public FieldMapping(
+        List<String> targets, String conversion, String missing, String nullValue) {
+      this(targets, conversion, missing, nullValue, List.of(), List.of(), List.of());
+    }
+
     public FieldMapping {
       targets = List.copyOf(Objects.requireNonNull(targets, "targets"));
       targets.forEach(target -> {
@@ -136,9 +150,29 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
       requireAllowed(conversion, CONVERSIONS, "fieldMappings.conversion");
       requireAllowed(missing, PRESENCE_RULES, "fieldMappings.missing");
       requireAllowed(nullValue, PRESENCE_RULES, "fieldMappings.nullValue");
+      requiredFields = requiredFields == null ? List.of() : List.copyOf(requiredFields);
+      optionalFields = optionalFields == null ? List.of() : List.copyOf(optionalFields);
+      invariants = invariants == null ? List.of() : List.copyOf(invariants);
+      requireDistinct(requiredFields, "fieldMappings.requiredFields");
+      requireDistinct(optionalFields, "fieldMappings.optionalFields");
+      requireDistinct(invariants, "fieldMappings.invariants");
+      if (requiredFields.stream().anyMatch(optionalFields::contains)) {
+        throw invalid("fieldMappings.shape");
+      }
+      if (COMPLEX_CONVERSIONS.contains(conversion)
+          && requiredFields.isEmpty() && optionalFields.isEmpty()) {
+        throw invalid("fieldMappings.shape");
+      }
       if (targets.isEmpty() && !"constant-kind".equals(conversion)) {
         throw invalid("fieldMappings.targets");
       }
+    }
+  }
+
+  private static void requireDistinct(List<String> values, String path) {
+    if (values.stream().anyMatch(value -> value == null || value.isBlank())
+        || values.stream().distinct().count() != values.size()) {
+      throw invalid(path);
     }
   }
 

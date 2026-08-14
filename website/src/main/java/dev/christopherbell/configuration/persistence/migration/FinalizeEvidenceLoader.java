@@ -7,6 +7,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.LinkOption;
 import java.security.MessageDigest;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Properties;
 import java.util.Set;
@@ -28,19 +30,24 @@ final class FinalizeEvidenceLoader {
 
   static FrozenSourceEvidence loadProduction() {
     var root = productionRoot();
-    if (!protectedDirectory(root.getParent(), true)
-        || !protectedDirectory(root, true)) {
+    if (!protectedDirectoryChain(productionAnchor(), root, true)) {
       throw invalid();
     }
-    return load(root, root.resolve(EVIDENCE_FILE), root.resolve(KEY_FILE), true);
+    return load(
+        root, root.resolve(EVIDENCE_FILE), root.resolve(KEY_FILE), true, Clock.systemUTC());
   }
 
   static FrozenSourceEvidence loadForTest(
       Path authorityRoot, Path path, Path hmacKeyPath) {
+    return loadForTest(authorityRoot, path, hmacKeyPath, Clock.systemUTC());
+  }
+
+  static FrozenSourceEvidence loadForTest(
+      Path authorityRoot, Path path, Path hmacKeyPath, Clock clock) {
     if (!protectedDirectory(authorityRoot, false)) {
       throw invalid();
     }
-    return load(authorityRoot, path, hmacKeyPath, false);
+    return load(authorityRoot, path, hmacKeyPath, false, clock);
   }
 
   static Path productionRoot() {
@@ -50,6 +57,17 @@ final class FinalizeEvidenceLoader {
         .toAbsolutePath().normalize();
   }
 
+  private static Path productionAnchor() {
+    return Path.of(isWindows() ? "C:\\ProgramData" : "/etc")
+        .toAbsolutePath().normalize();
+  }
+
+  static void requireProtectedPathForTest(Path anchor, Path target) {
+    if (!protectedDirectoryChain(anchor, target, false)) {
+      throw invalid();
+    }
+  }
+
   static void requireTrustedProductionNodeForTest(Path path, boolean directory) {
     if (!(directory ? protectedDirectory(path, true) : protectedRegularFile(path, true))) {
       throw invalid();
@@ -57,7 +75,7 @@ final class FinalizeEvidenceLoader {
   }
 
   private static FrozenSourceEvidence load(
-      Path authorityRoot, Path path, Path hmacKeyPath, boolean production) {
+      Path authorityRoot, Path path, Path hmacKeyPath, boolean production, Clock clock) {
     var normalizedRoot = authorityRoot.toAbsolutePath().normalize();
     var normalizedEvidence = path.toAbsolutePath().normalize();
     var normalizedKey = hmacKeyPath.toAbsolutePath().normalize();
@@ -100,7 +118,7 @@ final class FinalizeEvidenceLoader {
           .equals(expectedWriterLock)) {
         throw invalid();
       }
-      requireWriterLock(evidence, normalizedRoot, production);
+      requireWriterLock(evidence, normalizedRoot, production, clock);
       var signature = HexFormat.of().parseHex(required(properties, "signature"));
       var mac = Mac.getInstance("HmacSHA256");
       mac.init(new SecretKeySpec(hmacKey, "HmacSHA256"));
@@ -118,11 +136,11 @@ final class FinalizeEvidenceLoader {
   static void requireWriterLock(FrozenSourceEvidence evidence) {
     var writerLock = Path.of(evidence.writerLockPath()).toAbsolutePath().normalize();
     var production = writerLock.equals(productionRoot().resolve(WRITER_LOCK_FILE));
-    requireWriterLock(evidence, writerLock.getParent(), production);
+    requireWriterLock(evidence, writerLock.getParent(), production, Clock.systemUTC());
   }
 
   private static void requireWriterLock(
-      FrozenSourceEvidence evidence, Path authorityRoot, boolean production) {
+      FrozenSourceEvidence evidence, Path authorityRoot, boolean production, Clock clock) {
     try {
       var writerLock = Path.of(evidence.writerLockPath()).toAbsolutePath().normalize();
       if (!writerLock.equals(authorityRoot.resolve(WRITER_LOCK_FILE))
@@ -130,14 +148,33 @@ final class FinalizeEvidenceLoader {
         throw invalid();
       }
       var writerLockText = Files.readString(writerLock, StandardCharsets.UTF_8);
+      var writerLockValues = parseWriterLock(writerLockText);
       if (!evidence.writerLockDigest().equals(CanonicalMigrationHasher.sha256(writerLockText))
-          || !writerLockText.lines().toList().contains("lockToken=" + evidence.lockToken())
-          || !writerLockText.lines().toList().contains("release=" + evidence.release())) {
+          || !evidence.lockToken().toString().equals(writerLockValues.get("lockToken"))
+          || !evidence.release().equals(writerLockValues.get("release"))
+          || !"frozen".equals(writerLockValues.get("state"))
+          || !clock.instant().isBefore(Instant.parse(writerLockValues.get("leaseExpiresAt")))) {
         throw invalid();
       }
     } catch (RuntimeException | IOException failure) {
       throw invalid();
     }
+  }
+
+  private static java.util.Map<String, String> parseWriterLock(String text) {
+    var expected = Set.of("lockToken", "release", "state", "leaseExpiresAt");
+    var result = new java.util.LinkedHashMap<String, String>();
+    for (var line : text.lines().toList()) {
+      var separator = line.indexOf('=');
+      if (separator <= 0 || separator == line.length() - 1
+          || result.put(line.substring(0, separator), line.substring(separator + 1)) != null) {
+        throw invalid();
+      }
+    }
+    if (!result.keySet().equals(expected)) {
+      throw invalid();
+    }
+    return java.util.Map.copyOf(result);
   }
 
   private static boolean protectedRegularFile(Path path, boolean production) {
@@ -154,6 +191,29 @@ final class FinalizeEvidenceLoader {
       return false;
     }
     return protectedAttributes(path, production);
+  }
+
+  private static boolean protectedDirectoryChain(
+      Path anchor, Path target, boolean production) {
+    if (anchor == null || target == null) {
+      return false;
+    }
+    var normalizedAnchor = anchor.toAbsolutePath().normalize();
+    var normalizedTarget = target.toAbsolutePath().normalize();
+    if (!normalizedTarget.startsWith(normalizedAnchor)) {
+      return false;
+    }
+    var current = normalizedAnchor;
+    if (!protectedDirectory(current, production)) {
+      return false;
+    }
+    for (var component : normalizedAnchor.relativize(normalizedTarget)) {
+      current = current.resolve(component);
+      if (!protectedDirectory(current, production)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private static boolean protectedAttributes(Path path, boolean production) {
@@ -186,7 +246,8 @@ final class FinalizeEvidenceLoader {
           java.nio.file.attribute.AclEntryPermission.WRITE_NAMED_ATTRS,
           java.nio.file.attribute.AclEntryPermission.WRITE_ACL,
           java.nio.file.attribute.AclEntryPermission.WRITE_OWNER,
-          java.nio.file.attribute.AclEntryPermission.DELETE);
+          java.nio.file.attribute.AclEntryPermission.DELETE,
+          java.nio.file.attribute.AclEntryPermission.DELETE_CHILD);
       return acl.getAcl().stream().filter(entry -> entry.type()
               == java.nio.file.attribute.AclEntryType.ALLOW)
           .filter(entry -> !java.util.Collections.disjoint(entry.permissions(), write))

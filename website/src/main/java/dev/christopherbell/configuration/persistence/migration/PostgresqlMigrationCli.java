@@ -48,7 +48,8 @@ public final class PostgresqlMigrationCli {
             new KindMigrationEngine(
                 new MongoMigrationSourceReader(mongo), target, registry::require),
             new MigrationReconciler(target),
-            target);
+            target,
+            expected -> FinalizeEvidenceLoader.loadProduction());
         var result = runner.run(request);
         output.printf(
             "command=%s kinds=%d statusDigest=%s%n",

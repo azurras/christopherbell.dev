@@ -86,7 +86,10 @@ class MongoToPostgresqlMigrationAcceptanceTest {
           catalog,
           engine,
           new MigrationReconciler(target),
-          target);
+          target,
+          expected -> directory == null ? expected : FinalizeEvidenceLoader.loadForTest(
+              directory, directory.resolve("finalize.properties"),
+              directory.resolve("authority.key")));
         var request = request(database, mongoUri);
 
         var first = runner.run(request);
@@ -110,6 +113,8 @@ class MongoToPostgresqlMigrationAcceptanceTest {
         });
         assertThat(stagedAccountRows(database)).contains(
             "account_federation_identity", "account_moderation_audit_value");
+        assertThat(rootCounts(database, catalog)).containsOnly(1L, 2L);
+        assertThat(accountBinary(database)).containsExactly(new byte[12], new byte[16]);
         if (directory != null) {
           var context = preflight.validate(request);
           var snapshots = new ArrayList<MigrationSourceSnapshot>();
@@ -338,7 +343,8 @@ class MongoToPostgresqlMigrationAcceptanceTest {
     Files.writeString(keyPath, key, StandardCharsets.UTF_8);
     protect(keyPath);
     var lockPath = directory.resolve("writer.lock").toAbsolutePath().normalize();
-    var lockText = "lockToken=" + lockToken + "\nrelease=task6-acceptance\n";
+    var lockText = "lockToken=" + lockToken + "\nrelease=task6-acceptance\n"
+        + "state=frozen\nleaseExpiresAt=2999-01-01T00:00:00Z\n";
     Files.writeString(lockPath, lockText, StandardCharsets.UTF_8);
     protect(lockPath);
     var unsigned = new FrozenSourceEvidence(

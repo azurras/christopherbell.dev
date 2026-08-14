@@ -1,6 +1,7 @@
 package dev.christopherbell.configuration.persistence.migration;
 
 import java.util.ArrayList;
+import java.util.List;
 
 /** Stages one kind through deterministic, restartable, bounded source pages. */
 public final class KindMigrationEngine {
@@ -53,6 +54,24 @@ public final class KindMigrationEngine {
     if (!expected.complete()) {
       throw new MigrationReconciliationException();
     }
+    var snapshot = readSourceSnapshot(
+        context, kind, documents -> target.requireStagedDocuments(context, kind, documents));
+    if (snapshot.sourceCount() != expected.sourceCount()
+        || !snapshot.sourceDigest().equals(expected.sourceDigest())) {
+      throw new MigrationReconciliationException();
+    }
+    return snapshot;
+  }
+
+  MigrationSourceSnapshot readSourceSnapshot(
+      ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
+    return readSourceSnapshot(context, kind, ignored -> {});
+  }
+
+  private MigrationSourceSnapshot readSourceSnapshot(
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind,
+      java.util.function.Consumer<List<TransformedMigrationDocument>> stagedValidator) {
     var actual = MigrationCheckpoint.initial();
     var relationalDigest = MigrationCheckpoint.initial().sourceDigest();
     var transformer = transformers.require(kind.sourceKind());
@@ -67,7 +86,7 @@ public final class KindMigrationEngine {
       for (var document : batch.documents()) {
         transformed.add(transformer.transform(document));
       }
-      target.requireStagedDocuments(context, kind, transformed);
+      stagedValidator.accept(List.copyOf(transformed));
       for (var document : transformed) {
         var rowHashes = document.rows().stream().map(row -> CanonicalMigrationHasher.sha256(
             java.util.List.of(
@@ -76,10 +95,6 @@ public final class KindMigrationEngine {
             relationalDigest, document.sourceId(), document.sourceHash(), rowHashes));
       }
       actual = actual.advance(batch.lastCursor(), transformed);
-    }
-    if (actual.sourceCount() != expected.sourceCount()
-        || !actual.sourceDigest().equals(expected.sourceDigest())) {
-      throw new MigrationReconciliationException();
     }
     return new MigrationSourceSnapshot(
         kind.sourceKind(), actual.sourceCount(), actual.sourceDigest(), relationalDigest);

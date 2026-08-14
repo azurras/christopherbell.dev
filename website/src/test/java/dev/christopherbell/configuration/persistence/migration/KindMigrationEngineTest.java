@@ -251,10 +251,17 @@ class KindMigrationEngineTest {
     }
 
     @Override
-    public void finalizeRun(
+    public void rehearseShadow(
         ValidatedMigrationContext context,
         List<PostgresqlMigrationCatalog.Kind> kinds,
         List<MigrationReconciliation> reconciliations) {}
+
+    @Override
+    public void finalizeRun(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations,
+        LockedFinalizationCheck finalizationCheck) {}
 
     @Override
     public List<MigrationKindStatus> statuses(ValidatedMigrationContext context) {

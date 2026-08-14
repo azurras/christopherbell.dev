@@ -27,10 +27,16 @@ public interface MigrationTargetStore {
   MigrationReconciliation reconcile(
       ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind);
 
-  void finalizeRun(
+  void rehearseShadow(
       ValidatedMigrationContext context,
       List<PostgresqlMigrationCatalog.Kind> kinds,
       List<MigrationReconciliation> reconciliations);
+
+  void finalizeRun(
+      ValidatedMigrationContext context,
+      List<PostgresqlMigrationCatalog.Kind> kinds,
+      List<MigrationReconciliation> reconciliations,
+      LockedFinalizationCheck finalizationCheck);
 
   List<MigrationKindStatus> statuses(ValidatedMigrationContext context);
 }

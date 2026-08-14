@@ -17,6 +17,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.annotation.Id;
 
 class PostgresqlMigrationCatalogTest {
+  private static final Set<String> COMPLEX_CONVERSIONS = Set.of(
+      "record-flattened", "vin-response-flattened", "record-child",
+      "record-list-child", "string-list-child", "string-set-child", "string-map-child");
   private static final String RESOURCE = "db/migration/postgresql-migration-catalog.yml";
   private static final Set<String> CUTOVER_FIELDS = Set.of(
       "state", "manifestDigest", "ownerToken", "release", "backupIdentity",
@@ -71,6 +74,26 @@ class PostgresqlMigrationCatalogTest {
             .allMatch(target -> !target.contains("*") && !target.toLowerCase().contains("json"));
       });
     });
+  }
+
+  @Test
+  void everyComplexMappingDeclaresItsRequiredOptionalAndCrossFieldShape() {
+    assertThat(loadCatalog().kinds()).allSatisfy(kind ->
+        assertThat(kind.fieldMappings()).allSatisfy((field, mapping) -> {
+          if (!COMPLEX_CONVERSIONS.contains(mapping.conversion())) {
+            return;
+          }
+          var path = kind.sourceKind() + "." + field;
+          assertThat(mapping.requiredFields()).as(path + " required").isNotNull();
+          assertThat(mapping.optionalFields()).as(path + " optional").isNotNull();
+          assertThat(mapping.requiredFields()).as(path).doesNotHaveDuplicates();
+          assertThat(mapping.optionalFields()).as(path).doesNotHaveDuplicates();
+          assertThat(mapping.requiredFields().stream()
+              .filter(mapping.optionalFields()::contains).toList()).as(path).isEmpty();
+          assertThat(mapping.requiredFields().size() + mapping.optionalFields().size())
+              .as(path + " declared leaves").isPositive();
+          assertThat(mapping.invariants()).as(path + " invariants").isNotNull();
+        }));
   }
 
   @Test

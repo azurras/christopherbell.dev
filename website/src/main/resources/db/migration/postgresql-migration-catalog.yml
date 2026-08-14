@@ -17,7 +17,7 @@ kinds:
       email: {targets: [account.email, account.normalized_email], conversion: string, missing: reject, nullValue: reject}
       federationEnabled: {targets: [account.federation_enabled], conversion: boolean, missing: default, nullValue: default}
       federationEnabledOn: {targets: [account.federation_enabled_on], conversion: instant-utc, missing: allow, nullValue: allow}
-      federationIdentity: {targets: [account_federation_identity.actor_id, account_federation_identity.key_id, account_federation_identity.public_key_pem, account_federation_identity.private_key_nonce, account_federation_identity.private_key_ciphertext, account_federation_identity.key_version, account_federation_identity.created_on], conversion: record-child, missing: allow, nullValue: allow}
+      federationIdentity: {targets: [account_federation_identity.actor_id, account_federation_identity.key_id, account_federation_identity.public_key_pem, account_federation_identity.private_key_nonce, account_federation_identity.private_key_ciphertext, account_federation_identity.key_version, account_federation_identity.created_on], conversion: record-child, missing: allow, nullValue: allow, requiredFields: ["actorId", "keyId", "publicKeyPem", "encryptedPrivateKey.nonce", "encryptedPrivateKey.ciphertext", "keyVersion", "createdOn"], optionalFields: [], invariants: ["encrypted-key-bytes"]}
       firstName: {targets: [account.first_name], conversion: string, missing: allow, nullValue: allow}
       inviteCode: {targets: [account.invite_code], conversion: uuid-string, missing: allow, nullValue: allow}
       inviteCodeOwner: {targets: [account.invite_code_owner], conversion: uuid-string, missing: allow, nullValue: allow}
@@ -31,9 +31,9 @@ kinds:
       passwordResetTokenHash: {targets: [account.password_reset_token_hash], conversion: string, missing: allow, nullValue: allow}
       passwordResetTokenExpiresOn: {targets: [account.password_reset_token_expires_on], conversion: instant-utc, missing: allow, nullValue: allow}
       role: {targets: [account.role], conversion: enum-name, missing: reject, nullValue: reject}
-      permissions: {targets: [account_permission.permission], conversion: string-set-child, missing: empty, nullValue: empty}
+      permissions: {targets: [account_permission.permission], conversion: string-set-child, missing: empty, nullValue: empty, requiredFields: ["$item"], optionalFields: [], invariants: ["string-items"]}
       status: {targets: [account.status], conversion: enum-name, missing: reject, nullValue: reject}
-      pendingModerationAudit: {targets: [account_moderation_audit.event_id, account_moderation_audit.actor_account_id, account_moderation_audit.actor_username, account_moderation_audit.action, account_moderation_audit.target_type, account_moderation_audit.target_id, account_moderation_audit.target_label, account_moderation_audit.reason, account_moderation_audit.message, account_moderation_audit_value.partition_name, account_moderation_audit_value.value_key, account_moderation_audit_value.value], conversion: record-child, missing: allow, nullValue: allow}
+      pendingModerationAudit: {targets: [account_moderation_audit.event_id, account_moderation_audit.actor_account_id, account_moderation_audit.actor_username, account_moderation_audit.action, account_moderation_audit.target_type, account_moderation_audit.target_id, account_moderation_audit.target_label, account_moderation_audit.reason, account_moderation_audit.message, account_moderation_audit_value.partition_name, account_moderation_audit_value.value_key, account_moderation_audit_value.value], conversion: record-child, missing: allow, nullValue: allow, requiredFields: ["eventId", "action", "targetType", "targetId"], optionalFields: ["actorAccountId", "actorUsername", "targetLabel", "reason", "message", "beforeValues", "afterValues", "metadata", "metadataValues"], invariants: ["metadata-alias-exclusive"]}
       username: {targets: [account.username], conversion: string, missing: reject, nullValue: reject}
       version: {targets: [account.version], conversion: long, missing: default, nullValue: default}
     deleteBehavior: preserve
@@ -157,7 +157,7 @@ kinds:
     fieldMappings:
       ownerAccountId: {targets: [conversation_archive_state.owner_account_id], conversion: string, missing: reject, nullValue: reject}
       conversationKey: {targets: [conversation_archive_state.conversation_key], conversion: string, missing: reject, nullValue: reject}
-      participantIds: {targets: [conversation_archive_participant.account_id], conversion: string-set-child, missing: empty, nullValue: empty}
+      participantIds: {targets: [conversation_archive_participant.account_id], conversion: string-set-child, missing: empty, nullValue: empty, requiredFields: ["$item"], optionalFields: [], invariants: ["string-items"]}
       archivedThroughMessageId: {targets: [conversation_archive_state.archived_through_message_id], conversion: string, missing: allow, nullValue: allow}
       archivedAt: {targets: [conversation_archive_state.archived_at], conversion: instant-utc, missing: reject, nullValue: reject}
     deleteBehavior: cascade
@@ -181,7 +181,7 @@ kinds:
     fieldMappings:
       type: {targets: [], conversion: constant-kind, missing: allow, nullValue: allow}
       conversationKey: {targets: [message.conversation_key], conversion: string, missing: reject, nullValue: reject}
-      participantIds: {targets: [message_participant.account_id], conversion: string-set-child, missing: empty, nullValue: empty}
+      participantIds: {targets: [message_participant.account_id], conversion: string-set-child, missing: empty, nullValue: empty, requiredFields: ["$item"], optionalFields: [], invariants: ["string-items"]}
       senderAccountId: {targets: [message.sender_account_id], conversion: string, missing: reject, nullValue: reject}
       recipientAccountId: {targets: [message.recipient_account_id], conversion: string, missing: reject, nullValue: reject}
       text: {targets: [message.message_text], conversion: string, missing: reject, nullValue: reject}
@@ -322,15 +322,15 @@ kinds:
       createdOn: {targets: [post.created_on], conversion: instant-utc, missing: reject, nullValue: reject}
       lastUpdatedOn: {targets: [post.last_updated_on], conversion: instant-utc, missing: allow, nullValue: allow}
       editedOn: {targets: [post.edited_on], conversion: instant-utc, missing: allow, nullValue: allow}
-      editAudit: {targets: [post_edit_audit.ordinal, post_edit_audit.editor_account_id, post_edit_audit.before_text, post_edit_audit.after_text, post_edit_audit.edited_on], conversion: record-list-child, missing: empty, nullValue: empty}
+      editAudit: {targets: [post_edit_audit.ordinal, post_edit_audit.editor_account_id, post_edit_audit.before_text, post_edit_audit.after_text, post_edit_audit.edited_on], conversion: record-list-child, missing: empty, nullValue: empty, requiredFields: ["editorAccountId", "beforeText", "afterText", "editedOn"], optionalFields: [], invariants: []}
       expiresOn: {targets: [post.expires_on], conversion: instant-utc, missing: allow, nullValue: allow}
       federationOutboundEligible: {targets: [post.federation_outbound_eligible], conversion: boolean, missing: default, nullValue: default}
       lastExtendedOn: {targets: [post.last_extended_on], conversion: instant-utc, missing: allow, nullValue: allow}
-      topics: {targets: [post_topic.ordinal, post_topic.canonical, post_topic.display], conversion: record-list-child, missing: empty, nullValue: empty}
+      topics: {targets: [post_topic.ordinal, post_topic.canonical, post_topic.display], conversion: record-list-child, missing: empty, nullValue: empty, requiredFields: ["canonical", "display"], optionalFields: [], invariants: []}
       likesCount: {targets: [post.likes_count], conversion: integer, missing: default, nullValue: default}
       threadReplyLikesCount: {targets: [post.thread_reply_likes_count], conversion: integer, missing: default, nullValue: default}
       threadReplyCount: {targets: [post.thread_reply_count], conversion: integer, missing: default, nullValue: default}
-      linkPreviews: {targets: [post_link_preview.ordinal, post_link_preview.url, post_link_preview.domain_name, post_link_preview.title, post_link_preview.description, post_link_preview.image_url], conversion: record-list-child, missing: empty, nullValue: empty}
+      linkPreviews: {targets: [post_link_preview.ordinal, post_link_preview.url, post_link_preview.domain_name, post_link_preview.title, post_link_preview.description, post_link_preview.image_url], conversion: record-list-child, missing: empty, nullValue: empty, requiredFields: ["url", "domain"], optionalFields: ["title", "description", "imageUrl"], invariants: []}
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: preserve-deadline
@@ -388,7 +388,7 @@ kinds:
       resolvedBy: {targets: [post_report.resolved_by], conversion: string, missing: allow, nullValue: allow}
       openReportsForAccount: {targets: [post_report.open_reports_for_account], conversion: long, missing: allow, nullValue: allow}
       resolvedReportsForAccount: {targets: [post_report.resolved_reports_for_account], conversion: long, missing: allow, nullValue: allow}
-      pendingModerationAudit: {targets: [post_report_moderation_audit.event_id, post_report_moderation_audit.actor_account_id, post_report_moderation_audit.actor_username, post_report_moderation_audit.action, post_report_moderation_audit.target_type, post_report_moderation_audit.target_id, post_report_moderation_audit.target_label, post_report_moderation_audit.reason, post_report_moderation_audit.message, post_report_moderation_audit_value.partition_name, post_report_moderation_audit_value.value_key, post_report_moderation_audit_value.value], conversion: record-child, missing: allow, nullValue: allow}
+      pendingModerationAudit: {targets: [post_report_moderation_audit.event_id, post_report_moderation_audit.actor_account_id, post_report_moderation_audit.actor_username, post_report_moderation_audit.action, post_report_moderation_audit.target_type, post_report_moderation_audit.target_id, post_report_moderation_audit.target_label, post_report_moderation_audit.reason, post_report_moderation_audit.message, post_report_moderation_audit_value.partition_name, post_report_moderation_audit_value.value_key, post_report_moderation_audit_value.value], conversion: record-child, missing: allow, nullValue: allow, requiredFields: ["eventId", "action", "targetType", "targetId"], optionalFields: ["actorAccountId", "actorUsername", "targetLabel", "reason", "message", "beforeValues", "afterValues", "metadata", "metadataValues"], invariants: ["metadata-alias-exclusive"]}
       createdOn: {targets: [post_report.created_on], conversion: instant-utc, missing: reject, nullValue: reject}
       lastUpdatedOn: {targets: [post_report.last_updated_on], conversion: instant-utc, missing: allow, nullValue: allow}
       resolvedOn: {targets: [post_report.resolved_on], conversion: instant-utc, missing: allow, nullValue: allow}
@@ -434,7 +434,7 @@ kinds:
     keyMapping: {sourcePath: url, targetColumn: post_link_preview_cache.url, preservation: exact}
     fieldMappings:
       status: {targets: [post_link_preview_cache.status], conversion: string, missing: reject, nullValue: reject}
-      preview: {targets: [post_link_preview_cache.preview_url, post_link_preview_cache.preview_domain, post_link_preview_cache.preview_title, post_link_preview_cache.preview_description, post_link_preview_cache.preview_image_url], conversion: record-flattened, missing: allow, nullValue: allow}
+      preview: {targets: [post_link_preview_cache.preview_url, post_link_preview_cache.preview_domain, post_link_preview_cache.preview_title, post_link_preview_cache.preview_description, post_link_preview_cache.preview_image_url], conversion: record-flattened, missing: allow, nullValue: allow, requiredFields: ["url", "domain"], optionalFields: ["title", "description", "imageUrl"], invariants: []}
       failureCategory: {targets: [post_link_preview_cache.failure_category], conversion: string, missing: allow, nullValue: allow}
       completedOn: {targets: [post_link_preview_cache.completed_on], conversion: instant-utc, missing: reject, nullValue: reject}
       expiresOn: {targets: [post_link_preview_cache.expires_on], conversion: instant-utc, missing: reject, nullValue: reject}
@@ -554,7 +554,7 @@ kinds:
     fieldMappings:
       normalizedName: {targets: [playlist.normalized_name], conversion: string, missing: reject, nullValue: reject}
       name: {targets: [playlist.name], conversion: string, missing: reject, nullValue: reject}
-      trackIds: {targets: [playlist_track.ordinal, playlist_track.track_id], conversion: string-list-child, missing: empty, nullValue: empty}
+      trackIds: {targets: [playlist_track.ordinal, playlist_track.track_id], conversion: string-list-child, missing: empty, nullValue: empty, requiredFields: ["$item"], optionalFields: [], invariants: ["string-items"]}
       version: {targets: [playlist.version], conversion: long, missing: default, nullValue: default}
       updatedByAccountId: {targets: [playlist.updated_by_account_id], conversion: string, missing: reject, nullValue: reject}
       updatedAt: {targets: [playlist.updated_at], conversion: instant-utc, missing: reject, nullValue: reject}
@@ -611,8 +611,8 @@ kinds:
     keyMapping: {sourcePath: id, targetColumn: runtime_state.runtime_state_id, preservation: exact}
     fieldMappings:
       kind: {targets: [runtime_state.state_kind], conversion: enum-name, missing: reject, nullValue: reject}
-      queue: {targets: [queue_entry.ordinal, queue_entry.queue_entry_id, queue_entry.track_id, queue_entry.observed_token, queue_entry.enqueued_by_account_id, queue_entry.enqueued_at], conversion: record-child, missing: allow, nullValue: allow}
-      radio: {targets: [runtime_state.station_sequence, runtime_state.track_id, runtime_state.observed_token, runtime_state.started_at, runtime_state.duration_seconds, runtime_state.radio_source, runtime_state.queue_entry_id], conversion: record-flattened, missing: allow, nullValue: allow}
+      queue: {targets: [queue_entry.ordinal, queue_entry.queue_entry_id, queue_entry.track_id, queue_entry.observed_token, queue_entry.enqueued_by_account_id, queue_entry.enqueued_at], conversion: record-child, missing: allow, nullValue: allow, requiredFields: ["entries", "entries[].id", "entries[].trackId", "entries[].observedToken", "entries[].enqueuedByAccountId", "entries[].enqueuedAt"], optionalFields: [], invariants: ["queue-entry-id-unique"]}
+      radio: {targets: [runtime_state.station_sequence, runtime_state.track_id, runtime_state.observed_token, runtime_state.started_at, runtime_state.duration_seconds, runtime_state.radio_source, runtime_state.queue_entry_id], conversion: record-flattened, missing: allow, nullValue: allow, requiredFields: ["stationSequence", "trackId", "observedToken", "startedAt", "durationSeconds", "source"], optionalFields: ["queueEntryId"], invariants: ["positive-duration"]}
       version: {targets: [runtime_state.version], conversion: long, missing: default, nullValue: default}
     deleteBehavior: preserve
     versionSemantics: preserve-optimistic
@@ -686,7 +686,7 @@ kinds:
     keyMapping: {sourcePath: id, targetColumn: restaurant.restaurant_id, preservation: exact}
     fieldMappings:
       type: {targets: [], conversion: constant-kind, missing: allow, nullValue: allow}
-      address: {targets: [restaurant.city, restaurant.county, restaurant.country, restaurant.latitude, restaurant.longitude, restaurant.postal_code, restaurant.region, restaurant.street_1, restaurant.street_2], conversion: record-flattened, missing: allow, nullValue: allow}
+      address: {targets: [restaurant.city, restaurant.county, restaurant.country, restaurant.latitude, restaurant.longitude, restaurant.postal_code, restaurant.region, restaurant.street_1, restaurant.street_2], conversion: record-flattened, missing: allow, nullValue: allow, requiredFields: ["country", "latitude", "longitude", "state", "street1"], optionalFields: ["city", "county", "postalCode", "street2"], invariants: ["coordinate-pair"]}
       createdBy: {targets: [restaurant.created_by], conversion: string, missing: allow, nullValue: allow}
       createdOn: {targets: [restaurant.created_on], conversion: instant-utc, missing: allow, nullValue: allow}
       lastModifiedBy: {targets: [restaurant.last_modified_by], conversion: string, missing: allow, nullValue: allow}
@@ -767,7 +767,7 @@ kinds:
     dependsOnKinds: [account]
     keyMapping: {sourcePath: accountId, targetColumn: lunch_preference.account_id, preservation: exact}
     fieldMappings:
-      cuisines: {targets: [lunch_preference_cuisine.ordinal, lunch_preference_cuisine.cuisine], conversion: string-list-child, missing: empty, nullValue: empty}
+      cuisines: {targets: [lunch_preference_cuisine.ordinal, lunch_preference_cuisine.cuisine], conversion: string-list-child, missing: empty, nullValue: empty, requiredFields: ["$item"], optionalFields: [], invariants: ["string-items"]}
       radiusMiles: {targets: [lunch_preference.radius_miles], conversion: integer, missing: allow, nullValue: allow}
     deleteBehavior: cascade
     versionSemantics: initialize-zero
@@ -791,15 +791,15 @@ kinds:
       type: {targets: [], conversion: constant-kind, missing: allow, nullValue: allow}
       createdByAccountId: {targets: [lunch_session.created_by_account_id], conversion: string, missing: reject, nullValue: reject}
       createdByUsername: {targets: [lunch_session.created_by_username], conversion: string, missing: reject, nullValue: reject}
-      participantAccountIds: {targets: [lunch_session_participant.ordinal, lunch_session_participant.account_id], conversion: string-list-child, missing: empty, nullValue: empty}
-      participantUsernamesByAccountId: {targets: [lunch_session_participant.account_id, lunch_session_participant.username], conversion: string-map-child, missing: empty, nullValue: empty}
-      restaurantIds: {targets: [lunch_session_restaurant.ordinal, lunch_session_restaurant.restaurant_id], conversion: string-list-child, missing: empty, nullValue: empty}
-      votesByAccountId: {targets: [lunch_session_vote.account_id, lunch_session_vote.restaurant_id], conversion: string-map-child, missing: empty, nullValue: empty}
+      participantAccountIds: {targets: [lunch_session_participant.ordinal, lunch_session_participant.account_id], conversion: string-list-child, missing: empty, nullValue: empty, requiredFields: ["$item"], optionalFields: [], invariants: ["string-items"]}
+      participantUsernamesByAccountId: {targets: [lunch_session_participant.account_id, lunch_session_participant.username], conversion: string-map-child, missing: empty, nullValue: empty, requiredFields: ["$key", "$value"], optionalFields: [], invariants: ["unique-map-keys"]}
+      restaurantIds: {targets: [lunch_session_restaurant.ordinal, lunch_session_restaurant.restaurant_id], conversion: string-list-child, missing: empty, nullValue: empty, requiredFields: ["$item"], optionalFields: [], invariants: ["string-items"]}
+      votesByAccountId: {targets: [lunch_session_vote.account_id, lunch_session_vote.restaurant_id], conversion: string-map-child, missing: empty, nullValue: empty, requiredFields: ["$key", "$value"], optionalFields: [], invariants: ["unique-map-keys"]}
       revision: {targets: [lunch_session.revision], conversion: long, missing: default, nullValue: default}
       activeUntil: {targets: [lunch_session.active_until], conversion: instant-utc, missing: reject, nullValue: reject}
       deleteOn: {targets: [lunch_session.delete_on], conversion: instant-utc, missing: reject, nullValue: reject}
       restaurantResetCount: {targets: [lunch_session.restaurant_reset_count], conversion: long, missing: default, nullValue: default}
-      restaurantResetAudit: {targets: [lunch_session_reset_audit.ordinal, lunch_session_reset_audit.revision, lunch_session_reset_audit.account_id, lunch_session_reset_audit.username, lunch_session_reset_audit.occurred_on, lunch_session_reset_restaurant.restaurant_ordinal, lunch_session_reset_restaurant.restaurant_id], conversion: record-list-child, missing: empty, nullValue: empty}
+      restaurantResetAudit: {targets: [lunch_session_reset_audit.ordinal, lunch_session_reset_audit.revision, lunch_session_reset_audit.account_id, lunch_session_reset_audit.username, lunch_session_reset_audit.occurred_on, lunch_session_reset_restaurant.restaurant_ordinal, lunch_session_reset_restaurant.restaurant_id], conversion: record-list-child, missing: empty, nullValue: empty, requiredFields: ["revision", "accountId", "username", "restaurantIds", "occurredOn"], optionalFields: [], invariants: ["restaurant-id-order"]}
       createdOn: {targets: [lunch_session.created_on], conversion: instant-utc, missing: reject, nullValue: reject}
       lastUpdatedOn: {targets: [lunch_session.last_updated_on], conversion: instant-utc, missing: reject, nullValue: reject}
     deleteBehavior: preserve
@@ -822,7 +822,7 @@ kinds:
     keyMapping: {sourcePath: id, targetColumn: daily_lunch_picks.daily_lunch_picks_id, preservation: exact}
     fieldMappings:
       pickDate: {targets: [daily_lunch_picks.pick_date], conversion: local-date, missing: reject, nullValue: reject}
-      restaurantIds: {targets: [daily_lunch_pick_restaurant.ordinal, daily_lunch_pick_restaurant.restaurant_id], conversion: string-list-child, missing: empty, nullValue: empty}
+      restaurantIds: {targets: [daily_lunch_pick_restaurant.ordinal, daily_lunch_pick_restaurant.restaurant_id], conversion: string-list-child, missing: empty, nullValue: empty, requiredFields: ["$item"], optionalFields: [], invariants: ["string-items"]}
       generatedOn: {targets: [daily_lunch_picks.generated_on], conversion: instant-utc, missing: reject, nullValue: reject}
     deleteBehavior: preserve
     versionSemantics: initialize-zero
@@ -848,7 +848,7 @@ kinds:
       lastFailedOn: {targets: [restaurant_import_state.last_failed_on], conversion: instant-utc, missing: allow, nullValue: allow}
       lastCompletedMonth: {targets: [restaurant_import_state.last_completed_month], conversion: year-month-first-day, missing: allow, nullValue: allow}
       lastFailureMessage: {targets: [restaurant_import_state.last_failure_message], conversion: string, missing: allow, nullValue: allow}
-      lastResult: {targets: [restaurant_import_state.result_source, restaurant_import_state.result_fetched, restaurant_import_state.result_imported, restaurant_import_state.result_updated, restaurant_import_state.result_skipped_existing, restaurant_import_state.result_skipped_invalid], conversion: record-flattened, missing: allow, nullValue: allow}
+      lastResult: {targets: [restaurant_import_state.result_source, restaurant_import_state.result_fetched, restaurant_import_state.result_imported, restaurant_import_state.result_updated, restaurant_import_state.result_skipped_existing, restaurant_import_state.result_skipped_invalid], conversion: record-flattened, missing: allow, nullValue: allow, requiredFields: ["source", "fetched", "imported", "updated", "skippedExisting", "skippedInvalid"], optionalFields: [], invariants: ["nonnegative-counts"]}
       status: {targets: [restaurant_import_state.status], conversion: enum-name, missing: allow, nullValue: allow}
       trigger: {targets: [restaurant_import_state.trigger_name], conversion: string, missing: allow, nullValue: allow}
       actorAccountId: {targets: [restaurant_import_state.actor_account_id], conversion: string, missing: allow, nullValue: allow}
@@ -879,7 +879,7 @@ kinds:
       createdOn: {targets: [restaurant_import_preview.created_on], conversion: instant-utc, missing: reject, nullValue: reject}
       expiresOn: {targets: [restaurant_import_preview.expires_on], conversion: instant-utc, missing: reject, nullValue: reject}
       consumedOn: {targets: [restaurant_import_preview.consumed_on], conversion: instant-utc, missing: allow, nullValue: allow}
-      counts: {targets: [restaurant_import_preview.fetched_count, restaurant_import_preview.created_count, restaurant_import_preview.updated_count, restaurant_import_preview.deleted_count, restaurant_import_preview.unchanged_count, restaurant_import_preview.invalid_count], conversion: record-flattened, missing: reject, nullValue: reject}
+      counts: {targets: [restaurant_import_preview.fetched_count, restaurant_import_preview.created_count, restaurant_import_preview.updated_count, restaurant_import_preview.deleted_count, restaurant_import_preview.unchanged_count, restaurant_import_preview.invalid_count], conversion: record-flattened, missing: reject, nullValue: reject, requiredFields: ["fetched", "created", "updated", "deleted", "unchanged", "invalid"], optionalFields: [], invariants: ["nonnegative-counts"]}
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: ttl-deadline
@@ -1028,7 +1028,7 @@ kinds:
       path: {targets: [radio_state.relative_path], conversion: string, missing: allow, nullValue: allow}
       startedAt: {targets: [radio_state.started_at], conversion: instant-utc, missing: allow, nullValue: allow}
       durationSeconds: {targets: [radio_state.duration_seconds], conversion: decimal-20-9, missing: allow, nullValue: allow}
-      knownDurations: {targets: [radio_track_duration.ordinal, radio_track_duration.relative_path, radio_track_duration.observed_token, radio_track_duration.duration_seconds], conversion: record-list-child, missing: empty, nullValue: empty}
+      knownDurations: {targets: [radio_track_duration.ordinal, radio_track_duration.relative_path, radio_track_duration.observed_token, radio_track_duration.duration_seconds], conversion: record-list-child, missing: empty, nullValue: empty, requiredFields: ["path", "observedToken", "durationSeconds"], optionalFields: [], invariants: ["positive-duration"]}
       version: {targets: [radio_state.version], conversion: long, missing: default, nullValue: default}
     deleteBehavior: preserve
     versionSemantics: preserve-optimistic
@@ -1089,8 +1089,8 @@ kinds:
       expectedSha256: {targets: [upload_session.expected_sha256], conversion: string, missing: reject, nullValue: reject}
       targetObservedToken: {targets: [upload_session.target_observed_token], conversion: string, missing: allow, nullValue: allow}
       nextOffset: {targets: [upload_session.next_offset], conversion: long, missing: default, nullValue: default}
-      chunkDigests: {targets: [upload_chunk.chunk_key, upload_chunk.digest], conversion: string-map-child, missing: empty, nullValue: empty}
-      chunkLengths: {targets: [upload_chunk.chunk_key, upload_chunk.chunk_length], conversion: string-map-child, missing: empty, nullValue: empty}
+      chunkDigests: {targets: [upload_chunk.chunk_key, upload_chunk.digest], conversion: string-map-child, missing: empty, nullValue: empty, requiredFields: ["$key", "$value"], optionalFields: [], invariants: ["unique-map-keys"]}
+      chunkLengths: {targets: [upload_chunk.chunk_key, upload_chunk.chunk_length], conversion: string-map-child, missing: empty, nullValue: empty, requiredFields: ["$key", "$value"], optionalFields: [], invariants: ["unique-map-keys"]}
       stagingKey: {targets: [upload_session.staging_key], conversion: string, missing: reject, nullValue: reject}
       appendLeaseToken: {targets: [upload_session.append_lease_token], conversion: string, missing: allow, nullValue: allow}
       appendLeaseExpiresAt: {targets: [upload_session.append_lease_expires_at], conversion: instant-utc, missing: allow, nullValue: allow}
@@ -1151,7 +1151,7 @@ kinds:
       manufacturerId: {targets: [vehicle.manufacturer_id], conversion: string, missing: allow, nullValue: allow}
       mileage: {targets: [vehicle.mileage], conversion: integer, missing: allow, nullValue: allow}
       model: {targets: [vehicle.model], conversion: string, missing: allow, nullValue: allow}
-      nhtsaDecodedValues: {targets: [vehicle_decoded_value.field_name, vehicle_decoded_value.field_value], conversion: string-map-child, missing: empty, nullValue: empty}
+      nhtsaDecodedValues: {targets: [vehicle_decoded_value.field_name, vehicle_decoded_value.field_value], conversion: string-map-child, missing: empty, nullValue: empty, requiredFields: ["$key", "$value"], optionalFields: [], invariants: ["unique-map-keys"]}
       nhtsaErrorCode: {targets: [vehicle.nhtsa_error_code], conversion: string, missing: allow, nullValue: allow}
       nhtsaErrorText: {targets: [vehicle.nhtsa_error_text], conversion: string, missing: allow, nullValue: allow}
       nhtsaLastDecodedOn: {targets: [vehicle.nhtsa_last_decoded_on], conversion: instant-utc, missing: allow, nullValue: allow}
@@ -1186,7 +1186,7 @@ kinds:
     dependsOnKinds: []
     keyMapping: {sourcePath: vin, targetColumn: vin_decode_cache.vin, preservation: exact}
     fieldMappings:
-      response: {targets: [vin_decode_cache.response_present, vin_decode_cache.raw_decoded_values_present, vin_decode_cache.response_vin, vin_decode_cache.make, vin_decode_cache.model, vin_decode_cache.model_year, vin_decode_cache.body, vin_decode_cache.plant_city, vin_decode_cache.plant_state, vin_decode_cache.plant_country, vin_decode_cache.error_code, vin_decode_cache.error_text, vin_decode_raw_value.field_name, vin_decode_raw_value.field_value], conversion: vin-response-flattened, missing: allow, nullValue: allow}
+      response: {targets: [vin_decode_cache.response_present, vin_decode_cache.raw_decoded_values_present, vin_decode_cache.response_vin, vin_decode_cache.make, vin_decode_cache.model, vin_decode_cache.model_year, vin_decode_cache.body, vin_decode_cache.plant_city, vin_decode_cache.plant_state, vin_decode_cache.plant_country, vin_decode_cache.error_code, vin_decode_cache.error_text, vin_decode_raw_value.field_name, vin_decode_raw_value.field_value], conversion: vin-response-flattened, missing: allow, nullValue: allow, requiredFields: [], optionalFields: ["vin", "make", "model", "year", "body", "plantCity", "plantState", "plantCountry", "errorCode", "errorText", "rawDecodedValues"], invariants: ["raw-values-scalar"]}
       decoderVersion: {targets: [vin_decode_cache.decoder_version], conversion: string, missing: allow, nullValue: allow}
       refreshedOn: {targets: [vin_decode_cache.refreshed_on], conversion: instant-utc, missing: allow, nullValue: allow}
       expiresOn: {targets: [vin_decode_cache.expires_on], conversion: instant-utc, missing: allow, nullValue: allow}
@@ -1253,7 +1253,7 @@ kinds:
       lifetimeVinsProcessed: {targets: [random_vin_import_state.lifetime_vins_processed], conversion: long, missing: allow, nullValue: allow}
       notes: {targets: [random_vin_import_state.notes], conversion: string, missing: allow, nullValue: allow}
       permanentlyDisabled: {targets: [random_vin_import_state.permanently_disabled], conversion: boolean, missing: allow, nullValue: allow}
-      robotsPolicy: {targets: [random_vin_import_state.robots_policy_present, random_vin_import_state.robots_checked_on, random_vin_import_state.robots_allowed, random_vin_import_state.robots_reason, random_vin_import_state.robots_fail_closed], conversion: record-flattened, missing: allow, nullValue: allow}
+      robotsPolicy: {targets: [random_vin_import_state.robots_policy_present, random_vin_import_state.robots_checked_on, random_vin_import_state.robots_allowed, random_vin_import_state.robots_reason, random_vin_import_state.robots_fail_closed], conversion: record-flattened, missing: allow, nullValue: allow, requiredFields: ["checkedOn", "allowed", "reason", "failClosed"], optionalFields: [], invariants: ["fail-closed-reason"]}
       vinsProcessedToday: {targets: [random_vin_import_state.vins_processed_today], conversion: integer, missing: allow, nullValue: allow}
     deleteBehavior: preserve
     versionSemantics: initialize-zero
@@ -1303,7 +1303,7 @@ kinds:
       source: {targets: [zip_import_state.source], conversion: string, missing: reject, nullValue: reject}
       sourceYear: {targets: [zip_import_state.source_year], conversion: integer, missing: reject, nullValue: reject}
       importedOn: {targets: [zip_import_state.imported_on], conversion: instant-utc, missing: reject, nullValue: reject}
-      result: {targets: [zip_import_state.result_processed, zip_import_state.result_created, zip_import_state.result_updated, zip_import_state.result_unchanged, zip_import_state.result_deleted, zip_import_state.result_source, zip_import_state.result_source_year, zip_import_state.result_checksum, zip_import_state.result_imported_on, zip_import_state.result_no_op], conversion: record-flattened, missing: reject, nullValue: reject}
+      result: {targets: [zip_import_state.result_processed, zip_import_state.result_created, zip_import_state.result_updated, zip_import_state.result_unchanged, zip_import_state.result_deleted, zip_import_state.result_source, zip_import_state.result_source_year, zip_import_state.result_checksum, zip_import_state.result_imported_on, zip_import_state.result_no_op], conversion: record-flattened, missing: reject, nullValue: reject, requiredFields: ["processed", "created", "updated", "unchanged", "deleted", "source", "sourceYear", "checksum", "importedOn", "noOp"], optionalFields: [], invariants: ["nonnegative-counts"]}
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
@@ -1332,7 +1332,7 @@ kinds:
       verifiedMetroCount: {targets: [price_snapshot.verified_metro_count], conversion: integer, missing: reject, nullValue: reject}
       provisionalMetroCount: {targets: [price_snapshot.provisional_metro_count], conversion: integer, missing: reject, nullValue: reject}
       excludedMetroCount: {targets: [price_snapshot.excluded_metro_count], conversion: integer, missing: reject, nullValue: reject}
-      metroPrices: {targets: [metro_price.ordinal, metro_price.metro_name, metro_price.city, metro_price.region, metro_price.restaurant_ref, metro_price.restaurant_name, metro_price.address, metro_price.source_url, metro_price.price, metro_price.currency, metro_price.status, metro_price.source_name, metro_price.quality_status, metro_price.confidence_level, metro_price.raw_response_hash, metro_price.matched_item_name, metro_price.failure_reason, metro_price.review_note, metro_price.collected_on, metro_price.source_fetched_on, metro_price.reviewed_on], conversion: record-list-child, missing: empty, nullValue: empty}
+      metroPrices: {targets: [metro_price.ordinal, metro_price.metro_name, metro_price.city, metro_price.region, metro_price.restaurant_ref, metro_price.restaurant_name, metro_price.address, metro_price.source_url, metro_price.price, metro_price.currency, metro_price.status, metro_price.source_name, metro_price.quality_status, metro_price.confidence_level, metro_price.raw_response_hash, metro_price.matched_item_name, metro_price.failure_reason, metro_price.review_note, metro_price.collected_on, metro_price.source_fetched_on, metro_price.reviewed_on], conversion: record-list-child, missing: empty, nullValue: empty, requiredFields: ["metroName", "city", "state", "restaurantRef", "restaurantName", "sourceUrl", "price", "currency", "status", "sourceName", "qualityStatus", "confidenceLevel", "rawResponseHash", "collectedOn", "sourceFetchedOn"], optionalFields: ["address", "matchedItemName", "failureReason", "reviewNote", "reviewedOn"], invariants: ["nonnegative-price"]}
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
@@ -1439,8 +1439,8 @@ kinds:
       completed: {targets: [domain_collection_cutover.completed], conversion: boolean, missing: reject, nullValue: reject}
       legacyDropped: {targets: [domain_collection_cutover.legacy_dropped], conversion: boolean, missing: reject, nullValue: reject}
       intent: {targets: [domain_collection_cutover.intent], conversion: string, missing: allow, nullValue: allow}
-      presentSources: {targets: [domain_collection_cutover_source.ordinal, domain_collection_cutover_source.source_name], conversion: string-list-child, missing: empty, nullValue: empty}
-      expectedKindMetrics: {targets: [domain_collection_cutover_metric.ordinal, domain_collection_cutover_metric.source_kind, domain_collection_cutover_metric.source_count, domain_collection_cutover_metric.checksum], conversion: record-list-child, missing: empty, nullValue: empty}
+      presentSources: {targets: [domain_collection_cutover_source.ordinal, domain_collection_cutover_source.source_name], conversion: string-list-child, missing: empty, nullValue: empty, requiredFields: ["$item"], optionalFields: [], invariants: ["string-items"]}
+      expectedKindMetrics: {targets: [domain_collection_cutover_metric.ordinal, domain_collection_cutover_metric.source_kind, domain_collection_cutover_metric.source_count, domain_collection_cutover_metric.checksum], conversion: record-list-child, missing: empty, nullValue: empty, requiredFields: ["kind", "count", "checksum"], optionalFields: [], invariants: ["nonnegative-counts"]}
     deleteBehavior: ledger-state
     versionSemantics: preserve-revision
     expirySemantics: none
@@ -1468,9 +1468,9 @@ kinds:
       targetLabel: {targets: [admin_activity.target_label], conversion: string, missing: allow, nullValue: allow}
       reason: {targets: [admin_activity.reason], conversion: string, missing: allow, nullValue: allow}
       message: {targets: [admin_activity.message], conversion: string, missing: allow, nullValue: allow}
-      beforeValues: {targets: [admin_activity.before_values_present, admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: allow, nullValue: allow}
-      afterValues: {targets: [admin_activity.after_values_present, admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: allow, nullValue: allow}
-      metadata: {targets: [admin_activity.metadata_present, admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: allow, nullValue: allow}
+      beforeValues: {targets: [admin_activity.before_values_present, admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: allow, nullValue: allow, requiredFields: ["$key", "$value"], optionalFields: [], invariants: ["unique-map-keys"]}
+      afterValues: {targets: [admin_activity.after_values_present, admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: allow, nullValue: allow, requiredFields: ["$key", "$value"], optionalFields: [], invariants: ["unique-map-keys"]}
+      metadata: {targets: [admin_activity.metadata_present, admin_activity_value.partition_name, admin_activity_value.value_key, admin_activity_value.value_text], conversion: string-map-child, missing: allow, nullValue: allow, requiredFields: ["$key", "$value"], optionalFields: [], invariants: ["unique-map-keys"]}
       createdOn: {targets: [admin_activity.created_on], conversion: instant-utc, missing: reject, nullValue: reject}
     deleteBehavior: preserve
     versionSemantics: initialize-zero

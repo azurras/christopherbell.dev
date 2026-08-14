@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.io.IOException;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -15,6 +17,142 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 @EnabledIfEnvironmentVariable(named = "POSTGRESQL_INTEGRATION_TESTS", matches = "enabled")
 class JdbcMigrationTargetStoreTest {
+  @Test
+  void filteredPageQueriesExecuteSourceDerivedPartitionsAndOrdering() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate()) {
+      var catalog = loadCatalog();
+      var byKind = catalog.kinds().stream().collect(java.util.stream.Collectors.toMap(
+          PostgresqlMigrationCatalog.Kind::sourceKind, java.util.function.Function.identity()));
+      var account = byKind.get("account");
+      var follow = byKind.get("account_follow");
+      var registry = MigrationTransformerRegistry.from(catalog);
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var context = shadowContext(
+          database, UUID.fromString("00000000-0000-0000-0000-000000000634"));
+      var accountStage = target.commitBatch(
+          context, account, target.checkpoint(context, account),
+          List.of(
+              registry.require("account").transform(account("account-1")),
+              registry.require("account").transform(account("account-2")),
+              registry.require("account").transform(account("account-3"))),
+          "account-3");
+      target.completeStaging(context, account, accountStage);
+      var followStage = target.commitBatch(
+          context, follow, target.checkpoint(context, follow),
+          List.of(
+              registry.require("account_follow").transform(follow(
+                  "follow-a", "account-1", "account-2", "2026-08-15T00:00:00Z")),
+              registry.require("account_follow").transform(follow(
+                  "follow-b", "account-3", "account-2", "2026-08-14T00:00:00Z")),
+              registry.require("account_follow").transform(follow(
+                  "follow-c", "account-1", "account-3", "2026-08-16T00:00:00Z"))),
+          "follow-c");
+      target.completeStaging(context, follow, followStage);
+
+      target.rehearseShadow(
+          context, List.of(account, follow),
+          List.of(target.reconcile(context, account), target.reconcile(context, follow)));
+
+      assertThat(domainCount(database, "identity", "account_follow")).isEqualTo(3);
+    }
+  }
+
+  @Test
+  void deadlineQueryExecutesSourceDerivedFilteringOrderingAndTieBreaks() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate()) {
+      var kind = applicationLeaseKind();
+      var transformer = MigrationTransformerRegistry.from(loadCatalog()).require(kind.sourceKind());
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var context = shadowContext(
+          database, UUID.fromString("00000000-0000-0000-0000-000000000633"));
+      var staged = target.commitBatch(
+          context, kind, target.checkpoint(context, kind),
+          List.of(
+              transformer.transform(source(
+                  "lease-a-boundary", 1, Instant.parse("2026-08-15T00:00:00Z"))),
+              transformer.transform(source(
+                  "lease-b-before", 2, Instant.parse("2026-08-14T00:00:00Z"))),
+              transformer.transform(source(
+                  "lease-c-after", 3, Instant.parse("2026-08-16T00:00:00Z")))),
+          "lease-c-after");
+      target.completeStaging(context, kind, staged);
+
+      target.rehearseShadow(
+          context, List.of(kind), List.of(target.reconcile(context, kind)));
+
+      assertThat(leases(database)).hasSize(3);
+    }
+  }
+
+  @Test
+  void distinctShadowRunsUpsertChangedRowsWithoutDeletingAbsentRoots() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate()) {
+      var kind = applicationLeaseKind();
+      var transformer = MigrationTransformerRegistry.from(loadCatalog()).require(kind.sourceKind());
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var first = shadowContext(
+          database, UUID.fromString("00000000-0000-0000-0000-000000000631"));
+      var firstStage = target.commitBatch(
+          first, kind, target.checkpoint(first, kind),
+          List.of(transformer.transform(source("lease-a", 1)),
+              transformer.transform(source("lease-b", 2))), "lease-b");
+      target.completeStaging(first, kind, firstStage);
+      target.rehearseShadow(
+          first, List.of(kind), List.of(target.reconcile(first, kind)));
+
+      var second = shadowContext(
+          database, UUID.fromString("00000000-0000-0000-0000-000000000632"));
+      var secondStage = target.commitBatch(
+          second, kind, target.checkpoint(second, kind),
+          List.of(transformer.transform(source("lease-b", 20)),
+              transformer.transform(source("lease-c", 3))), "lease-c");
+      target.completeStaging(second, kind, secondStage);
+      target.rehearseShadow(
+          second, List.of(kind), List.of(target.reconcile(second, kind)));
+
+      assertThat(leases(database)).containsExactly(
+          List.of("lease-a", 1L), List.of("lease-b", 20L), List.of("lease-c", 3L));
+      assertThat(target.statuses(second).getFirst().published()).isFalse();
+    }
+  }
+
+  @Test
+  void finalizeRunsTheFrozenBoundaryCheckUnderItsLockBeforeAnyTypedDml() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+      var context = context(database);
+      var kind = applicationLeaseKind();
+      var transformer = MigrationTransformerRegistry.from(loadCatalog()).require(kind.sourceKind());
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var staged = target.commitBatch(
+          context, kind, target.checkpoint(context, kind),
+          List.of(transformer.transform(source("lease-frozen-window", 41))),
+          "lease-frozen-window");
+      target.completeStaging(context, kind, staged);
+      var reconciliation = target.reconcile(context, kind);
+      var checkEntered = new CountDownLatch(1);
+      var withdrawLease = new CountDownLatch(1);
+
+      var finalize = executor.submit(() -> target.finalizeRun(
+          context, List.of(kind), List.of(reconciliation), () -> {
+            checkEntered.countDown();
+            await(withdrawLease);
+            throw new MigrationReconciliationException();
+          }));
+
+      assertThat(checkEntered.await(10, TimeUnit.SECONDS)).isTrue();
+      assertThat(count(database, "application_lease")).isZero();
+      withdrawLease.countDown();
+      assertThatThrownBy(() -> finalize.get(10, TimeUnit.SECONDS))
+          .hasCauseInstanceOf(MigrationReconciliationException.class);
+      assertThat(count(database, "application_lease")).isZero();
+    }
+  }
+
   @Test
   void everyCatalogChildTableCarriesTheFrozenSourceIdentity() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate();
@@ -62,7 +200,8 @@ class JdbcMigrationTargetStoreTest {
           MigrationCheckpoint.initial().sourceDigest(), true, true);
 
       assertThatThrownBy(() -> target.finalizeRun(
-          shadow, List.of(kind), List.of(reconciliation)))
+          shadow, List.of(kind), List.of(reconciliation),
+          () -> shadow.request().frozenSourceEvidence()))
           .isInstanceOf(MigrationReconciliationException.class);
       assertThat(count(database, "persistence_migration_run")).isZero();
     }
@@ -129,13 +268,18 @@ class JdbcMigrationTargetStoreTest {
         throw new SQLException("injected after typed inserts");
       });
       assertThatThrownBy(() -> failingTarget.finalizeRun(
-          context, List.of(kind), List.of(reconciliation)))
+          context, List.of(kind), List.of(reconciliation),
+          () -> context.request().frozenSourceEvidence()))
           .isInstanceOf(MigrationStorageException.class);
       assertThat(count(database, "application_lease")).isZero();
       assertThat(target.statuses(context).getFirst().published()).isFalse();
 
-      target.finalizeRun(context, List.of(kind), List.of(reconciliation));
-      target.finalizeRun(context, List.of(kind), List.of(reconciliation));
+      target.finalizeRun(
+          context, List.of(kind), List.of(reconciliation),
+          () -> context.request().frozenSourceEvidence());
+      target.finalizeRun(
+          context, List.of(kind), List.of(reconciliation),
+          () -> context.request().frozenSourceEvidence());
 
       assertThat(count(database, "application_lease")).isEqualTo(2);
       assertThat(target.statuses(context).getFirst().published()).isTrue();
@@ -170,7 +314,8 @@ class JdbcMigrationTargetStoreTest {
       var supplied = target.reconcile(context, kind);
       assertThat(supplied.equivalent()).isTrue();
       assertThatThrownBy(() -> noOpPublisher.finalizeRun(
-          context, List.of(kind), List.of(supplied)))
+          context, List.of(kind), List.of(supplied),
+          () -> context.request().frozenSourceEvidence()))
           .isInstanceOf(MigrationReconciliationException.class);
       assertThat(count(database, "application_lease")).isZero();
     }
@@ -221,7 +366,9 @@ class JdbcMigrationTargetStoreTest {
               transformer.transform(source("lease-b", 2))), "lease-b");
       target.completeStaging(firstContext, kind, first);
       var firstReconciliation = target.reconcile(firstContext, kind);
-      target.finalizeRun(firstContext, List.of(kind), List.of(firstReconciliation));
+      target.finalizeRun(
+          firstContext, List.of(kind), List.of(firstReconciliation),
+          () -> firstContext.request().frozenSourceEvidence());
 
       var secondContext = context(database,
           UUID.fromString("00000000-0000-0000-0000-000000000612"));
@@ -230,7 +377,8 @@ class JdbcMigrationTargetStoreTest {
               transformer.transform(source("lease-c", 3))), "lease-c");
       target.completeStaging(secondContext, kind, second);
       target.finalizeRun(
-          secondContext, List.of(kind), List.of(target.reconcile(secondContext, kind)));
+          secondContext, List.of(kind), List.of(target.reconcile(secondContext, kind)),
+          () -> secondContext.request().frozenSourceEvidence());
 
       assertThat(leases(database)).containsExactly(
           List.of("lease-b", 20L), List.of("lease-c", 3L));
@@ -261,7 +409,8 @@ class JdbcMigrationTargetStoreTest {
           context, kind, target.checkpoint(context, kind), documents, "lease-0200");
       target.completeStaging(context, kind, staged);
       target.finalizeRun(
-          context, List.of(kind), List.of(target.reconcile(context, kind)));
+          context, List.of(kind), List.of(target.reconcile(context, kind)),
+          () -> context.request().frozenSourceEvidence());
 
       assertThat(calls[0]).isEqualTo(3);
       assertThat(largestBatch[0]).isEqualTo(100);
@@ -284,7 +433,8 @@ class JdbcMigrationTargetStoreTest {
           List.of(transformer.transform(vinSource(Map.of("A", "one", "B", "two")))), "vin");
       target.completeStaging(firstContext, kind, first);
       target.finalizeRun(
-          firstContext, List.of(kind), List.of(target.reconcile(firstContext, kind)));
+          firstContext, List.of(kind), List.of(target.reconcile(firstContext, kind)),
+          () -> firstContext.request().frozenSourceEvidence());
 
       var secondContext = context(database,
           UUID.fromString("00000000-0000-0000-0000-000000000615"));
@@ -292,7 +442,8 @@ class JdbcMigrationTargetStoreTest {
           List.of(transformer.transform(vinSource(Map.of("B", "updated")))), "vin");
       target.completeStaging(secondContext, kind, second);
       target.finalizeRun(
-          secondContext, List.of(kind), List.of(target.reconcile(secondContext, kind)));
+          secondContext, List.of(kind), List.of(target.reconcile(secondContext, kind)),
+          () -> secondContext.request().frozenSourceEvidence());
 
       assertThat(rawVinValues(database)).containsExactly(List.of("B", "updated"));
     }
@@ -313,7 +464,8 @@ class JdbcMigrationTargetStoreTest {
           List.of(transformer.transform(vinSource(Map.of("Make", "Mazda")))), "vin");
       target.completeStaging(firstContext, kind, first);
       target.finalizeRun(
-          firstContext, List.of(kind), List.of(target.reconcile(firstContext, kind)));
+          firstContext, List.of(kind), List.of(target.reconcile(firstContext, kind)),
+          () -> firstContext.request().frozenSourceEvidence());
 
       var secondContext = context(database,
           UUID.fromString("00000000-0000-0000-0000-000000000619"));
@@ -324,7 +476,8 @@ class JdbcMigrationTargetStoreTest {
           List.of(transformer.transform(presentEmpty)), "vin");
       target.completeStaging(secondContext, kind, second);
       target.finalizeRun(
-          secondContext, List.of(kind), List.of(target.reconcile(secondContext, kind)));
+          secondContext, List.of(kind), List.of(target.reconcile(secondContext, kind)),
+          () -> secondContext.request().frozenSourceEvidence());
 
       try (var connection = database.connect();
            var statement = connection.createStatement();
@@ -358,11 +511,15 @@ class JdbcMigrationTargetStoreTest {
           context, kind, target.checkpoint(context, kind), List.of(transformed), "lease-replay");
       target.completeStaging(context, kind, staged);
       var reconciliation = target.reconcile(context, kind);
-      target.finalizeRun(context, List.of(kind), List.of(reconciliation));
+      target.finalizeRun(
+          context, List.of(kind), List.of(reconciliation),
+          () -> context.request().frozenSourceEvidence());
       execute(database, "update \"" + database.prefix()
           + "platform\".application_lease set fence_token=999 where lease_name='lease-replay'");
 
-      target.finalizeRun(context, List.of(kind), List.of(reconciliation));
+      target.finalizeRun(
+          context, List.of(kind), List.of(reconciliation),
+          () -> context.request().frozenSourceEvidence());
 
       assertThat(leases(database)).containsExactly(List.of("lease-replay", 17L));
     }
@@ -396,7 +553,8 @@ class JdbcMigrationTargetStoreTest {
       target.completeStaging(first, post, postStage);
       target.finalizeRun(
           first, List.of(account, post), List.of(
-              target.reconcile(first, account), target.reconcile(first, post)));
+              target.reconcile(first, account), target.reconcile(first, post)),
+          () -> first.request().frozenSourceEvidence());
       assertThat(domainCount(database, "identity", "account")).isOne();
       assertThat(domainCount(database, "social", "post")).isOne();
 
@@ -405,7 +563,8 @@ class JdbcMigrationTargetStoreTest {
       target.completeStaging(second, post, target.checkpoint(second, post));
       target.finalizeRun(
           second, List.of(account, post), List.of(
-              target.reconcile(second, account), target.reconcile(second, post)));
+              target.reconcile(second, account), target.reconcile(second, post)),
+          () -> second.request().frozenSourceEvidence());
 
       assertThat(domainCount(database, "social", "post")).isZero();
       assertThat(domainCount(database, "identity", "account")).isZero();
@@ -413,6 +572,10 @@ class JdbcMigrationTargetStoreTest {
   }
 
   private static MigrationSourceDocument source(String id, long fence) {
+    return source(id, fence, Instant.parse("2026-08-15T00:00:00.123456Z"));
+  }
+
+  private static MigrationSourceDocument source(String id, long fence, Instant expiresAt) {
     return new MigrationSourceDocument(
         "application_lease",
         1,
@@ -421,7 +584,34 @@ class JdbcMigrationTargetStoreTest {
             "ownerToken", "owner-" + id,
             "fenceToken", fence,
             "acquiredAt", Instant.parse("2026-08-14T00:00:00.123456Z"),
-            "expiresAt", Instant.parse("2026-08-15T00:00:00.123456Z")));
+            "expiresAt", expiresAt));
+  }
+
+  private static MigrationSourceDocument account(String id) {
+    return new MigrationSourceDocument(
+        "account", 1, id, Map.of(
+            "email", id + "@example.test", "role", "USER", "status", "ACTIVE",
+            "username", id));
+  }
+
+  private static MigrationSourceDocument follow(
+      String id, String follower, String followed, String createdOn) {
+    return new MigrationSourceDocument(
+        "account_follow", 1, id, Map.of(
+            "followerAccountId", follower,
+            "followedAccountId", followed,
+            "createdOn", Instant.parse(createdOn)));
+  }
+
+  private static void await(CountDownLatch latch) {
+    try {
+      if (!latch.await(10, TimeUnit.SECONDS)) {
+        throw new AssertionError("migration test latch timed out");
+      }
+    } catch (InterruptedException failure) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError("migration test latch was interrupted", failure);
+    }
   }
 
   private static MigrationSourceDocument vinSource(Map<String, String> rawValues) {
@@ -481,11 +671,16 @@ class JdbcMigrationTargetStoreTest {
 
   private static ValidatedMigrationContext shadowContext(
       PostgresqlSchemaTestSupport.MigratedDatabase database) {
+    return shadowContext(database, UUID.randomUUID());
+  }
+
+  private static ValidatedMigrationContext shadowContext(
+      PostgresqlSchemaTestSupport.MigratedDatabase database, UUID lockToken) {
     var request = new MigrationRequest(
         PostgresqlMigrationCommand.SHADOW,
         "mongodb://127.0.0.1:57018/test", "test", database.jdbcConfiguration().url(), "test",
         "christopherbell_test", database.prefix(), "a".repeat(64), "release-6",
-        UUID.randomUUID(), null, 2);
+        lockToken, null, 2);
     return new ValidatedMigrationContext(
         request, new MigrationDatabaseIdentity("127.0.0.1", 57018, "test", null),
         new MigrationDatabaseIdentity("127.0.0.1", 55432, "test", "christopherbell_test"),

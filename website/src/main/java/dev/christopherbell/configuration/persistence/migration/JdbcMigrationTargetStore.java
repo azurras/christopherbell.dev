@@ -112,11 +112,63 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
   }
 
   @Override
-  public void finalizeRun(
+  public void rehearseShadow(
       ValidatedMigrationContext context,
       List<PostgresqlMigrationCatalog.Kind> kinds,
       List<MigrationReconciliation> supplied) {
-    requireFinalizeAuthority(context);
+    if (context.request().command() != PostgresqlMigrationCommand.SHADOW
+        || context.sourceFrozen() || context.request().frozenSourceEvidence() != null) {
+      throw new MigrationReconciliationException();
+    }
+    requireCompleteCatalog(kinds, supplied);
+    transaction(connection -> {
+      lockDomainMutation(connection);
+      requireEquivalentStaging(connection, context, kinds, supplied);
+      for (var kind : kinds) {
+        publishStagedRows(connection, context, kind);
+      }
+      verifyTypedDomain(connection, context, kinds, supplied, false);
+      return null;
+    });
+  }
+
+  @Override
+  public void finalizeRun(
+      ValidatedMigrationContext context,
+      List<PostgresqlMigrationCatalog.Kind> kinds,
+      List<MigrationReconciliation> supplied,
+      LockedFinalizationCheck finalizationCheck) {
+    java.util.Objects.requireNonNull(finalizationCheck, "finalizationCheck");
+    requireCompleteCatalog(kinds, supplied);
+    requireFinalizeRequest(context);
+    transaction(connection -> {
+      lockDomainMutation(connection);
+      requireEquivalentStaging(connection, context, kinds, supplied);
+      requireFinalizeAuthority(context, finalizationCheck.revalidate());
+      for (var index = kinds.size() - 1; index >= 0; index--) {
+        deleteFrozenDelta(connection, context, kinds.get(index));
+      }
+      for (var kind : kinds) {
+        publishStagedRows(connection, context, kind);
+      }
+      verifyTypedDomain(connection, context, kinds, supplied, true);
+      for (var index = 0; index < kinds.size(); index++) {
+        markPublished(connection, context, kinds.get(index), supplied.get(index).sourceCount());
+      }
+      return null;
+    });
+  }
+
+  private static void requireFinalizeRequest(ValidatedMigrationContext context) {
+    if (context.request().command() != PostgresqlMigrationCommand.FINALIZE
+        || !context.sourceFrozen()
+        || context.request().frozenSourceEvidence() == null) {
+      throw new MigrationReconciliationException();
+    }
+  }
+
+  private void requireCompleteCatalog(
+      List<PostgresqlMigrationCatalog.Kind> kinds, List<MigrationReconciliation> supplied) {
     if (kinds.isEmpty() || kinds.size() != supplied.size()) {
       throw new MigrationReconciliationException();
     }
@@ -125,46 +177,54 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
             .equals(expectedKinds)) {
       throw new MigrationReconciliationException();
     }
-    transaction(connection -> {
-      try (var statement = connection.prepareStatement(
-          "select pg_advisory_xact_lock(hashtextextended(?, 0))")) {
-        statement.setString(1, "christopherbell-postgresql-migration-finalize");
-        statement.executeQuery();
-      }
-      for (var index = 0; index < kinds.size(); index++) {
-        var kind = kinds.get(index);
-        var checkpoint = readCheckpoint(connection, context, kind, true);
-        var actual = reconcile(connection, context, kind, false);
-        if (!actual.equivalent() || !actual.equals(supplied.get(index))
-            || !checkpoint.complete()) {
-          throw new MigrationReconciliationException();
-        }
-      }
-      for (var index = kinds.size() - 1; index >= 0; index--) {
-        deleteFrozenDelta(connection, context, kinds.get(index));
-      }
-      for (var kind : kinds) {
-        publishStagedRows(connection, context, kind);
-      }
-      for (var index = 0; index < kinds.size(); index++) {
-        var kind = kinds.get(index);
-        var actual = supplied.get(index);
-        if (!typedTargetEquivalent(connection, context, kind, actual.sourceCount())
-            || !relationshipsEquivalent(connection, context, kind)
-            || !portQueryEquivalent(connection, context, kind)) {
-          throw new MigrationReconciliationException();
-        }
-      }
-      for (var index = 0; index < kinds.size(); index++) {
-        markPublished(connection, context, kinds.get(index), supplied.get(index).sourceCount());
-      }
-      return null;
-    });
   }
 
-  private void requireFinalizeAuthority(ValidatedMigrationContext context) {
+  private static void lockDomainMutation(Connection connection) throws SQLException {
+    try (var statement = connection.prepareStatement(
+        "select pg_advisory_xact_lock(hashtextextended(?, 0))")) {
+      statement.setString(1, "christopherbell-postgresql-migration-domain-mutation");
+      statement.executeQuery();
+    }
+  }
+
+  private void requireEquivalentStaging(
+      Connection connection,
+      ValidatedMigrationContext context,
+      List<PostgresqlMigrationCatalog.Kind> kinds,
+      List<MigrationReconciliation> supplied) throws SQLException {
+    for (var index = 0; index < kinds.size(); index++) {
+      var kind = kinds.get(index);
+      var checkpoint = readCheckpoint(connection, context, kind, true);
+      var actual = reconcile(connection, context, kind, false);
+      if (!actual.equivalent() || !actual.equals(supplied.get(index))
+          || !checkpoint.complete()) {
+        throw new MigrationReconciliationException();
+      }
+    }
+  }
+
+  private void verifyTypedDomain(
+      Connection connection,
+      ValidatedMigrationContext context,
+      List<PostgresqlMigrationCatalog.Kind> kinds,
+      List<MigrationReconciliation> supplied,
+      boolean exactCounts) throws SQLException {
+    for (var index = 0; index < kinds.size(); index++) {
+      var kind = kinds.get(index);
+      var actual = supplied.get(index);
+      var typed = typedTargetEquivalent(
+          connection, context, kind, actual.sourceCount(), exactCounts);
+      var relationships = relationshipsEquivalent(connection, context, kind);
+      var queries = portQueryEquivalent(connection, context, kind);
+      if (!typed || !relationships || !queries) {
+        throw new MigrationReconciliationException();
+      }
+    }
+  }
+
+  private void requireFinalizeAuthority(
+      ValidatedMigrationContext context, FrozenSourceEvidence evidence) {
     var request = context.request();
-    var evidence = request.frozenSourceEvidence();
     if (request.command() != PostgresqlMigrationCommand.FINALIZE
         || !context.sourceFrozen()
         || evidence == null
@@ -176,6 +236,7 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
         || !request.sourceUri().equals(evidence.sourceUri())
         || !request.targetJdbcUrl().equals(evidence.targetJdbcUrl())
         || !request.expectedTargetRole().equals(evidence.targetRole())
+        || !evidence.equals(request.frozenSourceEvidence())
         || !evidence.evidenceDigest().equals(evidence.reconstructedDigest())) {
       throw new MigrationReconciliationException();
     }
@@ -634,7 +695,8 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
       Connection connection,
       ValidatedMigrationContext context,
       PostgresqlMigrationCatalog.Kind kind,
-      long expectedCount) throws SQLException {
+      long expectedCount,
+      boolean exactCounts) throws SQLException {
     var rootTable = kind.targetTables().getFirst();
     var keyMapping = kind.keyMapping().targetColumn();
     var rootKey = keyMapping.substring(keyMapping.indexOf('.') + 1);
@@ -649,7 +711,8 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
       statement.setString(2, kind.sourceKind());
       try (var rows = statement.executeQuery()) {
         rootsEquivalent = rows.next()
-            && rows.getLong(1) == expectedCount && rows.getLong(2) == expectedCount;
+            && (!exactCounts || rows.getLong(1) == expectedCount)
+            && rows.getLong(1) >= expectedCount && rows.getLong(2) == expectedCount;
       }
     }
     if (!rootsEquivalent) {
@@ -679,7 +742,9 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
       try (var statement = connection.createStatement();
            var rows = statement.executeQuery("select count(*) from "
                + quoted(prefix(context) + kind.targetSchema()) + "." + quoted(table))) {
-        if (!rows.next() || rows.getLong(1) != expectedTableCounts.getOrDefault(table, 0L)) {
+        var expectedTableCount = expectedTableCounts.getOrDefault(table, 0L);
+        if (!rows.next() || exactCounts && rows.getLong(1) != expectedTableCount
+            || !exactCounts && rows.getLong(1) < expectedTableCount) {
           return false;
         }
       }
@@ -732,7 +797,8 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
       ValidatedMigrationContext context,
       PostgresqlMigrationCatalog.Kind kind) throws SQLException {
     return portQueryVerifiers.verify(
-        connection, prefix(context), prefix(context) + "platform", runId(context), kind, codec);
+        connection, prefix(context), prefix(context) + "platform", runId(context), kind, codec,
+        context.request().command() == PostgresqlMigrationCommand.SHADOW);
   }
 
   private void markPublished(

@@ -11,18 +11,22 @@ public final class PostgresqlMigrationRunner {
   private final KindMigrationEngine engine;
   private final MigrationReconciler reconciler;
   private final MigrationTargetStore target;
+  private final FinalizeAuthorityProvider finalizeAuthority;
 
   public PostgresqlMigrationRunner(
       MigrationPreflight preflight,
       PostgresqlMigrationCatalog catalog,
       KindMigrationEngine engine,
       MigrationReconciler reconciler,
-      MigrationTargetStore target) {
+      MigrationTargetStore target,
+      FinalizeAuthorityProvider finalizeAuthority) {
     this.preflight = preflight;
     this.catalog = catalog;
     this.engine = engine;
     this.reconciler = reconciler;
     this.target = target;
+    this.finalizeAuthority = java.util.Objects.requireNonNull(
+        finalizeAuthority, "finalizeAuthority");
   }
 
   public MigrationRunResult run(MigrationRequest request) {
@@ -62,8 +66,40 @@ public final class PostgresqlMigrationRunner {
           || !evidence.sourceDigest().equals(MigrationSourceSnapshot.runDigest(snapshots))) {
         throw new MigrationReconciliationException();
       }
-      target.finalizeRun(context, kinds, reconciliations);
+      target.finalizeRun(context, kinds, reconciliations,
+          () -> revalidateFrozenBoundary(context, kinds, reconciliations));
+    } else {
+      target.rehearseShadow(context, kinds, reconciliations);
     }
+  }
+
+  private FrozenSourceEvidence revalidateFrozenBoundary(
+      ValidatedMigrationContext context,
+      List<PostgresqlMigrationCatalog.Kind> kinds,
+      List<MigrationReconciliation> reconciliations) {
+    var expected = context.request().frozenSourceEvidence();
+    var before = finalizeAuthority.reload(expected);
+    if (before == null || !before.equals(expected)) {
+      throw new MigrationReconciliationException();
+    }
+    var snapshots = new java.util.ArrayList<MigrationSourceSnapshot>(kinds.size());
+    for (var index = 0; index < kinds.size(); index++) {
+      var snapshot = engine.readSourceSnapshot(context, kinds.get(index));
+      var reconciliation = reconciliations.get(index);
+      if (snapshot.sourceCount() != reconciliation.sourceCount()
+          || !snapshot.sourceDigest().equals(reconciliation.sourceDigest())) {
+        throw new MigrationReconciliationException();
+      }
+      snapshots.add(snapshot);
+    }
+    if (!before.sourceDigest().equals(MigrationSourceSnapshot.runDigest(snapshots))) {
+      throw new MigrationReconciliationException();
+    }
+    var after = finalizeAuthority.reload(expected);
+    if (!before.equals(after)) {
+      throw new MigrationReconciliationException();
+    }
+    return after;
   }
 
   private void reconcileExisting(
