@@ -26,8 +26,8 @@ class RemainingManualMongoPortContractTest {
     assertThat(signatures(ScheduledCollectorRunStore.class))
         .isEqualTo(Set.of("save(ScheduledCollectorRun)"));
     assertThat(signatures(SharedFolderMaintenanceLeaseStore.class)).isEqualTo(Set.of(
-        "release(String)", "renew(String,Instant,Instant)",
-        "tryAcquire(String,Instant,Instant)"));
+        "release(LeaseGrant)", "renew(LeaseGrant,Duration)",
+        "tryAcquire(String,Duration)"));
     assertThat(publicDeclaredSignatures(MigrationStateStore.class)).isEqualTo(Set.of(
         "complete(String,String,Instant)", "fail(String,String,Instant,String)",
         "find(String)", "start(ApplicationMigration,String,Instant)"));

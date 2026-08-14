@@ -3,6 +3,7 @@ package dev.christopherbell.configuration.persistence;
 import static dev.christopherbell.persistence.jooq.platform.Tables.APPLICATION_LEASE;
 
 import dev.christopherbell.libs.lease.LeaseGrant;
+import dev.christopherbell.libs.lease.LeaseIdentity;
 import dev.christopherbell.libs.lease.LeaseStore;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,6 +23,7 @@ public class PostgresApplicationLeaseStore implements LeaseStore {
 
   @Override public Optional<LeaseGrant> tryAcquire(
       String leaseName, String ownerId, Duration duration) {
+    new LeaseIdentity(leaseName, ownerId);
     Field<OffsetDateTime> now = DSL.currentOffsetDateTime();
     Field<OffsetDateTime> expiresAt = expiry(duration);
     var row = database.insertInto(APPLICATION_LEASE)

@@ -69,6 +69,9 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageRequest;
@@ -162,11 +165,51 @@ class PostgresTask4BehaviorContractTest {
     assertThat(attempts.deleteExpired(NOW.plus(Duration.ofDays(31)), 1)).isZero();
   }
 
+  @ParameterizedTest(name = "rejects Windows-unsafe persisted path: {0}")
+  @MethodSource("windowsUnsafePersistedPaths")
+  void postgresAdaptersRejectEveryWindowsUnsafeRelativePath(String path) {
+    var tracks = new PostgresMusicTrackRepository(database.dsl());
+
+    assertThatThrownBy(() -> tracks.save(track("unsafe-" + Integer.toUnsignedString(path.hashCode()),
+        path, "Unsafe", false)))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  static List<String> windowsUnsafePersistedPaths() {
+    return List.of(
+        "C:/Windows/file.mp3",
+        "C:relative.mp3",
+        "file.mp3:stream",
+        "album/control\n.mp3",
+        "album/../secret.mp3");
+  }
+
+  @ParameterizedTest(name = "invalid lease identity is rejected before SQL: {0}")
+  @MethodSource("invalidLeaseIdentities")
+  void applicationLeaseRejectsInvalidIdentityWithoutChangingAnyRow(
+      String leaseName, String ownerId) {
+    var leases = new PostgresApplicationLeaseStore(database.dsl());
+    int rowsBefore = database.dsl().fetchCount(APPLICATION_LEASE);
+
+    assertThatThrownBy(() -> leases.tryAcquire(leaseName, ownerId, Duration.ofMinutes(1)))
+        .isInstanceOf(IllegalArgumentException.class);
+
+    assertThat(database.dsl().fetchCount(APPLICATION_LEASE)).isEqualTo(rowsBefore);
+  }
+
+  static List<Arguments> invalidLeaseIdentities() {
+    return List.of(
+        Arguments.of("", "valid-owner"),
+        Arguments.of("valid-lease", ""),
+        Arguments.of("l".repeat(129), "valid-owner"),
+        Arguments.of("valid-lease", "o".repeat(129)));
+  }
+
   @Test
   void databaseTimeLeasesHaveOneWinnerAndMonotonicFencingAcrossConnections() throws Exception {
     var maintenance = new PostgresSharedFolderMaintenanceLeaseStore(database.dsl());
-    assertThat(maintenance.tryAcquire("owner-a", NOW, NOW.plusSeconds(60))).isTrue();
-    assertThat(maintenance.tryAcquire("owner-b", NOW, NOW.plusSeconds(60))).isFalse();
+    assertThat(maintenance.tryAcquire("owner-a", Duration.ofMinutes(1))).isPresent();
+    assertThat(maintenance.tryAcquire("owner-b", Duration.ofMinutes(1))).isEmpty();
     long firstFence = database.dsl().select(MAINTENANCE_LEASE.FENCE_TOKEN)
         .from(MAINTENANCE_LEASE).fetchOne(MAINTENANCE_LEASE.FENCE_TOKEN);
     database.dsl().update(MAINTENANCE_LEASE)
@@ -290,49 +333,55 @@ class PostgresTask4BehaviorContractTest {
     var recoveries = new PostgresSharedFolderMutationRecoveryRepository(database.dsl());
     var recovery = recoveries.save(recovery());
     database.dsl().update(MUTATION_RECOVERY)
+        .set(MUTATION_RECOVERY.OPERATION_LEASE_EXPIRES_AT, unexpiredDatabaseTime())
+        .where(MUTATION_RECOVERY.MUTATION_RECOVERY_ID.eq(recovery.getId())).execute();
+    assertThat(claimRecovery("recovery-too-early")).isFalse();
+    database.dsl().update(MUTATION_RECOVERY)
         .set(MUTATION_RECOVERY.OPERATION_LEASE_EXPIRES_AT, expiredDatabaseTime())
         .where(MUTATION_RECOVERY.MUTATION_RECOVERY_ID.eq(recovery.getId())).execute();
-    assertThat(claimRecovery("recovery-too-early", Instant.EPOCH)).isFalse();
     assertSingleWinner(
-        () -> claimRecovery("recovery-owner-a", Instant.now().plusSeconds(30)),
-        () -> claimRecovery("recovery-owner-b", Instant.now().plusSeconds(30)));
+        () -> claimRecovery("recovery-owner-a"),
+        () -> claimRecovery("recovery-owner-b"));
     assertThat(recoveries.findById(recovery.getId()).orElseThrow().getOperationLeaseToken())
         .isIn("recovery-owner-a", "recovery-owner-b");
 
     var uploads = new PostgresSharedFolderUploadSessionRepository(database.dsl());
     var upload = uploads.save(upload("upload-claim", SharedFolderUploadState.APPENDING, "append-owner"));
     database.dsl().update(UPLOAD_SESSION)
+        .set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT, unexpiredDatabaseTime())
+        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(upload.getId())).execute();
+    assertThat(claimUpload("append-too-early")).isFalse();
+    database.dsl().update(UPLOAD_SESSION)
         .set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT, expiredDatabaseTime())
         .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(upload.getId())).execute();
-    assertThat(claimUpload("append-too-early", Instant.EPOCH)).isFalse();
     assertSingleWinner(
-        () -> claimUpload("append-recovery-a", Instant.now().plusSeconds(30)),
-        () -> claimUpload("append-recovery-b", Instant.now().plusSeconds(30)));
+        () -> claimUpload("append-recovery-a"),
+        () -> claimUpload("append-recovery-b"));
     assertThat(uploads.findById(upload.getId()).orElseThrow().getAppendLeaseToken())
         .isIn("append-recovery-a", "append-recovery-b");
   }
 
-  private static boolean claimRecovery(String token, Instant cutoff) throws Exception {
+  private static boolean claimRecovery(String token) throws Exception {
     try (var connection = schemas.openDatabase()) {
       return new PostgresSharedFolderMutationRecoveryRepository(connection.dsl())
           .claimExpiredOperationLease("recovery", "operation-owner",
-              SharedFolderMutationRecoveryState.PREPARED, cutoff, token,
-              Instant.now().plusSeconds(60), Instant.now()) == 1;
+              SharedFolderMutationRecoveryState.PREPARED, token,
+              Duration.ofMinutes(1)).isPresent();
     }
   }
 
   private static boolean claimMaintenance(String token) throws Exception {
     try (var connection = schemas.openDatabase()) {
       return new PostgresSharedFolderMaintenanceLeaseStore(connection.dsl())
-          .tryAcquire(token, NOW, NOW.plusSeconds(60));
+          .tryAcquire(token, Duration.ofMinutes(1)).isPresent();
     }
   }
 
-  private static boolean claimUpload(String token, Instant cutoff) throws Exception {
+  private static boolean claimUpload(String token) throws Exception {
     try (var connection = schemas.openDatabase()) {
       return new PostgresSharedFolderUploadSessionRepository(connection.dsl())
-          .claimExpiredAppendLease("upload-claim", "append-owner", 0, cutoff, token,
-              Instant.now().plusSeconds(60), Instant.now()) == 1;
+          .claimExpiredAppendLease("upload-claim", "append-owner", 0, token,
+              Duration.ofMinutes(1)).isPresent();
     }
   }
 
@@ -365,6 +414,10 @@ class PostgresTask4BehaviorContractTest {
 
   private static org.jooq.Field<OffsetDateTime> expiredDatabaseTime() {
     return org.jooq.impl.DSL.field("CURRENT_TIMESTAMP - INTERVAL '1 second'", OffsetDateTime.class);
+  }
+
+  private static org.jooq.Field<OffsetDateTime> unexpiredDatabaseTime() {
+    return org.jooq.impl.DSL.field("CURRENT_TIMESTAMP + INTERVAL '1 minute'", OffsetDateTime.class);
   }
 
   private static Account account(String id, String email, String username) {

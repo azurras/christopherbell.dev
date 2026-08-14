@@ -1,11 +1,15 @@
 package dev.christopherbell.configuration.postgresql;
 
 import com.mongodb.ConnectionString;
+import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
 import dev.christopherbell.configuration.mongo.runtime.MongoApplicationLeaseStore;
 import dev.christopherbell.libs.lease.LeaseStore;
+import dev.christopherbell.libs.lease.LeaseGrant;
+import java.time.Instant;
 import dev.christopherbell.music.catalog.MongoMusicCatalogQueryRepository;
 import dev.christopherbell.music.catalog.MongoMusicTrackRepository;
 import dev.christopherbell.music.catalog.MusicCatalogQueryRepository;
@@ -44,6 +48,8 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 @EnabledIfEnvironmentVariable(named = "MONGODB_INTEGRATION_TESTS", matches = "enabled")
 class MongoTask4ParityContractTest implements Task4PersistenceParityContract {
   private static MongoClient client;
+  private static MongoClient contenderClient;
+  private static MongoTemplate mongo;
   private static LeaseStore applicationLeases;
   private static MusicTrackRepository tracks;
   private static MusicCatalogQueryRepository catalog;
@@ -54,11 +60,14 @@ class MongoTask4ParityContractTest implements Task4PersistenceParityContract {
   private static MusicAccessAttemptRepository accessAttempts;
   private static SharedFolderAuditRepository audits;
   private static SharedFolderMaintenanceLeaseStore maintenanceLeases;
+  private static SharedFolderMaintenanceLeaseStore maintenanceLeaseContender;
   private static MediaJobRepository mediaJobs;
   private static SharedFolderMutationRecoveryRepository recoveries;
+  private static SharedFolderMutationRecoveryRepository recoveryContender;
   private static SharedFolderRadioRepository sharedRadio;
   private static SharedFolderRecycleRepository recycleItems;
   private static SharedFolderUploadSessionRepository uploadSessions;
+  private static SharedFolderUploadSessionRepository uploadSessionContender;
 
   @BeforeAll
   static void connectToDisposableMongo() {
@@ -68,10 +77,20 @@ class MongoTask4ParityContractTest implements Task4PersistenceParityContract {
       throw new IllegalStateException("MongoDB contract tests require database test.");
     }
     client = MongoClients.create(connection);
-    var mongo = new MongoTemplate(client, "test");
+    mongo = new MongoTemplate(client, "test");
     for (String collection : List.of("music", "shared_folder", "application_runtime")) {
       mongo.getCollection(collection).deleteMany(new org.bson.Document());
     }
+    var playlistIndex = DomainCollectionManifest.ALL_INDEXES.stream()
+        .filter(index -> index.kind().orElse("").equals("music_playlist"))
+        .filter(DomainCollectionManifest.IndexDefinition::unique)
+        .findFirst().orElseThrow();
+    var playlistKeys = new org.bson.Document();
+    playlistIndex.keys().forEach(key -> playlistKeys.append(key.path(), key.direction()));
+    mongo.getCollection(playlistIndex.collection()).createIndex(
+        playlistKeys,
+        new IndexOptions().name(playlistIndex.name()).unique(true)
+            .partialFilterExpression(new org.bson.Document("_kind", "music_playlist")));
     var factory = DomainMongoOperationsTestFactory.createForDisposableMongo(mongo);
     applicationLeases = new MongoApplicationLeaseStore(factory);
     tracks = new MongoMusicTrackRepository(factory);
@@ -83,6 +102,12 @@ class MongoTask4ParityContractTest implements Task4PersistenceParityContract {
     accessAttempts = new MongoMusicAccessAttemptRepository(factory);
     audits = new MongoSharedFolderAuditRepository(factory);
     maintenanceLeases = new MongoSharedFolderMaintenanceLeaseStore(factory);
+    contenderClient = MongoClients.create(connection);
+    var contenderFactory = DomainMongoOperationsTestFactory.createForDisposableMongo(
+        new MongoTemplate(contenderClient, "test"));
+    maintenanceLeaseContender = new MongoSharedFolderMaintenanceLeaseStore(contenderFactory);
+    recoveryContender = new MongoSharedFolderMutationRecoveryRepository(contenderFactory);
+    uploadSessionContender = new MongoSharedFolderUploadSessionRepository(contenderFactory);
     mediaJobs = new MongoMediaJobRepository(factory);
     recoveries = new MongoSharedFolderMutationRecoveryRepository(factory);
     sharedRadio = new MongoSharedFolderRadioRepository(factory);
@@ -92,6 +117,7 @@ class MongoTask4ParityContractTest implements Task4PersistenceParityContract {
 
   @AfterAll
   static void disconnect() {
+    if (contenderClient != null) contenderClient.close();
     if (client != null) client.close();
   }
 
@@ -105,9 +131,29 @@ class MongoTask4ParityContractTest implements Task4PersistenceParityContract {
   @Override public MusicAccessAttemptRepository accessAttempts() { return accessAttempts; }
   @Override public SharedFolderAuditRepository audits() { return audits; }
   @Override public SharedFolderMaintenanceLeaseStore maintenanceLeases() { return maintenanceLeases; }
+  @Override public SharedFolderMaintenanceLeaseStore maintenanceLeaseContender() {
+    return maintenanceLeaseContender;
+  }
+  @Override public void expireMaintenanceLease(LeaseGrant grant) {
+    var result = mongo.getCollection("shared_folder").updateOne(
+        new org.bson.Document("_kind", "maintenance_lease")
+            .append("_id.legacyId", grant.leaseName())
+            .append("payload.fenceToken", grant.fenceToken()),
+        new org.bson.Document("$set", new org.bson.Document(
+            "payload.expiresAt", java.util.Date.from(Instant.EPOCH))));
+    if (result.getModifiedCount() != 1) {
+      throw new IllegalStateException("Mongo maintenance lease expiry fixture did not match.");
+    }
+  }
   @Override public MediaJobRepository mediaJobs() { return mediaJobs; }
   @Override public SharedFolderMutationRecoveryRepository recoveries() { return recoveries; }
+  @Override public SharedFolderMutationRecoveryRepository recoveryContender() {
+    return recoveryContender;
+  }
   @Override public SharedFolderRadioRepository sharedRadio() { return sharedRadio; }
   @Override public SharedFolderRecycleRepository recycleItems() { return recycleItems; }
   @Override public SharedFolderUploadSessionRepository uploadSessions() { return uploadSessions; }
+  @Override public SharedFolderUploadSessionRepository uploadSessionContender() {
+    return uploadSessionContender;
+  }
 }

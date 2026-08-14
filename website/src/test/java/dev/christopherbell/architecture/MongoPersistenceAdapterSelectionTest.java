@@ -3,6 +3,7 @@ package dev.christopherbell.architecture;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.tngtech.archunit.core.importer.ClassFileImporter;
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import dev.christopherbell.configuration.persistence.MongoPersistence;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Configuration;
@@ -24,7 +25,15 @@ class MongoPersistenceAdapterSelectionTest {
         .toList();
 
     assertThat(adapters).isNotEmpty();
-    assertThat(adapters)
-        .allSatisfy(adapter -> assertThat(adapter.isAnnotatedWith(MongoPersistence.class)).isTrue());
+    assertThat(adapters).allSatisfy(adapter -> assertThat(
+        adapter.isAnnotatedWith(MongoPersistence.class)
+            || adapter.isAnnotatedWith(MongoBackendComponent.class))
+        .as(adapter.getName() + " uses a Mongo backend selector")
+        .isTrue());
+
+    assertThat(adapters.stream().filter(adapter -> adapter.isAnnotatedWith(Repository.class)))
+        .allSatisfy(adapter -> assertThat(adapter.isAnnotatedWith(MongoPersistence.class))
+            .as(adapter.getName() + " uses repository exception translation")
+            .isTrue());
   }
 }

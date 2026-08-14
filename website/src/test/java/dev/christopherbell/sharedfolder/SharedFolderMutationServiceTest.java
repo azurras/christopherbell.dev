@@ -390,9 +390,9 @@ class SharedFolderMutationServiceTest {
       SharedFolderMutationRecovery current = records.get(invocation.getArgument(0));
       current.setOperationLeaseExpiresAt(renewedUntil);
       current.setUpdatedAt(Instant.now());
-      return 0L;
+      return java.util.Optional.empty();
     }).when(repository).claimExpiredOperationLease(
-        any(), any(), any(), any(), any(), any(), any());
+        any(), any(), any(), any(), any());
 
     new SharedFolderMutationService(
         access, properties, WindowsSharedFolderMutationBoundary.inactive(), repository)
@@ -768,8 +768,8 @@ class SharedFolderMutationServiceTest {
     when(access.requireWrite()).thenReturn(account);
     Map<String, SharedFolderMutationRecovery> records = new ConcurrentHashMap<>();
     SharedFolderMutationRecoveryRepository repository = recoveryRepository(records);
-    org.mockito.Mockito.doReturn(0L).when(repository)
-        .renewOperationLease(any(), any(), any(), any(), any());
+    org.mockito.Mockito.doReturn(java.util.Optional.empty()).when(repository)
+        .renewOperationLease(any(), any(), any(), any());
     SharedFolderMutationService mutations = new SharedFolderMutationService(
         access, properties(root), WindowsSharedFolderMutationBoundary.inactive(), repository);
 
@@ -779,7 +779,7 @@ class SharedFolderMutationServiceTest {
         mutations.observedToken("docs/target.bin"))));
 
     verify(repository, org.mockito.Mockito.atLeastOnce())
-        .renewOperationLease(any(), any(), any(), any(), any());
+        .renewOperationLease(any(), any(), any(), any());
     assertThat(Files.readString(docs.resolve("source.txt"))).isEqualTo("source");
     assertThat(Files.size(docs.resolve("target.bin"))).isEqualTo(256 * 1024);
     try (var quarantined = Files.list(properties(root).systemRoot()
@@ -817,7 +817,7 @@ class SharedFolderMutationServiceTest {
         mutations.observedToken("docs/target.bin")));
 
     verify(repository, org.mockito.Mockito.atLeast(4))
-        .renewOperationLease(any(), any(), any(), any(), any());
+        .renewOperationLease(any(), any(), any(), any());
     assertThat(Files.readString(docs.resolve("target.bin"))).isEqualTo("source");
     assertThat(records).isEmpty();
   }
@@ -851,8 +851,8 @@ class SharedFolderMutationServiceTest {
         .isInstanceOf(AssertionError.class);
     SharedFolderMutationRecovery durable = records.values().iterator().next();
     durable.setOperationLeaseExpiresAt(Instant.EPOCH);
-    org.mockito.Mockito.doReturn(0L).when(repository)
-        .renewOperationLease(any(), any(), any(), any(), any());
+    org.mockito.Mockito.doReturn(java.util.Optional.empty()).when(repository)
+        .renewOperationLease(any(), any(), any(), any());
 
     SharedFolderMutationService recovering = new SharedFolderMutationService(
         access, properties(root), WindowsSharedFolderMutationBoundary.inactive(), repository);
@@ -1049,33 +1049,35 @@ class SharedFolderMutationServiceTest {
         if (current == null
             || !java.util.Objects.equals(current.getOperationLeaseToken(), invocation.getArgument(1))
             || current.getState() != invocation.getArgument(2)) {
-          return 0L;
+          return java.util.Optional.empty();
         }
-        current.setOperationLeaseExpiresAt(invocation.getArgument(3));
-        current.setUpdatedAt(invocation.getArgument(4));
-        return 1L;
+        Instant issuedExpiry = Instant.now().plus(invocation.<Duration>getArgument(3));
+        current.setOperationLeaseExpiresAt(issuedExpiry);
+        current.setUpdatedAt(Instant.now());
+        return java.util.Optional.of(issuedExpiry);
       }
-    }).when(repository).renewOperationLease(any(), any(), any(), any(), any());
+    }).when(repository).renewOperationLease(any(), any(), any(), any());
     org.mockito.Mockito.doAnswer(invocation -> {
       synchronized (records) {
         SharedFolderMutationRecovery current = records.get(invocation.getArgument(0));
-        Instant now = invocation.getArgument(3);
+        Instant now = Instant.now();
         if (current == null
             || !java.util.Objects.equals(
                 current.getOperationLeaseToken(), invocation.getArgument(1))
             || current.getState() != invocation.getArgument(2)
             || current.getOperationLeaseExpiresAt() != null
                 && current.getOperationLeaseExpiresAt().isAfter(now)) {
-          return 0L;
+          return java.util.Optional.empty();
         }
-        current.setOperationLeaseToken(invocation.getArgument(4));
-        current.setOperationLeaseExpiresAt(invocation.getArgument(5));
-        current.setUpdatedAt(invocation.getArgument(6));
+        current.setOperationLeaseToken(invocation.getArgument(3));
+        Instant issuedExpiry = now.plus(invocation.<Duration>getArgument(4));
+        current.setOperationLeaseExpiresAt(issuedExpiry);
+        current.setUpdatedAt(now);
         current.setVersion(current.getVersion() == null ? 0L : current.getVersion() + 1L);
-        return 1L;
+        return java.util.Optional.of(issuedExpiry);
       }
     }).when(repository).claimExpiredOperationLease(
-        any(), any(), any(), any(), any(), any(), any());
+        any(), any(), any(), any(), any());
     org.mockito.Mockito.doAnswer(invocation -> {
       records.remove(invocation.getArgument(0));
       return null;

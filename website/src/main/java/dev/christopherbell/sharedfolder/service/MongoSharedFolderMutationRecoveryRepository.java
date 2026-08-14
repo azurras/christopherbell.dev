@@ -4,6 +4,8 @@ import dev.christopherbell.configuration.persistence.MongoPersistence;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
+import dev.christopherbell.configuration.mongo.domain.MongoDatabaseLeaseMutation;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -29,27 +31,22 @@ public class MongoSharedFolderMutationRecoveryRepository
   @Override public List<SharedFolderMutationRecovery> findTop100ByOrderByUpdatedAtAsc() {
     return find(new Query(), PageRequest.of(0, 100, Sort.by("updatedAt")));
   }
-  @Override public long renewOperationLease(
-      String id, String token, SharedFolderMutationRecoveryState state,
-      Instant expiresAt, Instant updatedAt) {
-    return mongo.updateHeartbeatPreservingVersion(Query.query(Criteria.where("id").is(id)
-        .and("operationLeaseToken").is(token).and("state").is(state)),
-        new Update().set("operationLeaseExpiresAt", expiresAt).set("updatedAt", updatedAt))
-        .getMatchedCount();
+  @Override public Optional<Instant> renewOperationLease(
+      String id, String token, SharedFolderMutationRecoveryState state, Duration duration) {
+    return mongo.findAndUpdateDatabaseLease(Query.query(Criteria.where("id").is(id)
+            .and("operationLeaseToken").is(token).and("state").is(state)),
+        MongoDatabaseLeaseMutation.renew(new Update().currentDate("updatedAt"),
+            "operationLeaseExpiresAt", duration, false))
+        .map(SharedFolderMutationRecovery::getOperationLeaseExpiresAt);
   }
-  @Override public long claimExpiredOperationLease(
+  @Override public Optional<Instant> claimExpiredOperationLease(
       String id, String expiredToken, SharedFolderMutationRecoveryState state,
-      Instant expiredAtOrBefore, String recoveryToken, Instant recoveryExpiresAt,
-      Instant updatedAt) {
-    var expired = new Criteria().orOperator(
-        Criteria.where("operationLeaseExpiresAt").lte(expiredAtOrBefore),
-        Criteria.where("operationLeaseExpiresAt").is(null));
-    return mongo.updateFirst(Query.query(Criteria.where("id").is(id)
-        .and("operationLeaseToken").is(expiredToken).and("state").is(state)
-        .andOperator(expired)),
-        new Update().set("operationLeaseToken", recoveryToken)
-            .set("operationLeaseExpiresAt", recoveryExpiresAt)
-            .set("updatedAt", updatedAt))
-        .getMatchedCount();
+      String recoveryToken, Duration duration) {
+    return mongo.findAndUpdateDatabaseLease(Query.query(Criteria.where("id").is(id)
+            .and("operationLeaseToken").is(expiredToken).and("state").is(state)),
+        MongoDatabaseLeaseMutation.claimExpired(
+            new Update().set("operationLeaseToken", recoveryToken).currentDate("updatedAt"),
+            "operationLeaseExpiresAt", duration, false))
+        .map(SharedFolderMutationRecovery::getOperationLeaseExpiresAt);
   }
 }

@@ -4,6 +4,8 @@ import static dev.christopherbell.persistence.jooq.shared_folder.Tables.UPLOAD_C
 import static dev.christopherbell.persistence.jooq.shared_folder.Tables.UPLOAD_SESSION;
 
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlLeaseFields;
+import java.time.Duration;
 import dev.christopherbell.configuration.persistence.PostgresqlRelativePath;
 import dev.christopherbell.persistence.jooq.shared_folder.tables.records.UploadSessionRecord;
 import java.time.Instant;
@@ -158,53 +160,70 @@ public class PostgresSharedFolderUploadSessionRepository
             .and(UPLOAD_SESSION.MAINTENANCE_ATTEMPTS.eq(expectedAttempts))).execute();
   }
 
-  @Override public long renewFinalizationLease(String id, String token,
-      SharedFolderUploadFinalizationState state, Instant expiresAt, Instant updatedAt) {
-    return database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT, offset(expiresAt))
-        .set(UPLOAD_SESSION.UPDATED_AT, offset(updatedAt)).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
+  @Override public Optional<Instant> renewFinalizationLease(String id, String token,
+      SharedFolderUploadFinalizationState state, Duration duration) {
+    var now = DSL.currentOffsetDateTime();
+    var row = database.update(UPLOAD_SESSION)
+        .set(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT,
+            PostgresqlLeaseFields.expiresAfter(duration))
+        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
         .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
             .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.FINALIZING.name()))
             .and(UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN.eq(token))
-            .and(UPLOAD_SESSION.FINALIZATION_STATE.eq(state.name()))).execute();
+            .and(UPLOAD_SESSION.FINALIZATION_STATE.eq(state.name()))
+            .and(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT.gt(now)))
+        .returning(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT).fetchOne();
+    return row == null ? Optional.empty()
+        : Optional.of(row.getFinalizationLeaseExpiresAt().toInstant());
   }
 
-  @Override public long claimExpiredFinalizationLease(String id, String oldToken,
-      SharedFolderUploadFinalizationState state, Instant expiredAtOrBefore, String newToken,
-      Instant expiresAt, Instant updatedAt) {
-    return database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN, newToken)
-        .set(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT, offset(expiresAt))
-        .set(UPLOAD_SESSION.UPDATED_AT, offset(updatedAt)).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
+  @Override public Optional<Instant> claimExpiredFinalizationLease(String id, String oldToken,
+      SharedFolderUploadFinalizationState state, String newToken, Duration duration) {
+    var now = DSL.currentOffsetDateTime();
+    var row = database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN, newToken)
+        .set(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT,
+            PostgresqlLeaseFields.expiresAfter(duration))
+        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
         .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
             .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.FINALIZING.name()))
             .and(UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN.eq(oldToken))
             .and(UPLOAD_SESSION.FINALIZATION_STATE.eq(state.name()))
             .and(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT.isNull()
-                .or(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT.le(
-                    DSL.least(DSL.val(offset(expiredAtOrBefore)), DSL.currentOffsetDateTime())))))
-        .execute();
+                .or(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT.le(now))))
+        .returning(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT).fetchOne();
+    return row == null ? Optional.empty()
+        : Optional.of(row.getFinalizationLeaseExpiresAt().toInstant());
   }
 
-  @Override public long renewAppendLease(String id, String token, long appendOffset,
-      Instant expiresAt, Instant updatedAt) {
-    return database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT, offset(expiresAt))
-        .set(UPLOAD_SESSION.UPDATED_AT, offset(updatedAt)).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
+  @Override public Optional<Instant> renewAppendLease(String id, String token, long appendOffset,
+      Duration duration) {
+    var now = DSL.currentOffsetDateTime();
+    var row = database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT,
+            PostgresqlLeaseFields.expiresAfter(duration))
+        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
         .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
             .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.APPENDING.name()))
-            .and(UPLOAD_SESSION.APPEND_LEASE_TOKEN.eq(token)).and(UPLOAD_SESSION.APPEND_OFFSET.eq(appendOffset)))
-        .execute();
+            .and(UPLOAD_SESSION.APPEND_LEASE_TOKEN.eq(token)).and(UPLOAD_SESSION.APPEND_OFFSET.eq(appendOffset))
+            .and(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT.gt(now)))
+        .returning(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT).fetchOne();
+    return row == null ? Optional.empty()
+        : Optional.of(row.getAppendLeaseExpiresAt().toInstant());
   }
 
-  @Override public long claimExpiredAppendLease(String id, String oldToken, long appendOffset,
-      Instant expiredAtOrBefore, String newToken, Instant expiresAt, Instant updatedAt) {
-    return database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.APPEND_LEASE_TOKEN, newToken)
-        .set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT, offset(expiresAt))
-        .set(UPLOAD_SESSION.UPDATED_AT, offset(updatedAt)).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
+  @Override public Optional<Instant> claimExpiredAppendLease(String id, String oldToken,
+      long appendOffset, String newToken, Duration duration) {
+    var now = DSL.currentOffsetDateTime();
+    var row = database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.APPEND_LEASE_TOKEN, newToken)
+        .set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT,
+            PostgresqlLeaseFields.expiresAfter(duration))
+        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
         .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
             .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.APPENDING.name()))
             .and(UPLOAD_SESSION.APPEND_LEASE_TOKEN.eq(oldToken)).and(UPLOAD_SESSION.APPEND_OFFSET.eq(appendOffset))
-            .and(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT.le(
-                DSL.least(DSL.val(offset(expiredAtOrBefore)), DSL.currentOffsetDateTime()))))
-        .execute();
+            .and(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT.le(now)))
+        .returning(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT).fetchOne();
+    return row == null ? Optional.empty()
+        : Optional.of(row.getAppendLeaseExpiresAt().toInstant());
   }
 
   private Slice<SharedFolderUploadSession> slice(

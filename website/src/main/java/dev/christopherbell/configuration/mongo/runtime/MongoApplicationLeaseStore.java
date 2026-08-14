@@ -7,6 +7,7 @@ import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.libs.mongo.lease.MongoLeaseDocument;
 import dev.christopherbell.libs.mongo.lease.MongoLeaseStore;
 import dev.christopherbell.libs.lease.LeaseGrant;
+import dev.christopherbell.libs.lease.LeaseIdentity;
 import dev.christopherbell.libs.lease.LeaseStore;
 import java.time.Duration;
 import java.time.Instant;
@@ -29,6 +30,7 @@ public class MongoApplicationLeaseStore implements MongoLeaseStore, LeaseStore {
 
   @Override
   public boolean tryAcquire(String name, String ownerToken, Instant now, Instant expiresAt) {
+    new LeaseIdentity(name, ownerToken);
     var ownerOrExpired = new Criteria().orOperator(
         Criteria.where("ownerToken").is(ownerToken),
         Criteria.where("expiresAt").lte(now));
@@ -57,6 +59,7 @@ public class MongoApplicationLeaseStore implements MongoLeaseStore, LeaseStore {
 
   @Override
   public boolean renew(String name, String ownerToken, Instant now, Instant expiresAt) {
+    new LeaseIdentity(name, ownerToken);
     var query = Query.query(Criteria.where("id").is(name)
         .and("ownerToken").is(ownerToken)
         .and("expiresAt").gt(now));
@@ -66,6 +69,7 @@ public class MongoApplicationLeaseStore implements MongoLeaseStore, LeaseStore {
 
   @Override
   public boolean release(String name, String ownerToken) {
+    new LeaseIdentity(name, ownerToken);
     var query = Query.query(Criteria.where("id").is(name).and("ownerToken").is(ownerToken));
     return mongo.updateFirst(
         query, new Update().unset("ownerToken").set("expiresAt", Instant.EPOCH))
@@ -74,6 +78,7 @@ public class MongoApplicationLeaseStore implements MongoLeaseStore, LeaseStore {
 
   @Override
   public Optional<LeaseGrant> tryAcquire(String name, String ownerToken, Duration duration) {
+    new LeaseIdentity(name, ownerToken);
     Instant now = Instant.now();
     if (!tryAcquire(name, ownerToken, now, now.plus(requireDuration(duration)))) {
       return Optional.empty();

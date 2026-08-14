@@ -1,6 +1,6 @@
 package dev.christopherbell.configuration.mongo;
 
-import dev.christopherbell.configuration.persistence.MongoPersistence;
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -30,7 +30,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
  * @see AuditorAware
  * @see DateTimeProvider
  */
-@MongoPersistence
+@MongoBackendComponent
 @Configuration
 @EnableMongoAuditing(
     auditorAwareRef = "auditorAware",

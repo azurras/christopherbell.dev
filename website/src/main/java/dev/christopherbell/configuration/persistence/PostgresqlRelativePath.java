@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.persistence;
 
+import dev.christopherbell.libs.path.WindowsSafeRelativePath;
+
 /** Validates the canonical slash-separated relative paths persisted by PostgreSQL adapters. */
 @PostgresPersistenceSupport
 public final class PostgresqlRelativePath {
@@ -14,21 +16,12 @@ public final class PostgresqlRelativePath {
   }
 
   private static String require(String value, String field, boolean rootAllowed) {
-    if (value == null || (!rootAllowed && value.isBlank())) {
-      throw new IllegalArgumentException(field + " is required.");
-    }
-    if (value.isEmpty() && rootAllowed) {
+    try {
+      WindowsSafeRelativePath.segments(value, rootAllowed);
       return value;
+    } catch (IllegalArgumentException exception) {
+      throw new IllegalArgumentException(field + " must be a Windows-safe relative path.",
+          exception);
     }
-    if (value.isBlank() || value.startsWith("/") || value.endsWith("/")
-        || value.contains("\\") || value.contains("//")) {
-      throw new IllegalArgumentException(field + " must be a normalized relative path.");
-    }
-    for (String segment : value.split("/", -1)) {
-      if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
-        throw new IllegalArgumentException(field + " must be a normalized relative path.");
-      }
-    }
-    return value;
   }
 }

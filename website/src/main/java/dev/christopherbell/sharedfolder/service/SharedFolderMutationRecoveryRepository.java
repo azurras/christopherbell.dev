@@ -1,5 +1,7 @@
 package dev.christopherbell.sharedfolder.service;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -12,20 +14,17 @@ public interface SharedFolderMutationRecoveryRepository {
   List<SharedFolderMutationRecovery> findTop100ByOrderByUpdatedAtAsc();
 
   /** Extends only the exact current writer's lease without advancing the document version. */
-  long renewOperationLease(
+  Optional<Instant> renewOperationLease(
       String id,
       String operationLeaseToken,
       SharedFolderMutationRecoveryState state,
-      java.time.Instant operationLeaseExpiresAt,
-      java.time.Instant updatedAt);
+      Duration duration);
 
   /** Atomically transfers one exact expired mutation lease to a single reconciler. */
-  long claimExpiredOperationLease(
+  Optional<Instant> claimExpiredOperationLease(
       String id,
       String expiredOperationLeaseToken,
       SharedFolderMutationRecoveryState state,
-      java.time.Instant expiredAtOrBefore,
       String recoveryOperationLeaseToken,
-      java.time.Instant recoveryOperationLeaseExpiresAt,
-      java.time.Instant updatedAt);
+      Duration duration);
 }

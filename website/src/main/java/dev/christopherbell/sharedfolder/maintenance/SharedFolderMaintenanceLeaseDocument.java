@@ -13,6 +13,7 @@ final class SharedFolderMaintenanceLeaseDocument {
 
   @Id private String id;
   private String ownerToken;
+  private Long fenceToken;
   private Instant acquiredAt;
   private Instant expiresAt;
 }

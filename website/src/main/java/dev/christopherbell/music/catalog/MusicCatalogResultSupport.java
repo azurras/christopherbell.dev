@@ -1,10 +1,10 @@
 package dev.christopherbell.music.catalog;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.TreeSet;
+import java.util.Locale;
+import java.util.TreeMap;
 
 /** Deterministic result shaping shared by persistence-engine query adapters. */
 final class MusicCatalogResultSupport {
@@ -24,11 +24,14 @@ final class MusicCatalogResultSupport {
   }
 
   static List<String> strings(List<String> values) {
-    return values.stream().filter(value -> value != null && !value.isBlank())
-        .collect(java.util.stream.Collectors.collectingAndThen(
-            java.util.stream.Collectors.toCollection(() -> new TreeSet<>(
-                Comparator.comparing(value -> value.toLowerCase(java.util.Locale.ROOT)))),
-            List::copyOf));
+    var byNormalizedValue = new TreeMap<String, String>();
+    for (String value : values) {
+      if (value != null && !value.isBlank()) {
+        byNormalizedValue.merge(value.toLowerCase(Locale.ROOT), value,
+            (left, right) -> left.compareTo(right) <= 0 ? left : right);
+      }
+    }
+    return List.copyOf(byNormalizedValue.values());
   }
 
   static int totalPages(long totalTracks, int size) {

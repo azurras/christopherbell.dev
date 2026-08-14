@@ -109,6 +109,10 @@ final class DomainMongoFieldMapper {
     return mapUpdate(heartbeatUpdate, false);
   }
 
+  Update mapLeaseUpdate(Update leaseUpdate, boolean advanceVersion) {
+    return mapUpdate(leaseUpdate, advanceVersion);
+  }
+
   private Update mapUpdate(Update domainUpdate, boolean advanceVersion) {
     if (domainUpdate == null) {
       throw new UnapprovedDomainFieldException();

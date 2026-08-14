@@ -21,16 +21,16 @@ class SharedFolderLeaseClaimRepositoryTest {
     assertThat(SharedFolderMutationRecoveryRepository.class.getDeclaredMethod(
         "claimExpiredOperationLease", String.class, String.class,
         dev.christopherbell.sharedfolder.service.SharedFolderMutationRecoveryState.class,
-        java.time.Instant.class, String.class, java.time.Instant.class, java.time.Instant.class))
+        String.class, java.time.Duration.class))
         .isNotNull();
     assertThat(SharedFolderUploadSessionRepository.class.getDeclaredMethod(
         "claimExpiredAppendLease", String.class, String.class, long.class,
-        java.time.Instant.class, String.class, java.time.Instant.class, java.time.Instant.class))
+        String.class, java.time.Duration.class))
         .isNotNull();
     assertThat(SharedFolderUploadSessionRepository.class.getDeclaredMethod(
         "claimExpiredFinalizationLease", String.class, String.class,
         dev.christopherbell.sharedfolder.upload.SharedFolderUploadFinalizationState.class,
-        java.time.Instant.class, String.class, java.time.Instant.class, java.time.Instant.class))
+        String.class, java.time.Duration.class))
         .isNotNull();
     assertThat(MongoSharedFolderMutationRecoveryRepository.class.getInterfaces())
         .contains(SharedFolderMutationRecoveryRepository.class);

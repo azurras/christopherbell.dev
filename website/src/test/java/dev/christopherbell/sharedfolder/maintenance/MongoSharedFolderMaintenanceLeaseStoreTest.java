@@ -2,20 +2,20 @@ package dev.christopherbell.sharedfolder.maintenance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.mongodb.client.result.UpdateResult;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.MongoDatabaseLeaseMutation;
+import dev.christopherbell.libs.lease.LeaseGrant;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.boot.test.util.TestPropertyValues;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.annotation.PersistenceExceptionTranslationPostProcessor;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -44,57 +44,65 @@ class MongoSharedFolderMaintenanceLeaseStoreTest {
   }
 
   @Test
-  void acquisitionUsesOneFixedKeyAndMapsAtomicUpsertContentionToFalse() {
+  void acquisitionUsesOneFixedKeyAndMapsAtomicDatabaseTimeContentionToEmpty() {
     @SuppressWarnings("unchecked")
     KindScopedMongoOperations<SharedFolderMaintenanceLeaseDocument> mongo =
         mock(KindScopedMongoOperations.class);
     MongoSharedFolderMaintenanceLeaseStore store =
         new MongoSharedFolderMaintenanceLeaseStore(mongo);
-    Instant now = Instant.parse("2026-07-22T12:00:00Z");
-    Instant expiresAt = now.plusSeconds(1800);
     SharedFolderMaintenanceLeaseDocument acquired = new SharedFolderMaintenanceLeaseDocument();
     acquired.setId(SharedFolderMaintenanceLeaseDocument.ID);
     acquired.setOwnerToken("owner-a");
-    when(mongo.findAndUpdate(any(Query.class), any(Update.class)))
+    acquired.setFenceToken(1L);
+    acquired.setExpiresAt(Instant.parse("2026-07-22T12:30:00Z"));
+    when(mongo.acquireDatabaseLease(
+        any(Query.class), any(MongoDatabaseLeaseMutation.class),
+        any(SharedFolderMaintenanceLeaseDocument.class)))
         .thenReturn(Optional.of(acquired))
         .thenReturn(Optional.empty());
-    when(mongo.insert(any(SharedFolderMaintenanceLeaseDocument.class)))
-        .thenThrow(new DuplicateKeyException("fixed lease is held"));
 
-    assertThat(store.tryAcquire("owner-a", now, expiresAt)).isTrue();
+    assertThat(store.tryAcquire("owner-a", Duration.ofMinutes(30))).contains(
+        new LeaseGrant(SharedFolderMaintenanceLeaseDocument.ID, "owner-a", 1,
+            acquired.getExpiresAt()));
 
     ArgumentCaptor<Query> query = ArgumentCaptor.forClass(Query.class);
-    ArgumentCaptor<Update> update = ArgumentCaptor.forClass(Update.class);
-    verify(mongo).findAndUpdate(query.capture(), update.capture());
+    verify(mongo).acquireDatabaseLease(
+        query.capture(), any(MongoDatabaseLeaseMutation.class),
+        any(SharedFolderMaintenanceLeaseDocument.class));
     assertThat(query.getValue().getQueryObject().toString())
-        .contains("shared-folder-maintenance", "ownerToken", "expiresAt", "$lte");
-    assertThat(update.getValue().getUpdateObject().toString())
-        .contains("owner-a", "acquiredAt", "expiresAt");
+        .contains("shared-folder-maintenance");
 
-    assertThat(store.tryAcquire("owner-b", now, expiresAt)).isFalse();
+    assertThat(store.tryAcquire("owner-b", Duration.ofMinutes(30))).isEmpty();
   }
 
   @Test
-  void renewAndReleaseAreBothConditionedOnTheExactOwner() {
+  void renewAndReleaseAreBothConditionedOnTheExactGrant() {
     @SuppressWarnings("unchecked")
     KindScopedMongoOperations<SharedFolderMaintenanceLeaseDocument> mongo =
         mock(KindScopedMongoOperations.class);
     MongoSharedFolderMaintenanceLeaseStore store =
         new MongoSharedFolderMaintenanceLeaseStore(mongo);
-    when(mongo.updateFirst(any(Query.class), any(Update.class)))
-        .thenReturn(UpdateResult.acknowledged(1, 1L, null))
-        .thenReturn(UpdateResult.acknowledged(1, 1L, null));
-    Instant now = Instant.parse("2026-07-22T12:00:00Z");
+    Instant expiresAt = Instant.parse("2026-07-22T12:30:00Z");
+    var document = new SharedFolderMaintenanceLeaseDocument();
+    document.setId(SharedFolderMaintenanceLeaseDocument.ID);
+    document.setOwnerToken("owner-a");
+    document.setFenceToken(7L);
+    document.setExpiresAt(expiresAt);
+    when(mongo.findAndUpdateDatabaseLease(
+        any(Query.class), any(MongoDatabaseLeaseMutation.class)))
+        .thenReturn(Optional.of(document))
+        .thenReturn(Optional.of(document));
+    var grant = new LeaseGrant(SharedFolderMaintenanceLeaseDocument.ID,
+        "owner-a", 7, expiresAt);
 
-    assertThat(store.renew("owner-a", now, now.plusSeconds(1800))).isTrue();
-    assertThat(store.release("owner-a")).isTrue();
+    assertThat(store.renew(grant, Duration.ofMinutes(30))).contains(grant);
+    assertThat(store.release(grant)).isTrue();
 
     ArgumentCaptor<Query> queries = ArgumentCaptor.forClass(Query.class);
-    verify(mongo, org.mockito.Mockito.times(2)).updateFirst(
-        queries.capture(), any(Update.class));
+    verify(mongo, org.mockito.Mockito.times(2)).findAndUpdateDatabaseLease(
+        queries.capture(), any(MongoDatabaseLeaseMutation.class));
     assertThat(queries.getAllValues()).allSatisfy(query ->
         assertThat(query.getQueryObject().toString())
-            .contains("shared-folder-maintenance", "ownerToken", "owner-a"));
-    assertThat(queries.getAllValues().get(0).getQueryObject().toString()).contains("$gt");
+            .contains("shared-folder-maintenance", "ownerToken", "owner-a", "fenceToken", "7"));
   }
 }

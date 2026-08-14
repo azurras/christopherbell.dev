@@ -33,6 +33,14 @@ public interface KindScopedMongoOperations<T> {
 
   Optional<T> findAndUpdate(Query domainQuery, Update domainUpdate);
 
+  /** Atomically applies a server-time lease predicate and mutation, returning its issued deadline. */
+  Optional<T> findAndUpdateDatabaseLease(
+      Query exactStateQuery, MongoDatabaseLeaseMutation mutation);
+
+  /** Seeds one absent lease as expired, then atomically competes for its server-time grant. */
+  Optional<T> acquireDatabaseLease(
+      Query leaseIdentityQuery, MongoDatabaseLeaseMutation mutation, T unownedExpiredSeed);
+
   T upsertById(Object legacyId, Update domainUpdate);
 
   Optional<T> decrementFloorZeroById(

@@ -6,6 +6,10 @@ import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.persistence.PostgresApplicationLeaseStore;
 import dev.christopherbell.libs.lease.LeaseStore;
+import dev.christopherbell.libs.lease.LeaseGrant;
+import static dev.christopherbell.persistence.jooq.shared_folder.Tables.MAINTENANCE_LEASE;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import dev.christopherbell.music.catalog.MusicCatalogQueryRepository;
 import dev.christopherbell.music.catalog.MusicTrackRepository;
 import dev.christopherbell.music.catalog.PostgresMusicCatalogQueryRepository;
@@ -43,6 +47,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 class PostgresTask4ParityContractTest implements Task4PersistenceParityContract {
   private static Task3PostgresqlTestSupport schemas;
   private static Task3PostgresqlTestSupport.Database database;
+  private static Task3PostgresqlTestSupport.Database contenderDatabase;
   private static LeaseStore applicationLeases;
   private static MusicTrackRepository tracks;
   private static MusicCatalogQueryRepository catalog;
@@ -53,16 +58,20 @@ class PostgresTask4ParityContractTest implements Task4PersistenceParityContract 
   private static MusicAccessAttemptRepository accessAttempts;
   private static SharedFolderAuditRepository audits;
   private static SharedFolderMaintenanceLeaseStore maintenanceLeases;
+  private static SharedFolderMaintenanceLeaseStore maintenanceLeaseContender;
   private static MediaJobRepository mediaJobs;
   private static SharedFolderMutationRecoveryRepository recoveries;
+  private static SharedFolderMutationRecoveryRepository recoveryContender;
   private static SharedFolderRadioRepository sharedRadio;
   private static SharedFolderRecycleRepository recycleItems;
   private static SharedFolderUploadSessionRepository uploadSessions;
+  private static SharedFolderUploadSessionRepository uploadSessionContender;
 
   @BeforeAll
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
+    contenderDatabase = schemas.openDatabase();
     new PostgresAccountRepository(database.dsl()).save(Account.builder()
         .id(OWNER_ID).createdOn(FIXTURE_TIME).email("task4-parity@example.test")
         .passwordHash("hash").role(Role.USER).status(AccountStatus.ACTIVE)
@@ -77,15 +86,22 @@ class PostgresTask4ParityContractTest implements Task4PersistenceParityContract 
     accessAttempts = new PostgresMusicAccessAttemptRepository(database.dsl());
     audits = new PostgresSharedFolderAuditRepository(database.dsl());
     maintenanceLeases = new PostgresSharedFolderMaintenanceLeaseStore(database.dsl());
+    maintenanceLeaseContender =
+        new PostgresSharedFolderMaintenanceLeaseStore(contenderDatabase.dsl());
     mediaJobs = new PostgresMediaJobRepository(database.dsl());
     recoveries = new PostgresSharedFolderMutationRecoveryRepository(database.dsl());
+    recoveryContender =
+        new PostgresSharedFolderMutationRecoveryRepository(contenderDatabase.dsl());
     sharedRadio = new PostgresSharedFolderRadioRepository(database.dsl());
     recycleItems = new PostgresSharedFolderRecycleRepository(database.dsl());
     uploadSessions = new PostgresSharedFolderUploadSessionRepository(database.dsl());
+    uploadSessionContender =
+        new PostgresSharedFolderUploadSessionRepository(contenderDatabase.dsl());
   }
 
   @AfterAll
   static void cleanupDatabase() throws Exception {
+    if (contenderDatabase != null) contenderDatabase.close();
     if (database != null) database.close();
     if (schemas != null) schemas.close();
   }
@@ -100,9 +116,25 @@ class PostgresTask4ParityContractTest implements Task4PersistenceParityContract 
   @Override public MusicAccessAttemptRepository accessAttempts() { return accessAttempts; }
   @Override public SharedFolderAuditRepository audits() { return audits; }
   @Override public SharedFolderMaintenanceLeaseStore maintenanceLeases() { return maintenanceLeases; }
+  @Override public SharedFolderMaintenanceLeaseStore maintenanceLeaseContender() {
+    return maintenanceLeaseContender;
+  }
+  @Override public void expireMaintenanceLease(LeaseGrant grant) {
+    database.dsl().update(MAINTENANCE_LEASE)
+        .set(MAINTENANCE_LEASE.EXPIRES_AT, Instant.EPOCH.atOffset(ZoneOffset.UTC))
+        .where(MAINTENANCE_LEASE.LEASE_NAME.eq(grant.leaseName())
+            .and(MAINTENANCE_LEASE.FENCE_TOKEN.eq(grant.fenceToken())))
+        .execute();
+  }
   @Override public MediaJobRepository mediaJobs() { return mediaJobs; }
   @Override public SharedFolderMutationRecoveryRepository recoveries() { return recoveries; }
+  @Override public SharedFolderMutationRecoveryRepository recoveryContender() {
+    return recoveryContender;
+  }
   @Override public SharedFolderRadioRepository sharedRadio() { return sharedRadio; }
   @Override public SharedFolderRecycleRepository recycleItems() { return recycleItems; }
   @Override public SharedFolderUploadSessionRepository uploadSessions() { return uploadSessions; }
+  @Override public SharedFolderUploadSessionRepository uploadSessionContender() {
+    return uploadSessionContender;
+  }
 }

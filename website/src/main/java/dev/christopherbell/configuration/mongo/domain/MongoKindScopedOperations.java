@@ -140,7 +140,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
           Document.class,
           kind.collection());
     } catch (DuplicateKeyException failure) {
-      throw duplicate();
+      throw duplicate(failure);
     } catch (RuntimeException failure) {
       throw translateMalformed(failure);
     }
@@ -156,7 +156,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
           Document.class,
           kind.collection());
     } catch (DuplicateKeyException failure) {
-      throw duplicate();
+      throw duplicate(failure);
     } catch (RuntimeException failure) {
       throw translateMalformed(failure);
     }
@@ -173,10 +173,102 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
           kind.collection());
       return Optional.ofNullable(envelope).map(codec::decode);
     } catch (DuplicateKeyException failure) {
-      throw duplicate();
+      throw duplicate(failure);
     } catch (RuntimeException failure) {
       throw translateMalformed(failure);
     }
+  }
+
+  @Override
+  public Optional<T> findAndUpdateDatabaseLease(
+      Query exactStateQuery, MongoDatabaseLeaseMutation mutation) {
+    if (mutation.upsert()) {
+      throw new UnapprovedDomainFieldException();
+    }
+    return executeDatabaseLeaseMutation(exactStateQuery, mutation);
+  }
+
+  @Override
+  public Optional<T> acquireDatabaseLease(
+      Query leaseIdentityQuery,
+      MongoDatabaseLeaseMutation mutation,
+      T unownedExpiredSeed) {
+    if (!mutation.upsert() || unownedExpiredSeed == null) {
+      throw new UnapprovedDomainFieldException();
+    }
+    var claimed = executeDatabaseLeaseMutation(leaseIdentityQuery, mutation);
+    if (claimed.isPresent()) {
+      return claimed;
+    }
+    try {
+      insert(unownedExpiredSeed);
+    } catch (DuplicateKeyException contention) {
+      // A peer seeded or claimed the same fixed lease between the two atomic operations.
+    }
+    return executeDatabaseLeaseMutation(leaseIdentityQuery, mutation);
+  }
+
+  private Optional<T> executeDatabaseLeaseMutation(
+      Query exactStateQuery, MongoDatabaseLeaseMutation mutation) {
+    var mappedQuery = fieldMapper.mapMutationQuery(exactStateQuery, kind.schemaVersion());
+    var deadlinePath = fieldMapper.mapWritablePath(mutation.deadlineField());
+    var deadline = new Document("$ifNull", List.of("$" + deadlinePath, new java.util.Date(0)));
+    Document timePredicate = switch (mutation.expectation()) {
+      case UNEXPIRED -> new Document("$expr", new Document("$gt", List.of(deadline, "$$NOW")));
+      case EXPIRED_OR_MISSING ->
+          new Document("$expr", new Document("$lte", List.of(deadline, "$$NOW")));
+      case EXPIRED_OR_SAME_OWNER -> {
+        String ownerPath = fieldMapper.mapWritablePath(mutation.sameOwnerField());
+        yield new Document("$or", List.of(
+            new Document(ownerPath, mutation.sameOwnerValue()),
+            new Document("$expr", new Document("$lte", List.of(deadline, "$$NOW")))));
+      }
+    };
+    var selector = new org.springframework.data.mongodb.core.query.BasicQuery(
+        new Document("$and", List.of(mappedQuery.getQueryObject(), timePredicate)));
+    var mappedUpdate = fieldMapper.mapLeaseUpdate(
+        mutation.update(), mutation.advanceVersion()).getUpdateObject();
+    var assignments = leaseAssignments(mappedUpdate);
+    if (mutation.duration() != null) {
+      assignments.put(deadlinePath, new Document("$dateAdd", new Document("startDate", "$$NOW")
+          .append("unit", "millisecond").append("amount", mutation.duration().toMillis())));
+    }
+    var update = AggregationUpdate.from(List.of(
+        context -> new Document("$set", assignments)));
+    try {
+      var envelope = mongo.findAndModify(
+          selector,
+          update,
+          FindAndModifyOptions.options().returnNew(true),
+          Document.class,
+          kind.collection());
+      return Optional.ofNullable(envelope).map(codec::decode);
+    } catch (DuplicateKeyException contention) {
+      return Optional.empty();
+    } catch (RuntimeException failure) {
+      throw translateMalformed(failure);
+    }
+  }
+
+  private static Document leaseAssignments(Document update) {
+    var assignments = new Document();
+    var sets = update.get("$set", Document.class);
+    if (sets != null) {
+      sets.forEach((path, value) -> assignments.put(path, new Document("$literal", value)));
+    }
+    var increments = update.get("$inc", Document.class);
+    if (increments != null) {
+      increments.forEach((path, amount) -> assignments.put(path, new Document("$add", List.of(
+          new Document("$ifNull", List.of("$" + path, 0)), amount))));
+    }
+    var currentDates = update.get("$currentDate", Document.class);
+    if (currentDates != null) {
+      currentDates.keySet().forEach(path -> assignments.put(path, "$$NOW"));
+    }
+    if (assignments.isEmpty()) {
+      throw new UnapprovedDomainFieldException();
+    }
+    return assignments;
   }
 
   @Override
@@ -203,7 +295,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
       }
       return codec.decode(envelope);
     } catch (DuplicateKeyException failure) {
-      throw duplicate();
+      throw duplicate(failure);
     }
   }
 
@@ -250,7 +342,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
           Document.class,
           kind.collection());
     } catch (DuplicateKeyException failure) {
-      throw duplicate();
+      throw duplicate(failure);
     } catch (RuntimeException failure) {
       throw translateMalformed(failure);
     }
@@ -331,7 +423,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
           kind.collection(),
           Document.class);
     } catch (DuplicateKeyException failure) {
-      throw duplicate();
+      throw duplicate(failure);
     } catch (RuntimeException failure) {
       throw translateMalformed(failure);
     }
@@ -342,7 +434,7 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
       var persisted = mongo.insert(candidate, kind.collection());
       return afterSave(persistedSource(prepared.source(), persisted), persisted);
     } catch (DuplicateKeyException failure) {
-      throw duplicate();
+      throw duplicate(failure);
     }
   }
 
@@ -403,8 +495,10 @@ public final class MongoKindScopedOperations<T> implements KindScopedMongoOperat
     return new OptimisticLockingFailureException(STALE_MESSAGE);
   }
 
-  private static DuplicateKeyException duplicate() {
-    return new DuplicateKeyException(DUPLICATE_MESSAGE);
+  private static DuplicateKeyException duplicate(DuplicateKeyException cause) {
+    return cause.getCause() == null
+        ? new DuplicateKeyException(DUPLICATE_MESSAGE)
+        : new DuplicateKeyException(DUPLICATE_MESSAGE, cause.getCause());
   }
 
   private static RuntimeException translateMalformed(RuntimeException failure) {

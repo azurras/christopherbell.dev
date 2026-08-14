@@ -46,6 +46,16 @@ public class PostgresSharedFolderAuditRepository implements SharedFolderAuditRep
   }
 
   @Override
+  public int deleteExpired(Instant cutoff, int limit) {
+    var ids = database.select(AUDIT_EVENT.AUDIT_EVENT_ID).from(AUDIT_EVENT)
+        .where(AUDIT_EVENT.EXPIRES_AT.le(cutoff.atOffset(ZoneOffset.UTC)))
+        .orderBy(AUDIT_EVENT.EXPIRES_AT.asc(), AUDIT_EVENT.AUDIT_EVENT_ID.asc())
+        .limit(limit);
+    return database.deleteFrom(AUDIT_EVENT)
+        .where(AUDIT_EVENT.AUDIT_EVENT_ID.in(ids)).execute();
+  }
+
+  @Override
   public List<SharedFolderAuditEvent> search(String accountId, String action, String outcome,
       String relativePath, Instant from, Instant to, int limit) {
     Condition condition = DSL.noCondition();

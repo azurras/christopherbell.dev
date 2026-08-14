@@ -7,6 +7,10 @@ import static org.mockito.Mockito.mock;
 
 import dev.christopherbell.sharedfolder.maintenance.MongoSharedFolderMaintenanceLeaseStore;
 import dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceLeaseStore;
+import dev.christopherbell.configuration.mongo.runtime.MongoLeaseConfiguration;
+import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
+import dev.christopherbell.libs.mongo.lease.MongoLeaseStore;
+import dev.christopherbell.music.radio.MusicRuntimeStateMigrationSupport;
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.boot.test.util.TestPropertyValues;
@@ -23,8 +27,11 @@ class MongoBackendComponentContextTest {
       var factory = context.getBean(
           "domainMongoOperationsFactory", DomainMongoOperationsFactory.class);
       var leaseStore = context.getBean(SharedFolderMaintenanceLeaseStore.class);
+      var migrationSupport = context.getBean(MusicRuntimeStateMigrationSupport.class);
 
       assertThat(AopUtils.isAopProxy(factory)).isFalse();
+      assertThat(AopUtils.isAopProxy(migrationSupport)).isFalse();
+      assertThat(context.getBean(MongoLeaseService.class)).isNotNull();
       assertThat(AopUtils.isAopProxy(leaseStore)).isTrue();
       assertThat(AopUtils.getTargetClass(leaseStore))
           .isEqualTo(MongoSharedFolderMaintenanceLeaseStore.class);
@@ -36,6 +43,8 @@ class MongoBackendComponentContextTest {
     try (var context = contextFor("postgresql")) {
       assertThat(context.containsBean("domainMongoOperationsFactory")).isFalse();
       assertThat(context.getBeansOfType(SharedFolderMaintenanceLeaseStore.class)).isEmpty();
+      assertThat(context.getBeansOfType(MusicRuntimeStateMigrationSupport.class)).isEmpty();
+      assertThat(context.getBeansOfType(MongoLeaseService.class)).isEmpty();
     }
   }
 
@@ -47,6 +56,7 @@ class MongoBackendComponentContextTest {
       org.mockito.Mockito.when(mongo.getConverter()).thenReturn(mock(MongoConverter.class));
       return mongo;
     });
+    context.registerBean(MongoLeaseStore.class, () -> mock(MongoLeaseStore.class));
     if (backend.equals("mongodb")) {
       var adapterFactory = mock(DomainMongoOperationsFactory.class);
       doReturn(mock(KindScopedMongoOperations.class)).when(adapterFactory).forType(any());
@@ -63,7 +73,9 @@ class MongoBackendComponentContextTest {
     });
     context.register(
         DomainMongoOperationsFactory.class,
-        MongoSharedFolderMaintenanceLeaseStore.class);
+        MongoSharedFolderMaintenanceLeaseStore.class,
+        MusicRuntimeStateMigrationSupport.class,
+        MongoLeaseConfiguration.class);
     context.refresh();
     return context;
   }

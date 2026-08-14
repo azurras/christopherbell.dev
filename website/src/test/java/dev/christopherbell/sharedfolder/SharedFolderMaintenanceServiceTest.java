@@ -115,8 +115,8 @@ class SharedFolderMaintenanceServiceTest {
   @Test
   void hostLockPreventsOverlapAfterTheMongoLeaseExpiresAndThenPermitsThePeer()
       throws Exception {
-    SharedLeaseStore store = new SharedLeaseStore();
     MutableClock clock = new MutableClock(Instant.parse("2026-07-22T12:00:00Z"));
+    SharedLeaseStore store = new SharedLeaseStore(clock);
     SharedFolderMaintenanceLease firstLease = new SharedFolderMaintenanceLease(
         store, clock, Duration.ofMinutes(30), () -> "owner-a");
     SharedFolderMaintenanceLease peerLease = new SharedFolderMaintenanceLease(
@@ -301,27 +301,38 @@ class SharedFolderMaintenanceServiceTest {
   private static final class SharedLeaseStore implements SharedFolderMaintenanceLeaseStore {
     private String owner;
     private Instant expiresAt = Instant.EPOCH;
+    private long fence;
+    private final Clock clock;
+
+    private SharedLeaseStore(Clock clock) { this.clock = clock; }
 
     @Override
-    public synchronized boolean tryAcquire(
-        String ownerToken, Instant acquiredAt, Instant newExpiresAt) {
-      if (owner != null && !owner.equals(ownerToken) && expiresAt.isAfter(acquiredAt)) return false;
+    public synchronized java.util.Optional<dev.christopherbell.libs.lease.LeaseGrant> tryAcquire(
+        String ownerToken, Duration duration) {
+      Instant now = clock.instant();
+      if (owner != null && !owner.equals(ownerToken) && expiresAt.isAfter(now)) {
+        return java.util.Optional.empty();
+      }
       owner = ownerToken;
-      expiresAt = newExpiresAt;
-      return true;
+      expiresAt = now.plus(duration);
+      return java.util.Optional.of(new dev.christopherbell.libs.lease.LeaseGrant(
+          "shared-folder-maintenance", owner, ++fence, expiresAt));
     }
 
     @Override
-    public synchronized boolean renew(
-        String ownerToken, Instant renewedAt, Instant newExpiresAt) {
-      if (!ownerToken.equals(owner) || !expiresAt.isAfter(renewedAt)) return false;
-      expiresAt = newExpiresAt;
-      return true;
+    public synchronized java.util.Optional<dev.christopherbell.libs.lease.LeaseGrant> renew(
+        dev.christopherbell.libs.lease.LeaseGrant grant, Duration duration) {
+      if (!grant.ownerId().equals(owner) || grant.fenceToken() != fence
+          || !expiresAt.isAfter(clock.instant())) return java.util.Optional.empty();
+      expiresAt = clock.instant().plus(duration);
+      return java.util.Optional.of(new dev.christopherbell.libs.lease.LeaseGrant(
+          grant.leaseName(), owner, fence, expiresAt));
     }
 
     @Override
-    public synchronized boolean release(String ownerToken) {
-      if (!ownerToken.equals(owner)) return false;
+    public synchronized boolean release(dev.christopherbell.libs.lease.LeaseGrant grant) {
+      if (!grant.ownerId().equals(owner) || grant.fenceToken() != fence
+          || !expiresAt.isAfter(clock.instant())) return false;
       owner = null;
       expiresAt = Instant.EPOCH;
       return true;

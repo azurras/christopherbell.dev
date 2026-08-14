@@ -761,11 +761,10 @@ public class SharedFolderMutationService {
       return null;
     }
     String recoveryToken = serviceInstanceId + ":recovery:" + UUID.randomUUID();
-    Instant recoveryExpiry = now.plus(operationLeaseDuration());
-    long claimed = recoveries.claimExpiredOperationLease(
-        candidate.getId(), candidate.getOperationLeaseToken(), candidate.getState(), now,
-        recoveryToken, recoveryExpiry, now);
-    if (claimed != 1L) {
+    var claimedExpiry = recoveries.claimExpiredOperationLease(
+        candidate.getId(), candidate.getOperationLeaseToken(), candidate.getState(),
+        recoveryToken, operationLeaseDuration());
+    if (claimedExpiry.isEmpty()) {
       return null;
     }
     return recoveries.findById(candidate.getId())
@@ -781,13 +780,13 @@ public class SharedFolderMutationService {
 
   private void renewOperationLease(SharedFolderMutationRecovery recovery) {
     Instant now = leaseNow();
-    Instant expiresAt = now.plus(operationLeaseDuration());
-    long renewed = recoveries.renewOperationLease(
-        recovery.getId(), recovery.getOperationLeaseToken(), recovery.getState(), expiresAt, now);
-    if (renewed != 1L) {
+    var expiresAt = recoveries.renewOperationLease(
+        recovery.getId(), recovery.getOperationLeaseToken(), recovery.getState(),
+        operationLeaseDuration());
+    if (expiresAt.isEmpty()) {
       throw new OperationLeaseLostException();
     }
-    recovery.setOperationLeaseExpiresAt(expiresAt);
+    recovery.setOperationLeaseExpiresAt(expiresAt.orElseThrow());
     recovery.setUpdatedAt(now);
   }
 

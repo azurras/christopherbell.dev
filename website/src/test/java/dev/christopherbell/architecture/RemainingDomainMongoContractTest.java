@@ -172,11 +172,11 @@ class RemainingDomainMongoContractTest {
         .append("finalizationState", "TARGET_QUARANTINED")
         .append("finalizationLeaseExpiresAt", now.minusSeconds(1))));
     assertThat(uploads.claimExpiredFinalizationLease(
-        "upload-a", "old", SharedFolderUploadFinalizationState.TARGET_QUARANTINED, now,
-        "winner", now.plusSeconds(60), now)).isEqualTo(1);
+        "upload-a", "old", SharedFolderUploadFinalizationState.TARGET_QUARANTINED,
+        "winner", java.time.Duration.ofMinutes(1))).isPresent();
     assertThat(uploads.claimExpiredFinalizationLease(
-        "upload-a", "old", SharedFolderUploadFinalizationState.TARGET_QUARANTINED, now,
-        "stale", now.plusSeconds(60), now)).isZero();
+        "upload-a", "old", SharedFolderUploadFinalizationState.TARGET_QUARANTINED,
+        "stale", java.time.Duration.ofMinutes(1))).isEmpty();
     var upload = collection.find(new Document(
         "_id", new Document("kind", "upload_session").append("legacyId", "upload-a")))
         .first();
@@ -189,11 +189,11 @@ class RemainingDomainMongoContractTest {
         .append("operationLeaseToken", "old")
         .append("operationLeaseExpiresAt", now.minusSeconds(1))));
     assertThat(recoveries.claimExpiredOperationLease(
-        "recovery-a", "old", SharedFolderMutationRecoveryState.TARGET_QUARANTINED, now,
-        "winner", now.plusSeconds(60), now)).isEqualTo(1);
+        "recovery-a", "old", SharedFolderMutationRecoveryState.TARGET_QUARANTINED,
+        "winner", java.time.Duration.ofMinutes(1))).isPresent();
     assertThat(recoveries.claimExpiredOperationLease(
-        "recovery-a", "old", SharedFolderMutationRecoveryState.TARGET_QUARANTINED, now,
-        "stale", now.plusSeconds(60), now)).isZero();
+        "recovery-a", "old", SharedFolderMutationRecoveryState.TARGET_QUARANTINED,
+        "stale", java.time.Duration.ofMinutes(1))).isEmpty();
 
     var malformedId = new Document("kind", "upload_session").append("legacyId", "bad");
     var malformed = envelope("upload_session", "bad", new Document("version", 0L)
@@ -203,7 +203,7 @@ class RemainingDomainMongoContractTest {
     collection.insertOne(malformed);
     var before = collection.find(new Document("_id", malformedId)).first();
     assertThatThrownBy(() -> uploads.renewAppendLease(
-        "bad", "owner", 0L, now.plusSeconds(60), now))
+        "bad", "owner", 0L, java.time.Duration.ofMinutes(1)))
         .isInstanceOf(MalformedDomainDocumentException.class);
     assertThat(collection.find(new Document("_id", malformedId)).first()).isEqualTo(before);
   }
@@ -217,25 +217,25 @@ class RemainingDomainMongoContractTest {
     recovery.setOwnerId("account-a");
     recovery.setState(SharedFolderMutationRecoveryState.TARGET_QUARANTINED);
     recovery.setOperationLeaseToken("owner-a");
-    recovery.setOperationLeaseExpiresAt(now.plusSeconds(30));
+    recovery.setOperationLeaseExpiresAt(Instant.now().plusSeconds(30));
     recovery.setCreatedAt(now);
     recovery.setUpdatedAt(now);
     var saved = recoveries.save(recovery);
 
     assertThat(saved.getVersion()).isZero();
     assertThat(recoveries.renewOperationLease(
-        saved.getId(), "wrong-owner", saved.getState(), now.plusSeconds(60), now.plusSeconds(1)))
-        .isZero();
+        saved.getId(), "wrong-owner", saved.getState(), java.time.Duration.ofMinutes(1)))
+        .isEmpty();
     assertThat(recoveries.renewOperationLease(
         saved.getId(), "owner-a", SharedFolderMutationRecoveryState.PREPARED,
-        now.plusSeconds(60), now.plusSeconds(1)))
-        .isZero();
+        java.time.Duration.ofMinutes(1)))
+        .isEmpty();
     assertThat(recoveries.renewOperationLease(
-        saved.getId(), "owner-a", saved.getState(), now.plusSeconds(60), now.plusSeconds(1)))
-        .isEqualTo(1);
+        saved.getId(), "owner-a", saved.getState(), java.time.Duration.ofMinutes(1)))
+        .isPresent();
     assertThat(recoveries.renewOperationLease(
-        saved.getId(), "owner-a", saved.getState(), now.plusSeconds(90), now.plusSeconds(2)))
-        .isEqualTo(1);
+        saved.getId(), "owner-a", saved.getState(), java.time.Duration.ofMinutes(1)))
+        .isPresent();
 
     var rawId = new Document("kind", "mutation_recovery").append("legacyId", saved.getId());
     var afterHeartbeats = mongo.getCollection("shared_folder")
@@ -263,7 +263,7 @@ class RemainingDomainMongoContractTest {
 
     assertThatThrownBy(() -> recoveries.renewOperationLease(
         "heartbeat-bad", "owner-a", SharedFolderMutationRecoveryState.TARGET_QUARANTINED,
-        now.plusSeconds(60), now))
+        java.time.Duration.ofMinutes(1)))
         .isInstanceOf(MalformedDomainDocumentException.class);
     assertThat(collection.find(new Document("_id", id)).first()).isEqualTo(before);
   }

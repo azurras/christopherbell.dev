@@ -928,6 +928,7 @@ kinds:
     keyMapping: {sourcePath: id, targetColumn: maintenance_lease.lease_name, preservation: exact}
     fieldMappings:
       ownerToken: {targets: [maintenance_lease.owner_token], conversion: string, missing: reject, nullValue: reject}
+      fenceToken: {targets: [maintenance_lease.fence_token], conversion: long, missing: default, nullValue: default}
       acquiredAt: {targets: [maintenance_lease.acquired_at], conversion: instant-utc, missing: reject, nullValue: reject}
       expiresAt: {targets: [maintenance_lease.expires_at], conversion: instant-utc, missing: reject, nullValue: reject}
     deleteBehavior: preserve

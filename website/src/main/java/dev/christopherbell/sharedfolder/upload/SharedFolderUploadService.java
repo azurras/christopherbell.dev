@@ -765,14 +765,14 @@ public class SharedFolderUploadService {
 
   private void renewAppendLease(SharedFolderUploadSession session) {
     Instant now = leaseNow();
-    Instant expiresAt = now.plus(appendLeaseDuration());
-    long renewed = sessions.renewAppendLease(
-        session.getId(), session.getAppendLeaseToken(), session.getAppendOffset(), expiresAt, now);
-    if (renewed != 1L) {
+    var expiresAt = sessions.renewAppendLease(
+        session.getId(), session.getAppendLeaseToken(), session.getAppendOffset(),
+        appendLeaseDuration());
+    if (expiresAt.isEmpty()) {
       throw new AppendLeaseLostException();
     }
     advanceVersionAfterLeaseRenewal(session);
-    session.setAppendLeaseExpiresAt(expiresAt);
+    session.setAppendLeaseExpiresAt(expiresAt.orElseThrow());
     session.setUpdatedAt(now);
   }
 
@@ -813,11 +813,10 @@ public class SharedFolderUploadService {
     }
     beforeExpiredAppendLeaseClaim();
     String recoveryToken = serviceInstanceId + ":append-recovery:" + UUID.randomUUID();
-    Instant recoveryExpiry = now.plus(appendLeaseDuration());
-    long claimed = sessions.claimExpiredAppendLease(
-        session.getId(), session.getAppendLeaseToken(), session.getAppendOffset(), now,
-        recoveryToken, recoveryExpiry, now);
-    if (claimed != 1L) {
+    var claimedExpiry = sessions.claimExpiredAppendLease(
+        session.getId(), session.getAppendLeaseToken(), session.getAppendOffset(),
+        recoveryToken, appendLeaseDuration());
+    if (claimedExpiry.isEmpty()) {
       return sessions.findById(session.getId()).orElseThrow(this::conflict);
     }
     Long appendOffset = session.getAppendOffset();
@@ -1161,11 +1160,10 @@ public class SharedFolderUploadService {
   private SharedFolderUploadSession claimExpiredFinalization(SharedFolderUploadSession session) {
     Instant now = leaseNow();
     String recoveryToken = serviceInstanceId + ":recovery:" + UUID.randomUUID();
-    Instant recoveryExpiry = now.plus(finalizationLeaseDuration());
-    long claimed = sessions.claimExpiredFinalizationLease(
-        session.getId(), session.getFinalizationLeaseToken(), session.getFinalizationState(), now,
-        recoveryToken, recoveryExpiry, now);
-    if (claimed != 1L) {
+    var claimedExpiry = sessions.claimExpiredFinalizationLease(
+        session.getId(), session.getFinalizationLeaseToken(), session.getFinalizationState(),
+        recoveryToken, finalizationLeaseDuration());
+    if (claimedExpiry.isEmpty()) {
       return null;
     }
     return sessions.findById(session.getId())
@@ -1286,15 +1284,14 @@ public class SharedFolderUploadService {
 
   private void renewFinalizationLease(SharedFolderUploadSession session) {
     Instant now = leaseNow();
-    Instant expiresAt = now.plus(finalizationLeaseDuration());
-    long renewed = sessions.renewFinalizationLease(
+    var expiresAt = sessions.renewFinalizationLease(
         session.getId(), session.getFinalizationLeaseToken(), session.getFinalizationState(),
-        expiresAt, now);
-    if (renewed != 1L) {
+        finalizationLeaseDuration());
+    if (expiresAt.isEmpty()) {
       throw new FinalizationLeaseLostException();
     }
     advanceVersionAfterLeaseRenewal(session);
-    session.setFinalizationLeaseExpiresAt(expiresAt);
+    session.setFinalizationLeaseExpiresAt(expiresAt.orElseThrow());
     session.setUpdatedAt(now);
   }
 
