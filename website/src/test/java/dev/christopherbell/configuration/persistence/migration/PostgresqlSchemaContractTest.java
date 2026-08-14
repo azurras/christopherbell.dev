@@ -29,8 +29,8 @@ class PostgresqlSchemaContractTest {
     try (var first = PostgresqlSchemaTestSupport.migrate();
          var second = PostgresqlSchemaTestSupport.migrate();
          var connection = first.connect()) {
-      assertThat(first.migrationsExecuted()).isEqualTo(11);
-      assertThat(second.migrationsExecuted()).isEqualTo(11);
+      assertThat(first.migrationsExecuted()).isEqualTo(12);
+      assertThat(second.migrationsExecuted()).isEqualTo(12);
       assertThat(ownedSchemas(connection, first.prefix()))
           .hasSize(PostgresqlSchemaTestSupport.DOMAINS.size());
       assertThat(ownedSchemas(connection, second.prefix()))
@@ -40,10 +40,10 @@ class PostgresqlSchemaContractTest {
   }
 
   @Test
-  void emptyFlywayMigrationCreatesExactlyTheElevenOwnedCatalogSchemasAndTables() throws Exception {
+  void emptyFlywayMigrationCreatesExactlyTheOwnedCatalogSchemasAndTables() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate();
          var connection = database.connect()) {
-      assertThat(database.migrationsExecuted()).isEqualTo(11);
+      assertThat(database.migrationsExecuted()).isEqualTo(12);
       assertThat(ownedSchemas(connection, database.prefix()))
           .containsExactlyInAnyOrderElementsOf(PostgresqlSchemaTestSupport.DOMAINS.stream()
               .map(database.prefix()::concat)
@@ -194,7 +194,7 @@ class PostgresqlSchemaContractTest {
           + "edited_on) values ('upgrade-post', 0, 'deleted:abcdef012345', 'before', 'after', "
           + "transaction_timestamp())");
 
-      assertThat(database.migrateToLatest()).isEqualTo(5);
+      assertThat(database.migrateToLatest()).isEqualTo(6);
       assertThat(longScalar(connection, "select count(*) from " + identity
           + ".deleted_account_pseudonym where pseudonym_id = 'deleted:abcdef012345'"))
           .isOne();
@@ -222,7 +222,7 @@ class PostgresqlSchemaContractTest {
           + "edited_on) values ('v7-post', 0, 'v7-owner', 'before', 'after', "
           + "transaction_timestamp())");
 
-      assertThat(database.migrateToLatest()).isEqualTo(4);
+      assertThat(database.migrateToLatest()).isEqualTo(5);
       assertRestrictViolation(() -> execute(connection,
           "delete from " + identity + ".account where account_id = 'v7-owner'"));
     }
@@ -268,7 +268,7 @@ class PostgresqlSchemaContractTest {
           + ".admin_activity_value (admin_activity_id, partition_name, value_key, value_text) "
           + "values ('v8-admin', 'before', 'state', 'old')");
 
-      assertThat(database.migrateToLatest()).isEqualTo(3);
+      assertThat(database.migrateToLatest()).isEqualTo(4);
       assertThat(longScalar(connection, "select count(*) from " + mobility
           + ".vin_decode_cache where vin = 'V8EMPTYRESPONSE1' and not response_present"))
           .isOne();
@@ -332,7 +332,7 @@ class PostgresqlSchemaContractTest {
           + ".vin_decode_raw_value (vin, field_name, field_value) values "
           + "('V9WITHRAWVALUE001', 'Make', 'Mazda')");
 
-      assertThat(database.migrateToLatest()).isEqualTo(2);
+      assertThat(database.migrateToLatest()).isEqualTo(3);
       assertThat(longScalar(connection, "select count(*) from " + mobility
           + ".vin_decode_cache where vin = 'V9AMBIGUOUS000001' "
           + "and not raw_decoded_values_present"))
@@ -347,6 +347,31 @@ class PostgresqlSchemaContractTest {
           .isInstanceOf(SQLException.class)
           .extracting(failure -> ((SQLException) failure).getSQLState())
           .isEqualTo("23514");
+    }
+  }
+
+  @Test
+  void versionElevenShadowRunUpgradesToV12AuthorityColumnsWithoutInventingEvidence()
+      throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("11");
+         var connection = database.connect()) {
+      assertThat(database.migrationsExecuted()).isEqualTo(11);
+      var platform = quoted(database.prefix() + "platform");
+      execute(connection, "insert into " + platform
+          + ".persistence_migration_run "
+          + "(run_id, catalog_version, source_database, target_database, source_frozen, status) "
+          + "values ('00000000-0000-0000-0000-000000000612', 'catalog', 'test', 'test', "
+          + "false, 'STAGING')");
+
+      assertThat(database.migrateToLatest()).isEqualTo(1);
+      assertThat(longScalar(connection, "select count(*) from " + platform
+          + ".persistence_migration_run where run_id="
+          + "'00000000-0000-0000-0000-000000000612' and release_commit is null "
+          + "and source_uri_digest is null and target_jdbc_url_digest is null "
+          + "and target_role is null and source_snapshot_digest is null "
+          + "and backup_digest is null and writer_lock_digest is null "
+          + "and finalize_evidence_digest is null"))
+          .isOne();
     }
   }
 

@@ -58,21 +58,16 @@ class KindMigrationEngineTest {
   }
 
   @Test
-  void publicationRequiresACompleteExactReconciliationAndIsIdempotent() {
+  void reconciliationRequiresACompleteExactCheckpoint() {
     var target = new FakeTarget(-1);
     var reconciler = new MigrationReconciler(target);
 
-    assertThatThrownBy(() -> reconciler.reconcileAndPublish(CONTEXT, KIND))
+    assertThatThrownBy(() -> reconciler.requireEquivalent(CONTEXT, KIND))
         .isInstanceOf(MigrationReconciliationException.class);
-    assertThat(target.publishCalls).isZero();
 
     new KindMigrationEngine(new FakeSource(3), target, ignored -> new StubTransformer())
         .stageAndCheckpoint(CONTEXT, KIND);
-    reconciler.reconcileAndPublish(CONTEXT, KIND);
-    reconciler.reconcileAndPublish(CONTEXT, KIND);
-
-    assertThat(target.publishCalls).isEqualTo(2);
-    assertThat(target.published).containsExactly("0001", "0002", "0003");
+    assertThat(reconciler.requireEquivalent(CONTEXT, KIND).equivalent()).isTrue();
   }
 
   @Test
@@ -197,10 +192,8 @@ class KindMigrationEngineTest {
   private static final class FakeTarget implements MigrationTargetStore {
     private MigrationCheckpoint checkpoint = MigrationCheckpoint.initial();
     private final List<String> staged = new ArrayList<>();
-    private final List<String> published = new ArrayList<>();
     private int failCommit;
     private int commitCalls;
-    private int publishCalls;
 
     private FakeTarget(int failCommit) {
       this.failCommit = failCommit;
@@ -244,6 +237,12 @@ class KindMigrationEngineTest {
     }
 
     @Override
+    public void requireStagedDocuments(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        List<TransformedMigrationDocument> documents) {}
+
+    @Override
     public MigrationReconciliation reconcile(
         ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
       return new MigrationReconciliation(
@@ -252,19 +251,15 @@ class KindMigrationEngineTest {
     }
 
     @Override
-    public void publish(
+    public void finalizeRun(
         ValidatedMigrationContext context,
-        PostgresqlMigrationCatalog.Kind kind,
-        MigrationReconciliation reconciliation) {
-      publishCalls++;
-      published.clear();
-      published.addAll(staged);
-    }
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations) {}
 
     @Override
     public List<MigrationKindStatus> statuses(ValidatedMigrationContext context) {
       return List.of(new MigrationKindStatus(
-          "fixture", checkpoint, published.size(), checkpoint.complete()));
+          "fixture", checkpoint, 0, checkpoint.complete()));
     }
   }
 

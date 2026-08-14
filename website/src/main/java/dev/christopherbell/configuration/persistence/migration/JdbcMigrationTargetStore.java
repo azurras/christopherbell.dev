@@ -6,6 +6,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -16,11 +17,28 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
   private static final Pattern PREFIX = Pattern.compile("(?:|cbtest_[a-z0-9_]+_)");
   private final DataSource dataSource;
   private final MigrationRowPublisher publisher;
+  private final List<String> expectedKinds;
+  private final JdbcRelationalRowPublisher verifier = new JdbcRelationalRowPublisher();
   private final MigrationRowCodec codec = new MigrationRowCodec();
 
-  public JdbcMigrationTargetStore(DataSource dataSource, MigrationRowPublisher publisher) {
+  JdbcMigrationTargetStore(DataSource dataSource, MigrationRowPublisher publisher) {
+    this(dataSource, publisher, List.of());
+  }
+
+  public JdbcMigrationTargetStore(
+      DataSource dataSource,
+      MigrationRowPublisher publisher,
+      PostgresqlMigrationCatalog catalog) {
+    this(dataSource, publisher, catalog.kinds().stream()
+        .sorted(java.util.Comparator.comparingInt(PostgresqlMigrationCatalog.Kind::loadOrder))
+        .map(PostgresqlMigrationCatalog.Kind::sourceKind).toList());
+  }
+
+  private JdbcMigrationTargetStore(
+      DataSource dataSource, MigrationRowPublisher publisher, List<String> expectedKinds) {
     this.dataSource = dataSource;
     this.publisher = publisher;
+    this.expectedKinds = List.copyOf(expectedKinds);
   }
 
   @Override
@@ -71,41 +89,102 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
   }
 
   @Override
+  public void requireStagedDocuments(
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind,
+      List<TransformedMigrationDocument> documents) {
+    readOnly(connection -> {
+      requireStagedDocuments(connection, context, kind, documents);
+      return null;
+    });
+  }
+
+  @Override
   public MigrationReconciliation reconcile(
       ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
     return transaction(connection -> reconcile(connection, context, kind, true));
   }
 
   @Override
-  public void publish(
+  public void finalizeRun(
       ValidatedMigrationContext context,
-      PostgresqlMigrationCatalog.Kind kind,
-      MigrationReconciliation supplied) {
+      List<PostgresqlMigrationCatalog.Kind> kinds,
+      List<MigrationReconciliation> supplied) {
+    requireFinalizeAuthority(context);
+    if (kinds.isEmpty() || kinds.size() != supplied.size()) {
+      throw new MigrationReconciliationException();
+    }
+    if (!expectedKinds.isEmpty()
+        && !kinds.stream().map(PostgresqlMigrationCatalog.Kind::sourceKind).toList()
+            .equals(expectedKinds)) {
+      throw new MigrationReconciliationException();
+    }
     transaction(connection -> {
-      var checkpoint = readCheckpoint(connection, context, kind, true);
-      if (published(connection, context, kind)) {
+      try (var statement = connection.prepareStatement(
+          "select pg_advisory_xact_lock(hashtextextended(?, 0))")) {
+        statement.setString(1, "christopherbell-postgresql-migration-finalize");
+        statement.executeQuery();
+      }
+      var alreadyPublished = true;
+      for (var index = 0; index < kinds.size(); index++) {
+        var kind = kinds.get(index);
+        var checkpoint = readCheckpoint(connection, context, kind, true);
+        var actual = reconcile(connection, context, kind, false);
+        if (!actual.equivalent() || !actual.equals(supplied.get(index))
+            || !checkpoint.complete()) {
+          throw new MigrationReconciliationException();
+        }
+        alreadyPublished &= published(connection, context, kind);
+      }
+      if (alreadyPublished) {
         return null;
       }
-      var actual = reconcile(connection, context, kind, false);
-      if (!actual.equivalent() || !actual.equals(supplied) || !checkpoint.complete()) {
-        throw new MigrationReconciliationException();
+      for (var index = kinds.size() - 1; index >= 0; index--) {
+        deleteFrozenDelta(connection, context, kinds.get(index));
       }
-      deleteFrozenDelta(connection, context, kind);
-      publishStagedRows(connection, context, kind);
-      if (!typedTargetEquivalent(connection, context, kind, actual.sourceCount())) {
-        throw new MigrationReconciliationException();
+      for (var kind : kinds) {
+        publishStagedRows(connection, context, kind);
       }
-      try (var statement = connection.prepareStatement(
-          "update " + platform(context) + ".persistence_migration_kind "
-              + "set published=true, published_count=?, published_at=transaction_timestamp(), "
-              + "updated_at=transaction_timestamp() where run_id=? and source_kind=?")) {
-        statement.setLong(1, actual.sourceCount());
-        statement.setObject(2, runId(context));
-        statement.setString(3, kind.sourceKind());
-        requireOne(statement.executeUpdate());
+      for (var index = 0; index < kinds.size(); index++) {
+        var kind = kinds.get(index);
+        var actual = supplied.get(index);
+        if (!typedTargetEquivalent(connection, context, kind, actual.sourceCount())
+            || !relationshipsEquivalent(connection, context, kind)
+            || !portQueryEquivalent(connection, context, kind, actual.sourceCount())) {
+          throw new MigrationReconciliationException();
+        }
+      }
+      for (var index = 0; index < kinds.size(); index++) {
+        markPublished(connection, context, kinds.get(index), supplied.get(index).sourceCount());
       }
       return null;
     });
+  }
+
+  private void requireFinalizeAuthority(ValidatedMigrationContext context) {
+    var request = context.request();
+    var evidence = request.frozenSourceEvidence();
+    if (request.command() != PostgresqlMigrationCommand.FINALIZE
+        || !context.sourceFrozen()
+        || evidence == null
+        || !request.lockToken().equals(evidence.lockToken())
+        || !request.release().equals(evidence.release())
+        || !request.catalogDigest().equals(evidence.catalogDigest())
+        || !request.sourceDatabase().equals(evidence.sourceDatabase())
+        || !request.targetDatabase().equals(evidence.targetDatabase())
+        || !request.sourceUri().equals(evidence.sourceUri())
+        || !request.targetJdbcUrl().equals(evidence.targetJdbcUrl())
+        || !request.expectedTargetRole().equals(evidence.targetRole())
+        || !evidence.evidenceDigest().equals(evidence.reconstructedDigest())) {
+      throw new MigrationReconciliationException();
+    }
+    if (!expectedKinds.isEmpty()) {
+      try {
+        FinalizeEvidenceLoader.requireWriterLock(evidence);
+      } catch (IllegalArgumentException failure) {
+        throw new MigrationReconciliationException();
+      }
+    }
   }
 
   @Override
@@ -280,6 +359,88 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
       statement.setObject(5, runId(context));
       statement.setString(6, kind.sourceKind());
       requireOne(statement.executeUpdate());
+    }
+  }
+
+  private void requireStagedDocuments(
+      Connection connection,
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind,
+      List<TransformedMigrationDocument> documents) throws SQLException {
+    if (documents.isEmpty() || documents.size() > context.request().batchSize()) {
+      throw new MigrationReconciliationException();
+    }
+    var expected = new LinkedHashMap<String, List<String>>();
+    var sourceHashes = new LinkedHashMap<String, String>();
+    for (var document : documents) {
+      if (!kind.sourceKind().equals(document.sourceKind())
+          || sourceHashes.put(document.sourceId(), document.sourceHash()) != null) {
+        throw new MigrationReconciliationException();
+      }
+      var rows = new ArrayList<String>(document.rows().size());
+      for (var rowIndex = 0; rowIndex < document.rows().size(); rowIndex++) {
+        var row = document.rows().get(rowIndex);
+        rows.add(CanonicalMigrationHasher.sha256(List.of(
+            rowIndex, row.targetSchema(), row.targetTable(), row.ordinal(),
+            document.sourceHash(), row.values())));
+      }
+      expected.put(document.sourceId(), List.copyOf(rows));
+    }
+    var sourceIds = connection.createArrayOf("text", expected.keySet().toArray());
+    try (var sourceStatement = connection.prepareStatement(
+             "select source_id, source_hash from " + platform(context)
+                 + ".persistence_migration_source where run_id=? and source_kind=? "
+                 + "and source_id=any(?) order by source_id")) {
+      sourceStatement.setObject(1, runId(context));
+      sourceStatement.setString(2, kind.sourceKind());
+      sourceStatement.setArray(3, sourceIds);
+      var found = new LinkedHashMap<String, String>();
+      try (var rows = sourceStatement.executeQuery()) {
+        while (rows.next()) {
+          found.put(rows.getString(1), rows.getString(2));
+        }
+      }
+      if (!found.equals(sourceHashes)) {
+        throw new MigrationReconciliationException();
+      }
+    } finally {
+      sourceIds.free();
+    }
+    var rowIds = connection.createArrayOf("text", expected.keySet().toArray());
+    try (var rowStatement = connection.prepareStatement(
+             "select source_id, row_ordinal, target_schema, target_table, target_ordinal, "
+                 + "source_hash, row_hash, row_payload from " + platform(context)
+                 + ".persistence_migration_staged_row where run_id=? and source_kind=? "
+                 + "and source_id=any(?) order by source_id, row_ordinal")) {
+      rowStatement.setObject(1, runId(context));
+      rowStatement.setString(2, kind.sourceKind());
+      rowStatement.setArray(3, rowIds);
+      var actual = new LinkedHashMap<String, List<String>>();
+      try (var rows = rowStatement.executeQuery()) {
+        while (rows.next()) {
+          var sourceId = rows.getString(1);
+          var rowOrdinal = rows.getInt(2);
+          var schema = rows.getString(3);
+          var table = rows.getString(4);
+          var targetOrdinal = rows.getInt(5);
+          var sourceHash = rows.getString(6);
+          var storedRowHash = rows.getString(7);
+          var values = codec.decode(rows.getBytes(8));
+          var reconstructedRowHash = CanonicalMigrationHasher.sha256(
+              List.of(schema, table, targetOrdinal, values));
+          if (!storedRowHash.equals(reconstructedRowHash)) {
+            throw new MigrationReconciliationException();
+          }
+          actual.computeIfAbsent(sourceId, ignored -> new ArrayList<>()).add(
+              CanonicalMigrationHasher.sha256(List.of(
+                  rowOrdinal, schema, table, targetOrdinal, sourceHash, values)));
+        }
+      }
+      if (!actual.equals(expected)) {
+        throw new MigrationReconciliationException();
+      }
+    } finally {
+      rowIds.free();
     }
   }
 
@@ -474,6 +635,7 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
     var keyMapping = kind.keyMapping().targetColumn();
     var rootKey = keyMapping.substring(keyMapping.indexOf('.') + 1);
     var qualifiedRoot = quoted(prefix(context) + kind.targetSchema()) + "." + quoted(rootTable);
+    boolean rootsEquivalent;
     try (var statement = connection.prepareStatement(
         "select count(*), count(*) filter (where exists (select 1 from " + platform(context)
             + ".persistence_migration_source source where source.run_id=? and source.source_kind=? "
@@ -482,8 +644,135 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
       statement.setObject(1, runId(context));
       statement.setString(2, kind.sourceKind());
       try (var rows = statement.executeQuery()) {
-        return rows.next() && rows.getLong(1) == expectedCount && rows.getLong(2) == expectedCount;
+        rootsEquivalent = rows.next()
+            && rows.getLong(1) == expectedCount && rows.getLong(2) == expectedCount;
       }
+    }
+    if (!rootsEquivalent) {
+      return false;
+    }
+    var expectedTableCounts = new LinkedHashMap<String, Long>();
+    try (var statement = connection.prepareStatement(
+        "select source_id, target_schema, target_table, target_ordinal, row_payload from "
+            + platform(context) + ".persistence_migration_staged_row "
+            + "where run_id=? and source_kind=? order by source_id, row_ordinal")) {
+      statement.setFetchSize(Math.min(context.request().batchSize(), 500));
+      statement.setObject(1, runId(context));
+      statement.setString(2, kind.sourceKind());
+      try (var rows = statement.executeQuery()) {
+        while (rows.next()) {
+          var staged = new StagedMigrationRow(
+              rows.getString(1), rows.getString(2), rows.getString(3), rows.getInt(4),
+              codec.decode(rows.getBytes(5)));
+          if (!verifier.rowEquivalent(connection, prefix(context), kind, staged)) {
+            return false;
+          }
+          expectedTableCounts.merge(staged.targetTable(), 1L, Long::sum);
+        }
+      }
+    }
+    for (var table : kind.targetTables()) {
+      try (var statement = connection.createStatement();
+           var rows = statement.executeQuery("select count(*) from "
+               + quoted(prefix(context) + kind.targetSchema()) + "." + quoted(table))) {
+        if (!rows.next() || rows.getLong(1) != expectedTableCounts.getOrDefault(table, 0L)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  private boolean relationshipsEquivalent(
+      Connection connection,
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind) throws SQLException {
+    var schema = prefix(context) + kind.targetSchema();
+    for (var table : kind.targetTables()) {
+      var foreignKeys = new LinkedHashMap<String, List<String[]>>();
+      try (var keys = connection.getMetaData().getImportedKeys(null, schema, table)) {
+        while (keys.next()) {
+          foreignKeys.computeIfAbsent(keys.getString("FK_NAME"), ignored -> new ArrayList<>())
+              .add(new String[] {
+                  keys.getString("FKCOLUMN_NAME"), keys.getString("PKTABLE_SCHEM"),
+                  keys.getString("PKTABLE_NAME"), keys.getString("PKCOLUMN_NAME")});
+        }
+      }
+      for (var columns : foreignKeys.values()) {
+        columns.sort(java.util.Comparator.comparing(column -> column[0]));
+        var parentSchema = columns.getFirst()[1];
+        var parentTable = columns.getFirst()[2];
+        var join = columns.stream().map(column ->
+            "child." + quoted(column[0]) + "=parent." + quoted(column[3]))
+            .collect(java.util.stream.Collectors.joining(" and "));
+        var nonNull = columns.stream().map(column ->
+            "child." + quoted(column[0]) + " is not null")
+            .collect(java.util.stream.Collectors.joining(" or "));
+        var sql = "select count(*) from " + quoted(schema) + "." + quoted(table)
+            + " child left join " + quoted(parentSchema) + "." + quoted(parentTable)
+            + " parent on " + join + " where (" + nonNull + ") and parent."
+            + quoted(columns.getFirst()[3]) + " is null";
+        try (var statement = connection.createStatement();
+             var rows = statement.executeQuery(sql)) {
+          if (!rows.next() || rows.getLong(1) != 0) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  private boolean portQueryEquivalent(
+      Connection connection,
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind,
+      long expectedCount) throws SQLException {
+    if (kind.portQueries().isEmpty()) {
+      return false;
+    }
+    var rootTable = kind.targetTables().getFirst();
+    var rootKey = kind.keyMapping().targetColumn();
+    rootKey = rootKey.substring(rootKey.indexOf('.') + 1);
+    String representative = null;
+    try (var statement = connection.prepareStatement(
+        "select source_id from " + platform(context)
+            + ".persistence_migration_source where run_id=? and source_kind=? "
+            + "order by staged_sequence limit 1")) {
+      statement.setObject(1, runId(context));
+      statement.setString(2, kind.sourceKind());
+      try (var rows = statement.executeQuery()) {
+        if (rows.next()) {
+          representative = rows.getString(1);
+        }
+      }
+    }
+    if (expectedCount == 0) {
+      return representative == null;
+    }
+    var qualified = quoted(prefix(context) + kind.targetSchema()) + "." + quoted(rootTable);
+    try (var statement = connection.prepareStatement(
+        "select count(*) from " + qualified + " where " + quoted(rootKey) + "::text=?")) {
+      statement.setString(1, representative);
+      try (var rows = statement.executeQuery()) {
+        return rows.next() && rows.getLong(1) == 1;
+      }
+    }
+  }
+
+  private void markPublished(
+      Connection connection,
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind,
+      long sourceCount) throws SQLException {
+    try (var statement = connection.prepareStatement(
+        "update " + platform(context) + ".persistence_migration_kind "
+            + "set published=true, published_count=?, published_at=transaction_timestamp(), "
+            + "updated_at=transaction_timestamp() where run_id=? and source_kind=?")) {
+      statement.setLong(1, sourceCount);
+      statement.setObject(2, runId(context));
+      statement.setString(3, kind.sourceKind());
+      requireOne(statement.executeUpdate());
     }
   }
 
@@ -573,6 +862,9 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
         return result;
       } catch (RuntimeException | SQLException failure) {
         connection.rollback();
+        if (failure instanceof MigrationReconciliationException reconciliation) {
+          throw reconciliation;
+        }
         throw new MigrationStorageException(failure);
       }
     } catch (SQLException failure) {

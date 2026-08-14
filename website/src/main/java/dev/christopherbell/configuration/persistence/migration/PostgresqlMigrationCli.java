@@ -38,7 +38,8 @@ public final class PostgresqlMigrationCli {
       var dataSource = new DriverManagerDataSource(
           request.targetJdbcUrl(), required(environment, "POSTGRESQL_MIGRATION_TARGET_USERNAME"),
           required(environment, "POSTGRESQL_MIGRATION_TARGET_PASSWORD"));
-      var target = new JdbcMigrationTargetStore(dataSource, new JdbcRelationalRowPublisher());
+      var target = new JdbcMigrationTargetStore(
+          dataSource, new JdbcRelationalRowPublisher(), catalog);
       var registry = MigrationTransformerRegistry.from(catalog);
       try (var mongo = MongoClients.create(request.sourceUri())) {
         var runner = new PostgresqlMigrationRunner(
@@ -71,7 +72,8 @@ public final class PostgresqlMigrationCli {
     if (command == PostgresqlMigrationCommand.FINALIZE) {
       evidence = FinalizeEvidenceLoader.load(
           java.nio.file.Path.of(required(environment, "POSTGRESQL_MIGRATION_EVIDENCE_FILE")),
-          required(environment, "POSTGRESQL_MIGRATION_EVIDENCE_HMAC_KEY"));
+          java.nio.file.Path.of(required(
+              environment, "POSTGRESQL_MIGRATION_EVIDENCE_HMAC_KEY_FILE")));
     }
     return new MigrationRequest(
         command,

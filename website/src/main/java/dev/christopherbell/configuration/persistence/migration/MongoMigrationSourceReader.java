@@ -13,7 +13,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import org.bson.Document;
-import org.bson.types.ObjectId;
 
 /** Direct, bounded, read-only access to consolidated Mongo domain envelopes. */
 public final class MongoMigrationSourceReader
@@ -89,25 +88,32 @@ public final class MongoMigrationSourceReader
       throw invalid();
     }
     var legacyId = id.get("legacyId");
+    if (!validIdentifierType(kind.identifierType(), legacyId)) {
+      throw invalid();
+    }
     var values = new LinkedHashMap<String, Object>();
     payload.forEach(values::put);
     return new Converted(
         new MigrationSourceDocument(
-            kind.sourceKind(), kind.sourceSchemaVersion(), sourceId(legacyId), values),
+            kind.sourceKind(), kind.sourceSchemaVersion(), (String) legacyId, values),
         encodeCursor(legacyId));
   }
 
-  private static String sourceId(Object legacyId) {
-    if (legacyId instanceof String text) {
-      return text;
+  private static boolean validIdentifierType(String identifierType, Object legacyId) {
+    if (!(legacyId instanceof String text)) {
+      return false;
     }
-    if (legacyId instanceof java.util.UUID uuid) {
-      return uuid.toString();
-    }
-    if (legacyId instanceof ObjectId objectId) {
-      return objectId.toHexString();
-    }
-    return new Document("value", legacyId).toJson();
+    return switch (identifierType) {
+      case "string" -> true;
+      case "uuid-string" -> {
+        try {
+          yield java.util.UUID.fromString(text).toString().equals(text);
+        } catch (IllegalArgumentException failure) {
+          yield false;
+        }
+      }
+      default -> false;
+    };
   }
 
   private static String encodeCursor(Object legacyId) {

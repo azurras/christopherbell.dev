@@ -46,7 +46,7 @@ public final class KindMigrationEngine {
   }
 
   /** Independently rereads the bounded source snapshot and rejects drift from the durable ledger. */
-  public void requireSourceSnapshot(
+  public MigrationSourceSnapshot requireSourceSnapshot(
       ValidatedMigrationContext context,
       PostgresqlMigrationCatalog.Kind kind,
       MigrationCheckpoint expected) {
@@ -54,6 +54,7 @@ public final class KindMigrationEngine {
       throw new MigrationReconciliationException();
     }
     var actual = MigrationCheckpoint.initial();
+    var relationalDigest = MigrationCheckpoint.initial().sourceDigest();
     var transformer = transformers.require(kind.sourceKind());
     while (true) {
       var batch = source.readAfter(
@@ -66,12 +67,22 @@ public final class KindMigrationEngine {
       for (var document : batch.documents()) {
         transformed.add(transformer.transform(document));
       }
+      target.requireStagedDocuments(context, kind, transformed);
+      for (var document : transformed) {
+        var rowHashes = document.rows().stream().map(row -> CanonicalMigrationHasher.sha256(
+            java.util.List.of(
+                row.targetSchema(), row.targetTable(), row.ordinal(), row.values()))).toList();
+        relationalDigest = CanonicalMigrationHasher.sha256(java.util.List.of(
+            relationalDigest, document.sourceId(), document.sourceHash(), rowHashes));
+      }
       actual = actual.advance(batch.lastCursor(), transformed);
     }
     if (actual.sourceCount() != expected.sourceCount()
         || !actual.sourceDigest().equals(expected.sourceDigest())) {
       throw new MigrationReconciliationException();
     }
+    return new MigrationSourceSnapshot(
+        kind.sourceKind(), actual.sourceCount(), actual.sourceDigest(), relationalDigest);
   }
 
   private static void validateBatch(

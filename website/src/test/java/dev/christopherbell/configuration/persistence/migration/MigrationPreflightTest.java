@@ -125,12 +125,13 @@ class MigrationPreflightTest {
     var unsigned = new FrozenSourceEvidence(
         release, CATALOG_DIGEST, "test", "test", SOURCE_DIGEST, BACKUP_DIGEST, LOCK_TOKEN,
         "mongodb://127.0.0.1:57018/test", "jdbc:postgresql://127.0.0.1:55432/test",
-        "christopherbell_test", "d".repeat(64), "e".repeat(64));
+        "christopherbell_test", "C:\\protected\\writer.lock", "d".repeat(64),
+        "e".repeat(64));
     return new FrozenSourceEvidence(
         unsigned.release(), unsigned.catalogDigest(), unsigned.sourceDatabase(),
         unsigned.targetDatabase(), unsigned.sourceDigest(), unsigned.backupDigest(),
         unsigned.lockToken(), unsigned.sourceUri(), unsigned.targetJdbcUrl(), unsigned.targetRole(),
-        unsigned.writerLockDigest(), unsigned.reconstructedDigest());
+        unsigned.writerLockPath(), unsigned.writerLockDigest(), unsigned.reconstructedDigest());
   }
 
   private static RecordingIdentityProbe validProbe() {

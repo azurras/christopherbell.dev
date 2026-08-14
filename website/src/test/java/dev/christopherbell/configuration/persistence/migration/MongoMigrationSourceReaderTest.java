@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.bson.Document;
+import org.bson.types.ObjectId;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -86,6 +87,19 @@ class MongoMigrationSourceReaderTest {
         .isInstanceOf(IllegalStateException.class)
         .hasMessage("PostgreSQL migration Mongo source envelope is invalid.")
         .hasMessageNotContaining("must-not-leak");
+  }
+
+  @Test
+  void rejectsOriginalNonStringBsonIdentifierBeforeTextConversion() throws IOException {
+    var malformed = envelope("lease-a", 1);
+    malformed.put("_id", new Document("kind", "application_lease")
+        .append("legacyId", new ObjectId("000000000000000000000006")));
+    client.getDatabase("test").getCollection("application_runtime").insertOne(malformed);
+
+    assertThatThrownBy(() -> new MongoMigrationSourceReader(client)
+        .readAfter(context(), kind(), null, 1))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("PostgreSQL migration Mongo source envelope is invalid.");
   }
 
   private static Document envelope(String id, long fence) {

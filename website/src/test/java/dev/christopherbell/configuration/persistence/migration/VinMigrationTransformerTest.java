@@ -35,6 +35,36 @@ class VinMigrationTransformerTest {
         .containsExactly(List.of("A", "one"), List.of("B", "two"));
   }
 
+  @Test
+  void distinguishesMissingNullAndPresentEmptyProductionOwner() throws Exception {
+    var catalog = loadCatalog();
+    var kind = catalog.kinds().stream()
+        .filter(candidate -> candidate.sourceKind().equals("vin_decode_cache"))
+        .findFirst().orElseThrow();
+    var transformer = MigrationTransformerRegistry.from(catalog).require(kind.sourceKind());
+    var explicitNull = new LinkedHashMap<String, Object>();
+    explicitNull.put("response", null);
+
+    var missing = transformer.transform(new MigrationSourceDocument(
+        "vin_decode_cache", 1, "VIN-1", Map.of()));
+    var nullOwner = transformer.transform(new MigrationSourceDocument(
+        "vin_decode_cache", 1, "VIN-1", explicitNull));
+    var emptyOwner = transformer.transform(source(Map.of()));
+
+    assertThat(missing.rows()).hasSize(1);
+    assertThat(nullOwner.rows()).hasSize(1);
+    assertThat(emptyOwner.rows()).hasSize(1);
+    assertThat(missing.rows().getFirst().values())
+        .containsEntry("response_present", false)
+        .containsEntry("raw_decoded_values_present", false);
+    assertThat(nullOwner.rows().getFirst().values())
+        .containsEntry("response_present", false)
+        .containsEntry("raw_decoded_values_present", false);
+    assertThat(emptyOwner.rows().getFirst().values())
+        .containsEntry("response_present", true)
+        .containsEntry("raw_decoded_values_present", false);
+  }
+
   private static MigrationSourceDocument source(Map<String, Object> response) {
     return new MigrationSourceDocument(
         "vin_decode_cache", 1, "VIN-1", Map.of("response", response));

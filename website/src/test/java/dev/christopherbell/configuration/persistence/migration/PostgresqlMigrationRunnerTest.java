@@ -39,6 +39,31 @@ class PostgresqlMigrationRunnerTest {
         .isInstanceOf(MigrationReconciliationException.class);
   }
 
+  @Test
+  void finalizeRejectsSignedSourceDigestDriftBeforeTargetMutation() {
+    var target = new RecordingTarget();
+    var request = request(PostgresqlMigrationCommand.FINALIZE);
+    var original = request.frozenSourceEvidence();
+    var unsigned = new FrozenSourceEvidence(
+        original.release(), original.catalogDigest(), original.sourceDatabase(),
+        original.targetDatabase(), "f".repeat(64), original.backupDigest(), original.lockToken(),
+        original.sourceUri(), original.targetJdbcUrl(), original.targetRole(),
+        original.writerLockPath(), original.writerLockDigest(), "0".repeat(64));
+    var drifted = new FrozenSourceEvidence(
+        unsigned.release(), unsigned.catalogDigest(), unsigned.sourceDatabase(),
+        unsigned.targetDatabase(), unsigned.sourceDigest(), unsigned.backupDigest(),
+        unsigned.lockToken(), unsigned.sourceUri(), unsigned.targetJdbcUrl(), unsigned.targetRole(),
+        unsigned.writerLockPath(), unsigned.writerLockDigest(), unsigned.reconstructedDigest());
+    var driftedRequest = new MigrationRequest(
+        request.command(), request.sourceUri(), request.sourceDatabase(), request.targetJdbcUrl(),
+        request.targetDatabase(), request.expectedTargetRole(), request.schemaPrefix(),
+        request.catalogDigest(), request.release(), request.lockToken(), drifted, request.batchSize());
+
+    assertThatThrownBy(() -> runner(target).run(driftedRequest))
+        .isInstanceOf(MigrationReconciliationException.class);
+    assertThat(target.publications).isZero();
+  }
+
   private static PostgresqlMigrationRunner runner(MigrationTargetStore target) {
     var kind = kind();
     var catalog = new PostgresqlMigrationCatalog(1, List.of(kind));
@@ -84,16 +109,21 @@ class PostgresqlMigrationRunnerTest {
   private static MigrationRequest request(PostgresqlMigrationCommand command) {
     FrozenSourceEvidence evidence = null;
     if (command == PostgresqlMigrationCommand.FINALIZE) {
+      var emptyDigest = MigrationCheckpoint.initial().sourceDigest();
+      var sourceDigest = MigrationSourceSnapshot.runDigest(List.of(
+          new MigrationSourceSnapshot("fixture", 0, emptyDigest, emptyDigest)));
       var unsigned = new FrozenSourceEvidence(
-          "release-6", "a".repeat(64), "test", "test", "b".repeat(64), "c".repeat(64),
+          "release-6", "a".repeat(64), "test", "test", sourceDigest, "c".repeat(64),
           UUID.fromString("00000000-0000-0000-0000-000000000016"),
           "mongodb://127.0.0.1:57018/test", "jdbc:postgresql://127.0.0.1:55432/test",
-          "christopherbell_test", "d".repeat(64), "e".repeat(64));
+          "christopherbell_test", "C:\\protected\\writer.lock", "d".repeat(64),
+          "e".repeat(64));
       evidence = new FrozenSourceEvidence(
           unsigned.release(), unsigned.catalogDigest(), unsigned.sourceDatabase(),
           unsigned.targetDatabase(), unsigned.sourceDigest(), unsigned.backupDigest(),
           unsigned.lockToken(), unsigned.sourceUri(), unsigned.targetJdbcUrl(),
-          unsigned.targetRole(), unsigned.writerLockDigest(), unsigned.reconstructedDigest());
+          unsigned.targetRole(), unsigned.writerLockPath(), unsigned.writerLockDigest(),
+          unsigned.reconstructedDigest());
     }
     return new MigrationRequest(
         command,
@@ -141,6 +171,12 @@ class PostgresqlMigrationRunnerTest {
     }
 
     @Override
+    public void requireStagedDocuments(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        List<TransformedMigrationDocument> documents) {}
+
+    @Override
     public MigrationReconciliation reconcile(
         ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
       reconciliations++;
@@ -150,11 +186,11 @@ class PostgresqlMigrationRunnerTest {
     }
 
     @Override
-    public void publish(
+    public void finalizeRun(
         ValidatedMigrationContext context,
-        PostgresqlMigrationCatalog.Kind kind,
-        MigrationReconciliation reconciliation) {
-      publications++;
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations) {
+      publications += kinds.size();
     }
 
     @Override
@@ -195,17 +231,23 @@ class PostgresqlMigrationRunnerTest {
     }
 
     @Override
+    public void requireStagedDocuments(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        List<TransformedMigrationDocument> documents) {}
+
+    @Override
     public MigrationReconciliation reconcile(
         ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
       throw new AssertionError("missing or incomplete kind must fail before reconciliation");
     }
 
     @Override
-    public void publish(
+    public void finalizeRun(
         ValidatedMigrationContext context,
-        PostgresqlMigrationCatalog.Kind kind,
-        MigrationReconciliation reconciliation) {
-      throw new AssertionError("reconcile must not publish");
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations) {
+      throw new AssertionError("reconcile must not finalize");
     }
 
     @Override

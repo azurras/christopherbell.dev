@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -66,6 +67,48 @@ class MigrationTransformerAllKindsTest {
         .isInstanceOf(MigrationTransformationException.class);
   }
 
+  @Test
+  void everyComplexProductionOwnerRejectsUnconsumedNestedLeaves() throws IOException {
+    var catalog = loadCatalog();
+    var registry = MigrationTransformerRegistry.from(catalog);
+    var recordConversions = Set.of(
+        "record-flattened", "preserve-ledger", "vin-response-flattened",
+        "record-child", "record-list-child");
+
+    for (var kind : catalog.kinds()) {
+      for (var mappingEntry : kind.fieldMappings().entrySet()) {
+        if (!recordConversions.contains(mappingEntry.getValue().conversion())) {
+          continue;
+        }
+        var payload = representativePayload(kind);
+        var field = mappingEntry.getKey();
+        var value = payload.get(field);
+        if (value instanceof Map<?, ?> raw) {
+          var unexpected = new LinkedHashMap<String, Object>();
+          raw.forEach((key, nested) -> unexpected.put(key.toString(), nested));
+          unexpected.put("unconsumedSecretLeaf", "must-not-leak");
+          payload.put(field, unexpected);
+        } else if (value instanceof List<?> values && !values.isEmpty()
+            && values.getFirst() instanceof Map<?, ?> raw) {
+          var unexpected = new LinkedHashMap<String, Object>();
+          raw.forEach((key, nested) -> unexpected.put(key.toString(), nested));
+          unexpected.put("unconsumedSecretLeaf", "must-not-leak");
+          payload.put(field, List.of(unexpected));
+        } else {
+          throw new AssertionError("Missing complex fixture for " + kind.sourceKind() + "." + field);
+        }
+
+        try {
+          registry.require(kind.sourceKind()).transform(new MigrationSourceDocument(
+              kind.sourceKind(), kind.sourceSchemaVersion(), "id", payload));
+          throw new AssertionError("Accepted unconsumed leaf for " + kind.sourceKind() + "." + field);
+        } catch (MigrationTransformationException failure) {
+          assertThat(failure).hasMessageNotContaining("must-not-leak");
+        }
+      }
+    }
+  }
+
   static LinkedHashMap<String, Object> representativePayload(
       PostgresqlMigrationCatalog.Kind kind) {
     var payload = new LinkedHashMap<String, Object>();
@@ -80,7 +123,7 @@ class MigrationTransformerAllKindsTest {
       case "constant-kind" -> "ignored-envelope-kind";
       case "string" -> "Café 🛰";
       case "uuid-string" -> UUID.fromString("00000000-0000-0000-0000-000000000006");
-      case "enum-name" -> "ACTIVE";
+      case "enum-name" -> productionEnum(mappingKey);
       case "instant-utc" -> Instant.parse("2026-08-14T00:00:00.123456789Z");
       case "local-date" -> LocalDate.parse("2026-08-14");
       case "integer" -> 7;
@@ -107,11 +150,23 @@ class MigrationTransformerAllKindsTest {
     return new LinkedHashMap<>(Map.of("b", "two", "a", "one"));
   }
 
+  private static String productionEnum(String key) {
+    return switch (key) {
+      case "account.role", "browser_session.role" -> "USER";
+      case "account_trust_relationship.type" -> "BLOCK";
+      case "notification.notificationType" -> "MESSAGE";
+      case "post_report.status" -> "OPEN";
+      case "federation_delivery_job.state" -> "PENDING";
+      case "vote.vote" -> "UP";
+      default -> "ACTIVE";
+    };
+  }
+
   private static Object productionRecord(String key) {
     return switch (key) {
       case "account.federationIdentity" -> Map.of(
           "actorId", "actor", "keyId", "key", "publicKeyPem", "pem",
-          "encryptedPrivateKey", Map.of("nonce", new byte[] {1}, "ciphertext", new byte[] {2}),
+          "encryptedPrivateKey", Map.of("nonce", new byte[12], "ciphertext", new byte[16]),
           "keyVersion", 1, "createdOn", Instant.parse("2026-08-14T00:00:00Z"));
       case "account.pendingModerationAudit", "post_report.pendingModerationAudit" -> Map.ofEntries(
           Map.entry("eventId", "event"), Map.entry("actorAccountId", "account"),

@@ -16,9 +16,4 @@ public final class MigrationReconciler {
     }
     return result;
   }
-
-  public void reconcileAndPublish(
-      ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
-    target.publish(context, kind, requireEquivalent(context, kind));
-  }
 }

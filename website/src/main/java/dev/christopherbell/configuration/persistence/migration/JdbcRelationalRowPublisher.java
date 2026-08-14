@@ -56,6 +56,66 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
     }
   }
 
+  boolean rowEquivalent(
+      Connection connection,
+      String schemaPrefix,
+      PostgresqlMigrationCatalog.Kind kind,
+      StagedMigrationRow row) throws SQLException {
+    var prepared = prepare(connection, schemaPrefix, Set.copyOf(kind.targetTables()), row);
+    var metadata = prepared.shape().metadata();
+    var values = new LinkedHashMap<String, Object>();
+    for (var index = 0; index < prepared.shape().columns().size(); index++) {
+      values.put(prepared.shape().columns().get(index), prepared.values().get(index));
+    }
+    var primaryKeys = metadata.values().stream().filter(Column::primaryKey)
+        .map(Column::name).toList();
+    var sql = "select " + values.keySet().stream().map(JdbcRelationalRowPublisher::quoted)
+        .collect(java.util.stream.Collectors.joining(", "))
+        + " from " + quoted(schemaPrefix + row.targetSchema()) + "." + quoted(row.targetTable())
+        + " where " + primaryKeys.stream().map(key -> quoted(key) + "=?")
+            .collect(java.util.stream.Collectors.joining(" and "));
+    try (var statement = connection.prepareStatement(sql)) {
+      for (var index = 0; index < primaryKeys.size(); index++) {
+        var key = primaryKeys.get(index);
+        bind(statement, index + 1, values.get(key), metadata.get(key));
+      }
+      try (var result = statement.executeQuery()) {
+        if (!result.next()) {
+          return false;
+        }
+        var actual = new LinkedHashMap<String, Object>();
+        var index = 1;
+        for (var column : values.keySet()) {
+          actual.put(column, normalizeJdbc(result.getObject(index++)));
+        }
+        var expected = new LinkedHashMap<String, Object>();
+        values.forEach((column, value) -> expected.put(column, normalizeJdbc(value)));
+        return !result.next()
+            && CanonicalMigrationHasher.sha256(expected)
+                .equals(CanonicalMigrationHasher.sha256(actual));
+      }
+    }
+  }
+
+  private static Object normalizeJdbc(Object value) {
+    if (value instanceof java.time.OffsetDateTime timestamp) {
+      return timestamp.toInstant();
+    }
+    if (value instanceof java.sql.Timestamp timestamp) {
+      return timestamp.toInstant();
+    }
+    if (value instanceof java.sql.Date date) {
+      return date.toLocalDate();
+    }
+    if (value instanceof UUID uuid) {
+      return uuid.toString();
+    }
+    if (value != null && value.getClass().getName().equals("org.postgresql.util.PGobject")) {
+      return value.toString();
+    }
+    return value;
+  }
+
   private PreparedRow prepare(
       Connection connection,
       String schemaPrefix,
@@ -156,6 +216,8 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
       statement.setObject(index, instant.atOffset(ZoneOffset.UTC));
     } else if (value instanceof String text && "uuid".equals(column.typeName())) {
       statement.setObject(index, UUID.fromString(text));
+    } else if (value instanceof String text && "inet".equals(column.typeName())) {
+      statement.setObject(index, text, Types.OTHER);
     } else if (value instanceof byte[] bytes) {
       statement.setBytes(index, bytes);
     } else if (column.jdbcType() == Types.VARCHAR || column.jdbcType() == Types.CHAR

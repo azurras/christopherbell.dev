@@ -48,15 +48,21 @@ public final class PostgresqlMigrationRunner {
       List<PostgresqlMigrationCatalog.Kind> kinds,
       boolean publish) {
     engine.requireOnlyCatalogKinds(context, catalog);
+    var snapshots = new java.util.ArrayList<MigrationSourceSnapshot>(kinds.size());
+    var reconciliations = new java.util.ArrayList<MigrationReconciliation>(kinds.size());
     for (var kind : kinds) {
       engine.stageAndCheckpoint(context, kind);
       var checkpoint = target.checkpoint(context, kind);
-      engine.requireSourceSnapshot(context, kind, checkpoint);
-      if (publish) {
-        reconciler.reconcileAndPublish(context, kind);
-      } else {
-        reconciler.requireEquivalent(context, kind);
+      snapshots.add(engine.requireSourceSnapshot(context, kind, checkpoint));
+      reconciliations.add(reconciler.requireEquivalent(context, kind));
+    }
+    if (publish) {
+      var evidence = context.request().frozenSourceEvidence();
+      if (evidence == null
+          || !evidence.sourceDigest().equals(MigrationSourceSnapshot.runDigest(snapshots))) {
+        throw new MigrationReconciliationException();
       }
+      target.finalizeRun(context, kinds, reconciliations);
     }
   }
 

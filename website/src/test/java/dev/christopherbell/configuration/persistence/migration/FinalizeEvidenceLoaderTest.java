@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
 import javax.crypto.Mac;
@@ -19,37 +20,55 @@ class FinalizeEvidenceLoaderTest {
 
   @Test
   void verifiesPersistedAuthorityAndRejectsTampering(@TempDir Path directory) throws Exception {
-    var evidence = evidence();
+    var keyPath = directory.resolve("authority.key");
+    Files.writeString(keyPath, KEY, StandardCharsets.UTF_8);
+    protect(keyPath);
+    var lockPath = directory.resolve("writer.lock");
+    var lockText = "lockToken=00000000-0000-0000-0000-000000000016\nrelease=release-6\n";
+    Files.writeString(lockPath, lockText, StandardCharsets.UTF_8);
+    protect(lockPath);
+    var evidence = evidence(lockPath, lockText);
     var properties = properties(evidence);
     properties.setProperty("signature", signature(evidence.evidenceDigest()));
     var path = directory.resolve("finalize.properties");
     try (var output = Files.newOutputStream(path)) {
       properties.store(output, null);
     }
+    protect(path);
 
-    assertThat(FinalizeEvidenceLoader.load(path, KEY)).isEqualTo(evidence);
+    var loaded = FinalizeEvidenceLoader.load(path, keyPath);
+    assertThat(loaded).isEqualTo(evidence);
+
+    Files.writeString(lockPath, lockText + "state=unfrozen\n", StandardCharsets.UTF_8);
+    protect(lockPath);
+    assertThatThrownBy(() -> FinalizeEvidenceLoader.requireWriterLock(loaded))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("PostgreSQL migration finalization evidence is invalid.");
+    Files.writeString(lockPath, lockText, StandardCharsets.UTF_8);
+    protect(lockPath);
 
     properties.setProperty("sourceDigest", "f".repeat(64));
     try (var output = Files.newOutputStream(path)) {
       properties.store(output, null);
     }
-    assertThatThrownBy(() -> FinalizeEvidenceLoader.load(path, KEY))
+    assertThatThrownBy(() -> FinalizeEvidenceLoader.load(path, keyPath))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("PostgreSQL migration finalization evidence is invalid.")
         .hasMessageNotContaining("f".repeat(64));
   }
 
-  private static FrozenSourceEvidence evidence() {
+  private static FrozenSourceEvidence evidence(Path lockPath, String lockText) {
     var unsigned = new FrozenSourceEvidence(
         "release-6", "a".repeat(64), "test", "test", "b".repeat(64), "c".repeat(64),
         UUID.fromString("00000000-0000-0000-0000-000000000016"),
         "mongodb://127.0.0.1:57018/test", "jdbc:postgresql://127.0.0.1:55432/test",
-        "christopherbell_test", "d".repeat(64), "e".repeat(64));
+        "christopherbell_test", lockPath.toAbsolutePath().normalize().toString(),
+        CanonicalMigrationHasher.sha256(lockText), "e".repeat(64));
     return new FrozenSourceEvidence(
         unsigned.release(), unsigned.catalogDigest(), unsigned.sourceDatabase(),
         unsigned.targetDatabase(), unsigned.sourceDigest(), unsigned.backupDigest(),
         unsigned.lockToken(), unsigned.sourceUri(), unsigned.targetJdbcUrl(), unsigned.targetRole(),
-        unsigned.writerLockDigest(), unsigned.reconstructedDigest());
+        unsigned.writerLockPath(), unsigned.writerLockDigest(), unsigned.reconstructedDigest());
   }
 
   private static Properties properties(FrozenSourceEvidence evidence) {
@@ -64,6 +83,7 @@ class FinalizeEvidenceLoaderTest {
     result.setProperty("sourceUri", evidence.sourceUri());
     result.setProperty("targetJdbcUrl", evidence.targetJdbcUrl());
     result.setProperty("targetRole", evidence.targetRole());
+    result.setProperty("writerLockPath", evidence.writerLockPath());
     result.setProperty("writerLockDigest", evidence.writerLockDigest());
     result.setProperty("evidenceDigest", evidence.evidenceDigest());
     return result;
@@ -73,5 +93,24 @@ class FinalizeEvidenceLoaderTest {
     var mac = Mac.getInstance("HmacSHA256");
     mac.init(new SecretKeySpec(KEY.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
     return HexFormat.of().formatHex(mac.doFinal(evidenceDigest.getBytes(StandardCharsets.US_ASCII)));
+  }
+
+  private static void protect(Path path) throws Exception {
+    var posix = Files.getFileAttributeView(
+        path, java.nio.file.attribute.PosixFileAttributeView.class);
+    if (posix != null) {
+      posix.setPermissions(java.util.Set.of(
+          java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+          java.nio.file.attribute.PosixFilePermission.OWNER_WRITE));
+      return;
+    }
+    var owner = Files.getOwner(path);
+    var acl = Files.getFileAttributeView(path, java.nio.file.attribute.AclFileAttributeView.class);
+    acl.setAcl(List.of(java.nio.file.attribute.AclEntry.newBuilder()
+        .setType(java.nio.file.attribute.AclEntryType.ALLOW)
+        .setPrincipal(owner)
+        .setPermissions(java.util.EnumSet.allOf(
+            java.nio.file.attribute.AclEntryPermission.class))
+        .build()));
   }
 }

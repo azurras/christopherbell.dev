@@ -51,6 +51,24 @@ class JdbcMigrationTargetStoreTest {
   }
 
   @Test
+  void mutationBoundaryRejectsShadowBeforeOpeningAFinalizeTransaction() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate()) {
+      var kind = applicationLeaseKind();
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var shadow = shadowContext(database);
+      var reconciliation = new MigrationReconciliation(
+          true, 0, 0, MigrationCheckpoint.initial().sourceDigest(),
+          MigrationCheckpoint.initial().sourceDigest(), true, true);
+
+      assertThatThrownBy(() -> target.finalizeRun(
+          shadow, List.of(kind), List.of(reconciliation)))
+          .isInstanceOf(MigrationReconciliationException.class);
+      assertThat(count(database, "persistence_migration_run")).isZero();
+    }
+  }
+
+  @Test
   void typedPublisherSuppliesTheImplicitSameKindChildForeignKey() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate();
          var connection = database.connect()) {
@@ -110,13 +128,14 @@ class JdbcMigrationTargetStoreTest {
         new JdbcRelationalRowPublisher().publish(connection, prefix, item, rows);
         throw new SQLException("injected after typed inserts");
       });
-      assertThatThrownBy(() -> failingTarget.publish(context, kind, reconciliation))
+      assertThatThrownBy(() -> failingTarget.finalizeRun(
+          context, List.of(kind), List.of(reconciliation)))
           .isInstanceOf(MigrationStorageException.class);
       assertThat(count(database, "application_lease")).isZero();
       assertThat(target.statuses(context).getFirst().published()).isFalse();
 
-      target.publish(context, kind, reconciliation);
-      target.publish(context, kind, reconciliation);
+      target.finalizeRun(context, List.of(kind), List.of(reconciliation));
+      target.finalizeRun(context, List.of(kind), List.of(reconciliation));
 
       assertThat(count(database, "application_lease")).isEqualTo(2);
       assertThat(target.statuses(context).getFirst().published()).isTrue();
@@ -150,9 +169,41 @@ class JdbcMigrationTargetStoreTest {
           (connection, prefix, item, rows) -> {});
       var supplied = target.reconcile(context, kind);
       assertThat(supplied.equivalent()).isTrue();
-      assertThatThrownBy(() -> noOpPublisher.publish(context, kind, supplied))
+      assertThatThrownBy(() -> noOpPublisher.finalizeRun(
+          context, List.of(kind), List.of(supplied)))
           .isInstanceOf(MigrationReconciliationException.class);
       assertThat(count(database, "application_lease")).isZero();
+    }
+  }
+
+  @Test
+  void sourceSnapshotRejectsTamperedPayloadEvenWhenItsRowHashWasRecomputed() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate()) {
+      var context = context(database);
+      var kind = applicationLeaseKind();
+      var transformer = MigrationTransformerRegistry.from(loadCatalog()).require(kind.sourceKind());
+      var expected = transformer.transform(source("lease-a", 1));
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var staged = target.commitBatch(
+          context, kind, target.checkpoint(context, kind), List.of(expected), "lease-a");
+      target.completeStaging(context, kind, staged);
+
+      var tamperedRow = transformer.transform(source("lease-a", 99)).rows().getFirst();
+      var tamperedHash = CanonicalMigrationHasher.sha256(List.of(
+          tamperedRow.targetSchema(), tamperedRow.targetTable(), tamperedRow.ordinal(),
+          tamperedRow.values()));
+      try (var connection = database.connect();
+           var statement = connection.prepareStatement("update \"" + database.prefix()
+               + "platform\".persistence_migration_staged_row set row_payload=?, row_hash=?")) {
+        statement.setBytes(1, new MigrationRowCodec().encode(tamperedRow.values()));
+        statement.setString(2, tamperedHash);
+        assertThat(statement.executeUpdate()).isEqualTo(1);
+      }
+
+      assertThat(target.reconcile(context, kind).equivalent()).isTrue();
+      assertThatThrownBy(() -> target.requireStagedDocuments(context, kind, List.of(expected)))
+          .isInstanceOf(MigrationReconciliationException.class);
     }
   }
 
@@ -170,7 +221,7 @@ class JdbcMigrationTargetStoreTest {
               transformer.transform(source("lease-b", 2))), "lease-b");
       target.completeStaging(firstContext, kind, first);
       var firstReconciliation = target.reconcile(firstContext, kind);
-      target.publish(firstContext, kind, firstReconciliation);
+      target.finalizeRun(firstContext, List.of(kind), List.of(firstReconciliation));
 
       var secondContext = context(database,
           UUID.fromString("00000000-0000-0000-0000-000000000612"));
@@ -178,7 +229,8 @@ class JdbcMigrationTargetStoreTest {
           List.of(transformer.transform(source("lease-b", 20)),
               transformer.transform(source("lease-c", 3))), "lease-c");
       target.completeStaging(secondContext, kind, second);
-      target.publish(secondContext, kind, target.reconcile(secondContext, kind));
+      target.finalizeRun(
+          secondContext, List.of(kind), List.of(target.reconcile(secondContext, kind)));
 
       assertThat(leases(database)).containsExactly(
           List.of("lease-b", 20L), List.of("lease-c", 3L));
@@ -208,7 +260,8 @@ class JdbcMigrationTargetStoreTest {
       var staged = target.commitBatch(
           context, kind, target.checkpoint(context, kind), documents, "lease-0200");
       target.completeStaging(context, kind, staged);
-      target.publish(context, kind, target.reconcile(context, kind));
+      target.finalizeRun(
+          context, List.of(kind), List.of(target.reconcile(context, kind)));
 
       assertThat(calls[0]).isEqualTo(3);
       assertThat(largestBatch[0]).isEqualTo(100);
@@ -230,16 +283,62 @@ class JdbcMigrationTargetStoreTest {
       var first = target.commitBatch(firstContext, kind, target.checkpoint(firstContext, kind),
           List.of(transformer.transform(vinSource(Map.of("A", "one", "B", "two")))), "vin");
       target.completeStaging(firstContext, kind, first);
-      target.publish(firstContext, kind, target.reconcile(firstContext, kind));
+      target.finalizeRun(
+          firstContext, List.of(kind), List.of(target.reconcile(firstContext, kind)));
 
       var secondContext = context(database,
           UUID.fromString("00000000-0000-0000-0000-000000000615"));
       var second = target.commitBatch(secondContext, kind, target.checkpoint(secondContext, kind),
           List.of(transformer.transform(vinSource(Map.of("B", "updated")))), "vin");
       target.completeStaging(secondContext, kind, second);
-      target.publish(secondContext, kind, target.reconcile(secondContext, kind));
+      target.finalizeRun(
+          secondContext, List.of(kind), List.of(target.reconcile(secondContext, kind)));
 
       assertThat(rawVinValues(database)).containsExactly(List.of("B", "updated"));
+    }
+  }
+
+  @Test
+  void allKindFinalizeDeletesReferencingPostBeforeItsRemovedAccount() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate()) {
+      var catalog = loadCatalog();
+      var account = catalog.kinds().stream()
+          .filter(kind -> kind.sourceKind().equals("account")).findFirst().orElseThrow();
+      var post = catalog.kinds().stream()
+          .filter(kind -> kind.sourceKind().equals("post")).findFirst().orElseThrow();
+      var transformers = MigrationTransformerRegistry.from(catalog);
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var first = context(database, UUID.fromString("00000000-0000-0000-0000-000000000616"));
+      var accountDocument = transformers.require("account").transform(new MigrationSourceDocument(
+          "account", 1, "account-a", Map.of(
+              "email", "account-a@example.test", "role", "USER", "status", "ACTIVE",
+              "username", "account-a")));
+      var postDocument = transformers.require("post").transform(new MigrationSourceDocument(
+          "post", 1, "post-a", Map.of(
+              "accountId", "account-a", "text", "post", "rootId", "post-a",
+              "createdOn", Instant.parse("2026-08-14T00:00:00Z"))));
+      var accountStage = target.commitBatch(
+          first, account, target.checkpoint(first, account), List.of(accountDocument), "account-a");
+      target.completeStaging(first, account, accountStage);
+      var postStage = target.commitBatch(
+          first, post, target.checkpoint(first, post), List.of(postDocument), "post-a");
+      target.completeStaging(first, post, postStage);
+      target.finalizeRun(
+          first, List.of(account, post), List.of(
+              target.reconcile(first, account), target.reconcile(first, post)));
+      assertThat(domainCount(database, "identity", "account")).isOne();
+      assertThat(domainCount(database, "social", "post")).isOne();
+
+      var second = context(database, UUID.fromString("00000000-0000-0000-0000-000000000617"));
+      target.completeStaging(second, account, target.checkpoint(second, account));
+      target.completeStaging(second, post, target.checkpoint(second, post));
+      target.finalizeRun(
+          second, List.of(account, post), List.of(
+              target.reconcile(second, account), target.reconcile(second, post)));
+
+      assertThat(domainCount(database, "social", "post")).isZero();
+      assertThat(domainCount(database, "identity", "account")).isZero();
     }
   }
 
@@ -280,8 +379,18 @@ class JdbcMigrationTargetStoreTest {
 
   private static ValidatedMigrationContext context(
       PostgresqlSchemaTestSupport.MigratedDatabase database, UUID lockToken, int batchSize) {
+    var unsigned = new FrozenSourceEvidence(
+        "release-6", "a".repeat(64), "test", "test", "b".repeat(64), "c".repeat(64),
+        lockToken, "mongodb://127.0.0.1:57018/test", database.jdbcConfiguration().url(),
+        "christopherbell_test", "C:\\protected\\writer.lock", "d".repeat(64),
+        "e".repeat(64));
+    var evidence = new FrozenSourceEvidence(
+        unsigned.release(), unsigned.catalogDigest(), unsigned.sourceDatabase(),
+        unsigned.targetDatabase(), unsigned.sourceDigest(), unsigned.backupDigest(),
+        unsigned.lockToken(), unsigned.sourceUri(), unsigned.targetJdbcUrl(), unsigned.targetRole(),
+        unsigned.writerLockPath(), unsigned.writerLockDigest(), unsigned.reconstructedDigest());
     var request = new MigrationRequest(
-        PostgresqlMigrationCommand.SHADOW,
+        PostgresqlMigrationCommand.FINALIZE,
         "mongodb://127.0.0.1:57018/test",
         "test",
         database.jdbcConfiguration().url(),
@@ -291,11 +400,24 @@ class JdbcMigrationTargetStoreTest {
         "a".repeat(64),
         "release-6",
         lockToken,
-        null,
+        evidence,
         batchSize);
     return new ValidatedMigrationContext(
         request,
         new MigrationDatabaseIdentity("127.0.0.1", 57018, "test", null),
+        new MigrationDatabaseIdentity("127.0.0.1", 55432, "test", "christopherbell_test"),
+        true);
+  }
+
+  private static ValidatedMigrationContext shadowContext(
+      PostgresqlSchemaTestSupport.MigratedDatabase database) {
+    var request = new MigrationRequest(
+        PostgresqlMigrationCommand.SHADOW,
+        "mongodb://127.0.0.1:57018/test", "test", database.jdbcConfiguration().url(), "test",
+        "christopherbell_test", database.prefix(), "a".repeat(64), "release-6",
+        UUID.randomUUID(), null, 2);
+    return new ValidatedMigrationContext(
+        request, new MigrationDatabaseIdentity("127.0.0.1", 57018, "test", null),
         new MigrationDatabaseIdentity("127.0.0.1", 55432, "test", "christopherbell_test"),
         false);
   }
@@ -358,6 +480,18 @@ class JdbcMigrationTargetStoreTest {
          var statement = connection.createStatement();
          var rows = statement.executeQuery(
              "select count(*) from \"" + database.prefix() + schema + "\".\"" + table + "\"")) {
+      rows.next();
+      return rows.getLong(1);
+    }
+  }
+
+  private static long domainCount(
+      PostgresqlSchemaTestSupport.MigratedDatabase database, String schema, String table)
+      throws SQLException {
+    try (var connection = database.connect();
+         var statement = connection.createStatement();
+         var rows = statement.executeQuery("select count(*) from \"" + database.prefix() + schema
+             + "\".\"" + table + "\"")) {
       rows.next();
       return rows.getLong(1);
     }

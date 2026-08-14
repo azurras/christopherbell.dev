@@ -14,6 +14,7 @@ public record FrozenSourceEvidence(
     String sourceUri,
     String targetJdbcUrl,
     String targetRole,
+    String writerLockPath,
     String writerLockDigest,
     String evidenceDigest) {
   public String reconstructedDigest() {
@@ -28,6 +29,7 @@ public record FrozenSourceEvidence(
         java.util.Map.entry("sourceUri", sourceUri),
         java.util.Map.entry("targetJdbcUrl", targetJdbcUrl),
         java.util.Map.entry("targetRole", targetRole),
+        java.util.Map.entry("writerLockPath", writerLockPath),
         java.util.Map.entry("writerLockDigest", writerLockDigest)));
   }
 }

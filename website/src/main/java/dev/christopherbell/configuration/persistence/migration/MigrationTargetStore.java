@@ -19,13 +19,18 @@ public interface MigrationTargetStore {
       PostgresqlMigrationCatalog.Kind kind,
       MigrationCheckpoint expected);
 
+  void requireStagedDocuments(
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind,
+      List<TransformedMigrationDocument> documents);
+
   MigrationReconciliation reconcile(
       ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind);
 
-  void publish(
+  void finalizeRun(
       ValidatedMigrationContext context,
-      PostgresqlMigrationCatalog.Kind kind,
-      MigrationReconciliation reconciliation);
+      List<PostgresqlMigrationCatalog.Kind> kinds,
+      List<MigrationReconciliation> reconciliations);
 
   List<MigrationKindStatus> statuses(ValidatedMigrationContext context);
 }

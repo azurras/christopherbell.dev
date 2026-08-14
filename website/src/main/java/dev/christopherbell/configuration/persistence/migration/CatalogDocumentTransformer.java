@@ -284,10 +284,14 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       PostgresqlMigrationCatalog.FieldMapping mapping,
       Map<String, Object> value,
       RowSet rows) {
+    requireExactKeys(value, Set.of(
+        "vin", "make", "model", "year", "body", "plantCity", "plantState",
+        "plantCountry", "errorCode", "errorText", "rawDecodedValues"));
     var rawPresent = value.containsKey("rawDecodedValues");
     Map<String, Object> rawValues = Map.of();
     if (rawPresent) {
       rawValues = asMap(value.get("rawDecodedValues"));
+      requireScalarValues(rawValues);
     }
     for (var targetText : mapping.targets()) {
       var target = Target.parse(targetText);
@@ -337,6 +341,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       return;
     }
     if ("music_runtime_state.queue".equals(mappingKey)) {
+      requireExactKeys(value, Set.of("entries"));
       var entries = readExact(value, "entries");
       if (!entries.found()) {
         throw invalid();
@@ -411,6 +416,10 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       PostgresqlMigrationCatalog.FieldMapping mapping,
       Map<String, Object> value,
       RowSet rows) {
+    requireExactKeys(value, Set.of(
+        "eventId", "actorAccountId", "actorUsername", "action", "targetType", "targetId",
+        "targetLabel", "reason", "message", "beforeValues", "afterValues", "metadata",
+        "metadataValues"));
     var auditTable = mapping.targets().stream().map(Target::parse)
         .map(Target::table).filter(table -> !table.endsWith("_value")).findFirst()
         .orElseThrow(CatalogDocumentTransformer::invalid);
@@ -438,7 +447,9 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       if (!nested.found()) {
         continue;
       }
-      for (var entry : asMap(nested.value()).entrySet().stream()
+      var partitionValues = asMap(nested.value());
+      requireScalarValues(partitionValues);
+      for (var entry : partitionValues.entrySet().stream()
           .sorted(Map.Entry.comparingByKey()).toList()) {
         var row = rows.child(valueTable, partition + ":" + entry.getKey());
         row.put("partition_name", partition);
@@ -455,6 +466,8 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     var ordinal = 0;
     for (var rawEntry : entries) {
       var entry = asMap(rawEntry);
+      requireExactKeys(entry, Set.of(
+          "id", "trackId", "observedToken", "enqueuedByAccountId", "enqueuedAt"));
       var row = rows.child("queue_entry", "ordinal:" + ordinal);
       row.put("ordinal", ordinal++);
       putExact(row, "queue_entry_id", entry, "id");
@@ -472,6 +485,8 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     var resetOrdinal = 0;
     for (var rawValue : values) {
       var value = asMap(rawValue);
+      requireExactKeys(value, Set.of(
+          "revision", "accountId", "username", "restaurantIds", "occurredOn"));
       var audit = rows.child("lunch_session_reset_audit", "reset:" + resetOrdinal);
       audit.put("ordinal", resetOrdinal);
       putExact(audit, "revision", value, "revision");
@@ -501,6 +516,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       Object value,
       int ordinal,
       RowSet rows) {
+    requireScalarValue(value);
     switch (mappingKey) {
       case "session.participantUsernamesByAccountId" -> {
         var row = rows.child("lunch_session_participant", "account:" + key);
@@ -551,6 +567,9 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     if (sourcePaths == null || !sourcePaths.keySet().equals(Set.copyOf(mapping.targets()))) {
       throw invalid();
     }
+    requireExactPaths(value, sourcePaths.values().stream()
+        .filter(path -> !path.startsWith("$"))
+        .collect(java.util.stream.Collectors.toUnmodifiableSet()), "");
     for (var targetText : mapping.targets()) {
       var target = Target.parse(targetText);
       var expression = sourcePaths.get(targetText);
@@ -589,6 +608,39 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       current = map.get(segment);
     }
     return new NestedValue(true, normalizeBson(current));
+  }
+
+  private static void requireExactPaths(
+      Map<String, Object> values, Set<String> paths, String prefix) {
+    for (var entry : values.entrySet()) {
+      var path = prefix.isEmpty() ? entry.getKey() : prefix + "." + entry.getKey();
+      var exact = paths.contains(path);
+      var nested = paths.stream().anyMatch(candidate -> candidate.startsWith(path + "."));
+      if (!exact && !nested) {
+        throw invalid();
+      }
+      if (nested && entry.getValue() != null) {
+        requireExactPaths(asMap(entry.getValue()), paths, path);
+      } else if (exact) {
+        requireScalarValue(entry.getValue());
+      }
+    }
+  }
+
+  private static void requireExactKeys(Map<String, Object> values, Set<String> allowed) {
+    if (!allowed.containsAll(values.keySet())) {
+      throw invalid();
+    }
+  }
+
+  private static void requireScalarValues(Map<String, Object> values) {
+    values.values().forEach(CatalogDocumentTransformer::requireScalarValue);
+  }
+
+  private static void requireScalarValue(Object value) {
+    if (value instanceof Map<?, ?> || value instanceof Collection<?>) {
+      throw invalid();
+    }
   }
 
   private static Map.Entry<String, Map<String, String>> paths(
@@ -655,6 +707,13 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
 
   private static Object normalizedValue(String column, Object value) {
     var normalized = normalizeBson(value);
+    if ("vote_value".equals(column) && normalized instanceof String vote) {
+      return switch (vote) {
+        case "UP" -> 1;
+        case "DOWN" -> -1;
+        default -> throw invalid();
+      };
+    }
     if (normalized instanceof String text
         && (column.startsWith("normalized_") || column.contains("_normalized_"))) {
       return text.toLowerCase(Locale.ROOT);

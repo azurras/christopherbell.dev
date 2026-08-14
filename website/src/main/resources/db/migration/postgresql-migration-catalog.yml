@@ -821,7 +821,7 @@ kinds:
     dependsOnKinds: [restaurant]
     keyMapping: {sourcePath: id, targetColumn: daily_lunch_picks.daily_lunch_picks_id, preservation: exact}
     fieldMappings:
-      pickDate: {targets: [daily_lunch_picks.pick_date], conversion: string, missing: reject, nullValue: reject}
+      pickDate: {targets: [daily_lunch_picks.pick_date], conversion: local-date, missing: reject, nullValue: reject}
       restaurantIds: {targets: [daily_lunch_pick_restaurant.ordinal, daily_lunch_pick_restaurant.restaurant_id], conversion: string-list-child, missing: empty, nullValue: empty}
       generatedOn: {targets: [daily_lunch_picks.generated_on], conversion: instant-utc, missing: reject, nullValue: reject}
     deleteBehavior: preserve
@@ -846,7 +846,7 @@ kinds:
       lastStartedOn: {targets: [restaurant_import_state.last_started_on], conversion: instant-utc, missing: allow, nullValue: allow}
       lastCompletedOn: {targets: [restaurant_import_state.last_completed_on], conversion: instant-utc, missing: allow, nullValue: allow}
       lastFailedOn: {targets: [restaurant_import_state.last_failed_on], conversion: instant-utc, missing: allow, nullValue: allow}
-      lastCompletedMonth: {targets: [restaurant_import_state.last_completed_month], conversion: string, missing: allow, nullValue: allow}
+      lastCompletedMonth: {targets: [restaurant_import_state.last_completed_month], conversion: local-date, missing: allow, nullValue: allow}
       lastFailureMessage: {targets: [restaurant_import_state.last_failure_message], conversion: string, missing: allow, nullValue: allow}
       lastResult: {targets: [restaurant_import_state.result_source, restaurant_import_state.result_fetched, restaurant_import_state.result_imported, restaurant_import_state.result_updated, restaurant_import_state.result_skipped_existing, restaurant_import_state.result_skipped_invalid], conversion: record-flattened, missing: allow, nullValue: allow}
       status: {targets: [restaurant_import_state.status], conversion: enum-name, missing: allow, nullValue: allow}
@@ -1323,7 +1323,7 @@ kinds:
     dependsOnKinds: []
     keyMapping: {sourcePath: id, targetColumn: price_snapshot.price_snapshot_id, preservation: exact}
     fieldMappings:
-      weekStartDate: {targets: [price_snapshot.week_start_date], conversion: string, missing: reject, nullValue: reject}
+      weekStartDate: {targets: [price_snapshot.week_start_date], conversion: local-date, missing: reject, nullValue: reject}
       collectedOn: {targets: [price_snapshot.collected_on], conversion: instant-utc, missing: reject, nullValue: reject}
       averagePrice: {targets: [price_snapshot.average_price], conversion: decimal-12-2, missing: reject, nullValue: reject}
       currency: {targets: [price_snapshot.currency], conversion: string, missing: reject, nullValue: reject}
