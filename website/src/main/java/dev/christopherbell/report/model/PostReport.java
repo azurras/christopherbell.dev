@@ -3,7 +3,7 @@ package dev.christopherbell.report.model;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import dev.christopherbell.admin.activity.ModerationAuditCommand;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import java.time.Instant;
 import lombok.AllArgsConstructor;
 import lombok.Builder;

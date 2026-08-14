@@ -1,4 +1,4 @@
-package dev.christopherbell.federation.identity;
+package dev.christopherbell.federation.api;
 
 import java.net.URI;
 import java.time.Instant;

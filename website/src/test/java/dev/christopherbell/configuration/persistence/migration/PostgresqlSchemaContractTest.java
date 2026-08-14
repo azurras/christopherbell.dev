@@ -27,8 +27,8 @@ class PostgresqlSchemaContractTest {
     try (var first = PostgresqlSchemaTestSupport.migrate();
          var second = PostgresqlSchemaTestSupport.migrate();
          var connection = first.connect()) {
-      assertThat(first.migrationsExecuted()).isEqualTo(7);
-      assertThat(second.migrationsExecuted()).isEqualTo(7);
+      assertThat(first.migrationsExecuted()).isEqualTo(8);
+      assertThat(second.migrationsExecuted()).isEqualTo(8);
       assertThat(ownedSchemas(connection, first.prefix()))
           .hasSize(PostgresqlSchemaTestSupport.DOMAINS.size());
       assertThat(ownedSchemas(connection, second.prefix()))
@@ -41,7 +41,7 @@ class PostgresqlSchemaContractTest {
   void emptyFlywayMigrationCreatesExactlyTheTenOwnedCatalogSchemasAndTables() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate();
          var connection = database.connect()) {
-      assertThat(database.migrationsExecuted()).isEqualTo(7);
+      assertThat(database.migrationsExecuted()).isEqualTo(8);
       assertThat(ownedSchemas(connection, database.prefix()))
           .containsExactlyInAnyOrderElementsOf(PostgresqlSchemaTestSupport.DOMAINS.stream()
               .map(database.prefix()::concat)
@@ -192,13 +192,62 @@ class PostgresqlSchemaContractTest {
           + "edited_on) values ('upgrade-post', 0, 'deleted:abcdef012345', 'before', 'after', "
           + "transaction_timestamp())");
 
-      assertThat(database.migrateToLatest()).isOne();
+      assertThat(database.migrateToLatest()).isEqualTo(2);
       assertThat(longScalar(connection, "select count(*) from " + identity
           + ".deleted_account_pseudonym where pseudonym_id = 'deleted:abcdef012345'"))
           .isOne();
       assertForeignKeyViolation(() -> execute(connection, "update " + social
           + ".post_edit_audit set editor_account_id = 'arbitrary-dangling-id' "
           + "where post_id = 'upgrade-post'"));
+    }
+  }
+
+  @Test
+  void versionSevenUpgradesParentDeletionGuards() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("7");
+         var connection = database.connect()) {
+      assertThat(database.migrationsExecuted()).isEqualTo(7);
+      var identity = quoted(database.prefix() + "identity");
+      var social = quoted(database.prefix() + "social");
+      execute(connection, "insert into " + identity
+          + ".account (account_id, email, normalized_email, role, status, username) values "
+          + "('v7-owner', 'v7@example.test', 'v7@example.test', 'USER', 'ACTIVE', 'v7-owner')");
+      execute(connection, "insert into " + social
+          + ".post (post_id, account_id, post_text, root_post_id, created_on) values "
+          + "('v7-post', 'v7-owner', 'before', 'v7-post', transaction_timestamp())");
+      execute(connection, "insert into " + social
+          + ".post_edit_audit (post_id, ordinal, editor_account_id, before_text, after_text, "
+          + "edited_on) values ('v7-post', 0, 'v7-owner', 'before', 'after', "
+          + "transaction_timestamp())");
+
+      assertThat(database.migrateToLatest()).isOne();
+      assertRestrictViolation(() -> execute(connection,
+          "delete from " + identity + ".account where account_id = 'v7-owner'"));
+    }
+  }
+
+  @Test
+  void versionSixDanglingIdentifierPreventsUpgrade() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("6");
+         var connection = database.connect()) {
+      var identity = quoted(database.prefix() + "identity");
+      var social = quoted(database.prefix() + "social");
+      execute(connection, "insert into " + identity
+          + ".account (account_id, email, normalized_email, role, status, username) values "
+          + "('v6-owner', 'v6@example.test', 'v6@example.test', 'USER', 'ACTIVE', 'v6-owner')");
+      execute(connection, "insert into " + social
+          + ".post (post_id, account_id, post_text, root_post_id, created_on) values "
+          + "('v6-post', 'v6-owner', 'before', 'v6-post', transaction_timestamp())");
+      execute(connection, "insert into " + social
+          + ".post_edit_audit (post_id, ordinal, editor_account_id, before_text, after_text, "
+          + "edited_on) values ('v6-post', 0, 'unregistered-v6-id', 'before', 'after', "
+          + "transaction_timestamp())");
+
+      assertThatThrownBy(database::migrateToLatest)
+          .hasRootCauseInstanceOf(SQLException.class)
+          .rootCause()
+          .extracting(failure -> ((SQLException) failure).getSQLState())
+          .isEqualTo("23503");
     }
   }
 
@@ -259,6 +308,93 @@ class PostgresqlSchemaContractTest {
       assertForeignKeyViolation(() -> execute(connection, "update " + sharedFolder
           + ".recycle_item set deleted_by_account_id = 'dangling-deleter' "
           + "where recycle_item_id = 'guard-recycle'"));
+    }
+  }
+
+  @Test
+  void retainedIdentifiersCannotBeOrphanedByDeletingEitherParent() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var connection = database.connect()) {
+      var identity = quoted(database.prefix() + "identity");
+      var social = quoted(database.prefix() + "social");
+      var platform = quoted(database.prefix() + "platform");
+      var sharedFolder = quoted(database.prefix() + "shared_folder");
+      var references = List.of(
+          new RetainedReference(social, "post_edit_audit", "editor_account_id",
+              "live-editor", "deleted:000000000001"),
+          new RetainedReference(social, "post_report", "reported_account_id",
+              "live-reported", "deleted:000000000002"),
+          new RetainedReference(social, "post_report", "reporter_account_id",
+              "live-reporter", "deleted:000000000003"),
+          new RetainedReference(platform, "admin_activity", "actor_account_id",
+              "live-admin", "deleted:000000000004"),
+          new RetainedReference(sharedFolder, "audit_event", "account_id",
+              "live-audit", "deleted:000000000005"),
+          new RetainedReference(sharedFolder, "recycle_item", "deleted_by_account_id",
+              "live-recycle", "deleted:000000000006"));
+
+      execute(connection, "insert into " + identity
+          + ".account (account_id, email, normalized_email, role, status, username) values "
+          + "('content-owner', 'content@example.test', 'content@example.test', "
+          + "'USER', 'ACTIVE', 'content-owner'), "
+          + "('live-editor', 'editor@example.test', 'editor@example.test', "
+          + "'USER', 'ACTIVE', 'live-editor'), "
+          + "('live-reported', 'reported@example.test', 'reported@example.test', "
+          + "'USER', 'ACTIVE', 'live-reported'), "
+          + "('live-reporter', 'reporter@example.test', 'reporter@example.test', "
+          + "'USER', 'ACTIVE', 'live-reporter'), "
+          + "('live-admin', 'admin@example.test', 'admin@example.test', "
+          + "'USER', 'ACTIVE', 'live-admin'), "
+          + "('live-audit', 'audit@example.test', 'audit@example.test', "
+          + "'USER', 'ACTIVE', 'live-audit'), "
+          + "('live-recycle', 'recycle@example.test', 'recycle@example.test', "
+          + "'USER', 'ACTIVE', 'live-recycle')");
+      execute(connection, "insert into " + social
+          + ".post (post_id, account_id, post_text, root_post_id, created_on) values "
+          + "('parent-guard-post', 'content-owner', 'before', 'parent-guard-post', "
+          + "transaction_timestamp())");
+      execute(connection, "insert into " + social
+          + ".post_edit_audit (post_id, ordinal, editor_account_id, before_text, after_text, "
+          + "edited_on) values ('parent-guard-post', 0, 'live-editor', 'before', 'after', "
+          + "transaction_timestamp())");
+      execute(connection, "insert into " + social
+          + ".post_report (post_report_id, reported_account_id, reporter_account_id, report_type, "
+          + "target_type, reason, status, created_on) values "
+          + "('parent-guard-report', 'live-reported', 'live-reporter', 'SPAM', 'POST', "
+          + "'guard', 'OPEN', transaction_timestamp())");
+      execute(connection, "insert into " + platform
+          + ".admin_activity (admin_activity_id, actor_account_id, actor_username, action, "
+          + "target_type, target_id, target_label, reason, message, created_on) values "
+          + "('parent-guard-activity', 'live-admin', 'live-admin', 'GUARD', 'ACCOUNT', "
+          + "'target', 'target', 'guard', 'guard', transaction_timestamp())");
+      execute(connection, "insert into " + sharedFolder
+          + ".audit_event (audit_event_id, account_id, action, outcome, occurred_at, expires_at) "
+          + "values ('parent-guard-audit', 'live-audit', 'GUARD', 'SUCCESS', "
+          + "transaction_timestamp(), transaction_timestamp() + interval '1 day')");
+      execute(connection, "insert into " + sharedFolder
+          + ".recycle_item (recycle_item_id, original_path, deleted_by_account_id, deleted_at, "
+          + "expires_at, payload_key, size_bytes, source_fingerprint, state, source_identity, "
+          + "retry_after) values ('parent-guard-recycle', '/guard', 'live-recycle', "
+          + "transaction_timestamp(), transaction_timestamp() + interval '1 day', 'payload', 1, "
+          + "'fingerprint', 'READY', 'source', transaction_timestamp())");
+
+      for (var reference : references) {
+        assertRestrictViolation(() -> execute(connection, "delete from " + identity
+            + ".account where account_id = '" + reference.liveId() + "'"));
+        execute(connection, "insert into " + identity
+            + ".deleted_account_pseudonym (pseudonym_id) values ('"
+            + reference.pseudonym() + "')");
+        execute(connection, "update " + reference.schema() + "." + reference.table()
+            + " set " + reference.column() + " = '" + reference.pseudonym()
+            + "' where " + reference.column() + " = '" + reference.liveId() + "'");
+        assertThat(executeUpdate(connection, "delete from " + identity
+            + ".account where account_id = '" + reference.liveId() + "'"))
+            .as(reference.column())
+            .isOne();
+        assertRestrictViolation(() -> execute(connection, "delete from " + identity
+            + ".deleted_account_pseudonym where pseudonym_id = '"
+            + reference.pseudonym() + "'"));
+      }
     }
   }
 
@@ -745,6 +881,13 @@ class PostgresqlSchemaContractTest {
         .isEqualTo("23503");
   }
 
+  private static void assertRestrictViolation(SqlAction action) {
+    assertThatThrownBy(action::run)
+        .isInstanceOf(SQLException.class)
+        .extracting(failure -> ((SQLException) failure).getSQLState())
+        .isEqualTo("23001");
+  }
+
   private static String quoted(String identifier) {
     return '"' + identifier.replace("\"", "\"\"") + '"';
   }
@@ -763,6 +906,9 @@ class PostgresqlSchemaContractTest {
   }
 
   private record TargetColumn(String table, String column) {}
+
+  private record RetainedReference(
+      String schema, String table, String column, String liveId, String pseudonym) {}
 
   @FunctionalInterface
   private interface SqlAction {

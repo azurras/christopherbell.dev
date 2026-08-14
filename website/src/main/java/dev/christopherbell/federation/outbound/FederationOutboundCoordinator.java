@@ -77,7 +77,7 @@ final class FederationOutboundCoordinator {
         properties.outbound().batchSize());
     for (var post : found) {
       for (var peer : properties.outbound().peers()) {
-        store.enqueueIfAbsent(post, peer, now);
+        store.enqueueIfAbsent(post.getId(), post.getAccountId(), peer, now);
       }
     }
     if (!found.isEmpty()) {

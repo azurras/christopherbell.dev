@@ -1,4 +1,4 @@
-package dev.christopherbell.admin.activity;
+package dev.christopherbell.libs.moderation;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import java.util.Map;

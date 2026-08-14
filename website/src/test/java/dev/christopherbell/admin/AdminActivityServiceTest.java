@@ -13,7 +13,7 @@ import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.admin.activity.AdminActivityRepository;
 import dev.christopherbell.admin.activity.AdminActivityService;
-import dev.christopherbell.admin.activity.ModerationAuditCommand;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import dev.christopherbell.admin.model.AdminActivity;
 import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
 import dev.christopherbell.permission.PermissionService;

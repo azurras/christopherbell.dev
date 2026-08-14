@@ -5,7 +5,6 @@ import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
-import dev.christopherbell.post.model.Post;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -37,11 +36,12 @@ class FederationDeliveryJobRepository implements FederationDeliveryStore {
   }
 
   @Override
-  public void enqueueIfAbsent(Post post, ControlledPeer peer, Instant now) {
-    String id = stableJobId(post.getId(), peer.name());
+  public void enqueueIfAbsent(
+      String postId, String accountId, ControlledPeer peer, Instant now) {
+    String id = stableJobId(postId, peer.name());
     if (jobs.findById(id).isPresent()) return;
     try {
-      jobs.insert(new FederationDeliveryJob(id, post.getId(), post.getAccountId(), peer.name(),
+      jobs.insert(new FederationDeliveryJob(id, postId, accountId, peer.name(),
           peer.inbox().toString(), FederationDeliveryState.PENDING, 0, now, null, null,
           null, null, now, now));
     } catch (org.springframework.dao.DuplicateKeyException ignored) {

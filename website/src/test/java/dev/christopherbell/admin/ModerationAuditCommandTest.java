@@ -3,7 +3,7 @@ package dev.christopherbell.admin;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import dev.christopherbell.admin.activity.ModerationAuditCommand;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;

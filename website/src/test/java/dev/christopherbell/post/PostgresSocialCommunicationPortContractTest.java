@@ -6,7 +6,7 @@ import dev.christopherbell.account.PostgresAccountRepository;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
-import dev.christopherbell.admin.activity.ModerationAuditCommand;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import dev.christopherbell.configuration.postgresql.Task3PostgresqlTestSupport;
 import dev.christopherbell.message.PostgresMessageRepository;
 import dev.christopherbell.message.model.Message;

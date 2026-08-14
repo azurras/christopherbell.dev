@@ -16,7 +16,7 @@ import dev.christopherbell.federation.discovery.FederationDiscoveryModels.NodeIn
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.NodeInfoUsers;
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.WebFingerDocument;
 import dev.christopherbell.federation.discovery.FederationDiscoveryModels.WebFingerLink;
-import dev.christopherbell.federation.identity.FederationIdentity;
+import dev.christopherbell.federation.api.FederationIdentity;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.post.PostRepository;

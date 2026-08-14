@@ -1,5 +1,8 @@
 package dev.christopherbell.federation.identity;
 
+import dev.christopherbell.federation.api.EncryptedPrivateKey;
+import dev.christopherbell.federation.api.FederationIdentity;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

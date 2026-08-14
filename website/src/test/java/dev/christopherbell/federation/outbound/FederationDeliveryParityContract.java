@@ -24,8 +24,10 @@ interface FederationDeliveryParityContract {
     assertThat(deliveries().loadCursor()).isEqualTo(cursor);
 
     var peer = new ControlledPeer("parity-" + RUN, URI.create("https://peer.example/inbox"));
-    deliveries().enqueueIfAbsent(deliveryPost(), peer, now.minusSeconds(1));
-    deliveries().enqueueIfAbsent(deliveryPost(), peer, now.minusSeconds(1));
+    deliveries().enqueueIfAbsent(
+        deliveryPost().getId(), deliveryPost().getAccountId(), peer, now.minusSeconds(1));
+    deliveries().enqueueIfAbsent(
+        deliveryPost().getId(), deliveryPost().getAccountId(), peer, now.minusSeconds(1));
     var claimed = deliveries().claimDue("worker-a", now, now.plusSeconds(30)).orElseThrow();
     assertThat(claimed.attempts()).isOne();
     assertThat(deliveries().succeed(claimed.id(), "worker-b", 202, now.plusSeconds(1)))

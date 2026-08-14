@@ -26,7 +26,7 @@ class PostgresFederationOutboxContractTest implements FederationOutboxParityCont
     accounts = new PostgresAccountRepository(database.dsl());
     posts = new PostgresPostRepository(database.dsl());
     cursors = new StableCursorCodec();
-    outbox = new PostgresFederationOutboxQueryRepository(database.dsl(), cursors, posts);
+    outbox = new PostgresFederationOutboxQueryRepository(database.dsl(), cursors);
   }
 
   @AfterAll

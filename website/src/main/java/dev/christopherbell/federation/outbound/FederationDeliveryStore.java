@@ -1,7 +1,6 @@
 package dev.christopherbell.federation.outbound;
 
 import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
-import dev.christopherbell.post.model.Post;
 import java.time.Instant;
 import java.util.Optional;
 
@@ -9,7 +8,7 @@ import java.util.Optional;
 interface FederationDeliveryStore {
   FederationScanCursor loadCursor();
 
-  void enqueueIfAbsent(Post post, ControlledPeer peer, Instant now);
+  void enqueueIfAbsent(String postId, String accountId, ControlledPeer peer, Instant now);
 
   void saveCursor(FederationScanCursor cursor, Instant now);
 

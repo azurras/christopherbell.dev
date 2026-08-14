@@ -12,8 +12,6 @@ import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.library.freeze.FreezingArchRule;
-import dev.christopherbell.configuration.persistence.PostgresPersistence;
-import dev.christopherbell.configuration.persistence.PostgresPersistenceSupport;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -41,6 +39,10 @@ final class LegacyModuleDependencyRules {
       "whatsforlunch");
   private static final Set<String> ORCHESTRATION_AREAS =
       Set.of("admin", "configuration", "view");
+  private static final Set<String> PUBLISHED_VALUE_CONTRACTS = Set.of(
+      "dev.christopherbell.account.model.AccountPermission",
+      "dev.christopherbell.account.model.AccountStatus",
+      "dev.christopherbell.account.model.Role");
 
   private final String rootPackage;
   private final Set<String> applicationAreas;
@@ -131,8 +133,10 @@ final class LegacyModuleDependencyRules {
     return Optional.of(area);
   }
 
-  private boolean isPublishedApi(String packageName) {
-    if (isSharedCrossAreaApi(packageName)) {
+  private boolean isPublishedApi(JavaClass target) {
+    var packageName = target.getPackageName();
+    if (isSharedCrossAreaApi(packageName)
+        || PUBLISHED_VALUE_CONTRACTS.contains(target.getName())) {
       return true;
     }
     var physicalArea = physicalAreaOf(packageName);
@@ -159,14 +163,7 @@ final class LegacyModuleDependencyRules {
       return Optional.empty();
     }
 
-    // PostgreSQL adapters are governed by the stricter transition-specific rules.
-    // Keep this frozen legacy-debt baseline focused on the pre-migration application.
-    if (source.isAnnotatedWith(PostgresPersistence.class)
-        || source.isAnnotatedWith(PostgresPersistenceSupport.class)) {
-      return Optional.empty();
-    }
-
-    if (kind == ViolationKind.INTERNAL_ACCESS && isPublishedApi(target.getPackageName())) {
+    if (kind == ViolationKind.INTERNAL_ACCESS && isPublishedApi(target)) {
       return Optional.empty();
     }
 

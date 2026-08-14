@@ -5,7 +5,7 @@ import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.admin.activity.AdminActivityService;
-import dev.christopherbell.admin.activity.ModerationAuditCommand;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.permission.PermissionService;

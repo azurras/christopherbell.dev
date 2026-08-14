@@ -4,7 +4,7 @@ import static dev.christopherbell.persistence.jooq.social.Tables.POST_REPORT;
 import static dev.christopherbell.persistence.jooq.social.Tables.POST_REPORT_MODERATION_AUDIT;
 import static dev.christopherbell.persistence.jooq.social.Tables.POST_REPORT_MODERATION_AUDIT_VALUE;
 
-import dev.christopherbell.admin.activity.ModerationAuditCommand;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
 import dev.christopherbell.persistence.jooq.social.tables.records.PostReportRecord;
 import dev.christopherbell.persistence.jooq.social.tables.records.PostReportModerationAuditRecord;

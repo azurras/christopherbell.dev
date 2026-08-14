@@ -14,7 +14,7 @@ import dev.christopherbell.libs.security.EmailSanitizer;
 import dev.christopherbell.libs.security.UsernameSanitizer;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.admin.activity.AdminActivityService;
-import dev.christopherbell.admin.activity.ModerationAuditCommand;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import java.time.Instant;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;

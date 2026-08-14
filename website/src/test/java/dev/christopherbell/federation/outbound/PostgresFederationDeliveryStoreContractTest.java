@@ -61,8 +61,8 @@ class PostgresFederationDeliveryStoreContractTest {
     assertThat(deliveries.loadCursor()).isEqualTo(cursor);
 
     var peer = new ControlledPeer("peer-a", URI.create("https://peer.example/inbox"));
-    deliveries.enqueueIfAbsent(post, peer, NOW);
-    deliveries.enqueueIfAbsent(post, peer, NOW);
+    deliveries.enqueueIfAbsent(post.getId(), post.getAccountId(), peer, NOW);
+    deliveries.enqueueIfAbsent(post.getId(), post.getAccountId(), peer, NOW);
     var claimed = deliveries.claimDue("worker-a", NOW, NOW.plusSeconds(30)).orElseThrow();
     assertThat(claimed.attempts()).isOne();
     assertThat(deliveries.succeed(claimed.id(), "worker-b", 202, NOW.plusSeconds(1)))
@@ -85,7 +85,7 @@ class PostgresFederationDeliveryStoreContractTest {
   @Test
   void claimEligibilityAndLeaseCompletionUseDatabaseTime() {
     var peer = new ControlledPeer("peer-db-clock", URI.create("https://clock.example/inbox"));
-    deliveries.enqueueIfAbsent(post, peer, NOW);
+    deliveries.enqueueIfAbsent(post.getId(), post.getAccountId(), peer, NOW);
     database.dsl().update(FEDERATION_DELIVERY_JOB)
         .set(FEDERATION_DELIVERY_JOB.NEXT_ATTEMPT_ON,
             OffsetDateTime.now(ZoneOffset.UTC).minusSeconds(1))

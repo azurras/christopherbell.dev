@@ -7,7 +7,7 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
-import dev.christopherbell.admin.activity.ModerationAuditCommand;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import dev.christopherbell.configuration.postgresql.PersistencePortContract;
 import dev.christopherbell.configuration.postgresql.Task3PostgresqlTestSupport;
 import java.time.Instant;

@@ -3,8 +3,8 @@ package dev.christopherbell.account;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.christopherbell.account.model.Account;
-import dev.christopherbell.federation.identity.EncryptedPrivateKey;
-import dev.christopherbell.federation.identity.FederationIdentity;
+import dev.christopherbell.federation.api.EncryptedPrivateKey;
+import dev.christopherbell.federation.api.FederationIdentity;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;

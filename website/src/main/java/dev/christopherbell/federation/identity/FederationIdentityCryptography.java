@@ -1,5 +1,8 @@
 package dev.christopherbell.federation.identity;
 
+import dev.christopherbell.federation.api.EncryptedPrivateKey;
+import dev.christopherbell.federation.api.FederationIdentity;
+
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;

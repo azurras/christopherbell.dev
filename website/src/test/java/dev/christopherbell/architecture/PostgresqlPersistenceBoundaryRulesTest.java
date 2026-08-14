@@ -110,6 +110,8 @@ class PostgresqlPersistenceBoundaryRulesTest {
     var adapters = classes.stream()
         .filter(javaClass -> javaClass.isAnnotatedWith(PostgresPersistence.class))
         .filter(javaClass -> !javaClass.getName().contains("Test"))
+        .filter(javaClass -> !javaClass.getPackageName()
+            .startsWith("dev.christopherbell.architecture.fixture"))
         .map(javaClass -> javaClass.getName())
         .collect(java.util.stream.Collectors.toUnmodifiableSet());
 

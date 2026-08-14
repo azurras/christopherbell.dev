@@ -11,8 +11,8 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.federation.configuration.FederationOutboundProperties;
 import dev.christopherbell.federation.configuration.FederationProperties;
-import dev.christopherbell.federation.identity.EncryptedPrivateKey;
-import dev.christopherbell.federation.identity.FederationIdentity;
+import dev.christopherbell.federation.api.EncryptedPrivateKey;
+import dev.christopherbell.federation.api.FederationIdentity;
 import dev.christopherbell.post.PostRepository;
 import dev.christopherbell.post.model.Post;
 import java.net.URI;
@@ -219,9 +219,10 @@ class FederationOutboundCoordinatorTest {
     }
 
     @Override
-    public void enqueueIfAbsent(Post post, FederationOutboundProperties.ControlledPeer peer,
-        Instant now) {
-      enqueued.add(post.getId() + ":" + peer.name());
+    public void enqueueIfAbsent(
+        String postId, String accountId,
+        FederationOutboundProperties.ControlledPeer peer, Instant now) {
+      enqueued.add(postId + ":" + peer.name());
     }
 
     @Override

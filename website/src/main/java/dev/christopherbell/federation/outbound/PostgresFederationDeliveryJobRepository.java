@@ -6,7 +6,6 @@ import static dev.christopherbell.persistence.jooq.federation.Tables.FEDERATION_
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
 import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
 import dev.christopherbell.persistence.jooq.federation.tables.records.FederationDeliveryJobRecord;
-import dev.christopherbell.post.model.Post;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -39,11 +38,12 @@ final class PostgresFederationDeliveryJobRepository implements FederationDeliver
   }
 
   @Override
-  public void enqueueIfAbsent(Post post, ControlledPeer peer, Instant now) {
+  public void enqueueIfAbsent(
+      String postId, String accountId, ControlledPeer peer, Instant now) {
     database.insertInto(FEDERATION_DELIVERY_JOB)
-        .set(FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID, stableJobId(post.getId(), peer.name()))
-        .set(FEDERATION_DELIVERY_JOB.POST_ID, post.getId())
-        .set(FEDERATION_DELIVERY_JOB.ACCOUNT_ID, post.getAccountId())
+        .set(FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID, stableJobId(postId, peer.name()))
+        .set(FEDERATION_DELIVERY_JOB.POST_ID, postId)
+        .set(FEDERATION_DELIVERY_JOB.ACCOUNT_ID, accountId)
         .set(FEDERATION_DELIVERY_JOB.PEER_NAME, peer.name())
         .set(FEDERATION_DELIVERY_JOB.PEER_INBOX, peer.inbox().toString())
         .set(FEDERATION_DELIVERY_JOB.STATE, FederationDeliveryState.PENDING.name())
