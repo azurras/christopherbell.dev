@@ -13,11 +13,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /** Publishes catalog-owned staged rows into typed tables within the caller's transaction. */
 public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
   private static final Pattern IDENTIFIER = Pattern.compile("[a-z][a-z0-9_]*");
+  private final Map<String, Map<String, Column>> metadataCache = new ConcurrentHashMap<>();
 
   @Override
   public void publish(
@@ -26,16 +28,35 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
       PostgresqlMigrationCatalog.Kind kind,
       List<StagedMigrationRow> rows) throws SQLException {
     var allowedTables = Set.copyOf(kind.targetTables());
+    var preparedRows = new LinkedHashMap<StatementShape, List<List<Object>>>();
     for (var row : rows) {
       if (!kind.targetSchema().equals(row.targetSchema())
           || !allowedTables.contains(row.targetTable())) {
         throw new SQLException("Staged target is outside its catalog kind.");
       }
-      insert(connection, schemaPrefix, allowedTables, row);
+      var prepared = prepare(connection, schemaPrefix, allowedTables, row);
+      preparedRows.computeIfAbsent(prepared.shape(), ignored -> new ArrayList<>())
+          .add(prepared.values());
+    }
+    for (var entry : preparedRows.entrySet()) {
+      try (var statement = connection.prepareStatement(entry.getKey().sql())) {
+        for (var values : entry.getValue()) {
+          for (var index = 0; index < values.size(); index++) {
+            var column = entry.getKey().columns().get(index);
+            bind(statement, index + 1, values.get(index), entry.getKey().metadata().get(column));
+          }
+          statement.addBatch();
+        }
+        for (var count : statement.executeBatch()) {
+          if (count != 0 && count != 1 && count != java.sql.Statement.SUCCESS_NO_INFO) {
+            throw new SQLException("Staged row was not published.");
+          }
+        }
+      }
     }
   }
 
-  private static void insert(
+  private PreparedRow prepare(
       Connection connection,
       String schemaPrefix,
       Set<String> sameKindTables,
@@ -57,36 +78,53 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
       throw new SQLException("Staged row contains an unknown target column.");
     }
     var columns = new ArrayList<>(values.keySet());
+    var primaryKeys = metadata.values().stream().filter(Column::primaryKey)
+        .map(Column::name).toList();
+    if (primaryKeys.isEmpty() || !columns.containsAll(primaryKeys)) {
+      throw new SQLException("Staged row does not contain its complete target identity.");
+    }
+    var updates = columns.stream().filter(column -> !primaryKeys.contains(column)).toList();
     var sql = "insert into " + quoted(schemaPrefix + row.targetSchema()) + "."
         + quoted(row.targetTable()) + " ("
         + columns.stream().map(JdbcRelationalRowPublisher::quoted)
             .collect(java.util.stream.Collectors.joining(", "))
         + ") values (" + String.join(", ", java.util.Collections.nCopies(columns.size(), "?"))
-        + ")";
-    try (var statement = connection.prepareStatement(sql)) {
-      for (var index = 0; index < columns.size(); index++) {
-        bind(statement, index + 1, values.get(columns.get(index)), metadata.get(columns.get(index)));
-      }
-      if (statement.executeUpdate() != 1) {
-        throw new SQLException("Staged row was not published.");
-      }
-    }
+        + ") on conflict ("
+        + primaryKeys.stream().map(JdbcRelationalRowPublisher::quoted)
+            .collect(java.util.stream.Collectors.joining(", "))
+        + ") " + (updates.isEmpty() ? "do nothing" : "do update set "
+            + updates.stream().map(column -> quoted(column) + "=excluded." + quoted(column))
+                .collect(java.util.stream.Collectors.joining(", ")));
+    return new PreparedRow(
+        new StatementShape(sql, List.copyOf(columns), metadata),
+        columns.stream().map(values::get).toList());
   }
 
-  private static Map<String, Column> columns(
+  private Map<String, Column> columns(
       Connection connection,
       String schema,
       String table,
       Set<String> sameKindTables) throws SQLException {
     requireIdentifier(schema);
     requireIdentifier(table);
+    var cacheKey = schema + "." + table;
+    var cached = metadataCache.get(cacheKey);
+    if (cached != null) {
+      return cached;
+    }
     var implicitSourceKeys = new java.util.HashSet<String>();
+    var primaryKeys = new java.util.HashSet<String>();
     try (var keys = connection.getMetaData().getImportedKeys(null, schema, table)) {
       while (keys.next()) {
         if (schema.equals(keys.getString("PKTABLE_SCHEM"))
             && sameKindTables.contains(keys.getString("PKTABLE_NAME"))) {
           implicitSourceKeys.add(keys.getString("FKCOLUMN_NAME"));
         }
+      }
+    }
+    try (var keys = connection.getMetaData().getPrimaryKeys(null, schema, table)) {
+      while (keys.next()) {
+        primaryKeys.add(keys.getString("COLUMN_NAME"));
       }
     }
     var result = new LinkedHashMap<String, Column>();
@@ -99,13 +137,15 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
             rows.getString("TYPE_NAME"),
             rows.getInt("NULLABLE") != java.sql.DatabaseMetaData.columnNoNulls,
             rows.getString("COLUMN_DEF") != null || "YES".equals(rows.getString("IS_GENERATEDCOLUMN")),
-            implicitSourceKeys.contains(name)));
+            implicitSourceKeys.contains(name), primaryKeys.contains(name)));
       }
     }
     if (result.isEmpty()) {
       throw new SQLException("Catalog target table is absent.");
     }
-    return result;
+    var immutable = Map.copyOf(result);
+    metadataCache.put(cacheKey, immutable);
+    return immutable;
   }
 
   private static void bind(
@@ -144,5 +184,11 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
       String typeName,
       boolean nullable,
       boolean generated,
-      boolean implicitSourceKey) {}
+      boolean implicitSourceKey,
+      boolean primaryKey) {}
+
+  private record StatementShape(
+      String sql, List<String> columns, Map<String, Column> metadata) {}
+
+  private record PreparedRow(StatementShape shape, List<Object> values) {}
 }

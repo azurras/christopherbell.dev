@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class MigrationTransformerRegistryTest {
@@ -44,6 +46,30 @@ class MigrationTransformerRegistryTest {
         new PostgresqlMigrationCatalog(catalog.version(), kinds)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("PostgreSQL migration transformer registry is invalid.");
+  }
+
+  @Test
+  void transformerRejectsSourceIdentityThatViolatesTheCatalogIdentifierType() {
+    var kind = new PostgresqlMigrationCatalog.Kind(
+        "accounts", "account", 1, 1, "uuid-string", "identity", List.of("account"),
+        1,
+        List.of(),
+        new PostgresqlMigrationCatalog.KeyMapping("id", "account.account_id", "exact"),
+        Map.of(
+            "username",
+            new PostgresqlMigrationCatalog.FieldMapping(
+                List.of("account.username"), "string", "reject", "reject")),
+        "preserve",
+        "none",
+        "none",
+        "sha256-rfc8785-v1",
+        List.of("row-count"),
+        List.of("find-by-id"),
+        AccountTransformer.class.getName());
+
+    assertThatThrownBy(() -> new AccountTransformer(kind).transform(
+        new MigrationSourceDocument("account", 1, "not-a-uuid", Map.of("username", "owner"))))
+        .isInstanceOf(MigrationTransformationException.class);
   }
 
   private static PostgresqlMigrationCatalog loadCatalog() throws IOException {

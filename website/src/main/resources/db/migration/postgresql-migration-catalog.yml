@@ -33,7 +33,7 @@ kinds:
       role: {targets: [account.role], conversion: enum-name, missing: reject, nullValue: reject}
       permissions: {targets: [account_permission.permission], conversion: string-set-child, missing: empty, nullValue: empty}
       status: {targets: [account.status], conversion: enum-name, missing: reject, nullValue: reject}
-      pendingModerationAudit: {targets: [account_moderation_audit.event_id, account_moderation_audit.actor_account_id, account_moderation_audit.actor_username, account_moderation_audit.action, account_moderation_audit.target_type, account_moderation_audit.target_id, account_moderation_audit.target_label, account_moderation_audit.reason, account_moderation_audit.message, account_moderation_audit_value.value], conversion: record-child, missing: allow, nullValue: allow}
+      pendingModerationAudit: {targets: [account_moderation_audit.event_id, account_moderation_audit.actor_account_id, account_moderation_audit.actor_username, account_moderation_audit.action, account_moderation_audit.target_type, account_moderation_audit.target_id, account_moderation_audit.target_label, account_moderation_audit.reason, account_moderation_audit.message, account_moderation_audit_value.partition_name, account_moderation_audit_value.value_key, account_moderation_audit_value.value], conversion: record-child, missing: allow, nullValue: allow}
       username: {targets: [account.username], conversion: string, missing: reject, nullValue: reject}
       version: {targets: [account.version], conversion: long, missing: default, nullValue: default}
     deleteBehavior: preserve
@@ -388,7 +388,7 @@ kinds:
       resolvedBy: {targets: [post_report.resolved_by], conversion: string, missing: allow, nullValue: allow}
       openReportsForAccount: {targets: [post_report.open_reports_for_account], conversion: long, missing: allow, nullValue: allow}
       resolvedReportsForAccount: {targets: [post_report.resolved_reports_for_account], conversion: long, missing: allow, nullValue: allow}
-      pendingModerationAudit: {targets: [post_report_moderation_audit.event_id, post_report_moderation_audit.actor_account_id, post_report_moderation_audit.actor_username, post_report_moderation_audit.action, post_report_moderation_audit.target_type, post_report_moderation_audit.target_id, post_report_moderation_audit.target_label, post_report_moderation_audit.reason, post_report_moderation_audit.message, post_report_moderation_audit_value.value], conversion: record-child, missing: allow, nullValue: allow}
+      pendingModerationAudit: {targets: [post_report_moderation_audit.event_id, post_report_moderation_audit.actor_account_id, post_report_moderation_audit.actor_username, post_report_moderation_audit.action, post_report_moderation_audit.target_type, post_report_moderation_audit.target_id, post_report_moderation_audit.target_label, post_report_moderation_audit.reason, post_report_moderation_audit.message, post_report_moderation_audit_value.partition_name, post_report_moderation_audit_value.value_key, post_report_moderation_audit_value.value], conversion: record-child, missing: allow, nullValue: allow}
       createdOn: {targets: [post_report.created_on], conversion: instant-utc, missing: reject, nullValue: reject}
       lastUpdatedOn: {targets: [post_report.last_updated_on], conversion: instant-utc, missing: allow, nullValue: allow}
       resolvedOn: {targets: [post_report.resolved_on], conversion: instant-utc, missing: allow, nullValue: allow}

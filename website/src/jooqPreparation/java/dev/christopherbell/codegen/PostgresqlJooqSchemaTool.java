@@ -95,8 +95,8 @@ public final class PostgresqlJooqSchemaTool {
         cleanTargetClaimed = true;
         try {
           var result = flyway().migrate();
-          if (result.migrationsExecuted != 11) {
-            throw new IllegalStateException("Expected exactly eleven canonical Flyway migrations.");
+          if (result.migrationsExecuted != 12) {
+            throw new IllegalStateException("Expected exactly twelve canonical Flyway migrations.");
           }
           insertOwnershipMarker(lockConnection, ownerToken);
           prepared = true;
@@ -197,7 +197,7 @@ public final class PostgresqlJooqSchemaTool {
     private void insertOwnershipMarker(Connection connection, UUID ownerToken) throws SQLException {
       var sql = "insert into \"" + prefix + "platform\".persistence_migration_run "
           + "(run_id, catalog_version, source_database, target_database, source_frozen, status) "
-          + "values (?, ?, 'jooq-generation', 'test', true, 'STAGING')";
+          + "values (?, ?, 'jooq-generation', 'test', false, 'STAGING')";
       try (var statement = connection.prepareStatement(sql)) {
         statement.setObject(1, ownerToken);
         statement.setString(2, MARKER_CATALOG_VERSION);

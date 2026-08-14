@@ -29,10 +29,10 @@ public final class MigrationPreflight {
   /** Validates cheap untrusted values before making read-only identity probes. */
   public ValidatedMigrationContext validate(MigrationRequest request) {
     requireRequest(request);
+    var frozen = requireFrozenEvidence(request);
     var source = identityProbe.sourceIdentity(request);
     var target = identityProbe.targetIdentity(request);
     requireObservedIdentity(request, source, target);
-    var frozen = requireFrozenEvidence(request);
     return new ValidatedMigrationContext(request, source, target, frozen);
   }
 
@@ -111,8 +111,14 @@ public final class MigrationPreflight {
         || !request.sourceDatabase().equals(evidence.sourceDatabase())
         || !request.targetDatabase().equals(evidence.targetDatabase())
         || !request.lockToken().equals(evidence.lockToken())
+        || !request.sourceUri().equals(evidence.sourceUri())
+        || !request.targetJdbcUrl().equals(evidence.targetJdbcUrl())
+        || !request.expectedTargetRole().equals(evidence.targetRole())
         || !DIGEST.matcher(value(evidence.sourceDigest())).matches()
-        || !DIGEST.matcher(value(evidence.backupDigest())).matches()) {
+        || !DIGEST.matcher(value(evidence.backupDigest())).matches()
+        || !DIGEST.matcher(value(evidence.writerLockDigest())).matches()
+        || !DIGEST.matcher(value(evidence.evidenceDigest())).matches()
+        || !evidence.evidenceDigest().equals(evidence.reconstructedDigest())) {
       throw new MigrationPreflightException(FROZEN_REJECTED);
     }
     return true;

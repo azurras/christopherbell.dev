@@ -45,6 +45,35 @@ public final class KindMigrationEngine {
     }
   }
 
+  /** Independently rereads the bounded source snapshot and rejects drift from the durable ledger. */
+  public void requireSourceSnapshot(
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind,
+      MigrationCheckpoint expected) {
+    if (!expected.complete()) {
+      throw new MigrationReconciliationException();
+    }
+    var actual = MigrationCheckpoint.initial();
+    var transformer = transformers.require(kind.sourceKind());
+    while (true) {
+      var batch = source.readAfter(
+          context, kind, actual.cursor(), context.request().batchSize());
+      validateBatch(kind, actual, batch, context.request().batchSize());
+      if (batch.isEmpty()) {
+        break;
+      }
+      var transformed = new ArrayList<TransformedMigrationDocument>(batch.documents().size());
+      for (var document : batch.documents()) {
+        transformed.add(transformer.transform(document));
+      }
+      actual = actual.advance(batch.lastCursor(), transformed);
+    }
+    if (actual.sourceCount() != expected.sourceCount()
+        || !actual.sourceDigest().equals(expected.sourceDigest())) {
+      throw new MigrationReconciliationException();
+    }
+  }
+
   private static void validateBatch(
       PostgresqlMigrationCatalog.Kind kind,
       MigrationCheckpoint checkpoint,

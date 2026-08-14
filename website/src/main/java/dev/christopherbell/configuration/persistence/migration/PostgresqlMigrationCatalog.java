@@ -1,6 +1,8 @@
 package dev.christopherbell.configuration.persistence.migration;
 
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -84,7 +86,8 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
       }
       dependsOnKinds = copyCanonical(dependsOnKinds, sourceKind + ".dependsOnKinds");
       keyMapping = Objects.requireNonNull(keyMapping, "keyMapping");
-      fieldMappings = Map.copyOf(Objects.requireNonNull(fieldMappings, "fieldMappings"));
+      fieldMappings = Collections.unmodifiableMap(
+          new LinkedHashMap<>(Objects.requireNonNull(fieldMappings, "fieldMappings")));
       if (fieldMappings.isEmpty()) {
         throw invalid(sourceKind + ".fieldMappings");
       }

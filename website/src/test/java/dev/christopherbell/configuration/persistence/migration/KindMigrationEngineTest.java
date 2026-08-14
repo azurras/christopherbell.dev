@@ -88,6 +88,20 @@ class KindMigrationEngineTest {
     assertThat(target.commitCalls).isEqualTo(11);
   }
 
+  @Test
+  void independentSourceSnapshotRereadRejectsCountOrDigestDrift() {
+    var target = new FakeTarget(-1);
+    var stable = new KindMigrationEngine(
+        new FakeSource(3), target, ignored -> new StubTransformer());
+    stable.stageAndCheckpoint(CONTEXT, KIND);
+
+    stable.requireSourceSnapshot(CONTEXT, KIND, target.checkpoint);
+    var drifted = new KindMigrationEngine(
+        new FakeSource(2), target, ignored -> new StubTransformer());
+    assertThatThrownBy(() -> drifted.requireSourceSnapshot(CONTEXT, KIND, target.checkpoint))
+        .isInstanceOf(MigrationReconciliationException.class);
+  }
+
   private static PostgresqlMigrationCatalog.Kind kind() {
     return new PostgresqlMigrationCatalog.Kind(
         "configuration", "fixture", 1, 1, "string", "platform", List.of("fixture"),

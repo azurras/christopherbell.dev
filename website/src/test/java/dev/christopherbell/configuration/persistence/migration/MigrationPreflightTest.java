@@ -32,9 +32,7 @@ class MigrationPreflightTest {
     var absent = testRequest(PostgresqlMigrationCommand.FINALIZE, null);
     var mismatched = testRequest(
         PostgresqlMigrationCommand.FINALIZE,
-        new FrozenSourceEvidence(
-            "other-release", CATALOG_DIGEST, "test", "test", SOURCE_DIGEST,
-            BACKUP_DIGEST, LOCK_TOKEN));
+        evidence("other-release"));
     var probe = validProbe();
 
     assertThatThrownBy(() -> new MigrationPreflight(probe).validate(absent))
@@ -43,10 +41,10 @@ class MigrationPreflightTest {
     assertThatThrownBy(() -> new MigrationPreflight(probe).validate(mismatched))
         .isInstanceOf(MigrationPreflightException.class)
         .hasMessage("PostgreSQL migration preflight rejected frozen source evidence.");
+    assertThat(probe.sourceProbes).isZero();
+    assertThat(probe.targetProbes).isZero();
 
-    var evidence = new FrozenSourceEvidence(
-        "release-6", CATALOG_DIGEST, "test", "test", SOURCE_DIGEST, BACKUP_DIGEST,
-        LOCK_TOKEN);
+    var evidence = evidence("release-6");
     assertThat(new MigrationPreflight(validProbe()).validate(
         testRequest(PostgresqlMigrationCommand.FINALIZE, evidence)).sourceFrozen()).isTrue();
   }
@@ -121,6 +119,18 @@ class MigrationPreflightTest {
         LOCK_TOKEN,
         evidence,
         100);
+  }
+
+  private static FrozenSourceEvidence evidence(String release) {
+    var unsigned = new FrozenSourceEvidence(
+        release, CATALOG_DIGEST, "test", "test", SOURCE_DIGEST, BACKUP_DIGEST, LOCK_TOKEN,
+        "mongodb://127.0.0.1:57018/test", "jdbc:postgresql://127.0.0.1:55432/test",
+        "christopherbell_test", "d".repeat(64), "e".repeat(64));
+    return new FrozenSourceEvidence(
+        unsigned.release(), unsigned.catalogDigest(), unsigned.sourceDatabase(),
+        unsigned.targetDatabase(), unsigned.sourceDigest(), unsigned.backupDigest(),
+        unsigned.lockToken(), unsigned.sourceUri(), unsigned.targetJdbcUrl(), unsigned.targetRole(),
+        unsigned.writerLockDigest(), unsigned.reconstructedDigest());
   }
 
   private static RecordingIdentityProbe validProbe() {

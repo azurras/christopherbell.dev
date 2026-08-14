@@ -20,12 +20,19 @@ class MigrationTransformerAllKindsTest {
     var catalog = loadCatalog();
     var registry = MigrationTransformerRegistry.from(catalog);
 
-    assertThat(catalog.kinds()).hasSize(52).allSatisfy(kind -> {
+    assertThat(catalog.kinds()).hasSize(52);
+    for (var kind : catalog.kinds()) {
       var source = new MigrationSourceDocument(
           kind.sourceKind(), kind.sourceSchemaVersion(), "id-🛰-" + kind.sourceKind(),
           representativePayload(kind));
-      var first = registry.require(kind.sourceKind()).transform(source);
-      var second = registry.require(kind.sourceKind()).transform(source);
+      TransformedMigrationDocument first;
+      TransformedMigrationDocument second;
+      try {
+        first = registry.require(kind.sourceKind()).transform(source);
+        second = registry.require(kind.sourceKind()).transform(source);
+      } catch (RuntimeException failure) {
+        throw new AssertionError("Production fixture failed for " + kind.sourceKind(), failure);
+      }
 
       assertThat(first.sourceHash()).isEqualTo(second.sourceHash());
       assertThat(first.rows()).hasSameSizeAs(second.rows());
@@ -39,7 +46,7 @@ class MigrationTransformerAllKindsTest {
         assertThat(kind.targetTables()).contains(row.targetTable());
         assertThat(row.values()).doesNotContainKey("_kind");
       });
-    });
+    }
   }
 
   @Test
@@ -59,15 +66,16 @@ class MigrationTransformerAllKindsTest {
         .isInstanceOf(MigrationTransformationException.class);
   }
 
-  private static LinkedHashMap<String, Object> representativePayload(
+  static LinkedHashMap<String, Object> representativePayload(
       PostgresqlMigrationCatalog.Kind kind) {
     var payload = new LinkedHashMap<String, Object>();
-    kind.fieldMappings().entrySet().stream().sorted(Map.Entry.comparingByKey())
-        .forEach(entry -> payload.put(entry.getKey(), representative(entry.getValue())));
+    kind.fieldMappings().forEach((field, mapping) ->
+        payload.put(field, representative(kind.sourceKind() + "." + field, mapping)));
     return payload;
   }
 
-  private static Object representative(PostgresqlMigrationCatalog.FieldMapping mapping) {
+  private static Object representative(
+      String mappingKey, PostgresqlMigrationCatalog.FieldMapping mapping) {
     return switch (mapping.conversion()) {
       case "constant-kind" -> "ignored-envelope-kind";
       case "string" -> "Café 🛰";
@@ -83,42 +91,115 @@ class MigrationTransformerAllKindsTest {
       case "double" -> 123.5d;
       case "byte-array" -> new byte[] {0, 1, -1};
       case "record-flattened", "vin-response-flattened", "record-child", "preserve-ledger" ->
-          nested(mapping);
-      case "record-list-child" -> List.of(nested(mapping), nested(mapping));
+          productionRecord(mappingKey);
+      case "record-list-child" -> productionRecords(mappingKey);
       case "string-list-child" -> List.of("duplicate", "duplicate", "é");
       case "string-set-child" -> new LinkedHashSet<>(List.of("first", "second"));
-      case "string-map-child" -> new LinkedHashMap<>(Map.of("b", "two", "a", "one"));
+      case "string-map-child" -> productionStringMap(mappingKey);
       default -> throw new AssertionError(mapping.conversion());
     };
   }
 
-  private static Map<String, Object> nested(PostgresqlMigrationCatalog.FieldMapping mapping) {
-    var result = new LinkedHashMap<String, Object>();
-    for (var target : mapping.targets()) {
-      var column = target.substring(target.indexOf('.') + 1);
-      if (column.equals("ordinal") || column.endsWith("_present")) {
-        continue;
-      }
-      result.put(column, nestedScalar(column));
+  private static Map<String, Object> productionStringMap(String key) {
+    if ("upload_session.chunkLengths".equals(key)) {
+      return new LinkedHashMap<>(Map.of("b", 2L, "a", 1L));
     }
-    if (result.isEmpty()) {
-      result.put("value", "nested");
-    }
-    return result;
+    return new LinkedHashMap<>(Map.of("b", "two", "a", "one"));
   }
 
-  private static Object nestedScalar(String column) {
-    if (column.contains("created") || column.contains("updated")
-        || column.contains("expires") || column.endsWith("_on") || column.endsWith("_at")) {
-      return Instant.parse("2026-08-14T00:00:00Z");
-    }
-    if (column.endsWith("count") || column.endsWith("version") || column.endsWith("size")) {
-      return 1L;
-    }
-    if (column.startsWith("is_") || column.endsWith("_enabled")) {
-      return true;
-    }
-    return "nested-" + column;
+  private static Object productionRecord(String key) {
+    return switch (key) {
+      case "account.federationIdentity" -> Map.of(
+          "actorId", "actor", "keyId", "key", "publicKeyPem", "pem",
+          "encryptedPrivateKey", Map.of("nonce", new byte[] {1}, "ciphertext", new byte[] {2}),
+          "keyVersion", 1, "createdOn", Instant.parse("2026-08-14T00:00:00Z"));
+      case "account.pendingModerationAudit", "post_report.pendingModerationAudit" -> Map.ofEntries(
+          Map.entry("eventId", "event"), Map.entry("actorAccountId", "account"),
+          Map.entry("actorUsername", "owner"), Map.entry("action", "UPDATE"),
+          Map.entry("targetType", "ACCOUNT"), Map.entry("targetId", "target"),
+          Map.entry("targetLabel", "label"), Map.entry("reason", "reason"),
+          Map.entry("message", "message"), Map.entry("beforeValues", Map.of("a", "b")),
+          Map.entry("afterValues", Map.of("a", "c")),
+          Map.entry("metadata", Map.of("ticket", "one")));
+      case "post_link_preview_cache.preview" -> linkPreview();
+      case "music_runtime_state.queue" -> Map.of("entries", List.of(queueEntry("one")));
+      case "music_runtime_state.radio" -> Map.of(
+          "stationSequence", 1L, "trackId", "track", "observedToken", "token",
+          "startedAt", Instant.parse("2026-08-14T00:00:00Z"), "durationSeconds", 3.5,
+          "source", "QUEUE", "queueEntryId", "entry");
+      case "restaurant.address" -> Map.ofEntries(
+          Map.entry("city", "Austin"), Map.entry("county", "Travis"),
+          Map.entry("country", "US"), Map.entry("latitude", 30.1),
+          Map.entry("longitude", -97.1), Map.entry("postalCode", "78701"),
+          Map.entry("state", "TX"), Map.entry("street1", "1 Main"),
+          Map.entry("street2", "Suite 1"));
+      case "import_state.lastResult" -> Map.of(
+          "source", "OSM", "fetched", 6, "imported", 5, "updated", 4,
+          "skippedExisting", 3, "skippedInvalid", 2);
+      case "import_preview.counts" -> Map.of(
+          "fetched", 6, "created", 5, "updated", 4, "deleted", 3,
+          "unchanged", 2, "invalid", 1);
+      case "vin_decode_cache.response" -> Map.ofEntries(
+          Map.entry("vin", "JM1TEST"), Map.entry("make", "Mazda"),
+          Map.entry("model", "3"), Map.entry("year", 2019), Map.entry("body", "Hatchback"),
+          Map.entry("plantCity", "Hofu"), Map.entry("plantState", "Yamaguchi"),
+          Map.entry("plantCountry", "Japan"), Map.entry("errorCode", "0"),
+          Map.entry("errorText", ""), Map.entry("rawDecodedValues", Map.of("Make", "Mazda")));
+      case "random_vin_import_state.robotsPolicy" -> Map.of(
+          "checkedOn", Instant.parse("2026-08-14T00:00:00Z"), "allowed", true,
+          "reason", "allowed", "failClosed", false);
+      case "zip_import_state.result" -> Map.ofEntries(
+          Map.entry("processed", 6), Map.entry("created", 5), Map.entry("updated", 4),
+          Map.entry("unchanged", 3), Map.entry("deleted", 2), Map.entry("source", "Census"),
+          Map.entry("sourceYear", 2026), Map.entry("checksum", "a".repeat(64)),
+          Map.entry("importedOn", Instant.parse("2026-08-14T00:00:00Z")),
+          Map.entry("noOp", false));
+      default -> throw new AssertionError("Missing production record fixture for " + key);
+    };
+  }
+
+  private static List<?> productionRecords(String key) {
+    var value = switch (key) {
+      case "post.editAudit" -> Map.of(
+          "editorAccountId", "account", "beforeText", "before", "afterText", "after",
+          "editedOn", Instant.parse("2026-08-14T00:00:00Z"));
+      case "post.topics" -> Map.of("canonical", "java", "display", "Java");
+      case "post.linkPreviews" -> linkPreview();
+      case "session.restaurantResetAudit" -> Map.of(
+          "revision", 1L, "accountId", "account", "username", "owner",
+          "restaurantIds", List.of("restaurant"),
+          "occurredOn", Instant.parse("2026-08-14T00:00:00Z"));
+      case "radio_state.knownDurations" -> Map.of(
+          "path", "music/file.mp3", "observedToken", "token", "durationSeconds", 3.5);
+      case "price_snapshot.metroPrices" -> Map.ofEntries(
+          Map.entry("metroName", "Austin"), Map.entry("city", "Austin"),
+          Map.entry("state", "TX"), Map.entry("restaurantRef", "ref"),
+          Map.entry("restaurantName", "Canes"), Map.entry("address", "1 Main"),
+          Map.entry("sourceUrl", "https://example.test"), Map.entry("price", BigDecimal.ONE),
+          Map.entry("currency", "USD"), Map.entry("status", "VERIFIED"),
+          Map.entry("sourceName", "source"), Map.entry("qualityStatus", "VERIFIED"),
+          Map.entry("confidenceLevel", "HIGH"), Map.entry("rawResponseHash", "a".repeat(64)),
+          Map.entry("matchedItemName", "Box"), Map.entry("failureReason", "none"),
+          Map.entry("reviewNote", "review"),
+          Map.entry("collectedOn", Instant.parse("2026-08-14T00:00:00Z")),
+          Map.entry("sourceFetchedOn", Instant.parse("2026-08-14T00:00:00Z")),
+          Map.entry("reviewedOn", Instant.parse("2026-08-14T00:00:00Z")));
+      case "domain_collection_cutover.expectedKindMetrics" ->
+          Map.of("kind", "account", "count", 1L, "checksum", "a".repeat(64));
+      default -> throw new AssertionError("Missing production list fixture for " + key);
+    };
+    return List.of(value, value);
+  }
+
+  private static Map<String, Object> linkPreview() {
+    return Map.of("url", "https://example.test", "domain", "example.test", "title", "Title",
+        "description", "Description", "imageUrl", "https://example.test/image.png");
+  }
+
+  private static Map<String, Object> queueEntry(String id) {
+    return Map.of("id", id, "trackId", "track", "observedToken", "token",
+        "enqueuedByAccountId", "account",
+        "enqueuedAt", Instant.parse("2026-08-14T00:00:00Z"));
   }
 
   private static PostgresqlMigrationCatalog loadCatalog() throws IOException {

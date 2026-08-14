@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.bson.types.Binary;
 import org.junit.jupiter.api.Test;
 
 class CanonicalMigrationHasherTest {
@@ -35,6 +36,14 @@ class CanonicalMigrationHasherTest {
         .isNotEqualTo(CanonicalMigrationHasher.sha256(Map.of("value", List.of("b", "a"))));
     assertThat(CanonicalMigrationHasher.sha256(Map.of("value", new byte[] {0, 1, -1})))
         .isNotEqualTo(CanonicalMigrationHasher.sha256(Map.of("value", "AAH/")));
+  }
+
+  @Test
+  void bsonBinaryAndItsByteArrayRepresentationHaveOneCanonicalDigest() {
+    var bytes = new byte[] {0, 1, -1, 42};
+
+    assertThat(CanonicalMigrationHasher.sha256(Map.of("value", new Binary(bytes))))
+        .isEqualTo(CanonicalMigrationHasher.sha256(Map.of("value", bytes)));
   }
 
   @Test

@@ -31,7 +31,8 @@ public final class PostgresqlMigrationRunner {
         .sorted(Comparator.comparingInt(PostgresqlMigrationCatalog.Kind::loadOrder))
         .toList();
     switch (request.command()) {
-      case SHADOW, FINALIZE -> migrate(context, kinds);
+      case SHADOW -> migrate(context, kinds, false);
+      case FINALIZE -> migrate(context, kinds, true);
       case RECONCILE -> reconcileExisting(context, kinds);
       case STATUS -> {
         // Preflight still runs; status is otherwise read-only.
@@ -43,11 +44,19 @@ public final class PostgresqlMigrationRunner {
   }
 
   private void migrate(
-      ValidatedMigrationContext context, List<PostgresqlMigrationCatalog.Kind> kinds) {
+      ValidatedMigrationContext context,
+      List<PostgresqlMigrationCatalog.Kind> kinds,
+      boolean publish) {
     engine.requireOnlyCatalogKinds(context, catalog);
     for (var kind : kinds) {
       engine.stageAndCheckpoint(context, kind);
-      reconciler.reconcileAndPublish(context, kind);
+      var checkpoint = target.checkpoint(context, kind);
+      engine.requireSourceSnapshot(context, kind, checkpoint);
+      if (publish) {
+        reconciler.reconcileAndPublish(context, kind);
+      } else {
+        reconciler.requireEquivalent(context, kind);
+      }
     }
   }
 
@@ -57,9 +66,11 @@ public final class PostgresqlMigrationRunner {
         .collect(java.util.stream.Collectors.toMap(MigrationKindStatus::sourceKind, status -> status));
     for (var kind : kinds) {
       var status = existing.get(kind.sourceKind());
-      if (status != null && status.checkpoint().complete()) {
-        reconciler.requireEquivalent(context, kind);
+      if (status == null || !status.checkpoint().complete()) {
+        throw new MigrationReconciliationException();
       }
+      engine.requireSourceSnapshot(context, kind, status.checkpoint());
+      reconciler.requireEquivalent(context, kind);
     }
   }
 

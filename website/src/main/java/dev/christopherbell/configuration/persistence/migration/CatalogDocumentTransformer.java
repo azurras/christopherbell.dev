@@ -5,7 +5,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,13 +13,101 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import org.bson.Document;
 import org.bson.types.Binary;
 import org.bson.types.Decimal128;
 
 /** Catalog-driven transformer shared by the 52 exact kind bindings. */
 abstract class CatalogDocumentTransformer implements MigrationTransformer {
+  private static final Map<String, Map<String, String>> COMPLEX_PATHS = Map.ofEntries(
+      paths("account.federationIdentity",
+          "account_federation_identity.actor_id=actorId",
+          "account_federation_identity.key_id=keyId",
+          "account_federation_identity.public_key_pem=publicKeyPem",
+          "account_federation_identity.private_key_nonce=encryptedPrivateKey.nonce",
+          "account_federation_identity.private_key_ciphertext=encryptedPrivateKey.ciphertext",
+          "account_federation_identity.key_version=keyVersion",
+          "account_federation_identity.created_on=createdOn"),
+      paths("post.editAudit", "post_edit_audit.ordinal=$ordinal",
+          "post_edit_audit.editor_account_id=editorAccountId",
+          "post_edit_audit.before_text=beforeText", "post_edit_audit.after_text=afterText",
+          "post_edit_audit.edited_on=editedOn"),
+      paths("post.topics", "post_topic.ordinal=$ordinal", "post_topic.canonical=canonical",
+          "post_topic.display=display"),
+      paths("post.linkPreviews", "post_link_preview.ordinal=$ordinal",
+          "post_link_preview.url=url", "post_link_preview.domain_name=domain",
+          "post_link_preview.title=title", "post_link_preview.description=description",
+          "post_link_preview.image_url=imageUrl"),
+      paths("post_link_preview_cache.preview", "post_link_preview_cache.preview_url=url",
+          "post_link_preview_cache.preview_domain=domain",
+          "post_link_preview_cache.preview_title=title",
+          "post_link_preview_cache.preview_description=description",
+          "post_link_preview_cache.preview_image_url=imageUrl"),
+      paths("music_runtime_state.radio", "runtime_state.station_sequence=stationSequence",
+          "runtime_state.track_id=trackId", "runtime_state.observed_token=observedToken",
+          "runtime_state.started_at=startedAt", "runtime_state.duration_seconds=durationSeconds",
+          "runtime_state.radio_source=source", "runtime_state.queue_entry_id=queueEntryId"),
+      paths("restaurant.address", "restaurant.city=city", "restaurant.county=county",
+          "restaurant.country=country", "restaurant.latitude=latitude",
+          "restaurant.longitude=longitude", "restaurant.postal_code=postalCode",
+          "restaurant.region=state", "restaurant.street_1=street1",
+          "restaurant.street_2=street2"),
+      paths("import_state.lastResult", "restaurant_import_state.result_source=source",
+          "restaurant_import_state.result_fetched=fetched",
+          "restaurant_import_state.result_imported=imported",
+          "restaurant_import_state.result_updated=updated",
+          "restaurant_import_state.result_skipped_existing=skippedExisting",
+          "restaurant_import_state.result_skipped_invalid=skippedInvalid"),
+      paths("import_preview.counts", "restaurant_import_preview.fetched_count=fetched",
+          "restaurant_import_preview.created_count=created",
+          "restaurant_import_preview.updated_count=updated",
+          "restaurant_import_preview.deleted_count=deleted",
+          "restaurant_import_preview.unchanged_count=unchanged",
+          "restaurant_import_preview.invalid_count=invalid"),
+      paths("radio_state.knownDurations", "radio_track_duration.ordinal=$ordinal",
+          "radio_track_duration.relative_path=path",
+          "radio_track_duration.observed_token=observedToken",
+          "radio_track_duration.duration_seconds=durationSeconds"),
+      paths("random_vin_import_state.robotsPolicy",
+          "random_vin_import_state.robots_policy_present=$present",
+          "random_vin_import_state.robots_checked_on=checkedOn",
+          "random_vin_import_state.robots_allowed=allowed",
+          "random_vin_import_state.robots_reason=reason",
+          "random_vin_import_state.robots_fail_closed=failClosed"),
+      paths("zip_import_state.result", "zip_import_state.result_processed=processed",
+          "zip_import_state.result_created=created", "zip_import_state.result_updated=updated",
+          "zip_import_state.result_unchanged=unchanged", "zip_import_state.result_deleted=deleted",
+          "zip_import_state.result_source=source", "zip_import_state.result_source_year=sourceYear",
+          "zip_import_state.result_checksum=checksum",
+          "zip_import_state.result_imported_on=importedOn",
+          "zip_import_state.result_no_op=noOp"),
+      paths("price_snapshot.metroPrices", "metro_price.ordinal=$ordinal",
+          "metro_price.metro_name=metroName", "metro_price.city=city", "metro_price.region=state",
+          "metro_price.restaurant_ref=restaurantRef",
+          "metro_price.restaurant_name=restaurantName", "metro_price.address=address",
+          "metro_price.source_url=sourceUrl", "metro_price.price=price",
+          "metro_price.currency=currency", "metro_price.status=status",
+          "metro_price.source_name=sourceName", "metro_price.quality_status=qualityStatus",
+          "metro_price.confidence_level=confidenceLevel",
+          "metro_price.raw_response_hash=rawResponseHash",
+          "metro_price.matched_item_name=matchedItemName",
+          "metro_price.failure_reason=failureReason", "metro_price.review_note=reviewNote",
+          "metro_price.collected_on=collectedOn",
+          "metro_price.source_fetched_on=sourceFetchedOn",
+          "metro_price.reviewed_on=reviewedOn"),
+      paths("domain_collection_cutover.expectedKindMetrics",
+          "domain_collection_cutover_metric.ordinal=$ordinal",
+          "domain_collection_cutover_metric.source_kind=kind",
+          "domain_collection_cutover_metric.source_count=count",
+          "domain_collection_cutover_metric.checksum=checksum"));
+  private static final Set<String> SPECIAL_COMPLEX_KEYS = Set.of(
+      "account.pendingModerationAudit", "post_report.pendingModerationAudit",
+      "music_runtime_state.queue", "session.participantUsernamesByAccountId",
+      "session.votesByAccountId", "session.restaurantResetAudit",
+      "upload_session.chunkDigests", "upload_session.chunkLengths",
+      "vehicle.nhtsaDecodedValues", "vin_decode_cache.response",
+      "admin_activity.beforeValues", "admin_activity.afterValues", "admin_activity.metadata");
+
   private final PostgresqlMigrationCatalog.Kind kind;
 
   CatalogDocumentTransformer(String expectedKind, PostgresqlMigrationCatalog.Kind kind) {
@@ -38,6 +125,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
   @Override
   public final TransformedMigrationDocument transform(MigrationSourceDocument source) {
     requireSource(source);
+    validateCrossFieldShape(source);
     var rows = new RowSet(kind.targetSchema(), kind.targetTables(), source.sourceId());
     var key = Target.parse(kind.keyMapping().targetColumn());
     rows.root(key.table()).put(key.column(), source.sourceId());
@@ -52,7 +140,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       } else if (value == null) {
         applyAbsent(mapping, mapping.nullValue(), rows, true);
       } else {
-        applyPresent(mapping, value, rows);
+        applyPresent(sourceField, mapping, value, rows);
       }
     }
 
@@ -65,16 +153,42 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
         kind.sourceKind(), source.sourceId(), sourceHash, rows.finish());
   }
 
+  private void validateCrossFieldShape(MigrationSourceDocument source) {
+    if (!"upload_session".equals(kind.sourceKind())) {
+      return;
+    }
+    var digests = asMap(source.payload().getOrDefault("chunkDigests", Map.of()));
+    var lengths = asMap(source.payload().getOrDefault("chunkLengths", Map.of()));
+    if (!digests.keySet().equals(lengths.keySet())) {
+      throw invalid();
+    }
+  }
+
   private void requireSource(MigrationSourceDocument source) {
     if (source == null
         || !kind.sourceKind().equals(source.sourceKind())
         || kind.sourceSchemaVersion() != source.schemaVersion()
         || source.sourceId() == null
         || source.sourceId().isBlank()
+        || !validIdentifier(source.sourceId())
         || source.payload() == null
         || !kind.fieldMappings().keySet().containsAll(source.payload().keySet())) {
       throw invalid();
     }
+  }
+
+  private boolean validIdentifier(String sourceId) {
+    return switch (kind.identifierType()) {
+      case "string" -> true;
+      case "uuid-string" -> {
+        try {
+          yield UUID.fromString(sourceId).toString().equals(sourceId);
+        } catch (IllegalArgumentException failure) {
+          yield false;
+        }
+      }
+      default -> false;
+    };
   }
 
   private static void applyAbsent(
@@ -96,8 +210,19 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     }
   }
 
-  private static void applyPresent(
-      PostgresqlMigrationCatalog.FieldMapping mapping, Object value, RowSet rows) {
+  private void applyPresent(
+      String sourceField,
+      PostgresqlMigrationCatalog.FieldMapping mapping,
+      Object value,
+      RowSet rows) {
+    var mappingKey = kind.sourceKind() + "." + sourceField;
+    if (Set.of("record-flattened", "preserve-ledger", "vin-response-flattened",
+            "record-child", "record-list-child", "string-map-child")
+        .contains(mapping.conversion())
+        && !COMPLEX_PATHS.containsKey(mappingKey)
+        && !SPECIAL_COMPLEX_KEYS.contains(mappingKey)) {
+      throw invalid();
+    }
     switch (mapping.conversion()) {
       case "constant-kind" -> {
         // Envelope kind is validated separately and has no relational value.
@@ -107,13 +232,14 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
           "byte-array" -> setScalarTargets(
               mapping, convertScalar(mapping.conversion(), value), rows, false);
       case "record-flattened", "preserve-ledger" ->
-          setFlattenedTargets(mapping, asMap(value), rows);
+          setFlattenedTargets(mappingKey, mapping, asMap(value), rows);
       case "vin-response-flattened" -> setVinResponse(mapping, asMap(value), rows);
-      case "record-child" -> setRecordChild(mapping, asMap(value), rows, 0);
-      case "record-list-child" -> setRecordList(mapping, asCollection(value), rows);
+      case "record-child" -> setRecordChild(mappingKey, mapping, asMap(value), rows);
+      case "record-list-child" ->
+          setRecordList(mappingKey, mapping, asCollection(value), rows);
       case "string-list-child", "string-set-child" ->
-          setScalarList(mapping, asCollection(value), rows);
-      case "string-map-child" -> setStringMap(mapping, asMap(value), rows);
+          setScalarList(mappingKey, mapping, asCollection(value), rows);
+      case "string-map-child" -> setStringMap(mappingKey, mapping, asMap(value), rows);
       default -> throw invalid();
     }
     if (!mapping.conversion().equals("vin-response-flattened")) {
@@ -147,18 +273,11 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
   }
 
   private static void setFlattenedTargets(
-      PostgresqlMigrationCatalog.FieldMapping mapping, Map<String, Object> value, RowSet rows) {
-    for (var targetText : mapping.targets()) {
-      var target = Target.parse(targetText);
-      if (target.column().endsWith("_present")) {
-        rows.root(target.table()).put(target.column(), true);
-        continue;
-      }
-      var nested = findNested(value, target.column());
-      if (nested.found()) {
-        rows.root(target.table()).put(target.column(), nested.value());
-      }
-    }
+      String mappingKey,
+      PostgresqlMigrationCatalog.FieldMapping mapping,
+      Map<String, Object> value,
+      RowSet rows) {
+    projectExact(mappingKey, mapping, value, rows, null, 0);
   }
 
   private static void setVinResponse(
@@ -180,7 +299,20 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       } else if (target.column().equals("raw_decoded_values_present")) {
         rows.root(target.table()).put(target.column(), rawPresent);
       } else {
-        var nested = findNested(value, target.column());
+        var sourcePath = switch (target.column()) {
+          case "response_vin" -> "vin";
+          case "make" -> "make";
+          case "model" -> "model";
+          case "body" -> "body";
+          case "plant_city" -> "plantCity";
+          case "plant_state" -> "plantState";
+          case "plant_country" -> "plantCountry";
+          case "error_code" -> "errorCode";
+          case "error_text" -> "errorText";
+          case "model_year" -> "year";
+          default -> throw invalid();
+        };
+        var nested = readExact(value, sourcePath);
         if (nested.found()) {
           rows.root(target.table()).put(target.column(), nested.value());
         }
@@ -189,52 +321,62 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     var entries = rawValues.entrySet().stream().sorted(Map.Entry.comparingByKey()).toList();
     for (var ordinal = 0; ordinal < entries.size(); ordinal++) {
       var entry = entries.get(ordinal);
-      var row = rows.child("vin_decode_raw_value", ordinal);
+      var row = rows.child("vin_decode_raw_value", "field:" + entry.getKey());
       row.put("field_name", entry.getKey());
       row.put("field_value", entry.getValue() == null ? null : entry.getValue().toString());
     }
   }
 
   private static void setRecordChild(
+      String mappingKey,
       PostgresqlMigrationCatalog.FieldMapping mapping,
       Map<String, Object> value,
-      RowSet rows,
-      int ordinal) {
-    for (var table : targetTables(mapping)) {
-      var row = rows.child(table, ordinal);
-      for (var targetText : mapping.targets()) {
-        var target = Target.parse(targetText);
-        if (!table.equals(target.table())) {
-          continue;
-        }
-        var nested = findNested(value, target.column());
-        if (nested.found()) {
-          row.put(target.column(), nested.value());
-        } else if (target.column().equals("ordinal")) {
-          row.put(target.column(), ordinal);
-        }
-      }
+      RowSet rows) {
+    if (mappingKey.endsWith(".pendingModerationAudit")) {
+      setModerationAudit(mapping, value, rows);
+      return;
     }
+    if ("music_runtime_state.queue".equals(mappingKey)) {
+      var entries = readExact(value, "entries");
+      if (!entries.found()) {
+        throw invalid();
+      }
+      setQueueEntries(mapping, asCollection(entries.value()), rows);
+      return;
+    }
+    projectExact(mappingKey, mapping, value, rows, "record", 0);
   }
 
   private static void setRecordList(
+      String mappingKey,
       PostgresqlMigrationCatalog.FieldMapping mapping,
       Collection<?> values,
       RowSet rows) {
+    if ("session.restaurantResetAudit".equals(mappingKey)) {
+      setLunchResetAudit(mapping, values, rows);
+      return;
+    }
     var ordinal = 0;
     for (var value : values) {
-      setRecordChild(mapping, asMap(value), rows, ordinal++);
+      projectExact(mappingKey, mapping, asMap(value), rows, "ordinal:" + ordinal, ordinal++);
     }
   }
 
   private static void setScalarList(
+      String mappingKey,
       PostgresqlMigrationCatalog.FieldMapping mapping,
       Collection<?> values,
       RowSet rows) {
+    var ordered = new ArrayList<>(values);
+    if ("string-set-child".equals(mapping.conversion())) {
+      ordered.sort(java.util.Comparator.comparing(Object::toString));
+    }
     var ordinal = 0;
-    for (var value : values) {
+    for (var value : ordered) {
       for (var table : targetTables(mapping)) {
-        var row = rows.child(table, ordinal);
+        var rowKey = "session.participantAccountIds".equals(mappingKey)
+            ? "account:" + value : "ordinal:" + ordinal;
+        var row = rows.child(table, rowKey);
         for (var targetText : mapping.targets()) {
           var target = Target.parse(targetText);
           if (!table.equals(target.table())) {
@@ -248,46 +390,218 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
   }
 
   private static void setStringMap(
+      String mappingKey,
       PostgresqlMigrationCatalog.FieldMapping mapping,
       Map<String, Object> values,
       RowSet rows) {
     var entries = values.entrySet().stream().sorted(Map.Entry.comparingByKey()).toList();
     for (var ordinal = 0; ordinal < entries.size(); ordinal++) {
       var entry = entries.get(ordinal);
-      for (var table : targetTables(mapping)) {
-        var row = rows.child(table, ordinal);
-        for (var targetText : mapping.targets()) {
-          var target = Target.parse(targetText);
-          if (!table.equals(target.table())) {
-            continue;
-          }
-          var column = target.column();
-          if (column.equals("ordinal")) {
-            row.put(column, ordinal);
-          } else if (column.endsWith("key") || column.endsWith("name")) {
-            row.put(column, entry.getKey());
-          } else {
-            row.put(column, entry.getValue());
-          }
+      setExactMapEntry(mappingKey, mapping, entry.getKey(), entry.getValue(), ordinal, rows);
+    }
+  }
+
+  private static Set<String> targetTables(PostgresqlMigrationCatalog.FieldMapping mapping) {
+    var result = new java.util.LinkedHashSet<String>();
+    mapping.targets().stream().map(Target::parse).map(Target::table).forEach(result::add);
+    return result;
+  }
+
+  private static void setModerationAudit(
+      PostgresqlMigrationCatalog.FieldMapping mapping,
+      Map<String, Object> value,
+      RowSet rows) {
+    var auditTable = mapping.targets().stream().map(Target::parse)
+        .map(Target::table).filter(table -> !table.endsWith("_value")).findFirst()
+        .orElseThrow(CatalogDocumentTransformer::invalid);
+    var valueTable = mapping.targets().stream().map(Target::parse)
+        .map(Target::table).filter(table -> table.endsWith("_value")).findFirst()
+        .orElseThrow(CatalogDocumentTransformer::invalid);
+    var audit = rows.child(auditTable, "audit");
+    var auditColumns = Map.ofEntries(
+        Map.entry("event_id", "eventId"), Map.entry("actor_account_id", "actorAccountId"),
+        Map.entry("actor_username", "actorUsername"), Map.entry("action", "action"),
+        Map.entry("target_type", "targetType"), Map.entry("target_id", "targetId"),
+        Map.entry("target_label", "targetLabel"), Map.entry("reason", "reason"),
+        Map.entry("message", "message"));
+    auditColumns.forEach((column, sourcePath) -> {
+      var nested = readExact(value, sourcePath);
+      if (nested.found()) {
+        audit.put(column, nested.value());
+      }
+    });
+    for (var partition : List.of("before", "after", "metadata")) {
+      var nested = readExact(value, partition + "Values");
+      if (!nested.found() && "metadata".equals(partition)) {
+        nested = readExact(value, "metadata");
+      }
+      if (!nested.found()) {
+        continue;
+      }
+      for (var entry : asMap(nested.value()).entrySet().stream()
+          .sorted(Map.Entry.comparingByKey()).toList()) {
+        var row = rows.child(valueTable, partition + ":" + entry.getKey());
+        row.put("partition_name", partition);
+        row.put("value_key", entry.getKey());
+        row.put("value", Objects.toString(entry.getValue(), null));
+      }
+    }
+  }
+
+  private static void setQueueEntries(
+      PostgresqlMigrationCatalog.FieldMapping mapping,
+      Collection<?> entries,
+      RowSet rows) {
+    var ordinal = 0;
+    for (var rawEntry : entries) {
+      var entry = asMap(rawEntry);
+      var row = rows.child("queue_entry", "ordinal:" + ordinal);
+      row.put("ordinal", ordinal++);
+      putExact(row, "queue_entry_id", entry, "id");
+      putExact(row, "track_id", entry, "trackId");
+      putExact(row, "observed_token", entry, "observedToken");
+      putExact(row, "enqueued_by_account_id", entry, "enqueuedByAccountId");
+      putExact(row, "enqueued_at", entry, "enqueuedAt");
+    }
+  }
+
+  private static void setLunchResetAudit(
+      PostgresqlMigrationCatalog.FieldMapping mapping,
+      Collection<?> values,
+      RowSet rows) {
+    var resetOrdinal = 0;
+    for (var rawValue : values) {
+      var value = asMap(rawValue);
+      var audit = rows.child("lunch_session_reset_audit", "reset:" + resetOrdinal);
+      audit.put("ordinal", resetOrdinal);
+      putExact(audit, "revision", value, "revision");
+      putExact(audit, "account_id", value, "accountId");
+      putExact(audit, "username", value, "username");
+      putExact(audit, "occurred_on", value, "occurredOn");
+      var restaurants = readExact(value, "restaurantIds");
+      if (!restaurants.found()) {
+        throw invalid();
+      }
+      var restaurantOrdinal = 0;
+      for (var restaurantId : asCollection(restaurants.value())) {
+        var child = rows.child("lunch_session_reset_restaurant",
+            "reset:" + resetOrdinal + ":restaurant:" + restaurantOrdinal);
+        child.put("reset_ordinal", resetOrdinal);
+        child.put("restaurant_ordinal", restaurantOrdinal++);
+        child.put("restaurant_id", normalizeBson(restaurantId));
+      }
+      resetOrdinal++;
+    }
+  }
+
+  private static void setExactMapEntry(
+      String mappingKey,
+      PostgresqlMigrationCatalog.FieldMapping mapping,
+      String key,
+      Object value,
+      int ordinal,
+      RowSet rows) {
+    switch (mappingKey) {
+      case "session.participantUsernamesByAccountId" -> {
+        var row = rows.child("lunch_session_participant", "account:" + key);
+        row.put("account_id", key);
+        row.put("username", normalizeBson(value));
+      }
+      case "session.votesByAccountId" -> {
+        var row = rows.child("lunch_session_vote", "account:" + key);
+        row.put("account_id", key);
+        row.put("restaurant_id", normalizeBson(value));
+      }
+      case "upload_session.chunkDigests" -> {
+        var row = rows.child("upload_chunk", "chunk:" + key);
+        row.put("chunk_key", key);
+        row.put("digest", normalizeBson(value));
+      }
+      case "upload_session.chunkLengths" -> {
+        var row = rows.child("upload_chunk", "chunk:" + key);
+        row.put("chunk_key", key);
+        row.put("chunk_length", convertScalar("long", value));
+      }
+      case "vehicle.nhtsaDecodedValues" -> {
+        var row = rows.child("vehicle_decoded_value", "field:" + key);
+        row.put("field_name", key);
+        row.put("field_value", Objects.toString(value, null));
+      }
+      case "admin_activity.beforeValues", "admin_activity.afterValues",
+          "admin_activity.metadata" -> {
+        var partition = mappingKey.substring("admin_activity.".length())
+            .replace("Values", "");
+        var row = rows.child("admin_activity_value", partition + ":" + key);
+        row.put("partition_name", partition);
+        row.put("value_key", key);
+        row.put("value_text", Objects.toString(value, null));
+      }
+      default -> throw invalid();
+    }
+  }
+
+  private static void projectExact(
+      String mappingKey,
+      PostgresqlMigrationCatalog.FieldMapping mapping,
+      Map<String, Object> value,
+      RowSet rows,
+      String rowKey,
+      int ordinal) {
+    var sourcePaths = COMPLEX_PATHS.get(mappingKey);
+    if (sourcePaths == null || !sourcePaths.keySet().equals(Set.copyOf(mapping.targets()))) {
+      throw invalid();
+    }
+    for (var targetText : mapping.targets()) {
+      var target = Target.parse(targetText);
+      var expression = sourcePaths.get(targetText);
+      var destination = rowKey == null ? rows.root(target.table())
+          : rows.child(target.table(), rowKey);
+      if ("$ordinal".equals(expression)) {
+        destination.put(target.column(), ordinal);
+      } else if ("$present".equals(expression)) {
+        destination.put(target.column(), true);
+      } else {
+        var nested = readExact(value, expression);
+        if (nested.found()) {
+          destination.put(target.column(), nested.value());
         }
       }
     }
   }
 
-  private static Set<String> targetTables(PostgresqlMigrationCatalog.FieldMapping mapping) {
-    return mapping.targets().stream().map(Target::parse).map(Target::table)
-        .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
+  private static void putExact(
+      Map<String, Object> destination,
+      String targetColumn,
+      Map<String, Object> source,
+      String sourcePath) {
+    var nested = readExact(source, sourcePath);
+    if (nested.found()) {
+      destination.put(targetColumn, nested.value());
+    }
   }
 
-  private static NestedValue findNested(Map<String, Object> values, String targetColumn) {
-    var exact = values.entrySet().stream()
-        .filter(entry -> snake(entry.getKey()).equals(targetColumn))
-        .findFirst();
-    var match = exact.or(() -> values.entrySet().stream()
-        .filter(entry -> targetColumn.endsWith("_" + snake(entry.getKey())))
-        .max(Comparator.comparingInt(entry -> entry.getKey().length())));
-    return match.<NestedValue>map(entry -> new NestedValue(true, normalizeBson(entry.getValue())))
-        .orElseGet(() -> new NestedValue(false, null));
+  private static NestedValue readExact(Map<String, Object> values, String path) {
+    Object current = values;
+    for (var segment : path.split("\\.")) {
+      if (!(current instanceof Map<?, ?> map) || !map.containsKey(segment)) {
+        return new NestedValue(false, null);
+      }
+      current = map.get(segment);
+    }
+    return new NestedValue(true, normalizeBson(current));
+  }
+
+  private static Map.Entry<String, Map<String, String>> paths(
+      String mappingKey, String... bindings) {
+    var result = new LinkedHashMap<String, String>();
+    for (var binding : bindings) {
+      var separator = binding.indexOf('=');
+      if (separator < 1 || separator == binding.length() - 1
+          || result.put(binding.substring(0, separator), binding.substring(separator + 1)) != null) {
+        throw new IllegalStateException("Invalid production migration mapping: " + mappingKey);
+      }
+    }
+    return Map.entry(mappingKey, Map.copyOf(result));
   }
 
   private static Object convertScalar(String conversion, Object value) {
@@ -378,10 +692,6 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     throw invalid();
   }
 
-  private static String snake(String camel) {
-    return camel.replaceAll("([a-z0-9])([A-Z])", "$1_$2").toLowerCase(Locale.ROOT);
-  }
-
   private static Object invalidValue() {
     throw invalid();
   }
@@ -406,7 +716,8 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     private final String schema;
     private final List<String> tableOrder;
     private final String sourceId;
-    private final Map<String, List<LinkedHashMap<String, Object>>> rows = new LinkedHashMap<>();
+    private final Map<String, LinkedHashMap<String, LinkedHashMap<String, Object>>> rows =
+        new LinkedHashMap<>();
 
     private RowSet(String schema, List<String> tableOrder, String sourceId) {
       this.schema = schema;
@@ -415,26 +726,19 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     }
 
     private LinkedHashMap<String, Object> root(String table) {
-      return rows.computeIfAbsent(table, ignored -> new ArrayList<>())
-          .stream().findFirst().orElseGet(() -> {
-            var row = new LinkedHashMap<String, Object>();
-            rows.get(table).add(row);
-            return row;
-          });
+      return rows.computeIfAbsent(table, ignored -> new LinkedHashMap<>())
+          .computeIfAbsent("$root", ignored -> new LinkedHashMap<>());
     }
 
-    private LinkedHashMap<String, Object> child(String table, int ordinal) {
-      var tableRows = rows.computeIfAbsent(table, ignored -> new ArrayList<>());
-      while (tableRows.size() <= ordinal) {
-        tableRows.add(new LinkedHashMap<>());
-      }
-      return tableRows.get(ordinal);
+    private LinkedHashMap<String, Object> child(String table, String rowKey) {
+      return rows.computeIfAbsent(table, ignored -> new LinkedHashMap<>())
+          .computeIfAbsent(rowKey, ignored -> new LinkedHashMap<>());
     }
 
     private List<MigrationRelationalRow> finish() {
       var result = new ArrayList<MigrationRelationalRow>();
       for (var table : tableOrder) {
-        var tableRows = rows.getOrDefault(table, List.of());
+        var tableRows = rows.getOrDefault(table, new LinkedHashMap<>()).values().stream().toList();
         for (var ordinal = 0; ordinal < tableRows.size(); ordinal++) {
           result.add(new MigrationRelationalRow(
               schema, table, sourceId, ordinal, tableRows.get(ordinal)));

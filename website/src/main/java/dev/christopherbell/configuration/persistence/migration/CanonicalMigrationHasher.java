@@ -15,6 +15,7 @@ import java.util.HexFormat;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.UUID;
+import org.bson.types.Binary;
 import org.bson.types.Decimal128;
 import org.bson.types.ObjectId;
 
@@ -64,6 +65,8 @@ public final class CanonicalMigrationHasher {
       appendTagged("uuid", uuid.toString(), target);
     } else if (value instanceof ObjectId objectId) {
       appendTagged("objectId", objectId.toHexString(), target);
+    } else if (value instanceof Binary binary) {
+      appendTagged("binary", Base64.getEncoder().encodeToString(binary.getData()), target);
     } else if (value instanceof byte[] bytes) {
       appendTagged("binary", Base64.getEncoder().encodeToString(bytes), target);
     } else if (value instanceof Map<?, ?> map) {
