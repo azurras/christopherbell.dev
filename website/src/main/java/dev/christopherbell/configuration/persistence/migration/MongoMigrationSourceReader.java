@@ -6,6 +6,7 @@ import static com.mongodb.client.model.Filters.gt;
 import static com.mongodb.client.model.Sorts.ascending;
 
 import com.mongodb.client.MongoClient;
+import com.mongodb.client.model.Collation;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -46,6 +47,7 @@ public final class MongoMigrationSourceReader
     for (var envelope : client.getDatabase(context.sourceIdentity().database())
         .getCollection(kind.sourceCollection())
         .find(filter)
+        .collation(Collation.builder().locale("simple").build())
         .sort(ascending("_id.legacyId"))
         .limit(limit)) {
       var converted = convert(kind, envelope);

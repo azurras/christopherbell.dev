@@ -19,7 +19,6 @@ import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
-@EnabledIfEnvironmentVariable(named = "MONGODB_MIGRATION_TEST_URI", matches = ".+")
 class MongoFinalizationFreezeGuardTest {
   @Test
   void releasesTheServerLockWhenAcquisitionVerificationFails() {
@@ -38,6 +37,50 @@ class MongoFinalizationFreezeGuardTest {
   }
 
   @Test
+  void directlyUnlocksAfterCloseVerificationFails() {
+    var client = mock(MongoClient.class);
+    var admin = mock(MongoDatabase.class);
+    when(client.getDatabase("admin")).thenReturn(admin);
+    when(admin.runCommand(any(Document.class)))
+        .thenReturn(new Document("ok", 1))
+        .thenReturn(new Document("fsyncLock", true))
+        .thenThrow(new IllegalStateException("verification failed"))
+        .thenReturn(new Document("ok", 1));
+    var guard = MongoFinalizationFreezeGuard.acquire(client);
+
+    assertThatThrownBy(guard::close)
+        .isInstanceOf(MigrationStorageException.class)
+        .hasMessage("MongoDB finalization write freeze could not be released.");
+
+    verify(admin, times(4)).runCommand(any(Document.class));
+  }
+
+  @Test
+  void preservesVerificationAndUnlockFailuresAndAllowsUnlockRetry() {
+    var client = mock(MongoClient.class);
+    var admin = mock(MongoDatabase.class);
+    when(client.getDatabase("admin")).thenReturn(admin);
+    when(admin.runCommand(any(Document.class)))
+        .thenReturn(new Document("ok", 1))
+        .thenReturn(new Document("fsyncLock", true))
+        .thenThrow(new IllegalStateException("verification failed"))
+        .thenThrow(new IllegalStateException("unlock failed"))
+        .thenReturn(new Document("fsyncLock", true))
+        .thenReturn(new Document("ok", 1));
+    var guard = MongoFinalizationFreezeGuard.acquire(client);
+
+    assertThatThrownBy(guard::close)
+        .isInstanceOf(MigrationStorageException.class)
+        .hasCauseInstanceOf(MigrationStorageException.class)
+        .satisfies(failure -> assertThat(failure.getCause().getSuppressed()).hasSize(1));
+
+    guard.close();
+    guard.close();
+    verify(admin, times(6)).runCommand(any(Document.class));
+  }
+
+  @Test
+  @EnabledIfEnvironmentVariable(named = "MONGODB_MIGRATION_TEST_URI", matches = ".+")
   void blocksAnIndependentWriterUntilTheGuardIsReleased() throws Exception {
     var uri = requireDisposableTestUri();
     var collectionName = "migration_finalize_freeze_probe";
@@ -68,16 +111,22 @@ class MongoFinalizationFreezeGuardTest {
   }
 
   @Test
+  @EnabledIfEnvironmentVariable(named = "MONGODB_MIGRATION_TEST_URI", matches = ".+")
   void failsClosedWhenAnotherAdministratorWithdrawsTheServerLock() throws Exception {
     var uri = requireDisposableTestUri();
     try (var administrativeClient = MongoClients.create(uri);
-        var independentAdministrator = MongoClients.create(uri);
-        var guard = MongoFinalizationFreezeGuard.acquire(administrativeClient)) {
+        var independentAdministrator = MongoClients.create(uri)) {
+      var guard = MongoFinalizationFreezeGuard.acquire(administrativeClient);
       independentAdministrator.getDatabase("admin").runCommand(new Document("fsyncUnlock", 1));
 
       assertThatThrownBy(guard::requireLocked)
           .isInstanceOf(MigrationStorageException.class)
           .hasMessage("MongoDB finalization write freeze is not held.");
+      assertThatThrownBy(guard::close)
+          .isInstanceOf(MigrationStorageException.class)
+          .hasMessage("MongoDB finalization write freeze could not be released.")
+          .satisfies(failure -> assertThat(failure.getCause().getSuppressed()).hasSize(1));
+      guard.close();
     }
   }
 

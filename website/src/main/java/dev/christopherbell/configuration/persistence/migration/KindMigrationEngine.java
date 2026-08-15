@@ -114,7 +114,8 @@ public final class KindMigrationEngine {
           || document.schemaVersion() != kind.sourceSchemaVersion()
           || document.sourceId() == null
           || document.sourceId().isBlank()
-          || previous != null && document.sourceId().compareTo(previous) <= 0) {
+          || previous != null
+              && MongoSimpleStringOrder.compare(document.sourceId(), previous) <= 0) {
         throw invalidBatch();
       }
       previous = document.sourceId();

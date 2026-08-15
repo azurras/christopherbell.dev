@@ -1,5 +1,6 @@
 package dev.christopherbell.configuration.persistence.migration;
 
+import com.mongodb.MongoCommandException;
 import com.mongodb.client.MongoClient;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -54,17 +55,39 @@ final class MongoFinalizationFreezeGuard implements FinalizationFreezeGuard {
   }
 
   @Override
-  public void close() {
-    if (!open.compareAndSet(true, false)) {
+  public synchronized void close() {
+    if (!open.get()) {
       return;
     }
+    RuntimeException verificationFailure = null;
     try {
-      if (serverReportsLocked()) {
-        client.getDatabase("admin").runCommand(new Document("fsyncUnlock", 1));
+      if (!serverReportsLocked()) {
+        verificationFailure = new MigrationStorageException(NOT_HELD);
       }
     } catch (RuntimeException exception) {
-      throw new MigrationStorageException("MongoDB finalization write freeze could not be released.",
-          exception);
+      verificationFailure = exception;
+    }
+    RuntimeException unlockFailure = null;
+    try {
+      client.getDatabase("admin").runCommand(new Document("fsyncUnlock", 1));
+      open.set(false);
+    } catch (RuntimeException exception) {
+      unlockFailure = exception;
+      if (exception instanceof MongoCommandException commandFailure
+          && commandFailure.getErrorCode() == 20) {
+        open.set(false);
+      }
+    }
+    if (verificationFailure != null) {
+      if (unlockFailure != null) {
+        verificationFailure.addSuppressed(unlockFailure);
+      }
+      throw new MigrationStorageException(
+          "MongoDB finalization write freeze could not be released.", verificationFailure);
+    }
+    if (unlockFailure != null) {
+      throw new MigrationStorageException(
+          "MongoDB finalization write freeze could not be released.", unlockFailure);
     }
   }
 

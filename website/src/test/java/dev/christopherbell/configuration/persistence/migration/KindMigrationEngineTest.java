@@ -97,6 +97,19 @@ class KindMigrationEngineTest {
         .isInstanceOf(MigrationReconciliationException.class);
   }
 
+  @Test
+  void acceptsMongoSimpleBinaryOrderWhenUtf16OrderDiffers() {
+    var firstInMongoOrder = "\uE000";
+    var secondInMongoOrder = "\uD83D\uDE00";
+    var source = new OrderedSource(List.of(firstInMongoOrder, secondInMongoOrder));
+    var target = new FakeTarget(-1);
+
+    new KindMigrationEngine(source, target, ignored -> new StubTransformer())
+        .stageAndCheckpoint(context(10), KIND);
+
+    assertThat(target.staged).containsExactly(firstInMongoOrder, secondInMongoOrder);
+  }
+
   private static PostgresqlMigrationCatalog.Kind kind() {
     return new PostgresqlMigrationCatalog.Kind(
         "configuration", "fixture", 1, 1, "string", "platform", List.of("fixture"),
@@ -186,6 +199,21 @@ class KindMigrationEngineTest {
           .limit(limit)
           .toList();
       return SourceBatch.of(values);
+    }
+  }
+
+  private record OrderedSource(List<String> ids) implements MigrationSourceReader {
+    @Override
+    public SourceBatch readAfter(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        String cursor,
+        int limit) {
+      if (cursor != null) {
+        return SourceBatch.of(List.of());
+      }
+      return SourceBatch.of(ids.stream().map(id ->
+          new MigrationSourceDocument("fixture", 1, id, Map.of("id", id))).toList());
     }
   }
 

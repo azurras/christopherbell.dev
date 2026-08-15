@@ -83,7 +83,7 @@ final class MigrationPortQueryVerifierRegistry {
       spec("federation_delivery_job", "find-by-post-and-peer", "federation_delivery_job", List.of("post_id", "peer_inbox"), List.of(asc("post_id"), asc("peer_inbox")), null, 2),
       spec("music_track", "find-by-id", "track", List.of("track_id"), List.of(asc("track_id")), null, 2),
       spec("music_track", "find-by-path", "track", List.of("relative_path"), List.of(asc("relative_path")), null, 2),
-      spec("music_track", "artist-page", "track", List.of(), List.of(asc("album_artist")), null, 100),
+      spec("music_track", "artist-page", "track", List.of(), List.of(asc("artist")), null, 100),
       spec("music_track", "album-page", "track", List.of(), List.of(asc("album")), null, 100),
       spec("music_track", "genre-page", "track", List.of(), List.of(asc("genre")), null, 100),
       spec("music_track", "radio-candidate-page", "track", List.of(), List.of(asc("excluded_from_radio")), null, 100),
@@ -207,6 +207,16 @@ final class MigrationPortQueryVerifierRegistry {
     return RULES.size();
   }
 
+  Set<String> explicitFamilyDeclarations() {
+    return RULES.values().stream()
+        .filter(strategy -> Set.of(
+            SemanticFamily.JOINED_CHILD_PAGE, SemanticFamily.GROUPED_PROJECTION)
+            .contains(strategy.semantics().family()))
+        .map(strategy -> strategy.declaration().sourceKind() + "/"
+            + strategy.declaration().queryName())
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  }
+
   String semanticFamily(String sourceKind, String queryName) {
     var strategy = RULES.get(new Declaration(sourceKind, queryName));
     if (strategy == null) {
@@ -229,6 +239,32 @@ final class MigrationPortQueryVerifierRegistry {
     return verifyConditionalClaimUnderRollback(connection, schema, table);
   }
 
+  boolean verifyExplicitFamilyForTest(
+      Connection connection,
+      String schema,
+      String sourceKind,
+      String queryName,
+      Map<String, List<Map<String, Object>>> sourceRows) throws SQLException {
+    var strategy = RULES.get(new Declaration(sourceKind, queryName));
+    if (strategy == null || !Set.of(
+        SemanticFamily.JOINED_CHILD_PAGE, SemanticFamily.GROUPED_PROJECTION)
+        .contains(strategy.semantics().family())
+        || !sourceRows.keySet().equals(requiredTables(strategy))) {
+      throw new IllegalArgumentException("PostgreSQL migration explicit query fixture is invalid.");
+    }
+    var snapshots = new LinkedHashMap<String, TableSnapshot>();
+    for (var table : requiredTables(strategy)) {
+      snapshots.put(table, new TableSnapshot(
+          table,
+          metadata(connection, schema, table),
+          sourceRows.get(table).stream()
+              .map(values -> new ExpectedRow(java.util.Collections.unmodifiableMap(
+                  new LinkedHashMap<>(values))))
+              .toList()));
+    }
+    return executeRule(connection, schema, Map.copyOf(snapshots), strategy);
+  }
+
   List<String> schemaViolations(
       Connection connection, String schemaPrefix, PostgresqlMigrationCatalog catalog)
       throws SQLException {
@@ -236,7 +272,9 @@ final class MigrationPortQueryVerifierRegistry {
     for (var kind : catalog.kinds()) {
       for (var queryName : kind.portQueries()) {
         var spec = RULES.get(new Declaration(kind.sourceKind(), queryName));
-        if (spec == null || !kind.targetTables().contains(spec.table())
+        if (spec == null || !kind.targetTables().containsAll(requiredTables(spec))
+            || !validRequiredMetadata(
+                connection, schemaPrefix + kind.targetSchema(), requiredTables(spec))
             || !spec.validFor(metadata(
                 connection, schemaPrefix + kind.targetSchema(), spec.table()))) {
           result.add(kind.sourceKind() + "/" + queryName);
@@ -244,6 +282,16 @@ final class MigrationPortQueryVerifierRegistry {
       }
     }
     return List.copyOf(result);
+  }
+
+  private static boolean validRequiredMetadata(
+      Connection connection, String schema, Set<String> tables) throws SQLException {
+    for (var table : tables) {
+      if (metadata(connection, schema, table).primaryKeys().isEmpty()) {
+        return false;
+      }
+    }
+    return true;
   }
 
   boolean verify(
@@ -256,19 +304,27 @@ final class MigrationPortQueryVerifierRegistry {
       boolean includePriorShadowRows) throws SQLException {
     for (var queryName : kind.portQueries()) {
       var spec = RULES.get(new Declaration(kind.sourceKind(), queryName));
-      if (spec == null || !kind.targetTables().contains(spec.table())) {
+      if (spec == null || !kind.targetTables().containsAll(requiredTables(spec))) {
         return false;
       }
-      var metadata = metadata(connection, schemaPrefix + kind.targetSchema(), spec.table());
-      if (!spec.validFor(metadata)) {
+      var snapshots = new LinkedHashMap<String, TableSnapshot>();
+      for (var table : requiredTables(spec)) {
+        var tableMetadata = metadata(
+            connection, schemaPrefix + kind.targetSchema(), table);
+        if (tableMetadata.primaryKeys().isEmpty()) {
+          return false;
+        }
+        var expected = expectedRows(
+            connection, schemaPrefix + kind.targetSchema(), platformSchema, runId, kind,
+            table, tableMetadata.primaryKeys(), codec, includePriorShadowRows);
+        snapshots.put(table, new TableSnapshot(table, tableMetadata, expected));
+      }
+      if (!spec.validFor(snapshots.get(spec.table()).metadata())) {
         return false;
       }
-      var expected = expectedRows(
-          connection, schemaPrefix + kind.targetSchema(), platformSchema, runId, kind,
-          spec.table(), metadata.primaryKeys(), codec, includePriorShadowRows);
       if (!executeRule(
           connection, schemaPrefix + kind.targetSchema(),
-          new TableSnapshot(spec.table(), metadata, expected), spec)) {
+          Map.copyOf(snapshots), spec)) {
         return false;
       }
     }
@@ -278,8 +334,15 @@ final class MigrationPortQueryVerifierRegistry {
   private static boolean executeRule(
       Connection connection,
       String schema,
-      TableSnapshot snapshot,
+      Map<String, TableSnapshot> snapshots,
       AdapterQueryStrategy spec) throws SQLException {
+    if (spec.semantics().family() == SemanticFamily.JOINED_CHILD_PAGE) {
+      return verifyJoinedChildPage(connection, schema, snapshots, spec);
+    }
+    if (spec.semantics().family() == SemanticFamily.GROUPED_PROJECTION) {
+      return verifyGroupedProjection(connection, schema, snapshots, spec);
+    }
+    var snapshot = snapshots.get(spec.table());
     if (spec.semantics().family() == SemanticFamily.CONDITIONAL_CLAIM
         && !verifyConditionalClaimUnderRollback(connection, schema, snapshot.table())) {
       return false;
@@ -370,6 +433,265 @@ final class MigrationPortQueryVerifierRegistry {
         return actual.equals(expected);
       }
     }
+  }
+
+  private static Set<String> requiredTables(AdapterQueryStrategy strategy) {
+    return switch (strategy.declaration()) {
+      case Declaration value when value.equals(
+          new Declaration("message", "participant-page")) -> Set.of("message", "message_participant");
+      case Declaration value when value.equals(
+          new Declaration("session", "participant-session-page")) ->
+          Set.of("lunch_session", "lunch_session_participant");
+      case Declaration value when value.equals(
+          new Declaration("music_playlist", "playlist-track-order")) ->
+          Set.of("playlist", "playlist_track");
+      case Declaration value when value.equals(
+          new Declaration("post_report", "moderation-page")) ->
+          Set.of("post_report", "post_report_moderation_audit");
+      default -> Set.of(strategy.table());
+    };
+  }
+
+  private static boolean verifyJoinedChildPage(
+      Connection connection,
+      String schema,
+      Map<String, TableSnapshot> snapshots,
+      AdapterQueryStrategy strategy) throws SQLException {
+    return switch (strategy.declaration()) {
+      case Declaration value when value.equals(
+          new Declaration("message", "participant-page")) ->
+          verifyMessageParticipantPage(connection, schema, snapshots, strategy.limit());
+      case Declaration value when value.equals(
+          new Declaration("session", "participant-session-page")) ->
+          verifyLunchParticipantPage(connection, schema, snapshots, strategy.limit());
+      case Declaration value when value.equals(
+          new Declaration("music_playlist", "playlist-track-order")) ->
+          verifyPlaylistTrackOrder(connection, schema, snapshots);
+      case Declaration value when value.equals(
+          new Declaration("post_report", "moderation-page")) ->
+          verifyModerationPage(connection, schema, snapshots, strategy.limit());
+      default -> false;
+    };
+  }
+
+  private static boolean verifyGroupedProjection(
+      Connection connection,
+      String schema,
+      Map<String, TableSnapshot> snapshots,
+      AdapterQueryStrategy strategy) throws SQLException {
+    var field = switch (strategy.declaration().queryName()) {
+      case "artist-page" -> "artist";
+      case "album-page" -> "album";
+      case "genre-page" -> "genre";
+      default -> null;
+    };
+    if (!strategy.declaration().sourceKind().equals("music_track") || field == null) {
+      return false;
+    }
+    var sourceRows = snapshots.get("track").rows();
+    var expected = normalizedMusicStrings(sourceRows.stream()
+        .filter(row -> row.values().get("missing_since") == null)
+        .filter(row -> "READY".equals(row.values().get("index_status")))
+        .map(row -> parameterText(row.values().get(field)))
+        .toList());
+    var sql = "select distinct " + quoted(field) + " from " + quoted(schema)
+        + ".\"track\" where missing_since is null and index_status='READY' and "
+        + quoted(field) + " is not null";
+    var actualValues = new ArrayList<String>();
+    try (var statement = connection.createStatement(); var rows = statement.executeQuery(sql)) {
+      while (rows.next()) {
+        actualValues.add(rows.getString(1));
+      }
+    }
+    return normalizedMusicStrings(actualValues).equals(expected);
+  }
+
+  private static List<String> normalizedMusicStrings(List<String> values) {
+    var byNormalizedValue = new java.util.TreeMap<String, String>();
+    for (var value : values) {
+      if (value != null && !value.isBlank()) {
+        byNormalizedValue.merge(value.toLowerCase(Locale.ROOT), value,
+            (left, right) -> left.compareTo(right) <= 0 ? left : right);
+      }
+    }
+    return List.copyOf(byNormalizedValue.values());
+  }
+
+  private static boolean verifyMessageParticipantPage(
+      Connection connection,
+      String schema,
+      Map<String, TableSnapshot> snapshots,
+      int maximumLimit) throws SQLException {
+    var participants = snapshots.get("message_participant").rows();
+    if (participants.isEmpty()) {
+      return true;
+    }
+    var roots = byStringIdentity(snapshots.get("message").rows(), "message_id");
+    var sql = "select message.message_id from " + quoted(schema) + ".\"message\" message "
+        + "join " + quoted(schema) + ".message_participant participant "
+        + "on participant.message_id=message.message_id where participant.account_id=? "
+        + "order by message.created_on desc, message.message_id desc limit ? offset ?";
+    for (var accountId : distinctValues(participants, "account_id")) {
+      var expected = participants.stream()
+          .filter(row -> java.util.Objects.equals(
+              accountId, parameterText(row.values().get("account_id"))))
+          .map(row -> roots.get(parameterText(row.values().get("message_id"))))
+          .filter(java.util.Objects::nonNull)
+          .sorted((left, right) -> compareRows(left, right,
+              List.of(desc("created_on"), desc("message_id"))))
+          .map(row -> parameterText(row.values().get("message_id")))
+          .toList();
+      if (!verifyStringPages(connection, sql, accountId, expected, maximumLimit)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static boolean verifyLunchParticipantPage(
+      Connection connection,
+      String schema,
+      Map<String, TableSnapshot> snapshots,
+      int maximumLimit) throws SQLException {
+    var participants = snapshots.get("lunch_session_participant").rows();
+    if (participants.isEmpty()) {
+      return true;
+    }
+    var now = databaseNow(connection);
+    var roots = byStringIdentity(snapshots.get("lunch_session").rows(), "lunch_session_id");
+    var sql = "select session.lunch_session_id from " + quoted(schema)
+        + ".lunch_session session join " + quoted(schema)
+        + ".lunch_session_participant participant using (lunch_session_id) "
+        + "where participant.account_id=? and session.delete_on>current_timestamp "
+        + "order by session.created_on desc, session.lunch_session_id asc limit ? offset ?";
+    for (var accountId : distinctValues(participants, "account_id")) {
+      var expected = participants.stream()
+          .filter(row -> java.util.Objects.equals(
+              accountId, parameterText(row.values().get("account_id"))))
+          .map(row -> roots.get(parameterText(row.values().get("lunch_session_id"))))
+          .filter(java.util.Objects::nonNull)
+          .filter(row -> instant(row.values().get("delete_on")).isAfter(now))
+          .sorted((left, right) -> compareRows(left, right,
+              List.of(desc("created_on"), asc("lunch_session_id"))))
+          .map(row -> parameterText(row.values().get("lunch_session_id")))
+          .toList();
+      if (!verifyStringPages(connection, sql, accountId, expected, maximumLimit)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static boolean verifyPlaylistTrackOrder(
+      Connection connection,
+      String schema,
+      Map<String, TableSnapshot> snapshots) throws SQLException {
+    var roots = snapshots.get("playlist").rows();
+    var children = snapshots.get("playlist_track").rows();
+    for (var root : roots) {
+      var playlistId = parameterText(root.values().get("playlist_id"));
+      var expected = children.stream()
+          .filter(row -> java.util.Objects.equals(
+              playlistId, parameterText(row.values().get("playlist_id"))))
+          .sorted((left, right) -> compareRows(left, right, List.of(asc("ordinal"))))
+          .map(row -> parameterText(row.values().get("track_id")))
+          .toList();
+      var sql = "select track_id from " + quoted(schema)
+          + ".playlist_track where playlist_id=? order by ordinal asc";
+      if (!fetchStrings(connection, sql, List.of(playlistId)).equals(expected)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static boolean verifyModerationPage(
+      Connection connection,
+      String schema,
+      Map<String, TableSnapshot> snapshots,
+      int maximumLimit) throws SQLException {
+    var audits = byStringIdentity(
+        snapshots.get("post_report_moderation_audit").rows(), "post_report_id");
+    var expected = snapshots.get("post_report").rows().stream()
+        .filter(row -> audits.containsKey(parameterText(row.values().get("post_report_id"))))
+        .sorted((left, right) -> compareRows(left, right,
+            List.of(desc("created_on"), desc("post_report_id"))))
+        .map(row -> parameterText(row.values().get("post_report_id")))
+        .limit(maximumLimit)
+        .toList();
+    var sql = "select report.post_report_id from " + quoted(schema)
+        + ".post_report report join " + quoted(schema)
+        + ".post_report_moderation_audit audit using (post_report_id) "
+        + "order by report.created_on desc, report.post_report_id desc limit " + maximumLimit;
+    return fetchStrings(connection, sql, List.of()).equals(expected);
+  }
+
+  private static boolean verifyStringPages(
+      Connection connection,
+      String sql,
+      String filter,
+      List<String> expected,
+      int maximumLimit) throws SQLException {
+    var pageSize = Math.min(2, maximumLimit);
+    if (!fetchStrings(connection, sql, List.of(filter, pageSize, 0))
+        .equals(expected.stream().limit(pageSize).toList())) {
+      return false;
+    }
+    if (expected.size() < 2) {
+      return true;
+    }
+    return fetchStrings(connection, sql, List.of(filter, pageSize, 1))
+        .equals(expected.stream().skip(1).limit(pageSize).toList());
+  }
+
+  private static List<String> fetchStrings(
+      Connection connection, String sql, List<?> parameters) throws SQLException {
+    var values = new ArrayList<String>();
+    try (var statement = connection.prepareStatement(sql)) {
+      for (var index = 0; index < parameters.size(); index++) {
+        statement.setObject(index + 1, parameters.get(index));
+      }
+      try (var rows = statement.executeQuery()) {
+        while (rows.next()) {
+          values.add(rows.getString(1));
+        }
+      }
+    }
+    return List.copyOf(values);
+  }
+
+  private static Map<String, ExpectedRow> byStringIdentity(
+      List<ExpectedRow> rows, String column) {
+    var result = new LinkedHashMap<String, ExpectedRow>();
+    rows.forEach(row -> result.put(parameterText(row.values().get(column)), row));
+    return Map.copyOf(result);
+  }
+
+  private static List<String> distinctValues(List<ExpectedRow> rows, String column) {
+    return rows.stream().map(row -> parameterText(row.values().get(column)))
+        .distinct().sorted().toList();
+  }
+
+  private static int compareRows(ExpectedRow left, ExpectedRow right, List<Order> order) {
+    return expectedComparator(order, List.of()).compare(left, right);
+  }
+
+  private static Instant databaseNow(Connection connection) throws SQLException {
+    try (var statement = connection.createStatement();
+         var rows = statement.executeQuery("select current_timestamp")) {
+      rows.next();
+      return rows.getObject(1, java.time.OffsetDateTime.class).toInstant();
+    }
+  }
+
+  private static Instant instant(Object value) {
+    if (value instanceof Instant instant) {
+      return instant;
+    }
+    if (value instanceof java.time.OffsetDateTime offsetDateTime) {
+      return offsetDateTime.toInstant();
+    }
+    throw new IllegalArgumentException("PostgreSQL migration timestamp is invalid.");
   }
 
   private static boolean verifyConditionalClaimUnderRollback(

@@ -63,6 +63,20 @@ class MongoMigrationSourceReaderTest {
   }
 
   @Test
+  void usesMongoSimpleBinaryOrderingForBmpAndAstralIdentifiers() throws IOException {
+    var firstInSimpleOrder = "\uE000";
+    var secondInSimpleOrder = "\uD83D\uDE00";
+    client.getDatabase("test").getCollection("application_runtime").insertMany(List.of(
+        envelope(secondInSimpleOrder, 2), envelope(firstInSimpleOrder, 1)));
+
+    var batch = new MongoMigrationSourceReader(client)
+        .readAfter(context(2), kind(), null, 2);
+
+    assertThat(batch.documents()).extracting(MigrationSourceDocument::sourceId)
+        .containsExactly(firstInSimpleOrder, secondInSimpleOrder);
+  }
+
+  @Test
   void rejectsUnknownEnvelopeFieldsWithoutReturningPayloadData() throws IOException {
     var malformed = envelope("lease-a", 1).append("unexpected", "secret-payload");
     client.getDatabase("test").getCollection("application_runtime").insertOne(malformed);
@@ -113,6 +127,10 @@ class MongoMigrationSourceReaderTest {
   }
 
   private static ValidatedMigrationContext context() {
+    return context(1);
+  }
+
+  private static ValidatedMigrationContext context(int batchSize) {
     var request = new MigrationRequest(
         PostgresqlMigrationCommand.SHADOW,
         System.getenv("MONGODB_MIGRATION_TEST_URI"),
@@ -125,7 +143,7 @@ class MongoMigrationSourceReaderTest {
         "release-6",
         UUID.randomUUID(),
         null,
-        1);
+        batchSize);
     return new ValidatedMigrationContext(
         request,
         new MigrationDatabaseIdentity("127.0.0.1", 57018, "test", null),

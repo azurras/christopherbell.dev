@@ -134,6 +134,60 @@ class MigrationTransformerAllKindsTest {
   }
 
   @Test
+  void everyDeclaredRequiredComplexLeafHasCatalogDrivenRemovalCoverage() throws IOException {
+    var catalog = loadCatalog();
+    var registry = MigrationTransformerRegistry.from(catalog);
+    var terminalRemovals = 0;
+    var nestedRemovals = 0;
+    var listRemovals = 0;
+    var mapRemovals = 0;
+    for (var kind : catalog.kinds()) {
+      for (var mappingEntry : kind.fieldMappings().entrySet()) {
+        var field = mappingEntry.getKey();
+        var mapping = mappingEntry.getValue();
+        for (var requiredPath : mapping.requiredFields()) {
+          var payload = representativePayload(kind);
+          if (Set.of("$item", "$key", "$value").contains(requiredPath)) {
+            var removed = removePseudoPath(payload.get(field));
+            payload.put(field, removed.value());
+            if (kind.sourceKind().equals("upload_session")
+                && Set.of("chunkDigests", "chunkLengths").contains(field)) {
+              var companion = field.equals("chunkDigests") ? "chunkLengths" : "chunkDigests";
+              var values = new LinkedHashMap<>((Map<String, Object>) payload.get(companion));
+              values.remove(removed.mapKey());
+              payload.put(companion, values);
+            }
+            if (requiredPath.equals("$item")) {
+              listRemovals++;
+            } else {
+              mapRemovals++;
+            }
+            registry.require(kind.sourceKind()).transform(new MigrationSourceDocument(
+                kind.sourceKind(), kind.sourceSchemaVersion(), "removed-owner-leaf", payload));
+            continue;
+          }
+          payload.put(field, removeRequiredPath(payload.get(field), requiredPath));
+          if (requiredPath.contains(".") || requiredPath.contains("[]")) {
+            nestedRemovals++;
+          } else {
+            terminalRemovals++;
+          }
+          assertThatThrownBy(() -> registry.require(kind.sourceKind()).transform(
+              new MigrationSourceDocument(
+                  kind.sourceKind(), kind.sourceSchemaVersion(), "removed-required", payload)))
+              .as(kind.sourceKind() + "." + field + "." + requiredPath)
+              .isInstanceOf(MigrationTransformationException.class)
+              .hasMessage("PostgreSQL migration source document is invalid.");
+        }
+      }
+    }
+    assertThat(terminalRemovals).isPositive();
+    assertThat(nestedRemovals).isPositive();
+    assertThat(listRemovals).isPositive();
+    assertThat(mapRemovals).isPositive();
+  }
+
+  @Test
   void everyDeclaredComplexInvariantRejectsItsAdversarialCounterexample() throws IOException {
     var catalog = loadCatalog();
     var registry = MigrationTransformerRegistry.from(catalog);
@@ -325,6 +379,28 @@ class MigrationTransformerAllKindsTest {
     return copy;
   }
 
+  private static Object removeRequiredPath(Object original, String path) {
+    var copy = deepMutableCopy(original);
+    if (copy instanceof java.util.List<?> records) {
+      records.forEach(record -> removePath((Map<String, Object>) record, path));
+    } else {
+      removePath((Map<String, Object>) copy, path);
+    }
+    return copy;
+  }
+
+  private static RemovedPseudoPath removePseudoPath(Object original) {
+    if (original instanceof java.util.Collection<?> collection) {
+      var values = new java.util.ArrayList<>(collection);
+      values.removeFirst();
+      return new RemovedPseudoPath(values, null);
+    }
+    var values = new LinkedHashMap<>((Map<String, Object>) original);
+    var key = values.keySet().iterator().next();
+    values.remove(key);
+    return new RemovedPseudoPath(values, key);
+  }
+
   private static Object deepMutableCopy(Object value) {
     if (value instanceof Map<?, ?> map) {
       var result = new LinkedHashMap<String, Object>();
@@ -438,6 +514,26 @@ class MigrationTransformerAllKindsTest {
     }
   }
 
+  @SuppressWarnings("unchecked")
+  private static void removePath(Map<String, Object> values, String path) {
+    var dot = path.indexOf('.');
+    var segment = dot < 0 ? path : path.substring(0, dot);
+    var list = segment.endsWith("[]");
+    var key = list ? segment.substring(0, segment.length() - 2) : segment;
+    if (dot < 0) {
+      values.remove(key);
+      return;
+    }
+    var remainder = path.substring(dot + 1);
+    if (list) {
+      for (var element : (java.util.List<Object>) values.get(key)) {
+        removePath((Map<String, Object>) element, remainder);
+      }
+    } else {
+      removePath((Map<String, Object>) values.get(key), remainder);
+    }
+  }
+
   private static PostgresqlMigrationCatalog loadCatalog() throws IOException {
     try (var input = MigrationTransformerAllKindsTest.class.getClassLoader()
         .getResourceAsStream("db/migration/postgresql-migration-catalog.yml")) {
@@ -445,4 +541,6 @@ class MigrationTransformerAllKindsTest {
       return new PostgresqlMigrationCatalogLoader().load(input);
     }
   }
+
+  private record RemovedPseudoPath(Object value, String mapKey) {}
 }
