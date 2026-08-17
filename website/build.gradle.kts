@@ -48,10 +48,10 @@ dependencies {
     runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")
 
     // Host metrics; Windows sensor binaries are pinned generated resources below.
-    implementation("com.github.oshi:oshi-core:7.4.2")
+    implementation("com.github.oshi:oshi-core:7.4.4")
     implementation("net.java.dev.jna:jna-platform-jpms:5.19.1")
 
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0")
     implementation("org.webjars:bootstrap:5.3.8")
 
     // Rate Limiting
@@ -61,7 +61,7 @@ dependencies {
     implementation("com.azure:azure-data-tables:12.5.11")
 
     // JSoup
-    implementation("org.jsoup:jsoup:1.22.2")
+    implementation("org.jsoup:jsoup:1.23.1")
 
     // MapStruct
     implementation("org.mapstruct:mapstruct:1.6.3")
