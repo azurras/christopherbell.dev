@@ -41,7 +41,7 @@ kinds:
     expirySemantics: preserve-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, email-uniqueness, username-uniqueness]
-    portQueries: [find-by-id, find-by-email, find-by-username, federation-actor-page]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.AccountTransformer
 
   - sourceCollection: accounts
@@ -63,7 +63,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, follower-target-uniqueness, account-foreign-keys]
-    portQueries: [find-by-id, follower-page, followed-page]
+    portQueries: [follow-exists]
     transformerClass: dev.christopherbell.configuration.persistence.migration.AccountFollowTransformer
 
   - sourceCollection: accounts
@@ -86,7 +86,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, owner-target-type-uniqueness, account-foreign-keys]
-    portQueries: [find-by-id, owner-page, target-page, incoming-block-page]
+    portQueries: [relationship-exists]
     transformerClass: dev.christopherbell.configuration.persistence.migration.AccountTrustRelationshipTransformer
 
   - sourceCollection: accounts
@@ -111,7 +111,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, lifecycle-state]
-    portQueries: [find-by-id, active-job-page]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.AccountDeletionJobTransformer
 
   - sourceCollection: sessions
@@ -141,7 +141,7 @@ kinds:
     expirySemantics: ttl-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, account-foreign-key, absolute-expiry]
-    portQueries: [find-by-id, find-by-account, expiration-page]
+    portQueries: [find-authentication-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.BrowserSessionTransformer
 
   - sourceCollection: sessions
@@ -165,7 +165,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, owner-conversation-uniqueness]
-    portQueries: [find-by-id, find-by-owner-and-conversation]
+    portQueries: [archive-conversation]
     transformerClass: dev.christopherbell.configuration.persistence.migration.ConversationArchiveStateTransformer
 
   - sourceCollection: communications
@@ -192,7 +192,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, participant-foreign-keys, conversation-order]
-    portQueries: [find-by-id, conversation-page, participant-page, unread-by-sender]
+    portQueries: [conversation-page, participant-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MessageTransformer
 
   - sourceCollection: communications
@@ -251,7 +251,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, account-uniqueness]
-    portQueries: [find-by-id, find-by-account]
+    portQueries: [find-by-account]
     transformerClass: dev.christopherbell.configuration.persistence.migration.NotificationPreferenceTransformer
 
   - sourceCollection: communications
@@ -275,7 +275,7 @@ kinds:
     expirySemantics: ttl-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, expiration-deadline]
-    portQueries: [find-by-id, expiration-page]
+    portQueries: [try-acquire]
     transformerClass: dev.christopherbell.configuration.persistence.migration.NotificationDeliveryGuardTransformer
 
   - sourceCollection: communications
@@ -299,7 +299,7 @@ kinds:
     expirySemantics: ttl-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, expiration-deadline]
-    portQueries: [find-by-id, expiration-page]
+    portQueries: [try-acquire]
     transformerClass: dev.christopherbell.configuration.persistence.migration.NotificationRateLimitTransformer
 
   - sourceCollection: content
@@ -336,7 +336,7 @@ kinds:
     expirySemantics: preserve-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, author-foreign-key, thread-foreign-keys, feed-order]
-    portQueries: [find-by-id, author-feed-page, public-feed-page, thread-page, expiration-page, discovery-page]
+    portQueries: [find-by-id, author-feed-page, public-feed-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.PostTransformer
 
   - sourceCollection: content
@@ -358,7 +358,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, post-account-uniqueness, foreign-keys]
-    portQueries: [find-by-id, find-by-post-and-account, post-like-page]
+    portQueries: [like-exists]
     transformerClass: dev.christopherbell.configuration.persistence.migration.PostLikeTransformer
 
   - sourceCollection: content
@@ -397,7 +397,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, open-dedupe-uniqueness, moderation-order]
-    portQueries: [find-by-id, moderation-page, status-page, find-open-dedupe]
+    portQueries: [find-by-id, moderation-page, find-open-dedupe]
     transformerClass: dev.christopherbell.configuration.persistence.migration.PostReportTransformer
 
   - sourceCollection: content
@@ -419,7 +419,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, account-root-uniqueness, foreign-keys]
-    portQueries: [find-by-id, find-by-account-and-root, account-page]
+    portQueries: [find-by-account-and-root, account-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.HiddenPostThreadTransformer
 
   - sourceCollection: content
@@ -443,7 +443,7 @@ kinds:
     expirySemantics: ttl-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, expiration-deadline]
-    portQueries: [find-by-url, expiration-page]
+    portQueries: [find-by-id, delete-expired]
     transformerClass: dev.christopherbell.configuration.persistence.migration.PostLinkPreviewCacheTransformer
 
   - sourceCollection: federation
@@ -465,7 +465,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, scan-cursor]
-    portQueries: [find-by-id, outbound-create-cursor]
+    portQueries: [load-cursor]
     transformerClass: dev.christopherbell.configuration.persistence.migration.FederationScanStateTransformer
 
   - sourceCollection: federation
@@ -497,7 +497,7 @@ kinds:
     expirySemantics: preserve-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, post-peer-uniqueness, delivery-claim-order]
-    portQueries: [find-by-id, due-job-page, expired-claim-page, find-by-post-and-peer]
+    portQueries: [claim-due, enqueue-if-absent]
     transformerClass: dev.christopherbell.configuration.persistence.migration.FederationDeliveryJobTransformer
 
   - sourceCollection: music
@@ -538,7 +538,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, path-uniqueness]
-    portQueries: [find-by-id, find-by-path, artist-page, album-page, genre-page, radio-candidate-page]
+    portQueries: [find-by-id, catalog-search]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicTrackTransformer
 
   - sourceCollection: music
@@ -563,7 +563,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, normalized-name-uniqueness, playlist-order]
-    portQueries: [find-by-id, find-by-normalized-name, playlist-track-order]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicPlaylistTransformer
 
   - sourceCollection: music
@@ -596,7 +596,7 @@ kinds:
     expirySemantics: preserve-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, track-foreign-key, expiration-deadline]
-    portQueries: [find-by-id, track-edit-page, expiration-page]
+    portQueries: [find-by-id, expiration-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicMetadataEditTransformer
 
   - sourceCollection: music
@@ -619,7 +619,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, runtime-kind-shape, queue-order]
-    portQueries: [find-by-id, global-queue, global-radio]
+    portQueries: [global-queue, global-radio]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicRuntimeStateTransformer
 
   - sourceCollection: music
@@ -645,7 +645,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, station-order]
-    portQueries: [find-by-id, station-sequence-page, occurred-at-page]
+    portQueries: [station-sequence-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicRadioHistoryTransformer
 
   - sourceCollection: music
@@ -671,7 +671,7 @@ kinds:
     expirySemantics: ttl-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, expiration-deadline]
-    portQueries: [find-by-id, expiration-page]
+    portQueries: [recent-page, delete-expired]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicAccessAttemptTransformer
 
   - sourceCollection: whatsforlunch
@@ -705,7 +705,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, normalized-name-uniqueness, coordinate-pairing]
-    portQueries: [find-by-id, find-by-normalized-name, location-inventory-page, city-inventory-page, state-inventory-page]
+    portQueries: [find-by-id, find-by-normalized-name, coordinate-bounds]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RestaurantTransformer
 
   - sourceCollection: whatsforlunch
@@ -730,7 +730,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, restaurant-account-uniqueness, foreign-keys]
-    portQueries: [find-by-id, find-by-restaurant-and-account, restaurant-vote-page]
+    portQueries: [find-by-restaurant-and-account]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RestaurantVoteTransformer
 
   - sourceCollection: whatsforlunch
@@ -753,7 +753,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, restaurant-account-uniqueness, foreign-keys]
-    portQueries: [find-by-id, find-by-restaurant-and-account, account-favorite-page]
+    portQueries: [find-by-restaurant-and-account, account-favorite-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RestaurantFavoriteTransformer
 
   - sourceCollection: whatsforlunch
@@ -807,7 +807,7 @@ kinds:
     expirySemantics: ttl-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, participant-order, restaurant-order, revision, expiration-deadline]
-    portQueries: [find-by-id, participant-session-page, creator-session-page, active-session]
+    portQueries: [find-by-id, participant-session-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.WhatsForLunchSessionTransformer
 
   - sourceCollection: whatsforlunch
@@ -829,7 +829,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, restaurant-order]
-    portQueries: [find-by-id, find-by-pick-date]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.DailyLunchPicksTransformer
 
   - sourceCollection: whatsforlunch
@@ -860,7 +860,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, lifecycle-state]
-    portQueries: [find-by-id, scheduler-state]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RestaurantImportStateTransformer
 
   - sourceCollection: whatsforlunch
@@ -885,7 +885,7 @@ kinds:
     expirySemantics: ttl-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, expiration-deadline]
-    portQueries: [find-by-id, actor-created-page, expiration-page]
+    portQueries: [claim]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RestaurantImportPreviewTransformer
 
   - sourceCollection: shared_folder
@@ -913,7 +913,7 @@ kinds:
     expirySemantics: ttl-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, audit-order, expiration-deadline]
-    portQueries: [find-by-id, occurred-page, account-page, action-page, outcome-page, path-page]
+    portQueries: [search]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderAuditEventTransformer
 
   - sourceCollection: shared_folder
@@ -936,7 +936,7 @@ kinds:
     expirySemantics: database-time-lease
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, lease-expiration]
-    portQueries: [find-by-id, claim-expired-lease]
+    portQueries: [claim-expired-lease]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderMaintenanceLeaseTransformer
 
   - sourceCollection: shared_folder
@@ -976,7 +976,7 @@ kinds:
     expirySemantics: ttl-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, active-cache-uniqueness, cleanup-order, expiration-deadline]
-    portQueries: [find-by-id, least-recently-used-page, cleanup-due-page, owner-page, status-page]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MediaJobTransformer
 
   - sourceCollection: shared_folder
@@ -1009,7 +1009,7 @@ kinds:
     expirySemantics: preserve-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, recovery-state]
-    portQueries: [find-by-id, owner-page, updated-page, lease-recovery-page]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderMutationRecoveryTransformer
 
   - sourceCollection: shared_folder
@@ -1035,7 +1035,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, radio-state-shape, duration-order]
-    portQueries: [find-by-id, station-state]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderRadioTransformer
 
   - sourceCollection: shared_folder
@@ -1067,7 +1067,7 @@ kinds:
     expirySemantics: preserve-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, recycle-state-order, replacement-pairing]
-    portQueries: [find-by-id, state-deleted-page, recovery-due-page, expiry-page]
+    portQueries: [find-by-id, state-deleted-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderRecycleItemTransformer
 
   - sourceCollection: shared_folder
@@ -1117,7 +1117,7 @@ kinds:
     expirySemantics: ttl-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, chunk-map-equivalence, upload-state, expiration-deadline]
-    portQueries: [find-by-id, owner-state-page, maintenance-due-page, expiration-page]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderUploadSessionTransformer
 
   - sourceCollection: vehicles
@@ -1197,7 +1197,7 @@ kinds:
     expirySemantics: ttl-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, vin-identity, raw-map-equivalence, expiration-deadline]
-    portQueries: [find-by-vin, expiration-page]
+    portQueries: [find-by-vin]
     transformerClass: dev.christopherbell.configuration.persistence.migration.VehicleVinDecodeCacheTransformer
 
   - sourceCollection: vehicles
@@ -1228,7 +1228,7 @@ kinds:
     expirySemantics: preserve-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, throttle-state]
-    portQueries: [find-by-id, collector-state]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.NhtsaVinImportStateTransformer
 
   - sourceCollection: vehicles
@@ -1260,7 +1260,7 @@ kinds:
     expirySemantics: preserve-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, throttle-state, robots-policy]
-    portQueries: [find-by-id, collector-state]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RandomVinImportStateTransformer
 
   - sourceCollection: location
@@ -1309,7 +1309,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, dataset-identity]
-    portQueries: [find-by-id, import-state]
+    portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.ZipCoordinateImportStateTransformer
 
   - sourceCollection: canes_box_tracker
@@ -1361,7 +1361,7 @@ kinds:
     expirySemantics: database-time-lease
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, lease-expiration]
-    portQueries: [find-by-id, claim-expired-lease]
+    portQueries: [claim-expired-lease]
     transformerClass: dev.christopherbell.configuration.persistence.migration.ApplicationLeaseTransformer
 
   - sourceCollection: application_runtime
@@ -1386,7 +1386,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, status-completed-order]
-    portQueries: [find-by-id, status-completed-page]
+    portQueries: [save]
     transformerClass: dev.christopherbell.configuration.persistence.migration.ScheduledCollectorRunTransformer
 
   - sourceCollection: application_migrations
@@ -1411,8 +1411,8 @@ kinds:
     versionSemantics: initialize-zero
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
-    reconciliation: [row-count, canonical-record-hash, status-completed-order]
-    portQueries: [find-by-id, status-completed-page]
+    reconciliation: [row-count, canonical-record-hash, status-completed-order, port-query-not-applicable]
+    portQueries: []
     transformerClass: dev.christopherbell.configuration.persistence.migration.ApplicationMigrationRecordTransformer
 
   - sourceCollection: application_migrations
@@ -1445,8 +1445,8 @@ kinds:
     versionSemantics: preserve-revision
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
-    reconciliation: [row-count, canonical-record-hash, source-order, metric-order]
-    portQueries: [find-by-id, target-active-ledger]
+    reconciliation: [row-count, canonical-record-hash, source-order, metric-order, port-query-not-applicable]
+    portQueries: []
     transformerClass: dev.christopherbell.configuration.persistence.migration.DomainCollectionCutoverTransformer
 
   - sourceCollection: admin_activity
@@ -1477,7 +1477,7 @@ kinds:
     expirySemantics: none
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, activity-order, map-equivalence]
-    portQueries: [find-by-id, created-page, action-page, target-page, actor-page]
+    portQueries: [find-by-id, query]
     transformerClass: dev.christopherbell.configuration.persistence.migration.AdminActivityTransformer
 
   - sourceCollection: admin_activity
@@ -1499,5 +1499,5 @@ kinds:
     expirySemantics: preserve-deadline
     canonicalHash: sha256-rfc8785-v1
     reconciliation: [row-count, canonical-record-hash, fixed-key]
-    portQueries: [find-by-id, pending-machine-power]
+    portQueries: [active, reserve]
     transformerClass: dev.christopherbell.configuration.persistence.migration.PendingActionTransformer

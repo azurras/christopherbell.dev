@@ -2,6 +2,7 @@ package dev.christopherbell.configuration.persistence.migration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.zaxxer.hikari.HikariDataSource;
 import com.mongodb.client.MongoClients;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -25,7 +26,6 @@ import org.bson.types.Decimal128;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 @EnabledIfEnvironmentVariable(named = "POSTGRESQL_INTEGRATION_TESTS", matches = "enabled")
 @EnabledIfEnvironmentVariable(named = "MONGODB_MIGRATION_TEST_URI", matches = ".+")
@@ -45,6 +45,10 @@ class MongoToPostgresqlMigrationAcceptanceTest {
       var inserted = new ArrayList<Document>();
       for (var kind : catalog.kinds()) {
         var id = switch (kind.sourceKind()) {
+          case "conversation_archive_state" -> "task6-all52-account:Café 🛰";
+          case "music_runtime_state" -> "queue";
+          case "radio_state" -> "shared-folder-radio";
+          case "pending_action" -> "machine-power";
           case "preference" -> "task6-all52-account";
           case "vin_decode_cache" -> "JM1TEST0000000000";
           case "zip_coordinate" -> "78701";
@@ -75,72 +79,74 @@ class MongoToPostgresqlMigrationAcceptanceTest {
           .getCollection(item.getString("collection"))
           .find(new Document("_id", item.get("_id"))).first().toJson()).toList();
         var registry = MigrationTransformerRegistry.from(catalog);
-        var dataSource = dataSource(database);
-        var target = new JdbcMigrationTargetStore(
-            dataSource, new JdbcRelationalRowPublisher(), catalog);
-        var source = new MongoMigrationSourceReader(mongo);
-        var preflight = new MigrationPreflight(new DirectMigrationIdentityProbe(dataSource));
-        var engine = new KindMigrationEngine(source, target, registry::require);
-        var runner = new PostgresqlMigrationRunner(
-          preflight,
-          catalog,
-          engine,
-          new MigrationReconciler(target),
-          target,
-          expected -> directory == null ? expected : FinalizeEvidenceLoader.loadForTest(
-              directory, directory.resolve("finalize.properties"),
-              directory.resolve("authority.key")),
-          (context, evidence) -> MongoFinalizationFreezeGuard.acquire(mongo));
-        var request = request(database, mongoUri);
+        try (var dataSource = dataSource(database)) {
+          var target = new JdbcMigrationTargetStore(
+              dataSource, new JdbcRelationalRowPublisher(), catalog);
+          var source = new MongoMigrationSourceReader(mongo);
+          var preflight = new MigrationPreflight(new DirectMigrationIdentityProbe(dataSource));
+          var engine = new KindMigrationEngine(source, target, registry::require);
+          var runner = new PostgresqlMigrationRunner(
+              preflight,
+              catalog,
+              engine,
+              new MigrationReconciler(target),
+              target,
+              expected -> directory == null ? expected : FinalizeEvidenceLoader.loadForTest(
+                  directory, directory.resolve("finalize.properties"),
+                  directory.resolve("authority.key")),
+              (context, evidence) -> MongoFinalizationFreezeGuard.acquire(mongo));
+          var request = request(database, mongoUri);
 
-        var first = runner.run(request);
-        var second = directory == null ? runner.run(request) : first;
+          var first = runner.run(request);
+          var second = directory == null ? runner.run(request) : first;
 
-        assertThat(first.kinds()).hasSize(52).allSatisfy(status -> {
-          assertThat(status.checkpoint().complete()).isTrue();
-          assertThat(status.checkpoint().sourceCount())
-              .isEqualTo(status.sourceKind().equals("account") ? 2 : 1);
-          assertThat(status.published()).isFalse();
-        });
-        assertThat(second.statusDigest()).isEqualTo(first.statusDigest());
-        assertThat(sourceCounts(database)).containsExactly(53L, 52L);
-        var stagedTables = stagedTables(database);
-        assertThat(stagedTables).hasSize(52);
-        assertThat(catalog.kinds()).allSatisfy(kind -> {
-          assertThat(stagedTables).containsKey(kind.sourceKind());
-          assertThat(stagedTables.get(kind.sourceKind()))
-              .contains(kind.targetTables().getFirst())
-              .isSubsetOf(kind.targetTables().toArray(String[]::new));
-        });
-        assertThat(stagedAccountRows(database)).contains(
-            "account_federation_identity", "account_moderation_audit_value");
-        assertThat(rootCounts(database, catalog)).containsOnly(1L, 2L);
-        assertThat(accountBinary(database)).containsExactly(new byte[12], new byte[16]);
-        if (directory != null) {
-          var context = preflight.validate(request);
-          var snapshots = new ArrayList<MigrationSourceSnapshot>();
-          for (var kind : catalog.kinds().stream()
-              .sorted(java.util.Comparator.comparingInt(
-                  PostgresqlMigrationCatalog.Kind::loadOrder)).toList()) {
-            snapshots.add(engine.requireSourceSnapshot(
-                context, kind, target.checkpoint(context, kind)));
-          }
-          var lockToken = UUID.fromString("00000000-0000-0000-0000-000000000607");
-          var evidence = authenticatedEvidence(
-              directory, database, mongoUri, MigrationSourceSnapshot.runDigest(snapshots), lockToken);
-          var finalizeRequest = request(database, mongoUri, lockToken, evidence);
-          var published = runner.run(finalizeRequest);
-          var replayed = runner.run(finalizeRequest);
-          assertThat(published.kinds()).hasSize(52).allSatisfy(status -> {
+          assertThat(first.kinds()).hasSize(52).allSatisfy(status -> {
+            assertThat(status.checkpoint().complete()).isTrue();
             assertThat(status.checkpoint().sourceCount())
                 .isEqualTo(status.sourceKind().equals("account") ? 2 : 1);
-            assertThat(status.published()).isTrue();
-            assertThat(status.publishedCount())
-                .isEqualTo(status.sourceKind().equals("account") ? 2 : 1);
+            assertThat(status.published()).isFalse();
           });
-          assertThat(replayed.statusDigest()).isEqualTo(published.statusDigest());
+          assertThat(second.statusDigest()).isEqualTo(first.statusDigest());
+          assertThat(sourceCounts(database)).containsExactly(53L, 52L);
+          var stagedTables = stagedTables(database);
+          assertThat(stagedTables).hasSize(52);
+          assertThat(catalog.kinds()).allSatisfy(kind -> {
+            assertThat(stagedTables).containsKey(kind.sourceKind());
+            assertThat(stagedTables.get(kind.sourceKind()))
+                .contains(kind.targetTables().getFirst())
+                .isSubsetOf(kind.targetTables().toArray(String[]::new));
+          });
+          assertThat(stagedAccountRows(database)).contains(
+              "account_federation_identity", "account_moderation_audit_value");
           assertThat(rootCounts(database, catalog)).containsOnly(1L, 2L);
           assertThat(accountBinary(database)).containsExactly(new byte[12], new byte[16]);
+          if (directory != null) {
+            var context = preflight.validate(request);
+            var snapshots = new ArrayList<MigrationSourceSnapshot>();
+            for (var kind : catalog.kinds().stream()
+                .sorted(java.util.Comparator.comparingInt(
+                    PostgresqlMigrationCatalog.Kind::loadOrder)).toList()) {
+              snapshots.add(engine.requireSourceSnapshot(
+                  context, kind, target.checkpoint(context, kind)));
+            }
+            var lockToken = UUID.fromString("00000000-0000-0000-0000-000000000607");
+            var evidence = authenticatedEvidence(
+                directory, database, mongoUri, MigrationSourceSnapshot.runDigest(snapshots),
+                lockToken);
+            var finalizeRequest = request(database, mongoUri, lockToken, evidence);
+            var published = runner.run(finalizeRequest);
+            var replayed = runner.run(finalizeRequest);
+            assertThat(published.kinds()).hasSize(52).allSatisfy(status -> {
+              assertThat(status.checkpoint().sourceCount())
+                  .isEqualTo(status.sourceKind().equals("account") ? 2 : 1);
+              assertThat(status.published()).isTrue();
+              assertThat(status.publishedCount())
+                  .isEqualTo(status.sourceKind().equals("account") ? 2 : 1);
+            });
+            assertThat(replayed.statusDigest()).isEqualTo(published.statusDigest());
+            assertThat(rootCounts(database, catalog)).containsOnly(1L, 2L);
+            assertThat(accountBinary(database)).containsExactly(new byte[12], new byte[16]);
+          }
         }
         var mongoAfter = inserted.stream().map(item -> mongo.getDatabase("test")
           .getCollection(item.getString("collection"))
@@ -213,7 +219,19 @@ class MongoToPostgresqlMigrationAcceptanceTest {
         result.put("status", "SUCCESS");
         result.remove("failureCategory");
       }
-      case "federation_delivery_job" -> result.put("lastStatus", 200);
+      case "post_report" -> {
+        result.put("reportType", "SPAM");
+        result.put("targetType", "POST");
+        result.put("status", "OPEN");
+        result.put("reporterUsername", "migration-owner");
+        result.remove("resolution");
+        result.remove("resolvedBy");
+        result.remove("resolvedOn");
+      }
+      case "federation_delivery_job" -> {
+        result.put("peerInbox", "https://federation.example.test/inbox");
+        result.put("lastStatus", 200);
+      }
       case "audit_event" -> result.put("clientIp", "192.0.2.1");
       case "price_snapshot" -> result.put("currency", "USD");
       case "music_metadata_edit" -> result.put("backupSha256", "a".repeat(64));
@@ -223,6 +241,10 @@ class MongoToPostgresqlMigrationAcceptanceTest {
         result.put("chunkDigests", Map.of("a", "a".repeat(64), "b", "b".repeat(64)));
       }
       case "media_job", "mutation_recovery" -> result.put("ownerId", ids.get("account"));
+      case "recycle_item" -> result.put("state", "RECYCLED");
+      case "radio_state" -> result.put("durationSeconds", 3.5d);
+      case "pending_action" -> result.put(
+          "executeAt", ((Instant) result.get("acceptedAt")).plusSeconds(60));
       case "post" -> {
         result.put("rootId", ids.get("post"));
         result.remove("parentId");
@@ -242,6 +264,7 @@ class MongoToPostgresqlMigrationAcceptanceTest {
         result.put("restaurantIds", java.util.List.of(ids.get("restaurant")));
         result.put("votesByAccountId", Map.of(ids.get("account"), ids.get("restaurant")));
       }
+      case "import_preview" -> result.remove("consumedOn");
       case "restaurant" -> {
         result.put("createdBy", ids.get("account"));
         result.put("lastModifiedBy", ids.get("account"));
@@ -403,10 +426,16 @@ class MongoToPostgresqlMigrationAcceptanceTest {
         .build()));
   }
 
-  private static DriverManagerDataSource dataSource(
+  private static HikariDataSource dataSource(
       PostgresqlSchemaTestSupport.MigratedDatabase database) {
     var jdbc = database.jdbcConfiguration();
-    return new DriverManagerDataSource(jdbc.url(), jdbc.username(), jdbc.password());
+    var dataSource = new HikariDataSource();
+    dataSource.setJdbcUrl(jdbc.url());
+    dataSource.setUsername(jdbc.username());
+    dataSource.setPassword(jdbc.password());
+    dataSource.setMaximumPoolSize(2);
+    dataSource.setMinimumIdle(0);
+    return dataSource;
   }
 
   private static java.util.List<Long> sourceCounts(

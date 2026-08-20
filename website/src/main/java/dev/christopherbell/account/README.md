@@ -7,6 +7,8 @@ subfeature services own the larger account workflows.
 ## What Lives Here
 
 - Account CRUD and lookup facade methods.
+- `api.AccountMigrationVerifier` publishes narrow real-adapter parity operations for the guarded
+  MongoDB-to-PostgreSQL cutover.
 - Account creation returns `201 Created` with a `Location` header for the
   canonical account resource. Synchronous updates and deletes return `200 OK`,
   and bodyless delete routes do not require a request `Content-Type` header.

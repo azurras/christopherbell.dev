@@ -6,6 +6,8 @@ Tracks weekly Raising Canes Box Combo pricing as a public Tool.
 
 - `CanesBoxTrackerController` exposes the public history API at
   `/api/canes-box-tracker/2026-06-04/history`.
+- `api.CanesBoxTrackerMigrationVerifier` publishes real price-history adapter parity operations
+  for the guarded MongoDB-to-PostgreSQL cutover.
 - `CanesBoxTrackerService` runs the scheduled weekly collection job, averages
   verified metro prices, persists snapshots, and returns chart-ready history.
 - `OfficialCanesBoxPriceClient` talks to the official Raising Canes ordering

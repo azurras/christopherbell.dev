@@ -21,6 +21,9 @@ final class ProductionFinalizationFreezeGuard implements FinalizationFreezeGuard
   private final FileLock deploymentLock;
   private final BooleanSupplier websiteStopped;
   private final MongoFinalizationFreezeGuard mongoGuard;
+  private boolean mongoReleased;
+  private boolean deploymentLockReleased;
+  private boolean deploymentChannelClosed;
   private boolean open = true;
 
   private ProductionFinalizationFreezeGuard(
@@ -89,31 +92,38 @@ final class ProductionFinalizationFreezeGuard implements FinalizationFreezeGuard
   }
 
   @Override
-  public void close() {
+  public synchronized void close() {
     if (!open) {
       return;
     }
-    open = false;
-    RuntimeException failure = null;
-    try {
+    if (!mongoReleased) {
       mongoGuard.close();
-    } catch (RuntimeException closeFailure) {
-      failure = closeFailure;
+      mongoReleased = true;
     }
-    try {
-      deploymentLock.release();
-      deploymentChannel.close();
-    } catch (IOException closeFailure) {
-      if (failure == null) {
+    RuntimeException failure = null;
+    if (!deploymentLockReleased) {
+      try {
+        deploymentLock.release();
+        deploymentLockReleased = true;
+      } catch (IOException closeFailure) {
         failure = new MigrationStorageException(
             "Production deployment lock could not be released.", closeFailure);
-      } else {
-        failure.addSuppressed(closeFailure);
       }
     }
-    if (failure != null) {
-      throw failure;
+    if (failure == null && !deploymentChannelClosed) {
+      try {
+        deploymentChannel.close();
+        deploymentChannelClosed = true;
+      } catch (IOException closeFailure) {
+        failure = new MigrationStorageException(
+            "Production deployment lock could not be released.", closeFailure);
+      }
     }
+    if (failure == null) {
+      open = false;
+      return;
+    }
+    throw failure;
   }
 
   private static void requireWebsiteStopped(BooleanSupplier websiteStopped) {

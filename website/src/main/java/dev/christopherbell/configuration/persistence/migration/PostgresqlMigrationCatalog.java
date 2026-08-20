@@ -108,7 +108,8 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
       }
       reconciliation = copyRules(reconciliation, sourceKind + ".reconciliation");
       portQueries = copyRules(portQueries, sourceKind + ".portQueries");
-      if (reconciliation.isEmpty() || portQueries.isEmpty()
+      var queryNotApplicable = reconciliation.contains("port-query-not-applicable");
+      if (reconciliation.isEmpty() || portQueries.isEmpty() != queryNotApplicable
           || transformerClass == null || !JAVA_CLASS.matcher(transformerClass).matches()) {
         throw invalid(sourceKind + ".transformerClass");
       }

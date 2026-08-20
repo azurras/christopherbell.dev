@@ -6,6 +6,8 @@ Owns Void posts and feed behavior.
 
 - `PostController` owns the HTTP contract and keeps request parsing thin.
 - `PostService` is a facade that keeps controller-facing methods stable.
+- `api.PostMigrationVerifier` publishes real post, feed, like, hidden-thread, and preview-cache
+  adapter parity operations for the guarded MongoDB-to-PostgreSQL cutover.
 - Post creation and reply persistence live under `creation`.
 - Global, following, user, and current-user feeds live under `feed`.
 - Single-post and thread retrieval live under `thread`.

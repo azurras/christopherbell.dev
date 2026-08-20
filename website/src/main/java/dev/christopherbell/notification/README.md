@@ -13,6 +13,8 @@ Owns in-app notifications.
 - Message notifications created from direct messages.
 - User category preferences under `preference`.
 - Inbox behavior under `inbox`.
+- `api.NotificationMigrationVerifier` publishes real lookup, inbox, unread-count, preference,
+  and fanout-guard adapter parity operations for the guarded MongoDB-to-PostgreSQL cutover.
 - Unread counts, notification listing, and mark-read behavior.
 - MongoDB document indexes and PostgreSQL relational indexes cover account inbox
   ordering and unread-count lookups. Migration rollout verifies both strategies

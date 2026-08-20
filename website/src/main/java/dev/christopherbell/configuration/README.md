@@ -5,6 +5,8 @@ Owns application-wide Spring and web infrastructure.
 ## What Lives Here
 
 - `persistence` owns the closed MongoDB/PostgreSQL transition selector and the PostgreSQL test database guard. Only `app.persistence.backend` selects an adapter; test contexts require database `test` and a disposable `cbtest_` schema before fixtures may write.
+- The same package owns narrow PostgreSQL migration-verification support and the real platform
+  lease/run-store parity operations; these are support boundaries, not runtime persistence ports.
 
 - Security configuration and route access rules under `security`.
 - Public static browser assets such as `/favicon.ico`.

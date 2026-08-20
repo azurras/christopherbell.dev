@@ -37,6 +37,43 @@ class MongoFinalizationFreezeGuardTest {
   }
 
   @Test
+  void directlyUnlocksWhenTheInitialFsyncCommandOutcomeIsAmbiguous() {
+    var client = mock(MongoClient.class);
+    var admin = mock(MongoDatabase.class);
+    var commandFailure = new IllegalStateException("fsync response timed out");
+    when(client.getDatabase("admin")).thenReturn(admin);
+    when(admin.runCommand(any(Document.class)))
+        .thenThrow(commandFailure)
+        .thenReturn(new Document("ok", 1));
+
+    assertThatThrownBy(() -> MongoFinalizationFreezeGuard.acquire(client))
+        .isInstanceOf(MigrationStorageException.class)
+        .hasCause(commandFailure);
+
+    verify(admin, times(2)).runCommand(any(Document.class));
+  }
+
+  @Test
+  void preservesAmbiguousFsyncAndDirectUnlockFailures() {
+    var client = mock(MongoClient.class);
+    var admin = mock(MongoDatabase.class);
+    var commandFailure = new IllegalStateException("fsync response timed out");
+    var unlockFailure = new IllegalStateException("fsyncUnlock response timed out");
+    when(client.getDatabase("admin")).thenReturn(admin);
+    when(admin.runCommand(any(Document.class)))
+        .thenThrow(commandFailure)
+        .thenThrow(unlockFailure);
+
+    assertThatThrownBy(() -> MongoFinalizationFreezeGuard.acquire(client))
+        .isInstanceOf(MigrationStorageException.class)
+        .hasCause(commandFailure)
+        .satisfies(failure -> assertThat(failure.getCause().getSuppressed())
+            .containsExactly(unlockFailure));
+
+    verify(admin, times(2)).runCommand(any(Document.class));
+  }
+
+  @Test
   void directlyUnlocksAfterCloseVerificationFails() {
     var client = mock(MongoClient.class);
     var admin = mock(MongoDatabase.class);

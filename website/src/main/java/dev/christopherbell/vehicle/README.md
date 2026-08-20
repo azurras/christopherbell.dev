@@ -6,6 +6,8 @@ Owns vehicle storage, VIN decoding, and vehicle data enrichment.
 
 - `VehicleController`, `VehicleControllerExceptionHandler`, and `VehicleService`
   keep the public API surface stable.
+- `api.VehicleMigrationVerifier` publishes real vehicle, VIN, cache, import, and decode adapter
+  parity operations for the guarded MongoDB-to-PostgreSQL cutover.
 - `core` owns CRUD, mapping, repository access, and data collection state reads.
 - `vin` owns VIN-only and batch VIN vehicle creation.
 - CRUD and VIN persistence outages use the shared service-unavailable contract

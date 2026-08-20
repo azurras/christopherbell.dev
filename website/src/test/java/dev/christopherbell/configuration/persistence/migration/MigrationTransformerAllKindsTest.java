@@ -134,13 +134,13 @@ class MigrationTransformerAllKindsTest {
   }
 
   @Test
-  void everyDeclaredRequiredComplexLeafHasCatalogDrivenRemovalCoverage() throws IOException {
+  void everyTrulyRequiredNamedLeafRejectsRemovalInsideItsRetainedOwner() throws IOException {
     var catalog = loadCatalog();
     var registry = MigrationTransformerRegistry.from(catalog);
+    var declaredNamedLeaves = 0;
     var terminalRemovals = 0;
     var nestedRemovals = 0;
-    var listRemovals = 0;
-    var mapRemovals = 0;
+    var retainedListElementRemovals = 0;
     for (var kind : catalog.kinds()) {
       for (var mappingEntry : kind.fieldMappings().entrySet()) {
         var field = mappingEntry.getKey();
@@ -148,26 +148,14 @@ class MigrationTransformerAllKindsTest {
         for (var requiredPath : mapping.requiredFields()) {
           var payload = representativePayload(kind);
           if (Set.of("$item", "$key", "$value").contains(requiredPath)) {
-            var removed = removePseudoPath(payload.get(field));
-            payload.put(field, removed.value());
-            if (kind.sourceKind().equals("upload_session")
-                && Set.of("chunkDigests", "chunkLengths").contains(field)) {
-              var companion = field.equals("chunkDigests") ? "chunkLengths" : "chunkDigests";
-              var values = new LinkedHashMap<>((Map<String, Object>) payload.get(companion));
-              values.remove(removed.mapKey());
-              payload.put(companion, values);
-            }
-            if (requiredPath.equals("$item")) {
-              listRemovals++;
-            } else {
-              mapRemovals++;
-            }
-            registry.require(kind.sourceKind()).transform(new MigrationSourceDocument(
-                kind.sourceKind(), kind.sourceSchemaVersion(), "removed-owner-leaf", payload));
             continue;
           }
+          declaredNamedLeaves++;
           payload.put(field, removeRequiredPath(payload.get(field), requiredPath));
-          if (requiredPath.contains(".") || requiredPath.contains("[]")) {
+          if (requiredPath.contains("[]")) {
+            retainedListElementRemovals++;
+            nestedRemovals++;
+          } else if (requiredPath.contains(".")) {
             nestedRemovals++;
           } else {
             terminalRemovals++;
@@ -183,8 +171,48 @@ class MigrationTransformerAllKindsTest {
     }
     assertThat(terminalRemovals).isPositive();
     assertThat(nestedRemovals).isPositive();
-    assertThat(listRemovals).isPositive();
-    assertThat(mapRemovals).isPositive();
+    assertThat(retainedListElementRemovals).isPositive();
+    assertThat(terminalRemovals + nestedRemovals).isEqualTo(declaredNamedLeaves);
+  }
+
+  @Test
+  void pseudoPathsRejectNullEntriesButAllowExplicitCardinalityChanges() throws IOException {
+    var catalog = loadCatalog();
+    var registry = MigrationTransformerRegistry.from(catalog);
+    var listCardinalityChanges = 0;
+    var mapCardinalityChanges = 0;
+    for (var kind : catalog.kinds()) {
+      for (var mappingEntry : kind.fieldMappings().entrySet()) {
+        var field = mappingEntry.getKey();
+        for (var requiredPath : mappingEntry.getValue().requiredFields()) {
+          if (!Set.of("$item", "$key", "$value").contains(requiredPath)) {
+            continue;
+          }
+          var nullPayload = representativePayload(kind);
+          assertThatThrownBy(() -> {
+            nullPayload.put(field, nullRequiredPath(nullPayload.get(field), requiredPath));
+            registry.require(kind.sourceKind()).transform(new MigrationSourceDocument(
+                kind.sourceKind(), kind.sourceSchemaVersion(), "null-pseudo-entry", nullPayload));
+          }).as(kind.sourceKind() + "." + field + "." + requiredPath)
+              .isInstanceOf(MigrationTransformationException.class)
+              .hasMessage("PostgreSQL migration source document is invalid.");
+
+          var payload = representativePayload(kind);
+          var removed = removePseudoPath(payload.get(field));
+          payload.put(field, removed.value());
+          alignUploadChunkMaps(kind, field, payload, removed.mapKey());
+          registry.require(kind.sourceKind()).transform(new MigrationSourceDocument(
+              kind.sourceKind(), kind.sourceSchemaVersion(), "cardinality-change", payload));
+          if (requiredPath.equals("$item")) {
+            listCardinalityChanges++;
+          } else {
+            mapCardinalityChanges++;
+          }
+        }
+      }
+    }
+    assertThat(listCardinalityChanges).isPositive();
+    assertThat(mapCardinalityChanges).isPositive();
   }
 
   @Test
@@ -252,11 +280,26 @@ class MigrationTransformerAllKindsTest {
   private static String productionEnum(String key) {
     return switch (key) {
       case "account.role", "browser_session.role" -> "USER";
+      case "account_deletion_job.nextStep" -> "ENSURE_TOMBSTONE";
       case "account_trust_relationship.type" -> "BLOCK";
       case "notification.notificationType" -> "MESSAGE";
       case "post_report.status" -> "OPEN";
       case "federation_delivery_job.state" -> "PENDING";
+      case "music_track.indexStatus" -> "READY";
+      case "music_metadata_edit.status" -> "PREPARED";
+      case "music_runtime_state.kind" -> "QUEUE";
+      case "music_radio_history.source" -> "RADIO";
+      case "music_radio_history.outcome" -> "PLAYED";
+      case "music_access_attempt.principalType" -> "ACCOUNT";
       case "vote.vote" -> "UP";
+      case "import_state.status" -> "RUNNING";
+      case "media_job.profile" -> "VIDEO_MP4";
+      case "media_job.status" -> "QUEUED";
+      case "mutation_recovery.state" -> "PREPARED";
+      case "radio_state.state" -> "PLAYING";
+      case "upload_session.finalizationState" -> "PREPARED";
+      case "scheduled_collector_run.status" -> "RUNNING";
+      case "pending_action.action" -> "RESTART_COMPUTER";
       default -> "ACTIVE";
     };
   }
@@ -264,7 +307,9 @@ class MigrationTransformerAllKindsTest {
   private static Object productionRecord(String key) {
     return switch (key) {
       case "account.federationIdentity" -> Map.of(
-          "actorId", "actor", "keyId", "key", "publicKeyPem", "pem",
+          "actorId", "https://social.example.test/users/migration-owner",
+          "keyId", "https://social.example.test/users/migration-owner#main-key",
+          "publicKeyPem", "-----BEGIN PUBLIC KEY-----\ntest-key\n-----END PUBLIC KEY-----",
           "encryptedPrivateKey", Map.of("nonce", new byte[12], "ciphertext", new byte[16]),
           "keyVersion", 1, "createdOn", Instant.parse("2026-08-14T00:00:00Z"));
       case "account.pendingModerationAudit", "post_report.pendingModerationAudit" -> Map.ofEntries(
@@ -399,6 +444,22 @@ class MigrationTransformerAllKindsTest {
     var key = values.keySet().iterator().next();
     values.remove(key);
     return new RemovedPseudoPath(values, key);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static void alignUploadChunkMaps(
+      PostgresqlMigrationCatalog.Kind kind,
+      String field,
+      Map<String, Object> payload,
+      String removedKey) {
+    if (!kind.sourceKind().equals("upload_session")
+        || !Set.of("chunkDigests", "chunkLengths").contains(field)) {
+      return;
+    }
+    var companion = field.equals("chunkDigests") ? "chunkLengths" : "chunkDigests";
+    var values = new LinkedHashMap<>((Map<String, Object>) payload.get(companion));
+    values.remove(removedKey);
+    payload.put(companion, values);
   }
 
   private static Object deepMutableCopy(Object value) {

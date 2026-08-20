@@ -28,19 +28,21 @@ final class MongoFinalizationFreezeGuard implements FinalizationFreezeGuard {
   static MongoFinalizationFreezeGuard acquire(MongoClient client) {
     Objects.requireNonNull(client, "client");
     var admin = client.getDatabase("admin");
-    var serverLocked = false;
+    var commandIssued = false;
     try {
+      commandIssued = true;
       admin.runCommand(new Document("fsync", 1).append("lock", true));
-      serverLocked = true;
       var guard = new MongoFinalizationFreezeGuard(client);
       guard.requireLocked();
       return guard;
     } catch (RuntimeException exception) {
-      if (serverLocked) {
+      if (commandIssued) {
         try {
           admin.runCommand(new Document("fsyncUnlock", 1));
         } catch (RuntimeException releaseFailure) {
-          exception.addSuppressed(releaseFailure);
+          if (!alreadyUnlocked(releaseFailure)) {
+            exception.addSuppressed(releaseFailure);
+          }
         }
       }
       throw new MigrationStorageException("MongoDB finalization write freeze could not be acquired.",
@@ -73,8 +75,7 @@ final class MongoFinalizationFreezeGuard implements FinalizationFreezeGuard {
       open.set(false);
     } catch (RuntimeException exception) {
       unlockFailure = exception;
-      if (exception instanceof MongoCommandException commandFailure
-          && commandFailure.getErrorCode() == 20) {
+      if (alreadyUnlocked(exception)) {
         open.set(false);
       }
     }
@@ -99,5 +100,10 @@ final class MongoFinalizationFreezeGuard implements FinalizationFreezeGuard {
       throw new MigrationStorageException("MongoDB finalization write freeze could not be verified.",
           exception);
     }
+  }
+
+  private static boolean alreadyUnlocked(RuntimeException failure) {
+    return failure instanceof MongoCommandException commandFailure
+        && commandFailure.getErrorCode() == 20;
   }
 }

@@ -33,6 +33,9 @@ feature.
   disk-streamed full or single-range downloads, safe previews, conflict-safe mutations, and
   resumable uploads. `web` accepts each path after Spring has decoded it once and passes that
   value unchanged to the resolver; response models never include a local absolute path.
+- `api.SharedFolderMigrationVerifier` publishes real audit, job/recovery/radio/upload lookup,
+  recycle-page, and maintenance-lease adapter parity operations for the guarded
+  MongoDB-to-PostgreSQL cutover.
 
 ## Configuration
 

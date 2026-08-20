@@ -5,6 +5,8 @@ Owns lunch spot data, location-aware public picks, shared voting sessions, and l
 ## What Lives Here
 
 - Restaurant CRUD and admin-only maintenance endpoints under `restaurant`.
+- `api.WhatsForLunchMigrationVerifier` publishes real restaurant, session, vote, preference,
+  import, and preview-claim parity operations for the guarded MongoDB-to-PostgreSQL cutover.
 - Restaurant persistence outages use the shared service-unavailable contract
   with preserved diagnostic causes and a redacted public response.
 - Public location-aware lunch picks that query bounded nearby candidates and

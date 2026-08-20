@@ -17,6 +17,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.annotation.Id;
 
 class PostgresqlMigrationCatalogTest {
+  private static final Set<String> NON_QUERY_KINDS = Set.of(
+      "migration_record", "domain_collection_cutover");
   private static final Set<String> COMPLEX_CONVERSIONS = Set.of(
       "record-flattened", "vin-response-flattened", "record-child",
       "record-list-child", "string-list-child", "string-set-child", "string-map-child");
@@ -56,7 +58,15 @@ class PostgresqlMigrationCatalogTest {
       assertThat(target.canonicalHash()).as(manifest.kind()).isEqualTo("sha256-rfc8785-v1");
       assertThat(target.reconciliation()).as(manifest.kind())
           .contains("row-count", "canonical-record-hash");
-      assertThat(target.portQueries()).as(manifest.kind()).isNotEmpty();
+      if (NON_QUERY_KINDS.contains(manifest.kind())) {
+        assertThat(target.portQueries()).as(manifest.kind()).isEmpty();
+        assertThat(target.reconciliation()).as(manifest.kind())
+            .contains("port-query-not-applicable");
+      } else {
+        assertThat(target.portQueries()).as(manifest.kind()).isNotEmpty();
+        assertThat(target.reconciliation()).as(manifest.kind())
+            .doesNotContain("port-query-not-applicable");
+      }
     }
   }
 

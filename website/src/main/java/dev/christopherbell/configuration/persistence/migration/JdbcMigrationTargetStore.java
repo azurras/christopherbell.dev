@@ -574,7 +574,8 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
         var result = new MigrationReconciliation(
             checkpoint.complete(), sourceCount, stagedCount,
             checkpoint.sourceDigest(), digest, rowsValid,
-            rowsValid && !kind.portQueries().isEmpty());
+            rowsValid && (!kind.portQueries().isEmpty()
+                || kind.reconciliation().contains("port-query-not-applicable")));
         if (persist) {
           persistReconciliation(connection, context, kind, result);
         }

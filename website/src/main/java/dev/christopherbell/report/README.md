@@ -10,6 +10,8 @@ Owns user reports and moderation actions.
 - `submission` owns user-created report validation, post/account lookup, and open report persistence.
 - `moderation` owns admin report list reads, repeat-report context,
   resolution, reopen, post deletion, user suspension, and admin activity logs.
+- `api.ReportMigrationVerifier` publishes real report lookup, open-dedupe, and moderation-query
+  adapter parity operations for the guarded MongoDB-to-PostgreSQL cutover.
 - The `2025-09-03` submission route retains its payload-free success envelope;
   the additive `2026-07-26` route returns the accepted report resource.
 
