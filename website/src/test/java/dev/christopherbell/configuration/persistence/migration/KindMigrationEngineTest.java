@@ -110,6 +110,61 @@ class KindMigrationEngineTest {
     assertThat(target.staged).containsExactly(firstInMongoOrder, secondInMongoOrder);
   }
 
+  @Test
+  void rejectsABackwardIdentifierAcrossAdjacentSourcePages() {
+    var source = new ScriptedSource(List.of(
+        batch("0002", "opaque-page-a"),
+        batch("0001", "opaque-page-b")));
+    var target = new FakeTarget(-1);
+
+    assertThatThrownBy(() -> new KindMigrationEngine(
+        source, target, ignored -> new StubTransformer())
+        .stageAndCheckpoint(context(1), KIND))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("PostgreSQL migration source batch is invalid.");
+    assertThat(target.staged).containsExactly("0002");
+    assertThat(target.checkpoint.sourceCount()).isOne();
+  }
+
+  @Test
+  void rejectsARepeatedIdentifierWithADifferentOpaqueCursor() {
+    var source = new ScriptedSource(List.of(
+        batch("0001", "opaque-page-a"),
+        batch("0001", "opaque-page-b")));
+    var target = new FakeTarget(-1);
+
+    assertThatThrownBy(() -> new KindMigrationEngine(
+        source, target, ignored -> new StubTransformer())
+        .stageAndCheckpoint(context(1), KIND))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("PostgreSQL migration source batch is invalid.");
+    assertThat(target.staged).containsExactly("0001");
+    assertThat(target.checkpoint.sourceCount()).isOne();
+  }
+
+  @Test
+  void rejectsAnIdenticalOpaqueCursorEvenWhenTheIdentifierChanges() {
+    var source = new ScriptedSource(List.of(
+        batch("0001", "opaque-page"),
+        batch("0002", "opaque-page")));
+    var target = new FakeTarget(-1);
+
+    assertThatThrownBy(() -> new KindMigrationEngine(
+        source, target, ignored -> new StubTransformer())
+        .stageAndCheckpoint(context(1), KIND))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("PostgreSQL migration source batch is invalid.");
+    assertThat(target.staged).containsExactly("0001");
+    assertThat(target.checkpoint.sourceCount()).isOne();
+  }
+
+  private static SourceBatch batch(String sourceId, String cursor) {
+    return new SourceBatch(
+        List.of(new MigrationSourceDocument(
+            "fixture", 1, sourceId, Map.of("id", sourceId))),
+        cursor);
+  }
+
   private static PostgresqlMigrationCatalog.Kind kind() {
     return new PostgresqlMigrationCatalog.Kind(
         "configuration", "fixture",
@@ -218,6 +273,27 @@ class KindMigrationEngineTest {
       }
       return SourceBatch.of(ids.stream().map(id ->
           new MigrationSourceDocument("fixture", 1, id, Map.of("id", id))).toList());
+    }
+  }
+
+  private static final class ScriptedSource implements MigrationSourceReader {
+    private final List<SourceBatch> batches;
+    private int nextBatch;
+
+    private ScriptedSource(List<SourceBatch> batches) {
+      this.batches = List.copyOf(batches);
+    }
+
+    @Override
+    public SourceBatch readAfter(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        String cursor,
+        int limit) {
+      if (nextBatch == batches.size()) {
+        return SourceBatch.of(List.of());
+      }
+      return batches.get(nextBatch++);
     }
   }
 

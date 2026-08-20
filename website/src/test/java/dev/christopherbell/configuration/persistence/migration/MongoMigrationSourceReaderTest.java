@@ -5,7 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.mongodb.client.MongoClients;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 import org.bson.Document;
@@ -63,6 +66,32 @@ class MongoMigrationSourceReaderTest {
   }
 
   @Test
+  void engineCrashResumeAdvancesAcrossLexicallyReversedOpaqueCursors() throws IOException {
+    var collection = client.getDatabase("test").getCollection("application_runtime");
+    collection.insertMany(List.of(envelope("lease-3", 1), envelope("lease-4", 2)));
+    var catalog = catalog();
+    var target = new CrashResumeTarget(2);
+    var transformers = MigrationTransformerRegistry.from(catalog);
+    var engine = new KindMigrationEngine(
+        new MongoMigrationSourceReader(client), target, transformers::require);
+
+    assertThatThrownBy(() -> engine.stageAndCheckpoint(context(), kind(catalog)))
+        .isInstanceOf(InjectedFailure.class);
+    assertThat(target.checkpoint.sourceCount()).isOne();
+    assertThat(target.staged).containsExactly("lease-3");
+
+    target.failCommit = -1;
+    engine.stageAndCheckpoint(context(), kind(catalog));
+
+    assertThat(target.checkpoint.complete()).isTrue();
+    assertThat(target.checkpoint.sourceCount()).isEqualTo(2);
+    assertThat(target.staged).containsExactly("lease-3", "lease-4");
+    assertThat(target.attemptedCursors.get(1))
+        .as("lease-4's opaque token sorts below lease-3's token")
+        .isLessThan(target.attemptedCursors.getFirst());
+  }
+
+  @Test
   void usesMongoSimpleBinaryOrderingForBmpAndAstralIdentifiers() throws IOException {
     var firstInSimpleOrder = "\uE000";
     var secondInSimpleOrder = "\uD83D\uDE00";
@@ -116,6 +145,19 @@ class MongoMigrationSourceReaderTest {
         .hasMessage("PostgreSQL migration Mongo source envelope is invalid.");
   }
 
+  @Test
+  void rejectsACursorWhoseDecodedIdentifierHasTheWrongBsonType() throws IOException {
+    client.getDatabase("test").getCollection("application_runtime")
+        .insertOne(envelope("lease-a", 1));
+    var numericCursor = Base64.getUrlEncoder().withoutPadding().encodeToString(
+        new Document("value", 6).toJson().getBytes(StandardCharsets.UTF_8));
+
+    assertThatThrownBy(() -> new MongoMigrationSourceReader(client)
+        .readAfter(context(), kind(), numericCursor, 1))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("PostgreSQL migration Mongo source envelope is invalid.");
+  }
+
   private static Document envelope(String id, long fence) {
     return new Document("_id", new Document("kind", "application_lease").append("legacyId", id))
         .append("_kind", "application_lease")
@@ -153,7 +195,11 @@ class MongoMigrationSourceReaderTest {
   }
 
   private static PostgresqlMigrationCatalog.Kind kind() throws IOException {
-    return catalog().kinds().stream()
+    return kind(catalog());
+  }
+
+  private static PostgresqlMigrationCatalog.Kind kind(PostgresqlMigrationCatalog catalog) {
+    return catalog.kinds().stream()
         .filter(candidate -> candidate.sourceKind().equals("application_lease"))
         .findFirst()
         .orElseThrow();
@@ -166,4 +212,97 @@ class MongoMigrationSourceReaderTest {
       return new PostgresqlMigrationCatalogLoader().load(input);
     }
   }
+
+  private static final class CrashResumeTarget implements MigrationTargetStore {
+    private MigrationCheckpoint checkpoint = MigrationCheckpoint.initial();
+    private final List<String> staged = new ArrayList<>();
+    private final List<String> attemptedCursors = new ArrayList<>();
+    private int failCommit;
+    private int commitCalls;
+
+    private CrashResumeTarget(int failCommit) {
+      this.failCommit = failCommit;
+    }
+
+    @Override
+    public void requireExistingRun(ValidatedMigrationContext context) {}
+
+    @Override
+    public void prepareExistingRunVerification(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds) {}
+
+    @Override
+    public MigrationCheckpoint checkpoint(
+        ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
+      return checkpoint;
+    }
+
+    @Override
+    public MigrationCheckpoint commitBatch(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        MigrationCheckpoint expected,
+        List<TransformedMigrationDocument> documents,
+        String nextCursor) {
+      assertThat(expected).isEqualTo(checkpoint);
+      attemptedCursors.add(nextCursor);
+      commitCalls++;
+      if (commitCalls == failCommit) {
+        throw new InjectedFailure();
+      }
+      var advanced = checkpoint.advance(nextCursor, documents);
+      documents.forEach(document -> staged.add(document.sourceId()));
+      checkpoint = advanced;
+      return checkpoint;
+    }
+
+    @Override
+    public MigrationCheckpoint completeStaging(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        MigrationCheckpoint expected) {
+      assertThat(expected).isEqualTo(checkpoint);
+      checkpoint = checkpoint.markComplete();
+      return checkpoint;
+    }
+
+    @Override
+    public void requireStagedDocuments(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        List<TransformedMigrationDocument> documents) {}
+
+    @Override
+    public MigrationReconciliation reconcile(
+        ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void verifyExistingRun(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations) {}
+
+    @Override
+    public void rehearseShadow(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations) {}
+
+    @Override
+    public void finalizeRun(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations,
+        LockedFinalizationCheck finalizationCheck) {}
+
+    @Override
+    public List<MigrationKindStatus> statuses(ValidatedMigrationContext context) {
+      return List.of();
+    }
+  }
+
+  private static final class InjectedFailure extends RuntimeException {}
 }

@@ -21,7 +21,7 @@ public record MigrationCheckpoint(
   public MigrationCheckpoint advance(
       String nextCursor, List<TransformedMigrationDocument> documents) {
     if (complete || nextCursor == null || nextCursor.isBlank() || documents.isEmpty()
-        || cursor != null && nextCursor.compareTo(cursor) <= 0) {
+        || nextCursor.equals(cursor)) {
       throw new IllegalStateException("PostgreSQL migration checkpoint cannot advance.");
     }
     var digest = sourceDigest;

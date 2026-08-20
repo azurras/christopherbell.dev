@@ -22,10 +22,12 @@ public final class KindMigrationEngine {
       ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
     var checkpoint = target.checkpoint(context, kind);
     var transformer = transformers.require(kind.sourceKind());
+    String previousSourceId = null;
     while (!checkpoint.complete()) {
       var batch = source.readAfter(
           context, kind, checkpoint.cursor(), context.request().batchSize());
-      validateBatch(kind, checkpoint, batch, context.request().batchSize());
+      previousSourceId = validateBatch(
+          kind, checkpoint, batch, context.request().batchSize(), previousSourceId);
       if (batch.isEmpty()) {
         target.completeStaging(context, kind, checkpoint);
         return;
@@ -75,10 +77,12 @@ public final class KindMigrationEngine {
     var actual = MigrationCheckpoint.initial();
     var relationalDigest = MigrationCheckpoint.initial().sourceDigest();
     var transformer = transformers.require(kind.sourceKind());
+    String previousSourceId = null;
     while (true) {
       var batch = source.readAfter(
           context, kind, actual.cursor(), context.request().batchSize());
-      validateBatch(kind, actual, batch, context.request().batchSize());
+      previousSourceId = validateBatch(
+          kind, actual, batch, context.request().batchSize(), previousSourceId);
       if (batch.isEmpty()) {
         break;
       }
@@ -99,15 +103,15 @@ public final class KindMigrationEngine {
         kind.sourceKind(), actual.sourceCount(), actual.sourceDigest(), relationalDigest);
   }
 
-  private static void validateBatch(
+  private static String validateBatch(
       PostgresqlMigrationCatalog.Kind kind,
       MigrationCheckpoint checkpoint,
       SourceBatch batch,
-      int limit) {
+      int limit,
+      String previous) {
     if (batch.documents().size() > limit) {
       throw invalidBatch();
     }
-    String previous = null;
     for (var document : batch.documents()) {
       if (!kind.sourceKind().equals(document.sourceKind())
           || document.schemaVersion() != kind.sourceSchemaVersion()
@@ -124,6 +128,7 @@ public final class KindMigrationEngine {
             || batch.lastCursor().equals(checkpoint.cursor()))) {
       throw invalidBatch();
     }
+    return previous;
   }
 
   private static IllegalStateException invalidBatch() {

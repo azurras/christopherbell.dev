@@ -39,8 +39,10 @@ public final class MongoMigrationSourceReader
     }
     var filter = and(
         eq("_kind", kind.sourceKind()));
+    String previousIdentifier = null;
     if (cursor != null) {
-      filter = and(filter, gt("_id.legacyId", decodeCursor(cursor)));
+      previousIdentifier = decodeCursor(kind, cursor);
+      filter = and(filter, gt("_id.legacyId", previousIdentifier));
     }
     var documents = new ArrayList<MigrationSourceDocument>();
     String lastCursor = null;
@@ -51,8 +53,14 @@ public final class MongoMigrationSourceReader
         .sort(ascending("_id.legacyId"))
         .limit(limit)) {
       var converted = convert(kind, envelope);
+      if (previousIdentifier != null
+          && MongoSimpleStringOrder.compare(
+              converted.document().sourceId(), previousIdentifier) <= 0) {
+        throw invalid();
+      }
       documents.add(converted.document());
       lastCursor = converted.cursor();
+      previousIdentifier = converted.document().sourceId();
     }
     return new SourceBatch(documents, lastCursor);
   }
@@ -126,17 +134,20 @@ public final class MongoMigrationSourceReader
     return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
   }
 
-  private static Object decodeCursor(String cursor) {
+  private static String decodeCursor(
+      PostgresqlMigrationCatalog.Kind kind, String cursor) {
     try {
       var bytes = Base64.getUrlDecoder().decode(cursor);
       if (bytes.length > MAX_CURSOR_BYTES) {
         throw invalid();
       }
       var parsed = Document.parse(new String(bytes, StandardCharsets.UTF_8));
-      if (!parsed.keySet().equals(Set.of("value")) || parsed.get("value") == null) {
+      var value = parsed.get("value");
+      if (!parsed.keySet().equals(Set.of("value"))
+          || !validIdentifierType(kind.identifierType(), value)) {
         throw invalid();
       }
-      return parsed.get("value");
+      return (String) value;
     } catch (IllegalArgumentException failure) {
       throw invalid();
     }
