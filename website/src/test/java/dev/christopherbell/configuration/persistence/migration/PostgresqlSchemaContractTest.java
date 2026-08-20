@@ -29,8 +29,8 @@ class PostgresqlSchemaContractTest {
     try (var first = PostgresqlSchemaTestSupport.migrate();
          var second = PostgresqlSchemaTestSupport.migrate();
          var connection = first.connect()) {
-      assertThat(first.migrationsExecuted()).isEqualTo(13);
-      assertThat(second.migrationsExecuted()).isEqualTo(13);
+      assertThat(first.migrationsExecuted()).isEqualTo(14);
+      assertThat(second.migrationsExecuted()).isEqualTo(14);
       assertThat(ownedSchemas(connection, first.prefix()))
           .hasSize(PostgresqlSchemaTestSupport.DOMAINS.size());
       assertThat(ownedSchemas(connection, second.prefix()))
@@ -43,7 +43,7 @@ class PostgresqlSchemaContractTest {
   void emptyFlywayMigrationCreatesExactlyTheOwnedCatalogSchemasAndTables() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate();
          var connection = database.connect()) {
-      assertThat(database.migrationsExecuted()).isEqualTo(13);
+      assertThat(database.migrationsExecuted()).isEqualTo(14);
       assertThat(ownedSchemas(connection, database.prefix()))
           .containsExactlyInAnyOrderElementsOf(PostgresqlSchemaTestSupport.DOMAINS.stream()
               .map(database.prefix()::concat)
@@ -194,7 +194,7 @@ class PostgresqlSchemaContractTest {
           + "edited_on) values ('upgrade-post', 0, 'deleted:abcdef012345', 'before', 'after', "
           + "transaction_timestamp())");
 
-      assertThat(database.migrateToLatest()).isEqualTo(7);
+      assertThat(database.migrateToLatest()).isEqualTo(8);
       assertThat(longScalar(connection, "select count(*) from " + identity
           + ".deleted_account_pseudonym where pseudonym_id = 'deleted:abcdef012345'"))
           .isOne();
@@ -222,7 +222,7 @@ class PostgresqlSchemaContractTest {
           + "edited_on) values ('v7-post', 0, 'v7-owner', 'before', 'after', "
           + "transaction_timestamp())");
 
-      assertThat(database.migrateToLatest()).isEqualTo(6);
+      assertThat(database.migrateToLatest()).isEqualTo(7);
       assertRestrictViolation(() -> execute(connection,
           "delete from " + identity + ".account where account_id = 'v7-owner'"));
     }
@@ -268,7 +268,7 @@ class PostgresqlSchemaContractTest {
           + ".admin_activity_value (admin_activity_id, partition_name, value_key, value_text) "
           + "values ('v8-admin', 'before', 'state', 'old')");
 
-      assertThat(database.migrateToLatest()).isEqualTo(5);
+      assertThat(database.migrateToLatest()).isEqualTo(6);
       assertThat(longScalar(connection, "select count(*) from " + mobility
           + ".vin_decode_cache where vin = 'V8EMPTYRESPONSE1' and not response_present"))
           .isOne();
@@ -332,7 +332,7 @@ class PostgresqlSchemaContractTest {
           + ".vin_decode_raw_value (vin, field_name, field_value) values "
           + "('V9WITHRAWVALUE001', 'Make', 'Mazda')");
 
-      assertThat(database.migrateToLatest()).isEqualTo(4);
+      assertThat(database.migrateToLatest()).isEqualTo(5);
       assertThat(longScalar(connection, "select count(*) from " + mobility
           + ".vin_decode_cache where vin = 'V9AMBIGUOUS000001' "
           + "and not raw_decoded_values_present"))
@@ -363,7 +363,7 @@ class PostgresqlSchemaContractTest {
           + "values ('00000000-0000-0000-0000-000000000612', 'catalog', 'test', 'test', "
           + "false, 'STAGING')");
 
-      assertThat(database.migrateToLatest()).isEqualTo(2);
+      assertThat(database.migrateToLatest()).isEqualTo(3);
       assertThat(longScalar(connection, "select count(*) from " + platform
           + ".persistence_migration_run where run_id="
           + "'00000000-0000-0000-0000-000000000612' and release_commit is null "
@@ -387,7 +387,7 @@ class PostgresqlSchemaContractTest {
           + "values ('00000000-0000-0000-0000-000000000621', 'catalog', 'test', 'test', "
           + "true, 'STAGING')");
 
-      assertThat(database.migrateToLatest()).isEqualTo(2);
+      assertThat(database.migrateToLatest()).isEqualTo(3);
       assertThat(longScalar(connection, "select count(*) from " + platform
           + ".persistence_migration_run where run_id="
           + "'00000000-0000-0000-0000-000000000621' and source_frozen "
@@ -417,7 +417,7 @@ class PostgresqlSchemaContractTest {
           + "true,'PUBLISHED','legacy-release',repeat('a',64),repeat('b',64),'legacy-role',"
           + "repeat('c',64),repeat('d',64),repeat('e',64),repeat('f',64))");
 
-      assertThat(database.migrateToLatest()).isEqualTo(1);
+      assertThat(database.migrateToLatest()).isEqualTo(2);
       assertThat(longScalar(connection, "select count(*) from information_schema.columns "
           + "where table_schema='" + database.prefix() + "platform' "
           + "and table_name='persistence_migration_run' and column_name='bridge_release'"))
@@ -462,6 +462,69 @@ class PostgresqlSchemaContractTest {
           .isInstanceOf(SQLException.class)
           .extracting(failure -> ((SQLException) failure).getSQLState())
           .isEqualTo("23514");
+    }
+  }
+
+  @Test
+  void versionThirteenPublishedRunUpgradesWithoutInventingPublicationAuthority()
+      throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("13");
+         var connection = database.connect()) {
+      var platform = quoted(database.prefix() + "platform");
+      execute(connection, "insert into " + platform
+          + ".persistence_migration_run "
+          + "(run_id,catalog_version,source_database,target_database,source_frozen,status,"
+          + "completed_at,bridge_release,release_commit,source_uri_digest,"
+          + "target_jdbc_url_digest,target_role,source_snapshot_digest,backup_digest,"
+          + "writer_lock_digest,finalize_evidence_digest) values "
+          + "('00000000-0000-0000-0000-000000000714','published-looking','test','test',"
+          + "true,'PUBLISHED',transaction_timestamp(),1,'release',repeat('a',64),"
+          + "repeat('b',64),'role',repeat('c',64),repeat('d',64),repeat('e',64),repeat('f',64))");
+
+      assertThat(database.migrateToLatest()).isEqualTo(1);
+      assertThat(longScalar(connection, "select count(*) from information_schema.tables "
+          + "where table_schema='" + database.prefix() + "platform' "
+          + "and table_name='persistence_migration_publication_commit'"))
+          .isOne();
+      assertThat(longScalar(connection, "select count(*) from " + platform
+          + ".persistence_migration_publication_commit"))
+          .isZero();
+    }
+  }
+
+  @Test
+  void publicationCommitAuthorityRejectsUpdateAndDelete() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var connection = database.connect()) {
+      var platform = quoted(database.prefix() + "platform");
+      var runId = "00000000-0000-0000-0000-000000000717";
+      execute(connection, "insert into " + platform
+          + ".persistence_migration_run "
+          + "(run_id,catalog_version,source_database,target_database,source_frozen,status,"
+          + "bridge_release,release_commit,source_uri_digest,target_jdbc_url_digest,target_role,"
+          + "source_snapshot_digest,backup_digest,writer_lock_digest,finalize_evidence_digest) "
+          + "values ('" + runId + "','catalog','test','test',true,'RECONCILING',1,'release',"
+          + "repeat('a',64),repeat('b',64),'role',repeat('c',64),repeat('d',64),repeat('e',64),"
+          + "repeat('f',64))");
+      execute(connection, "insert into " + platform
+          + ".persistence_migration_publication_commit (run_id, committed_at) values ('"
+          + runId + "','2026-08-20T12:00:00Z')");
+
+      assertThatThrownBy(() -> execute(connection, "update " + platform
+          + ".persistence_migration_publication_commit set committed_at="
+          + "'2026-08-20T12:00:01Z' where run_id='" + runId + "'"))
+          .isInstanceOf(SQLException.class)
+          .extracting(failure -> ((SQLException) failure).getSQLState())
+          .isEqualTo("55000");
+      assertThatThrownBy(() -> execute(connection, "delete from " + platform
+          + ".persistence_migration_publication_commit where run_id='" + runId + "'"))
+          .isInstanceOf(SQLException.class)
+          .extracting(failure -> ((SQLException) failure).getSQLState())
+          .isEqualTo("55000");
+      assertThat(longScalar(connection, "select count(*) from " + platform
+          + ".persistence_migration_publication_commit where run_id='" + runId + "' "
+          + "and committed_at='2026-08-20T12:00:00Z'"))
+          .isOne();
     }
   }
 
@@ -830,6 +893,7 @@ class PostgresqlSchemaContractTest {
     tables.add("platform.persistence_migration_source");
     tables.add("platform.persistence_migration_kind");
     tables.add("platform.persistence_migration_staged_row");
+    tables.add("platform.persistence_migration_publication_commit");
     tables.add("identity.deleted_account_pseudonym");
     return Set.copyOf(tables);
   }

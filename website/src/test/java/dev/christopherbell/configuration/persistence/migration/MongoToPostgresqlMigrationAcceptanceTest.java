@@ -1,6 +1,7 @@
 package dev.christopherbell.configuration.persistence.migration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.zaxxer.hikari.HikariDataSource;
 import com.mongodb.client.MongoClients;
@@ -139,7 +140,48 @@ class MongoToPostgresqlMigrationAcceptanceTest {
                 directory, database, mongoUri, MigrationSourceSnapshot.runDigest(snapshots),
                 lockToken);
             var finalizeRequest = request(database, mongoUri, lockToken, evidence);
+            var finalizeContext = preflight.validate(finalizeRequest);
+            var orderedKinds = catalog.kinds().stream()
+                .sorted(java.util.Comparator.comparingInt(
+                    PostgresqlMigrationCatalog.Kind::loadOrder))
+                .toList();
+            for (var kind : orderedKinds) {
+              engine.stageAndCheckpoint(finalizeContext, kind);
+            }
+            var reconcileFinal = withCommand(
+                finalizeRequest, PostgresqlMigrationCommand.RECONCILE);
+            var verifiedButUnpublished = runner.run(reconcileFinal);
+            assertThat(verifiedButUnpublished.kinds()).hasSize(52)
+                .allSatisfy(status -> assertThat(status.published()).isFalse());
+            assertPublicationState(
+                database, lockToken, "READY", true, 53, 0, 0);
+
+            var leaseCollection = mongo.getDatabase("test").getCollection(
+                catalog.kinds().stream()
+                    .filter(kind -> kind.sourceKind().equals("application_lease"))
+                    .findFirst().orElseThrow().sourceCollection());
+            var leaseId = new Document("kind", "application_lease")
+                .append("legacyId", "task6-all52-application_lease");
+            var leasePayload = leaseCollection.find(new Document("_id", leaseId))
+                .first().get("payload", Document.class);
+            var originalFenceToken = leasePayload.get("fenceToken");
+            leaseCollection.updateOne(
+                new Document("_id", leaseId),
+                new Document("$set", new Document(
+                    "payload.fenceToken", ((Number) originalFenceToken).longValue() + 1_000)));
+            try {
+              assertThatThrownBy(() -> runner.run(reconcileFinal))
+                  .isInstanceOf(MigrationReconciliationException.class);
+              assertPublicationState(
+                  database, lockToken, "RECONCILING", true, 0, 0, 0);
+            } finally {
+              leaseCollection.updateOne(
+                  new Document("_id", leaseId),
+                  new Document("$set", new Document("payload.fenceToken", originalFenceToken)));
+            }
+
             var published = runner.run(finalizeRequest);
+            var completedAt = runCompletion(database, lockToken);
             var replayed = runner.run(finalizeRequest);
             assertThat(published.kinds()).hasSize(52).allSatisfy(status -> {
               assertThat(status.checkpoint().sourceCount())
@@ -149,6 +191,9 @@ class MongoToPostgresqlMigrationAcceptanceTest {
                   .isEqualTo(status.sourceKind().equals("account") ? 2 : 1);
             });
             assertThat(replayed.statusDigest()).isEqualTo(published.statusDigest());
+            assertPublicationState(
+                database, lockToken, "PUBLISHED", false, 0, 53, 52);
+            assertThat(runCompletion(database, lockToken)).isEqualTo(completedAt);
             assertThat(rootCounts(database, catalog)).containsOnly(1L, 2L);
             assertThat(accountBinary(database)).containsExactly(new byte[12], new byte[16]);
           }
@@ -509,6 +554,59 @@ class MongoToPostgresqlMigrationAcceptanceTest {
                  + "and target_hash is not null")) {
       rows.next();
       return rows.getLong(1);
+    }
+  }
+
+  private static void assertPublicationState(
+      PostgresqlSchemaTestSupport.MigratedDatabase database,
+      UUID runId,
+      String expectedRunStatus,
+      boolean completionNull,
+      long verifiedSources,
+      long publishedSources,
+      long publishedKinds) throws java.sql.SQLException {
+    try (var connection = database.connect();
+         var statement = connection.prepareStatement(
+             "select status, completed_at is null, "
+                 + "(select count(*) from \"" + database.prefix()
+                 + "platform\".persistence_migration_source source "
+                 + "where source.run_id=run.run_id and source.status='VERIFIED'), "
+                 + "(select count(*) from \"" + database.prefix()
+                 + "platform\".persistence_migration_source source "
+                 + "where source.run_id=run.run_id and source.status='PUBLISHED'), "
+                 + "(select count(*) from \"" + database.prefix()
+                 + "platform\".persistence_migration_kind kind "
+                 + "where kind.run_id=run.run_id and kind.published), "
+                 + "(select count(*) from \"" + database.prefix()
+                 + "platform\".persistence_migration_publication_commit publication "
+                 + "where publication.run_id=run.run_id) "
+                 + "from \"" + database.prefix()
+                 + "platform\".persistence_migration_run run where run_id=?")) {
+      statement.setObject(1, runId);
+      try (var rows = statement.executeQuery()) {
+        assertThat(rows.next()).isTrue();
+        assertThat(rows.getString(1)).isEqualTo(expectedRunStatus);
+        assertThat(rows.getBoolean(2)).isEqualTo(completionNull);
+        assertThat(rows.getLong(3)).isEqualTo(verifiedSources);
+        assertThat(rows.getLong(4)).isEqualTo(publishedSources);
+        assertThat(rows.getLong(5)).isEqualTo(publishedKinds);
+        assertThat(rows.getLong(6)).isEqualTo(expectedRunStatus.equals("PUBLISHED") ? 1 : 0);
+      }
+    }
+  }
+
+  private static String runCompletion(
+      PostgresqlSchemaTestSupport.MigratedDatabase database, UUID runId)
+      throws java.sql.SQLException {
+    try (var connection = database.connect();
+         var statement = connection.prepareStatement(
+             "select completed_at::text from \"" + database.prefix()
+                 + "platform\".persistence_migration_run where run_id=?")) {
+      statement.setObject(1, runId);
+      try (var rows = statement.executeQuery()) {
+        assertThat(rows.next()).isTrue();
+        return rows.getString(1);
+      }
     }
   }
 

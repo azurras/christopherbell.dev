@@ -23,7 +23,11 @@ documents. An independent writer remains blocked until PostgreSQL commits and th
 the lock in `finally`.
 
 MongoDB deliberately retains an fsync lock when the client process disconnects. After a command
-crash, keep `ChristopherBellDev` stopped and keep the deployment lock held. Confirm that no
-PostgreSQL finalization process or transaction is active and reconcile the recorded run before an
-authenticated administrator issues `fsyncUnlock`. Do not restart the website writer before the
-source and typed PostgreSQL rows have been reconciled.
+crash, the operating system releases that process's file-lock ownership; the continued presence of
+`deploy.lock` does not prove exclusion. Keep `ChristopherBellDev` stopped and leave MongoDB fsync-
+locked. An approved recovery process must reacquire the protected deployment lock exclusively,
+then confirm that no PostgreSQL finalization process or transaction is active and reconcile the
+recorded run before an authenticated administrator issues `fsyncUnlock`. Until that recovery
+exclusion is owned, the retained MongoDB fsync lock and stopped website service are the writer-
+safety boundary. Do not restart the website writer before the source and typed PostgreSQL rows have
+been reconciled.

@@ -3,11 +3,13 @@ package dev.christopherbell.configuration.persistence.migration;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import javax.sql.DataSource;
@@ -90,7 +92,7 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
       for (var kind : kinds) {
         invalidateKindVerification(connection, context, kind);
       }
-      markRun(connection, context, "RECONCILING", false);
+      markRunUnpublished(connection, context, "RECONCILING");
       return null;
     });
   }
@@ -175,6 +177,10 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
       requireEquivalentStaging(connection, context, kinds, reconciliations);
       lockVerificationTables(connection, context, kinds);
       var sourceFrozen = readRunSourceFrozen(connection, context);
+      var publicationCommit = readPublicationCommit(connection, context);
+      if (publicationCommit.isPresent() && !sourceFrozen) {
+        throw new MigrationReconciliationException();
+      }
       var allValid = true;
       for (var index = 0; index < kinds.size(); index++) {
         var kind = kinds.get(index);
@@ -186,23 +192,25 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
         persistKindVerification(connection, context, kind, typed, relationships, queries);
         if (typed && relationships && queries) {
           persistSourceVerification(
-              connection, context, kind, actual.sourceCount(),
-              sourceFrozen ? "PUBLISHED" : "VERIFIED");
+              connection, context, kind, actual.sourceCount(), "VERIFIED");
         } else {
           markKindVerificationFailed(connection, context, kind);
           allValid = false;
         }
       }
-      if (allValid && sourceFrozen) {
+      if (!allValid) {
+        markRunUnpublished(connection, context, "FAILED");
+      } else if (publicationCommit.isPresent()) {
         for (var index = 0; index < kinds.size(); index++) {
+          markSourcesPublished(
+              connection, context, kinds.get(index), reconciliations.get(index).sourceCount());
           markPublished(
               connection, context, kinds.get(index), reconciliations.get(index).sourceCount());
         }
+        markRunPublished(connection, context, publicationCommit.orElseThrow());
+      } else {
+        markRunUnpublished(connection, context, "READY");
       }
-      markRun(
-          connection, context,
-          allValid ? sourceFrozen ? "PUBLISHED" : "READY" : "FAILED",
-          allValid && sourceFrozen);
       return allValid;
     });
     if (!verified) {
@@ -228,7 +236,7 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
         publishStagedRows(connection, context, kind);
       }
       verifyTypedDomain(connection, context, kinds, supplied, false, "VERIFIED");
-      markRun(connection, context, "READY", false);
+      markRunUnpublished(connection, context, "READY");
       return null;
     });
   }
@@ -259,10 +267,11 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
         publishFrozenRows(connection, context, kind);
       }
       verifyTypedDomain(connection, context, kinds, supplied, true, "PUBLISHED");
+      var publicationCommittedAt = recordPublicationCommit(connection, context);
       for (var index = 0; index < kinds.size(); index++) {
         markPublished(connection, context, kinds.get(index), supplied.get(index).sourceCount());
       }
-      markRun(connection, context, "PUBLISHED", true);
+      markRunPublished(connection, context, publicationCommittedAt);
       return null;
     });
   }
@@ -339,6 +348,34 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
         return rows.getBoolean(1);
       }
     }
+  }
+
+  private static Optional<OffsetDateTime> readPublicationCommit(
+      Connection connection, ValidatedMigrationContext context) throws SQLException {
+    try (var statement = connection.prepareStatement(
+        "select committed_at from " + platform(context)
+            + ".persistence_migration_publication_commit where run_id=?")) {
+      statement.setObject(1, runId(context));
+      try (var rows = statement.executeQuery()) {
+        if (!rows.next()) {
+          return Optional.empty();
+        }
+        return Optional.of(rows.getObject(1, OffsetDateTime.class));
+      }
+    }
+  }
+
+  private static OffsetDateTime recordPublicationCommit(
+      Connection connection, ValidatedMigrationContext context) throws SQLException {
+    try (var statement = connection.prepareStatement(
+        "insert into " + platform(context)
+            + ".persistence_migration_publication_commit (run_id) values (?) "
+            + "on conflict (run_id) do nothing")) {
+      statement.setObject(1, runId(context));
+      statement.executeUpdate();
+    }
+    return readPublicationCommit(connection, context)
+        .orElseThrow(MigrationReconciliationException::new);
   }
 
   private static void createFrozenSnapshot(Connection connection) throws SQLException {
@@ -1128,6 +1165,23 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
     }
   }
 
+  private void markSourcesPublished(
+      Connection connection,
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind,
+      long expectedSourceCount) throws SQLException {
+    try (var statement = connection.prepareStatement(
+        "update " + platform(context) + ".persistence_migration_source "
+            + "set status='PUBLISHED' where run_id=? and source_kind=? "
+            + "and status='VERIFIED' and target_hash is not null")) {
+      statement.setObject(1, runId(context));
+      statement.setString(2, kind.sourceKind());
+      if (statement.executeUpdate() != expectedSourceCount) {
+        throw new MigrationReconciliationException();
+      }
+    }
+  }
+
   private void invalidateKindVerification(
       Connection connection,
       ValidatedMigrationContext context,
@@ -1151,17 +1205,27 @@ public final class JdbcMigrationTargetStore implements MigrationTargetStore {
     }
   }
 
-  private void markRun(
+  private void markRunUnpublished(
       Connection connection,
       ValidatedMigrationContext context,
-      String status,
-      boolean complete) throws SQLException {
+      String status) throws SQLException {
     try (var statement = connection.prepareStatement(
         "update " + platform(context) + ".persistence_migration_run "
-            + "set status=?, completed_at="
-            + (complete ? "coalesce(completed_at, transaction_timestamp())" : "null")
-            + " where run_id=?")) {
+            + "set status=?, completed_at=null where run_id=?")) {
       statement.setString(1, status);
+      statement.setObject(2, runId(context));
+      requireOne(statement.executeUpdate());
+    }
+  }
+
+  private void markRunPublished(
+      Connection connection,
+      ValidatedMigrationContext context,
+      OffsetDateTime completedAt) throws SQLException {
+    try (var statement = connection.prepareStatement(
+        "update " + platform(context) + ".persistence_migration_run "
+            + "set status='PUBLISHED', completed_at=? where run_id=?")) {
+      statement.setObject(1, completedAt);
       statement.setObject(2, runId(context));
       requireOne(statement.executeUpdate());
     }

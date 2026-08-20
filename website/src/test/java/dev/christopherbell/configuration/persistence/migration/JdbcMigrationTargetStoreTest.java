@@ -345,6 +345,7 @@ class JdbcMigrationTargetStoreTest {
       assertThat(scalar(database, "select concat(status, '|', completed_at is null) from \""
           + database.prefix() + "platform\".persistence_migration_run"))
           .isEqualTo("STAGING|t");
+      assertThat(count(database, "persistence_migration_publication_commit")).isZero();
 
       target.finalizeRun(
           context, List.of(kind), List.of(reconciliation),
@@ -499,6 +500,56 @@ class JdbcMigrationTargetStoreTest {
   }
 
   @Test
+  void reconcileCannotPublishFrozenStagingThatNeverCommittedFinalize() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate()) {
+      var kind = applicationLeaseKind();
+      var transformed = MigrationTransformerRegistry.from(loadCatalog())
+          .require(kind.sourceKind()).transform(source("lease-uncommitted-finalize", 29));
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var shadow = shadowContext(
+          database, UUID.fromString("00000000-0000-0000-0000-000000000640"));
+      var shadowStaged = target.commitBatch(
+          shadow, kind, target.checkpoint(shadow, kind), List.of(transformed),
+          "lease-uncommitted-finalize");
+      target.completeStaging(shadow, kind, shadowStaged);
+      target.rehearseShadow(
+          shadow, List.of(kind), List.of(target.reconcile(shadow, kind)));
+
+      var frozen = context(
+          database, UUID.fromString("00000000-0000-0000-0000-000000000641"));
+      var frozenStaged = target.commitBatch(
+          frozen, kind, target.checkpoint(frozen, kind), List.of(transformed),
+          "lease-uncommitted-finalize");
+      target.completeStaging(frozen, kind, frozenStaged);
+      var reconcile = withRequest(
+          frozen, PostgresqlMigrationCommand.RECONCILE, "release-6",
+          frozen.request().catalogDigest());
+      target.prepareExistingRunVerification(reconcile, List.of(kind));
+      var verification = target.reconcile(reconcile, kind);
+
+      target.verifyExistingRun(reconcile, List.of(kind), List.of(verification));
+
+      var runId = frozen.request().lockToken();
+      assertThat(scalar(database, "select concat(status, '|', target_hash is not null) from \""
+          + database.prefix() + "platform\".persistence_migration_source where run_id='"
+          + runId + "'"))
+          .isEqualTo("VERIFIED|t");
+      assertThat(scalar(database, "select concat(published, '|', published_count) from \""
+          + database.prefix() + "platform\".persistence_migration_kind where run_id='"
+          + runId + "'"))
+          .isEqualTo("f|0");
+      assertThat(scalar(database, "select concat(status, '|', completed_at is null) from \""
+          + database.prefix() + "platform\".persistence_migration_run where run_id='"
+          + runId + "'"))
+          .isEqualTo("READY|t");
+      assertThat(scalar(database, "select count(*) from \"" + database.prefix()
+          + "platform\".persistence_migration_publication_commit where run_id='" + runId + "'"))
+          .isEqualTo("0");
+    }
+  }
+
+  @Test
   void finalizationTransitionsExactProvenanceAndReplayPreservesCompletion() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate()) {
       var context = context(
@@ -535,11 +586,18 @@ class JdbcMigrationTargetStoreTest {
           .isEqualTo("PUBLISHED|t");
       var completedAt = scalar(database, "select completed_at::text from \""
           + database.prefix() + "platform\".persistence_migration_run");
+      var publicationCommittedAt = scalar(database, "select committed_at::text from \""
+          + database.prefix() + "platform\".persistence_migration_publication_commit");
+      assertThat(publicationCommittedAt).isEqualTo(completedAt);
 
       target.finalizeRun(context, List.of(kind), List.of(reconciliation), frozen);
 
       assertThat(scalar(database, "select completed_at::text from \"" + database.prefix()
           + "platform\".persistence_migration_run")).isEqualTo(completedAt);
+      assertThat(count(database, "persistence_migration_publication_commit")).isOne();
+      assertThat(scalar(database, "select committed_at::text from \"" + database.prefix()
+          + "platform\".persistence_migration_publication_commit"))
+          .isEqualTo(publicationCommittedAt);
       assertThat(count(database, "application_lease")).isOne();
 
       var reconcile = withRequest(
@@ -560,6 +618,115 @@ class JdbcMigrationTargetStoreTest {
       assertThat(scalar(database, "select concat(status, '|', completed_at is not null) from \""
           + database.prefix() + "platform\".persistence_migration_run"))
           .isEqualTo("PUBLISHED|t");
+      assertThat(scalar(database, "select completed_at::text from \"" + database.prefix()
+          + "platform\".persistence_migration_run"))
+          .isEqualTo(completedAt);
+      assertThat(scalar(database, "select committed_at::text from \"" + database.prefix()
+          + "platform\".persistence_migration_publication_commit"))
+          .isEqualTo(publicationCommittedAt);
+    }
+  }
+
+  @Test
+  void publicationCommitRollsBackWhenLaterPublicationMarkerWriteFails() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate()) {
+      var context = context(
+          database, UUID.fromString("00000000-0000-0000-0000-000000000642"));
+      var kind = applicationLeaseKind();
+      var transformed = MigrationTransformerRegistry.from(loadCatalog())
+          .require(kind.sourceKind()).transform(source("lease-post-commit-failure", 31));
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var staged = target.commitBatch(
+          context, kind, target.checkpoint(context, kind), List.of(transformed),
+          "lease-post-commit-failure");
+      target.completeStaging(context, kind, staged);
+      var reconciliation = target.reconcile(context, kind);
+      var platform = "\"" + database.prefix() + "platform\"";
+      execute(database, "create function " + platform
+          + ".reject_test_publication_marker() returns trigger language plpgsql as $function$ "
+          + "begin if new.published then raise exception 'injected publication marker failure'; "
+          + "end if; return new; end; $function$");
+      execute(database, "create trigger reject_test_publication_marker before update on "
+          + platform + ".persistence_migration_kind for each row execute function "
+          + platform + ".reject_test_publication_marker()");
+
+      assertThatThrownBy(() -> target.finalizeRun(
+          context, List.of(kind), List.of(reconciliation),
+          snapshot -> {
+            snapshot.accept(kind, List.of(transformed));
+            return context.request().frozenSourceEvidence();
+          }))
+          .isInstanceOf(MigrationStorageException.class);
+
+      assertThat(count(database, "application_lease")).isZero();
+      assertThat(count(database, "persistence_migration_publication_commit")).isZero();
+      assertThat(scalar(database, "select concat(status, '|', completed_at is null) from "
+          + platform + ".persistence_migration_run"))
+          .isEqualTo("STAGING|t");
+      assertThat(scalar(database, "select concat(status, '|', target_hash is null) from "
+          + platform + ".persistence_migration_source"))
+          .isEqualTo("STAGED|t");
+    }
+  }
+
+  @Test
+  void failedPublishedReconciliationDoesNotRestoreAnyPublicationMarkers() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate()) {
+      var context = context(
+          database, UUID.fromString("00000000-0000-0000-0000-000000000643"));
+      var catalog = loadCatalog();
+      var accountKind = catalog.kinds().stream()
+          .filter(kind -> kind.sourceKind().equals("account"))
+          .findFirst().orElseThrow();
+      var leaseKind = catalog.kinds().stream()
+          .filter(kind -> kind.sourceKind().equals("application_lease"))
+          .findFirst().orElseThrow();
+      var registry = MigrationTransformerRegistry.from(catalog);
+      var account = registry.require("account").transform(account("published-account"));
+      var lease = registry.require("application_lease")
+          .transform(source("published-lease", 37));
+      var kinds = List.of(accountKind, leaseKind);
+      var documents = List.of(account, lease);
+      var target = new JdbcMigrationTargetStore(
+          dataSource(database), new JdbcRelationalRowPublisher());
+      var reconciliations = new java.util.ArrayList<MigrationReconciliation>();
+      for (var index = 0; index < kinds.size(); index++) {
+        var kind = kinds.get(index);
+        var document = documents.get(index);
+        var staged = target.commitBatch(
+            context, kind, target.checkpoint(context, kind), List.of(document),
+            document.sourceId());
+        target.completeStaging(context, kind, staged);
+        reconciliations.add(target.reconcile(context, kind));
+      }
+      target.finalizeRun(
+          context, kinds, List.copyOf(reconciliations),
+          frozen(context, kinds, List.of(List.of(account), List.of(lease))));
+
+      var reconcile = withRequest(
+          context, PostgresqlMigrationCommand.RECONCILE, "release-6",
+          context.request().catalogDigest());
+      target.prepareExistingRunVerification(reconcile, kinds);
+      var prepared = kinds.stream().map(kind -> target.reconcile(reconcile, kind)).toList();
+      execute(database, "update \"" + database.prefix()
+          + "platform\".application_lease set fence_token=999 "
+          + "where lease_name='published-lease'");
+
+      assertThatThrownBy(() -> target.verifyExistingRun(reconcile, kinds, prepared))
+          .isInstanceOf(MigrationReconciliationException.class);
+
+      var platform = "\"" + database.prefix() + "platform\"";
+      assertThat(scalar(database, "select count(*) from " + platform
+          + ".persistence_migration_source where status='PUBLISHED'"))
+          .isEqualTo("0");
+      assertThat(scalar(database, "select count(*) from " + platform
+          + ".persistence_migration_kind where published"))
+          .isEqualTo("0");
+      assertThat(scalar(database, "select concat(status, '|', completed_at is null) from "
+          + platform + ".persistence_migration_run"))
+          .isEqualTo("FAILED|t");
+      assertThat(count(database, "persistence_migration_publication_commit")).isOne();
     }
   }
 
