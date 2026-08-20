@@ -29,6 +29,14 @@ final class MigrationPortQueryVerifierRegistry {
   private static final List<Operation> OPERATIONS = List.of(
       op("account", "find-by-id", "account", SemanticFamily.LOOKUP,
           "dev.christopherbell.account.PostgresAccountRepository", "findById", Module.ACCOUNT),
+      op("account", "find-by-email", "account", SemanticFamily.LOOKUP,
+          "dev.christopherbell.account.PostgresAccountRepository", "findByEmail", Module.ACCOUNT),
+      op("account", "find-by-username", "account", SemanticFamily.LOOKUP,
+          "dev.christopherbell.account.PostgresAccountRepository", "findByUsername",
+          Module.ACCOUNT),
+      op("account", "federation-actor-page", "account", SemanticFamily.LOOKUP,
+          "dev.christopherbell.account.PostgresAccountRepository",
+          "findByUsernameIgnoreCaseAndStatusAndFederationEnabledTrue", Module.ACCOUNT),
       op("account_follow", "follow-exists", "account_follow", SemanticFamily.LOOKUP,
           "dev.christopherbell.account.follow.PostgresAccountFollowStore", "exists", Module.ACCOUNT),
       op("account_trust_relationship", "relationship-exists", "account_trust_relationship",
@@ -262,6 +270,15 @@ final class MigrationPortQueryVerifierRegistry {
           Module.ADMIN));
 
   private static final Map<Declaration, Operation> RULES = rules();
+  private static final List<AdapterBinding> NON_QUERY_BINDINGS = List.of(
+      new AdapterBinding(
+          "migration_record", "non-query-reconciliation",
+          "dev.christopherbell.configuration.persistence.PlatformMigrationVerifier",
+          "verifyLedger"),
+      new AdapterBinding(
+          "domain_collection_cutover", "non-query-reconciliation",
+          "dev.christopherbell.configuration.persistence.PlatformMigrationVerifier",
+          "verifyLedger"));
 
   private MigrationPortQueryVerifierRegistry() {}
 
@@ -279,6 +296,15 @@ final class MigrationPortQueryVerifierRegistry {
     if (!declared.equals(RULES.keySet())) {
       throw invalid();
     }
+    var declaredNonQueries = catalog.kinds().stream()
+        .filter(kind -> kind.portQueries().isEmpty())
+        .map(PostgresqlMigrationCatalog.Kind::sourceKind)
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    var boundNonQueries = NON_QUERY_BINDINGS.stream().map(AdapterBinding::sourceKind)
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    if (!declaredNonQueries.equals(boundNonQueries)) {
+      throw invalid();
+    }
     return standard();
   }
 
@@ -289,6 +315,10 @@ final class MigrationPortQueryVerifierRegistry {
 
   int declarationCount() {
     return RULES.size();
+  }
+
+  List<AdapterBinding> nonQueryBindings() {
+    return NON_QUERY_BINDINGS;
   }
 
   List<AdapterBinding> actualAdapterBindings() {
@@ -386,6 +416,11 @@ final class MigrationPortQueryVerifierRegistry {
       PostgresqlMigrationCatalog.Kind kind,
       MigrationRowCodec codec,
       boolean includePriorShadowRows) throws SQLException {
+    if (kind.portQueries().isEmpty()) {
+      return verifyNonQuery(
+          connection, schemaPrefix, platformSchema, runId, kind, codec,
+          includePriorShadowRows);
+    }
     for (var queryName : kind.portQueries()) {
       var operation = RULES.get(new Declaration(kind.sourceKind(), queryName));
       if (operation == null || !kind.targetTables().containsAll(operation.tables())) {
@@ -410,6 +445,34 @@ final class MigrationPortQueryVerifierRegistry {
     return true;
   }
 
+  private static boolean verifyNonQuery(
+      Connection connection,
+      String schemaPrefix,
+      String platformSchema,
+      UUID runId,
+      PostgresqlMigrationCatalog.Kind kind,
+      MigrationRowCodec codec,
+      boolean includePriorShadowRows) throws SQLException {
+    var binding = NON_QUERY_BINDINGS.stream()
+        .filter(candidate -> candidate.sourceKind().equals(kind.sourceKind()))
+        .findFirst().orElse(null);
+    if (binding == null) {
+      return false;
+    }
+    var tables = new LinkedHashMap<String, List<Map<String, Object>>>();
+    for (var table : kind.targetTables()) {
+      var schema = schemaPrefix + kind.targetSchema();
+      var keys = primaryKeys(connection, schema, table);
+      if (keys.isEmpty()) {
+        return false;
+      }
+      tables.put(table, expectedRows(
+          connection, schema, platformSchema, runId, kind, table, keys, codec,
+          includePriorShadowRows));
+    }
+    return PlatformMigrationVerifier.verifyLedger(kind.sourceKind(), Map.copyOf(tables));
+  }
+
   private static boolean execute(
       Connection connection, String schema, Operation operation,
       Map<String, List<Map<String, Object>>> tables) throws SQLException {
@@ -417,7 +480,7 @@ final class MigrationPortQueryVerifierRegistry {
     var declaration = operation.declaration();
     return switch (operation.module()) {
       case ACCOUNT -> AccountMigrationVerifier.verify(
-          connection, schema, declaration.sourceKind(), rows);
+          connection, schema, declaration.sourceKind(), declaration.queryName(), rows);
       case ADMIN -> AdminMigrationVerifier.verify(
           connection, schema, declaration.sourceKind(), declaration.queryName(), rows);
       case CANES -> CanesBoxTrackerMigrationVerifier.verify(

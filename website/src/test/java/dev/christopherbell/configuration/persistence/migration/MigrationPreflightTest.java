@@ -61,6 +61,7 @@ class MigrationPreflightTest {
         "cbtest_task6_",
         CATALOG_DIGEST,
         "release-6",
+        1,
         LOCK_TOKEN,
         null,
         100);
@@ -116,6 +117,7 @@ class MigrationPreflightTest {
         "cbtest_task6_",
         CATALOG_DIGEST,
         "release-6",
+        1,
         LOCK_TOKEN,
         evidence,
         100);

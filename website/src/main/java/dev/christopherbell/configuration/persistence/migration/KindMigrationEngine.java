@@ -68,7 +68,7 @@ public final class KindMigrationEngine {
     return readSourceSnapshot(context, kind, ignored -> {});
   }
 
-  private MigrationSourceSnapshot readSourceSnapshot(
+  MigrationSourceSnapshot readSourceSnapshot(
       ValidatedMigrationContext context,
       PostgresqlMigrationCatalog.Kind kind,
       java.util.function.Consumer<List<TransformedMigrationDocument>> stagedValidator) {
@@ -88,11 +88,10 @@ public final class KindMigrationEngine {
       }
       stagedValidator.accept(List.copyOf(transformed));
       for (var document : transformed) {
-        var rowHashes = document.rows().stream().map(row -> CanonicalMigrationHasher.sha256(
-            java.util.List.of(
-                row.targetSchema(), row.targetTable(), row.ordinal(), row.values()))).toList();
+        var targetHash = MigrationCanonicalizationRegistry.targetDocumentHash(
+            kind, document.rows());
         relationalDigest = CanonicalMigrationHasher.sha256(java.util.List.of(
-            relationalDigest, document.sourceId(), document.sourceHash(), rowHashes));
+            relationalDigest, document.sourceId(), document.sourceHash(), targetHash));
       }
       actual = actual.advance(batch.lastCursor(), transformed);
     }

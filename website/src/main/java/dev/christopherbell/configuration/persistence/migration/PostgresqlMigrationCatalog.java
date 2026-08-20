@@ -10,7 +10,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /** Strict, immutable contract between consolidated Mongo kinds and relational targets. */
-public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
+public record PostgresqlMigrationCatalog(int version, int bridgeRelease, List<Kind> kinds) {
   private static final Pattern CANONICAL_NAME = Pattern.compile("[a-z][a-z0-9_]*");
   private static final Pattern JAVA_FIELD = Pattern.compile("[A-Za-z][A-Za-z0-9]*");
   private static final Pattern JAVA_CLASS =
@@ -44,6 +44,9 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
     if (version != 1) {
       throw invalid("version");
     }
+    if (bridgeRelease < 1) {
+      throw invalid("bridgeRelease");
+    }
     kinds = List.copyOf(Objects.requireNonNull(kinds, "kinds"));
     if (kinds.isEmpty()) {
       throw invalid("kinds");
@@ -60,6 +63,10 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
   public record Kind(
       String sourceCollection,
       String sourceKind,
+      String sourceOwner,
+      int minimumBridgeRelease,
+      String sourceCanonicalization,
+      String targetCanonicalization,
       int sourceSchemaVersion,
       int transformerVersion,
       String identifierType,
@@ -79,7 +86,10 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
     public Kind {
       requireCanonical(sourceCollection, "sourceCollection");
       requireCanonical(sourceKind, "sourceKind");
-      if (sourceSchemaVersion < 1 || transformerVersion < 1) {
+      if (sourceOwner == null || !JAVA_CLASS.matcher(sourceOwner).matches()) {
+        throw invalid(sourceKind + ".sourceOwner");
+      }
+      if (minimumBridgeRelease < 1 || sourceSchemaVersion < 1 || transformerVersion < 1) {
         throw invalid(sourceKind + ".schemaVersion");
       }
       requireAllowed(identifierType, IDENTIFIER_TYPES, sourceKind + ".identifierType");
@@ -103,9 +113,8 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
       requireAllowed(deleteBehavior, DELETE_BEHAVIORS, sourceKind + ".deleteBehavior");
       requireAllowed(versionSemantics, VERSION_SEMANTICS, sourceKind + ".versionSemantics");
       requireAllowed(expirySemantics, EXPIRY_SEMANTICS, sourceKind + ".expirySemantics");
-      if (!"sha256-rfc8785-v1".equals(canonicalHash)) {
-        throw invalid(sourceKind + ".canonicalHash");
-      }
+      MigrationCanonicalizationRegistry.requireSupported(
+          canonicalHash, sourceCanonicalization, targetCanonicalization);
       reconciliation = copyRules(reconciliation, sourceKind + ".reconciliation");
       portQueries = copyRules(portQueries, sourceKind + ".portQueries");
       var queryNotApplicable = reconciliation.contains("port-query-not-applicable");
@@ -113,6 +122,13 @@ public record PostgresqlMigrationCatalog(int version, List<Kind> kinds) {
           || transformerClass == null || !JAVA_CLASS.matcher(transformerClass).matches()) {
         throw invalid(sourceKind + ".transformerClass");
       }
+    }
+  }
+
+  void requireCompatibleBridgeRelease(int runningBridgeRelease) {
+    if (runningBridgeRelease != bridgeRelease
+        || kinds.stream().anyMatch(kind -> runningBridgeRelease < kind.minimumBridgeRelease())) {
+      throw new IllegalArgumentException("PostgreSQL migration bridge release is incompatible.");
     }
   }
 

@@ -33,7 +33,9 @@ class MigrationTransformerRegistryTest {
     var catalog = loadCatalog();
     var first = catalog.kinds().getFirst();
     var wrong = new PostgresqlMigrationCatalog.Kind(
-        first.sourceCollection(), first.sourceKind(), first.sourceSchemaVersion(),
+        first.sourceCollection(), first.sourceKind(), first.sourceOwner(),
+        first.minimumBridgeRelease(), first.sourceCanonicalization(),
+        first.targetCanonicalization(), first.sourceSchemaVersion(),
         first.transformerVersion(), first.identifierType(), first.targetSchema(),
         first.targetTables(), first.loadOrder(), first.dependsOnKinds(), first.keyMapping(),
         first.fieldMappings(), first.deleteBehavior(), first.versionSemantics(),
@@ -43,7 +45,7 @@ class MigrationTransformerRegistryTest {
     kinds.set(0, wrong);
 
     assertThatThrownBy(() -> MigrationTransformerRegistry.from(
-        new PostgresqlMigrationCatalog(catalog.version(), kinds)))
+        new PostgresqlMigrationCatalog(catalog.version(), catalog.bridgeRelease(), kinds)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("PostgreSQL migration transformer registry is invalid.");
   }
@@ -51,7 +53,9 @@ class MigrationTransformerRegistryTest {
   @Test
   void transformerRejectsSourceIdentityThatViolatesTheCatalogIdentifierType() {
     var kind = new PostgresqlMigrationCatalog.Kind(
-        "accounts", "account", 1, 1, "uuid-string", "identity", List.of("account"),
+        "accounts", "account", "dev.christopherbell.account.model.Account",
+        1, "mongo-source-document-v1", "ordered-relational-rows-v1",
+        1, 1, "uuid-string", "identity", List.of("account"),
         1,
         List.of(),
         new PostgresqlMigrationCatalog.KeyMapping("id", "account.account_id", "exact"),
@@ -62,7 +66,7 @@ class MigrationTransformerRegistryTest {
         "preserve",
         "none",
         "none",
-        "sha256-rfc8785-v1",
+        "tagged-canonical-sha256-v1",
         List.of("row-count"),
         List.of("find-by-id"),
         AccountTransformer.class.getName());

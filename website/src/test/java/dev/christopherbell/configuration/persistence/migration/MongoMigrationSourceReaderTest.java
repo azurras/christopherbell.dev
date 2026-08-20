@@ -141,6 +141,7 @@ class MongoMigrationSourceReaderTest {
         "cbtest_task6_",
         "a".repeat(64),
         "release-6",
+        1,
         UUID.randomUUID(),
         null,
         batchSize);

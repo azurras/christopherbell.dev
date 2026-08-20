@@ -7,14 +7,12 @@ public record MigrationReconciliation(
     long stagedCount,
     String sourceDigest,
     String reconstructedSourceDigest,
-    boolean relationshipsValid,
-    boolean portQueriesValid) {
+    boolean stagedRowsValid) {
   public boolean equivalent() {
     return stagingComplete
         && sourceCount == stagedCount
         && sourceDigest != null
         && sourceDigest.equals(reconstructedSourceDigest)
-        && relationshipsValid
-        && portQueriesValid;
+        && stagedRowsValid;
   }
 }

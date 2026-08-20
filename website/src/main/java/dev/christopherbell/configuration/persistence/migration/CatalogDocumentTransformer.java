@@ -144,11 +144,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       }
     }
 
-    var sourceHash = CanonicalMigrationHasher.sha256(Map.of(
-        "kind", source.sourceKind(),
-        "schemaVersion", source.schemaVersion(),
-        "sourceId", source.sourceId(),
-        "payload", source.payload()));
+    var sourceHash = MigrationCanonicalizationRegistry.sourceHash(kind, source);
     return new TransformedMigrationDocument(
         kind.sourceKind(), source.sourceId(), sourceHash, rows.finish());
   }

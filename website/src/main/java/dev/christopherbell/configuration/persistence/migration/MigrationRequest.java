@@ -13,6 +13,7 @@ public record MigrationRequest(
     String schemaPrefix,
     String catalogDigest,
     String release,
+    int bridgeRelease,
     UUID lockToken,
     FrozenSourceEvidence frozenSourceEvidence,
     int batchSize) {}

@@ -35,6 +35,7 @@ public final class PostgresqlMigrationCli {
       var catalog = new PostgresqlMigrationCatalogLoader().load(
           new java.io.ByteArrayInputStream(catalogResource));
       var request = request(command, environment, digest(catalogResource));
+      catalog.requireCompatibleBridgeRelease(request.bridgeRelease());
       var dataSource = new DriverManagerDataSource(
           request.targetJdbcUrl(), required(environment, "POSTGRESQL_MIGRATION_TARGET_USERNAME"),
           required(environment, "POSTGRESQL_MIGRATION_TARGET_PASSWORD"));
@@ -84,6 +85,7 @@ public final class PostgresqlMigrationCli {
         environment.getOrDefault("POSTGRESQL_MIGRATION_SCHEMA_PREFIX", ""),
         catalogDigest,
         required(environment, "POSTGRESQL_MIGRATION_RELEASE"),
+        Integer.parseInt(required(environment, "POSTGRESQL_MIGRATION_BRIDGE_RELEASE")),
         lockToken,
         evidence,
         Integer.parseInt(required(environment, "POSTGRESQL_MIGRATION_BATCH_SIZE")));

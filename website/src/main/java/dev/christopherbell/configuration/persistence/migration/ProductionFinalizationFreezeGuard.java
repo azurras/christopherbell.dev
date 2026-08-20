@@ -7,6 +7,8 @@ import java.nio.channels.FileLock;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
@@ -16,6 +18,8 @@ final class ProductionFinalizationFreezeGuard implements FinalizationFreezeGuard
   private static final Path DEPLOYMENT_LOCK = Path.of(
       "C:\\ProgramData\\christopherbell.dev\\locks\\deploy.lock");
   private static final String WEBSITE_SERVICE = "ChristopherBellDev";
+  private static final Map<Path, ProductionFinalizationFreezeGuard> FAILED_ACQUISITIONS =
+      new HashMap<>();
 
   private final FileChannel deploymentChannel;
   private final FileLock deploymentLock;
@@ -58,11 +62,12 @@ final class ProductionFinalizationFreezeGuard implements FinalizationFreezeGuard
     Objects.requireNonNull(client, "client");
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(websiteStopped, "websiteStopped");
+    var lockPath = path.toAbsolutePath().normalize();
+    recoverFailedAcquisition(lockPath);
     FileChannel channel = null;
     FileLock lock = null;
-    MongoFinalizationFreezeGuard mongo = null;
     try {
-      channel = FileChannel.open(path, StandardOpenOption.CREATE,
+      channel = FileChannel.open(lockPath, StandardOpenOption.CREATE,
           StandardOpenOption.READ, StandardOpenOption.WRITE);
       lock = channel.tryLock();
       if (lock == null) {
@@ -70,15 +75,57 @@ final class ProductionFinalizationFreezeGuard implements FinalizationFreezeGuard
             "Production deployment lock is already held.");
       }
       requireWebsiteStopped(websiteStopped);
-      mongo = MongoFinalizationFreezeGuard.acquire(client);
-      return new ProductionFinalizationFreezeGuard(channel, lock, websiteStopped, mongo);
+      var mongo = MongoFinalizationFreezeGuard.prepare(client);
+      var guard = new ProductionFinalizationFreezeGuard(channel, lock, websiteStopped, mongo);
+      channel = null;
+      lock = null;
+      try {
+        mongo.acquirePrepared();
+        return guard;
+      } catch (RuntimeException failure) {
+        closeOrRetainFailedAcquisition(lockPath, guard, failure);
+        throw failure;
+      }
     } catch (RuntimeException | IOException failure) {
-      closeAfterFailedAcquire(mongo, lock, channel, failure);
+      closeAfterFailedAcquire(lock, channel, failure);
       if (failure instanceof MigrationStorageException storage) {
         throw storage;
       }
       throw new MigrationStorageException(
           "Production finalization write freeze could not be acquired.", failure);
+    }
+  }
+
+  private static void recoverFailedAcquisition(Path path) {
+    synchronized (FAILED_ACQUISITIONS) {
+      var failedGuard = FAILED_ACQUISITIONS.get(path);
+      if (failedGuard == null) {
+        return;
+      }
+      try {
+        failedGuard.close();
+        FAILED_ACQUISITIONS.remove(path);
+      } catch (RuntimeException recoveryFailure) {
+        throw new MigrationStorageException(
+            "Previous production finalization write freeze could not be recovered.",
+            recoveryFailure);
+      }
+    }
+  }
+
+  private static void closeOrRetainFailedAcquisition(
+      Path path, ProductionFinalizationFreezeGuard guard, RuntimeException failure) {
+    try {
+      guard.close();
+    } catch (RuntimeException closeFailure) {
+      failure.addSuppressed(closeFailure);
+      synchronized (FAILED_ACQUISITIONS) {
+        var displaced = FAILED_ACQUISITIONS.putIfAbsent(path, guard);
+        if (displaced != null && displaced != guard) {
+          throw new IllegalStateException(
+              "A production finalization cleanup handle is already retained for " + path + ".");
+        }
+      }
     }
   }
 
@@ -156,14 +203,10 @@ final class ProductionFinalizationFreezeGuard implements FinalizationFreezeGuard
   }
 
   private static void closeAfterFailedAcquire(
-      MongoFinalizationFreezeGuard mongo,
       FileLock lock,
       FileChannel channel,
       Throwable failure) {
     try {
-      if (mongo != null) {
-        mongo.close();
-      }
       if (lock != null && lock.isValid()) {
         lock.release();
       }

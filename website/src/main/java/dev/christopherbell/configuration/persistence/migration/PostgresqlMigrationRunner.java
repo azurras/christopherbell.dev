@@ -33,7 +33,15 @@ public final class PostgresqlMigrationRunner {
   }
 
   public MigrationRunResult run(MigrationRequest request) {
+    if (request == null) {
+      throw new IllegalArgumentException("PostgreSQL migration bridge release is incompatible.");
+    }
+    catalog.requireCompatibleBridgeRelease(request.bridgeRelease());
     var context = preflight.validate(request);
+    if (request.command() == PostgresqlMigrationCommand.STATUS
+        || request.command() == PostgresqlMigrationCommand.RECONCILE) {
+      target.requireExistingRun(context);
+    }
     var kinds = catalog.kinds().stream()
         .sorted(Comparator.comparingInt(PostgresqlMigrationCatalog.Kind::loadOrder))
         .toList();
@@ -76,7 +84,8 @@ public final class PostgresqlMigrationRunner {
       try (var guard = freezeGuard.acquire(context, verifiedEvidence)) {
         guard.requireLocked();
         target.finalizeRun(context, kinds, reconciliations,
-            () -> revalidateFrozenBoundary(context, kinds, reconciliations, guard));
+            snapshot -> revalidateFrozenBoundary(
+                context, kinds, reconciliations, guard, snapshot));
       }
     } else {
       target.rehearseShadow(context, kinds, reconciliations);
@@ -87,7 +96,8 @@ public final class PostgresqlMigrationRunner {
       ValidatedMigrationContext context,
       List<PostgresqlMigrationCatalog.Kind> kinds,
       List<MigrationReconciliation> reconciliations,
-      FinalizationFreezeGuard guard) {
+      FinalizationFreezeGuard guard,
+      FrozenSourceSnapshotSink frozenSnapshot) {
     var expected = context.request().frozenSourceEvidence();
     guard.requireLocked();
     var before = finalizeAuthority.reload(expected);
@@ -96,7 +106,9 @@ public final class PostgresqlMigrationRunner {
     }
     var snapshots = new java.util.ArrayList<MigrationSourceSnapshot>(kinds.size());
     for (var index = 0; index < kinds.size(); index++) {
-      var snapshot = engine.readSourceSnapshot(context, kinds.get(index));
+      var kind = kinds.get(index);
+      var snapshot = engine.readSourceSnapshot(
+          context, kind, documents -> frozenSnapshot.accept(kind, documents));
       var reconciliation = reconciliations.get(index);
       if (snapshot.sourceCount() != reconciliation.sourceCount()
           || !snapshot.sourceDigest().equals(reconciliation.sourceDigest())) {
@@ -117,16 +129,19 @@ public final class PostgresqlMigrationRunner {
 
   private void reconcileExisting(
       ValidatedMigrationContext context, List<PostgresqlMigrationCatalog.Kind> kinds) {
+    target.prepareExistingRunVerification(context, kinds);
     var existing = target.statuses(context).stream()
         .collect(java.util.stream.Collectors.toMap(MigrationKindStatus::sourceKind, status -> status));
+    var reconciliations = new java.util.ArrayList<MigrationReconciliation>(kinds.size());
     for (var kind : kinds) {
       var status = existing.get(kind.sourceKind());
       if (status == null || !status.checkpoint().complete()) {
         throw new MigrationReconciliationException();
       }
       engine.requireSourceSnapshot(context, kind, status.checkpoint());
-      reconciler.requireEquivalent(context, kind);
+      reconciliations.add(reconciler.requireEquivalent(context, kind));
     }
+    target.verifyExistingRun(context, kinds, List.copyOf(reconciliations));
   }
 
   private static List<Object> statusValues(List<MigrationKindStatus> statuses) {

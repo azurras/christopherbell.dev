@@ -112,7 +112,10 @@ class KindMigrationEngineTest {
 
   private static PostgresqlMigrationCatalog.Kind kind() {
     return new PostgresqlMigrationCatalog.Kind(
-        "configuration", "fixture", 1, 1, "string", "platform", List.of("fixture"),
+        "configuration", "fixture",
+        "dev.christopherbell.configuration.persistence.migration.Fixture",
+        1, "mongo-source-document-v1", "ordered-relational-rows-v1",
+        1, 1, "string", "platform", List.of("fixture"),
         1,
         List.of(),
         new PostgresqlMigrationCatalog.KeyMapping(
@@ -124,7 +127,7 @@ class KindMigrationEngineTest {
         "preserve",
         "none",
         "none",
-        "sha256-rfc8785-v1",
+        "tagged-canonical-sha256-v1",
         List.of("count"),
         List.of("by-id"),
         "dev.christopherbell.configuration.persistence.migration.AccountTransformer");
@@ -145,6 +148,7 @@ class KindMigrationEngineTest {
         "cbtest_task6_",
         "a".repeat(64),
         "release-6",
+        1,
         UUID.fromString("00000000-0000-0000-0000-000000000006"),
         null,
         batchSize);
@@ -228,6 +232,14 @@ class KindMigrationEngineTest {
     }
 
     @Override
+    public void requireExistingRun(ValidatedMigrationContext context) {}
+
+    @Override
+    public void prepareExistingRunVerification(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds) {}
+
+    @Override
     public MigrationCheckpoint checkpoint(
         ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
       return checkpoint;
@@ -275,8 +287,14 @@ class KindMigrationEngineTest {
         ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
       return new MigrationReconciliation(
           checkpoint.complete(), checkpoint.sourceCount(), staged.size(),
-          checkpoint.sourceDigest(), checkpoint.sourceDigest(), true, true);
+          checkpoint.sourceDigest(), checkpoint.sourceDigest(), true);
     }
+
+    @Override
+    public void verifyExistingRun(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations) {}
 
     @Override
     public void rehearseShadow(

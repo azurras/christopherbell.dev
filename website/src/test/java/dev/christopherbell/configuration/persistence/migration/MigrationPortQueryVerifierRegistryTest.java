@@ -2,6 +2,8 @@ package dev.christopherbell.configuration.persistence.migration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
+import dev.christopherbell.configuration.persistence.PlatformMigrationVerifier;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -64,6 +66,95 @@ class MigrationPortQueryVerifierRegistryTest {
               .contains(binding.operation());
         });
     assertThat(registry.migrationOwnedFallbackDeclarations()).isEmpty();
+  }
+
+  @Test
+  void ledgerOnlyKindsBindExecutableModuleOwnedNonQueryVerification() throws IOException {
+    var bindings = MigrationPortQueryVerifierRegistry.from(loadCatalog()).nonQueryBindings();
+
+    assertThat(bindings)
+        .extracting(binding -> binding.sourceKind() + ":" + binding.ownerType()
+            + ":" + binding.operation())
+        .containsExactlyInAnyOrder(
+            "migration_record:dev.christopherbell.configuration.persistence."
+                + "PlatformMigrationVerifier:verifyLedger",
+            "domain_collection_cutover:dev.christopherbell.configuration.persistence."
+                + "PlatformMigrationVerifier:verifyLedger");
+    assertThat(bindings).allSatisfy(binding ->
+        assertThat(java.util.Arrays.stream(loadClass(binding.ownerType()).getMethods())
+            .map(java.lang.reflect.Method::getName)).contains(binding.operation()));
+  }
+
+  @Test
+  void ledgerOnlyVerificationExecutesDeclaredOrderingAndStateInvariants() {
+    var started = instant("2026-08-14T00:00:00Z");
+    var completed = instant("2026-08-14T00:01:00Z");
+    var migrationRows = Map.of("application_migration_record", List.of(
+        row("status", "RUNNING", "started_at", started,
+            "completed_at", null, "failure_category", null),
+        row("status", "APPLIED", "started_at", started,
+            "completed_at", completed, "failure_category", null),
+        row("status", "FAILED", "started_at", started,
+            "completed_at", completed, "failure_category", "write")));
+    var invalidMigrationRows = Map.of("application_migration_record", List.of(
+        row("status", "RUNNING", "started_at", started,
+            "completed_at", completed, "failure_category", null)));
+    var metrics = new java.util.ArrayList<Map<String, Object>>();
+    for (var index = 0; index < DomainCollectionManifest.ALL_KINDS.size(); index++) {
+      metrics.add(row(
+          "cutover_id", "cutover", "ordinal", index,
+          "source_kind", DomainCollectionManifest.ALL_KINDS.get(index).kind(),
+          "source_count", 0L, "checksum", "a".repeat(64)));
+    }
+    var cutoverRows = Map.of(
+        "domain_collection_cutover", List.of(row("cutover_id", "cutover")),
+        "domain_collection_cutover_source", List.<Map<String, Object>>of(),
+        "domain_collection_cutover_metric", List.copyOf(metrics));
+    var shorterCutoverRows = Map.of(
+        "domain_collection_cutover", List.of(row("cutover_id", "cutover")),
+        "domain_collection_cutover_source", List.<Map<String, Object>>of(),
+        "domain_collection_cutover_metric", List.of(metrics.getFirst()));
+    var emptyCutoverRows = Map.of(
+        "domain_collection_cutover", List.of(row("cutover_id", "cutover")),
+        "domain_collection_cutover_source", List.<Map<String, Object>>of(),
+        "domain_collection_cutover_metric", List.<Map<String, Object>>of());
+    var reorderedMetrics = new java.util.ArrayList<>(metrics);
+    java.util.Collections.swap(reorderedMetrics, 0, 1);
+    var invalidCutoverRows = Map.of(
+        "domain_collection_cutover", List.of(row("cutover_id", "cutover")),
+        "domain_collection_cutover_source", List.<Map<String, Object>>of(),
+        "domain_collection_cutover_metric", List.copyOf(reorderedMetrics));
+
+    assertThat(PlatformMigrationVerifier.verifyLedger("migration_record", migrationRows)).isTrue();
+    assertThat(PlatformMigrationVerifier.verifyLedger("migration_record", invalidMigrationRows))
+        .isFalse();
+    assertThat(PlatformMigrationVerifier.verifyLedger(
+        "domain_collection_cutover", cutoverRows)).isTrue();
+    assertThat(PlatformMigrationVerifier.verifyLedger(
+        "domain_collection_cutover", shorterCutoverRows)).isTrue();
+    assertThat(PlatformMigrationVerifier.verifyLedger(
+        "domain_collection_cutover", emptyCutoverRows)).isTrue();
+    assertThat(PlatformMigrationVerifier.verifyLedger(
+        "domain_collection_cutover", invalidCutoverRows)).isFalse();
+  }
+
+  @Test
+  void accountCatalogRetainsEveryRealIdentityLookup() throws IOException {
+    var catalog = loadCatalog();
+    var account = catalog.kinds().stream()
+        .filter(kind -> kind.sourceKind().equals("account"))
+        .findFirst().orElseThrow();
+
+    assertThat(account.portQueries()).containsExactly(
+        "find-by-id", "find-by-email", "find-by-username", "federation-actor-page");
+    assertThat(MigrationPortQueryVerifierRegistry.from(catalog).actualAdapterBindings().stream()
+        .filter(binding -> binding.sourceKind().equals("account"))
+        .map(binding -> binding.queryName() + ":" + binding.operation()))
+        .containsExactlyInAnyOrder(
+            "find-by-id:findById",
+            "find-by-email:findByEmail",
+            "find-by-username:findByUsername",
+            "federation-actor-page:findByUsernameIgnoreCaseAndStatusAndFederationEnabledTrue");
   }
 
   private static Class<?> loadClass(String name) {
@@ -177,6 +268,112 @@ class MigrationPortQueryVerifierRegistryTest {
           Map.of("metadata_edit", metadataDeadlineRows())))
           .isTrue();
     }
+  }
+
+  @Test
+  @EnabledIfEnvironmentVariable(named = "POSTGRESQL_INTEGRATION_TESTS", matches = "enabled")
+  void accountLookupsAndFavoritePageMatchCaseFilteringAndTiedTimeOrdering() throws Exception {
+    var registry = MigrationPortQueryVerifierRegistry.from(loadCatalog());
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var connection = database.connect()) {
+      var prefix = database.prefix();
+      insertAccountAndFavoriteFixtures(connection, prefix);
+      var accounts = List.of(
+          row("account_id", "account-a", "email", "case.a@example.test",
+              "username", "AlphaActor", "status", "ACTIVE", "federation_enabled", true),
+          row("account_id", "account-b", "email", "case.b@example.test",
+              "username", "BetaActor", "status", "ACTIVE", "federation_enabled", false),
+          row("account_id", "account-c", "email", "case.c@example.test",
+              "username", "GammaActor", "status", "SUSPENDED", "federation_enabled", true));
+      for (var query : List.of(
+          "find-by-id", "find-by-email", "find-by-username", "federation-actor-page")) {
+        assertThat(registry.verifyBoundAdapterForTest(
+            connection, prefix + "identity", "account", query,
+            Map.of("account", accounts))).isTrue();
+      }
+      assertThat(registry.verifyBoundAdapterForTest(
+          connection, prefix + "lunch", "favorite", "account-favorite-page",
+          Map.of("restaurant_favorite", List.of(
+              row("restaurant_favorite_id", "favorite-a", "account_id", "account-a",
+                  "created_on", instant("2026-08-14T00:00:00Z")),
+              row("restaurant_favorite_id", "favorite-z", "account_id", "account-a",
+                  "created_on", instant("2026-08-14T00:00:00Z")),
+              row("restaurant_favorite_id", "favorite-middle", "account_id", "account-a",
+                  "created_on", instant("2026-08-14T00:00:00Z")))))).isTrue();
+    }
+  }
+
+  @Test
+  @EnabledIfEnvironmentVariable(named = "POSTGRESQL_INTEGRATION_TESTS", matches = "enabled")
+  void pendingActionActiveUsesFixtureTimeAndRollsBackPreEpochAndEmptySourceProbes()
+      throws Exception {
+    var registry = MigrationPortQueryVerifierRegistry.from(loadCatalog());
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var connection = database.connect()) {
+      var schema = database.prefix() + "platform";
+      execute(connection, "insert into \"" + schema + "\".pending_action "
+          + "(pending_action_id,action,accepted_at,execute_at) values "
+          + "('machine-power','RESTART_COMPUTER','1960-01-01T00:00:00Z',"
+          + "'1960-01-01T00:01:00Z')");
+      var before = pendingActionRows(connection, schema);
+      connection.setAutoCommit(false);
+
+      var preEpochMatches = registry.verifyBoundAdapterForTest(
+          connection, schema, "pending_action", "active",
+          Map.of("pending_action", List.of(
+              row("pending_action_id", "machine-power", "action", "RESTART_COMPUTER",
+                  "accepted_at", instant("1960-01-01T00:00:00Z"),
+                  "execute_at", instant("1960-01-01T00:01:00Z")))));
+      var afterPreEpochProbe = pendingActionRows(connection, schema);
+      connection.rollback();
+
+      var emptySourceMatches = registry.verifyBoundAdapterForTest(
+          connection, schema, "pending_action", "active",
+          Map.of("pending_action", List.of()));
+      var afterEmptySourceProbe = pendingActionRows(connection, schema);
+      connection.rollback();
+
+      assertThat(preEpochMatches).isTrue();
+      assertThat(emptySourceMatches).isFalse();
+      assertThat(afterPreEpochProbe).isEqualTo(before);
+      assertThat(afterEmptySourceProbe).isEqualTo(before);
+      assertThat(pendingActionRows(connection, schema)).isEqualTo(before);
+    }
+  }
+
+  private static void insertAccountAndFavoriteFixtures(
+      java.sql.Connection connection, String prefix) throws java.sql.SQLException {
+    execute(connection, "insert into \"" + prefix + "identity\".account "
+        + "(account_id,email,normalized_email,federation_enabled,role,status,username) values "
+        + "('account-a','case.a@example.test','case.a@example.test',true,'USER','ACTIVE','AlphaActor'),"
+        + "('account-b','case.b@example.test','case.b@example.test',false,'USER','ACTIVE','BetaActor'),"
+        + "('account-c','case.c@example.test','case.c@example.test',true,'USER','SUSPENDED','GammaActor')");
+    execute(connection, "insert into \"" + prefix + "lunch\".restaurant "
+        + "(restaurant_id,dedupe_key,display_name,search_city,search_state) values "
+        + "('restaurant-a','dedupe-a','A','Austin','TX'),"
+        + "('restaurant-z','dedupe-z','Z','Austin','TX'),"
+        + "('restaurant-middle','dedupe-middle','Middle','Austin','TX')");
+    execute(connection, "insert into \"" + prefix + "lunch\".restaurant_favorite "
+        + "(restaurant_favorite_id,account_id,restaurant_id,created_on) values "
+        + "('favorite-a','account-a','restaurant-a','2026-08-14T00:00:00Z'),"
+        + "('favorite-z','account-a','restaurant-z','2026-08-14T00:00:00Z'),"
+        + "('favorite-middle','account-a','restaurant-middle','2026-08-14T00:00:00Z')");
+  }
+
+  private static List<String> pendingActionRows(
+      java.sql.Connection connection, String schema) throws java.sql.SQLException {
+    var result = new java.util.ArrayList<String>();
+    try (var statement = connection.createStatement();
+         var rows = statement.executeQuery(
+             "select pending_action_id,action,accepted_at,execute_at from \"" + schema
+                 + "\".pending_action order by pending_action_id")) {
+      while (rows.next()) {
+        result.add(String.join("|", rows.getString(1), rows.getString(2),
+            rows.getObject(3, java.time.OffsetDateTime.class).toInstant().toString(),
+            rows.getObject(4, java.time.OffsetDateTime.class).toInstant().toString()));
+      }
+    }
+    return List.copyOf(result);
   }
 
   private static void insertLookupAndDeadlineFixtures(

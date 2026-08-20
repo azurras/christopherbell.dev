@@ -95,8 +95,8 @@ public final class PostgresqlJooqSchemaTool {
         cleanTargetClaimed = true;
         try {
           var result = flyway().migrate();
-          if (result.migrationsExecuted != 12) {
-            throw new IllegalStateException("Expected exactly twelve canonical Flyway migrations.");
+          if (result.migrationsExecuted != 13) {
+            throw new IllegalStateException("Expected exactly thirteen canonical Flyway migrations.");
           }
           insertOwnershipMarker(lockConnection, ownerToken);
           prepared = true;

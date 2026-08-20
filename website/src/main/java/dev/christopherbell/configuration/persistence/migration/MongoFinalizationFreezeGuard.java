@@ -20,30 +20,36 @@ final class MongoFinalizationFreezeGuard implements FinalizationFreezeGuard {
 
   private final MongoClient client;
   private final AtomicBoolean open = new AtomicBoolean(true);
+  private volatile Ownership ownership = Ownership.PREPARED;
 
   private MongoFinalizationFreezeGuard(MongoClient client) {
     this.client = Objects.requireNonNull(client, "client");
   }
 
   static MongoFinalizationFreezeGuard acquire(MongoClient client) {
-    Objects.requireNonNull(client, "client");
-    var admin = client.getDatabase("admin");
-    var commandIssued = false;
+    var guard = prepare(client);
+    guard.acquirePrepared();
+    return guard;
+  }
+
+  static MongoFinalizationFreezeGuard prepare(MongoClient client) {
+    return new MongoFinalizationFreezeGuard(client);
+  }
+
+  synchronized void acquirePrepared() {
+    if (ownership != Ownership.PREPARED) {
+      throw new IllegalStateException("MongoDB finalization guard was already acquired.");
+    }
+    ownership = Ownership.UNCERTAIN;
     try {
-      commandIssued = true;
-      admin.runCommand(new Document("fsync", 1).append("lock", true));
-      var guard = new MongoFinalizationFreezeGuard(client);
-      guard.requireLocked();
-      return guard;
+      client.getDatabase("admin").runCommand(new Document("fsync", 1).append("lock", true));
+      ownership = Ownership.LOCKED;
+      requireLocked();
     } catch (RuntimeException exception) {
-      if (commandIssued) {
-        try {
-          admin.runCommand(new Document("fsyncUnlock", 1));
-        } catch (RuntimeException releaseFailure) {
-          if (!alreadyUnlocked(releaseFailure)) {
-            exception.addSuppressed(releaseFailure);
-          }
-        }
+      try {
+        unlockDirectly();
+      } catch (RuntimeException releaseFailure) {
+        exception.addSuppressed(releaseFailure);
       }
       throw new MigrationStorageException("MongoDB finalization write freeze could not be acquired.",
           exception);
@@ -51,7 +57,7 @@ final class MongoFinalizationFreezeGuard implements FinalizationFreezeGuard {
   }
 
   public void requireLocked() {
-    if (!open.get() || !serverReportsLocked()) {
+    if (!open.get() || ownership != Ownership.LOCKED || !serverReportsLocked()) {
       throw new MigrationStorageException(NOT_HELD);
     }
   }
@@ -61,23 +67,26 @@ final class MongoFinalizationFreezeGuard implements FinalizationFreezeGuard {
     if (!open.get()) {
       return;
     }
+    if (ownership == Ownership.PREPARED) {
+      open.set(false);
+      ownership = Ownership.RELEASED;
+      return;
+    }
     RuntimeException verificationFailure = null;
-    try {
-      if (!serverReportsLocked()) {
-        verificationFailure = new MigrationStorageException(NOT_HELD);
+    if (ownership == Ownership.LOCKED) {
+      try {
+        if (!serverReportsLocked()) {
+          verificationFailure = new MigrationStorageException(NOT_HELD);
+        }
+      } catch (RuntimeException exception) {
+        verificationFailure = exception;
       }
-    } catch (RuntimeException exception) {
-      verificationFailure = exception;
     }
     RuntimeException unlockFailure = null;
     try {
-      client.getDatabase("admin").runCommand(new Document("fsyncUnlock", 1));
-      open.set(false);
+      unlockDirectly();
     } catch (RuntimeException exception) {
       unlockFailure = exception;
-      if (alreadyUnlocked(exception)) {
-        open.set(false);
-      }
     }
     if (verificationFailure != null) {
       if (unlockFailure != null) {
@@ -102,8 +111,30 @@ final class MongoFinalizationFreezeGuard implements FinalizationFreezeGuard {
     }
   }
 
+  private void unlockDirectly() {
+    try {
+      client.getDatabase("admin").runCommand(new Document("fsyncUnlock", 1));
+      ownership = Ownership.RELEASED;
+      open.set(false);
+    } catch (RuntimeException failure) {
+      if (alreadyUnlocked(failure)) {
+        ownership = Ownership.RELEASED;
+        open.set(false);
+        return;
+      }
+      throw failure;
+    }
+  }
+
   private static boolean alreadyUnlocked(RuntimeException failure) {
     return failure instanceof MongoCommandException commandFailure
         && commandFailure.getErrorCode() == 20;
+  }
+
+  private enum Ownership {
+    PREPARED,
+    UNCERTAIN,
+    LOCKED,
+    RELEASED
   }
 }

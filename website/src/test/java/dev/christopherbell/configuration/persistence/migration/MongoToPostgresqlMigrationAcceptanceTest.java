@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.zaxxer.hikari.HikariDataSource;
 import com.mongodb.client.MongoClients;
+import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -98,6 +99,7 @@ class MongoToPostgresqlMigrationAcceptanceTest {
           var request = request(database, mongoUri);
 
           var first = runner.run(request);
+          var reconciled = runner.run(withCommand(request, PostgresqlMigrationCommand.RECONCILE));
           var second = directory == null ? runner.run(request) : first;
 
           assertThat(first.kinds()).hasSize(52).allSatisfy(status -> {
@@ -106,8 +108,11 @@ class MongoToPostgresqlMigrationAcceptanceTest {
                 .isEqualTo(status.sourceKind().equals("account") ? 2 : 1);
             assertThat(status.published()).isFalse();
           });
+          assertThat(reconciled.statusDigest()).isEqualTo(first.statusDigest());
           assertThat(second.statusDigest()).isEqualTo(first.statusDigest());
           assertThat(sourceCounts(database)).containsExactly(53L, 52L);
+          assertThat(verifiedKindCount(database)).isEqualTo(52L);
+          assertThat(verifiedSourceCount(database)).isEqualTo(53L);
           var stagedTables = stagedTables(database);
           assertThat(stagedTables).hasSize(52);
           assertThat(catalog.kinds()).allSatisfy(kind -> {
@@ -245,6 +250,18 @@ class MongoToPostgresqlMigrationAcceptanceTest {
       case "radio_state" -> result.put("durationSeconds", 3.5d);
       case "pending_action" -> result.put(
           "executeAt", ((Instant) result.get("acceptedAt")).plusSeconds(60));
+      case "migration_record" -> {
+        result.put("status", "RUNNING");
+        result.remove("completedAt");
+        result.remove("failureCategory");
+      }
+      case "domain_collection_cutover" -> {
+        result.put("presentSources", List.of());
+        result.put("expectedKindMetrics", List.of(Map.of(
+            "kind", DomainCollectionManifest.ALL_KINDS.getFirst().kind(),
+            "count", 1L,
+            "checksum", "a".repeat(64))));
+      }
       case "post" -> {
         result.put("rootId", ids.get("post"));
         result.remove("parentId");
@@ -339,9 +356,28 @@ class MongoToPostgresqlMigrationAcceptanceTest {
         database.prefix(),
         "a".repeat(64),
         "task6-acceptance",
+        1,
         UUID.fromString("00000000-0000-0000-0000-000000000606"),
         null,
         2);
+  }
+
+  private static MigrationRequest withCommand(
+      MigrationRequest request, PostgresqlMigrationCommand command) {
+    return new MigrationRequest(
+        command,
+        request.sourceUri(),
+        request.sourceDatabase(),
+        request.targetJdbcUrl(),
+        request.targetDatabase(),
+        request.expectedTargetRole(),
+        request.schemaPrefix(),
+        request.catalogDigest(),
+        request.release(),
+        request.bridgeRelease(),
+        request.lockToken(),
+        null,
+        request.batchSize());
   }
 
   private static MigrationRequest request(
@@ -352,7 +388,7 @@ class MongoToPostgresqlMigrationAcceptanceTest {
     return new MigrationRequest(
         PostgresqlMigrationCommand.FINALIZE, mongoUri, "test", database.jdbcConfiguration().url(),
         "test", "christopherbell_test", database.prefix(), "a".repeat(64),
-        "task6-acceptance", lockToken, evidence, 2);
+        "task6-acceptance", 1, lockToken, evidence, 2);
   }
 
   private static FrozenSourceEvidence authenticatedEvidence(
@@ -447,6 +483,32 @@ class MongoToPostgresqlMigrationAcceptanceTest {
                    + "platform\".persistence_migration_source")) {
       rows.next();
       return java.util.List.of(rows.getLong(1), rows.getLong(2));
+    }
+  }
+
+  private static long verifiedKindCount(
+      PostgresqlSchemaTestSupport.MigratedDatabase database) throws java.sql.SQLException {
+    try (var connection = database.connect();
+         var statement = connection.createStatement();
+         var rows = statement.executeQuery(
+             "select count(*) from \"" + database.prefix()
+                 + "platform\".persistence_migration_kind where staged_rows_valid "
+                 + "and typed_rows_valid and relationships_valid and port_queries_valid")) {
+      rows.next();
+      return rows.getLong(1);
+    }
+  }
+
+  private static long verifiedSourceCount(
+      PostgresqlSchemaTestSupport.MigratedDatabase database) throws java.sql.SQLException {
+    try (var connection = database.connect();
+         var statement = connection.createStatement();
+         var rows = statement.executeQuery(
+             "select count(*) from \"" + database.prefix()
+                 + "platform\".persistence_migration_source where status='VERIFIED' "
+                 + "and target_hash is not null")) {
+      rows.next();
+      return rows.getLong(1);
     }
   }
 

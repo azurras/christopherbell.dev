@@ -1,7 +1,12 @@
 version: 1
+bridgeRelease: 1
 kinds:
   - sourceCollection: accounts
     sourceKind: account
+    sourceOwner: dev.christopherbell.account.model.Account
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -39,13 +44,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: preserve-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, email-uniqueness, username-uniqueness]
-    portQueries: [find-by-id]
+    portQueries: [find-by-id, find-by-email, find-by-username, federation-actor-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.AccountTransformer
 
   - sourceCollection: accounts
     sourceKind: account_follow
+    sourceOwner: dev.christopherbell.account.follow.AccountFollow
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -61,13 +70,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, follower-target-uniqueness, account-foreign-keys]
     portQueries: [follow-exists]
     transformerClass: dev.christopherbell.configuration.persistence.migration.AccountFollowTransformer
 
   - sourceCollection: accounts
     sourceKind: account_trust_relationship
+    sourceOwner: dev.christopherbell.account.trust.AccountTrustRelationship
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -84,13 +97,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, owner-target-type-uniqueness, account-foreign-keys]
     portQueries: [relationship-exists]
     transformerClass: dev.christopherbell.configuration.persistence.migration.AccountTrustRelationshipTransformer
 
   - sourceCollection: accounts
     sourceKind: account_deletion_job
+    sourceOwner: dev.christopherbell.account.deletion.AccountDeletionJob
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -109,13 +126,17 @@ kinds:
     deleteBehavior: ledger-state
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, lifecycle-state]
     portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.AccountDeletionJobTransformer
 
   - sourceCollection: sessions
     sourceKind: browser_session
+    sourceOwner: dev.christopherbell.configuration.security.browser.BrowserSession
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -139,13 +160,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: ttl-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, account-foreign-key, absolute-expiry]
     portQueries: [find-authentication-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.BrowserSessionTransformer
 
   - sourceCollection: sessions
     sourceKind: conversation_archive_state
+    sourceOwner: dev.christopherbell.message.conversation.ConversationArchiveState
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -163,13 +188,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, owner-conversation-uniqueness]
     portQueries: [archive-conversation]
     transformerClass: dev.christopherbell.configuration.persistence.migration.ConversationArchiveStateTransformer
 
   - sourceCollection: communications
     sourceKind: message
+    sourceOwner: dev.christopherbell.message.model.Message
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -190,13 +219,17 @@ kinds:
     deleteBehavior: restrict
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, participant-foreign-keys, conversation-order]
     portQueries: [conversation-page, participant-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MessageTransformer
 
   - sourceCollection: communications
     sourceKind: notification
+    sourceOwner: dev.christopherbell.notification.model.Notification
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -222,13 +255,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, account-foreign-key, inbox-order]
     portQueries: [find-by-id, account-page, unread-by-account]
     transformerClass: dev.christopherbell.configuration.persistence.migration.NotificationTransformer
 
   - sourceCollection: communications
     sourceKind: notification_preference
+    sourceOwner: dev.christopherbell.notification.preference.NotificationPreference
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -249,13 +286,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, account-uniqueness]
     portQueries: [find-by-account]
     transformerClass: dev.christopherbell.configuration.persistence.migration.NotificationPreferenceTransformer
 
   - sourceCollection: communications
     sourceKind: notification_delivery_guard
+    sourceOwner: dev.christopherbell.notification.delivery.NotificationDeliveryGuard
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -273,13 +314,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: ttl-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, expiration-deadline]
     portQueries: [try-acquire]
     transformerClass: dev.christopherbell.configuration.persistence.migration.NotificationDeliveryGuardTransformer
 
   - sourceCollection: communications
     sourceKind: notification_rate_limit
+    sourceOwner: dev.christopherbell.notification.delivery.NotificationRateLimit
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -297,13 +342,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: ttl-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, expiration-deadline]
     portQueries: [try-acquire]
     transformerClass: dev.christopherbell.configuration.persistence.migration.NotificationRateLimitTransformer
 
   - sourceCollection: content
     sourceKind: post
+    sourceOwner: dev.christopherbell.post.model.Post
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -334,13 +383,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: preserve-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, author-foreign-key, thread-foreign-keys, feed-order]
     portQueries: [find-by-id, author-feed-page, public-feed-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.PostTransformer
 
   - sourceCollection: content
     sourceKind: post_like
+    sourceOwner: dev.christopherbell.post.like.PostLike
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -356,13 +409,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, post-account-uniqueness, foreign-keys]
     portQueries: [like-exists]
     transformerClass: dev.christopherbell.configuration.persistence.migration.PostLikeTransformer
 
   - sourceCollection: content
     sourceKind: post_report
+    sourceOwner: dev.christopherbell.report.model.PostReport
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -395,13 +452,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, open-dedupe-uniqueness, moderation-order]
     portQueries: [find-by-id, moderation-page, find-open-dedupe]
     transformerClass: dev.christopherbell.configuration.persistence.migration.PostReportTransformer
 
   - sourceCollection: content
     sourceKind: hidden_post_thread
+    sourceOwner: dev.christopherbell.post.hide.HiddenPostThread
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -417,13 +478,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, account-root-uniqueness, foreign-keys]
     portQueries: [find-by-account-and-root, account-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.HiddenPostThreadTransformer
 
   - sourceCollection: content
     sourceKind: post_link_preview_cache
+    sourceOwner: dev.christopherbell.post.preview.PostLinkPreviewCacheEntry
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -441,13 +506,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: ttl-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, expiration-deadline]
     portQueries: [find-by-id, delete-expired]
     transformerClass: dev.christopherbell.configuration.persistence.migration.PostLinkPreviewCacheTransformer
 
   - sourceCollection: federation
     sourceKind: federation_scan_state
+    sourceOwner: dev.christopherbell.federation.outbound.FederationScanState
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -463,13 +532,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, scan-cursor]
     portQueries: [load-cursor]
     transformerClass: dev.christopherbell.configuration.persistence.migration.FederationScanStateTransformer
 
   - sourceCollection: federation
     sourceKind: federation_delivery_job
+    sourceOwner: dev.christopherbell.federation.outbound.FederationDeliveryJob
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -495,13 +568,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: preserve-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, post-peer-uniqueness, delivery-claim-order]
     portQueries: [claim-due, enqueue-if-absent]
     transformerClass: dev.christopherbell.configuration.persistence.migration.FederationDeliveryJobTransformer
 
   - sourceCollection: music
     sourceKind: music_track
+    sourceOwner: dev.christopherbell.music.catalog.MusicTrack
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -536,13 +613,17 @@ kinds:
     deleteBehavior: restrict
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, path-uniqueness]
     portQueries: [find-by-id, catalog-search]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicTrackTransformer
 
   - sourceCollection: music
     sourceKind: music_playlist
+    sourceOwner: dev.christopherbell.music.library.MusicPlaylist
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -561,13 +642,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: preserve-optimistic
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, normalized-name-uniqueness, playlist-order]
     portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicPlaylistTransformer
 
   - sourceCollection: music
     sourceKind: music_metadata_edit
+    sourceOwner: dev.christopherbell.music.metadata.MusicMetadataEdit
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -594,13 +679,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: preserve-optimistic
     expirySemantics: preserve-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, track-foreign-key, expiration-deadline]
     portQueries: [find-by-id, expiration-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicMetadataEditTransformer
 
   - sourceCollection: music
     sourceKind: music_runtime_state
+    sourceOwner: dev.christopherbell.music.radio.MusicRuntimeStateDocument
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -617,13 +706,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: preserve-optimistic
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, runtime-kind-shape, queue-order]
     portQueries: [global-queue, global-radio]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicRuntimeStateTransformer
 
   - sourceCollection: music
     sourceKind: music_radio_history
+    sourceOwner: dev.christopherbell.music.radio.MusicRadioHistoryEvent
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -643,13 +736,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, station-order]
     portQueries: [station-sequence-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicRadioHistoryTransformer
 
   - sourceCollection: music
     sourceKind: music_access_attempt
+    sourceOwner: dev.christopherbell.music.security.MusicAccessAttempt
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -669,13 +766,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: ttl-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, expiration-deadline]
     portQueries: [recent-page, delete-expired]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MusicAccessAttemptTransformer
 
   - sourceCollection: whatsforlunch
     sourceKind: restaurant
+    sourceOwner: dev.christopherbell.whatsforlunch.restaurant.model.Restaurant
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -703,13 +804,17 @@ kinds:
     deleteBehavior: restrict
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, normalized-name-uniqueness, coordinate-pairing]
     portQueries: [find-by-id, find-by-normalized-name, coordinate-bounds]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RestaurantTransformer
 
   - sourceCollection: whatsforlunch
     sourceKind: vote
+    sourceOwner: dev.christopherbell.whatsforlunch.restaurant.model.RestaurantVote
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -728,13 +833,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, restaurant-account-uniqueness, foreign-keys]
     portQueries: [find-by-restaurant-and-account]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RestaurantVoteTransformer
 
   - sourceCollection: whatsforlunch
     sourceKind: favorite
+    sourceOwner: dev.christopherbell.whatsforlunch.restaurant.model.RestaurantFavorite
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -751,13 +860,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, restaurant-account-uniqueness, foreign-keys]
     portQueries: [find-by-restaurant-and-account, account-favorite-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RestaurantFavoriteTransformer
 
   - sourceCollection: whatsforlunch
     sourceKind: preference
+    sourceOwner: dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreference
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -772,13 +885,17 @@ kinds:
     deleteBehavior: cascade
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, account-foreign-key, cuisine-order]
     portQueries: [find-by-account]
     transformerClass: dev.christopherbell.configuration.persistence.migration.WhatsForLunchPreferenceTransformer
 
   - sourceCollection: whatsforlunch
     sourceKind: session
+    sourceOwner: dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -805,13 +922,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: preserve-revision
     expirySemantics: ttl-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, participant-order, restaurant-order, revision, expiration-deadline]
     portQueries: [find-by-id, participant-session-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.WhatsForLunchSessionTransformer
 
   - sourceCollection: whatsforlunch
     sourceKind: daily_picks
+    sourceOwner: dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -827,13 +948,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, restaurant-order]
     portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.DailyLunchPicksTransformer
 
   - sourceCollection: whatsforlunch
     sourceKind: import_state
+    sourceOwner: dev.christopherbell.whatsforlunch.restaurant.model.RestaurantImportState
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -858,13 +983,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, lifecycle-state]
     portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RestaurantImportStateTransformer
 
   - sourceCollection: whatsforlunch
     sourceKind: import_preview
+    sourceOwner: dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewDocument
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -883,13 +1012,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: ttl-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, expiration-deadline]
     portQueries: [claim]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RestaurantImportPreviewTransformer
 
   - sourceCollection: shared_folder
     sourceKind: audit_event
+    sourceOwner: dev.christopherbell.sharedfolder.audit.SharedFolderAuditEvent
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -911,13 +1044,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: ttl-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, audit-order, expiration-deadline]
     portQueries: [search]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderAuditEventTransformer
 
   - sourceCollection: shared_folder
     sourceKind: maintenance_lease
+    sourceOwner: dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceLeaseDocument
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -934,13 +1071,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: database-time-lease
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, lease-expiration]
     portQueries: [claim-expired-lease]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderMaintenanceLeaseTransformer
 
   - sourceCollection: shared_folder
     sourceKind: media_job
+    sourceOwner: dev.christopherbell.sharedfolder.media.MediaJob
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -974,13 +1115,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: preserve-optimistic
     expirySemantics: ttl-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, active-cache-uniqueness, cleanup-order, expiration-deadline]
     portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.MediaJobTransformer
 
   - sourceCollection: shared_folder
     sourceKind: mutation_recovery
+    sourceOwner: dev.christopherbell.sharedfolder.service.SharedFolderMutationRecovery
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1007,13 +1152,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: preserve-optimistic
     expirySemantics: preserve-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, recovery-state]
     portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderMutationRecoveryTransformer
 
   - sourceCollection: shared_folder
     sourceKind: radio_state
+    sourceOwner: dev.christopherbell.sharedfolder.radio.SharedFolderRadioDocument
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1033,13 +1182,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: preserve-optimistic
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, radio-state-shape, duration-order]
     portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderRadioTransformer
 
   - sourceCollection: shared_folder
     sourceKind: recycle_item
+    sourceOwner: dev.christopherbell.sharedfolder.recycle.SharedFolderRecycleItem
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1065,13 +1218,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: preserve-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, recycle-state-order, replacement-pairing]
     portQueries: [find-by-id, state-deleted-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderRecycleItemTransformer
 
   - sourceCollection: shared_folder
     sourceKind: upload_session
+    sourceOwner: dev.christopherbell.sharedfolder.upload.SharedFolderUploadSession
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1115,13 +1272,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: preserve-optimistic
     expirySemantics: ttl-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, chunk-map-equivalence, upload-state, expiration-deadline]
     portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.SharedFolderUploadSessionTransformer
 
   - sourceCollection: vehicles
     sourceKind: vehicle
+    sourceOwner: dev.christopherbell.vehicle.model.Vehicle
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1170,13 +1331,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, vin-uniqueness, decoded-map-equivalence]
     portQueries: [find-by-id, find-by-vin]
     transformerClass: dev.christopherbell.configuration.persistence.migration.VehicleTransformer
 
   - sourceCollection: vehicles
     sourceKind: vin_decode_cache
+    sourceOwner: dev.christopherbell.vehicle.model.VehicleVinDecodeCache
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1195,13 +1360,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: ttl-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, vin-identity, raw-map-equivalence, expiration-deadline]
     portQueries: [find-by-vin]
     transformerClass: dev.christopherbell.configuration.persistence.migration.VehicleVinDecodeCacheTransformer
 
   - sourceCollection: vehicles
     sourceKind: nhtsa_import_state
+    sourceOwner: dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1226,13 +1395,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: preserve-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, throttle-state]
     portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.NhtsaVinImportStateTransformer
 
   - sourceCollection: vehicles
     sourceKind: random_vin_import_state
+    sourceOwner: dev.christopherbell.vehicle.randomvin.model.RandomVinImportState
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1258,13 +1431,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: preserve-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, throttle-state, robots-policy]
     portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.RandomVinImportStateTransformer
 
   - sourceCollection: location
     sourceKind: zip_coordinate
+    sourceOwner: dev.christopherbell.location.model.ZipCoordinate
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1283,13 +1460,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, coordinate-bounds]
     portQueries: [find-by-zip-code]
     transformerClass: dev.christopherbell.configuration.persistence.migration.ZipCoordinateTransformer
 
   - sourceCollection: location
     sourceKind: zip_import_state
+    sourceOwner: dev.christopherbell.location.model.ZipCoordinateImportState
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1307,13 +1488,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, dataset-identity]
     portQueries: [find-by-id]
     transformerClass: dev.christopherbell.configuration.persistence.migration.ZipCoordinateImportStateTransformer
 
   - sourceCollection: canes_box_tracker
     sourceKind: price_snapshot
+    sourceOwner: dev.christopherbell.canesboxtracker.model.CanesBoxPriceSnapshot
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1336,13 +1521,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, monetary-precision, metro-order]
     portQueries: [find-by-id, weekly-snapshot-page]
     transformerClass: dev.christopherbell.configuration.persistence.migration.CanesBoxPriceSnapshotTransformer
 
   - sourceCollection: application_runtime
     sourceKind: application_lease
+    sourceOwner: dev.christopherbell.libs.mongo.lease.MongoLeaseDocument
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1359,13 +1548,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: database-time-lease
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, lease-expiration]
     portQueries: [claim-expired-lease]
     transformerClass: dev.christopherbell.configuration.persistence.migration.ApplicationLeaseTransformer
 
   - sourceCollection: application_runtime
     sourceKind: scheduled_collector_run
+    sourceOwner: dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1384,13 +1577,17 @@ kinds:
     deleteBehavior: ledger-state
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, status-completed-order]
     portQueries: [save]
     transformerClass: dev.christopherbell.configuration.persistence.migration.ScheduledCollectorRunTransformer
 
   - sourceCollection: application_migrations
     sourceKind: migration_record
+    sourceOwner: dev.christopherbell.configuration.mongo.migration.MigrationRecord
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1410,13 +1607,17 @@ kinds:
     deleteBehavior: ledger-state
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, status-completed-order, port-query-not-applicable]
     portQueries: []
     transformerClass: dev.christopherbell.configuration.persistence.migration.ApplicationMigrationRecordTransformer
 
   - sourceCollection: application_migrations
     sourceKind: domain_collection_cutover
+    sourceOwner: dev.christopherbell.configuration.mongo.migration.DomainCollectionCutoverLedger
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1444,13 +1645,17 @@ kinds:
     deleteBehavior: ledger-state
     versionSemantics: preserve-revision
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, source-order, metric-order, port-query-not-applicable]
     portQueries: []
     transformerClass: dev.christopherbell.configuration.persistence.migration.DomainCollectionCutoverTransformer
 
   - sourceCollection: admin_activity
     sourceKind: admin_activity
+    sourceOwner: dev.christopherbell.admin.model.AdminActivity
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1475,13 +1680,17 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: none
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, activity-order, map-equivalence]
     portQueries: [find-by-id, query]
     transformerClass: dev.christopherbell.configuration.persistence.migration.AdminActivityTransformer
 
   - sourceCollection: admin_activity
     sourceKind: pending_action
+    sourceOwner: dev.christopherbell.admin.commandcenter.action.PendingActionDocument
+    minimumBridgeRelease: 1
+    sourceCanonicalization: mongo-source-document-v1
+    targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
     identifierType: string
@@ -1497,7 +1706,7 @@ kinds:
     deleteBehavior: preserve
     versionSemantics: initialize-zero
     expirySemantics: preserve-deadline
-    canonicalHash: sha256-rfc8785-v1
+    canonicalHash: tagged-canonical-sha256-v1
     reconciliation: [row-count, canonical-record-hash, fixed-key]
     portQueries: [active, reserve]
     transformerClass: dev.christopherbell.configuration.persistence.migration.PendingActionTransformer

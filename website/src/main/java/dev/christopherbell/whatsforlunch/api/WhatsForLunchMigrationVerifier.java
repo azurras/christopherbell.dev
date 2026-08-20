@@ -111,7 +111,9 @@ public final class WhatsForLunchMigrationVerifier {
     for (var account : rows.stream().map(row -> text(row.get("account_id"))).distinct().toList()) {
       var expected = rows.stream().filter(row -> account.equals(text(row.get("account_id"))))
           .sorted(Comparator.comparing(
-              (Map<String, Object> row) -> instant(row.get("created_on"))).reversed())
+              (Map<String, Object> row) -> instant(row.get("created_on"))).reversed()
+              .thenComparing(
+                  row -> text(row.get("restaurant_favorite_id")), Comparator.reverseOrder()))
           .map(row -> text(row.get("restaurant_favorite_id"))).toList();
       var actual = repository.findByAccountIdOrderByCreatedOnDesc(account).stream()
           .map(value -> value.getId()).toList();

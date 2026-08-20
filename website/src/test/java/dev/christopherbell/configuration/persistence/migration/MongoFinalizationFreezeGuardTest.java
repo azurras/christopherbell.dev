@@ -162,7 +162,7 @@ class MongoFinalizationFreezeGuardTest {
       assertThatThrownBy(guard::close)
           .isInstanceOf(MigrationStorageException.class)
           .hasMessage("MongoDB finalization write freeze could not be released.")
-          .satisfies(failure -> assertThat(failure.getCause().getSuppressed()).hasSize(1));
+          .satisfies(failure -> assertThat(failure.getCause().getSuppressed()).isEmpty());
       guard.close();
     }
   }

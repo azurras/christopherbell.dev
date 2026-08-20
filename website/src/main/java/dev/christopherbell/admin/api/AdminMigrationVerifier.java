@@ -1,5 +1,6 @@
 package dev.christopherbell.admin.api;
 
+import static dev.christopherbell.persistence.jooq.platform.Tables.PENDING_ACTION;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.database;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.instant;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.rollback;
@@ -33,7 +34,7 @@ public final class AdminMigrationVerifier {
       case "admin_activity/find-by-id" -> verifyOptionalLookup(
           rows, "admin_activity_id", new PostgresAdminActivityRepository(context)::findById);
       case "admin_activity/query" -> verifyQuery(context, rows);
-      case "pending_action/active" -> verifyActive(context, rows);
+      case "pending_action/active" -> verifyActive(connection, context, rows);
       case "pending_action/reserve" -> verifyReserve(connection, context);
       default -> false;
     };
@@ -54,10 +55,31 @@ public final class AdminMigrationVerifier {
   }
 
   private static boolean verifyActive(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var actual = new PostgresPendingActionStore(context).active(Instant.EPOCH);
-    return rows.isEmpty() ? actual.isEmpty() : actual.isPresent()
-        && text(rows.getFirst().get("action")).equals(actual.orElseThrow().action().name());
+      Connection connection, org.jooq.DSLContext context, List<Map<String, Object>> rows)
+      throws SQLException {
+    if (rows.size() > 1) {
+      return false;
+    }
+    var targetDeadline = context.select(PENDING_ACTION.EXECUTE_AT)
+        .from(PENDING_ACTION)
+        .where(PENDING_ACTION.PENDING_ACTION_ID.eq("machine-power"))
+        .fetchOptional(PENDING_ACTION.EXECUTE_AT)
+        .map(value -> value.toInstant());
+    var deadline = rows.isEmpty()
+        ? targetDeadline.orElse(Instant.EPOCH)
+        : instant(rows.getFirst().get("execute_at"));
+    var observationTime = deadline.minusNanos(1);
+    return rollback(connection, () -> {
+      var actual = new PostgresPendingActionStore(context).active(observationTime);
+      if (rows.isEmpty()) {
+        return actual.isEmpty();
+      }
+      var expected = rows.getFirst();
+      return actual.isPresent()
+          && text(expected.get("action")).equals(actual.orElseThrow().action().name())
+          && instant(expected.get("accepted_at")).equals(actual.orElseThrow().acceptedAt())
+          && deadline.equals(actual.orElseThrow().executeAt());
+    });
   }
 
   private static boolean verifyReserve(

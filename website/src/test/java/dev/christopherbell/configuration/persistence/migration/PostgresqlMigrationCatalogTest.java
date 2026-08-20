@@ -55,7 +55,8 @@ class PostgresqlMigrationCatalogTest {
           .containsExactlyInAnyOrderElementsOf(persistedFields(manifest));
       assertThat(target.keyMapping().sourcePath()).as(manifest.kind())
           .isEqualTo(persistedIdField(manifest));
-      assertThat(target.canonicalHash()).as(manifest.kind()).isEqualTo("sha256-rfc8785-v1");
+      assertThat(target.canonicalHash()).as(manifest.kind())
+          .isEqualTo(MigrationCanonicalizationRegistry.HASH);
       assertThat(target.reconciliation()).as(manifest.kind())
           .contains("row-count", "canonical-record-hash");
       if (NON_QUERY_KINDS.contains(manifest.kind())) {
@@ -83,6 +84,30 @@ class PostgresqlMigrationCatalogTest {
         assertThat(mapping.targets()).as(kind.sourceKind() + "." + field)
             .allMatch(target -> !target.contains("*") && !target.toLowerCase().contains("json"));
       });
+    });
+  }
+
+  @Test
+  void everyKindDeclaresManifestOwnershipAndExecutableBridgeCanonicalization() throws Exception {
+    var catalog = loadCatalog();
+    var manifests = DomainCollectionManifest.ALL_KINDS.stream().collect(
+        Collectors.toUnmodifiableMap(
+            DomainCollectionManifest.KindDefinition::kind, Function.identity()));
+
+    assertThat(catalog.bridgeRelease()).isEqualTo(1);
+    assertThat(catalog.kinds()).allSatisfy(kind -> {
+      var manifest = manifests.get(kind.sourceKind());
+      assertThat(kind.sourceOwner()).as(kind.sourceKind())
+          .isEqualTo(manifest.ownerTypeName());
+      assertThat(kind.minimumBridgeRelease()).as(kind.sourceKind())
+          .isEqualTo(1);
+      assertThat(kind.sourceCanonicalization()).as(kind.sourceKind())
+          .isEqualTo(MigrationCanonicalizationRegistry.SOURCE);
+      assertThat(kind.targetCanonicalization()).as(kind.sourceKind())
+          .isEqualTo(MigrationCanonicalizationRegistry.TARGET);
+      assertThat(kind.canonicalHash()).as(kind.sourceKind())
+          .isEqualTo(MigrationCanonicalizationRegistry.HASH);
+      MigrationCanonicalizationRegistry.requireSupported(kind);
     });
   }
 
@@ -179,7 +204,8 @@ class PostgresqlMigrationCatalogTest {
         .toList();
 
     assertThatThrownBy(() -> PostgresqlMigrationCatalogValidator.validate(
-        new PostgresqlMigrationCatalog(catalog.version(), invalidKinds)))
+        new PostgresqlMigrationCatalog(
+            catalog.version(), catalog.bridgeRelease(), invalidKinds)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("notification.dependsOnKinds");
   }
@@ -199,6 +225,10 @@ class PostgresqlMigrationCatalogTest {
     return new PostgresqlMigrationCatalog.Kind(
         kind.sourceCollection(),
         kind.sourceKind(),
+        kind.sourceOwner(),
+        kind.minimumBridgeRelease(),
+        kind.sourceCanonicalization(),
+        kind.targetCanonicalization(),
         kind.sourceSchemaVersion(),
         kind.transformerVersion(),
         kind.identifierType(),
@@ -249,4 +279,5 @@ class PostgresqlMigrationCatalogTest {
     return Stream.<Class<?>>iterate(owner, type -> type != null, type -> type.getSuperclass())
         .flatMap(type -> Arrays.stream(type.getDeclaredFields()));
   }
+
 }

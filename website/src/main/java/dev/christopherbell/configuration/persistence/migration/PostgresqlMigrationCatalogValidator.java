@@ -33,6 +33,12 @@ final class PostgresqlMigrationCatalogValidator {
       if (!kind.sourceCollection().equals(manifest.collection())) {
         throw invalid(kind.sourceKind() + ".sourceCollection");
       }
+      if (!kind.sourceOwner().equals(manifest.ownerTypeName())) {
+        throw invalid(kind.sourceKind() + ".sourceOwner");
+      }
+      if (kind.minimumBridgeRelease() > catalog.bridgeRelease()) {
+        throw invalid(kind.sourceKind() + ".minimumBridgeRelease");
+      }
       if (kind.sourceSchemaVersion() != manifest.schemaVersion()) {
         throw invalid(kind.sourceKind() + ".sourceSchemaVersion");
       }
