@@ -236,6 +236,7 @@ val forwardedArchitectureTestSystemProperties = listOf(
     "archunit.freeze.store.default.allowStoreUpdate")
 
 tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
     forwardedArchitectureTestSystemProperties.forEach { propertyName ->
         providers.systemProperty(propertyName).orNull?.let { value ->
             systemProperty(propertyName, value)

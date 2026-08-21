@@ -96,6 +96,15 @@ class GitHubAutomationConfigurationTest {
   }
 
   @Test
+  void websiteTestWorkerHasEnoughHeapForTheFullRepositorySuite() throws IOException {
+    var websiteBuild = Files.readString(REPOSITORY_ROOT.resolve("website/build.gradle.kts"));
+
+    assertThat(websiteBuild)
+        .contains("tasks.withType<Test>().configureEach")
+        .contains("maxHeapSize = \"2g\"");
+  }
+
+  @Test
   void ciRunsPinnedWindowsPesterAndRetainsItsNunitResults() throws IOException {
     var workflow = readYaml(".github/workflows/ci.yml");
     var steps = workflow.at("/jobs/build/steps");
