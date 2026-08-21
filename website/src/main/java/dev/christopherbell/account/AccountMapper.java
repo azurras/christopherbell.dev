@@ -29,6 +29,7 @@ public interface AccountMapper {
   @Mapping(target = "federationEnabled", ignore = true)
   @Mapping(target = "federationEnabledOn", ignore = true)
   @Mapping(target = "federationIdentity", ignore = true)
+  @Mapping(target = "version", ignore = true)
   Account toAccountEntity(AccountDetail accountDetail);
 
   /**

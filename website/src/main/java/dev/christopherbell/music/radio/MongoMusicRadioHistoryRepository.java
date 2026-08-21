@@ -1,5 +1,7 @@
 package dev.christopherbell.music.radio;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import java.util.List;
@@ -10,6 +12,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the music-radio history persistence port. */
+@MongoPersistence
 @Repository
 public class MongoMusicRadioHistoryRepository
     extends KindScopedRepositorySupport<MusicRadioHistoryEvent>

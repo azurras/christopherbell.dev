@@ -11,9 +11,9 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import dev.christopherbell.libs.mongo.lease.CollectorLeaseGuard;
-import dev.christopherbell.libs.mongo.lease.LeaseOwnershipLostException;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.CollectorLeaseGuard;
+import dev.christopherbell.libs.lease.LeaseOwnershipLostException;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;

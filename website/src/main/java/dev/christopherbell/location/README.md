@@ -5,6 +5,8 @@ Owns reusable Location reference data and APIs.
 ## What Lives Here
 
 - ZIP coordinate APIs, imports, parsing, and persistence under `zip`.
+- `api.LocationMigrationVerifier` publishes real ZIP lookup and import-state adapter parity
+  operations for the guarded MongoDB-to-PostgreSQL cutover.
 - Census ZIP Code Tabulation Area coordinate persistence in MongoDB.
 - `zip.ZipCoordinateGazetteerReader`, which parses the bundled Census Gazetteer
   resource before imports mutate stored coordinates.

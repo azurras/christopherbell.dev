@@ -7,6 +7,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import dev.christopherbell.libs.lease.LeaseService;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.ScheduledCollectorRun;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStatus;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStore;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,7 +27,7 @@ class ScheduledCollectorCoordinatorTest {
 
   @Test
   void contentionRecordsSkippedWithoutRunningWork() {
-    var leases = Mockito.mock(MongoLeaseService.class);
+    var leases = Mockito.mock(LeaseService.class);
     var runs = Mockito.mock(ScheduledCollectorRunStore.class);
     var ran = new AtomicBoolean();
     when(leases.tryAcquire(any(), any(), any(), any())).thenReturn(false);
@@ -43,7 +48,7 @@ class ScheduledCollectorCoordinatorTest {
 
   @Test
   void successRecordsLifecycleAndReleasesExactOwner() {
-    var leases = Mockito.mock(MongoLeaseService.class);
+    var leases = Mockito.mock(LeaseService.class);
     var runs = Mockito.mock(ScheduledCollectorRunStore.class);
     when(leases.tryAcquire(any(), any(), any(), any())).thenReturn(true);
     var coordinator = new ScheduledCollectorCoordinator(
@@ -61,7 +66,7 @@ class ScheduledCollectorCoordinatorTest {
 
   @Test
   void terminalStatusFailureStillReleasesTheExactLeaseOwner() {
-    var leases = Mockito.mock(MongoLeaseService.class);
+    var leases = Mockito.mock(LeaseService.class);
     var runs = Mockito.mock(ScheduledCollectorRunStore.class);
     when(leases.tryAcquire(any(), any(), any(), any())).thenReturn(true);
     var saves = new AtomicInteger();
@@ -83,7 +88,7 @@ class ScheduledCollectorCoordinatorTest {
 
   @Test
   void runningStatusFailureStillReleasesTheExactLeaseOwner() {
-    var leases = Mockito.mock(MongoLeaseService.class);
+    var leases = Mockito.mock(LeaseService.class);
     var runs = Mockito.mock(ScheduledCollectorRunStore.class);
     when(leases.tryAcquire(any(), any(), any(), any())).thenReturn(true);
     when(runs.save(any(ScheduledCollectorRun.class)))

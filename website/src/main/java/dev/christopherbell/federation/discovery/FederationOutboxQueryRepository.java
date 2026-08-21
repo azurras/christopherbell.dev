@@ -1,5 +1,7 @@
 package dev.christopherbell.federation.discovery;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.libs.pagination.StableCursor;
@@ -13,8 +15,9 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Bounded active-post queries for a local actor's public outbox. */
+@MongoPersistence
 @Repository
-public class FederationOutboxQueryRepository {
+public class FederationOutboxQueryRepository implements FederationOutboxQueryPort {
   private static final int MAX_PAGE_SIZE = 20;
 
   private final KindScopedMongoOperations<Post> mongo;
@@ -26,7 +29,7 @@ public class FederationOutboxQueryRepository {
     this.cursors = cursors;
   }
 
-  public FederationPage<Post> page(
+  public FederationPage<FederationOutboxEntry> page(
       String accountId,
       Optional<StableCursor> cursor,
       int requestedSize,
@@ -44,13 +47,22 @@ public class FederationOutboxQueryRepository {
         .limit(size + 1);
     var loaded = mongo.find(query, org.springframework.data.domain.Pageable.unpaged());
     boolean hasNext = loaded.size() > size;
-    var items = loaded.stream().limit(size).toList();
+    var items = loaded.stream().limit(size).map(FederationOutboxQueryRepository::entry).toList();
     String nextCursor = null;
     if (hasNext && !items.isEmpty()) {
-      Post boundary = items.get(items.size() - 1);
-      nextCursor = cursors.encode(new StableCursor(boundary.getCreatedOn(), boundary.getId()));
+      var boundary = items.get(items.size() - 1);
+      nextCursor = cursors.encode(new StableCursor(boundary.createdOn(), boundary.id()));
     }
     return new FederationPage<>(items, nextCursor);
+  }
+
+  private static FederationOutboxEntry entry(Post post) {
+    return new FederationOutboxEntry(
+        post.getId(),
+        post.getText(),
+        post.getParentId(),
+        post.getCreatedOn(),
+        post.getLastUpdatedOn());
   }
 
   public long count(String accountId, Instant now) {

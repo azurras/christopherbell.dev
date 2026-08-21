@@ -59,4 +59,11 @@ public interface PostRepository {
   /** Count reply posts authored by an account. */
   long countByAccountIdAndParentIdIsNotNull(String accountId);
 
+  /** Stable ascending scan of posts eligible for federation after an optional tuple boundary. */
+  List<Post> findFederationEligibleAfter(Instant createdOn, String postId, int limit);
+
+  /** Stable descending page of active posts exposed through a local federation outbox. */
+  List<Post> findFederationOutboxPage(
+      String accountId, Instant createdOn, String postId, int limit, Instant expiresAfter);
+
 }

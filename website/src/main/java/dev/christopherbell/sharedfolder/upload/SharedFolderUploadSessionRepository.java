@@ -1,5 +1,6 @@
 package dev.christopherbell.sharedfolder.upload;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -33,39 +34,53 @@ public interface SharedFolderUploadSessionRepository {
       int newAttempts,
       Instant updatedAt);
 
-  /** Extends only the exact FINALIZING writer and phase, advancing its optimistic-lock version. */
-  long renewFinalizationLease(
+  /** Issues the initial APPENDING deadline after the durable intent is persisted. */
+  Optional<Instant> acquireAppendLease(
+      String id, String appendLeaseToken, long appendOffset, Duration duration);
+
+  /** Issues the initial FINALIZING deadline after the durable intent is persisted. */
+  Optional<Instant> acquireFinalizationLease(
       String id,
       String finalizationLeaseToken,
       SharedFolderUploadFinalizationState finalizationState,
-      java.time.Instant finalizationLeaseExpiresAt,
-      java.time.Instant updatedAt);
+      Duration duration);
+
+  /** Relinquishes the exact live APPENDING writer at database time for retry reconciliation. */
+  boolean relinquishAppendLease(String id, String appendLeaseToken, long appendOffset);
+
+  /** Relinquishes the exact live FINALIZING writer at database time for retry reconciliation. */
+  boolean relinquishFinalizationLease(
+      String id,
+      String finalizationLeaseToken,
+      SharedFolderUploadFinalizationState finalizationState);
+
+  /** Extends only the exact FINALIZING writer and phase, advancing its optimistic-lock version. */
+  Optional<Instant> renewFinalizationLease(
+      String id,
+      String finalizationLeaseToken,
+      SharedFolderUploadFinalizationState finalizationState,
+      Duration duration);
 
   /** Atomically transfers one exact expired FINALIZING lease to a single reconciler. */
-  long claimExpiredFinalizationLease(
+  Optional<Instant> claimExpiredFinalizationLease(
       String id,
       String expiredFinalizationLeaseToken,
       SharedFolderUploadFinalizationState finalizationState,
-      java.time.Instant expiredAtOrBefore,
       String recoveryFinalizationLeaseToken,
-      java.time.Instant recoveryFinalizationLeaseExpiresAt,
-      java.time.Instant updatedAt);
+      Duration duration);
 
   /** Extends only the exact APPENDING writer and offset, advancing its optimistic-lock version. */
-  long renewAppendLease(
+  Optional<Instant> renewAppendLease(
       String id,
       String appendLeaseToken,
       long appendOffset,
-      java.time.Instant appendLeaseExpiresAt,
-      java.time.Instant updatedAt);
+      Duration duration);
 
   /** Atomically transfers one exact expired APPENDING lease to a single reconciler. */
-  long claimExpiredAppendLease(
+  Optional<Instant> claimExpiredAppendLease(
       String id,
       String expiredAppendLeaseToken,
       long appendOffset,
-      java.time.Instant expiredAtOrBefore,
       String recoveryAppendLeaseToken,
-      java.time.Instant recoveryAppendLeaseExpiresAt,
-      java.time.Instant updatedAt);
+      Duration duration);
 }

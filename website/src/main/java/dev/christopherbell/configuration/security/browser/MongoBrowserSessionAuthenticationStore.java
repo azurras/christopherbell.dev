@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.security.browser;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
@@ -11,6 +13,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.stereotype.Repository;
 
 /** Mongo join that resolves a browser session and current account in one command. */
+@MongoPersistence
 @Repository
 public class MongoBrowserSessionAuthenticationStore implements BrowserSessionAuthenticationStore {
   private static final String ACCOUNT_COLLECTION = "accounts";

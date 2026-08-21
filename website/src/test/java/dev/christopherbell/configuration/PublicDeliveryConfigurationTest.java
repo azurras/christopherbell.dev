@@ -52,16 +52,18 @@ class PublicDeliveryConfigurationTest {
     assertThat(configuration.at("/management/endpoints/web/exposure/include").asText())
         .isEqualTo("health");
     assertThat(configuration.at("/management/endpoint/health/show-details").asText())
-        .isEqualTo("never");
+        .isEqualTo("when-authorized");
+    assertThat(configuration.at("/management/endpoint/health/roles").asText())
+        .isEqualTo("ADMIN");
     assertThat(configuration.at("/management/endpoint/health/probes/enabled").asBoolean())
         .isTrue();
     assertThat(configuration.at("/management/endpoint/health/group/readiness/include").asText())
-        .isEqualTo("readinessState,mongo");
+        .isEqualTo("readinessState,database");
 
     assertThat(isPublic("GET", "/actuator/health/liveness")).isTrue();
     assertThat(isPublic("GET", "/actuator/health/readiness")).isTrue();
     assertThat(isPublic("GET", "/actuator/health")).isFalse();
-    assertThat(isPublic("GET", "/actuator/health/mongo")).isFalse();
+    assertThat(isPublic("GET", "/actuator/health/database")).isFalse();
   }
 
   @Test

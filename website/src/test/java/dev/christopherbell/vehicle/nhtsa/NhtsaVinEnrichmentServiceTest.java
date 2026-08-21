@@ -13,8 +13,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRunStatus;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStatus;
 import dev.christopherbell.vehicle.VehicleStub;
 import dev.christopherbell.vehicle.core.VehicleRepository;
 import dev.christopherbell.vehicle.model.VehicleProperties;

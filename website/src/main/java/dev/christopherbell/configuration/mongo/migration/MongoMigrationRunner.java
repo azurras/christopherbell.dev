@@ -1,5 +1,6 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
 import java.time.Clock;
 import java.time.Instant;
@@ -11,10 +12,9 @@ import java.util.UUID;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.stereotype.Component;
 
 /** Applies pending migrations in stable order while holding the global migration lease. */
-@Component
+@MongoBackendComponent
 @EnableConfigurationProperties(MigrationProperties.class)
 public class MongoMigrationRunner implements InitializingBean {
   private final List<ApplicationMigration> migrations;

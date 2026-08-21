@@ -405,8 +405,11 @@ function Install-ConfigurationExamples {
     $configSource = Join-Path $PSScriptRoot '..\config'
     $deployTarget = Join-Path $Root 'config\deploy.json'
     $environmentTarget = Join-Path $Root 'config\app.env'
+    $postgresqlEnvironmentTarget = Join-Path $Root 'config\postgresql.env'
     Copy-Item (Join-Path $configSource 'deploy.example.json') (Join-Path $Root 'config\deploy.example.json') -Force
     Copy-Item (Join-Path $configSource 'app.env.example') (Join-Path $Root 'config\app.env.example') -Force
+    Copy-Item (Join-Path $configSource 'postgresql.env.example') `
+        (Join-Path $Root 'config\postgresql.env.example') -Force
     if (-not (Test-Path -LiteralPath $deployTarget)) {
         Copy-Item (Join-Path $configSource 'deploy.example.json') $deployTarget
     } else {
@@ -423,6 +426,9 @@ function Install-ConfigurationExamples {
         $existing | ConvertTo-Json -Depth 10 | Set-Content $deployTarget -Encoding utf8
     }
     if (-not (Test-Path -LiteralPath $environmentTarget)) { Copy-Item (Join-Path $configSource 'app.env.example') $environmentTarget }
+    if (-not (Test-Path -LiteralPath $postgresqlEnvironmentTarget)) {
+        Copy-Item (Join-Path $configSource 'postgresql.env.example') $postgresqlEnvironmentTarget
+    }
 }
 
 function Protect-ProductionSecrets {

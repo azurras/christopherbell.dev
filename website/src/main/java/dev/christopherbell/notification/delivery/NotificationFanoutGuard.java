@@ -2,6 +2,7 @@ package dev.christopherbell.notification.delivery;
 
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -9,14 +10,14 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Optional;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
-import org.springframework.stereotype.Service;
 
 /** Atomically claims dedupe and actor-recipient rate-limit permits before fanout. */
-@Service
-public class NotificationFanoutGuard {
+@MongoPersistence
+public class NotificationFanoutGuard implements NotificationFanoutPort {
   private final KindScopedMongoOperations<NotificationDeliveryGuard> claims;
   private final KindScopedMongoOperations<NotificationRateLimit> rates;
   private final NotificationDeliveryProperties properties;
@@ -82,6 +83,22 @@ public class NotificationFanoutGuard {
     releaseClaim(permit.claimId());
   }
 
+  @Override
+  public NotificationCleanupResult deleteExpired(Instant cutoff, int batchLimit) {
+    requireBatchLimit(batchLimit);
+    var guardIds = claims.find(expiredQuery(cutoff, batchLimit),
+            org.springframework.data.domain.Pageable.unpaged())
+        .stream().map(NotificationDeliveryGuard::getId).toList();
+    var rateIds = rates.find(expiredQuery(cutoff, batchLimit),
+            org.springframework.data.domain.Pageable.unpaged())
+        .stream().map(NotificationRateLimit::getId).toList();
+    var guardsDeleted = guardIds.isEmpty() ? 0 : Math.toIntExact(claims.remove(
+        Query.query(Criteria.where("id").in(guardIds))).getDeletedCount());
+    var ratesDeleted = rateIds.isEmpty() ? 0 : Math.toIntExact(rates.remove(
+        Query.query(Criteria.where("id").in(rateIds))).getDeletedCount());
+    return new NotificationCleanupResult(guardsDeleted, ratesDeleted);
+  }
+
   private void releaseClaim(String claimId) {
     claims.remove(Query.query(Criteria.where("id").is(claimId)));
   }
@@ -110,5 +127,15 @@ public class NotificationFanoutGuard {
     } catch (NoSuchAlgorithmException impossible) {
       throw new IllegalStateException("SHA-256 is unavailable.", impossible);
     }
+  }
+
+  private static Query expiredQuery(Instant cutoff, int batchLimit) {
+    return Query.query(Criteria.where("expiresAt").lte(cutoff))
+        .with(Sort.by("expiresAt").ascending())
+        .limit(batchLimit);
+  }
+
+  private static void requireBatchLimit(int batchLimit) {
+    if (batchLimit < 1) throw new IllegalArgumentException("Cleanup batch limit must be positive");
   }
 }

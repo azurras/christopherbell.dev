@@ -9,10 +9,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import dev.christopherbell.account.model.Account;
-import dev.christopherbell.libs.mongo.lease.CollectorLeaseGuard;
-import dev.christopherbell.libs.mongo.lease.LeaseOwnershipLostException;
-import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.CollectorLeaseGuard;
+import dev.christopherbell.libs.lease.LeaseOwnershipLostException;
+import dev.christopherbell.libs.lease.LeaseService;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.music.catalog.MusicArtworkService;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicFileRevision;
@@ -205,7 +205,7 @@ class MusicMetadataServiceTest {
       ScheduledCollectorCoordinator scheduledCollectors) {
     var access = mock(MusicAccessService.class);
     when(access.requireWrite()).thenReturn(Account.builder().id("writer").build());
-    var leases = mock(MongoLeaseService.class);
+    var leases = mock(LeaseService.class);
     when(leases.tryAcquire(any(), any(), any(), any())).thenReturn(true);
     var properties = metadataProperties();
     return new MusicMetadataService(
@@ -221,7 +221,7 @@ class MusicMetadataServiceTest {
       Object value = work.execute(guard);
       guard.verifyHeld();
       return new ScheduledCollectorCoordinator.Outcome<>(
-          dev.christopherbell.libs.mongo.lease.ScheduledCollectorRunStatus.SUCCEEDED,
+          dev.christopherbell.libs.lease.ScheduledCollectorRunStatus.SUCCEEDED,
           value);
     });
     return coordinator;

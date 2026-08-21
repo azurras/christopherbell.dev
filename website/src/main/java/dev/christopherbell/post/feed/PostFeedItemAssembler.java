@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 @Component
 @RequiredArgsConstructor
 public class PostFeedItemAssembler {
-  private final PostEngagementQueryRepository engagement;
+  private final PostEngagementQueryPort engagement;
   private final PostLikeStore likes;
 
   public List<PostFeedItem> assemble(

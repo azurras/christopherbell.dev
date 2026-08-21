@@ -13,8 +13,7 @@ class FederationDeliveryJobRepositoryProxyTest {
   void repositoryCanBeProxiedForPersistenceExceptionTranslation() {
     assertDoesNotThrow(() -> {
       try (var context = new AnnotationConfigApplicationContext()) {
-        context.registerBean(
-            DomainMongoOperationsFactory.class, () -> mock(DomainMongoOperationsFactory.class));
+        var factory = mock(DomainMongoOperationsFactory.class);
         context.registerBean(
             PersistenceExceptionTranslationPostProcessor.class,
             () -> {
@@ -23,11 +22,10 @@ class FederationDeliveryJobRepositoryProxyTest {
               return processor;
             });
         context.registerBean(
-            FederationDeliveryJobRepository.class,
-            () -> new FederationDeliveryJobRepository(
-                context.getBean(DomainMongoOperationsFactory.class)));
+            FederationDeliveryStore.class,
+            () -> new FederationDeliveryJobRepository(factory));
         context.refresh();
-        context.getBean(FederationDeliveryJobRepository.class);
+        context.getBean(FederationDeliveryStore.class);
       }
     });
   }

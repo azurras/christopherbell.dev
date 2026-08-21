@@ -1,5 +1,8 @@
 package dev.christopherbell.federation.identity;
 
+import dev.christopherbell.federation.api.EncryptedPrivateKey;
+import dev.christopherbell.federation.api.FederationIdentity;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;

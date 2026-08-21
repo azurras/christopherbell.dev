@@ -1,5 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import dev.christopherbell.whatsforlunch.restaurant.model.DailyLunchPicks;
@@ -7,6 +9,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the daily-picks persistence port. */
+@MongoPersistence
 @Repository
 public class MongoDailyLunchPicksRepository
     extends KindScopedRepositorySupport<DailyLunchPicks>

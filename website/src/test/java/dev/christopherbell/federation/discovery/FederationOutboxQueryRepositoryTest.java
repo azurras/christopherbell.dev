@@ -67,7 +67,12 @@ class FederationOutboxQueryRepositoryTest {
     assertThat(query.getValue().getSortObject())
         .isEqualTo(new Document("payload.createdOn", -1).append("_id.legacyId", -1));
     assertThat(query.getValue().getLimit()).isEqualTo(2);
-    assertThat(page.items()).containsExactly(boundary);
+    assertThat(page.items()).containsExactly(new FederationOutboxEntry(
+        boundary.getId(),
+        boundary.getText(),
+        boundary.getParentId(),
+        boundary.getCreatedOn(),
+        boundary.getLastUpdatedOn()));
     assertThat(cursors.decode(page.nextCursor()))
         .contains(new StableCursor(boundary.getCreatedOn(), boundary.getId()));
   }

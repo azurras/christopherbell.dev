@@ -1,5 +1,7 @@
 package dev.christopherbell.admin.activity;
 
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
+
 import dev.christopherbell.account.AccountRepository;
 import dev.christopherbell.admin.model.AdminActivity;
 import dev.christopherbell.permission.PermissionService;

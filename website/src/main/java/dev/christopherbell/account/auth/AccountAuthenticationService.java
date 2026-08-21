@@ -13,6 +13,7 @@ import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 
 /**
  * Handles account authentication so login rules can evolve without expanding account CRUD.
@@ -61,7 +62,8 @@ public class AccountAuthenticationService {
       }
       log.info("Successful login for account with id: {}", current.getId());
       return PermissionService.generateToken(current);
-    } catch (NoSuchAlgorithmException | InvalidKeySpecException | IllegalArgumentException failure) {
+    } catch (NoSuchAlgorithmException | InvalidKeySpecException | IllegalArgumentException
+        | IncorrectResultSizeDataAccessException failure) {
       log.warn("Rejected account login because credential verification failed safely.");
       throw rejectedLogin(failure);
     }

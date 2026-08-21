@@ -5,6 +5,8 @@ command-center:
     mode: SIMULATED
     power-actions-enabled: true
 app:
+  persistence:
+    backend: postgresql
   request-size:
     default-max: ${APP_REQUEST_SIZE_DEFAULT_MAX:2MB}
   shared-folder:
@@ -18,9 +20,13 @@ app:
     metadata:
       private-root: build/shared-folder/local/system/music-metadata
 spring:
-  mongodb:
-    database: christopherbell
-    uri: mongodb://localhost:27017
-  data:
-    mongodb:
-      auto-index-creation: true
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/test}
+    username: ${SPRING_DATASOURCE_USERNAME:christopherbell_test}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  flyway:
+    enabled: true
+    default-schema: ${APP_TEST_SCHEMA:public}
+    schemas: ${APP_TEST_SCHEMA:public}
+  jooq:
+    sql-dialect: POSTGRES

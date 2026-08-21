@@ -1,7 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant.importing;
 
-import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
-import dev.christopherbell.libs.mongo.lease.RenewingMongoLease;
+import dev.christopherbell.libs.lease.LeaseService;
+import dev.christopherbell.libs.lease.RenewingLease;
 import dev.christopherbell.permission.PermissionService;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantImportStateRepository;
 import dev.christopherbell.whatsforlunch.restaurant.RestaurantService;
@@ -33,9 +33,9 @@ public class RestaurantImportWorkflowService {
   private static final int PUBLIC_FRESHNESS_DAYS = 45;
 
   private final Clock clock;
-  private final MongoLeaseService leases;
+  private final LeaseService leases;
   private final PermissionService permissionService;
-  private final RestaurantImportPreviewStore previews;
+  private final RestaurantImportPreviewPort previews;
   private final RestaurantImportStateRepository states;
   private final RestaurantService restaurantService;
   private final WflProperties properties;
@@ -244,7 +244,7 @@ public class RestaurantImportWorkflowService {
 
   private RestaurantImportLeaseGuard renewingLeaseGuard(String ownerToken, Instant renewedOn) {
     var duration = properties.getRestaurantImport().getLeaseDuration();
-    var guard = new RenewingMongoLease(leases, clock, LEASE_NAME, ownerToken, duration, renewedOn);
+    var guard = new RenewingLease(leases, clock, LEASE_NAME, ownerToken, duration, renewedOn);
     return guard::verifyHeld;
   }
 

@@ -17,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -31,6 +32,7 @@ class MigrationStateStoreTest {
   @Test
   void springSelectsTheProductionFactoryConstructor() {
     try (var context = new AnnotationConfigApplicationContext()) {
+      TestPropertyValues.of("app.persistence.backend=mongodb").applyTo(context);
       context.registerBean(
           DomainMongoOperationsFactory.class,
           () -> org.mockito.Mockito.mock(DomainMongoOperationsFactory.class));

@@ -1,12 +1,13 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
+
 import org.springframework.data.domain.Sort.Direction;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
-import org.springframework.stereotype.Component;
 
 /** Creates the compound indexes used by bounded public Void discovery queries. */
-@Component
+@MongoBackendComponent
 public final class V004EnsureVoidDiscoveryIndexes implements ApplicationMigration {
   private static final String CHECKSUM =
       "fe6a635eee77ba364de13ac5bfe02865cd07689ff5991c11a5d8dc6229fd19e1";

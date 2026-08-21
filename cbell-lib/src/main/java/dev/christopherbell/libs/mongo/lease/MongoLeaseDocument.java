@@ -10,6 +10,7 @@ import org.springframework.data.annotation.Id;
 public class MongoLeaseDocument {
   @Id private String id;
   private String ownerToken;
+  private Long fenceToken;
   private Instant acquiredAt;
   private Instant expiresAt;
 }

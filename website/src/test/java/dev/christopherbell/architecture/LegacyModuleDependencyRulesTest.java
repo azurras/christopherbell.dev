@@ -35,6 +35,17 @@ class LegacyModuleDependencyRulesTest {
   }
 
   @Test
+  void annotatedPostgresqlAdaptersStillRejectInternalCrossAreaAccess() {
+    var details = RULES.crossAreaAccessRule().evaluate(FIXTURES).getFailureReport().getDetails();
+
+    assertThat(details)
+        .anyMatch(detail -> detail.contains("AlphaPostgresAdapter")
+            && detail.contains("BetaInternalDependency"))
+        .noneMatch(detail -> detail.contains("AlphaPostgresAdapter")
+            && detail.contains("BetaApiContract"));
+  }
+
+  @Test
   void allowsPublishedOrchestrationApiAcrossAreas() {
     var details = RULES.crossAreaAccessRule().evaluate(FIXTURES).getFailureReport().getDetails();
 

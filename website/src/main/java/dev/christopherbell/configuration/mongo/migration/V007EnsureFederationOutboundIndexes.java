@@ -1,12 +1,13 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
+
 import org.springframework.data.domain.Sort.Direction;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
-import org.springframework.stereotype.Component;
 
 /** Creates bounded scan, uniqueness, due-job, and abandoned-claim indexes. */
-@Component
+@MongoBackendComponent
 public final class V007EnsureFederationOutboundIndexes implements ApplicationMigration {
   private static final String CHECKSUM =
       "1f9d1ddf7fcdb35e66556310b541bedbed4444c2178ebdf0dc22455c22b9ec82";

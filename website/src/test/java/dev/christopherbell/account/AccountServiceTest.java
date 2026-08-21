@@ -74,6 +74,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Sort;
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -340,6 +341,21 @@ public class AccountServiceTest {
   }
 
   @Test
+  @DisplayName("Login: ambiguous case-folded email uses the generic rejection")
+  void loginAccount_whenEmailCaseIsAmbiguous_rejectsWithoutCompletingLogin() {
+    when(accountRepository.findByEmailIgnoreCase("legacy.case@example.test"))
+        .thenThrow(new IncorrectResultSizeDataAccessException(1));
+
+    var rejection = assertThrows(
+        InvalidTokenException.class,
+        () -> accountService.loginAccount(
+            new AccountLoginRequest("Legacy.Case@example.test", "irrelevant-password")));
+
+    assertEquals("Login failed.", rejection.getMessage());
+    verifyNoMoreInteractions(accountLoginStore);
+  }
+
+  @Test
   @DisplayName("Login: unknown email and wrong password are externally indistinguishable")
   void testLoginAccount_whenUnknownOrWrongPassword_usesSameRejection() throws Exception {
     var password = "CorrectHorseBatteryStaple";
@@ -535,6 +551,20 @@ public class AccountServiceTest {
         "https://example.com");
 
     verify(accountRepository).findByEmailIgnoreCase(eq("missing@example.com"));
+    verifyNoMoreInteractions(accountRepository, passwordResetNotificationService);
+  }
+
+  @Test
+  @DisplayName("Password reset request: ambiguous case-folded email does not mutate or notify")
+  void requestPasswordReset_whenEmailCaseIsAmbiguous_doesNotSend() {
+    when(accountRepository.findByEmailIgnoreCase("legacy.case@example.test"))
+        .thenThrow(new IncorrectResultSizeDataAccessException(1));
+
+    accountService.requestPasswordReset(
+        new AccountPasswordResetRequest("Legacy.Case@example.test"),
+        "https://example.com");
+
+    verify(accountRepository).findByEmailIgnoreCase("legacy.case@example.test");
     verifyNoMoreInteractions(accountRepository, passwordResetNotificationService);
   }
 

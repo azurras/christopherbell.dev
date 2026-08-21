@@ -1,5 +1,7 @@
 package dev.christopherbell.account;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
@@ -10,6 +12,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import org.springframework.dao.IncorrectResultSizeDataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -18,6 +21,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Kind-scoped Mongo implementation of the account persistence port. */
+@MongoPersistence
 @Repository
 public class MongoAccountRepository extends KindScopedRepositorySupport<Account>
     implements AccountRepository {
@@ -25,7 +29,14 @@ public class MongoAccountRepository extends KindScopedRepositorySupport<Account>
     super(factory, Account.class);
   }
 
-  @Override public Account save(Account account) { return saveValue(account); }
+  @Override
+  public Account save(Account account) {
+    try {
+      return saveValue(account);
+    } catch (DuplicateKeyException failure) {
+      throw new DuplicateKeyException("MongoDB rejected a duplicate account identity", failure);
+    }
+  }
   @Override public Optional<Account> findById(String id) { return findValueById(id); }
   @Override public boolean existsById(String id) {
     return mongo.exists(Query.query(Criteria.where("id").is(id)));
@@ -44,7 +55,7 @@ public class MongoAccountRepository extends KindScopedRepositorySupport<Account>
     return findOne(Query.query(Criteria.where("email").is(email)));
   }
   @Override public Optional<Account> findByEmailIgnoreCase(String email) {
-    return findOne(Query.query(Criteria.where("email").regex(exactIgnoreCase(email))));
+    return findUnique(Query.query(Criteria.where("email").regex(exactIgnoreCase(email))));
   }
   @Override public Optional<Account> findByPasswordResetTokenHash(String hash) {
     return findOne(Query.query(Criteria.where("passwordResetTokenHash").is(hash)));

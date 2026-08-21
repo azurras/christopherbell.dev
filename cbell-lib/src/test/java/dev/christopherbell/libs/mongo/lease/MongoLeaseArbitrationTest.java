@@ -8,6 +8,13 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.mongodb.client.result.UpdateResult;
+import dev.christopherbell.libs.lease.LeaseGrant;
+import dev.christopherbell.libs.lease.LeaseOwnershipLostException;
+import dev.christopherbell.libs.lease.LeaseService;
+import dev.christopherbell.libs.lease.LeaseStore;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStatus;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStore;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -18,6 +25,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bson.Document;
@@ -37,8 +45,9 @@ class MongoLeaseArbitrationTest {
   @Test
   void twoCoordinatorsSerializeWorkAndTakeOverAtTheExactExpiryBoundary() {
     var leaseMongo = new StatefulLeaseMongo();
-    var leases = new MongoLeaseService(leaseMongo);
     var clock = new MutableClock(NOW);
+    var leases = new LeaseService(
+        new LegacyLeaseStore(new MongoLeaseService(leaseMongo), clock));
     var firstNode = new ScheduledCollectorCoordinator(
         leases, mock(ScheduledCollectorRunStore.class), clock);
     var secondNode = new ScheduledCollectorCoordinator(
@@ -79,6 +88,39 @@ class MongoLeaseArbitrationTest {
     assertThat(leaseMongo.acquiredExpiries())
         .containsExactly(NOW.plus(LEASE_DURATION), NOW.plus(LEASE_DURATION.multipliedBy(2)));
     assertThat(workRuns).hasValue(2);
+  }
+
+  private static final class LegacyLeaseStore implements LeaseStore {
+    private final MongoLeaseService leases;
+    private final Clock clock;
+    private final AtomicInteger fence = new AtomicInteger();
+
+    private LegacyLeaseStore(MongoLeaseService leases, Clock clock) {
+      this.leases = leases;
+      this.clock = clock;
+    }
+
+    @Override public Optional<LeaseGrant> tryAcquire(
+        String name, String owner, Duration duration) {
+      Instant now = clock.instant();
+      Instant expiresAt = now.plus(duration);
+      return leases.tryAcquire(name, owner, now, expiresAt)
+          ? Optional.of(new LeaseGrant(name, owner, fence.incrementAndGet(), expiresAt))
+          : Optional.empty();
+    }
+
+    @Override public Optional<LeaseGrant> renew(LeaseGrant grant, Duration duration) {
+      Instant now = clock.instant();
+      Instant expiresAt = now.plus(duration);
+      return leases.renew(grant.leaseName(), grant.ownerId(), now, expiresAt)
+          ? Optional.of(new LeaseGrant(
+              grant.leaseName(), grant.ownerId(), grant.fenceToken(), expiresAt))
+          : Optional.empty();
+    }
+
+    @Override public boolean release(LeaseGrant grant) {
+      return leases.release(grant.leaseName(), grant.ownerId());
+    }
   }
 
   private static final class StatefulLeaseMongo implements MongoLeaseStore {

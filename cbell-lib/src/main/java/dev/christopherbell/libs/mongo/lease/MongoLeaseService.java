@@ -1,14 +1,12 @@
 package dev.christopherbell.libs.mongo.lease;
 
 import java.time.Instant;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
 
-/** Provides atomic, owner-scoped leases stored in MongoDB. */
-@Service
-@RequiredArgsConstructor
+/** Transition-only facade for legacy Mongo lease callers. */
 public class MongoLeaseService {
   private final MongoLeaseStore store;
+
+  public MongoLeaseService(MongoLeaseStore store) { this.store = store; }
 
   public boolean tryAcquire(
       String name, String ownerToken, Instant now, Instant expiresAt) {

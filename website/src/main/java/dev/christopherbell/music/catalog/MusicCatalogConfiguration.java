@@ -1,9 +1,8 @@
 package dev.christopherbell.music.catalog;
 
 import java.time.Clock;
-import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
-import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.LeaseService;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.music.metadata.FfmpegMusicTagProcess;
 import dev.christopherbell.music.metadata.MusicMetadataEditRepository;
 import dev.christopherbell.music.metadata.MusicMetadataFileStore;
@@ -70,8 +69,8 @@ public class MusicCatalogConfiguration {
 
   @Bean
   public MusicCatalog musicCatalog(
-      DomainMongoOperationsFactory factory, MusicTrackRepository tracks) {
-    return new MusicCatalog(factory, tracks);
+      MusicCatalogQueryRepository queries, MusicTrackRepository tracks) {
+    return new MusicCatalog(queries, tracks);
   }
 
   @Bean
@@ -104,7 +103,7 @@ public class MusicCatalogConfiguration {
       MusicMetadataFileStore files,
       MusicMetadataEditRepository edits,
       MusicAccessService access,
-      MongoLeaseService leases,
+      LeaseService leases,
       ScheduledCollectorCoordinator scheduledCollectors) {
     return new MusicMetadataService(
         music, metadata, catalog, tracks, probe, artwork, tagProcess, files, edits, access,

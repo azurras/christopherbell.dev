@@ -4,8 +4,8 @@ import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import dev.christopherbell.libs.api.exception.ResourceExistsException;
 import dev.christopherbell.libs.api.exception.ResourceNotFoundException;
 import dev.christopherbell.libs.api.exception.ServiceUnavailableException;
-import dev.christopherbell.libs.mongo.lease.CollectorLeaseGuard;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.CollectorLeaseGuard;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.location.zip.ZipCoordinateService;
 import dev.christopherbell.location.model.ZipCoordinateDetail;
 import dev.christopherbell.permission.PermissionService;
@@ -36,7 +36,7 @@ import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenc
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchPreferenceRequest;
 import dev.christopherbell.whatsforlunch.restaurant.preference.WhatsForLunchPreferenceRepository;
 import dev.christopherbell.whatsforlunch.restaurant.selection.ApprovalWeightedRestaurantSelector;
-import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteQueryRepository;
+import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteQueryPort;
 import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteRepository;
 import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteSummary;
 import java.io.IOException;
@@ -87,10 +87,10 @@ public class RestaurantService {
   private final PermissionService permissionService;
   private final RestaurantMapper restaurantMapper;
   private final RestaurantFavoriteRepository restaurantFavoriteRepository;
-  private final RestaurantDuplicateQueryRepository restaurantDuplicateQueries;
-  private final RestaurantInventoryQueryRepository restaurantInventoryQueries;
+  private final RestaurantDuplicateQueryPort restaurantDuplicateQueries;
+  private final RestaurantInventoryQueryPort restaurantInventoryQueries;
   private final RestaurantVoteRepository restaurantVoteRepository;
-  private final RestaurantVoteQueryRepository restaurantVoteQueryRepository;
+  private final RestaurantVoteQueryPort restaurantVoteQueryRepository;
   private final ApprovalWeightedRestaurantSelector restaurantSelector;
   private final RestaurantRepository restaurantRepository;
   private final ScheduledCollectorCoordinator scheduledCollectors;
@@ -765,6 +765,7 @@ public class RestaurantService {
       }
       applyNormalizedName(restaurant);
 
+      try {
       var existingById = restaurantRepository.findById(restaurant.getId());
       if (existingById.isPresent()) {
         if (hasConflictingNormalizedNameOwner(existingById.get(), restaurant)) {
@@ -807,6 +808,12 @@ public class RestaurantService {
       restaurantRepository.save(restaurant);
       imported++;
       log.info("Saved OpenStreetMap restaurant id: {}, name: {}", restaurant.getId(), restaurant.getName());
+      } catch (DuplicateKeyException concurrentOwner) {
+        skippedExisting++;
+        log.info(
+            "Skipping OpenStreetMap restaurant id {} because its unique owner changed concurrently.",
+            restaurant.getId());
+      }
     }
     leaseGuard.verifyHeld();
 

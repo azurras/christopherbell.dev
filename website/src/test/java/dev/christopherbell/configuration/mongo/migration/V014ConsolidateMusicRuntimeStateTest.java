@@ -60,6 +60,7 @@ class V014ConsolidateMusicRuntimeStateTest {
   @Test
   void springConstructsTheMigrationWithExactlyOneMusicPort() {
     new ApplicationContextRunner()
+        .withPropertyValues("app.persistence.backend=mongodb")
         .withUserConfiguration(
             MusicRuntimeStateMigrationSupport.class,
             V014ConsolidateMusicRuntimeState.class)

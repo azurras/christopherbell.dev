@@ -1,0 +1,500 @@
+package dev.christopherbell.configuration.persistence.migration;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+
+class PostgresqlMigrationRunnerTest {
+  @Test
+  void incompatibleBridgeReleaseIsRejectedBeforeDatabaseIdentityProbes() {
+    var target = new RecordingTarget();
+    var probes = new java.util.concurrent.atomic.AtomicInteger();
+    var probe = new MigrationIdentityProbe() {
+      @Override
+      public MigrationDatabaseIdentity sourceIdentity(MigrationRequest request) {
+        probes.incrementAndGet();
+        return new MigrationDatabaseIdentity("127.0.0.1", 57018, "test", null);
+      }
+
+      @Override
+      public MigrationDatabaseIdentity targetIdentity(MigrationRequest request) {
+        probes.incrementAndGet();
+        return new MigrationDatabaseIdentity(
+            "127.0.0.1", 55432, "test", "christopherbell_test");
+      }
+    };
+    var catalog = new PostgresqlMigrationCatalog(1, 1, List.of(kind()));
+    var engine = new KindMigrationEngine(
+        (context, item, cursor, limit) -> SourceBatch.of(List.of()),
+        target,
+        ignored -> new KindMigrationEngineTest.StubTransformer());
+    var migrationRunner = new PostgresqlMigrationRunner(
+        new MigrationPreflight(probe), catalog, engine, new MigrationReconciler(target), target,
+        expected -> expected, (context, evidence) -> new RecordingFreezeGuard());
+    var compatible = request(PostgresqlMigrationCommand.STATUS);
+    var incompatible = new MigrationRequest(
+        compatible.command(), compatible.sourceUri(), compatible.sourceDatabase(),
+        compatible.targetJdbcUrl(), compatible.targetDatabase(), compatible.expectedTargetRole(),
+        compatible.schemaPrefix(), compatible.catalogDigest(), compatible.release(), 2,
+        compatible.lockToken(), compatible.frozenSourceEvidence(), compatible.batchSize());
+
+    assertThatThrownBy(() -> migrationRunner.run(incompatible))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("PostgreSQL migration bridge release is incompatible.");
+    assertThat(probes).hasValue(0);
+  }
+
+  @Test
+  void shadowReconcilesWithoutPublishingWhileFinalizePublishes() {
+    var shadowTarget = new RecordingTarget();
+    runner(shadowTarget).run(request(PostgresqlMigrationCommand.SHADOW));
+    assertThat(shadowTarget.reconciliations).isOne();
+    assertThat(shadowTarget.rehearsals).isOne();
+    assertThat(shadowTarget.publications).isZero();
+
+    var finalizeTarget = new RecordingTarget();
+    runner(finalizeTarget).run(request(PostgresqlMigrationCommand.FINALIZE));
+    assertThat(finalizeTarget.reconciliations).isOne();
+    assertThat(finalizeTarget.publications).isOne();
+  }
+
+  @Test
+  void completedShadowReplayUsesCapturedEvidenceWithoutRereadingAMovingSource() {
+    var target = new RecordingTarget();
+    var first = runner(target).run(request(PostgresqlMigrationCommand.SHADOW));
+    MigrationSourceReader movingSource = (context, kind, cursor, limit) -> {
+      throw new AssertionError("completed shadow replay must not reread the live source");
+    };
+
+    var replayed = runner(target, movingSource).run(request(PostgresqlMigrationCommand.SHADOW));
+
+    assertThat(replayed.statusDigest()).isEqualTo(first.statusDigest());
+    assertThat(target.rehearsals).isEqualTo(2);
+    assertThat(target.publications).isZero();
+  }
+
+  @Test
+  void reconcileRejectsAMissingKindInsteadOfReportingSuccess() {
+    var target = new StatusTarget(List.of());
+
+    assertThatThrownBy(() -> runner(target).run(request(PostgresqlMigrationCommand.RECONCILE)))
+        .isInstanceOf(MigrationReconciliationException.class);
+  }
+
+  @Test
+  void statusAndReconcileRequireBoundExistingRunBeforeReadingKindState() {
+    for (var command : List.of(
+        PostgresqlMigrationCommand.STATUS, PostgresqlMigrationCommand.RECONCILE)) {
+      var target = new StatusTarget(List.of(new MigrationKindStatus(
+          "fixture", MigrationCheckpoint.initial().markComplete(), 0, false)));
+
+      runner(target).run(request(command));
+      assertThat(target.existingRunRequirements).as(command.name()).isOne();
+      assertThat(target.existingRunPreparations).as(command.name())
+          .isEqualTo(command == PostgresqlMigrationCommand.RECONCILE ? 1 : 0);
+      assertThat(target.existingRunVerifications).as(command.name())
+          .isEqualTo(command == PostgresqlMigrationCommand.RECONCILE ? 1 : 0);
+    }
+  }
+
+  @Test
+  void reconcileRejectsAnIncompleteKindInsteadOfReportingSuccess() {
+    var target = new StatusTarget(List.of(new MigrationKindStatus(
+        "fixture", MigrationCheckpoint.initial(), 0, false)));
+
+    assertThatThrownBy(() -> runner(target).run(request(PostgresqlMigrationCommand.RECONCILE)))
+        .isInstanceOf(MigrationReconciliationException.class);
+  }
+
+  @Test
+  void reconcileReplaysImmutableStagingWithoutRereadingAMovingSource() {
+    var checkpoint = MigrationCheckpoint.initial().markComplete();
+    var target = new StatusTarget(List.of(new MigrationKindStatus(
+        "fixture", checkpoint, 0, false)));
+    MigrationSourceReader movingSource = (context, kind, cursor, limit) -> {
+      throw new AssertionError("reconcile must not reread the live source");
+    };
+
+    var result = runner(target, movingSource).run(request(PostgresqlMigrationCommand.RECONCILE));
+
+    assertThat(result.kinds()).singleElement().satisfies(status -> {
+      assertThat(status.sourceKind()).isEqualTo("fixture");
+      assertThat(status.checkpoint()).isEqualTo(checkpoint);
+    });
+    assertThat(target.existingRunPreparations).isOne();
+    assertThat(target.existingRunVerifications).isOne();
+  }
+
+  @Test
+  void finalizeRejectsSignedSourceDigestDriftBeforeTargetMutation() {
+    var target = new RecordingTarget();
+    var request = request(PostgresqlMigrationCommand.FINALIZE);
+    var original = request.frozenSourceEvidence();
+    var unsigned = new FrozenSourceEvidence(
+        original.release(), original.catalogDigest(), original.sourceDatabase(),
+        original.targetDatabase(), "f".repeat(64), original.backupDigest(), original.lockToken(),
+        original.sourceUri(), original.targetJdbcUrl(), original.targetRole(),
+        original.writerLockPath(), original.writerLockDigest(), "0".repeat(64));
+    var drifted = new FrozenSourceEvidence(
+        unsigned.release(), unsigned.catalogDigest(), unsigned.sourceDatabase(),
+        unsigned.targetDatabase(), unsigned.sourceDigest(), unsigned.backupDigest(),
+        unsigned.lockToken(), unsigned.sourceUri(), unsigned.targetJdbcUrl(), unsigned.targetRole(),
+        unsigned.writerLockPath(), unsigned.writerLockDigest(), unsigned.reconstructedDigest());
+    var driftedRequest = new MigrationRequest(
+        request.command(), request.sourceUri(), request.sourceDatabase(), request.targetJdbcUrl(),
+        request.targetDatabase(), request.expectedTargetRole(), request.schemaPrefix(),
+        request.catalogDigest(), request.release(), request.bridgeRelease(), request.lockToken(),
+        drifted, request.batchSize());
+
+    assertThatThrownBy(() -> runner(target).run(driftedRequest))
+        .isInstanceOf(MigrationReconciliationException.class);
+    assertThat(target.publications).isZero();
+  }
+
+  @Test
+  void finalizeRereadsSourceInsideTheLockedBoundaryAndRejectsAnInWindowMutation() {
+    var target = new RecordingTarget();
+    var reads = new java.util.concurrent.atomic.AtomicInteger();
+    MigrationSourceReader source = (context, kind, cursor, limit) -> {
+      var read = reads.incrementAndGet();
+      if (read == 3) {
+        return SourceBatch.of(List.of(new MigrationSourceDocument(
+            "fixture", 1, "mutated", Map.of("id", "mutated"))));
+      }
+      return SourceBatch.of(List.of());
+    };
+
+    assertThatThrownBy(() -> runner(target, source).run(
+        request(PostgresqlMigrationCommand.FINALIZE)))
+        .isInstanceOf(MigrationReconciliationException.class);
+    assertThat(reads).hasValueGreaterThanOrEqualTo(3);
+    assertThat(target.publications).isZero();
+  }
+
+  @Test
+  void finalizeHoldsTheWriteFreezeThroughTargetCommitAndReleasesItAfterward() {
+    var guard = new RecordingFreezeGuard();
+    var target = new RecordingTarget();
+    target.beforeCommit = () -> assertThat(guard.open).isTrue();
+
+    runner(target, (context, item, cursor, limit) -> SourceBatch.of(List.of()),
+        expected -> expected, (context, evidence) -> guard)
+        .run(request(PostgresqlMigrationCommand.FINALIZE));
+
+    assertThat(guard.verifications).isPositive();
+    assertThat(guard.open).isFalse();
+    assertThat(target.publications).isOne();
+  }
+
+  @Test
+  void authorityWithdrawalBeforeWriteFreezeAcquisitionAbortsWithZeroTargetMutation() {
+    var acquisitions = new java.util.concurrent.atomic.AtomicInteger();
+    var target = new RecordingTarget();
+
+    assertThatThrownBy(() -> runner(
+        target,
+        (context, item, cursor, limit) -> SourceBatch.of(List.of()),
+        expected -> null,
+        (context, evidence) -> {
+          acquisitions.incrementAndGet();
+          return new RecordingFreezeGuard();
+        }).run(request(PostgresqlMigrationCommand.FINALIZE)))
+        .isInstanceOf(MigrationReconciliationException.class);
+
+    assertThat(acquisitions).hasValue(0);
+    assertThat(target.publications).isZero();
+  }
+
+  private static PostgresqlMigrationRunner runner(MigrationTargetStore target) {
+    return runner(target, (context, item, cursor, limit) -> SourceBatch.of(List.of()));
+  }
+
+  private static PostgresqlMigrationRunner runner(
+      MigrationTargetStore target, MigrationSourceReader source) {
+    return runner(target, source, expected -> expected,
+        (context, evidence) -> new RecordingFreezeGuard());
+  }
+
+  private static PostgresqlMigrationRunner runner(
+      MigrationTargetStore target,
+      MigrationSourceReader source,
+      FinalizeAuthorityProvider authority,
+      FinalizationFreezeGuardProvider freezeGuard) {
+    var kind = kind();
+    var catalog = new PostgresqlMigrationCatalog(1, 1, List.of(kind));
+    var preflight = new MigrationPreflight(new MigrationIdentityProbe() {
+      @Override
+      public MigrationDatabaseIdentity sourceIdentity(MigrationRequest request) {
+        return new MigrationDatabaseIdentity("127.0.0.1", 57018, "test", null);
+      }
+
+      @Override
+      public MigrationDatabaseIdentity targetIdentity(MigrationRequest request) {
+        return new MigrationDatabaseIdentity(
+            "127.0.0.1", 55432, "test", "christopherbell_test");
+      }
+    });
+    var engine = new KindMigrationEngine(
+        source,
+        target,
+        ignored -> new KindMigrationEngineTest.StubTransformer());
+    return new PostgresqlMigrationRunner(
+        preflight, catalog, engine, new MigrationReconciler(target), target,
+        authority, freezeGuard);
+  }
+
+  private static PostgresqlMigrationCatalog.Kind kind() {
+    return new PostgresqlMigrationCatalog.Kind(
+        "configuration", "fixture",
+        "dev.christopherbell.configuration.persistence.migration.Fixture",
+        1, "mongo-source-document-v1", "ordered-relational-rows-v1",
+        1, 1, "string", "platform", List.of("fixture"),
+        1,
+        List.of(),
+        new PostgresqlMigrationCatalog.KeyMapping("id", "fixture.id", "exact"),
+        Map.of(
+            "id",
+            new PostgresqlMigrationCatalog.FieldMapping(
+                List.of("fixture.id"), "string", "reject", "reject")),
+        "preserve",
+        "none",
+        "none",
+        "tagged-canonical-sha256-v1",
+        List.of("count"),
+        List.of("by-id"),
+        AccountTransformer.class.getName());
+  }
+
+  private static MigrationRequest request(PostgresqlMigrationCommand command) {
+    FrozenSourceEvidence evidence = null;
+    if (command == PostgresqlMigrationCommand.FINALIZE) {
+      var emptyDigest = MigrationCheckpoint.initial().sourceDigest();
+      var sourceDigest = MigrationSourceSnapshot.runDigest(List.of(
+          new MigrationSourceSnapshot("fixture", 0, emptyDigest, emptyDigest)));
+      var unsigned = new FrozenSourceEvidence(
+          "release-6", "a".repeat(64), "test", "test", sourceDigest, "c".repeat(64),
+          UUID.fromString("00000000-0000-0000-0000-000000000016"),
+          "mongodb://127.0.0.1:57018/test", "jdbc:postgresql://127.0.0.1:55432/test",
+          "christopherbell_test", "C:\\protected\\writer.lock", "d".repeat(64),
+          "e".repeat(64));
+      evidence = new FrozenSourceEvidence(
+          unsigned.release(), unsigned.catalogDigest(), unsigned.sourceDatabase(),
+          unsigned.targetDatabase(), unsigned.sourceDigest(), unsigned.backupDigest(),
+          unsigned.lockToken(), unsigned.sourceUri(), unsigned.targetJdbcUrl(),
+          unsigned.targetRole(), unsigned.writerLockPath(), unsigned.writerLockDigest(),
+          unsigned.reconstructedDigest());
+    }
+    return new MigrationRequest(
+        command,
+        "mongodb://127.0.0.1:57018/test",
+        "test",
+        "jdbc:postgresql://127.0.0.1:55432/test",
+        "test",
+        "christopherbell_test",
+        "cbtest_task6_fix1_",
+        "a".repeat(64),
+        "release-6",
+        1,
+        UUID.fromString("00000000-0000-0000-0000-000000000016"),
+        evidence,
+        100);
+  }
+
+  private static final class RecordingTarget implements MigrationTargetStore {
+    private MigrationCheckpoint checkpoint = MigrationCheckpoint.initial();
+    private int reconciliations;
+    private int rehearsals;
+    private int publications;
+    private Runnable beforeCommit = () -> {};
+
+    @Override
+    public void requireExistingRun(ValidatedMigrationContext context) {}
+
+    @Override
+    public void prepareExistingRunVerification(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds) {}
+
+    @Override
+    public MigrationCheckpoint checkpoint(
+        ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
+      return checkpoint;
+    }
+
+    @Override
+    public MigrationCheckpoint commitBatch(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        MigrationCheckpoint expected,
+        List<TransformedMigrationDocument> documents,
+        String nextCursor) {
+      throw new AssertionError("empty fixture must not commit a batch");
+    }
+
+    @Override
+    public MigrationCheckpoint completeStaging(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        MigrationCheckpoint expected) {
+      checkpoint = expected.markComplete();
+      return checkpoint;
+    }
+
+    @Override
+    public void requireStagedDocuments(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        List<TransformedMigrationDocument> documents) {}
+
+    @Override
+    public MigrationReconciliation reconcile(
+        ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
+      reconciliations++;
+      return new MigrationReconciliation(
+          checkpoint.complete(), 0, 0, checkpoint.sourceDigest(), checkpoint.sourceDigest(),
+          true);
+    }
+
+    @Override
+    public void verifyExistingRun(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations) {}
+
+    @Override
+    public void rehearseShadow(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations) {
+      rehearsals += kinds.size();
+    }
+
+    @Override
+    public void finalizeRun(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations,
+        LockedFinalizationCheck finalizationCheck) {
+      finalizationCheck.revalidate((kind, documents) -> {});
+      publications += kinds.size();
+      beforeCommit.run();
+    }
+
+    @Override
+    public List<MigrationKindStatus> statuses(ValidatedMigrationContext context) {
+      return List.of(new MigrationKindStatus("fixture", checkpoint, publications, publications > 0));
+    }
+  }
+
+  private static final class RecordingFreezeGuard implements FinalizationFreezeGuard {
+    private boolean open = true;
+    private int verifications;
+
+    @Override
+    public void requireLocked() {
+      assertThat(open).isTrue();
+      verifications++;
+    }
+
+    @Override
+    public void close() {
+      open = false;
+    }
+  }
+
+  private static final class StatusTarget implements MigrationTargetStore {
+    private final List<MigrationKindStatus> statuses;
+    private int existingRunRequirements;
+    private int existingRunPreparations;
+    private int existingRunVerifications;
+
+    private StatusTarget(List<MigrationKindStatus> statuses) {
+      this.statuses = statuses;
+    }
+
+    @Override
+    public void requireExistingRun(ValidatedMigrationContext context) {
+      existingRunRequirements++;
+    }
+
+    @Override
+    public void prepareExistingRunVerification(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds) {
+      existingRunPreparations++;
+    }
+
+    @Override
+    public MigrationCheckpoint checkpoint(
+        ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
+      throw new AssertionError("reconcile must not stage");
+    }
+
+    @Override
+    public MigrationCheckpoint commitBatch(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        MigrationCheckpoint expected,
+        List<TransformedMigrationDocument> documents,
+        String nextCursor) {
+      throw new AssertionError("reconcile must not stage");
+    }
+
+    @Override
+    public MigrationCheckpoint completeStaging(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        MigrationCheckpoint expected) {
+      throw new AssertionError("reconcile must not stage");
+    }
+
+    @Override
+    public void requireStagedDocuments(
+        ValidatedMigrationContext context,
+        PostgresqlMigrationCatalog.Kind kind,
+        List<TransformedMigrationDocument> documents) {}
+
+    @Override
+    public MigrationReconciliation reconcile(
+        ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
+      var checkpoint = statuses.getFirst().checkpoint();
+      return new MigrationReconciliation(
+          checkpoint.complete(), checkpoint.sourceCount(), checkpoint.sourceCount(),
+          checkpoint.sourceDigest(), checkpoint.sourceDigest(), true);
+    }
+
+    @Override
+    public void verifyExistingRun(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations) {
+      existingRunVerifications++;
+    }
+
+    @Override
+    public void rehearseShadow(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations) {
+      throw new AssertionError("reconcile must not rehearse shadow rows");
+    }
+
+    @Override
+    public void finalizeRun(
+        ValidatedMigrationContext context,
+        List<PostgresqlMigrationCatalog.Kind> kinds,
+        List<MigrationReconciliation> reconciliations,
+        LockedFinalizationCheck finalizationCheck) {
+      throw new AssertionError("reconcile must not finalize");
+    }
+
+    @Override
+    public List<MigrationKindStatus> statuses(ValidatedMigrationContext context) {
+      return statuses;
+    }
+  }
+}

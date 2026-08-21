@@ -2,6 +2,7 @@ package dev.christopherbell.message.conversation;
 
 import java.time.Clock;
 import java.util.Set;
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.message.model.Message;
@@ -10,11 +11,10 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.stereotype.Service;
 
 /** Persists per-user conversation visibility without changing messages or the other participant. */
-@Service
-public class ConversationArchiveService {
+@MongoPersistence
+public class ConversationArchiveService implements ConversationArchivePort {
   private final KindScopedMongoOperations<Message> messages;
   private final KindScopedMongoOperations<ConversationArchiveState> archives;
   private final Clock clock;

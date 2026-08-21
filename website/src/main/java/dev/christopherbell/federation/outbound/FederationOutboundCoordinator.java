@@ -70,11 +70,14 @@ final class FederationOutboundCoordinator {
       return;
     }
     Instant now = clock.instant();
-    var found = store.scanEligibleAfter(
-        store.loadCursor(), properties.outbound().batchSize());
+    var cursor = store.loadCursor();
+    var found = posts.findFederationEligibleAfter(
+        cursor == null ? null : cursor.createdOn(),
+        cursor == null ? null : cursor.postId(),
+        properties.outbound().batchSize());
     for (var post : found) {
       for (var peer : properties.outbound().peers()) {
-        store.enqueueIfAbsent(post, peer, now);
+        store.enqueueIfAbsent(post.getId(), post.getAccountId(), peer, now);
       }
     }
     if (!found.isEmpty()) {

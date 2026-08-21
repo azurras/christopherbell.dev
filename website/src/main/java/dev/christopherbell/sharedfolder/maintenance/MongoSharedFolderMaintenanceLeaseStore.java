@@ -1,22 +1,30 @@
 package dev.christopherbell.sharedfolder.maintenance;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
+import dev.christopherbell.configuration.mongo.domain.MongoDatabaseLeaseMutation;
+import dev.christopherbell.libs.lease.LeaseGrant;
+import dev.christopherbell.libs.lease.LeaseIdentity;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 /** Mongo implementation of the fixed-key atomic maintenance lease boundary. */
+@MongoPersistence
 @Repository
-class MongoSharedFolderMaintenanceLeaseStore implements SharedFolderMaintenanceLeaseStore {
+public class MongoSharedFolderMaintenanceLeaseStore
+    implements SharedFolderMaintenanceLeaseStore {
   private final KindScopedMongoOperations<SharedFolderMaintenanceLeaseDocument> mongo;
 
   @Autowired
-  MongoSharedFolderMaintenanceLeaseStore(DomainMongoOperationsFactory factory) {
+  public MongoSharedFolderMaintenanceLeaseStore(DomainMongoOperationsFactory factory) {
     this.mongo = factory.forType(SharedFolderMaintenanceLeaseDocument.class);
   }
 
@@ -26,52 +34,56 @@ class MongoSharedFolderMaintenanceLeaseStore implements SharedFolderMaintenanceL
   }
 
   @Override
-  public boolean tryAcquire(String ownerToken, Instant acquiredAt, Instant expiresAt) {
-    Query query = Query.query(Criteria.where("id")
-        .is(SharedFolderMaintenanceLeaseDocument.ID)
-        .orOperator(
-            Criteria.where("ownerToken").is(ownerToken),
-            Criteria.where("expiresAt").lte(acquiredAt)));
+  public Optional<LeaseGrant> tryAcquire(String ownerToken, Duration duration) {
+    new LeaseIdentity(SharedFolderMaintenanceLeaseDocument.ID, ownerToken);
+    Query query = Query.query(Criteria.where("id").is(SharedFolderMaintenanceLeaseDocument.ID));
     Update update = new Update()
         .set("ownerToken", ownerToken)
-        .set("acquiredAt", acquiredAt)
-        .set("expiresAt", expiresAt);
-    if (mongo.findAndUpdate(query, update).isPresent()) {
-      return true;
+        .inc("fenceToken", 1L)
+        .currentDate("acquiredAt");
+    var seed = new SharedFolderMaintenanceLeaseDocument();
+    seed.setId(SharedFolderMaintenanceLeaseDocument.ID);
+    seed.setOwnerToken("unclaimed");
+    seed.setFenceToken(0L);
+    seed.setAcquiredAt(Instant.EPOCH);
+    seed.setExpiresAt(Instant.EPOCH);
+    return mongo.acquireDatabaseLease(query, MongoDatabaseLeaseMutation.acquire(
+            update, "expiresAt", duration, "ownerToken", ownerToken), seed)
+        .map(MongoSharedFolderMaintenanceLeaseStore::grant);
+  }
+
+  @Override
+  public Optional<LeaseGrant> renew(LeaseGrant grant, Duration duration) {
+    if (!SharedFolderMaintenanceLeaseDocument.ID.equals(grant.leaseName())) {
+      return Optional.empty();
     }
-    var lease = new SharedFolderMaintenanceLeaseDocument();
-    lease.setId(SharedFolderMaintenanceLeaseDocument.ID);
-    lease.setOwnerToken(ownerToken);
-    lease.setAcquiredAt(acquiredAt);
-    lease.setExpiresAt(expiresAt);
-    try {
-      mongo.insert(lease);
-      return true;
-    } catch (DuplicateKeyException contention) {
+    Query query = Query.query(Criteria.where("id")
+        .is(SharedFolderMaintenanceLeaseDocument.ID)
+        .and("ownerToken").is(grant.ownerId())
+        .and("fenceToken").is(grant.fenceToken()));
+    return mongo.findAndUpdateDatabaseLease(query, MongoDatabaseLeaseMutation.renew(
+            new Update().set("ownerToken", grant.ownerId()), "expiresAt", duration, false))
+        .map(MongoSharedFolderMaintenanceLeaseStore::grant);
+  }
+
+  @Override
+  public boolean release(LeaseGrant grant) {
+    if (!SharedFolderMaintenanceLeaseDocument.ID.equals(grant.leaseName())) {
       return false;
     }
-  }
-
-  @Override
-  public boolean renew(String ownerToken, Instant renewedAt, Instant expiresAt) {
     Query query = Query.query(Criteria.where("id")
         .is(SharedFolderMaintenanceLeaseDocument.ID)
-        .and("ownerToken").is(ownerToken)
-        .and("expiresAt").gt(renewedAt));
-    Update update = new Update().set("expiresAt", expiresAt);
-    return mongo.updateFirst(query, update)
-        .getMatchedCount() == 1;
-  }
-
-  @Override
-  public boolean release(String ownerToken) {
-    Query query = Query.query(Criteria.where("id")
-        .is(SharedFolderMaintenanceLeaseDocument.ID)
-        .and("ownerToken").is(ownerToken));
+        .and("ownerToken").is(grant.ownerId())
+        .and("fenceToken").is(grant.fenceToken()));
     Update update = new Update()
-        .unset("ownerToken")
+        .set("ownerToken", "released")
         .set("expiresAt", Instant.EPOCH);
-    return mongo.updateFirst(query, update)
-        .getMatchedCount() == 1;
+    return mongo.findAndUpdateDatabaseLease(query,
+        MongoDatabaseLeaseMutation.release(update, "expiresAt", false)).isPresent();
+  }
+
+  private static LeaseGrant grant(SharedFolderMaintenanceLeaseDocument document) {
+    return new LeaseGrant(document.getId(), document.getOwnerToken(), document.getFenceToken(),
+        document.getExpiresAt());
   }
 }

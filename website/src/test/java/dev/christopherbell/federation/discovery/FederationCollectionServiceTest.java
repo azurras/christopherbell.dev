@@ -84,7 +84,12 @@ class FederationCollectionServiceTest {
     when(discovery.actorForAccount(account)).thenReturn(actor("chris"));
     when(outboxQueries.count(account.getId(), NOW)).thenReturn(1L);
     when(outboxQueries.page(eq(account.getId()), any(), eq(20), eq(NOW)))
-        .thenReturn(new FederationPage<>(List.of(post), null));
+        .thenReturn(new FederationPage<>(List.of(new FederationOutboxEntry(
+            post.getId(),
+            post.getText(),
+            post.getParentId(),
+            post.getCreatedOn(),
+            post.getLastUpdatedOn())), null));
 
     var collection = collections.outbox("chris", true, "", 20);
 

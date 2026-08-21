@@ -32,7 +32,8 @@ class MusicCatalogTest {
         .thenReturn(List.of(new Document("_id", "Album")))
         .thenReturn(List.of(new Document("_id", "Rock")))
         .thenReturn(List.of(new Document("_id", 2025), new Document("_id", 2026)));
-    var catalog = new MusicCatalog(boundary.factory, mock(MusicTrackRepository.class));
+    var catalog = new MusicCatalog(
+        new MongoMusicCatalogQueryRepository(boundary.factory), mock(MusicTrackRepository.class));
 
     var result = catalog.search(new MusicQuery(
         ".*", null, null, null, null, null, 1, 50));
@@ -59,7 +60,8 @@ class MusicCatalogTest {
         track("last.mp3", "Last Song", "Artist", "Album", "Rock", 2026)));
     when(boundary.operations.aggregate(any(), org.mockito.ArgumentMatchers.eq(Document.class)))
         .thenReturn(List.of());
-    var catalog = new MusicCatalog(boundary.factory, mock(MusicTrackRepository.class));
+    var catalog = new MusicCatalog(
+        new MongoMusicCatalogQueryRepository(boundary.factory), mock(MusicTrackRepository.class));
 
     var result = catalog.search(new MusicQuery(
         null, null, null, null, true, List.of("track-a", "track-b"), 99, 50));

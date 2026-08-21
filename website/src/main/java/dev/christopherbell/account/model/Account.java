@@ -3,8 +3,8 @@ package dev.christopherbell.account.model;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import dev.christopherbell.admin.activity.ModerationAuditCommand;
-import dev.christopherbell.federation.identity.FederationIdentity;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
+import dev.christopherbell.federation.api.FederationIdentity;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
@@ -18,6 +18,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.annotation.Version;
 import org.springframework.data.mongodb.core.index.Indexed;
 
 /**
@@ -41,6 +42,9 @@ public class Account {
 
   @Id
   private String id;
+
+  @Version
+  private Long version;
 
   @CreatedBy
   private String createdBy;

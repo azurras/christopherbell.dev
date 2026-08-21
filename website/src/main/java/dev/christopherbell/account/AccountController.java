@@ -75,7 +75,7 @@ import org.springframework.web.util.WebUtils;
 public class AccountController {
   private static final String BROWSER_SESSION_HEADER = "X-CBELL-Browser-Session";
   private final AccountService accountService;
-  private final AdminAccountQueryService adminAccountQueryService;
+  private final AdminAccountQueryPort adminAccountQueryService;
   private final PermissionService permissionService;
   private final BrowserAuthenticationCookies browserAuthenticationCookies;
   private final BrowserSecurityProperties browserSecurityProperties;

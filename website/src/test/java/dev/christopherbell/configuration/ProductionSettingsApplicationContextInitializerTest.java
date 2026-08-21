@@ -19,6 +19,7 @@ class ProductionSettingsApplicationContextInitializerTest {
   @Test
   void productionAggregatesMissingSettingsWithoutLeakingValues() {
     var context = context("prod", Map.of(
+        "APP_PERSISTENCE_BACKEND", "mongodb",
         "APP_JWT_SECRET", "short-secret-value",
         "APP_MAIL_ENABLED", "true"));
 
@@ -89,8 +90,44 @@ class ProductionSettingsApplicationContextInitializerTest {
         .doesNotThrowAnyException();
   }
 
+  @Test
+  void productionRequiresAnExplicitPostgresqlBackendAndJdbcCredentialsWithoutLeakingThem() {
+    String unsafeJdbcUrl = "jdbc:postgresql://db.example/test?password=do-not-echo";
+    var context = validProductionContext(Map.of(
+        "APP_PERSISTENCE_BACKEND", "postgresql",
+        "SPRING_DATASOURCE_URL", unsafeJdbcUrl,
+        "SPRING_DATASOURCE_USERNAME", "database-user",
+        "SPRING_DATASOURCE_PASSWORD", "database-secret"));
+
+    assertThatCode(() -> initializer.initialize(context)).doesNotThrowAnyException();
+
+    var incompleteContext = validProductionContext(Map.of("APP_PERSISTENCE_BACKEND", "postgresql"));
+    assertThatThrownBy(() -> initializer.initialize(incompleteContext))
+        .hasMessageContaining("SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATASOURCE_PASSWORD")
+        .hasMessageNotContaining("database-secret")
+        .hasMessageNotContaining(unsafeJdbcUrl);
+  }
+
+  @Test
+  void productionRejectsMissingAndUnsupportedPersistenceBackends() {
+    var missing = context("prod", Map.of(
+        "APP_JWT_SECRET", VALID_JWT,
+        "APP_MAIL_ENABLED", "false"));
+    assertThatThrownBy(() -> initializer.initialize(missing))
+        .hasMessageContaining("APP_PERSISTENCE_BACKEND");
+
+    var unsupported = context("prod", Map.of(
+        "APP_PERSISTENCE_BACKEND", "unsupported",
+        "APP_JWT_SECRET", VALID_JWT,
+        "APP_MAIL_ENABLED", "false"));
+    assertThatThrownBy(() -> initializer.initialize(unsupported))
+        .hasMessageContaining("APP_PERSISTENCE_BACKEND")
+        .hasMessageNotContaining("unsupported");
+  }
+
   private GenericApplicationContext validProductionContext(Map<String, String> overrides) {
     var values = new LinkedHashMap<String, String>();
+    values.put("APP_PERSISTENCE_BACKEND", "mongodb");
     values.put("SPRING_MONGODB_URI", "mongodb://127.0.0.1:27017");
     values.put("APP_JWT_SECRET", VALID_JWT);
     values.put("APP_MAIL_ENABLED", "false");

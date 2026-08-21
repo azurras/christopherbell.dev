@@ -65,7 +65,7 @@ final class DomainEnvelopeAggregationValidation {
 
   private static Document validEnvelope(String expectedKind, int expectedSchemaVersion) {
     return new Document("$and", List.of(
-        equal(keyNames("$$ROOT"), ENVELOPE_KEYS),
+        setEqual(keyNames("$$ROOT"), ENVELOPE_KEYS),
         equal("$_kind", expectedKind),
         equal(new Document("$type", "$schemaVersion"), "int"),
         equal("$schemaVersion", expectedSchemaVersion),
@@ -91,6 +91,10 @@ final class DomainEnvelopeAggregationValidation {
 
   private static Document equal(Object left, Object right) {
     return new Document("$eq", List.of(left, right));
+  }
+
+  private static Document setEqual(Object left, Object right) {
+    return new Document("$setEquals", List.of(left, right));
   }
 
   private static Document notEqual(Object left, Object right) {

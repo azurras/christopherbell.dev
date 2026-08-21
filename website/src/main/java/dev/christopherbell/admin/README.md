@@ -5,6 +5,8 @@ Owns back-office administration views and cross-feature admin operations.
 ## What Lives Here
 
 - Admin activity recording and reads live under `activity`.
+- `api.AdminMigrationVerifier` publishes real admin-query and conditional-reservation parity
+  operations for the guarded MongoDB-to-PostgreSQL cutover.
 - Admin-facing DTOs under `model`.
 - Cross-feature moderation/admin summaries, such as reports and recent operational state.
 - Back Office work queues for reports and users.

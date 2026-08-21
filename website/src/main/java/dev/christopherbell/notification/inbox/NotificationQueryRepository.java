@@ -1,5 +1,7 @@
 package dev.christopherbell.notification.inbox;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.notification.model.Notification;
@@ -14,8 +16,9 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 /** Stable owner-scoped reads and bulk updates for the notification inbox. */
+@MongoPersistence
 @Repository
-public class NotificationQueryRepository {
+public class NotificationQueryRepository implements NotificationQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
   private final KindScopedMongoOperations<Notification> mongo;
   private final StableCursorCodec cursorCodec;

@@ -1,12 +1,14 @@
 package dev.christopherbell.sharedfolder.maintenance;
 
-import java.time.Instant;
+import dev.christopherbell.libs.lease.LeaseGrant;
+import java.time.Duration;
+import java.util.Optional;
 
 /** Atomic persistence boundary for the one fixed shared-folder maintenance lease. */
 public interface SharedFolderMaintenanceLeaseStore {
-  boolean tryAcquire(String ownerToken, Instant acquiredAt, Instant expiresAt);
+  Optional<LeaseGrant> tryAcquire(String ownerToken, Duration duration);
 
-  boolean renew(String ownerToken, Instant renewedAt, Instant expiresAt);
+  Optional<LeaseGrant> renew(LeaseGrant grant, Duration duration);
 
-  boolean release(String ownerToken);
+  boolean release(LeaseGrant grant);
 }

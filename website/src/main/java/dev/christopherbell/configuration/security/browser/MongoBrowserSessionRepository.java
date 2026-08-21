@@ -1,11 +1,14 @@
 package dev.christopherbell.configuration.security.browser;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
+@MongoPersistence
 @Repository
 class MongoBrowserSessionRepository extends KindScopedRepositorySupport<BrowserSession>
     implements BrowserSessionRepository {

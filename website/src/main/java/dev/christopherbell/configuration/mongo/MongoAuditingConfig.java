@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo;
 
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
@@ -28,6 +30,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
  * @see AuditorAware
  * @see DateTimeProvider
  */
+@MongoBackendComponent
 @Configuration
 @EnableMongoAuditing(
     auditorAwareRef = "auditorAware",
@@ -48,16 +51,6 @@ public class MongoAuditingConfig {
   public AuditorAware<String> auditorAware() {
     return () -> Optional.ofNullable(SecurityContextHolder.getContext().getAuthentication())
         .map(Authentication::getName);
-  }
-
-  /**
-   * UTC clock for deterministic auditing timestamps.
-   *
-   * @return a {@link Clock} set to UTC
-   */
-  @Bean
-  public Clock clock() {
-    return Clock.systemUTC();
   }
 
   /**

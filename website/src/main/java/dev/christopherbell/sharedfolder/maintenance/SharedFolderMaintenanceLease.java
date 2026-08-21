@@ -2,8 +2,9 @@ package dev.christopherbell.sharedfolder.maintenance;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
+import dev.christopherbell.libs.lease.LeaseGrant;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -14,9 +15,9 @@ public final class SharedFolderMaintenanceLease {
   private static final Duration DEFAULT_DURATION = Duration.ofMinutes(30);
 
   private final SharedFolderMaintenanceLeaseStore store;
-  private final Clock clock;
   private final Duration duration;
   private final String ownerToken;
+  private LeaseGrant grant;
 
   @Autowired
   public SharedFolderMaintenanceLease(SharedFolderMaintenanceLeaseStore store, Clock clock) {
@@ -35,23 +36,32 @@ public final class SharedFolderMaintenanceLease {
     if (owner == null || owner.isBlank() || owner.length() > 128) {
       throw new IllegalArgumentException("Maintenance lease owner is invalid");
     }
-    this.store = store;
-    this.clock = clock;
+    this.store = Objects.requireNonNull(store, "store");
+    Objects.requireNonNull(clock, "clock");
     this.duration = duration;
     this.ownerToken = owner;
   }
 
-  public boolean acquire() {
-    Instant now = clock.instant();
-    return store.tryAcquire(ownerToken, now, now.plus(duration));
+  public synchronized boolean acquire() {
+    var acquired = store.tryAcquire(ownerToken, duration);
+    acquired.ifPresent(value -> grant = value);
+    return acquired.isPresent();
   }
 
-  public boolean renew() {
-    Instant now = clock.instant();
-    return store.renew(ownerToken, now, now.plus(duration));
+  public synchronized boolean renew() {
+    if (grant == null) {
+      return false;
+    }
+    var renewed = store.renew(grant, duration);
+    renewed.ifPresent(value -> grant = value);
+    return renewed.isPresent();
   }
 
-  public boolean release() {
-    return store.release(ownerToken);
+  public synchronized boolean release() {
+    if (grant == null || !store.release(grant)) {
+      return false;
+    }
+    grant = null;
+    return true;
   }
 }

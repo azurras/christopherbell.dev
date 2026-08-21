@@ -1,5 +1,7 @@
 package dev.christopherbell.vehicle.core;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import dev.christopherbell.vehicle.model.Vehicle;
@@ -12,6 +14,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
+@MongoPersistence
 @Repository
 public class MongoVehicleRepository extends KindScopedRepositorySupport<Vehicle>
     implements VehicleRepository {

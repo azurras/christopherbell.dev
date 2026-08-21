@@ -16,6 +16,7 @@ import org.gradle.language.jvm.tasks.ProcessResources
 plugins {
     id("org.springframework.boot")
     id("io.spring.dependency-management")
+    id("org.jooq.jooq-codegen-gradle")
     java
 }
 
@@ -35,6 +36,8 @@ dependencies {
     // Spring Boot dependencies
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-data-mongodb")
+    implementation("org.springframework.boot:spring-boot-starter-flyway")
+    implementation("org.springframework.boot:spring-boot-starter-jooq")
     implementation("org.springframework.boot:spring-boot-starter-json")
     implementation("org.springframework.boot:spring-boot-starter-logging")
     implementation("org.springframework.boot:spring-boot-starter-security")
@@ -42,10 +45,14 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
     implementation("io.projectreactor.netty:reactor-netty-http")
     implementation("io.jsonwebtoken:jjwt-api:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")
+    runtimeOnly("org.flywaydb:flyway-database-postgresql")
+    runtimeOnly("org.postgresql:postgresql")
+    jooqCodegen("org.postgresql:postgresql")
 
     // Host metrics; Windows sensor binaries are pinned generated resources below.
     implementation("com.github.oshi:oshi-core:7.4.2")
@@ -73,15 +80,155 @@ dependencies {
     annotationProcessor("org.projectlombok:lombok-mapstruct-binding:0.2.0")
 
     // Testing
-    testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("org.springframework.modulith:spring-modulith-starter-test")
     testImplementation(testFixtures(project(":cbell-lib")))
+    testImplementation("org.jooq:jooq-codegen:3.21.5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testAnnotationProcessor("org.projectlombok:lombok:1.18.46")
     testCompileOnly("org.projectlombok:lombok:1.18.46")
+}
+
+val canonicalJooqSchemas = listOf(
+    "identity", "social", "communication", "federation", "music", "shared_folder",
+    "mobility", "lunch", "canes", "platform")
+val jooqJdbcUrl = providers.environmentVariable("JOOQ_CODEGEN_JDBC_URL")
+val jooqUsername = providers.environmentVariable("JOOQ_CODEGEN_USERNAME")
+val jooqPassword = providers.environmentVariable("JOOQ_CODEGEN_PASSWORD")
+val jooqSchemaPrefix = providers.environmentVariable("JOOQ_CODEGEN_SCHEMA_PREFIX")
+val jooqEnvironment = listOf(
+    "JOOQ_CODEGEN_JDBC_URL" to jooqJdbcUrl,
+    "JOOQ_CODEGEN_USERNAME" to jooqUsername,
+    "JOOQ_CODEGEN_PASSWORD" to jooqPassword,
+    "JOOQ_CODEGEN_SCHEMA_PREFIX" to jooqSchemaPrefix)
+val presentJooqEnvironment = jooqEnvironment.filter { (_, value) -> value.isPresent }
+val invalidJooqEnvironment = jooqEnvironment.filterNot { (_, value) ->
+    value.isPresent && value.get().isNotBlank()
+}
+if (presentJooqEnvironment.isNotEmpty() && invalidJooqEnvironment.isNotEmpty()) {
+    throw GradleException(
+        "Partial jOOQ generation environment is not allowed; missing or blank: "
+            + "${invalidJooqEnvironment.map { (name, _) -> name }.joinToString()}.")
+}
+val jooqEnvironmentConfigured = invalidJooqEnvironment.isEmpty()
+val generatedJooqDirectory = layout.buildDirectory.dir("generated-src/jooq/main")
+val jooqOwnershipDirectory = layout.buildDirectory.dir("jooq/ownership")
+
+sourceSets.named("main") {
+    // PostgreSQL adapters always compile against generated jOOQ types. Local builds generate
+    // them in this invocation; CI downloads the exact-SHA artifact produced by its prerequisite
+    // codegen job. A missing artifact therefore remains a hard compile failure.
+    java.srcDir(generatedJooqDirectory)
+}
+
+val jooqPreparation = sourceSets.create("jooqPreparation") {
+    resources.srcDir("src/main/resources")
+}
+dependencies.add("testImplementation", jooqPreparation.output)
+configurations[jooqPreparation.implementationConfigurationName]
+    .extendsFrom(configurations["implementation"])
+configurations[jooqPreparation.runtimeOnlyConfigurationName]
+    .extendsFrom(configurations["runtimeOnly"])
+
+fun requireCompleteJooqEnvironment() {
+    val missing = jooqEnvironment
+        .filterNot { (_, value) -> value.isPresent && value.get().isNotBlank() }
+        .map { (name, _) -> name }
+    if (missing.isNotEmpty()) {
+        throw GradleException(
+            "jOOQ generation requires nonblank environment variables: ${missing.joinToString()}.")
+    }
+}
+
+val prepareJooqSchema = tasks.register<JavaExec>("prepareJooqSchema") {
+    group = "jooq"
+    description = "Applies canonical Flyway migrations to an owned jOOQ schema prefix."
+    dependsOn(jooqPreparation.classesTaskName)
+    classpath = jooqPreparation.runtimeClasspath
+    mainClass.set("dev.christopherbell.codegen.PostgresqlJooqSchemaTool")
+    args("prepare", jooqOwnershipDirectory.get().asFile.absolutePath)
+    doFirst { requireCompleteJooqEnvironment() }
+}
+
+val cleanJooqSchema = tasks.register<JavaExec>("cleanJooqSchema") {
+    group = "jooq"
+    description = "Drops only the exact owned jOOQ schema prefix after generation."
+    dependsOn(jooqPreparation.classesTaskName)
+    classpath = jooqPreparation.runtimeClasspath
+    mainClass.set("dev.christopherbell.codegen.PostgresqlJooqSchemaTool")
+    args("clean", jooqOwnershipDirectory.get().asFile.absolutePath)
+    doFirst { requireCompleteJooqEnvironment() }
+}
+
+tasks.register<JavaExec>("postgresqlMigration") {
+    group = "application"
+    description = "Runs the guarded standalone Mongo-to-PostgreSQL migration command."
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set(
+        "dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationCli")
+}
+
+jooq {
+    configuration {
+        jdbc {
+            driver = "org.postgresql.Driver"
+            url = jooqJdbcUrl.orElse("").get()
+            user = jooqUsername.orElse("").get()
+            password = jooqPassword.orElse("").get()
+        }
+        generator {
+            database {
+                name = "org.jooq.meta.postgres.PostgresDatabase"
+                includes = ".*"
+                excludes = "flyway_schema_history"
+                isIncludeIndexes = true
+                isIncludePrimaryKeys = true
+                isIncludeUniqueKeys = true
+                isIncludeForeignKeys = true
+                schemata {
+                    canonicalJooqSchemas.forEach { canonicalSchema ->
+                        schema {
+                            inputSchema = jooqSchemaPrefix.orElse("").get() + canonicalSchema
+                            outputSchema = canonicalSchema
+                        }
+                    }
+                }
+            }
+            generate {
+                isDeprecated = false
+                isRecords = true
+                isPojos = false
+                isDaos = false
+                isImplicitJoinPathsToOne = false
+                isImplicitJoinPathsToMany = false
+                isImplicitJoinPathsManyToMany = false
+                isGeneratedAnnotationDate = false
+                isGeneratedAnnotationJooqVersion = false
+            }
+            target {
+                packageName = "dev.christopherbell.persistence.jooq"
+                directory = generatedJooqDirectory.get().asFile.absolutePath
+            }
+        }
+    }
+}
+
+tasks.named("jooqCodegen") {
+    dependsOn(prepareJooqSchema)
+    finalizedBy(cleanJooqSchema)
+    outputs.upToDateWhen { false }
+    doFirst {
+        requireCompleteJooqEnvironment()
+        delete(generatedJooqDirectory)
+    }
+}
+
+if (jooqEnvironmentConfigured) {
+    tasks.named("compileJava") {
+        dependsOn("jooqCodegen")
+    }
 }
 
 val forwardedArchitectureTestSystemProperties = listOf(
@@ -89,6 +236,7 @@ val forwardedArchitectureTestSystemProperties = listOf(
     "archunit.freeze.store.default.allowStoreUpdate")
 
 tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
     forwardedArchitectureTestSystemProperties.forEach { propertyName ->
         providers.systemProperty(propertyName).orNull?.let { value ->
             systemProperty(propertyName, value)

@@ -11,6 +11,7 @@ import com.mongodb.client.model.IndexOptions;
 import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory;
+import dev.christopherbell.music.catalog.MongoMusicCatalogQueryRepository;
 import dev.christopherbell.music.catalog.MongoMusicTrackRepository;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicIndexStatus;
@@ -21,12 +22,14 @@ import dev.christopherbell.music.library.MusicPlaylist;
 import dev.christopherbell.music.metadata.MongoMusicMetadataEditRepository;
 import dev.christopherbell.music.metadata.MusicMetadataEdit;
 import dev.christopherbell.music.radio.MongoMusicRadioHistoryRepository;
+import dev.christopherbell.music.radio.MongoMusicRuntimeStateRepository;
 import dev.christopherbell.music.radio.MusicQueueState;
 import dev.christopherbell.music.radio.MusicRadioHistoryEvent;
 import dev.christopherbell.music.radio.MusicRadioState;
 import dev.christopherbell.music.radio.MusicRuntimeStateStore;
 import dev.christopherbell.music.security.MusicAccessAuditQueryService;
 import dev.christopherbell.music.security.MusicAccessAuditRecorder;
+import dev.christopherbell.music.security.MongoMusicAccessAttemptRepository;
 import dev.christopherbell.whatsforlunch.restaurant.MongoRestaurantRepository;
 import dev.christopherbell.whatsforlunch.restaurant.MongoDailyLunchPicksRepository;
 import dev.christopherbell.whatsforlunch.restaurant.MongoRestaurantImportStateRepository;
@@ -115,7 +118,7 @@ class MusicAndLunchMongoContractTest {
 
   @Test
   void queueAndRadioHaveIndependentCasWinnersAndStaleLosers() {
-    var states = new MusicRuntimeStateStore(factory);
+    var states = new MusicRuntimeStateStore(new MongoMusicRuntimeStateRepository(factory));
     var queue = states.saveQueue(queue(null, "entry-1"));
     var radio = states.saveRadio(radio(null, 1));
     var staleQueue = states.findQueue().orElseThrow();
@@ -323,7 +326,7 @@ class MusicAndLunchMongoContractTest {
     var tracks = new MongoMusicTrackRepository(factory);
     tracks.save(track("track-1", "a.mp3", "Alpha", now));
     tracks.save(track("track-2", "b.mp3", "Beta", now));
-    var catalog = new MusicCatalog(factory, tracks);
+    var catalog = new MusicCatalog(new MongoMusicCatalogQueryRepository(factory), tracks);
 
     var result = catalog.search(new MusicQuery(null, null, null, null, null, null, 0, 50));
     assertThat(result.tracks()).extracting(MusicTrack::id).containsExactly("track-1", "track-2");
@@ -331,10 +334,11 @@ class MusicAndLunchMongoContractTest {
     assertThat(catalog.radioCandidates(1)).extracting(MusicTrack::id)
         .containsExactly("track-1");
 
-    var recorder = new MusicAccessAuditRecorder(factory);
+    var attempts = new MongoMusicAccessAttemptRepository(factory);
+    var recorder = new MusicAccessAuditRecorder(attempts);
     var attempt = recorder.deniedIp("203.0.113.7", "SIGN_IN_REQUIRED");
     assertThat(attempt.count()).isEqualTo(1);
-    assertThat(new MusicAccessAuditQueryService(factory).recent(100)).contains(attempt);
+    assertThat(new MusicAccessAuditQueryService(attempts).recent(100)).contains(attempt);
   }
 
   @Test

@@ -28,7 +28,7 @@ class AccountFollowStoreTest {
     when(mongo.remove(any(Query.class), eq(Document.class), eq("accounts")))
         .thenReturn(DeleteResult.acknowledged(1))
         .thenReturn(DeleteResult.acknowledged(0));
-    var store = new AccountFollowStore(
+    var store = new MongoAccountFollowStore(
         dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
 
     assertThat(store.follow("self", "target", Instant.EPOCH).created()).isTrue();

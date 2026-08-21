@@ -58,6 +58,7 @@ public interface AccountRepository {
    * @param email the email address to look up (must not be {@code null})
    * @return an {@link Optional} containing the matching {@link Account}
    *         if found, or {@link Optional#empty()} if no match exists
+   * @throws IncorrectResultSizeDataAccessException if stored email case is ambiguous
    */
   Optional<Account> findByEmailIgnoreCase(String email);
 

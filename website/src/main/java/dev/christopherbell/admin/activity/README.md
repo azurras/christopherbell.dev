@@ -9,10 +9,11 @@ Owns the audit-style activity feed shown in the Back Office.
 - `AdminActivityService` records admin actions with actor, target, message,
   metadata, timestamp, reason, and allowlisted before/after state.
 - `AdminActivityRepository` owns MongoDB access for recent admin activity records.
-- `ModerationAuditCommand` validates bounded audit events before a domain
-  mutation begins, redacts common credential, email, and content-body forms,
-  and assigns a stable event id; `AdminActivityQueryService` validates and
-  executes ledger filters with stable `createdOn`/`_id` ordering.
+- The shared `cbell-lib` `ModerationAuditCommand` validates bounded audit events
+  before a domain mutation begins, redacts common credential, email, and
+  content-body forms, and assigns a stable event id. This package persists that
+  neutral command; `AdminActivityQueryService` validates and executes ledger
+  filters with stable `createdOn`/`_id` ordering.
 
 ## Design Notes
 

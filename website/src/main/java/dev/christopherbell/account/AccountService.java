@@ -1,6 +1,5 @@
 package dev.christopherbell.account;
 
-import com.mongodb.MongoWriteException;
 import dev.christopherbell.account.auth.AccountAuthenticationService;
 import dev.christopherbell.account.auth.AccountSessionRevoker;
 import dev.christopherbell.account.deletion.AccountDeletionResult;
@@ -94,7 +93,7 @@ public class AccountService {
       log.info("Successfully created account for username {}", accountCreateRequest.username());
     } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
       throw new InternalServiceException("Failed to create account credentials", e);
-    } catch (DuplicateKeyException | MongoWriteException e) {
+    } catch (DuplicateKeyException e) {
       throw new ResourceExistsException("Account with given email or username already exists.", e);
     }
     return accountMapper.toAccount(account);

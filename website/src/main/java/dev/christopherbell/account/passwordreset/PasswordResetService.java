@@ -21,6 +21,7 @@ import java.util.Base64;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 
 /**
  * Owns password reset token lifecycle and delegates delivery to the mail notifier.
@@ -48,7 +49,7 @@ public class PasswordResetService {
     try {
       var sanitizedEmail = EmailSanitizer.sanitize(request.email());
       account = accountRepository.findByEmailIgnoreCase(sanitizedEmail).orElse(null);
-    } catch (IllegalArgumentException e) {
+    } catch (IllegalArgumentException | IncorrectResultSizeDataAccessException failure) {
       return;
     }
     if (account == null) {

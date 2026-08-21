@@ -1,5 +1,8 @@
 package dev.christopherbell.federation.identity;
 
+import dev.christopherbell.federation.api.EncryptedPrivateKey;
+import dev.christopherbell.federation.api.FederationIdentity;
+
 import dev.christopherbell.configuration.security.BrowserSecurityProperties;
 import java.security.GeneralSecurityException;
 import java.security.KeyPairGenerator;

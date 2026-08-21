@@ -5,8 +5,8 @@ Owns direct-message reads.
 ## What Lives Here
 
 - `ConversationService` loads individual conversations, marks incoming unread messages as read, and builds conversation summaries.
-- `ConversationQueryRepository` batches unread counts for every visible conversation
-  into one Mongo aggregation before summaries are mapped.
+- `ConversationQueryRepository` batches unread counts for every visible
+  conversation into one backend-native grouped query before summaries are mapped.
 
 ## Design Notes
 

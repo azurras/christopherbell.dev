@@ -1,8 +1,8 @@
 package dev.christopherbell.music.metadata;
 
-import dev.christopherbell.libs.mongo.lease.LeaseOwnershipLostException;
-import dev.christopherbell.libs.mongo.lease.MongoLeaseService;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorCoordinator;
+import dev.christopherbell.libs.lease.LeaseOwnershipLostException;
+import dev.christopherbell.libs.lease.LeaseService;
+import dev.christopherbell.libs.lease.ScheduledCollectorCoordinator;
 import dev.christopherbell.music.catalog.MusicArtworkService;
 import dev.christopherbell.music.catalog.MusicCatalog;
 import dev.christopherbell.music.catalog.MusicFileRevision;
@@ -41,7 +41,7 @@ public final class MusicMetadataService {
   private final MusicMetadataFileStore files;
   private final MusicMetadataEditRepository edits;
   private final MusicAccessService access;
-  private final MongoLeaseService leases;
+  private final LeaseService leases;
   private final ScheduledCollectorCoordinator scheduledCollectors;
   private final Clock clock;
   private final Object localLock = new Object();
@@ -57,7 +57,7 @@ public final class MusicMetadataService {
       MusicMetadataFileStore files,
       MusicMetadataEditRepository edits,
       MusicAccessService access,
-      MongoLeaseService leases,
+      LeaseService leases,
       ScheduledCollectorCoordinator scheduledCollectors,
       Clock clock) {
     this.music = music;

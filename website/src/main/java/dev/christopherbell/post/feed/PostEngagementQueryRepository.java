@@ -1,5 +1,7 @@
 package dev.christopherbell.post.feed;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
@@ -12,8 +14,9 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.stereotype.Repository;
 
 /** Page-wide post engagement aggregates whose query count is independent of page size. */
+@MongoPersistence
 @Repository
-public class PostEngagementQueryRepository {
+public class PostEngagementQueryRepository implements PostEngagementQueryPort {
   private final KindScopedMongoOperations<Post> posts;
 
   public PostEngagementQueryRepository(DomainMongoOperationsFactory factory) {

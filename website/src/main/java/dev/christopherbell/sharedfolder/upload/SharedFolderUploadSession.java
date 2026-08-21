@@ -11,7 +11,7 @@ import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.CompoundIndexes;
 
-/** Mongo-backed owned upload metadata; only a random private staging key, never a local path, is kept. */
+/** Owned upload metadata; only a random private staging key, never a local path, is kept. */
 @Data
 @NoArgsConstructor
 @CompoundIndexes({

@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import dev.christopherbell.admin.activity.AdminActivityPage;
 import dev.christopherbell.admin.activity.AdminActivityQuery;
 import dev.christopherbell.admin.activity.AdminActivityQueryService;
+import dev.christopherbell.admin.activity.MongoAdminActivityQueryRepository;
 import dev.christopherbell.admin.model.AdminActivity;
 import dev.christopherbell.libs.api.exception.InvalidRequestException;
 import java.time.Instant;
@@ -32,8 +33,8 @@ class AdminActivityQueryServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new AdminActivityQueryService(
-        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo));
+    service = new AdminActivityQueryService(new MongoAdminActivityQueryRepository(
+        dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory.create(mongo)));
   }
 
   @Test

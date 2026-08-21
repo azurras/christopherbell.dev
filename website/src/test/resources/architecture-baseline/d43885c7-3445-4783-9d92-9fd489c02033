@@ -1,7 +1,4 @@
-account -> admin | dev.christopherbell.account.model.Account -> dev.christopherbell.admin.activity.ModerationAuditCommand
-account -> admin | dev.christopherbell.account.model.Account$AccountBuilder -> dev.christopherbell.admin.activity.ModerationAuditCommand
 account -> admin | dev.christopherbell.account.moderation.AccountModerationService -> dev.christopherbell.admin.activity.AdminActivityService
-account -> admin | dev.christopherbell.account.moderation.AccountModerationService -> dev.christopherbell.admin.activity.ModerationAuditCommand
 account -> configuration | dev.christopherbell.account.AccountController -> dev.christopherbell.configuration.security.BrowserAuthenticationCookies
 account -> configuration | dev.christopherbell.account.AccountController -> dev.christopherbell.configuration.security.BrowserSecurityProperties
 account -> configuration | dev.christopherbell.account.AccountController -> dev.christopherbell.configuration.security.browser.BrowserSessionService
@@ -13,10 +10,7 @@ federation -> configuration | dev.christopherbell.federation.outbound.DefaultFed
 federation -> configuration | dev.christopherbell.federation.outbound.FederationActivityFactory -> dev.christopherbell.configuration.security.BrowserSecurityProperties
 federation -> configuration | dev.christopherbell.federation.outbound.FederationOutboundConfiguration -> dev.christopherbell.configuration.security.BrowserSecurityProperties
 music -> configuration | dev.christopherbell.music.web.MusicEntryService -> dev.christopherbell.configuration.ClientIpResolver
-report -> admin | dev.christopherbell.report.model.PostReport -> dev.christopherbell.admin.activity.ModerationAuditCommand
-report -> admin | dev.christopherbell.report.model.PostReport$PostReportBuilder -> dev.christopherbell.admin.activity.ModerationAuditCommand
 report -> admin | dev.christopherbell.report.moderation.ReportModerationService -> dev.christopherbell.admin.activity.AdminActivityService
-report -> admin | dev.christopherbell.report.moderation.ReportModerationService -> dev.christopherbell.admin.activity.ModerationAuditCommand
 sharedfolder -> configuration | dev.christopherbell.sharedfolder.audit.MongoSharedFolderAuditSink -> dev.christopherbell.configuration.SharedFolderProperties
 sharedfolder -> configuration | dev.christopherbell.sharedfolder.audit.SharedFolderAuditRecorder -> dev.christopherbell.configuration.ClientIpResolver
 sharedfolder -> configuration | dev.christopherbell.sharedfolder.fs.WindowsSharedFolderMutationBoundary -> dev.christopherbell.configuration.SharedFolderProperties

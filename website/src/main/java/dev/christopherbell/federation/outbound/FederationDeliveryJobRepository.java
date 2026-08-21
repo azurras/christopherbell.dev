@@ -1,15 +1,15 @@
 package dev.christopherbell.federation.outbound;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
-import dev.christopherbell.post.model.Post;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -18,14 +18,13 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
 /** Mongo owner of idempotent enqueue, scan cursor, due claim, and exact-owner transitions. */
+@MongoPersistence
 @Repository
 class FederationDeliveryJobRepository implements FederationDeliveryStore {
-  private final KindScopedMongoOperations<Post> posts;
   private final KindScopedMongoOperations<FederationScanState> scans;
   private final KindScopedMongoOperations<FederationDeliveryJob> jobs;
 
   FederationDeliveryJobRepository(DomainMongoOperationsFactory factory) {
-    this.posts = factory.forType(Post.class);
     this.scans = factory.forType(FederationScanState.class);
     this.jobs = factory.forType(FederationDeliveryJob.class);
   }
@@ -37,28 +36,12 @@ class FederationDeliveryJobRepository implements FederationDeliveryStore {
   }
 
   @Override
-  public List<Post> scanEligibleAfter(FederationScanCursor cursor, int limit) {
-    var eligible = Criteria.where("federationOutboundEligible").is(true);
-    Criteria criteria = eligible;
-    if (cursor != null) {
-      criteria = new Criteria().andOperator(eligible, new Criteria().orOperator(
-          Criteria.where("createdOn").gt(cursor.createdOn()),
-          new Criteria().andOperator(
-              Criteria.where("createdOn").is(cursor.createdOn()),
-              Criteria.where("id").gt(cursor.postId()))));
-    }
-    var query = Query.query(criteria)
-        .with(Sort.by(Sort.Order.asc("createdOn"), Sort.Order.asc("id")))
-        .limit(limit);
-    return posts.find(query, org.springframework.data.domain.Pageable.unpaged());
-  }
-
-  @Override
-  public void enqueueIfAbsent(Post post, ControlledPeer peer, Instant now) {
-    String id = stableJobId(post.getId(), peer.name());
+  public void enqueueIfAbsent(
+      String postId, String accountId, ControlledPeer peer, Instant now) {
+    String id = stableJobId(postId, peer.name());
     if (jobs.findById(id).isPresent()) return;
     try {
-      jobs.insert(new FederationDeliveryJob(id, post.getId(), post.getAccountId(), peer.name(),
+      jobs.insert(new FederationDeliveryJob(id, postId, accountId, peer.name(),
           peer.inbox().toString(), FederationDeliveryState.PENDING, 0, now, null, null,
           null, null, now, now));
     } catch (org.springframework.dao.DuplicateKeyException ignored) {

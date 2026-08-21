@@ -1,5 +1,7 @@
 package dev.christopherbell.post.discovery;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
@@ -21,8 +23,9 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Bounded MongoDB queries for anonymous Void discovery. */
+@MongoPersistence
 @Repository
-public class VoidDiscoveryQueryRepository {
+public class VoidDiscoveryQueryRepository implements VoidDiscoveryQueryPort {
   private static final int MAX_PAGE_SIZE = 24;
   private static final String POSTS_COLLECTION = "content";
 
@@ -35,21 +38,25 @@ public class VoidDiscoveryQueryRepository {
     this.cursors = cursors;
   }
 
+  @Override
   public VoidDiscoveryPage<Post> newArrivals(
       Optional<StableCursor> cursor, int requestedSize, Instant now) {
     return rootPage("createdOn", Sort.Direction.DESC, cursor, requestedSize, now, false);
   }
 
+  @Override
   public VoidDiscoveryPage<Post> fadingSoon(
       Optional<StableCursor> cursor, int requestedSize, Instant now) {
     return rootPage("expiresOn", Sort.Direction.ASC, cursor, requestedSize, now, false);
   }
 
+  @Override
   public VoidDiscoveryPage<Post> recentlyRevived(
       Optional<StableCursor> cursor, int requestedSize, Instant now) {
     return rootPage("lastExtendedOn", Sort.Direction.DESC, cursor, requestedSize, now, true);
   }
 
+  @Override
   public VoidDiscoveryPage<Post> topic(
       String canonical,
       Optional<StableCursor> cursor,
@@ -82,6 +89,7 @@ public class VoidDiscoveryQueryRepository {
     return postPage(loaded, size, Post::getCreatedOn);
   }
 
+  @Override
   public VoidDiscoveryPage<VoidTopicSummary> topics(
       Optional<StableCursor> cursor, int requestedSize, Instant now) {
     int size = pageSize(requestedSize);

@@ -55,7 +55,7 @@ public class WhatsForLunchSessionService {
   private final RestaurantFavoriteRepository restaurantFavoriteRepository;
   private final RestaurantVoteRepository restaurantVoteRepository;
   private final RestaurantRepository restaurantRepository;
-  private final WhatsForLunchSessionMutationStore mutations;
+  private final WhatsForLunchSessionMutationPort mutations;
   private final WhatsForLunchSessionRepository sessionRepository;
   private final WflProperties wflProperties;
 

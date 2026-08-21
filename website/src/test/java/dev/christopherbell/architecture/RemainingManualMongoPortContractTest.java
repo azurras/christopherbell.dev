@@ -6,7 +6,7 @@ import dev.christopherbell.configuration.mongo.migration.MigrationStateStore;
 import dev.christopherbell.configuration.mongo.runtime.MongoApplicationLeaseStore;
 import dev.christopherbell.configuration.mongo.runtime.MongoScheduledCollectorRunStore;
 import dev.christopherbell.libs.mongo.lease.MongoLeaseStore;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRunStore;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStore;
 import dev.christopherbell.sharedfolder.audit.SharedFolderAuditQueryService;
 import dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceLeaseStore;
 import java.lang.reflect.Method;
@@ -26,8 +26,8 @@ class RemainingManualMongoPortContractTest {
     assertThat(signatures(ScheduledCollectorRunStore.class))
         .isEqualTo(Set.of("save(ScheduledCollectorRun)"));
     assertThat(signatures(SharedFolderMaintenanceLeaseStore.class)).isEqualTo(Set.of(
-        "release(String)", "renew(String,Instant,Instant)",
-        "tryAcquire(String,Instant,Instant)"));
+        "release(LeaseGrant)", "renew(LeaseGrant,Duration)",
+        "tryAcquire(String,Duration)"));
     assertThat(publicDeclaredSignatures(MigrationStateStore.class)).isEqualTo(Set.of(
         "complete(String,String,Instant)", "fail(String,String,Instant,String)",
         "find(String)", "start(ApplicationMigration,String,Instant)"));

@@ -9,7 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Builds bounded indexed MongoDB queries for fresh ADMIN audit browsing. */
+/** Builds bounded indexed queries for fresh ADMIN audit browsing. */
 @Service
 public final class SharedFolderAuditQueryService {
   private static final Pattern TOKEN = Pattern.compile("[A-Za-z0-9._-]+");

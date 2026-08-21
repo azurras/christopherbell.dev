@@ -12,6 +12,7 @@ import java.util.Optional;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.dao.annotation.PersistenceExceptionTranslationPostProcessor;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
@@ -26,17 +27,17 @@ class MongoBrowserSessionActivityStoreTest {
   @Test
   void repositoryCanBeProxiedUsingTheApplicationClassProxyMode() {
     try (var context = new AnnotationConfigApplicationContext()) {
-      context.registerBean(MongoTemplate.class, () -> mock(MongoTemplate.class));
-      context.registerBean(
-          dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory.class,
-          () -> dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
-              .create(context.getBean(MongoTemplate.class)));
+      TestPropertyValues.of("app.persistence.backend=mongodb").applyTo(context);
+      var factory = mock(
+          dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory.class);
       context.registerBean(PersistenceExceptionTranslationPostProcessor.class, () -> {
         var postProcessor = new PersistenceExceptionTranslationPostProcessor();
         postProcessor.setProxyTargetClass(true);
         return postProcessor;
       });
-      context.register(MongoBrowserSessionActivityStore.class);
+      context.registerBean(
+          MongoBrowserSessionActivityStore.class,
+          () -> new MongoBrowserSessionActivityStore(factory));
 
       context.refresh();
 

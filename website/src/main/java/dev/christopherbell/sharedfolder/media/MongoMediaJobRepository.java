@@ -1,5 +1,7 @@
 package dev.christopherbell.sharedfolder.media;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import java.time.Instant;
@@ -14,6 +16,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Repository;
 
+@MongoPersistence
 @Repository
 public class MongoMediaJobRepository extends KindScopedRepositorySupport<MediaJob>
     implements MediaJobRepository {

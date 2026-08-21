@@ -1,5 +1,7 @@
 package dev.christopherbell.post.discovery;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
@@ -19,8 +21,9 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
 /** Bounded active-post queries used to suggest people without popularity signals. */
+@MongoPersistence
 @Repository
-public class VoidPeopleDiscoveryQueryRepository {
+public class VoidPeopleDiscoveryQueryRepository implements VoidPeopleDiscoveryQueryPort {
   private static final int MAX_INTEREST_POSTS = 256;
   private static final int MAX_CANDIDATES = 128;
 
@@ -33,6 +36,7 @@ public class VoidPeopleDiscoveryQueryRepository {
     this.likes = likes;
   }
 
+  @Override
   public Set<String> interestsFor(String accountId, Instant now) {
     var participation = new Criteria().orOperator(
         Criteria.where("accountId").is(accountId),
@@ -50,6 +54,7 @@ public class VoidPeopleDiscoveryQueryRepository {
     return Set.copyOf(interests);
   }
 
+  @Override
   public List<VoidPersonCandidate> recentActiveCandidates(
       Instant now, int requestedLimit) {
     int limit = Math.max(1, Math.min(requestedLimit, MAX_CANDIDATES));

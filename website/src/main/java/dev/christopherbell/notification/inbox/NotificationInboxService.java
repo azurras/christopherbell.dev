@@ -19,7 +19,7 @@ import org.springframework.stereotype.Service;
 public class NotificationInboxService {
   private final NotificationRepository notificationRepository;
   private final PermissionService permissionService;
-  private final NotificationQueryRepository notificationQueryRepository;
+  private final NotificationQueryPort notificationQueryRepository;
   private final StableCursorCodec cursorCodec;
 
   /** Lists the current user's notifications newest first. */

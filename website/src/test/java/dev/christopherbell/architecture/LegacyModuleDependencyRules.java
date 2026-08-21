@@ -39,6 +39,10 @@ final class LegacyModuleDependencyRules {
       "whatsforlunch");
   private static final Set<String> ORCHESTRATION_AREAS =
       Set.of("admin", "configuration", "view");
+  private static final Set<String> PUBLISHED_VALUE_CONTRACTS = Set.of(
+      "dev.christopherbell.account.model.AccountPermission",
+      "dev.christopherbell.account.model.AccountStatus",
+      "dev.christopherbell.account.model.Role");
 
   private final String rootPackage;
   private final Set<String> applicationAreas;
@@ -65,7 +69,10 @@ final class LegacyModuleDependencyRules {
 
   static LegacyModuleDependencyRules production() {
     return new LegacyModuleDependencyRules(
-        APPLICATION_ROOT, APPLICATION_AREAS, ORCHESTRATION_AREAS, Set.of("libs"));
+        APPLICATION_ROOT,
+        APPLICATION_AREAS,
+        ORCHESTRATION_AREAS,
+        Set.of("codegen", "libs", "persistence"));
   }
 
   JavaClasses importProductionClasses() {
@@ -126,8 +133,10 @@ final class LegacyModuleDependencyRules {
     return Optional.of(area);
   }
 
-  private boolean isPublishedApi(String packageName) {
-    if (isSharedPersistenceApi(packageName)) {
+  private boolean isPublishedApi(JavaClass target) {
+    var packageName = target.getPackageName();
+    if (isSharedCrossAreaApi(packageName)
+        || PUBLISHED_VALUE_CONTRACTS.contains(target.getName())) {
       return true;
     }
     var physicalArea = physicalAreaOf(packageName);
@@ -139,8 +148,9 @@ final class LegacyModuleDependencyRules {
     return packageName.equals(apiPackage);
   }
 
-  private boolean isSharedPersistenceApi(String packageName) {
-    return packageName.equals(rootPackage + ".configuration.mongo.domain");
+  private boolean isSharedCrossAreaApi(String packageName) {
+    return packageName.equals(rootPackage + ".configuration.mongo.domain")
+        || packageName.equals(rootPackage + ".configuration.persistence");
   }
 
   private Optional<AccessViolation> violation(Dependency dependency, ViolationKind kind) {
@@ -153,12 +163,12 @@ final class LegacyModuleDependencyRules {
       return Optional.empty();
     }
 
-    if (kind == ViolationKind.INTERNAL_ACCESS && isPublishedApi(target.getPackageName())) {
+    if (kind == ViolationKind.INTERNAL_ACCESS && isPublishedApi(target)) {
       return Optional.empty();
     }
 
     if (kind == ViolationKind.ORCHESTRATION_DIRECTION
-        && (isSharedPersistenceApi(target.getPackageName())
+        && (isSharedCrossAreaApi(target.getPackageName())
             || orchestrationAreas.contains(sourceArea.get())
             || !orchestrationAreas.contains(targetArea.get()))) {
       return Optional.empty();

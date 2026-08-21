@@ -1,5 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant.vote;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
@@ -16,8 +18,9 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.stereotype.Repository;
 
 /** Owns bounded aggregate queries over binary restaurant votes. */
+@MongoPersistence
 @Repository
-public class RestaurantVoteQueryRepository {
+public class RestaurantVoteQueryRepository implements RestaurantVoteQueryPort {
   private static final int MAX_RESULTS = 50;
 
   private final KindScopedMongoOperations<RestaurantVote> votes;
@@ -27,6 +30,7 @@ public class RestaurantVoteQueryRepository {
   }
 
   /** Returns restaurant vote totals in stable public leaderboard order. */
+  @Override
   public List<RestaurantVoteSummary> topLiked(int requestedLimit) {
     int limit = Math.max(1, Math.min(requestedLimit, MAX_RESULTS));
     return votes.aggregate(
@@ -34,6 +38,7 @@ public class RestaurantVoteQueryRepository {
   }
 
   /** Returns aggregate vote totals for the requested candidate restaurants. */
+  @Override
   public List<RestaurantVoteSummary> summariesForRestaurants(Collection<String> restaurantIds) {
     Objects.requireNonNull(restaurantIds, "restaurantIds");
     if (restaurantIds.isEmpty()) {
@@ -42,7 +47,8 @@ public class RestaurantVoteQueryRepository {
     AggregationExpression up = voteCountExpression(RestaurantVoteValue.UP);
     AggregationExpression down = voteCountExpression(RestaurantVoteValue.DOWN);
     var aggregation = Aggregation.newAggregation(
-        Aggregation.match(Criteria.where("restaurantId").in(restaurantIds)),
+        Aggregation.match(Criteria.where("restaurantId").in(restaurantIds)
+            .and("vote").in(RestaurantVoteValue.UP.name(), RestaurantVoteValue.DOWN.name())),
         Aggregation.group("restaurantId")
             .sum(up).as("upVotes")
             .sum(down).as("downVotes")
@@ -56,6 +62,8 @@ public class RestaurantVoteQueryRepository {
     AggregationExpression up = voteCountExpression(RestaurantVoteValue.UP);
     AggregationExpression down = voteCountExpression(RestaurantVoteValue.DOWN);
     return Aggregation.newAggregation(
+        Aggregation.match(Criteria.where("vote")
+            .in(RestaurantVoteValue.UP.name(), RestaurantVoteValue.DOWN.name())),
         Aggregation.group("restaurantId")
             .sum(up).as("upVotes")
             .sum(down).as("downVotes")

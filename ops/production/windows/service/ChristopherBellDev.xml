@@ -5,7 +5,7 @@
   <executable>pwsh.exe</executable>
   <arguments>-NoLogo -NoProfile -ExecutionPolicy Bypass -File "%BASE%\Start-ChristopherBellDev.ps1"</arguments>
   <workingdirectory>C:\ProgramData\christopherbell.dev\current</workingdirectory>
-  <depend>MongoDB</depend>
+  <depend>postgresql-x64-18</depend>
   <startmode>Manual</startmode>
   <stoptimeout>30sec</stoptimeout>
   <onfailure action="restart" delay="10 sec" />

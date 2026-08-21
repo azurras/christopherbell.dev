@@ -1,5 +1,7 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedAggregation;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
@@ -16,8 +18,9 @@ import org.springframework.stereotype.Repository;
 import org.springframework.web.server.ResponseStatusException;
 
 /** Indexed aggregation for bounded duplicate-name discovery. */
+@MongoPersistence
 @Repository
-public class RestaurantDuplicateQueryRepository {
+public class RestaurantDuplicateQueryRepository implements RestaurantDuplicateQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
   private final KindScopedMongoOperations<Restaurant> restaurants;
 
@@ -26,6 +29,7 @@ public class RestaurantDuplicateQueryRepository {
   }
 
   /** Aggregates only one page of duplicate keys and then fetches only those members. */
+  @Override
   public Page find(String cursor, int size) {
     if (size < 1 || size > MAX_PAGE_SIZE) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Duplicate page size must be 1 through 100");

@@ -26,12 +26,13 @@ management:
         include: health
   endpoint:
     health:
-      show-details: never
+      show-details: when-authorized
+      roles: ADMIN
       probes:
         enabled: true
       group:
         readiness:
-          include: readinessState,mongo
+          include: readinessState,database
 logging:
   level:
     root: INFO

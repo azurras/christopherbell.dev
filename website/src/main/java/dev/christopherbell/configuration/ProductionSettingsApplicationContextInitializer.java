@@ -26,12 +26,33 @@ public final class ProductionSettingsApplicationContextInitializer
     }
 
     var violations = new ArrayList<String>();
-    validateMongo(environment, violations);
+    validatePersistence(environment, violations);
     validateJwt(environment, violations);
     validateMail(environment, violations);
     if (!violations.isEmpty()) {
       throw new IllegalStateException(
           "Invalid production configuration:\n- " + String.join("\n- ", violations));
+    }
+  }
+
+  private static void validatePersistence(Environment environment, List<String> violations) {
+    var backend = trimmed(environment, "APP_PERSISTENCE_BACKEND");
+    if (backend.equalsIgnoreCase("mongodb")) {
+      validateMongo(environment, violations);
+      return;
+    }
+    if (backend.equalsIgnoreCase("postgresql")) {
+      validateRequired(environment, "SPRING_DATASOURCE_URL", violations);
+      validateRequired(environment, "SPRING_DATASOURCE_USERNAME", violations);
+      validateRequired(environment, "SPRING_DATASOURCE_PASSWORD", violations);
+      return;
+    }
+    violations.add("APP_PERSISTENCE_BACKEND must be mongodb or postgresql.");
+  }
+
+  private static void validateRequired(Environment environment, String key, List<String> violations) {
+    if (trimmed(environment, key).isEmpty()) {
+      violations.add(key + " is required.");
     }
   }
 

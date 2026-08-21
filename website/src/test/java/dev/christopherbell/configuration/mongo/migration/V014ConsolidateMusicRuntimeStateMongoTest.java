@@ -9,6 +9,7 @@ import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import dev.christopherbell.music.radio.MusicQueueState;
+import dev.christopherbell.music.radio.MongoMusicRuntimeStateRepository;
 import dev.christopherbell.music.radio.MusicRadioState;
 import dev.christopherbell.music.radio.MusicRuntimeStateDocument;
 import dev.christopherbell.music.radio.MusicRuntimeStateMigrationSupport;
@@ -145,9 +146,9 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     insertSources(mongo, 4L, 9L);
     migration().apply(mongo);
     stageCanonicalRuntimeState(mongo);
-    var store = new MusicRuntimeStateStore(
+    var store = new MusicRuntimeStateStore(new MongoMusicRuntimeStateRepository(
         dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
-            .createForDisposableMongo(mongo));
+            .createForDisposableMongo(mongo)));
     var winningSnapshot = store.findQueue().orElseThrow();
     var staleSnapshot = store.findQueue().orElseThrow();
     var winningEntry = entry("ordinary-winner");
@@ -208,9 +209,9 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     assertThat(canonicalTarget(mongo, "queue").containsKey("version")).isFalse();
     assertThat(canonicalTarget(mongo, "radio").containsKey("version")).isFalse();
 
-    var store = new MusicRuntimeStateStore(
+    var store = new MusicRuntimeStateStore(new MongoMusicRuntimeStateRepository(
         dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
-            .createForDisposableMongo(mongo));
+            .createForDisposableMongo(mongo)));
     var saved = store.saveQueue(store.findQueue().orElseThrow());
 
     assertThat(saved.version()).isZero();
@@ -226,9 +227,9 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
     insertSources(mongo, null, null);
     migration().apply(mongo);
     stageCanonicalRuntimeState(mongo);
-    var store = new MusicRuntimeStateStore(
+    var store = new MusicRuntimeStateStore(new MongoMusicRuntimeStateRepository(
         dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
-            .createForDisposableMongo(mongo));
+            .createForDisposableMongo(mongo)));
     var firstSnapshot = store.findQueue().orElseThrow();
     var staleSnapshot = store.findQueue().orElseThrow();
     var winningEntry = entry("winner");
@@ -247,9 +248,9 @@ class V014ConsolidateMusicRuntimeStateMongoTest {
   @Test
   void genuinelyAbsentRuntimeDocumentRetainsNormalInsertSemantics() {
     var mongo = template("normal-insert");
-    var store = new MusicRuntimeStateStore(
+    var store = new MusicRuntimeStateStore(new MongoMusicRuntimeStateRepository(
         dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsTestFactory
-            .createForDisposableMongo(mongo));
+            .createForDisposableMongo(mongo)));
 
     var saved = store.saveQueue(MusicQueueState.empty());
 

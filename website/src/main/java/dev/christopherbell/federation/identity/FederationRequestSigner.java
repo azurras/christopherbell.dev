@@ -1,5 +1,7 @@
 package dev.christopherbell.federation.identity;
 
+import dev.christopherbell.federation.api.FederationIdentity;
+
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.federation.outbound.FederationRequestTarget;
 import dev.christopherbell.federation.outbound.SignedFederationRequest;

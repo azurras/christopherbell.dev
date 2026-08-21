@@ -53,7 +53,10 @@ class PostExpirationServiceTest {
     var extendedOn = Instant.parse("2026-07-29T03:00:00Z");
     var service =
         new PostExpirationService(
-            postRepository, null, Clock.fixed(extendedOn, ZoneOffset.UTC), true);
+            postRepository,
+            (dev.christopherbell.post.expiration.PostExpirationStore) null,
+            Clock.fixed(extendedOn, ZoneOffset.UTC),
+            true);
     var root = Post.builder()
         .id("root")
         .rootId("root")
@@ -110,7 +113,7 @@ class PostExpirationServiceTest {
         eq(org.bson.Document.class), eq("content"))).thenReturn(updatedEnvelope);
     var service = new PostExpirationService(
         postRepository,
-        factory,
+        new dev.christopherbell.post.expiration.MongoPostExpirationStore(factory),
         Clock.fixed(changedOn, ZoneOffset.UTC),
         true);
 
@@ -175,7 +178,7 @@ class PostExpirationServiceTest {
         });
     var service = new PostExpirationService(
         postRepository,
-        factory,
+        new dev.christopherbell.post.expiration.MongoPostExpirationStore(factory),
         Clock.fixed(changedOn, ZoneOffset.UTC),
         true);
 

@@ -1,5 +1,7 @@
 package dev.christopherbell.location.zip;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedRepositorySupport;
 import dev.christopherbell.location.model.ZipCoordinate;
@@ -10,6 +12,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Repository;
 
+@MongoPersistence
 @Repository
 public class MongoZipCoordinateRepository extends KindScopedRepositorySupport<ZipCoordinate>
     implements ZipCoordinateRepository {
@@ -19,7 +22,13 @@ public class MongoZipCoordinateRepository extends KindScopedRepositorySupport<Zi
     values.forEach(value -> saved.add(saveValue(value)));
     return List.copyOf(saved);
   }
-  @Override public void deleteAll(Iterable<ZipCoordinate> values) { deleteAllValues(values, ZipCoordinate::getZipCode); }
+  @Override public void deleteAll(Iterable<ZipCoordinate> values) {
+    var ids = new ArrayList<String>();
+    values.forEach(value -> ids.add(value.getZipCode()));
+    if (!ids.isEmpty()) {
+      mongo.remove(Query.query(Criteria.where("zipCode").in(ids)));
+    }
+  }
   @Override public Optional<ZipCoordinate> findById(String id) { return findValueById(id); }
   @Override public List<ZipCoordinate> findAllBySource(String source) {
     return find(Query.query(Criteria.where("source").is(source)));

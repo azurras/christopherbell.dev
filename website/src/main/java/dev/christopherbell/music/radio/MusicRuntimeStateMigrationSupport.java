@@ -1,6 +1,7 @@
 package dev.christopherbell.music.radio;
 
 import dev.christopherbell.music.api.MusicRuntimeStateMigrationPort;
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
@@ -9,11 +10,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.bson.Document;
-import org.springframework.stereotype.Component;
 
 /** Music-owned strict BSON validation and mapping for runtime-state consolidation. */
-@Component
-public final class MusicRuntimeStateMigrationSupport implements MusicRuntimeStateMigrationPort {
+@MongoBackendComponent
+public class MusicRuntimeStateMigrationSupport implements MusicRuntimeStateMigrationPort {
   private static final String CLASS_FIELD = "_class";
   private static final String QUEUE_STATE_CLASS = MusicQueueState.class.getName();
   private static final String RADIO_STATE_CLASS = MusicRadioState.class.getName();

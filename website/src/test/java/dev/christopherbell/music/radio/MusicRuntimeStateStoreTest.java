@@ -26,7 +26,7 @@ class MusicRuntimeStateStoreTest {
   @BeforeEach
   void setUp() {
     when(factory.forType(MusicRuntimeStateDocument.class)).thenReturn(states);
-    store = new MusicRuntimeStateStore(factory);
+    store = new MusicRuntimeStateStore(new MongoMusicRuntimeStateRepository(factory));
   }
 
   @Test

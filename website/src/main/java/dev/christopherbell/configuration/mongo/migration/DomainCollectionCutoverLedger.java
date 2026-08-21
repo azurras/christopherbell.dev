@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainCollectionManifest;
 import java.util.List;
 import java.util.ArrayList;
@@ -13,8 +15,9 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Component;
 
 /** Startup-only validation of the durable domain-collection cutover ledger. */
+@MongoPersistence
 @Component
-public final class DomainCollectionCutoverLedger {
+public class DomainCollectionCutoverLedger {
   public static final String LEGACY_ID = "domain-collection-cutover";
   private static final String COLLECTION = "application_migrations";
   private static final String KIND = "domain_collection_cutover";

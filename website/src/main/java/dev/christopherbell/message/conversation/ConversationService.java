@@ -26,8 +26,8 @@ public class ConversationService {
   private final MessageRepository messageRepository;
   private final AccountRepository accountRepository;
   private final PermissionService permissionService;
-  private final ConversationQueryRepository conversationQueries;
-  private final ConversationArchiveService conversationArchives;
+  private final ConversationQueryPort conversationQueries;
+  private final ConversationArchivePort conversationArchives;
   private final StableCursorCodec cursorCodec;
 
   /**

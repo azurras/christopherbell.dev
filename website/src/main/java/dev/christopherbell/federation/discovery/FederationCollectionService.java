@@ -26,7 +26,7 @@ public class FederationCollectionService {
   private static final int MAX_PAGE_SIZE = 20;
 
   private final FederationDiscoveryService discovery;
-  private final FederationOutboxQueryRepository outboxQueries;
+  private final FederationOutboxQueryPort outboxQueries;
   private final AccountRepository accounts;
   private final AccountFollowStore follows;
   private final StableCursorCodec cursors;
@@ -35,7 +35,7 @@ public class FederationCollectionService {
 
   public FederationCollectionService(
       FederationDiscoveryService discovery,
-      FederationOutboxQueryRepository outboxQueries,
+      FederationOutboxQueryPort outboxQueries,
       AccountRepository accounts,
       AccountFollowStore follows,
       StableCursorCodec cursors,

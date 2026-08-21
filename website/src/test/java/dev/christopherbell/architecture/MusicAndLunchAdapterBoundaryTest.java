@@ -13,12 +13,18 @@ class MusicAndLunchAdapterBoundaryTest {
   private static final Map<String, String> ADAPTER_PORTS = Map.ofEntries(
       Map.entry("dev.christopherbell.music.catalog.MongoMusicTrackRepository",
           "dev.christopherbell.music.catalog.MusicTrackRepository"),
+      Map.entry("dev.christopherbell.music.catalog.MongoMusicCatalogQueryRepository",
+          "dev.christopherbell.music.catalog.MusicCatalogQueryRepository"),
       Map.entry("dev.christopherbell.music.library.MongoMusicPlaylistRepository",
           "dev.christopherbell.music.library.MusicPlaylistRepository"),
       Map.entry("dev.christopherbell.music.metadata.MongoMusicMetadataEditRepository",
           "dev.christopherbell.music.metadata.MusicMetadataEditRepository"),
       Map.entry("dev.christopherbell.music.radio.MongoMusicRadioHistoryRepository",
           "dev.christopherbell.music.radio.MusicRadioHistoryRepository"),
+      Map.entry("dev.christopherbell.music.radio.MongoMusicRuntimeStateRepository",
+          "dev.christopherbell.music.radio.MusicRuntimeStateRepository"),
+      Map.entry("dev.christopherbell.music.security.MongoMusicAccessAttemptRepository",
+          "dev.christopherbell.music.security.MusicAccessAttemptRepository"),
       Map.entry("dev.christopherbell.whatsforlunch.restaurant.MongoRestaurantRepository",
           "dev.christopherbell.whatsforlunch.restaurant.RestaurantRepository"),
       Map.entry("dev.christopherbell.whatsforlunch.restaurant.vote.MongoRestaurantVoteRepository",
@@ -35,10 +41,6 @@ class MusicAndLunchAdapterBoundaryTest {
           "dev.christopherbell.whatsforlunch.restaurant.RestaurantImportStateRepository"));
 
   private static final List<String> MANUAL_OWNERS = List.of(
-      "dev.christopherbell.music.catalog.MusicCatalog",
-      "dev.christopherbell.music.radio.MusicRuntimeStateStore",
-      "dev.christopherbell.music.security.MusicAccessAuditQueryService",
-      "dev.christopherbell.music.security.MusicAccessAuditRecorder",
       "dev.christopherbell.whatsforlunch.restaurant.RestaurantDuplicateQueryRepository",
       "dev.christopherbell.whatsforlunch.restaurant.RestaurantInventoryQueryRepository",
       "dev.christopherbell.whatsforlunch.restaurant.importing.RestaurantImportPreviewStore",

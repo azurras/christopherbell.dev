@@ -1,5 +1,7 @@
 package dev.christopherbell.configuration.security.browser;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
+
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
 import java.time.Instant;
@@ -14,6 +16,7 @@ import org.springframework.stereotype.Repository;
  *
  * <p>Intentionally non-final so Spring can apply class-based persistence exception translation.
  */
+@MongoPersistence
 @Repository
 public class MongoBrowserSessionActivityStore implements BrowserSessionActivityStore {
   private final KindScopedMongoOperations<BrowserSession> mongo;

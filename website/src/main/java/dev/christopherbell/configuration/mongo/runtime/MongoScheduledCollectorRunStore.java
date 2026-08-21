@@ -1,22 +1,26 @@
 package dev.christopherbell.configuration.mongo.runtime;
 
+import dev.christopherbell.configuration.persistence.MongoPersistence;
 import dev.christopherbell.configuration.mongo.domain.DomainMongoOperationsFactory;
 import dev.christopherbell.configuration.mongo.domain.KindScopedMongoOperations;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun;
-import dev.christopherbell.libs.mongo.lease.ScheduledCollectorRunStore;
+import dev.christopherbell.libs.lease.ScheduledCollectorRun;
+import dev.christopherbell.libs.lease.ScheduledCollectorRunStore;
 import org.springframework.stereotype.Repository;
 
 /** Kind-scoped durable collector history adapter. */
+@MongoPersistence
 @Repository
 public class MongoScheduledCollectorRunStore implements ScheduledCollectorRunStore {
-  private final KindScopedMongoOperations<ScheduledCollectorRun> mongo;
+  private final KindScopedMongoOperations<dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun>
+      mongo;
 
   public MongoScheduledCollectorRunStore(DomainMongoOperationsFactory factory) {
-    this.mongo = factory.forType(ScheduledCollectorRun.class);
+    this.mongo = factory.forType(dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun.class);
   }
 
   @Override
   public ScheduledCollectorRun save(ScheduledCollectorRun run) {
-    return mongo.save(run);
+    return mongo.save(dev.christopherbell.libs.mongo.lease.ScheduledCollectorRun.from(run))
+        .toDomain();
   }
 }

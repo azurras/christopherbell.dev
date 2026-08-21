@@ -1,12 +1,13 @@
 package dev.christopherbell.configuration.mongo.migration;
 
+import dev.christopherbell.configuration.persistence.MongoBackendComponent;
+
 import org.springframework.data.domain.Sort.Direction;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
-import org.springframework.stereotype.Component;
 
 /** Creates the bounded account lookup used by local ActivityPub actor discovery. */
-@Component
+@MongoBackendComponent
 public final class V006EnsureFederationActorIndex implements ApplicationMigration {
   private static final String CHECKSUM =
       "899abb93df60f83b06d2080a6ab890e1521a94b1617dde0b0502d5eb9c93c555";

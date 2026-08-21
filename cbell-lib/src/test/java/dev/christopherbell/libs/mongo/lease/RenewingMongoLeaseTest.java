@@ -8,6 +8,9 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import dev.christopherbell.libs.lease.LeaseOwnershipLostException;
+import dev.christopherbell.libs.lease.LeaseService;
+import dev.christopherbell.libs.lease.RenewingLease;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -17,11 +20,11 @@ class RenewingMongoLeaseTest {
   @Test
   void renewsAtHalfDurationAndFailsClosedWhenOwnershipIsLost() {
     var clock = Mockito.mock(Clock.class);
-    var leases = Mockito.mock(MongoLeaseService.class);
+    var leases = Mockito.mock(LeaseService.class);
     when(clock.instant()).thenReturn(NOW.plusSeconds(59), NOW.plusSeconds(60));
     when(leases.renew("collector:test", "owner-1", NOW.plusSeconds(60), NOW.plusSeconds(180)))
         .thenReturn(false);
-    var lease = new RenewingMongoLease(
+    var lease = new RenewingLease(
         leases, clock, "collector:test", "owner-1", Duration.ofMinutes(2), NOW);
 
     lease.verifyHeld();
