@@ -28,10 +28,11 @@ The checked-in examples are:
 - `ops/production/windows/config/app.env.example`
 - `ops/production/windows/config/postgresql.env.example`
 
-The installer copies missing examples to the protected production `config`
-directory without replacing existing files. Replace every placeholder in
-`postgresql.env` with an independently generated high-entropy value. Protect
-the file with the same SYSTEM-and-Administrators-only ACL as `app.env`.
+The guarded preparation command merges only missing deployment defaults and creates
+`postgresql.env` with seven independent cryptographically random credentials directly
+inside the protected production `config` directory. It preserves a complete valid file
+and rejects partial, malformed, duplicate, or mixed-placeholder state. Credential values
+are never returned or written to command arguments, logs, or reports.
 
 The PostgreSQL administrator and all login roles have separate secrets:
 
@@ -61,6 +62,7 @@ SPRING_DATASOURCE_PASSWORD=<protected application secret>
 Review the dry-run effects first:
 
 ```powershell
+.\prod.cmd postgres-prepare -WhatIf
 .\prod.cmd postgres-install -WhatIf
 .\prod.cmd postgres-bootstrap -ConfirmPostgreSqlBootstrap -WhatIf
 .\prod.cmd postgres-pgadmin -WhatIf
@@ -69,6 +71,7 @@ Review the dry-run effects first:
 With an approved PostgreSQL-preparation window, run:
 
 ```powershell
+.\prod.cmd postgres-prepare -ConfirmPostgreSqlPreparation
 .\prod.cmd postgres-install
 .\prod.cmd postgres-bootstrap -ConfirmPostgreSqlBootstrap
 .\prod.cmd postgres-pgadmin
@@ -76,7 +79,12 @@ With an approved PostgreSQL-preparation window, run:
 ```
 
 Installation accepts only the signed PostgreSQL 18.4 Windows runtime and the
-fixed `postgresql-x64-18` service identity. Bootstrap is idempotent: it creates
+fixed `postgresql-x64-18` service identity. The installer receives its administrator
+credential through a protected temporary EDB option file whose path, but never content,
+appears in the process arguments; the file is removed on success or failure. If an idle
+legacy `postgresql-x64-16` service owns port 5432, installation stops it without deleting
+its service or data and restores it if PostgreSQL 18 validation fails. Bootstrap is
+idempotent: it creates
 or rotates the login roles, creates the `christopherbell` and `test` databases,
 revokes default public access, and invokes the migration-only Java entry point
 from the pinned active release. That entry point validates database, role,

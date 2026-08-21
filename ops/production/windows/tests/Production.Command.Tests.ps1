@@ -16,7 +16,7 @@ Describe 'native Windows production command surface' {
         ($output -join "`n") | Should -Match 'mongo-consolidation-preview'
         ($output -join "`n") | Should -Match 'mongo-consolidate'
         ($output -join "`n") | Should -Match 'mongo-consolidation-rollback'
-        foreach ($command in 'postgres-install','postgres-bootstrap','postgres-status',
+        foreach ($command in 'postgres-prepare','postgres-install','postgres-bootstrap','postgres-status',
             'postgres-backup','postgres-restore-check','postgres-pgadmin',
             'postgres-shadow','postgres-reconcile','postgres-cutover') {
             ($output -join "`n") | Should -Match ([regex]::Escape($command))
@@ -28,12 +28,25 @@ Describe 'native Windows production command surface' {
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
         $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
 
-        foreach ($functionName in 'Install-ProductionPostgreSql','Initialize-ProductionPostgreSql',
+        foreach ($functionName in 'Initialize-ProductionPostgreSqlPreparation',
+            'Install-ProductionPostgreSql','Initialize-ProductionPostgreSql',
             'Get-ProductionPostgreSqlStatus','New-ProductionPostgreSqlBackup',
             'Test-ProductionPostgreSqlRestore','Install-ProductionPgAdmin',
             'Invoke-ProductionPostgreSqlShadow','Invoke-ProductionPostgreSqlReconcile') {
             Get-Command $functionName -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
+    }
+
+    It 'requires explicit confirmation before protected PostgreSQL preparation' {
+        $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $null = . (Join-Path $root 'ops\production\windows\prod.ps1') help
+        Mock Initialize-ProductionPostgreSqlPreparation { }
+
+        { Invoke-ProductionCommand -Command 'postgres-prepare' } |
+            Should -Throw '*PostgreSQL preparation requires explicit confirmation*'
+        Invoke-ProductionCommand -Command 'postgres-prepare' -ConfirmPostgreSqlPreparation
+
+        Should -Invoke Initialize-ProductionPostgreSqlPreparation -Times 1 -Exactly
     }
 
     It 'requires explicit confirmation before PostgreSQL bootstrap mutation' {

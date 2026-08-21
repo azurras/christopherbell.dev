@@ -21,7 +21,8 @@ Describe 'native PostgreSQL production operations' {
         $script:release = Join-Path $programData 'releases\1111111111111111111111111111111111111111'
         $script:jar = Join-Path $release 'app.jar'
         New-Item -ItemType Directory -Force $bin,$backupRoot,$programData,
-            (Join-Path $programData 'locks'),$pgAdminRuntime,$pgAdminWeb,$dataPath,$release | Out-Null
+            (Join-Path $programData 'locks'),(Join-Path $programData 'config'),
+            $pgAdminRuntime,$pgAdminWeb,$dataPath,$release | Out-Null
         foreach ($name in 'psql.exe','pg_dump.exe','pg_restore.exe','postgres.exe') {
             New-Item -ItemType File -Force (Join-Path $bin $name) | Out-Null
         }
@@ -103,10 +104,295 @@ Describe 'native PostgreSQL production operations' {
 
     It 'exports the guarded PostgreSQL operation boundary' {
         Test-Path -LiteralPath $modulePath -PathType Leaf | Should -BeTrue
-        foreach ($name in 'Install-ProductionPostgreSql','Initialize-ProductionPostgreSql',
+        foreach ($name in 'Initialize-ProductionPostgreSqlPreparation',
+            'Install-ProductionPostgreSql','Initialize-ProductionPostgreSql',
             'Get-ProductionPostgreSqlStatus','New-ProductionPostgreSqlBackup',
             'Test-ProductionPostgreSqlRestore','Install-ProductionPgAdmin') {
             Get-Command $name -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It 'creates seven independent protected credentials without returning their values' {
+        $path = Join-Path $programData 'config\postgresql.env'
+        New-Item -ItemType Directory -Force (Split-Path -Parent $path) | Out-Null
+        $protection = [Collections.Generic.List[object]]::new()
+        $protectDirectory = {
+            param($directory)
+            $protection.Add([pscustomobject]@{
+                Stage = 'directory'; Path = $directory
+                SecretExists = Test-Path -LiteralPath $path -PathType Leaf
+            })
+        }
+        $protectFile = {
+            param($file)
+            $protection.Add([pscustomobject]@{
+                Stage = 'file'; Path = $file
+                Length = (Get-Item -LiteralPath $file).Length
+            })
+        }
+
+        InModuleScope Production.PostgreSql -Parameters @{
+            SecretPath=$path; ProtectDirectory=$protectDirectory; ProtectFile=$protectFile
+        } {
+            $result = New-ProductionPostgreSqlSecretFile -Path $SecretPath `
+                -ProtectDirectoryAction $ProtectDirectory -ProtectPathAction $ProtectFile `
+                -AssertPathAction { param($file) }
+
+            $result.Created | Should -BeTrue
+            $result.SecretCount | Should -Be 7
+            ($result | ConvertTo-Json -Compress) | Should -Not -Match 'PASSWORD|[A-Za-z0-9_-]{32}'
+        }
+
+        $protection | Should -HaveCount 3
+        $protection[0].Stage | Should -Be 'directory'
+        $protection[0].SecretExists | Should -BeFalse
+        $protection[1].Stage | Should -Be 'file'
+        $protection[1].Length | Should -Be 0
+        $protection[2].Stage | Should -Be 'file'
+        $values = Get-Content -LiteralPath $path | ForEach-Object { ($_ -split '=',2)[1] }
+        $values | Should -HaveCount 7
+        @($values | Select-Object -Unique) | Should -HaveCount 7
+        foreach ($value in $values) { $value | Should -Match '^[A-Za-z0-9_-]{43}$' }
+    }
+
+    It 'holds the deployment lock across configuration protection and credential preparation' {
+        $events = [Collections.Generic.List[string]]::new()
+        $configuration = {
+            param($root)
+            { Enter-DeploymentLock -LockPath (Join-Path $root 'locks\deploy.lock') } |
+                Should -Throw '*already running*'
+            $events.Add('configuration')
+            return $config
+        }
+        $protect = {
+            param($root)
+            { Enter-DeploymentLock -LockPath (Join-Path $root 'locks\deploy.lock') } |
+                Should -Throw '*already running*'
+            $events.Add('protect')
+        }
+        $secrets = {
+            param($path)
+            { Enter-DeploymentLock -LockPath (Join-Path $programData 'locks\deploy.lock') } |
+                Should -Throw '*already running*'
+            $events.Add('secrets')
+            [pscustomobject]@{ Created=$true; SecretCount=7 }
+        }
+
+        InModuleScope Production.PostgreSql -Parameters @{
+            Root=$programData; Configuration=$configuration; Protect=$protect; Secrets=$secrets
+        } {
+            $result = Invoke-ProductionPostgreSqlPreparationCore -Root $Root `
+                -ConfigurationAction $Configuration -ProtectSecretsAction $Protect `
+                -SecretFileAction $Secrets
+            $result.Prepared | Should -BeTrue
+            $result.Configuration | Should -Be 'Validated'
+            $result.Credentials | Should -Be 'Created'
+            $result.CredentialCount | Should -Be 7
+            ($result | ConvertTo-Json -Compress) | Should -Not -Match '(?i)password|secret'
+        }
+
+        $events | Should -Be @('protect','configuration','protect','secrets')
+    }
+
+    It 'preserves a complete credential file and rejects a mixed placeholder file' {
+        $path = Join-Path $programData 'config\postgresql.env'
+        New-Item -ItemType Directory -Force (Split-Path -Parent $path) | Out-Null
+        $complete = @(
+            'POSTGRES_ADMIN_PASSWORD=admin-existing-secret-value',
+            'CB_MIGRATOR_PASSWORD=migrator-existing-secret-value',
+            'CB_APP_PASSWORD=app-existing-secret-value',
+            'CB_BRIDGE_PASSWORD=bridge-existing-secret-value',
+            'CB_VIEWER_PASSWORD=viewer-existing-secret-value',
+            'CB_BACKUP_PASSWORD=backup-existing-secret-value',
+            'CB_TEST_PASSWORD=test-existing-secret-value') -join "`n"
+        [IO.File]::WriteAllText($path, $complete)
+        $before = [IO.File]::ReadAllBytes($path)
+
+        InModuleScope Production.PostgreSql -Parameters @{ SecretPath=$path } {
+            $result = New-ProductionPostgreSqlSecretFile -Path $SecretPath `
+                -ProtectDirectoryAction { param($directory) } `
+                -ProtectPathAction { param($file) } -AssertPathAction { param($file) }
+            $result.Created | Should -BeFalse
+        }
+        [Convert]::ToHexString([IO.File]::ReadAllBytes($path)) |
+            Should -Be ([Convert]::ToHexString($before))
+
+        $mixed = $complete.Replace('app-existing-secret-value',
+            'replace-with-protected-app-role-secret')
+        [IO.File]::WriteAllText($path, $mixed)
+        InModuleScope Production.PostgreSql -Parameters @{ SecretPath=$path } {
+            { New-ProductionPostgreSqlSecretFile -Path $SecretPath `
+                -ProtectDirectoryAction { param($directory) } `
+                -ProtectPathAction { param($file) } -AssertPathAction { param($file) } } |
+                Should -Throw '*partially configured*'
+        }
+        [IO.File]::ReadAllText($path) | Should -Be $mixed
+    }
+
+    It 'installs with a protected option file and removes it without exposing the administrator secret' {
+        Remove-Item -LiteralPath (Join-Path $bin 'postgres.exe') -Force
+        $administratorSecret = 'administrator-secret-never-in-arguments'
+        $calls = [Collections.Generic.List[object]]::new()
+        $protected = [Collections.Generic.List[object]]::new()
+        $optionPath = $null
+        $process = {
+            param($FilePath,$Arguments,$Environment)
+            $calls.Add([pscustomobject]@{ FilePath=$FilePath; Arguments=@($Arguments) })
+            if ($FilePath -eq 'winget.exe') {
+                $override = $Arguments[([array]::IndexOf($Arguments,'--override') + 1)]
+                $optionMatch = [regex]::Match($override, '--optionfile\s+"([^"]+)"')
+                $optionMatch.Success | Should -BeTrue
+                $script:optionPath = $optionMatch.Groups[1].Value
+                (Get-Content -LiteralPath $script:optionPath -Raw) |
+                    Should -Match ([regex]::Escape("superpassword=$administratorSecret"))
+                New-Item -ItemType File -Force (Join-Path $bin 'postgres.exe') | Out-Null
+                return ''
+            }
+            return 'postgres (PostgreSQL) 18.4'
+        }
+        $signature = {
+            param($Path)
+            [pscustomobject]@{
+                Status='Valid'; SignerCertificate=[pscustomobject]@{
+                    Subject='CN=EnterpriseDB Corporation'
+                }
+            }
+        }
+        $protect = {
+            param($Path)
+            $protected.Add([pscustomobject]@{ Path=$Path; Length=(Get-Item $Path).Length })
+        }
+
+        $result = Install-ProductionPostgreSql -Config $config `
+            -AdministratorPassword $administratorSecret -ProcessAction $process `
+            -SignatureAction $signature -ProtectOptionFileAction $protect `
+            -AssertOptionFileAction { param($Path) } `
+            -PrepareLegacyAction { [pscustomobject]@{ WasRunning=$false } } `
+            -CommitLegacyAction { param($state) } -RollbackLegacyAction { param($state) }
+
+        $result.Installed | Should -BeTrue
+        $protected | Should -HaveCount 1
+        $protected[0].Length | Should -Be 0
+        Test-Path -LiteralPath $script:optionPath | Should -BeFalse
+        ($calls | ForEach-Object { $_.Arguments -join ' ' }) -join "`n" |
+            Should -Not -Match ([regex]::Escape($administratorSecret))
+        ($calls[0].Arguments -join ' ') | Should -Match '--mode unattended'
+        ($calls[0].Arguments -join ' ') | Should -Match '--optionfile'
+        ($result | ConvertTo-Json -Compress) | Should -Not -Match 'administrator-secret'
+    }
+
+    It 'restores the preserved PostgreSQL 16 service and removes the option file when installation fails' {
+        Remove-Item -LiteralPath (Join-Path $bin 'postgres.exe') -Force
+        $events = [Collections.Generic.List[string]]::new()
+        $optionPath = $null
+        $process = {
+            param($FilePath,$Arguments,$Environment)
+            $override = $Arguments[([array]::IndexOf($Arguments,'--override') + 1)]
+            $optionMatch = [regex]::Match($override, '--optionfile\s+"([^"]+)"')
+            $optionMatch.Success | Should -BeTrue
+            $script:optionPath = $optionMatch.Groups[1].Value
+            $events.Add('installer')
+            throw 'synthetic installer failure'
+        }
+
+        { Install-ProductionPostgreSql -Config $config `
+            -AdministratorPassword 'administrator-secret-value' -ProcessAction $process `
+            -ProtectOptionFileAction { param($Path) } `
+            -AssertOptionFileAction { param($Path) } `
+            -PrepareLegacyAction { $events.Add('legacy-stop'); 'legacy-state' } `
+            -CommitLegacyAction { param($state) $events.Add('legacy-commit') } `
+            -RollbackLegacyAction { param($state) $events.Add("legacy-restore:$state") } } |
+            Should -Throw '*synthetic installer failure*'
+
+        $events | Should -Be @('legacy-stop','installer','legacy-restore:legacy-state')
+        Test-Path -LiteralPath $script:optionPath | Should -BeFalse
+    }
+
+    It 'removes the empty installer option file when ACL protection fails before returning its path' {
+        Remove-Item -LiteralPath (Join-Path $bin 'postgres.exe') -Force
+        $optionPath = Join-Path $programData 'config\.postgresql-18-install.options'
+        $events = [Collections.Generic.List[string]]::new()
+
+        { Install-ProductionPostgreSql -Config $config `
+            -AdministratorPassword 'administrator-secret-value' `
+            -ProcessAction { param($FilePath,$Arguments,$Environment) throw 'process must not run' } `
+            -ProtectOptionFileAction { param($Path) throw 'synthetic ACL failure' } `
+            -AssertOptionFileAction { param($Path) } `
+            -PrepareLegacyAction { $events.Add('legacy-stop'); 'legacy-state' } `
+            -CommitLegacyAction { param($state) $events.Add('legacy-commit') } `
+            -RollbackLegacyAction { param($state) $events.Add("legacy-restore:$state") } } |
+            Should -Throw '*synthetic ACL failure*'
+
+        $events | Should -Be @('legacy-stop','legacy-restore:legacy-state')
+        Test-Path -LiteralPath $optionPath | Should -BeFalse
+    }
+
+    It 'rejects an option-file-unsafe administrator password before filesystem or process effects' {
+        Remove-Item -LiteralPath (Join-Path $bin 'postgres.exe') -Force
+        $optionPath = Join-Path $programData 'config\.postgresql-18-install.options'
+        $events = [Collections.Generic.List[string]]::new()
+
+        { Install-ProductionPostgreSql -Config $config `
+            -AdministratorPassword "administrator-secret`noptionfile-injection=true" `
+            -ProcessAction { param($FilePath,$Arguments,$Environment) $events.Add('process') } `
+            -ProtectOptionFileAction { param($Path) $events.Add('protect') } `
+            -AssertOptionFileAction { param($Path) $events.Add('assert') } `
+            -PrepareLegacyAction { $events.Add('legacy-stop'); 'legacy-state' } `
+            -CommitLegacyAction { param($state) $events.Add('legacy-commit') } `
+            -RollbackLegacyAction { param($state) $events.Add("legacy-restore:$state") } } |
+            Should -Throw '*administrator password*option-file-safe*'
+
+        $events | Should -Be @('legacy-stop','legacy-restore:legacy-state')
+        Test-Path -LiteralPath $optionPath | Should -BeFalse
+    }
+
+    It 'completes the legacy service transition when retry finds PostgreSQL 18 already installed' {
+        $events = [Collections.Generic.List[string]]::new()
+        $signature = {
+            param($Path)
+            [pscustomobject]@{
+                Status='Valid'; SignerCertificate=[pscustomobject]@{
+                    Subject='CN=EnterpriseDB Corporation'
+                }
+            }
+        }
+        $process = {
+            param($FilePath,$Arguments,$Environment)
+            $events.Add("process:$([IO.Path]::GetFileName($FilePath)):$($Arguments -join ',')")
+            return 'postgres (PostgreSQL) 18.4'
+        }
+
+        $result = Install-ProductionPostgreSql -Config $config -ProcessAction $process `
+            -SignatureAction $signature `
+            -PrepareLegacyAction { $events.Add('legacy-stop'); 'legacy-state' } `
+            -CommitLegacyAction { param($state) $events.Add("legacy-commit:$state") } `
+            -RollbackLegacyAction { param($state) $events.Add("legacy-restore:$state") }
+
+        $result.Installed | Should -BeTrue
+        $result.Version | Should -Be '18.4'
+        $events | Should -Be @('legacy-stop','process:postgres.exe:--version',
+            'legacy-commit:legacy-state')
+    }
+
+    It 'restores the legacy startup mode when stopping PostgreSQL 16 fails inside preparation' {
+        InModuleScope Production.PostgreSql {
+            Mock Get-Service { [pscustomobject]@{ Status='Running' } }
+            Mock Get-CimInstance { [pscustomobject]@{ StartMode='Auto' } }
+            Mock Get-NetTCPConnection { @() }
+            Mock Set-Service { }
+            Mock Stop-Service { throw 'synthetic legacy stop failure' }
+            Mock Start-Service { }
+
+            { Enter-ProductionPostgreSqlLegacyReplacement } |
+                Should -Throw '*synthetic legacy stop failure*'
+
+            Should -Invoke Set-Service -Times 1 -Exactly -ParameterFilter {
+                $Name -eq 'postgresql-x64-16' -and $StartupType -eq 'Disabled'
+            }
+            Should -Invoke Set-Service -Times 1 -Exactly -ParameterFilter {
+                $Name -eq 'postgresql-x64-16' -and $StartupType -eq 'Automatic'
+            }
+            Should -Invoke Start-Service -Times 0
         }
     }
 
@@ -301,7 +587,10 @@ Describe 'native PostgreSQL production operations' {
         }
 
         $result = Install-ProductionPostgreSql -Config $config -ProcessAction $action `
-            -SignatureAction $signature
+            -SignatureAction $signature `
+            -PrepareLegacyAction { 'legacy-state' } `
+            -CommitLegacyAction { param($state) } `
+            -RollbackLegacyAction { param($state) }
 
         $result.Installed | Should -BeTrue
         $result.Version | Should -Be '18.4'

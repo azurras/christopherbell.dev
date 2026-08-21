@@ -2,7 +2,7 @@
 param(
     [Parameter(Position = 0)]
     [ValidateSet('help','install','deploy','status','logs','restart','releases','rollback','backup',
-        'postgres-install','postgres-bootstrap','postgres-status','postgres-backup',
+        'postgres-prepare','postgres-install','postgres-bootstrap','postgres-status','postgres-backup',
         'postgres-restore-check','postgres-pgadmin',
         'postgres-shadow','postgres-reconcile','postgres-cutover',
         'mongo-inventory','mongo-consolidation-preview','mongo-consolidate',
@@ -13,6 +13,7 @@ param(
     [switch]$WhatIf,
     [switch]$ConfirmDomainCollectionCutover,
     [switch]$ConfirmDomainCollectionRollback,
+    [switch]$ConfirmPostgreSqlPreparation,
     [switch]$ConfirmPostgreSqlBootstrap,
     [switch]$ConfirmPostgreSqlCutover,
     [string]$CloudflareTokenPath
@@ -34,6 +35,7 @@ function Invoke-ProductionCommand {
         [switch]$WhatIf,
         [switch]$ConfirmDomainCollectionCutover,
         [switch]$ConfirmDomainCollectionRollback,
+        [switch]$ConfirmPostgreSqlPreparation,
         [switch]$ConfirmPostgreSqlBootstrap,
         [switch]$ConfirmPostgreSqlCutover,
         [string]$CloudflareTokenPath
@@ -49,6 +51,12 @@ function Invoke-ProductionCommand {
         releases = { Get-ProductionReleases }
         rollback = { Invoke-ProductionRollback -WhatIf:$WhatIf }
         backup = { New-ProductionBackup }
+        'postgres-prepare' = {
+            if (-not $WhatIf -and -not $ConfirmPostgreSqlPreparation) {
+                throw 'PostgreSQL preparation requires explicit confirmation.'
+            }
+            Initialize-ProductionPostgreSqlPreparation -WhatIf:$WhatIf
+        }
         'postgres-install' = {
             Install-ProductionPostgreSql -Config (Read-ProductionConfig) -WhatIf:$WhatIf
         }
@@ -111,6 +119,7 @@ function Invoke-ProductionCommand {
 Invoke-ProductionCommand -Command $Command -WhatIf:$WhatIf `
     -ConfirmDomainCollectionCutover:$ConfirmDomainCollectionCutover `
     -ConfirmDomainCollectionRollback:$ConfirmDomainCollectionRollback `
+    -ConfirmPostgreSqlPreparation:$ConfirmPostgreSqlPreparation `
     -ConfirmPostgreSqlBootstrap:$ConfirmPostgreSqlBootstrap `
     -ConfirmPostgreSqlCutover:$ConfirmPostgreSqlCutover `
     -CloudflareTokenPath $CloudflareTokenPath

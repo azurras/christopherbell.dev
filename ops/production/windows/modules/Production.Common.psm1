@@ -586,7 +586,7 @@ function Show-ProductionHelp {
 Usage: prod.cmd <command> [-WhatIf]
 
 Commands: install, deploy, status, logs, restart, releases, rollback, backup,
-          postgres-install, postgres-bootstrap, postgres-status, postgres-backup,
+          postgres-prepare, postgres-install, postgres-bootstrap, postgres-status, postgres-backup,
           postgres-restore-check, postgres-pgadmin, postgres-shadow, postgres-reconcile,
           postgres-cutover,
           mongo-inventory, mongo-consolidation-preview, mongo-consolidate,
@@ -597,8 +597,9 @@ Commands: install, deploy, status, logs, restart, releases, rollback, backup,
 mongo-consolidation-preview is read-only. mongo-consolidate requires
 -ConfirmDomainCollectionCutover. mongo-consolidation-rollback requires
 -ConfirmDomainCollectionRollback. Automatic deployment never supplies either switch.
-postgres-bootstrap requires -ConfirmPostgreSqlBootstrap. PostgreSQL install,
-bootstrap, backup, restore-check, and pgAdmin commands support -WhatIf.
+postgres-prepare requires -ConfirmPostgreSqlPreparation. postgres-bootstrap requires
+-ConfirmPostgreSqlBootstrap. PostgreSQL preparation, install, bootstrap, backup,
+restore-check, and pgAdmin commands support -WhatIf.
 postgres-shadow stages and reconciles all 52 kinds. postgres-reconcile rechecks the
 same durable run. Neither command authorizes finalization or cutover.
 postgres-cutover requires -ConfirmPostgreSqlCutover and performs the one-way
