@@ -35,7 +35,8 @@ public class PostgresSharedFolderMaintenanceLeaseStore
         .set(MAINTENANCE_LEASE.ACQUIRED_AT, now).set(MAINTENANCE_LEASE.EXPIRES_AT, expiry)
         .onConflict(MAINTENANCE_LEASE.LEASE_NAME).doUpdate()
         .set(MAINTENANCE_LEASE.OWNER_TOKEN, ownerToken)
-        .set(MAINTENANCE_LEASE.FENCE_TOKEN, MAINTENANCE_LEASE.FENCE_TOKEN.plus(1L))
+        .set(MAINTENANCE_LEASE.FENCE_TOKEN,
+            DSL.coalesce(MAINTENANCE_LEASE.FENCE_TOKEN, 0L).plus(1L))
         .set(MAINTENANCE_LEASE.ACQUIRED_AT, now).set(MAINTENANCE_LEASE.EXPIRES_AT, expiry)
         .where(MAINTENANCE_LEASE.OWNER_TOKEN.eq(ownerToken)
             .or(MAINTENANCE_LEASE.EXPIRES_AT.le(now))).returning().fetchOne();

@@ -147,7 +147,7 @@ kinds:
     keyMapping: {sourcePath: id, targetColumn: browser_session.browser_session_id, preservation: exact}
     fieldMappings:
       accountId: {targets: [browser_session.account_id], conversion: string, missing: reject, nullValue: reject}
-      role: {targets: [browser_session.role], conversion: enum-name, missing: reject, nullValue: reject}
+      role: {targets: [browser_session.role], conversion: enum-name, missing: allow, nullValue: allow}
       tokenHash: {targets: [browser_session.token_hash], conversion: string, missing: reject, nullValue: reject}
       previousTokenHash: {targets: [browser_session.previous_token_hash], conversion: string, missing: allow, nullValue: allow}
       previousTokenExpiresOn: {targets: [browser_session.previous_token_expires_on], conversion: instant-utc, missing: allow, nullValue: allow}
@@ -422,7 +422,7 @@ kinds:
     targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
-    identifierType: string
+    identifierType: object-id
     targetSchema: social
     targetTables: [post_report, post_report_moderation_audit, post_report_moderation_audit_value]
     loadOrder: 320
@@ -779,7 +779,7 @@ kinds:
     targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
-    identifierType: string
+    identifierType: string-or-object-id
     targetSchema: lunch
     targetTables: [restaurant]
     loadOrder: 600
@@ -787,7 +787,7 @@ kinds:
     keyMapping: {sourcePath: id, targetColumn: restaurant.restaurant_id, preservation: exact}
     fieldMappings:
       type: {targets: [], conversion: constant-kind, missing: allow, nullValue: allow}
-      address: {targets: [restaurant.city, restaurant.county, restaurant.country, restaurant.latitude, restaurant.longitude, restaurant.postal_code, restaurant.region, restaurant.street_1, restaurant.street_2], conversion: record-flattened, missing: allow, nullValue: allow, requiredFields: ["country", "latitude", "longitude", "state", "street1"], optionalFields: ["city", "county", "postalCode", "street2"], invariants: ["coordinate-pair"]}
+      address: {targets: [restaurant.city, restaurant.county, restaurant.country, restaurant.latitude, restaurant.longitude, restaurant.postal_code, restaurant.region, restaurant.street_1, restaurant.street_2], conversion: record-flattened, missing: allow, nullValue: allow, requiredFields: ["country", "state"], optionalFields: ["city", "county", "latitude", "longitude", "postalCode", "street1", "street2"], invariants: ["coordinate-pair"]}
       createdBy: {targets: [restaurant.created_by], conversion: string, missing: allow, nullValue: allow}
       createdOn: {targets: [restaurant.created_on], conversion: instant-utc, missing: allow, nullValue: allow}
       lastModifiedBy: {targets: [restaurant.last_modified_by], conversion: string, missing: allow, nullValue: allow}
@@ -1025,7 +1025,7 @@ kinds:
     targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
-    identifierType: string
+    identifierType: object-id
     targetSchema: shared_folder
     targetTables: [audit_event]
     loadOrder: 700
@@ -1064,8 +1064,8 @@ kinds:
     dependsOnKinds: []
     keyMapping: {sourcePath: id, targetColumn: maintenance_lease.lease_name, preservation: exact}
     fieldMappings:
-      ownerToken: {targets: [maintenance_lease.owner_token], conversion: string, missing: reject, nullValue: reject}
-      fenceToken: {targets: [maintenance_lease.fence_token], conversion: long, missing: default, nullValue: default}
+      ownerToken: {targets: [maintenance_lease.owner_token], conversion: string, missing: allow, nullValue: allow}
+      fenceToken: {targets: [maintenance_lease.fence_token], conversion: long, missing: allow, nullValue: allow}
       acquiredAt: {targets: [maintenance_lease.acquired_at], conversion: instant-utc, missing: reject, nullValue: reject}
       expiresAt: {targets: [maintenance_lease.expires_at], conversion: instant-utc, missing: reject, nullValue: reject}
     deleteBehavior: preserve
@@ -1541,8 +1541,8 @@ kinds:
     dependsOnKinds: []
     keyMapping: {sourcePath: id, targetColumn: application_lease.lease_name, preservation: exact}
     fieldMappings:
-      ownerToken: {targets: [application_lease.owner_token], conversion: string, missing: reject, nullValue: reject}
-      fenceToken: {targets: [application_lease.fence_token], conversion: long, missing: default, nullValue: default}
+      ownerToken: {targets: [application_lease.owner_token], conversion: string, missing: allow, nullValue: allow}
+      fenceToken: {targets: [application_lease.fence_token], conversion: long, missing: allow, nullValue: allow}
       acquiredAt: {targets: [application_lease.acquired_at], conversion: instant-utc, missing: reject, nullValue: reject}
       expiresAt: {targets: [application_lease.expires_at], conversion: instant-utc, missing: reject, nullValue: reject}
     deleteBehavior: preserve
@@ -1658,7 +1658,7 @@ kinds:
     targetCanonicalization: ordered-relational-rows-v1
     sourceSchemaVersion: 1
     transformerVersion: 1
-    identifierType: string
+    identifierType: object-id
     targetSchema: platform
     targetTables: [admin_activity, admin_activity_value]
     loadOrder: 1040

@@ -21,7 +21,8 @@ public record PostgresqlMigrationCatalog(int version, int bridgeRelease, List<Ki
   private static final Set<String> TARGET_SCHEMAS = Set.of(
       "identity", "social", "communication", "federation", "music", "shared_folder",
       "mobility", "lunch", "canes", "platform");
-  private static final Set<String> IDENTIFIER_TYPES = Set.of("string", "uuid-string");
+  private static final Set<String> IDENTIFIER_TYPES =
+      Set.of("string", "uuid-string", "object-id", "string-or-object-id");
   private static final Set<String> CONVERSIONS = Set.of(
       "string", "uuid-string", "enum-name", "instant-utc", "local-date",
       "year-month-first-day", "integer",

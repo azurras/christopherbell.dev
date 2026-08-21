@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
@@ -13,12 +14,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.bson.types.ObjectId;
 import org.bson.Document;
 import org.bson.types.Binary;
 import org.bson.types.Decimal128;
 
 /** Catalog-driven transformer shared by the 52 exact kind bindings. */
 abstract class CatalogDocumentTransformer implements MigrationTransformer {
+  private static final ZoneId LEGACY_MONGO_LOCAL_DATE_ZONE = ZoneId.of("America/Chicago");
   private static final Map<String, Map<String, String>> COMPLEX_PATHS = Map.ofEntries(
       paths("account.federationIdentity",
           "account_federation_identity.actor_id=actorId",
@@ -124,6 +127,8 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
 
   @Override
   public final TransformedMigrationDocument transform(MigrationSourceDocument source) {
+    source = normalizeLegacyPostReport(source);
+    source = normalizeLegacyRestaurant(source);
     requireSource(source);
     validateCrossFieldShape(source);
     var rows = new RowSet(kind.targetSchema(), kind.targetTables(), source.sourceId());
@@ -147,6 +152,65 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
     var sourceHash = MigrationCanonicalizationRegistry.sourceHash(kind, source);
     return new TransformedMigrationDocument(
         kind.sourceKind(), source.sourceId(), sourceHash, rows.finish());
+  }
+
+  private MigrationSourceDocument normalizeLegacyPostReport(MigrationSourceDocument source) {
+    if (source == null || !"post_report".equals(kind.sourceKind())
+        || source.payload() == null
+        || (source.payload().containsKey("reportType")
+            && source.payload().containsKey("targetType"))) {
+      return source;
+    }
+    var normalized = new LinkedHashMap<String, Object>(source.payload());
+    if (!normalized.containsKey("targetType")) {
+      normalized.put("targetType", "POST");
+    }
+    if (!normalized.containsKey("reportType")) {
+      var reason = normalized.get("reason");
+      if (!(reason instanceof String text)) {
+        throw invalid();
+      }
+      var candidate = text.strip().toUpperCase(Locale.ROOT);
+      normalized.put("reportType", Set.of(
+          "SPAM", "HARASSMENT", "VIOLENCE", "SEXUAL", "COPYRIGHT").contains(candidate)
+          ? candidate : "OTHER");
+    }
+    return new MigrationSourceDocument(
+        source.sourceKind(), source.schemaVersion(), source.sourceId(), normalized);
+  }
+
+  private MigrationSourceDocument normalizeLegacyRestaurant(MigrationSourceDocument source) {
+    if (source == null || !"restaurant".equals(kind.sourceKind())
+        || source.payload() == null
+        || (source.payload().containsKey("normalizedName")
+            && source.payload().containsKey("dedupeKey")
+            && source.payload().containsKey("searchCity")
+            && source.payload().containsKey("searchState"))) {
+      return source;
+    }
+    if (!(source.payload().get("name") instanceof String name)
+        || !(source.payload().get("address") instanceof Map<?, ?> address)
+        || !(address.get("city") instanceof String city)
+        || !(address.get("state") instanceof String state)) {
+      throw invalid();
+    }
+    var normalizedName = normalizedText(name);
+    var normalizedCity = normalizedText(city);
+    var normalizedState = normalizedText(state);
+    if (normalizedName.isBlank() || normalizedCity.isBlank() || normalizedState.isBlank()) {
+      throw invalid();
+    }
+    var normalized = new LinkedHashMap<String, Object>(source.payload());
+    normalized.putIfAbsent("normalizedName", normalizedName);
+    normalized.putIfAbsent("dedupeKey", normalizedName);
+    normalized.putIfAbsent("searchCity", normalizedCity);
+    normalized.putIfAbsent("searchState", normalizedState);
+    return new MigrationSourceDocument(
+        source.sourceKind(), source.schemaVersion(), source.sourceId(), normalized);
+  }
+
+  private static String normalizedText(String value) {
+    return value.strip().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
   }
 
   private void validateCrossFieldShape(MigrationSourceDocument source) {
@@ -183,6 +247,9 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
           yield false;
         }
       }
+      case "object-id" -> ObjectId.isValid(sourceId)
+          && new ObjectId(sourceId).toHexString().equals(sourceId);
+      case "string-or-object-id" -> true;
       default -> false;
     };
   }
@@ -349,9 +416,15 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
   private static void requireCoordinatePair(Map<String, Object> value) {
     var latitude = readExact(value, "latitude");
     var longitude = readExact(value, "longitude");
-    if (!latitude.found() || !longitude.found()
-        || latitude.value() == null || longitude.value() == null) {
+    if (!latitude.found() && !longitude.found()) {
+      return;
+    }
+    if (latitude.found() != longitude.found()
+        || (latitude.value() == null) != (longitude.value() == null)) {
       throw invalid();
+    }
+    if (latitude.value() == null) {
+      return;
     }
     var latitudeValue = number(latitude.value());
     var longitudeValue = number(longitude.value());
@@ -408,8 +481,7 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
   private static void requireNonnegativePrices(Object value) {
     for (var raw : asCollection(value)) {
       var price = readExact(asMap(raw), "price");
-      if (!price.found() || !(normalizeBson(price.value()) instanceof Number number)
-          || new BigDecimal(number.toString()).signum() < 0) {
+      if (!price.found() || decimal(price.value()).signum() < 0) {
         throw invalid();
       }
     }
@@ -890,8 +962,11 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
         "keyVersion", "stationSequence", "durationSeconds", "fetched", "imported",
         "updated", "skippedExisting", "skippedInvalid", "created", "deleted",
         "unchanged", "invalid", "processed", "sourceYear", "count", "revision",
-        "price", "latitude", "longitude").contains(leaf)) {
+        "latitude", "longitude").contains(leaf)) {
       return requireNumber(value);
+    }
+    if ("price".equals(leaf)) {
+      return decimal(value);
     }
     return requireString(value);
   }
@@ -961,13 +1036,16 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
         case "instant-utc" -> value instanceof Instant instant ? instant
             : value instanceof Date date ? date.toInstant() : invalidValue();
         case "local-date" -> value instanceof LocalDate date ? date
-            : value instanceof String text ? LocalDate.parse(text) : invalidValue();
+            : value instanceof String text ? LocalDate.parse(text)
+            : value instanceof Date date
+                ? date.toInstant().atZone(LEGACY_MONGO_LOCAL_DATE_ZONE).toLocalDate()
+                : invalidValue();
         case "year-month-first-day" -> value instanceof String text
             ? YearMonth.parse(text).atDay(1) : invalidValue();
         case "integer" -> number(value).intValueExact();
         case "long" -> number(value).longValueExact();
         case "boolean" -> value instanceof Boolean flag ? flag : invalidValue();
-        case "decimal-12-2", "decimal-20-9" -> number(value);
+        case "decimal-12-2", "decimal-20-9" -> decimal(value);
         case "double" -> {
           var result = number(value).doubleValue();
           if (!Double.isFinite(result)) {
@@ -1027,6 +1105,16 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       return new BigDecimal(number.toString());
     }
     throw invalid();
+  }
+
+  private static BigDecimal decimal(Object value) {
+    if (value instanceof String text) {
+      if (!text.matches("-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?")) {
+        throw invalid();
+      }
+      return new BigDecimal(text);
+    }
+    return number(value);
   }
 
   private static Object requireNumber(Object value) {

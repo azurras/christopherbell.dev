@@ -29,8 +29,8 @@ class PostgresqlSchemaContractTest {
     try (var first = PostgresqlSchemaTestSupport.migrate();
          var second = PostgresqlSchemaTestSupport.migrate();
          var connection = first.connect()) {
-      assertThat(first.migrationsExecuted()).isEqualTo(14);
-      assertThat(second.migrationsExecuted()).isEqualTo(14);
+      assertThat(first.migrationsExecuted()).isEqualTo(27);
+      assertThat(second.migrationsExecuted()).isEqualTo(27);
       assertThat(ownedSchemas(connection, first.prefix()))
           .hasSize(PostgresqlSchemaTestSupport.DOMAINS.size());
       assertThat(ownedSchemas(connection, second.prefix()))
@@ -43,7 +43,7 @@ class PostgresqlSchemaContractTest {
   void emptyFlywayMigrationCreatesExactlyTheOwnedCatalogSchemasAndTables() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate();
          var connection = database.connect()) {
-      assertThat(database.migrationsExecuted()).isEqualTo(14);
+      assertThat(database.migrationsExecuted()).isEqualTo(27);
       assertThat(ownedSchemas(connection, database.prefix()))
           .containsExactlyInAnyOrderElementsOf(PostgresqlSchemaTestSupport.DOMAINS.stream()
               .map(database.prefix()::concat)
@@ -77,7 +77,7 @@ class PostgresqlSchemaContractTest {
       assertThat(constraintDeleteRule(connection, database.prefix() + "music",
           "playlist_updated_by_account_fk")).isEqualTo("RESTRICT");
       assertThat(columnPrecision(connection, database.prefix() + "lunch", "restaurant",
-          "latitude")).containsExactly(9, 6);
+          "latitude")).containsExactly(20, 9);
       assertThat(columnPrecision(connection, database.prefix() + "canes", "price_snapshot",
           "average_price")).containsExactly(12, 2);
     }
@@ -122,8 +122,10 @@ class PostgresqlSchemaContractTest {
          var connection = database.connect()) {
       var catalog = loadCatalog();
       assertThat(relationalDependencyViolations(connection, database.prefix(), catalog)).isEmpty();
-      assertThat(constraintDeleteRule(connection, database.prefix() + "communication",
-          "notification_lunch_session_fk")).isEqualTo("SET NULL");
+      assertThat(referentialConstraintCount(
+          connection,
+          database.prefix() + "communication",
+          "notification_lunch_session_fk")).isZero();
     }
   }
 
@@ -194,7 +196,7 @@ class PostgresqlSchemaContractTest {
           + "edited_on) values ('upgrade-post', 0, 'deleted:abcdef012345', 'before', 'after', "
           + "transaction_timestamp())");
 
-      assertThat(database.migrateToLatest()).isEqualTo(8);
+      assertThat(database.migrateToLatest()).isEqualTo(21);
       assertThat(longScalar(connection, "select count(*) from " + identity
           + ".deleted_account_pseudonym where pseudonym_id = 'deleted:abcdef012345'"))
           .isOne();
@@ -222,7 +224,7 @@ class PostgresqlSchemaContractTest {
           + "edited_on) values ('v7-post', 0, 'v7-owner', 'before', 'after', "
           + "transaction_timestamp())");
 
-      assertThat(database.migrateToLatest()).isEqualTo(7);
+      assertThat(database.migrateToLatest()).isEqualTo(20);
       assertRestrictViolation(() -> execute(connection,
           "delete from " + identity + ".account where account_id = 'v7-owner'"));
     }
@@ -268,7 +270,7 @@ class PostgresqlSchemaContractTest {
           + ".admin_activity_value (admin_activity_id, partition_name, value_key, value_text) "
           + "values ('v8-admin', 'before', 'state', 'old')");
 
-      assertThat(database.migrateToLatest()).isEqualTo(6);
+      assertThat(database.migrateToLatest()).isEqualTo(19);
       assertThat(longScalar(connection, "select count(*) from " + mobility
           + ".vin_decode_cache where vin = 'V8EMPTYRESPONSE1' and not response_present"))
           .isOne();
@@ -332,7 +334,7 @@ class PostgresqlSchemaContractTest {
           + ".vin_decode_raw_value (vin, field_name, field_value) values "
           + "('V9WITHRAWVALUE001', 'Make', 'Mazda')");
 
-      assertThat(database.migrateToLatest()).isEqualTo(5);
+      assertThat(database.migrateToLatest()).isEqualTo(18);
       assertThat(longScalar(connection, "select count(*) from " + mobility
           + ".vin_decode_cache where vin = 'V9AMBIGUOUS000001' "
           + "and not raw_decoded_values_present"))
@@ -363,7 +365,7 @@ class PostgresqlSchemaContractTest {
           + "values ('00000000-0000-0000-0000-000000000612', 'catalog', 'test', 'test', "
           + "false, 'STAGING')");
 
-      assertThat(database.migrateToLatest()).isEqualTo(3);
+      assertThat(database.migrateToLatest()).isEqualTo(16);
       assertThat(longScalar(connection, "select count(*) from " + platform
           + ".persistence_migration_run where run_id="
           + "'00000000-0000-0000-0000-000000000612' and release_commit is null "
@@ -387,7 +389,7 @@ class PostgresqlSchemaContractTest {
           + "values ('00000000-0000-0000-0000-000000000621', 'catalog', 'test', 'test', "
           + "true, 'STAGING')");
 
-      assertThat(database.migrateToLatest()).isEqualTo(3);
+      assertThat(database.migrateToLatest()).isEqualTo(16);
       assertThat(longScalar(connection, "select count(*) from " + platform
           + ".persistence_migration_run where run_id="
           + "'00000000-0000-0000-0000-000000000621' and source_frozen "
@@ -417,7 +419,7 @@ class PostgresqlSchemaContractTest {
           + "true,'PUBLISHED','legacy-release',repeat('a',64),repeat('b',64),'legacy-role',"
           + "repeat('c',64),repeat('d',64),repeat('e',64),repeat('f',64))");
 
-      assertThat(database.migrateToLatest()).isEqualTo(2);
+      assertThat(database.migrateToLatest()).isEqualTo(15);
       assertThat(longScalar(connection, "select count(*) from information_schema.columns "
           + "where table_schema='" + database.prefix() + "platform' "
           + "and table_name='persistence_migration_run' and column_name='bridge_release'"))
@@ -481,7 +483,7 @@ class PostgresqlSchemaContractTest {
           + "true,'PUBLISHED',transaction_timestamp(),1,'release',repeat('a',64),"
           + "repeat('b',64),'role',repeat('c',64),repeat('d',64),repeat('e',64),repeat('f',64))");
 
-      assertThat(database.migrateToLatest()).isEqualTo(1);
+      assertThat(database.migrateToLatest()).isEqualTo(14);
       assertThat(longScalar(connection, "select count(*) from information_schema.tables "
           + "where table_schema='" + database.prefix() + "platform' "
           + "and table_name='persistence_migration_publication_commit'"))
@@ -524,6 +526,263 @@ class PostgresqlSchemaContractTest {
       assertThat(longScalar(connection, "select count(*) from " + platform
           + ".persistence_migration_publication_commit where run_id='" + runId + "' "
           + "and committed_at='2026-08-20T12:00:00Z'"))
+          .isOne();
+    }
+  }
+
+  @Test
+  void versionFourteenUpgradePreservesMissingLegacyBrowserSessionRole() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("14");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(13);
+      var identity = quoted(database.prefix() + "identity");
+      execute(connection, "insert into " + identity
+          + ".account (account_id, email, normalized_email, role, status, username) values "
+          + "('legacy-session-owner','legacy-session@example.test',"
+          + "'legacy-session@example.test','USER','ACTIVE','legacy-session-owner')");
+      execute(connection, "insert into " + identity
+          + ".browser_session (browser_session_id,account_id,role,token_hash,"
+          + "account_security_fingerprint,created_on,last_seen_on,idle_expires_on,"
+          + "absolute_expires_on) values ('legacy-session','legacy-session-owner',null,"
+          + "'token','fingerprint',transaction_timestamp(),transaction_timestamp(),"
+          + "transaction_timestamp(),transaction_timestamp())");
+      assertThat(longScalar(connection, "select count(*) from " + identity
+          + ".browser_session where browser_session_id='legacy-session' and role is null"))
+          .isOne();
+    }
+  }
+
+  @Test
+  void versionFifteenUpgradePreservesMissingLegacyMaintenanceLeaseOwnership() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("15");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(12);
+      var sharedFolder = quoted(database.prefix() + "shared_folder");
+
+      execute(connection, "insert into " + sharedFolder
+          + ".maintenance_lease (lease_name, owner_token, fence_token, acquired_at, expires_at) "
+          + "values ('shared-folder-maintenance',null,null,"
+          + "'2026-08-01T00:00:00Z','2026-08-01T00:01:00Z')");
+
+      assertThat(nullableColumns(connection, database.prefix() + "shared_folder",
+          "maintenance_lease")).contains("owner_token", "fence_token");
+      assertThat(longScalar(connection, "select count(*) from " + sharedFolder
+          + ".maintenance_lease where lease_name='shared-folder-maintenance' "
+          + "and owner_token is null and fence_token is null")).isOne();
+    }
+  }
+
+  @Test
+  void versionSixteenUpgradePreservesMissingLegacyApplicationLeaseOwnership() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("16");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(11);
+      var platform = quoted(database.prefix() + "platform");
+
+      execute(connection, "insert into " + platform
+          + ".application_lease (lease_name, owner_token, fence_token, acquired_at, expires_at) "
+          + "values ('legacy-application',null,null,"
+          + "'2026-08-01T00:00:00Z','2026-08-01T00:01:00Z')");
+
+      assertThat(nullableColumns(connection, database.prefix() + "platform",
+          "application_lease")).contains("owner_token", "fence_token");
+      assertThat(longScalar(connection, "select count(*) from " + platform
+          + ".application_lease where lease_name='legacy-application' "
+          + "and owner_token is null and fence_token is null")).isOne();
+    }
+  }
+
+  @Test
+  void versionSeventeenUpgradePreservesCaseDistinctLegacyAccountEmails() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("17");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(10);
+      var identity = quoted(database.prefix() + "identity");
+
+      execute(connection, "insert into " + identity
+          + ".account (account_id,email,normalized_email,role,status,username) values "
+          + "('legacy-case-a','Legacy.Case@example.test','legacy.case@example.test',"
+          + "'USER','ACTIVE','legacy-case-a'),"
+          + "('legacy-case-b','legacy.case@example.test','legacy.case@example.test',"
+          + "'USER','ACTIVE','legacy-case-b')");
+
+      assertThat(longScalar(connection, "select count(*) from " + identity
+          + ".account where normalized_email='legacy.case@example.test'")).isEqualTo(2);
+    }
+  }
+
+  @Test
+  void versionEighteenUpgradePreservesReportsWhoseSourcePostWasAlreadyDeleted() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("18");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(9);
+      var social = quoted(database.prefix() + "social");
+
+      execute(connection, "insert into " + social
+          + ".post_report (post_report_id,post_id,report_type,target_type,reason,status,created_on) "
+          + "values ('legacy-orphan-report','deleted-post','SPAM','POST','legacy','OPEN',"
+          + "'2026-08-01T00:00:00Z')");
+
+      assertThat(longScalar(connection, "select count(*) from " + social
+          + ".post_report where post_report_id='legacy-orphan-report' "
+          + "and post_id='deleted-post'")).isOne();
+    }
+  }
+
+  @Test
+  void versionNineteenUpgradePreservesNotificationSnapshotsForDeletedTargets() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("19");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(8);
+      var identity = quoted(database.prefix() + "identity");
+      var communication = quoted(database.prefix() + "communication");
+
+      execute(connection, "insert into " + identity
+          + ".account (account_id,email,normalized_email,role,status,username) values "
+          + "('notification-owner','notification-owner@example.test',"
+          + "'notification-owner@example.test','USER','ACTIVE','notification-owner')");
+      execute(connection, "insert into " + communication
+          + ".notification (notification_id,account_id,post_id,message_id,lunch_session_id,"
+          + "notification_type,created_on) values "
+          + "('legacy-notification','notification-owner','deleted-post','deleted-message',"
+          + "'deleted-session','MENTION','2026-08-01T00:00:00Z')");
+
+      assertThat(longScalar(connection, "select count(*) from " + communication
+          + ".notification where notification_id='legacy-notification' "
+          + "and post_id='deleted-post' and message_id='deleted-message' "
+          + "and lunch_session_id='deleted-session'")).isOne();
+    }
+  }
+
+  @Test
+  void versionTwentyUpgradePreservesSystemTriggeredRestaurantImports() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("20");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(7);
+      var lunch = quoted(database.prefix() + "lunch");
+
+      execute(connection, "insert into " + lunch
+          + ".restaurant_import_state (import_state_id,status,actor_account_id) "
+          + "values ('restaurant-import','COMPLETED','system')");
+
+      assertThat(longScalar(connection, "select count(*) from " + lunch
+          + ".restaurant_import_state where import_state_id='restaurant-import' "
+          + "and actor_account_id='system'")).isOne();
+    }
+  }
+
+  @Test
+  void versionTwentyOneUpgradeRegistersReservedAuditPrincipalsOnly() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("21");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(6);
+      var sharedFolder = quoted(database.prefix() + "shared_folder");
+
+      execute(connection, "insert into " + sharedFolder
+          + ".audit_event (audit_event_id,account_id,action,outcome,occurred_at,expires_at) values "
+          + "('reserved-system','system','READ','SUCCESS','2026-08-01T00:00:00Z',"
+          + "'2027-08-01T00:00:00Z'),"
+          + "('reserved-unknown','unknown','READ','SUCCESS','2026-08-01T00:00:01Z',"
+          + "'2027-08-01T00:00:01Z')");
+
+      assertThat(longScalar(connection, "select count(*) from " + sharedFolder
+          + ".audit_event where account_id in ('system','unknown')")).isEqualTo(2);
+      assertThatThrownBy(() -> execute(connection, "insert into " + sharedFolder
+          + ".audit_event (audit_event_id,account_id,action,outcome,occurred_at,expires_at) values "
+          + "('reserved-arbitrary','arbitrary','READ','SUCCESS','2026-08-01T00:00:02Z',"
+          + "'2027-08-01T00:00:02Z')"))
+          .isInstanceOf(SQLException.class);
+    }
+  }
+
+  @Test
+  void versionTwentyTwoUpgradePreservesUnknownAuditClientOrigin() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("22");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(5);
+      var sharedFolder = quoted(database.prefix() + "shared_folder");
+
+      execute(connection, "insert into " + sharedFolder
+          + ".audit_event (audit_event_id,account_id,action,outcome,client_ip,occurred_at,expires_at) "
+          + "values ('unknown-origin','unknown','READ','SUCCESS','unknown',"
+          + "'2026-08-01T00:00:00Z','2027-08-01T00:00:00Z')");
+
+      assertThat(longScalar(connection, "select count(*) from " + sharedFolder
+          + ".audit_event where audit_event_id='unknown-origin' and client_ip='unknown'"))
+          .isOne();
+    }
+  }
+
+  @Test
+  void versionTwentyThreeUpgradePreservesHistoricalVehicleModifier() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("23");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(4);
+      var mobility = quoted(database.prefix() + "mobility");
+
+      execute(connection, "insert into " + mobility
+          + ".vehicle (vehicle_id,vin,last_modified_by) values "
+          + "('historical-vehicle','TASK8HISTORYVIN01','retired-account')");
+
+      assertThat(longScalar(connection, "select count(*) from " + mobility
+          + ".vehicle where vehicle_id='historical-vehicle' "
+          + "and last_modified_by='retired-account'"))
+          .isOne();
+    }
+  }
+
+  @Test
+  void versionTwentyFourUpgradePreservesMissingZipCreationTimestamp() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("24");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(3);
+      var mobility = quoted(database.prefix() + "mobility");
+
+      execute(connection, "insert into " + mobility
+          + ".zip_coordinate (zip_code,latitude,longitude,source,source_year,last_updated_on) "
+          + "values ('78701',30.2672,-97.7431,'TASK8',2026,'2026-08-01T00:00:00Z')");
+
+      assertThat(longScalar(connection, "select count(*) from " + mobility
+          + ".zip_coordinate where zip_code='78701' and created_on is null"))
+          .isOne();
+    }
+  }
+
+  @Test
+  void versionTwentyFiveUpgradePreservesLegacyMusicRuntimeIdsByUniqueKind() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("25");
+         var connection = database.connect()) {
+      var music = quoted(database.prefix() + "music");
+      execute(connection, "insert into " + music
+          + ".runtime_state (runtime_state_id,state_kind) values "
+          + "('legacy-queue','QUEUE'),('legacy-radio','RADIO')");
+
+      assertThat(database.migrateToLatest()).isEqualTo(2);
+      assertThat(longScalar(connection, "select count(*) from " + music
+          + ".runtime_state where (runtime_state_id='legacy-queue' and state_kind='QUEUE') "
+          + "or (runtime_state_id='legacy-radio' and state_kind='RADIO')"))
+          .isEqualTo(2);
+      assertThatThrownBy(() -> execute(connection, "insert into " + music
+          + ".runtime_state (runtime_state_id,state_kind) values ('second-queue','QUEUE')"))
+          .isInstanceOf(SQLException.class);
+    }
+  }
+
+  @Test
+  void versionTwentySixUpgradePreservesRestaurantCoordinatePrecision() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrateThrough("26");
+         var connection = database.connect()) {
+      assertThat(database.migrateToLatest()).isEqualTo(1);
+      var lunch = quoted(database.prefix() + "lunch");
+
+      execute(connection, "insert into " + lunch
+          + ".restaurant (restaurant_id,dedupe_key,display_name,search_city,search_state,"
+          + "latitude,longitude) values "
+          + "('precision','precision','Precision','austin','tx',30.2671534,-97.7430608)");
+
+      assertThat(longScalar(connection, "select count(*) from " + lunch
+          + ".restaurant where restaurant_id='precision' and latitude=30.2671534 "
+          + "and longitude=-97.7430608"))
           .isOne();
     }
   }
@@ -1203,6 +1462,21 @@ class PostgresqlSchemaContractTest {
       try (var rows = statement.executeQuery()) {
         assertThat(rows.next()).isTrue();
         return rows.getString(1);
+      }
+    }
+  }
+
+  private static int referentialConstraintCount(
+      Connection connection, String schema, String constraint) throws SQLException {
+    try (var statement = connection.prepareStatement("""
+        select count(*) from information_schema.referential_constraints
+        where constraint_schema = ? and constraint_name = ?
+        """)) {
+      statement.setString(1, schema);
+      statement.setString(2, constraint);
+      try (var rows = statement.executeQuery()) {
+        assertThat(rows.next()).isTrue();
+        return rows.getInt(1);
       }
     }
   }

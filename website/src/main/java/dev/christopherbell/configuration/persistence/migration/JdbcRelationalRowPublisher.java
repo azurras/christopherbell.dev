@@ -28,28 +28,32 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
       PostgresqlMigrationCatalog.Kind kind,
       List<StagedMigrationRow> rows) throws SQLException {
     var allowedTables = Set.copyOf(kind.targetTables());
-    var preparedRows = new LinkedHashMap<StatementShape, List<List<Object>>>();
+    var preparedRows = new LinkedHashMap<
+        String, LinkedHashMap<StatementShape, List<List<Object>>>>();
     for (var row : rows) {
       if (!kind.targetSchema().equals(row.targetSchema())
           || !allowedTables.contains(row.targetTable())) {
         throw new SQLException("Staged target is outside its catalog kind.");
       }
       var prepared = prepare(connection, schemaPrefix, allowedTables, row);
-      preparedRows.computeIfAbsent(prepared.shape(), ignored -> new ArrayList<>())
+      preparedRows.computeIfAbsent(row.targetTable(), ignored -> new LinkedHashMap<>())
+          .computeIfAbsent(prepared.shape(), ignored -> new ArrayList<>())
           .add(prepared.values());
     }
-    for (var entry : preparedRows.entrySet()) {
-      try (var statement = connection.prepareStatement(entry.getKey().sql())) {
-        for (var values : entry.getValue()) {
-          for (var index = 0; index < values.size(); index++) {
-            var column = entry.getKey().columns().get(index);
-            bind(statement, index + 1, values.get(index), entry.getKey().metadata().get(column));
+    for (var targetTable : kind.targetTables()) {
+      for (var entry : preparedRows.getOrDefault(targetTable, new LinkedHashMap<>()).entrySet()) {
+        try (var statement = connection.prepareStatement(entry.getKey().sql())) {
+          for (var values : entry.getValue()) {
+            for (var index = 0; index < values.size(); index++) {
+              var column = entry.getKey().columns().get(index);
+              bind(statement, index + 1, values.get(index), entry.getKey().metadata().get(column));
+            }
+            statement.addBatch();
           }
-          statement.addBatch();
-        }
-        for (var count : statement.executeBatch()) {
-          if (count != 0 && count != 1 && count != java.sql.Statement.SUCCESS_NO_INFO) {
-            throw new SQLException("Staged row was not published.");
+          for (var count : statement.executeBatch()) {
+            if (count != 0 && count != 1 && count != java.sql.Statement.SUCCESS_NO_INFO) {
+              throw new SQLException("Staged row was not published.");
+            }
           }
         }
       }
@@ -98,6 +102,9 @@ public final class JdbcRelationalRowPublisher implements MigrationRowPublisher {
   }
 
   private static Object normalizeJdbc(Object value) {
+    if (value instanceof java.math.BigDecimal decimal) {
+      return decimal.stripTrailingZeros();
+    }
     if (value instanceof java.time.OffsetDateTime timestamp) {
       return timestamp.toInstant();
     }

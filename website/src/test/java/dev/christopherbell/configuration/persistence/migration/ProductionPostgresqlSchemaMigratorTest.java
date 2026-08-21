@@ -49,12 +49,15 @@ class ProductionPostgresqlSchemaMigratorTest {
         .contains("christopherbell_bridge")
         .contains("christopherbell_viewer")
         .contains("christopherbell_backup")
+        .contains("GRANT SELECT ON TABLE \"flyway_schema_history\" TO "
+            + "christopherbell_app, christopherbell_bridge, "
+            + "christopherbell_viewer, christopherbell_backup")
         .doesNotContain("PASSWORD");
   }
 
   @Test
   @EnabledIfEnvironmentVariable(named = "POSTGRESQL_INTEGRATION_TESTS", matches = "enabled")
-  void migrationRunsThroughV14AndAppliesLeastPrivilegeRuntimeGrants() throws Exception {
+  void migrationRunsThroughV27AndAppliesLeastPrivilegeRuntimeGrants() throws Exception {
     var url = requiredEnvironment("SPRING_DATASOURCE_URL");
     var username = requiredEnvironment("SPRING_DATASOURCE_USERNAME");
     var password = requiredEnvironment("SPRING_DATASOURCE_PASSWORD");
@@ -73,7 +76,7 @@ class ProductionPostgresqlSchemaMigratorTest {
 
         assertThat(scalar(connection,
             "select version::text from public.\"flyway_" + prefix + "history\" "
-                + "order by installed_rank desc limit 1")).isEqualTo("14");
+                + "order by installed_rank desc limit 1")).isEqualTo("27");
         var account = "\"" + prefix + "identity\".\"account\"";
         for (var privilege : new String[]{"SELECT", "INSERT", "UPDATE", "DELETE"}) {
           assertThat(booleanScalar(connection,

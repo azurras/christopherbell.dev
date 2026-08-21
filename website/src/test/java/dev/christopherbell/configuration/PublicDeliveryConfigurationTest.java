@@ -52,7 +52,9 @@ class PublicDeliveryConfigurationTest {
     assertThat(configuration.at("/management/endpoints/web/exposure/include").asText())
         .isEqualTo("health");
     assertThat(configuration.at("/management/endpoint/health/show-details").asText())
-        .isEqualTo("never");
+        .isEqualTo("when-authorized");
+    assertThat(configuration.at("/management/endpoint/health/roles").asText())
+        .isEqualTo("ADMIN");
     assertThat(configuration.at("/management/endpoint/health/probes/enabled").asBoolean())
         .isTrue();
     assertThat(configuration.at("/management/endpoint/health/group/readiness/include").asText())

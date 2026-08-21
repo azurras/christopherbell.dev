@@ -71,12 +71,19 @@ public final class WhatsForLunchMigrationVerifier {
 
   private static boolean verifyCoordinates(
       org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    if (rows.isEmpty()) {
+    var sample = rows.stream()
+        .filter(row -> row.get("latitude") instanceof Number
+            && row.get("longitude") instanceof Number)
+        .findFirst();
+    if (sample.isEmpty()) {
       return true;
     }
-    var latitude = ((Number) rows.getFirst().get("latitude")).doubleValue();
-    var longitude = ((Number) rows.getFirst().get("longitude")).doubleValue();
-    var expected = rows.stream().filter(row ->
+    var latitude = ((Number) sample.orElseThrow().get("latitude")).doubleValue();
+    var longitude = ((Number) sample.orElseThrow().get("longitude")).doubleValue();
+    var expected = rows.stream()
+        .filter(row -> row.get("latitude") instanceof Number
+            && row.get("longitude") instanceof Number)
+        .filter(row ->
         Math.abs(((Number) row.get("latitude")).doubleValue() - latitude) <= 0.000001
             && Math.abs(((Number) row.get("longitude")).doubleValue() - longitude) <= 0.000001)
         .map(row -> text(row.get("restaurant_id"))).sorted().toList();

@@ -131,10 +131,23 @@ public final class MusicMigrationVerifier {
     var expected = rows.stream().filter(row -> "RADIO".equals(text(row.get("state_kind"))))
         .findFirst();
     var actual = new PostgresMusicRuntimeStateRepository(context).findRadio();
-    return expected.isEmpty() ? actual.isEmpty()
-        : actual.isPresent()
-            && text(expected.orElseThrow().get("runtime_state_id"))
-                .equals(actual.orElseThrow().id());
+    if (expected.isEmpty()) {
+      return actual.isEmpty();
+    }
+    if (actual.isEmpty()) {
+      return false;
+    }
+    var row = expected.orElseThrow();
+    var state = actual.orElseThrow();
+    return ((Number) row.get("station_sequence")).longValue() == state.stationSequence()
+        && text(row.get("track_id")).equals(state.trackId())
+        && text(row.get("observed_token")).equals(state.observedToken())
+        && instant(row.get("started_at")).equals(state.startedAt())
+        && Double.compare(((Number) row.get("duration_seconds")).doubleValue(),
+            state.durationSeconds()) == 0
+        && text(row.get("radio_source")).equals(state.source().name())
+        && java.util.Objects.equals(row.get("queue_entry_id"), state.queueEntryId())
+        && java.util.Objects.equals(((Number) row.get("version")).longValue(), state.version());
   }
 
   private static boolean verifyHistory(

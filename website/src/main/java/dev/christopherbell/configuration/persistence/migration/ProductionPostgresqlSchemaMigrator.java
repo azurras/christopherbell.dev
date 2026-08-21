@@ -24,7 +24,7 @@ public final class ProductionPostgresqlSchemaMigrator {
 
   private ProductionPostgresqlSchemaMigrator() {}
 
-  /** Validates production identity, migrates through V14, applies runtime grants, and exits. */
+  /** Validates production identity, migrates through V27, applies runtime grants, and exits. */
   public static void main(String[] arguments) throws SQLException {
     if (arguments.length != 0) {
       throw new IllegalArgumentException("The production schema migrator accepts no arguments.");
@@ -63,7 +63,7 @@ public final class ProductionPostgresqlSchemaMigrator {
         .load();
     flyway.migrate();
     var current = flyway.info().current();
-    if (current == null || !"14".equals(current.getVersion().toString())) {
+    if (current == null || !"27".equals(current.getVersion().toString())) {
       throw new IllegalStateException("The production schema did not reach the required version.");
     }
     try (var connection = DriverManager.getConnection(
@@ -138,6 +138,11 @@ public final class ProductionPostgresqlSchemaMigrator {
           .append(schema)
           .append(" GRANT SELECT ON TABLES TO ").append(roles.readersSql()).append(';');
     }
+    var historyTable = schemaPrefix.isEmpty()
+        ? "flyway_schema_history"
+        : "flyway_" + schemaPrefix + "history";
+    sql.append("GRANT SELECT ON TABLE ").append(quoteIdentifier(historyTable))
+        .append(" TO ").append(roles.allRuntimeSql()).append(';');
     return sql.toString();
   }
 

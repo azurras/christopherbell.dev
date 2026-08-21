@@ -43,6 +43,8 @@ class PostgresAccountRepositoryContractTest
   @BeforeEach
   void removeContractFixtures() {
     accounts.deleteById("account-contract");
+    accounts.deleteById("account-case-a");
+    accounts.deleteById("account-case-b");
     accounts.deleteById("account-moderation-contract");
     accounts.deleteById("account-two-writer-contract");
   }
@@ -62,6 +64,26 @@ class PostgresAccountRepositoryContractTest
         "OWNER", AccountStatus.ACTIVE)).contains(saved);
     assertThat(accounts.findById(saved.getId()).orElseThrow().getPermissions())
         .containsExactly(AccountPermission.MUSIC_READ);
+  }
+
+  @Test
+  void preservesCaseDistinctLegacyEmailsWithoutCollapsingAccountIdentity() {
+    var first = createFixture();
+    first.setId("account-case-a");
+    first.setEmail("Legacy.Case@example.test");
+    first.setUsername("legacy-case-a");
+    var second = createFixture();
+    second.setId("account-case-b");
+    second.setEmail("legacy.case@example.test");
+    second.setUsername("legacy-case-b");
+
+    accounts.save(first);
+    accounts.save(second);
+
+    assertThat(accounts.findByEmail(first.getEmail()).map(Account::getId))
+        .contains(first.getId());
+    assertThat(accounts.findByEmail(second.getEmail()).map(Account::getId))
+        .contains(second.getId());
   }
 
   @Test

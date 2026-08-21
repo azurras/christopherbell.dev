@@ -50,7 +50,8 @@ public class PostgresZipCoordinateRepository implements ZipCoordinateRepository 
         .fetchOptional(row -> ZipCoordinate.builder().zipCode(row.getZipCode())
             .latitude(row.getLatitude().doubleValue()).longitude(row.getLongitude().doubleValue())
             .source(row.getSource()).sourceYear(row.getSourceYear())
-            .createdOn(row.getCreatedOn().toInstant()).lastUpdatedOn(row.getLastUpdatedOn().toInstant()).build());
+            .createdOn(instant(row.getCreatedOn())).lastUpdatedOn(instant(row.getLastUpdatedOn()))
+            .build());
   }
 
   @Override public List<ZipCoordinate> findAllBySource(String source) {
@@ -58,10 +59,15 @@ public class PostgresZipCoordinateRepository implements ZipCoordinateRepository 
         .orderBy(ZIP_COORDINATE.ZIP_CODE).fetch(row -> ZipCoordinate.builder().zipCode(row.getZipCode())
             .latitude(row.getLatitude().doubleValue()).longitude(row.getLongitude().doubleValue())
             .source(row.getSource()).sourceYear(row.getSourceYear())
-            .createdOn(row.getCreatedOn().toInstant()).lastUpdatedOn(row.getLastUpdatedOn().toInstant()).build());
+            .createdOn(instant(row.getCreatedOn())).lastUpdatedOn(instant(row.getLastUpdatedOn()))
+            .build());
   }
 
   private static java.time.OffsetDateTime offset(java.time.Instant value) {
     return value == null ? null : value.atOffset(ZoneOffset.UTC);
+  }
+
+  private static java.time.Instant instant(java.time.OffsetDateTime value) {
+    return value == null ? null : value.toInstant();
   }
 }

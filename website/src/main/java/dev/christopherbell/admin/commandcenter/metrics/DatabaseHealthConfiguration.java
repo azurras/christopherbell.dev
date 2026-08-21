@@ -12,9 +12,23 @@ public class DatabaseHealthConfiguration {
   private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(2);
 
   @Bean
-  public HealthIndicator databaseHealthIndicator(DatabaseConnectivityProbe database) {
-    return () -> database.ping(PROBE_TIMEOUT)
-        ? Health.up().build()
-        : Health.down().build();
+  public HealthIndicator databaseHealthIndicator(
+      DatabaseConnectivityProbe database,
+      PersistenceIdentityProbe identityProbe) {
+    return () -> {
+      if (!database.ping(PROBE_TIMEOUT)) {
+        return Health.down().build();
+      }
+      try {
+        var identity = identityProbe.identity(PROBE_TIMEOUT);
+        return Health.up()
+            .withDetail("backend", identity.backend())
+            .withDetail("database", identity.database())
+            .withDetail("schemaVersion", identity.schemaVersion())
+            .build();
+      } catch (RuntimeException failure) {
+        return Health.down().build();
+      }
+    };
   }
 }

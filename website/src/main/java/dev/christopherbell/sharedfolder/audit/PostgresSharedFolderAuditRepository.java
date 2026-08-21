@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.UUID;
 import org.jooq.Condition;
 import org.jooq.DSLContext;
-import org.jooq.Field;
 import org.jooq.impl.DSL;
 
 /** PostgreSQL implementation of bounded shared-folder audit persistence. */
@@ -31,14 +30,14 @@ public class PostgresSharedFolderAuditRepository implements SharedFolderAuditRep
         .set(AUDIT_EVENT.ACCOUNT_ID, event.accountId()).set(AUDIT_EVENT.ACTION, event.action())
         .set(AUDIT_EVENT.RELATIVE_PATH, relativePath).set(AUDIT_EVENT.SIZE_BYTES, event.size())
         .set(AUDIT_EVENT.OUTCOME, event.outcome()).set(AUDIT_EVENT.FAILURE_CATEGORY, event.failureCategory())
-        .set(AUDIT_EVENT.CLIENT_IP.coerce(String.class), inet(event.clientIp()))
+        .set(AUDIT_EVENT.CLIENT_IP, event.clientIp())
         .set(AUDIT_EVENT.OCCURRED_AT, event.occurredAt().atOffset(ZoneOffset.UTC))
         .set(AUDIT_EVENT.EXPIRES_AT, event.expiresAt().atOffset(ZoneOffset.UTC))
         .onConflict(AUDIT_EVENT.AUDIT_EVENT_ID).doUpdate()
         .set(AUDIT_EVENT.ACCOUNT_ID, event.accountId()).set(AUDIT_EVENT.ACTION, event.action())
         .set(AUDIT_EVENT.RELATIVE_PATH, relativePath).set(AUDIT_EVENT.SIZE_BYTES, event.size())
         .set(AUDIT_EVENT.OUTCOME, event.outcome()).set(AUDIT_EVENT.FAILURE_CATEGORY, event.failureCategory())
-        .set(AUDIT_EVENT.CLIENT_IP.coerce(String.class), inet(event.clientIp()))
+        .set(AUDIT_EVENT.CLIENT_IP, event.clientIp())
         .set(AUDIT_EVENT.OCCURRED_AT, event.occurredAt().atOffset(ZoneOffset.UTC))
         .set(AUDIT_EVENT.EXPIRES_AT, event.expiresAt().atOffset(ZoneOffset.UTC)).execute();
     return new SharedFolderAuditEvent(id, event.accountId(), event.action(), relativePath, event.size(),
@@ -75,10 +74,6 @@ public class PostgresSharedFolderAuditRepository implements SharedFolderAuditRep
   private static SharedFolderAuditEvent map(AuditEventRecord row) {
     return new SharedFolderAuditEvent(row.getAuditEventId(), row.getAccountId(), row.getAction(),
         row.getRelativePath(), row.getSizeBytes(), row.getOutcome(), row.getFailureCategory(),
-        row.getClientIp().toString(), row.getOccurredAt().toInstant(), row.getExpiresAt().toInstant());
-  }
-
-  private static Field<String> inet(String value) {
-    return DSL.field("cast({0} as inet)", String.class, DSL.val(value));
+        row.getClientIp(), row.getOccurredAt().toInstant(), row.getExpiresAt().toInstant());
   }
 }

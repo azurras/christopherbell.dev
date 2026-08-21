@@ -46,7 +46,9 @@ class MongoToPostgresqlMigrationAcceptanceTest {
       var catalog = loadCatalog();
       var inserted = new ArrayList<Document>();
       for (var kind : catalog.kinds()) {
-        var id = switch (kind.sourceKind()) {
+        Object id = kind.identifierType().equals("object-id")
+            ? new org.bson.types.ObjectId("%024x".formatted(kind.loadOrder()))
+            : switch (kind.sourceKind()) {
           case "conversation_archive_state" -> "task6-all52-account:Café 🛰";
           case "music_runtime_state" -> "queue";
           case "radio_state" -> "shared-folder-radio";
@@ -227,7 +229,9 @@ class MongoToPostgresqlMigrationAcceptanceTest {
       PostgresqlMigrationCatalog.Kind kind, PostgresqlMigrationCatalog catalog) {
     var ids = catalog.kinds().stream().collect(java.util.stream.Collectors.toMap(
         PostgresqlMigrationCatalog.Kind::sourceKind,
-        candidate -> "task6-all52-" + candidate.sourceKind()));
+        candidate -> candidate.identifierType().equals("object-id")
+            ? "%024x".formatted(candidate.loadOrder())
+            : "task6-all52-" + candidate.sourceKind()));
     var placeholders = Map.of(
         "account", ids.get("account"),
         "message", ids.get("message"),

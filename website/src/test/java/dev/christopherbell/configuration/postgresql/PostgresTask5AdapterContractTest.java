@@ -62,12 +62,14 @@ class PostgresTask5AdapterContractTest {
   }
 
   private static boolean isTask5Port(String name) {
-    return name.startsWith("dev.christopherbell.vehicle.")
+    return !name.equals(
+            "dev.christopherbell.admin.commandcenter.metrics.PersistenceIdentityProbe")
+        && (name.startsWith("dev.christopherbell.vehicle.")
         || name.startsWith("dev.christopherbell.location.zip.")
         || name.startsWith("dev.christopherbell.whatsforlunch.restaurant.")
         || name.equals("dev.christopherbell.canesboxtracker.CanesBoxPriceSnapshotRepository")
         || name.startsWith("dev.christopherbell.admin.activity.")
         || name.startsWith("dev.christopherbell.admin.commandcenter.")
-        || name.equals("dev.christopherbell.libs.lease.ScheduledCollectorRunStore");
+        || name.equals("dev.christopherbell.libs.lease.ScheduledCollectorRunStore"));
   }
 }

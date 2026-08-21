@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -24,7 +25,7 @@ class MigrationTransformerAllKindsTest {
     assertThat(catalog.kinds()).hasSize(52);
     for (var kind : catalog.kinds()) {
       var source = new MigrationSourceDocument(
-          kind.sourceKind(), kind.sourceSchemaVersion(), "id-🛰-" + kind.sourceKind(),
+          kind.sourceKind(), kind.sourceSchemaVersion(), representativeSourceId(kind),
           representativePayload(kind));
       TransformedMigrationDocument first;
       TransformedMigrationDocument second;
@@ -68,6 +69,166 @@ class MigrationTransformerAllKindsTest {
   }
 
   @Test
+  void legacyBrowserSessionWithoutRolePreservesTheMissingState() throws IOException {
+    var catalog = loadCatalog();
+    var kind = catalog.kinds().stream()
+        .filter(candidate -> candidate.sourceKind().equals("browser_session"))
+        .findFirst()
+        .orElseThrow();
+    var payload = representativePayload(kind);
+    payload.remove("role");
+
+    var transformed = MigrationTransformerRegistry.from(catalog)
+        .require(kind.sourceKind())
+        .transform(new MigrationSourceDocument(
+            kind.sourceKind(), kind.sourceSchemaVersion(), "legacy-session", payload));
+
+    assertThat(transformed.rows().getFirst().values()).doesNotContainKey("role");
+  }
+
+  @Test
+  void legacyPostReportDerivesOnlyItsHistoricallyImpliedClassification() throws IOException {
+    var catalog = loadCatalog();
+    var kind = catalog.kinds().stream()
+        .filter(candidate -> candidate.sourceKind().equals("post_report"))
+        .findFirst()
+        .orElseThrow();
+    var payload = representativePayload(kind);
+    payload.remove("reportType");
+    payload.remove("targetType");
+    payload.put("reason", "spam");
+
+    var transformed = MigrationTransformerRegistry.from(catalog)
+        .require(kind.sourceKind())
+        .transform(new MigrationSourceDocument(
+            kind.sourceKind(), kind.sourceSchemaVersion(), representativeSourceId(kind), payload));
+
+    assertThat(transformed.rows().getFirst().values())
+        .containsEntry("report_type", "SPAM")
+        .containsEntry("target_type", "POST");
+  }
+
+  @Test
+  void legacyRestaurantDerivesSearchFieldsAndPreservesAbsentAddressDetails()
+      throws IOException {
+    var catalog = loadCatalog();
+    var kind = catalog.kinds().stream()
+        .filter(candidate -> candidate.sourceKind().equals("restaurant"))
+        .findFirst()
+        .orElseThrow();
+    var payload = representativePayload(kind);
+    payload.put("name", "  Legacy   Cafe  ");
+    payload.remove("normalizedName");
+    payload.remove("dedupeKey");
+    payload.remove("searchCity");
+    payload.remove("searchState");
+    payload.put("address", Map.of(
+        "city", "  Cedar   Park ", "country", "US", "state", " TX "));
+
+    var transformed = MigrationTransformerRegistry.from(catalog)
+        .require(kind.sourceKind())
+        .transform(new MigrationSourceDocument(
+            kind.sourceKind(), kind.sourceSchemaVersion(), "legacy-restaurant", payload));
+
+    assertThat(transformed.rows().getFirst().values())
+        .containsEntry("normalized_name", "legacy cafe")
+        .containsEntry("dedupe_key", "legacy cafe")
+        .containsEntry("search_city", "cedar park")
+        .containsEntry("search_state", "tx")
+        .doesNotContainKeys("latitude", "longitude", "street_1");
+  }
+
+  @Test
+  void legacyMaintenanceLeasePreservesMissingOwnerAndFence() throws IOException {
+    var catalog = loadCatalog();
+    var kind = catalog.kinds().stream()
+        .filter(candidate -> candidate.sourceKind().equals("maintenance_lease"))
+        .findFirst()
+        .orElseThrow();
+    var payload = representativePayload(kind);
+    payload.remove("ownerToken");
+    payload.remove("fenceToken");
+
+    var transformed = MigrationTransformerRegistry.from(catalog)
+        .require(kind.sourceKind())
+        .transform(new MigrationSourceDocument(
+            kind.sourceKind(), kind.sourceSchemaVersion(), "shared-folder-maintenance", payload));
+
+    assertThat(transformed.rows().getFirst().values())
+        .doesNotContainKeys("owner_token", "fence_token");
+  }
+
+  @Test
+  void legacyApplicationLeasePreservesMissingOwnerAndFence() throws IOException {
+    var catalog = loadCatalog();
+    var kind = catalog.kinds().stream()
+        .filter(candidate -> candidate.sourceKind().equals("application_lease"))
+        .findFirst()
+        .orElseThrow();
+    var payload = representativePayload(kind);
+    payload.remove("ownerToken");
+    payload.remove("fenceToken");
+
+    var transformed = MigrationTransformerRegistry.from(catalog)
+        .require(kind.sourceKind())
+        .transform(new MigrationSourceDocument(
+            kind.sourceKind(), kind.sourceSchemaVersion(), "legacy-application", payload));
+
+    assertThat(transformed.rows().getFirst().values())
+        .doesNotContainKeys("owner_token", "fence_token");
+  }
+
+  @Test
+  void legacyMongoDatePreservesTheCentralLocalDate() throws IOException {
+    var catalog = loadCatalog();
+    var kind = catalog.kinds().stream()
+        .filter(candidate -> candidate.sourceKind().equals("nhtsa_import_state"))
+        .findFirst()
+        .orElseThrow();
+    var payload = representativePayload(kind);
+    payload.put("callsOnDate", Date.from(Instant.parse("2026-05-10T05:00:00Z")));
+
+    var transformed = MigrationTransformerRegistry.from(catalog)
+        .require(kind.sourceKind())
+        .transform(new MigrationSourceDocument(
+            kind.sourceKind(), kind.sourceSchemaVersion(), "nhtsa", payload));
+
+    assertThat(transformed.rows().getFirst().values())
+        .containsEntry("calls_on_date", LocalDate.of(2026, 5, 10));
+  }
+
+  @Test
+  void legacyCanesDecimalStringsPreserveExactMoney() throws IOException {
+    var catalog = loadCatalog();
+    var kind = catalog.kinds().stream()
+        .filter(candidate -> candidate.sourceKind().equals("price_snapshot"))
+        .findFirst()
+        .orElseThrow();
+    var payload = representativePayload(kind);
+    payload.put("averagePrice", "12.52");
+    var metro = new LinkedHashMap<String, Object>(
+        (Map<String, Object>) ((List<?>) payload.get("metroPrices")).getFirst());
+    metro.put("price", "14.99");
+    payload.put("metroPrices", List.of(metro));
+
+    var transformed = MigrationTransformerRegistry.from(catalog)
+        .require(kind.sourceKind())
+        .transform(new MigrationSourceDocument(
+            kind.sourceKind(), kind.sourceSchemaVersion(), "2026-06-01", payload));
+
+    assertThat(transformed.rows()).anySatisfy(row -> assertThat(row.values())
+        .containsEntry("average_price", new BigDecimal("12.52")));
+    assertThat(transformed.rows()).anySatisfy(row -> assertThat(row.values())
+        .containsEntry("price", new BigDecimal("14.99")));
+  }
+
+  private static String representativeSourceId(PostgresqlMigrationCatalog.Kind kind) {
+    return kind.identifierType().equals("object-id")
+        ? "000000000000000000000006"
+        : "id-🛰-" + kind.sourceKind();
+  }
+
+  @Test
   void everyComplexProductionOwnerRejectsUnconsumedNestedLeaves() throws IOException {
     var catalog = loadCatalog();
     var registry = MigrationTransformerRegistry.from(catalog);
@@ -100,7 +261,7 @@ class MigrationTransformerAllKindsTest {
 
         try {
           registry.require(kind.sourceKind()).transform(new MigrationSourceDocument(
-              kind.sourceKind(), kind.sourceSchemaVersion(), "id", payload));
+              kind.sourceKind(), kind.sourceSchemaVersion(), representativeSourceId(kind), payload));
           throw new AssertionError("Accepted unconsumed leaf for " + kind.sourceKind() + "." + field);
         } catch (MigrationTransformationException failure) {
           assertThat(failure).hasMessageNotContaining("must-not-leak");
@@ -122,7 +283,7 @@ class MigrationTransformerAllKindsTest {
           payload.put(field, nullRequiredPath(payload.get(field), requiredPath));
           try {
             registry.require(kind.sourceKind()).transform(new MigrationSourceDocument(
-                kind.sourceKind(), kind.sourceSchemaVersion(), "null-required", payload));
+                kind.sourceKind(), kind.sourceSchemaVersion(), representativeSourceId(kind), payload));
             throw new AssertionError("Accepted null required leaf "
                 + kind.sourceKind() + "." + field + "." + requiredPath);
           } catch (MigrationTransformationException expected) {
@@ -162,7 +323,7 @@ class MigrationTransformerAllKindsTest {
           }
           assertThatThrownBy(() -> registry.require(kind.sourceKind()).transform(
               new MigrationSourceDocument(
-                  kind.sourceKind(), kind.sourceSchemaVersion(), "removed-required", payload)))
+                  kind.sourceKind(), kind.sourceSchemaVersion(), representativeSourceId(kind), payload)))
               .as(kind.sourceKind() + "." + field + "." + requiredPath)
               .isInstanceOf(MigrationTransformationException.class)
               .hasMessage("PostgreSQL migration source document is invalid.");
@@ -192,7 +353,7 @@ class MigrationTransformerAllKindsTest {
           assertThatThrownBy(() -> {
             nullPayload.put(field, nullRequiredPath(nullPayload.get(field), requiredPath));
             registry.require(kind.sourceKind()).transform(new MigrationSourceDocument(
-                kind.sourceKind(), kind.sourceSchemaVersion(), "null-pseudo-entry", nullPayload));
+                kind.sourceKind(), kind.sourceSchemaVersion(), representativeSourceId(kind), nullPayload));
           }).as(kind.sourceKind() + "." + field + "." + requiredPath)
               .isInstanceOf(MigrationTransformationException.class)
               .hasMessage("PostgreSQL migration source document is invalid.");
@@ -202,7 +363,7 @@ class MigrationTransformerAllKindsTest {
           payload.put(field, removed.value());
           alignUploadChunkMaps(kind, field, payload, removed.mapKey());
           registry.require(kind.sourceKind()).transform(new MigrationSourceDocument(
-              kind.sourceKind(), kind.sourceSchemaVersion(), "cardinality-change", payload));
+              kind.sourceKind(), kind.sourceSchemaVersion(), representativeSourceId(kind), payload));
           if (requiredPath.equals("$item")) {
             listCardinalityChanges++;
           } else {
@@ -227,7 +388,7 @@ class MigrationTransformerAllKindsTest {
               invariant));
           assertThatThrownBy(() -> registry.require(kind.sourceKind()).transform(
               new MigrationSourceDocument(
-                  kind.sourceKind(), kind.sourceSchemaVersion(), "invalid-invariant", payload)))
+                  kind.sourceKind(), kind.sourceSchemaVersion(), representativeSourceId(kind), payload)))
               .as(kind.sourceKind() + "." + mappingEntry.getKey() + ":" + invariant)
               .isInstanceOf(MigrationTransformationException.class);
         }

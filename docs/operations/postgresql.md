@@ -79,7 +79,7 @@ or rotates the login roles, creates the `christopherbell` and `test` databases,
 revokes default public access, and invokes the migration-only Java entry point
 from the pinned active release. That entry point validates database, role,
 server address, port, and exact PostgreSQL version before applying Flyway V1
-through V14 as the owner role. It then applies runtime grants to all ten
+through V27 as the owner role. It then applies runtime grants to all ten
 canonical schemas. It does not construct or start the website application.
 
 pgAdmin imports two password-free registrations:

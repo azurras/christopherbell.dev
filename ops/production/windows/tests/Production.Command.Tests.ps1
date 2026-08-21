@@ -17,7 +17,8 @@ Describe 'native Windows production command surface' {
         ($output -join "`n") | Should -Match 'mongo-consolidate'
         ($output -join "`n") | Should -Match 'mongo-consolidation-rollback'
         foreach ($command in 'postgres-install','postgres-bootstrap','postgres-status',
-            'postgres-backup','postgres-restore-check','postgres-pgadmin') {
+            'postgres-backup','postgres-restore-check','postgres-pgadmin',
+            'postgres-shadow','postgres-reconcile') {
             ($output -join "`n") | Should -Match ([regex]::Escape($command))
         }
         $LASTEXITCODE | Should -Be 0
@@ -29,7 +30,8 @@ Describe 'native Windows production command surface' {
 
         foreach ($functionName in 'Install-ProductionPostgreSql','Initialize-ProductionPostgreSql',
             'Get-ProductionPostgreSqlStatus','New-ProductionPostgreSqlBackup',
-            'Test-ProductionPostgreSqlRestore','Install-ProductionPgAdmin') {
+            'Test-ProductionPostgreSqlRestore','Install-ProductionPgAdmin',
+            'Invoke-ProductionPostgreSqlShadow','Invoke-ProductionPostgreSqlReconcile') {
             Get-Command $functionName -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
         }
     }

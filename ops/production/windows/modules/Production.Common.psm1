@@ -587,7 +587,7 @@ Usage: prod.cmd <command> [-WhatIf]
 
 Commands: install, deploy, status, logs, restart, releases, rollback, backup,
           postgres-install, postgres-bootstrap, postgres-status, postgres-backup,
-          postgres-restore-check, postgres-pgadmin,
+          postgres-restore-check, postgres-pgadmin, postgres-shadow, postgres-reconcile,
           mongo-inventory, mongo-consolidation-preview, mongo-consolidate,
           mongo-consolidation-rollback, verify-startup, uninstall,
           auto-install, auto-deploy, auto-status, auto-remove, sensor-install,
@@ -598,6 +598,8 @@ mongo-consolidation-preview is read-only. mongo-consolidate requires
 -ConfirmDomainCollectionRollback. Automatic deployment never supplies either switch.
 postgres-bootstrap requires -ConfirmPostgreSqlBootstrap. PostgreSQL install,
 bootstrap, backup, restore-check, and pgAdmin commands support -WhatIf.
+postgres-shadow stages and reconciles all 52 kinds. postgres-reconcile rechecks the
+same durable run. Neither command authorizes finalization or cutover.
 '@ | Write-Output
 }
 

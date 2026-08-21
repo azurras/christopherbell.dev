@@ -66,6 +66,22 @@ class MongoMigrationSourceReaderTest {
   }
 
   @Test
+  void excludesOnlyValidatedSpringTypeMetadataFromTheDomainPayload() throws IOException {
+    var envelope = envelope("lease-metadata", 7);
+    envelope.get("payload", Document.class).append(
+        "_class", "dev.christopherbell.libs.mongo.lease.MongoApplicationLease");
+    client.getDatabase("test").getCollection("application_runtime").insertOne(envelope);
+
+    var batch = new MongoMigrationSourceReader(client)
+        .readAfter(context(), kind(), null, 1);
+
+    assertThat(batch.documents()).singleElement().satisfies(document -> {
+      assertThat(document.payload()).doesNotContainKey("_class");
+      assertThat(document.payload()).containsEntry("fenceToken", 7L);
+    });
+  }
+
+  @Test
   void engineCrashResumeAdvancesAcrossLexicallyReversedOpaqueCursors() throws IOException {
     var collection = client.getDatabase("test").getCollection("application_runtime");
     collection.insertMany(List.of(envelope("lease-3", 1), envelope("lease-4", 2)));
@@ -146,6 +162,65 @@ class MongoMigrationSourceReaderTest {
   }
 
   @Test
+  void explicitlyDeclaredObjectIdsPageAsBsonAndBecomeCanonicalHexSourceIds()
+      throws IOException {
+    var firstId = new ObjectId("000000000000000000000006");
+    var secondId = new ObjectId("000000000000000000000007");
+    var first = envelope("ignored-1", 1);
+    first.put("_id", new Document("kind", "application_lease").append("legacyId", firstId));
+    var second = envelope("ignored-2", 2);
+    second.put("_id", new Document("kind", "application_lease").append("legacyId", secondId));
+    client.getDatabase("test").getCollection("application_runtime").insertMany(List.of(second, first));
+    var reader = new MongoMigrationSourceReader(client);
+    var objectIdKind = withIdentifierType(kind(), "object-id");
+
+    var firstPage = reader.readAfter(context(), objectIdKind, null, 1);
+    var secondPage = reader.readAfter(context(), objectIdKind, firstPage.lastCursor(), 1);
+
+    assertThat(firstPage.documents()).extracting(MigrationSourceDocument::sourceId)
+        .containsExactly(firstId.toHexString());
+    assertThat(secondPage.documents()).extracting(MigrationSourceDocument::sourceId)
+        .containsExactly(secondId.toHexString());
+  }
+
+  @Test
+  void explicitlyDeclaredMixedIdentifiersPageInCanonicalSourceIdOrder()
+      throws IOException {
+    var objectId = new ObjectId("000000000000000000000006");
+    var objectEnvelope = envelope("ignored", 1);
+    objectEnvelope.put(
+        "_id", new Document("kind", "application_lease").append("legacyId", objectId));
+    var stringEnvelope = envelope("lease-a", 2);
+    client.getDatabase("test").getCollection("application_runtime")
+        .insertMany(List.of(stringEnvelope, objectEnvelope));
+    var reader = new MongoMigrationSourceReader(client);
+    var mixedKind = withIdentifierType(kind(), "string-or-object-id");
+
+    var firstPage = reader.readAfter(context(), mixedKind, null, 1);
+    var secondPage = reader.readAfter(context(), mixedKind, firstPage.lastCursor(), 1);
+
+    assertThat(firstPage.documents()).extracting(MigrationSourceDocument::sourceId)
+        .containsExactly(objectId.toHexString());
+    assertThat(secondPage.documents()).extracting(MigrationSourceDocument::sourceId)
+        .containsExactly("lease-a");
+  }
+
+  @Test
+  void mixedIdentifiersRejectCanonicalStringAndObjectIdCollisions() throws IOException {
+    var shared = "000000000000000000000006";
+    var objectEnvelope = envelope("ignored", 1);
+    objectEnvelope.put("_id", new Document("kind", "application_lease")
+        .append("legacyId", new ObjectId(shared)));
+    client.getDatabase("test").getCollection("application_runtime")
+        .insertMany(List.of(envelope(shared, 2), objectEnvelope));
+
+    assertThatThrownBy(() -> new MongoMigrationSourceReader(client)
+        .readAfter(context(), withIdentifierType(kind(), "string-or-object-id"), null, 1))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("PostgreSQL migration Mongo source envelope is invalid.");
+  }
+
+  @Test
   void rejectsACursorWhoseDecodedIdentifierHasTheWrongBsonType() throws IOException {
     client.getDatabase("test").getCollection("application_runtime")
         .insertOne(envelope("lease-a", 1));
@@ -203,6 +278,18 @@ class MongoMigrationSourceReaderTest {
         .filter(candidate -> candidate.sourceKind().equals("application_lease"))
         .findFirst()
         .orElseThrow();
+  }
+
+  private static PostgresqlMigrationCatalog.Kind withIdentifierType(
+      PostgresqlMigrationCatalog.Kind kind, String identifierType) {
+    return new PostgresqlMigrationCatalog.Kind(
+        kind.sourceCollection(), kind.sourceKind(), kind.sourceOwner(),
+        kind.minimumBridgeRelease(), kind.sourceCanonicalization(),
+        kind.targetCanonicalization(), kind.sourceSchemaVersion(), kind.transformerVersion(),
+        identifierType, kind.targetSchema(), kind.targetTables(), kind.loadOrder(),
+        kind.dependsOnKinds(), kind.keyMapping(), kind.fieldMappings(), kind.deleteBehavior(),
+        kind.versionSemantics(), kind.expirySemantics(), kind.canonicalHash(),
+        kind.reconciliation(), kind.portQueries(), kind.transformerClass());
   }
 
   private static PostgresqlMigrationCatalog catalog() throws IOException {

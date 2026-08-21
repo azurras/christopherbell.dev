@@ -3,6 +3,8 @@ package dev.christopherbell.configuration.persistence.migration;
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.gt;
+import static com.mongodb.client.model.Filters.nor;
+import static com.mongodb.client.model.Filters.or;
 import static com.mongodb.client.model.Sorts.ascending;
 
 import com.mongodb.client.MongoClient;
@@ -13,7 +15,9 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import org.bson.BsonType;
 import org.bson.Document;
+import org.bson.types.ObjectId;
 
 /** Direct, bounded, read-only access to consolidated Mongo domain envelopes. */
 public final class MongoMigrationSourceReader
@@ -21,6 +25,7 @@ public final class MongoMigrationSourceReader
   private static final Set<String> ENVELOPE_KEYS =
       Set.of("_id", "_kind", "schemaVersion", "payload");
   private static final Set<String> ID_KEYS = Set.of("kind", "legacyId");
+  private static final String SPRING_TYPE_METADATA = "_class";
   private static final int MAX_CURSOR_BYTES = 16 * 1024;
   private final MongoClient client;
 
@@ -37,12 +42,17 @@ public final class MongoMigrationSourceReader
     if (limit < 1 || limit > context.request().batchSize()) {
       throw invalid();
     }
+    requireValidIdentifierTypes(context, kind);
+    if ("string-or-object-id".equals(kind.identifierType())) {
+      return readMixedIdentifiers(context, kind, cursor, limit);
+    }
     var filter = and(
         eq("_kind", kind.sourceKind()));
     String previousIdentifier = null;
     if (cursor != null) {
-      previousIdentifier = decodeCursor(kind, cursor);
-      filter = and(filter, gt("_id.legacyId", previousIdentifier));
+      var decodedIdentifier = decodeCursor(kind, cursor);
+      previousIdentifier = canonicalIdentifier(kind.identifierType(), decodedIdentifier);
+      filter = and(filter, gt("_id.legacyId", decodedIdentifier));
     }
     var documents = new ArrayList<MigrationSourceDocument>();
     String lastCursor = null;
@@ -63,6 +73,85 @@ public final class MongoMigrationSourceReader
       previousIdentifier = converted.document().sourceId();
     }
     return new SourceBatch(documents, lastCursor);
+  }
+
+  private SourceBatch readMixedIdentifiers(
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind,
+      String cursor,
+      int limit) {
+    String previousIdentifier = null;
+    if (cursor != null) {
+      previousIdentifier = canonicalIdentifier(kind.identifierType(), decodeCursor(kind, cursor));
+    } else {
+      requireNoMixedIdentifierCollision(context, kind);
+    }
+    var pipeline = new ArrayList<Document>();
+    pipeline.add(new Document("$match", new Document("_kind", kind.sourceKind())));
+    pipeline.add(new Document("$set", new Document(
+        "_migrationSourceId", new Document("$toString", "$_id.legacyId"))));
+    if (previousIdentifier != null) {
+      pipeline.add(new Document("$match", new Document(
+          "_migrationSourceId", new Document("$gt", previousIdentifier))));
+    }
+    pipeline.add(new Document("$sort", new Document("_migrationSourceId", 1)));
+    pipeline.add(new Document("$limit", limit));
+    pipeline.add(new Document("$unset", "_migrationSourceId"));
+    var documents = new ArrayList<MigrationSourceDocument>();
+    String lastCursor = null;
+    for (var envelope : client.getDatabase(context.sourceIdentity().database())
+        .getCollection(kind.sourceCollection())
+        .aggregate(pipeline)
+        .collation(Collation.builder().locale("simple").build())) {
+      var converted = convert(kind, envelope);
+      if (previousIdentifier != null
+          && MongoSimpleStringOrder.compare(
+              converted.document().sourceId(), previousIdentifier) <= 0) {
+        throw invalid();
+      }
+      documents.add(converted.document());
+      lastCursor = converted.cursor();
+      previousIdentifier = converted.document().sourceId();
+    }
+    return new SourceBatch(documents, lastCursor);
+  }
+
+  private void requireValidIdentifierTypes(
+      ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
+    var field = "_id.legacyId";
+    var allowed = switch (kind.identifierType()) {
+      case "string", "uuid-string" -> com.mongodb.client.model.Filters.type(
+          field, BsonType.STRING);
+      case "object-id" -> com.mongodb.client.model.Filters.type(field, BsonType.OBJECT_ID);
+      case "string-or-object-id" -> or(
+          com.mongodb.client.model.Filters.type(field, BsonType.STRING),
+          com.mongodb.client.model.Filters.type(field, BsonType.OBJECT_ID));
+      default -> throw invalid();
+    };
+    var invalid = client.getDatabase(context.sourceIdentity().database())
+        .getCollection(kind.sourceCollection())
+        .find(and(eq("_kind", kind.sourceKind()), nor(allowed)))
+        .limit(1)
+        .first();
+    if (invalid != null) {
+      throw invalid();
+    }
+  }
+
+  private void requireNoMixedIdentifierCollision(
+      ValidatedMigrationContext context, PostgresqlMigrationCatalog.Kind kind) {
+    var collision = client.getDatabase(context.sourceIdentity().database())
+        .getCollection(kind.sourceCollection())
+        .aggregate(java.util.List.of(
+            new Document("$match", new Document("_kind", kind.sourceKind())),
+            new Document("$group", new Document("_id", new Document(
+                "$toString", "$_id.legacyId")).append("count", new Document("$sum", 1))),
+            new Document("$match", new Document("count", new Document("$gt", 1))),
+            new Document("$limit", 1)))
+        .first();
+    if (collision != null) {
+      throw invalid();
+    }
   }
 
   @Override
@@ -102,27 +191,47 @@ public final class MongoMigrationSourceReader
       throw invalid();
     }
     var values = new LinkedHashMap<String, Object>();
-    payload.forEach(values::put);
+    payload.forEach((key, value) -> {
+      if (!SPRING_TYPE_METADATA.equals(key)) {
+        values.put(key, value);
+      } else if (!(value instanceof String typeName) || typeName.isBlank()) {
+        throw invalid();
+      }
+    });
     return new Converted(
         new MigrationSourceDocument(
-            kind.sourceKind(), kind.sourceSchemaVersion(), (String) legacyId, values),
+            kind.sourceKind(), kind.sourceSchemaVersion(),
+            canonicalIdentifier(kind.identifierType(), legacyId), values),
         encodeCursor(legacyId));
   }
 
   private static boolean validIdentifierType(String identifierType, Object legacyId) {
-    if (!(legacyId instanceof String text)) {
-      return false;
-    }
     return switch (identifierType) {
-      case "string" -> true;
+      case "string" -> legacyId instanceof String;
       case "uuid-string" -> {
+        if (!(legacyId instanceof String text)) {
+          yield false;
+        }
         try {
           yield java.util.UUID.fromString(text).toString().equals(text);
         } catch (IllegalArgumentException failure) {
           yield false;
         }
       }
+      case "object-id" -> legacyId instanceof ObjectId;
+      case "string-or-object-id" -> legacyId instanceof String || legacyId instanceof ObjectId;
       default -> false;
+    };
+  }
+
+  private static String canonicalIdentifier(String identifierType, Object legacyId) {
+    return switch (identifierType) {
+      case "string", "uuid-string" -> (String) legacyId;
+      case "object-id" -> ((ObjectId) legacyId).toHexString();
+      case "string-or-object-id" -> legacyId instanceof ObjectId objectId
+          ? objectId.toHexString()
+          : (String) legacyId;
+      default -> throw invalid();
     };
   }
 
@@ -134,7 +243,7 @@ public final class MongoMigrationSourceReader
     return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
   }
 
-  private static String decodeCursor(
+  private static Object decodeCursor(
       PostgresqlMigrationCatalog.Kind kind, String cursor) {
     try {
       var bytes = Base64.getUrlDecoder().decode(cursor);
@@ -147,7 +256,7 @@ public final class MongoMigrationSourceReader
           || !validIdentifierType(kind.identifierType(), value)) {
         throw invalid();
       }
-      return (String) value;
+      return value;
     } catch (IllegalArgumentException failure) {
       throw invalid();
     }

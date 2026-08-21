@@ -4,6 +4,7 @@ param(
     [ValidateSet('help','install','deploy','status','logs','restart','releases','rollback','backup',
         'postgres-install','postgres-bootstrap','postgres-status','postgres-backup',
         'postgres-restore-check','postgres-pgadmin',
+        'postgres-shadow','postgres-reconcile',
         'mongo-inventory','mongo-consolidation-preview','mongo-consolidate',
         'mongo-consolidation-rollback','verify-startup','uninstall','auto-install',
         'auto-deploy','auto-status','auto-remove','sensor-install','sensor-status',
@@ -22,7 +23,7 @@ Import-Module (Join-Path $moduleRoot 'Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $moduleRoot 'Production.WriterStart.psm1') -Global -Force
 foreach ($module in 'Production.MusicRuntime','Production.Deploy','Production.SharedFolder',
     'Production.Install','Production.Sensors','Production.Operations','Production.AutoDeploy',
-    'Production.DomainCollections','Production.PostgreSql') {
+    'Production.DomainCollections','Production.PostgreSql','Production.PostgreSqlMigration') {
     Import-Module (Join-Path $moduleRoot "$module.psm1") -Force
 }
 
@@ -59,6 +60,8 @@ function Invoke-ProductionCommand {
         'postgres-backup' = { New-ProductionPostgreSqlBackup -WhatIf:$WhatIf }
         'postgres-restore-check' = { Test-ProductionPostgreSqlRestore -WhatIf:$WhatIf }
         'postgres-pgadmin' = { Install-ProductionPgAdmin -WhatIf:$WhatIf }
+        'postgres-shadow' = { Invoke-ProductionPostgreSqlShadow -WhatIf:$WhatIf }
+        'postgres-reconcile' = { Invoke-ProductionPostgreSqlReconcile -WhatIf:$WhatIf }
         'mongo-inventory' = {
             Get-ProductionMongoCollectionInventory | ConvertTo-Json -Depth 100
         }

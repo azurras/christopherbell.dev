@@ -253,7 +253,7 @@ public class PostgresAccountRepository implements AccountRepository {
 
   @Override
   public Optional<Account> findByEmailIgnoreCase(String email) {
-    return findOne(DSL.lower(ACCOUNT.EMAIL).eq(normalize(email)), false);
+    return findOne(ACCOUNT.NORMALIZED_EMAIL.eq(normalize(email)), false);
   }
 
   @Override

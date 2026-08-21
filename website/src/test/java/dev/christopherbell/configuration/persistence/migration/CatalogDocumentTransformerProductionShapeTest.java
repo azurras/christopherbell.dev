@@ -171,7 +171,7 @@ class CatalogDocumentTransformerProductionShapeTest {
     payload.put("metadata", Map.of("ticket", "ABC-1"));
     payload.put("createdOn", NOW);
 
-    var transformed = transform("admin_activity", "activity-1", payload);
+    var transformed = transform("admin_activity", "64b000000000000000000001", payload);
 
     assertThat(rows(transformed, "admin_activity")).singleElement()
         .satisfies(row -> assertThat(row.values())

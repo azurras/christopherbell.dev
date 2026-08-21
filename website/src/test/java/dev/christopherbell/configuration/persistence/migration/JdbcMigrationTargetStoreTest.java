@@ -300,6 +300,64 @@ class JdbcMigrationTargetStoreTest {
   }
 
   @Test
+  void typedPublisherOrdersHeterogeneousRootShapesBeforeTheirChildren() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var connection = database.connect()) {
+      var kind = loadCatalog().kinds().stream()
+          .filter(candidate -> candidate.sourceKind().equals("vin_decode_cache"))
+          .findFirst().orElseThrow();
+      var firstRoot = new java.util.LinkedHashMap<String, Object>();
+      firstRoot.put("vin", "JM1BN1L30K1234501");
+      firstRoot.put("response_present", true);
+      firstRoot.put("raw_decoded_values_present", true);
+      var secondRoot = new java.util.LinkedHashMap<String, Object>();
+      secondRoot.put("vin", "JM1BN1L30K1234502");
+      secondRoot.put("make", "Mazda");
+      secondRoot.put("response_present", true);
+      secondRoot.put("raw_decoded_values_present", true);
+      var rows = List.of(
+          new StagedMigrationRow(
+              "JM1BN1L30K1234501", "mobility", "vin_decode_cache", 0, firstRoot),
+          new StagedMigrationRow(
+              "JM1BN1L30K1234501", "mobility", "vin_decode_raw_value", 0,
+              Map.of("field_name", "Make", "field_value", "Mazda")),
+          new StagedMigrationRow(
+              "JM1BN1L30K1234502", "mobility", "vin_decode_cache", 0, secondRoot),
+          new StagedMigrationRow(
+              "JM1BN1L30K1234502", "mobility", "vin_decode_raw_value", 0,
+              Map.of("field_name", "Make", "field_value", "Mazda")));
+
+      new JdbcRelationalRowPublisher().publish(connection, database.prefix(), kind, rows);
+
+      assertThat(domainCount(database, "mobility", "vin_decode_raw_value")).isEqualTo(2);
+    }
+  }
+
+  @Test
+  void typedPublisherComparesFixedScaleDecimalsByNumericValue() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var connection = database.connect()) {
+      var kind = loadCatalog().kinds().stream()
+          .filter(candidate -> candidate.sourceKind().equals("zip_coordinate"))
+          .findFirst().orElseThrow();
+      var row = new StagedMigrationRow(
+          "78703", "mobility", "zip_coordinate", 0,
+          Map.of(
+              "zip_code", "78703",
+              "latitude", new java.math.BigDecimal("30.1"),
+              "longitude", new java.math.BigDecimal("-97.2"),
+              "source", "TASK8",
+              "source_year", 2026,
+              "last_updated_on", Instant.parse("2026-08-01T00:00:00Z")));
+      var publisher = new JdbcRelationalRowPublisher();
+
+      publisher.publish(connection, database.prefix(), kind, List.of(row));
+
+      assertThat(publisher.rowEquivalent(connection, database.prefix(), kind, row)).isTrue();
+    }
+  }
+
+  @Test
   void failedBatchAndFailedPublicationRollbackThenResumeToExactTypedRows() throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrate()) {
       var context = context(database);

@@ -28,14 +28,15 @@ public class PostgresMusicRuntimeStateRepository implements MusicRuntimeStateRep
   @Override public MusicQueueState saveQueue(MusicQueueState state) {
     return database.transactionResult(configuration -> {
       DSLContext transaction = DSL.using(configuration);
-      saveHeader(transaction, MusicRuntimeStateDocument.QUEUE_ID, "QUEUE", state.version(),
+      var runtimeStateId = saveHeader(
+          transaction, MusicRuntimeStateDocument.QUEUE_ID, "QUEUE", state.version(),
           null, null, null, null, null, null, null);
       transaction.deleteFrom(QUEUE_ENTRY)
-          .where(QUEUE_ENTRY.RUNTIME_STATE_ID.eq(MusicRuntimeStateDocument.QUEUE_ID)).execute();
+          .where(QUEUE_ENTRY.RUNTIME_STATE_ID.eq(runtimeStateId)).execute();
       for (int ordinal = 0; ordinal < state.entries().size(); ordinal++) {
         MusicQueueState.Entry entry = state.entries().get(ordinal);
         transaction.insertInto(QUEUE_ENTRY)
-            .set(QUEUE_ENTRY.RUNTIME_STATE_ID, MusicRuntimeStateDocument.QUEUE_ID)
+            .set(QUEUE_ENTRY.RUNTIME_STATE_ID, runtimeStateId)
             .set(QUEUE_ENTRY.ORDINAL, ordinal).set(QUEUE_ENTRY.QUEUE_ENTRY_ID, entry.id())
             .set(QUEUE_ENTRY.TRACK_ID, entry.trackId()).set(QUEUE_ENTRY.OBSERVED_TOKEN, entry.observedToken())
             .set(QUEUE_ENTRY.ENQUEUED_BY_ACCOUNT_ID, entry.enqueuedByAccountId())
@@ -47,7 +48,7 @@ public class PostgresMusicRuntimeStateRepository implements MusicRuntimeStateRep
 
   @Override public Optional<MusicRadioState> findRadio() {
     return database.selectFrom(RUNTIME_STATE)
-        .where(RUNTIME_STATE.RUNTIME_STATE_ID.eq(MusicRuntimeStateDocument.RADIO_ID))
+        .where(RUNTIME_STATE.STATE_KIND.eq("RADIO"))
         .fetchOptional(row -> new MusicRadioState(MusicRadioState.ID, row.getStationSequence(),
             row.getTrackId(), row.getObservedToken(), row.getStartedAt().toInstant(),
             row.getDurationSeconds().doubleValue(), MusicRadioState.Source.valueOf(row.getRadioSource()),
@@ -63,10 +64,10 @@ public class PostgresMusicRuntimeStateRepository implements MusicRuntimeStateRep
 
   private static Optional<MusicQueueState> findQueue(DSLContext context) {
     return context.selectFrom(RUNTIME_STATE)
-        .where(RUNTIME_STATE.RUNTIME_STATE_ID.eq(MusicRuntimeStateDocument.QUEUE_ID))
+        .where(RUNTIME_STATE.STATE_KIND.eq("QUEUE"))
         .fetchOptional(row -> {
           List<MusicQueueState.Entry> entries = context.selectFrom(QUEUE_ENTRY)
-              .where(QUEUE_ENTRY.RUNTIME_STATE_ID.eq(MusicRuntimeStateDocument.QUEUE_ID))
+              .where(QUEUE_ENTRY.RUNTIME_STATE_ID.eq(row.getRuntimeStateId()))
               .orderBy(QUEUE_ENTRY.ORDINAL.asc()).fetch(entry -> new MusicQueueState.Entry(
                   entry.getQueueEntryId(), entry.getTrackId(), entry.getObservedToken(),
                   entry.getEnqueuedByAccountId(), entry.getEnqueuedAt().toInstant()));
@@ -74,10 +75,16 @@ public class PostgresMusicRuntimeStateRepository implements MusicRuntimeStateRep
         });
   }
 
-  private static void saveHeader(DSLContext context, String id, String kind, Long expectedVersion,
+  private static String saveHeader(
+      DSLContext context, String id, String kind, Long expectedVersion,
       Long stationSequence, String trackId, String observedToken, java.time.Instant startedAt,
       Double durationSeconds, String source, String queueEntryId) {
+    var existingId = context.select(RUNTIME_STATE.RUNTIME_STATE_ID).from(RUNTIME_STATE)
+        .where(RUNTIME_STATE.STATE_KIND.eq(kind)).fetchOptional(RUNTIME_STATE.RUNTIME_STATE_ID);
     if (expectedVersion == null) {
+      if (existingId.isPresent()) {
+        throw new OptimisticLockingFailureException("Music runtime state already exists.");
+      }
       context.insertInto(RUNTIME_STATE).set(RUNTIME_STATE.RUNTIME_STATE_ID, id)
           .set(RUNTIME_STATE.STATE_KIND, kind).set(RUNTIME_STATE.STATION_SEQUENCE, stationSequence)
           .set(RUNTIME_STATE.TRACK_ID, trackId).set(RUNTIME_STATE.OBSERVED_TOKEN, observedToken)
@@ -86,8 +93,9 @@ public class PostgresMusicRuntimeStateRepository implements MusicRuntimeStateRep
               durationSeconds == null ? null : BigDecimal.valueOf(durationSeconds))
           .set(RUNTIME_STATE.RADIO_SOURCE, source).set(RUNTIME_STATE.QUEUE_ENTRY_ID, queueEntryId)
           .set(RUNTIME_STATE.VERSION, 0L).execute();
-      return;
+      return id;
     }
+    var storedId = existingId.orElse(id);
     long nextVersion = Math.incrementExact(expectedVersion);
     int changed = context.update(RUNTIME_STATE).set(RUNTIME_STATE.STATE_KIND, kind)
         .set(RUNTIME_STATE.STATION_SEQUENCE, stationSequence).set(RUNTIME_STATE.TRACK_ID, trackId)
@@ -97,10 +105,12 @@ public class PostgresMusicRuntimeStateRepository implements MusicRuntimeStateRep
             durationSeconds == null ? null : BigDecimal.valueOf(durationSeconds))
         .set(RUNTIME_STATE.RADIO_SOURCE, source).set(RUNTIME_STATE.QUEUE_ENTRY_ID, queueEntryId)
         .set(RUNTIME_STATE.VERSION, nextVersion)
-        .where(RUNTIME_STATE.RUNTIME_STATE_ID.eq(id).and(RUNTIME_STATE.VERSION.eq(expectedVersion)))
+        .where(RUNTIME_STATE.RUNTIME_STATE_ID.eq(storedId)
+            .and(RUNTIME_STATE.VERSION.eq(expectedVersion)))
         .execute();
     if (changed != 1) {
       throw new OptimisticLockingFailureException("Music runtime state changed during save.");
     }
+    return storedId;
   }
 }

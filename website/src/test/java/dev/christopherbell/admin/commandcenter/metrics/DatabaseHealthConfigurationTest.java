@@ -19,8 +19,10 @@ class DatabaseHealthConfigurationTest {
     contextRunner.run(context -> {
       assertThat(context.getStartupFailure()).isNull();
       assertThat(context).hasBean("databaseHealthIndicator");
-      assertThat(context.getBean("databaseHealthIndicator", HealthIndicator.class)
-          .health().getStatus()).isEqualTo(Status.UP);
+      var health = context.getBean("databaseHealthIndicator", HealthIndicator.class).health();
+      assertThat(health.getStatus()).isEqualTo(Status.UP);
+      assertThat(health.getDetails()).containsExactlyInAnyOrderEntriesOf(java.util.Map.of(
+          "backend", "postgresql", "database", "christopherbell", "schemaVersion", "27"));
     });
   }
 
@@ -33,6 +35,14 @@ class DatabaseHealthConfigurationTest {
         public boolean ping(Duration timeout) {
           return timeout.equals(Duration.ofSeconds(2));
         }
+      };
+    }
+
+    @Bean
+    PersistenceIdentityProbe persistenceIdentityProbe() {
+      return timeout -> {
+        assertThat(timeout).isEqualTo(Duration.ofSeconds(2));
+        return new PersistenceIdentity("postgresql", "christopherbell", "27");
       };
     }
   }

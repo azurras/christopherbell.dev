@@ -2,6 +2,8 @@ package dev.christopherbell.configuration.postgresql;
 
 import static dev.christopherbell.persistence.jooq.platform.Tables.APPLICATION_LEASE;
 import static dev.christopherbell.persistence.jooq.music.Tables.ACCESS_ATTEMPT;
+import static dev.christopherbell.persistence.jooq.music.Tables.RUNTIME_STATE;
+import static dev.christopherbell.persistence.jooq.music.Tables.QUEUE_ENTRY;
 import static dev.christopherbell.persistence.jooq.music.Tables.TRACK;
 import static dev.christopherbell.persistence.jooq.shared_folder.Tables.AUDIT_EVENT;
 import static dev.christopherbell.persistence.jooq.shared_folder.Tables.MAINTENANCE_LEASE;
@@ -101,6 +103,8 @@ class PostgresTask4BehaviorContractTest {
 
   @Test
   void musicContractsPreservePathsOrderingCasAggregationAndBoundedQueries() {
+    database.dsl().deleteFrom(QUEUE_ENTRY).execute();
+    database.dsl().deleteFrom(RUNTIME_STATE).execute();
     var tracks = new PostgresMusicTrackRepository(database.dsl());
     tracks.save(track("track-a", "album/a.mp3", "Alpha", true));
     tracks.save(track("track-b", "album/b.mp3", "Beta", false));
@@ -166,6 +170,30 @@ class PostgresTask4BehaviorContractTest {
     assertThat(attempts.deleteExpired(NOW.plus(Duration.ofDays(31)), 1)).isZero();
   }
 
+  @Test
+  void musicRuntimeRepositoryPreservesAndUpdatesLegacyStateIdentity() {
+    database.dsl().deleteFrom(QUEUE_ENTRY).execute();
+    database.dsl().deleteFrom(RUNTIME_STATE).execute();
+    database.dsl().insertInto(RUNTIME_STATE)
+        .set(RUNTIME_STATE.RUNTIME_STATE_ID, "legacy-queue-state")
+        .set(RUNTIME_STATE.STATE_KIND, "QUEUE")
+        .set(RUNTIME_STATE.VERSION, 4L)
+        .execute();
+    var runtime = new PostgresMusicRuntimeStateRepository(database.dsl());
+
+    var loaded = runtime.findQueue().orElseThrow();
+    var saved = runtime.saveQueue(
+        new MusicQueueState(MusicQueueState.ID, List.of(), loaded.version()));
+
+    assertThat(saved.version()).isEqualTo(5L);
+    assertThat(database.dsl().select(RUNTIME_STATE.RUNTIME_STATE_ID, RUNTIME_STATE.VERSION)
+        .from(RUNTIME_STATE).where(RUNTIME_STATE.STATE_KIND.eq("QUEUE")).fetchOne())
+        .satisfies(row -> {
+          assertThat(row.value1()).isEqualTo("legacy-queue-state");
+          assertThat(row.value2()).isEqualTo(5L);
+        });
+  }
+
   @ParameterizedTest(name = "rejects Windows-unsafe persisted path: {0}")
   @MethodSource("windowsUnsafePersistedPaths")
   void postgresAdaptersRejectEveryWindowsUnsafeRelativePath(String path) {
@@ -208,6 +236,8 @@ class PostgresTask4BehaviorContractTest {
 
   @Test
   void databaseTimeLeasesHaveOneWinnerAndMonotonicFencingAcrossConnections() throws Exception {
+    database.dsl().deleteFrom(MAINTENANCE_LEASE).execute();
+    database.dsl().deleteFrom(APPLICATION_LEASE).execute();
     var maintenance = new PostgresSharedFolderMaintenanceLeaseStore(database.dsl());
     assertThat(maintenance.tryAcquire("owner-a", Duration.ofMinutes(1))).isPresent();
     assertThat(maintenance.tryAcquire("owner-b", Duration.ofMinutes(1))).isEmpty();
@@ -232,6 +262,58 @@ class PostgresTask4BehaviorContractTest {
     assertThat(application.renew(first, Duration.ofMinutes(1))).isEmpty();
     assertThat(application.release(first)).isFalse();
     assertThat(application.release(next)).isTrue();
+  }
+
+  @Test
+  void maintenanceLeaseTakesOverAnExpiredLegacyRowWithoutOwnershipAtFenceOne() {
+    database.dsl().deleteFrom(MAINTENANCE_LEASE).execute();
+    database.dsl().insertInto(MAINTENANCE_LEASE)
+        .set(MAINTENANCE_LEASE.LEASE_NAME, "shared-folder-maintenance")
+        .set(MAINTENANCE_LEASE.OWNER_TOKEN, (String) null)
+        .set(MAINTENANCE_LEASE.FENCE_TOKEN, (Long) null)
+        .set(MAINTENANCE_LEASE.ACQUIRED_AT,
+            Instant.parse("2026-08-01T00:00:00Z").atOffset(ZoneOffset.UTC))
+        .set(MAINTENANCE_LEASE.EXPIRES_AT,
+            Instant.parse("2026-08-01T00:01:00Z").atOffset(ZoneOffset.UTC))
+        .execute();
+
+    var grant = new PostgresSharedFolderMaintenanceLeaseStore(database.dsl())
+        .tryAcquire("legacy-takeover", Duration.ofMinutes(1))
+        .orElseThrow();
+
+    assertThat(grant.ownerId()).isEqualTo("legacy-takeover");
+    assertThat(grant.fenceToken()).isOne();
+  }
+
+  @Test
+  void applicationLeaseTakesOverAnExpiredLegacyRowWithoutOwnershipAtFenceOne() {
+    database.dsl().deleteFrom(APPLICATION_LEASE).execute();
+    database.dsl().insertInto(APPLICATION_LEASE)
+        .set(APPLICATION_LEASE.LEASE_NAME, "legacy-application")
+        .set(APPLICATION_LEASE.OWNER_TOKEN, (String) null)
+        .set(APPLICATION_LEASE.FENCE_TOKEN, (Long) null)
+        .set(APPLICATION_LEASE.ACQUIRED_AT,
+            Instant.parse("2026-08-01T00:00:00Z").atOffset(ZoneOffset.UTC))
+        .set(APPLICATION_LEASE.EXPIRES_AT,
+            Instant.parse("2026-08-01T00:01:00Z").atOffset(ZoneOffset.UTC))
+        .execute();
+
+    var grant = new PostgresApplicationLeaseStore(database.dsl())
+        .tryAcquire("legacy-application", "legacy-owner", Duration.ofMinutes(1))
+        .orElseThrow();
+
+    assertThat(grant.ownerId()).isEqualTo("legacy-owner");
+    assertThat(grant.fenceToken()).isOne();
+  }
+
+  @Test
+  void sharedFolderAuditPreservesUnknownClientOrigin() {
+    var event = new PostgresSharedFolderAuditRepository(database.dsl()).save(
+        new SharedFolderAuditEvent("unknown-origin", "unknown", "READ", "folder/file.txt",
+            1L, "SUCCESS", null, "unknown", Instant.parse("2026-08-01T00:00:00Z"),
+            Instant.parse("2027-08-01T00:00:00Z")));
+
+    assertThat(event.clientIp()).isEqualTo("unknown");
   }
 
   @Test

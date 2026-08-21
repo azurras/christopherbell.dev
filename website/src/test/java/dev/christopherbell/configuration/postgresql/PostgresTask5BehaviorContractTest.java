@@ -15,6 +15,8 @@ import dev.christopherbell.admin.model.AdminActivity;
 import dev.christopherbell.canesboxtracker.PostgresCanesBoxPriceSnapshotRepository;
 import dev.christopherbell.canesboxtracker.model.CanesBoxPriceSnapshot;
 import dev.christopherbell.configuration.persistence.PostgresqlConstraintViolationCause;
+import dev.christopherbell.location.model.ZipCoordinate;
+import dev.christopherbell.location.zip.PostgresZipCoordinateRepository;
 import dev.christopherbell.vehicle.core.PostgresVehicleRepository;
 import dev.christopherbell.vehicle.model.Vehicle;
 import dev.christopherbell.whatsforlunch.restaurant.PostgresRestaurantRepository;
@@ -128,6 +130,36 @@ class PostgresTask5BehaviorContractTest {
     assertSafeDuplicate(
         () -> activities.insert(activity(sensitiveActivityId, "REDACTION_TEST")),
         sensitiveActivityId);
+  }
+
+  @Test
+  void vehiclePreservesHistoricalModifierWithoutLiveAccount() {
+    var vehicles = new PostgresVehicleRepository(database.dsl());
+    var historical = Vehicle.builder().id("task8-historical-vehicle")
+        .vin("TASK8HISTORYVIN02").make("Task8").model("History").year(2026)
+        .lastModifiedBy("task8-retired-account").createdOn(NOW).lastUpdatedOn(NOW).build();
+
+    vehicles.save(historical);
+
+    assertThat(vehicles.findById(historical.getId()))
+        .get()
+        .extracting(Vehicle::getLastModifiedBy)
+        .isEqualTo("task8-retired-account");
+  }
+
+  @Test
+  void zipCoordinatePreservesMissingCreationTimestamp() {
+    var coordinates = new PostgresZipCoordinateRepository(database.dsl());
+    var legacy = ZipCoordinate.builder().zipCode("78702").latitude(30.2638)
+        .longitude(-97.7169).source("TASK8").sourceYear(2026)
+        .createdOn(null).lastUpdatedOn(NOW).build();
+
+    coordinates.saveAll(List.of(legacy));
+
+    assertThat(coordinates.findById(legacy.getZipCode()))
+        .get()
+        .extracting(ZipCoordinate::getCreatedOn, ZipCoordinate::getLastUpdatedOn)
+        .containsExactly(null, NOW);
   }
 
   @Test

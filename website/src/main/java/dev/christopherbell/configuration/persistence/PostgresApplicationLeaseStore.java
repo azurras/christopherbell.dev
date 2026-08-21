@@ -32,7 +32,8 @@ public class PostgresApplicationLeaseStore implements LeaseStore {
         .set(APPLICATION_LEASE.EXPIRES_AT, expiresAt)
         .onConflict(APPLICATION_LEASE.LEASE_NAME).doUpdate()
         .set(APPLICATION_LEASE.OWNER_TOKEN, ownerId)
-        .set(APPLICATION_LEASE.FENCE_TOKEN, APPLICATION_LEASE.FENCE_TOKEN.plus(1L))
+        .set(APPLICATION_LEASE.FENCE_TOKEN,
+            DSL.coalesce(APPLICATION_LEASE.FENCE_TOKEN, 0L).plus(1L))
         .set(APPLICATION_LEASE.ACQUIRED_AT, now).set(APPLICATION_LEASE.EXPIRES_AT, expiresAt)
         .where(APPLICATION_LEASE.OWNER_TOKEN.eq(ownerId)
             .or(APPLICATION_LEASE.EXPIRES_AT.le(now))).returning().fetchOne();

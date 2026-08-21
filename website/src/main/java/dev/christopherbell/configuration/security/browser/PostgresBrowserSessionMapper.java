@@ -14,7 +14,7 @@ final class PostgresBrowserSessionMapper {
     return BrowserSession.builder()
         .id(record.getBrowserSessionId())
         .accountId(record.getAccountId())
-        .role(Role.valueOf(record.getRole()))
+        .role(record.getRole() == null ? null : Role.valueOf(record.getRole()))
         .tokenHash(record.getTokenHash())
         .previousTokenHash(record.getPreviousTokenHash())
         .previousTokenExpiresOn(instant(record.getPreviousTokenExpiresOn()))
