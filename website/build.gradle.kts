@@ -25,8 +25,8 @@ dependencyManagement {
         mavenBom("org.springframework.modulith:spring-modulith-bom:2.1.0")
     }
     dependencies {
-        dependency("net.bytebuddy:byte-buddy:1.18.11")
-        dependency("net.bytebuddy:byte-buddy-agent:1.18.11")
+        dependency("net.bytebuddy:byte-buddy:1.18.12")
+        dependency("net.bytebuddy:byte-buddy-agent:1.18.12")
     }
 }
 
@@ -55,10 +55,10 @@ dependencies {
     jooqCodegen("org.postgresql:postgresql")
 
     // Host metrics; Windows sensor binaries are pinned generated resources below.
-    implementation("com.github.oshi:oshi-core:7.4.2")
+    implementation("com.github.oshi:oshi-core:7.5.0")
     implementation("net.java.dev.jna:jna-platform-jpms:5.19.1")
 
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0")
     implementation("org.webjars:bootstrap:5.3.8")
 
     // Rate Limiting
@@ -68,7 +68,7 @@ dependencies {
     implementation("com.azure:azure-data-tables:12.5.11")
 
     // JSoup
-    implementation("org.jsoup:jsoup:1.22.2")
+    implementation("org.jsoup:jsoup:1.23.1")
 
     // MapStruct
     implementation("org.mapstruct:mapstruct:1.6.3")
@@ -85,7 +85,7 @@ dependencies {
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("org.springframework.modulith:spring-modulith-starter-test")
     testImplementation(testFixtures(project(":cbell-lib")))
-    testImplementation("org.jooq:jooq-codegen:3.21.5")
+    testImplementation("org.jooq:jooq-codegen:3.21.7")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testAnnotationProcessor("org.projectlombok:lombok:1.18.46")
     testCompileOnly("org.projectlombok:lombok:1.18.46")
