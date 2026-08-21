@@ -4,7 +4,7 @@ param(
     [ValidateSet('help','install','deploy','status','logs','restart','releases','rollback','backup',
         'postgres-install','postgres-bootstrap','postgres-status','postgres-backup',
         'postgres-restore-check','postgres-pgadmin',
-        'postgres-shadow','postgres-reconcile',
+        'postgres-shadow','postgres-reconcile','postgres-cutover',
         'mongo-inventory','mongo-consolidation-preview','mongo-consolidate',
         'mongo-consolidation-rollback','verify-startup','uninstall','auto-install',
         'auto-deploy','auto-status','auto-remove','sensor-install','sensor-status',
@@ -14,6 +14,7 @@ param(
     [switch]$ConfirmDomainCollectionCutover,
     [switch]$ConfirmDomainCollectionRollback,
     [switch]$ConfirmPostgreSqlBootstrap,
+    [switch]$ConfirmPostgreSqlCutover,
     [string]$CloudflareTokenPath
 )
 
@@ -34,6 +35,7 @@ function Invoke-ProductionCommand {
         [switch]$ConfirmDomainCollectionCutover,
         [switch]$ConfirmDomainCollectionRollback,
         [switch]$ConfirmPostgreSqlBootstrap,
+        [switch]$ConfirmPostgreSqlCutover,
         [string]$CloudflareTokenPath
     )
 
@@ -62,6 +64,13 @@ function Invoke-ProductionCommand {
         'postgres-pgadmin' = { Install-ProductionPgAdmin -WhatIf:$WhatIf }
         'postgres-shadow' = { Invoke-ProductionPostgreSqlShadow -WhatIf:$WhatIf }
         'postgres-reconcile' = { Invoke-ProductionPostgreSqlReconcile -WhatIf:$WhatIf }
+        'postgres-cutover' = {
+            if (-not $WhatIf -and -not $ConfirmPostgreSqlCutover) {
+                throw 'PostgreSQL authority cutover requires explicit confirmation.'
+            }
+            Invoke-ProductionPostgreSqlCutover `
+                -ConfirmPostgreSqlCutover:$ConfirmPostgreSqlCutover -WhatIf:$WhatIf
+        }
         'mongo-inventory' = {
             Get-ProductionMongoCollectionInventory | ConvertTo-Json -Depth 100
         }
@@ -103,4 +112,5 @@ Invoke-ProductionCommand -Command $Command -WhatIf:$WhatIf `
     -ConfirmDomainCollectionCutover:$ConfirmDomainCollectionCutover `
     -ConfirmDomainCollectionRollback:$ConfirmDomainCollectionRollback `
     -ConfirmPostgreSqlBootstrap:$ConfirmPostgreSqlBootstrap `
+    -ConfirmPostgreSqlCutover:$ConfirmPostgreSqlCutover `
     -CloudflareTokenPath $CloudflareTokenPath

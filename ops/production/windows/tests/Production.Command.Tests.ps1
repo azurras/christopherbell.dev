@@ -18,7 +18,7 @@ Describe 'native Windows production command surface' {
         ($output -join "`n") | Should -Match 'mongo-consolidation-rollback'
         foreach ($command in 'postgres-install','postgres-bootstrap','postgres-status',
             'postgres-backup','postgres-restore-check','postgres-pgadmin',
-            'postgres-shadow','postgres-reconcile') {
+            'postgres-shadow','postgres-reconcile','postgres-cutover') {
             ($output -join "`n") | Should -Match ([regex]::Escape($command))
         }
         $LASTEXITCODE | Should -Be 0
