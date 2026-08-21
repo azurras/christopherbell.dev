@@ -44,16 +44,16 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         if: matrix.language == 'java-kotlin'
         with:
           distribution: temurin
           java-version: 25
-      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
         if: matrix.language == 'java-kotlin'
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
-      - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+      - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -64,6 +64,6 @@ jobs:
           JOOQ_CODEGEN_PASSWORD: ${{ format('ci-only-{0}-{1}', github.run_id, github.run_attempt) }}
           JOOQ_CODEGEN_SCHEMA_PREFIX: cbtest_codeql_${{ github.run_id }}_${{ github.run_attempt }}_
         run: ./gradlew :website:jooqCodegen :website:classes
-      - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+      - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           category: '/language:${{ matrix.language }}'
