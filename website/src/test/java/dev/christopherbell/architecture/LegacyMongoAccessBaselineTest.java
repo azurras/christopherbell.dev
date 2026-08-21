@@ -58,6 +58,7 @@ class LegacyMongoAccessBaselineTest {
       "dev.christopherbell.configuration.persistence.migration.MongoFinalizationFreezeGuard",
       "dev.christopherbell.configuration.persistence.migration.MongoMigrationSourceReader",
       "dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationCli",
+      "dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationSourceSnapshotCli",
       "dev.christopherbell.configuration.persistence.migration.ProductionFinalizationFreezeGuard");
 
   @Test

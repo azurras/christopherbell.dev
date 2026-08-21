@@ -8,6 +8,18 @@ The standalone `postgresqlMigration` command supports `shadow`, `finalize`, `rec
 `status`. It is not a web endpoint. `shadow` publishes deterministic typed rehearsal rows without
 deleting target rows. Only `finalize` may delete frozen-source rows that are absent from the source.
 
+Production operators must not invoke `finalize` directly. The sole public
+production entry point is:
+
+```powershell
+.\ops\production\windows\prod.cmd postgres-cutover -ConfirmPostgreSqlCutover
+```
+
+Use it only after explicit approval for an up-to-30-minute maintenance window.
+It owns the writer stop, final archive and restore proof, signed finalization
+authority, reconciliation, PostgreSQL backup and restore proof, candidate,
+one-way authority marker, listener activation, verification, and soak journal.
+
 ## Finalization write exclusion
 
 Run `finalize` only in an approved native-Windows maintenance window. The command requires all of
@@ -35,3 +47,36 @@ recorded run before an authenticated administrator issues `fsyncUnlock`. Until t
 exclusion is owned, the retained MongoDB fsync lock and stopped website service are the writer-
 safety boundary. Do not restart the website writer before the source and typed PostgreSQL rows have
 been reconciled.
+
+## Durable phases and recovery
+
+The protected cutover journal permits only this ordered chain:
+
+```text
+PLANNED -> WRITERS_STOPPED -> MONGO_ARCHIVED -> POSTGRESQL_FINALIZED
+-> POSTGRESQL_RECONCILED -> POSTGRESQL_BACKED_UP -> CANDIDATE_VERIFIED
+-> AUTHORITY_PUBLICATION_STARTED -> AUTHORITY_PUBLISHED
+-> PRODUCTION_ACTIVE -> PRODUCTION_VERIFIED -> SOAKING
+```
+
+Every transition is hash-bound to its prior phase and an immutable evidence
+sidecar. A resumed command revalidates the release, lock token, database
+identities, catalog digest, target JDBC digest, transition order, and journal
+digest before performing another effect.
+
+Before `AUTHORITY_PUBLICATION_STARTED`, a failure may return to MongoDB only
+when the authority marker is absent and MongoDB `currentOp` explicitly reports
+`fsyncLock:false`. Otherwise leave `ChristopherBellDev` stopped and follow the
+authenticated unlock procedure above. The terminal pre-authority state is
+`ROLLED_BACK`.
+
+At `AUTHORITY_PUBLICATION_STARTED` or later, rollback to MongoDB is forbidden,
+including when authority-marker persistence is uncertain. The terminal fault
+state is `FORWARD_RECOVERY_REQUIRED`; repair PostgreSQL and continue the
+recorded release forward. Do not delete or rewrite the journal or sidecars.
+
+After `SOAKING`, retain the stopped MongoDB service, final MongoDB archive,
+PostgreSQL archive, authority evidence, journal, and bridge role for at least
+the recorded 14-day soak. Retain the final MongoDB archive for the recorded
+90-day period. Task 10 decommissioning is a separate approved operation after
+the soak evidence is complete.

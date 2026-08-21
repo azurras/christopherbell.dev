@@ -74,9 +74,26 @@ public final class KindMigrationEngine {
       ValidatedMigrationContext context,
       PostgresqlMigrationCatalog.Kind kind,
       java.util.function.Consumer<List<TransformedMigrationDocument>> stagedValidator) {
+    return readSourceSnapshot(
+        source, context, kind, transformers.require(kind.sourceKind()), stagedValidator);
+  }
+
+  static MigrationSourceSnapshot readSourceSnapshot(
+      MigrationSourceReader source,
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind,
+      MigrationTransformer transformer) {
+    return readSourceSnapshot(source, context, kind, transformer, ignored -> {});
+  }
+
+  private static MigrationSourceSnapshot readSourceSnapshot(
+      MigrationSourceReader source,
+      ValidatedMigrationContext context,
+      PostgresqlMigrationCatalog.Kind kind,
+      MigrationTransformer transformer,
+      java.util.function.Consumer<List<TransformedMigrationDocument>> stagedValidator) {
     var actual = MigrationCheckpoint.initial();
     var relationalDigest = MigrationCheckpoint.initial().sourceDigest();
-    var transformer = transformers.require(kind.sourceKind());
     String previousSourceId = null;
     while (true) {
       var batch = source.readAfter(

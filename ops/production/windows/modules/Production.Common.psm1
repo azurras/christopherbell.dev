@@ -588,6 +588,7 @@ Usage: prod.cmd <command> [-WhatIf]
 Commands: install, deploy, status, logs, restart, releases, rollback, backup,
           postgres-install, postgres-bootstrap, postgres-status, postgres-backup,
           postgres-restore-check, postgres-pgadmin, postgres-shadow, postgres-reconcile,
+          postgres-cutover,
           mongo-inventory, mongo-consolidation-preview, mongo-consolidate,
           mongo-consolidation-rollback, verify-startup, uninstall,
           auto-install, auto-deploy, auto-status, auto-remove, sensor-install,
@@ -600,6 +601,8 @@ postgres-bootstrap requires -ConfirmPostgreSqlBootstrap. PostgreSQL install,
 bootstrap, backup, restore-check, and pgAdmin commands support -WhatIf.
 postgres-shadow stages and reconciles all 52 kinds. postgres-reconcile rechecks the
 same durable run. Neither command authorizes finalization or cutover.
+postgres-cutover requires -ConfirmPostgreSqlCutover and performs the one-way
+production authority transfer. Run it only in an explicitly approved maintenance window.
 '@ | Write-Output
 }
 

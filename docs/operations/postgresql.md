@@ -3,8 +3,10 @@
 This runbook covers the native PostgreSQL 18.4 runtime used by
 `christopherbell.dev`. PostgreSQL is loopback-only, uses SCRAM authentication,
 and is managed by the guarded commands in `ops/production/windows/prod.ps1`.
-These commands prepare and verify PostgreSQL; they do not authorize a MongoDB
-source freeze, migration finalization, website cutover, or production restart.
+The install, bootstrap, status, backup, shadow, and reconcile commands prepare
+or verify PostgreSQL; they do not authorize a MongoDB source freeze, migration
+finalization, website cutover, or production restart. Only the separately
+confirmed `postgres-cutover` command crosses that authority boundary.
 
 ## Authority and safety boundary
 
@@ -140,6 +142,28 @@ After PostgreSQL preparation is green:
 4. During the rollback window, retain MongoDB and the bridge role. Remove them
    only after the approved soak and backup evidence are complete.
 
+Preview the complete production command without effects:
+
+```powershell
+.\prod.cmd postgres-cutover -ConfirmPostgreSqlCutover -WhatIf
+```
+
+After an explicit, time-bounded maintenance-window approval, run from elevated
+PowerShell 7:
+
+```powershell
+.\prod.cmd postgres-cutover -ConfirmPostgreSqlCutover
+```
+
+The command permits at most 30 minutes from its persisted `PLANNED` journal to
+`SOAKING`. It stops the website writer, creates and dry-restores the final
+MongoDB archive, finalizes and reconciles all 52 kinds, creates and verifies a
+PostgreSQL backup, tests the PostgreSQL candidate, and only then persists the
+authority-publication intent. From `AUTHORITY_PUBLICATION_STARTED` onward,
+recovery is forward-only: MongoDB must not be restored as the application
+authority. A successful run leaves MongoDB stopped and records a 14-day soak
+plus a 90-day MongoDB archive-retention deadline.
+
 ## Incident response
 
 - If bootstrap fails before the Java migration entry point, correct the role or
@@ -153,3 +177,10 @@ After PostgreSQL preparation is green:
   managed configuration and re-run status before any application start.
 - A failed MongoDB finalization has additional writer-freeze recovery rules;
   follow `postgresql-migration.md` and do not improvise an unlock or restart.
+- Before `AUTHORITY_PUBLICATION_STARTED`, the wrapper restores the Mongo-backed
+  website only after `currentOp` proves MongoDB is not fsync-locked. If the
+  lock state is true or cannot be proven, keep the website stopped and perform
+  the authenticated recovery procedure below.
+- At or after `AUTHORITY_PUBLICATION_STARTED`, never start Mongo-backed writers.
+  Repair PostgreSQL, activate the recorded release, and finish production
+  verification from the durable cutover journal.
