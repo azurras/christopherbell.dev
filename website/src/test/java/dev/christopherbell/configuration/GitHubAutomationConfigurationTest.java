@@ -23,6 +23,8 @@ class GitHubAutomationConfigurationTest {
       "gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92";
   private static final String UPLOAD_ARTIFACT =
       "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a";
+  private static final String DOWNLOAD_ARTIFACT =
+      "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131";
   private static final String CODEQL_INIT =
       "github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81";
   private static final String CODEQL_ANALYZE =
@@ -64,6 +66,33 @@ class GitHubAutomationConfigurationTest {
     assertThat(upload.at("/with/retention-days").asInt()).isEqualTo(14);
     assertThat(upload.at("/with/path").asText())
         .contains("**/build/reports/tests/**", "**/build/test-results/**");
+  }
+
+  @Test
+  void ciGeneratesJooqSourcesForTheExactCommitBeforeEveryPlatformBuild() throws IOException {
+    var workflow = readYaml(".github/workflows/ci.yml");
+    var codegen = workflow.at("/jobs/jooq-codegen");
+    var codegenSteps = codegen.path("steps");
+    var build = workflow.at("/jobs/build");
+    var buildSteps = build.path("steps");
+
+    assertThat(codegen.at("/services/postgres/image").asText()).isEqualTo("postgres:18.4");
+    assertThat(stepNamed(codegenSteps, "Generate jOOQ sources").path("run").asText())
+        .isEqualTo("./gradlew :website:jooqCodegen");
+    assertThat(stepNamed(codegenSteps, "Generate jOOQ sources")
+        .at("/env/JOOQ_CODEGEN_JDBC_URL").asText())
+        .isEqualTo("jdbc:postgresql://127.0.0.1:5432/test");
+    assertThat(stepUsing(codegenSteps, UPLOAD_ARTIFACT).at("/with/name").asText())
+        .isEqualTo("jooq-generated-${{ github.sha }}");
+    assertThat(stepUsing(codegenSteps, UPLOAD_ARTIFACT).at("/with/if-no-files-found").asText())
+        .isEqualTo("error");
+
+    assertThat(build.path("needs").asText()).isEqualTo("jooq-codegen");
+    var download = stepUsing(buildSteps, DOWNLOAD_ARTIFACT);
+    assertThat(download.at("/with/name").asText())
+        .isEqualTo("jooq-generated-${{ github.sha }}");
+    assertThat(download.at("/with/path").asText())
+        .isEqualTo("website/build/generated-src/jooq/main");
   }
 
   @Test
@@ -127,8 +156,13 @@ class GitHubAutomationConfigurationTest {
     var steps = workflow.at("/jobs/analyze/steps");
     assertThat(stepUsing(steps, CODEQL_INIT)
         .at("/with/languages").asText()).isEqualTo("${{ matrix.language }}");
-    assertThat(stepRunning(steps, "./gradlew :website:classes").path("if").asText())
+    assertThat(workflow.at("/jobs/analyze/services/postgres/image").asText())
+        .isEqualTo("postgres:18.4");
+    var javaBuild = stepRunning(steps, "./gradlew :website:jooqCodegen :website:classes");
+    assertThat(javaBuild.path("if").asText())
         .isEqualTo("matrix.language == 'java-kotlin'");
+    assertThat(javaBuild.at("/env/JOOQ_CODEGEN_JDBC_URL").asText())
+        .isEqualTo("jdbc:postgresql://127.0.0.1:5432/test");
     assertThat(stepUsing(steps, CODEQL_ANALYZE).isMissingNode()).isFalse();
   }
 

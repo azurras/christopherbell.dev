@@ -117,9 +117,10 @@ val generatedJooqDirectory = layout.buildDirectory.dir("generated-src/jooq/main"
 val jooqOwnershipDirectory = layout.buildDirectory.dir("jooq/ownership")
 
 sourceSets.named("main") {
-    if (jooqEnvironmentConfigured) {
-        java.srcDir(generatedJooqDirectory)
-    }
+    // PostgreSQL adapters always compile against generated jOOQ types. Local builds generate
+    // them in this invocation; CI downloads the exact-SHA artifact produced by its prerequisite
+    // codegen job. A missing artifact therefore remains a hard compile failure.
+    java.srcDir(generatedJooqDirectory)
 }
 
 val jooqPreparation = sourceSets.create("jooqPreparation") {
