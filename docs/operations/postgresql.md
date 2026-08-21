@@ -78,8 +78,9 @@ With an approved PostgreSQL-preparation window, run:
 .\prod.cmd postgres-status
 ```
 
-Installation accepts only the signed PostgreSQL 18.4 Windows runtime and the
-fixed `postgresql-x64-18` service identity. The installer receives its administrator
+Installation accepts only the winget-verified PostgreSQL 18.4-1 installer, exact
+registered package identity, runtime version, and fixed `postgresql-x64-18` service
+binding under `NT AUTHORITY\NetworkService`. The installer receives its administrator
 credential through a protected temporary EDB option file whose path, but never content,
 appears in the process arguments; the file is removed on success or failure. If an idle
 legacy `postgresql-x64-16` service owns port 5432, installation stops it without deleting

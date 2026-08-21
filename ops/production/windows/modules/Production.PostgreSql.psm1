@@ -531,14 +531,63 @@ function Write-ProductionPostgreSqlInstallerOptionFile {
     }
 }
 
+function Get-ProductionPostgreSqlPackageIdentity {
+    $registryPaths = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
+    $matches = @(Get-ItemProperty $registryPaths -ErrorAction SilentlyContinue |
+        Where-Object { ([string]$_.DisplayName).Trim() -ceq 'PostgreSQL 18' })
+    if ($matches.Count -ne 1) {
+        throw 'Exactly one registered PostgreSQL 18 package is required.'
+    }
+    return $matches[0]
+}
+
+function Assert-ProductionPostgreSqlPackageIdentity {
+    param(
+        [Parameter(Mandatory)]$Identity,
+        [Parameter(Mandatory)][pscustomobject]$Config
+    )
+    $expectedRoot = Split-Path -Parent ([string]$Config.postgresqlBinPath)
+    if (([string]$Identity.DisplayName).Trim() -cne 'PostgreSQL 18' -or
+        [string]$Identity.DisplayVersion -cne '18.4-1' -or
+        [string]$Identity.Publisher -cne 'PostgreSQL Global Development Group' -or
+        -not [string]::Equals(
+            [IO.Path]::GetFullPath([string]$Identity.InstallLocation).TrimEnd('\'),
+            [IO.Path]::GetFullPath($expectedRoot).TrimEnd('\'),
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The registered PostgreSQL package identity is not exact version 18.4-1.'
+    }
+}
+
+function Assert-ProductionPostgreSqlServiceIdentity {
+    param(
+        [Parameter(Mandatory)]$Identity,
+        [Parameter(Mandatory)][pscustomobject]$Config
+    )
+    $pgCtl = Join-Path $Config.postgresqlBinPath 'pg_ctl.exe'
+    $expectedPath = "`"$pgCtl`" runservice -N `"$($Config.postgresqlServiceName)`" " +
+        "-D `"$($Config.postgresqlDataPath)`" -w"
+    if ([string]$Identity.Name -cne $script:ExpectedServiceName -or
+        -not [string]::Equals([string]$Identity.PathName,$expectedPath,
+            [StringComparison]::OrdinalIgnoreCase) -or
+        [string]$Identity.StartName -cne 'NT AUTHORITY\NetworkService') {
+        throw 'The PostgreSQL 18 service identity or executable binding is invalid.'
+    }
+}
+
 function Install-ProductionPostgreSql {
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][pscustomobject]$Config,
         [string]$AdministratorPassword,
         [scriptblock]$ProcessAction = $script:DefaultProcessAction,
-        [scriptblock]$SignatureAction = {
-            param($Path) Get-AuthenticodeSignature -LiteralPath $Path
+        [scriptblock]$PackageIdentityAction = {
+            Get-ProductionPostgreSqlPackageIdentity
+        },
+        [scriptblock]$ServiceIdentityAction = {
+            param($Name)
+            Get-CimInstance Win32_Service -Filter "Name='$Name'" -ErrorAction SilentlyContinue
         },
         [scriptblock]$ProtectOptionFileAction = {
             param($Path) Protect-ProductionPath -Path $Path
@@ -556,8 +605,10 @@ function Install-ProductionPostgreSql {
     )
     Assert-ProductionPostgreSqlConfig -Config $Config | Out-Null
     $postgres = Join-Path $Config.postgresqlBinPath 'postgres.exe'
-    $alreadyInstalled = Test-Path -LiteralPath $postgres -PathType Leaf
-    $operation = if ($alreadyInstalled) { 'validate exact signed installation' } else { 'install' }
+    $serviceIdentity = & $ServiceIdentityAction $script:ExpectedServiceName
+    $alreadyInstalled = (Test-Path -LiteralPath $postgres -PathType Leaf) -and
+        $null -ne $serviceIdentity
+    $operation = if ($alreadyInstalled) { 'validate exact registered installation' } else { 'install' }
     if (-not $PSCmdlet.ShouldProcess('PostgreSQL 18.4 native Windows runtime', $operation)) {
         return
     }
@@ -583,14 +634,13 @@ function Install-ProductionPostgreSql {
                 '--accept-source-agreements','--override',$override) @{} | Out-Null
             }
             Assert-ProductionPostgreSqlConfig -Config $Config -RequireInstalled | Out-Null
-            $signature = & $SignatureAction $postgres
-            $subject = if ($signature.SignerCertificate) {
-                [string]$signature.SignerCertificate.Subject
-            } else { '' }
-            if ([string]$signature.Status -cne 'Valid' -or
-                $subject -notmatch '(?i)(EnterpriseDB Corporation|PostgreSQL Global Development Group)') {
-                throw 'The PostgreSQL runtime must have a valid trusted publisher signature.'
+            Assert-ProductionPostgreSqlPackageIdentity -Identity (& $PackageIdentityAction) `
+                -Config $Config
+            $serviceIdentity = & $ServiceIdentityAction $script:ExpectedServiceName
+            if ($null -eq $serviceIdentity) {
+                throw 'The PostgreSQL 18 service registration is missing.'
             }
+            Assert-ProductionPostgreSqlServiceIdentity -Identity $serviceIdentity -Config $Config
             $versionOutput = [string](& $ProcessAction $postgres @('--version') @{})
             if ($versionOutput -notmatch '(?i)PostgreSQL\)\s+18\.4(?:\s|$)') {
                 throw 'The installed PostgreSQL runtime is not exact version 18.4.'

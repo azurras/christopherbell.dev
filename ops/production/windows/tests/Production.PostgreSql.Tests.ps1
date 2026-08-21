@@ -44,6 +44,18 @@ Describe 'native PostgreSQL production operations' {
             javaExe = $java
             smokeAccountEmail = 'admin@christopherbell.dev'
         }
+        $script:packageIdentity = [pscustomobject]@{
+            DisplayName='PostgreSQL 18 '
+            DisplayVersion='18.4-1'
+            Publisher='PostgreSQL Global Development Group'
+            InstallLocation=(Split-Path -Parent $bin)
+        }
+        $script:serviceIdentity = [pscustomobject]@{
+            Name='postgresql-x64-18'
+            PathName="`"$(Join-Path $bin 'pg_ctl.exe')`" runservice " +
+                "-N `"postgresql-x64-18`" -D `"$dataPath`" -w"
+            StartName='NT AUTHORITY\NetworkService'
+        }
     }
 
     It 'holds the protected deployment lock across bootstrap process effects' {
@@ -250,14 +262,6 @@ Describe 'native PostgreSQL production operations' {
             }
             return 'postgres (PostgreSQL) 18.4'
         }
-        $signature = {
-            param($Path)
-            [pscustomobject]@{
-                Status='Valid'; SignerCertificate=[pscustomobject]@{
-                    Subject='CN=EnterpriseDB Corporation'
-                }
-            }
-        }
         $protect = {
             param($Path)
             $protected.Add([pscustomobject]@{ Path=$Path; Length=(Get-Item $Path).Length })
@@ -265,7 +269,9 @@ Describe 'native PostgreSQL production operations' {
 
         $result = Install-ProductionPostgreSql -Config $config `
             -AdministratorPassword $administratorSecret -ProcessAction $process `
-            -SignatureAction $signature -ProtectOptionFileAction $protect `
+            -PackageIdentityAction { $packageIdentity } `
+            -ServiceIdentityAction { param($Name) $serviceIdentity } `
+            -ProtectOptionFileAction $protect `
             -AssertOptionFileAction { param($Path) } `
             -PrepareLegacyAction { [pscustomobject]@{ WasRunning=$false } } `
             -CommitLegacyAction { param($state) } -RollbackLegacyAction { param($state) }
@@ -348,14 +354,6 @@ Describe 'native PostgreSQL production operations' {
 
     It 'completes the legacy service transition when retry finds PostgreSQL 18 already installed' {
         $events = [Collections.Generic.List[string]]::new()
-        $signature = {
-            param($Path)
-            [pscustomobject]@{
-                Status='Valid'; SignerCertificate=[pscustomobject]@{
-                    Subject='CN=EnterpriseDB Corporation'
-                }
-            }
-        }
         $process = {
             param($FilePath,$Arguments,$Environment)
             $events.Add("process:$([IO.Path]::GetFileName($FilePath)):$($Arguments -join ',')")
@@ -363,7 +361,8 @@ Describe 'native PostgreSQL production operations' {
         }
 
         $result = Install-ProductionPostgreSql -Config $config -ProcessAction $process `
-            -SignatureAction $signature `
+            -PackageIdentityAction { $packageIdentity } `
+            -ServiceIdentityAction { param($Name) $serviceIdentity } `
             -PrepareLegacyAction { $events.Add('legacy-stop'); 'legacy-state' } `
             -CommitLegacyAction { param($state) $events.Add("legacy-commit:$state") } `
             -RollbackLegacyAction { param($state) $events.Add("legacy-restore:$state") }
@@ -372,6 +371,84 @@ Describe 'native PostgreSQL production operations' {
         $result.Version | Should -Be '18.4'
         $events | Should -Be @('legacy-stop','process:postgres.exe:--version',
             'legacy-commit:legacy-state')
+    }
+
+    It 'accepts the exact registered EDB package when the PostgreSQL runtime is unsigned' {
+        $events = [Collections.Generic.List[string]]::new()
+        $package = {
+            [pscustomobject]@{
+                DisplayName='PostgreSQL 18 '
+                DisplayVersion='18.4-1'
+                Publisher='PostgreSQL Global Development Group'
+                InstallLocation=(Split-Path -Parent $bin)
+            }
+        }
+
+        $result = Install-ProductionPostgreSql -Config $config `
+            -ProcessAction { param($FilePath,$Arguments,$Environment)
+                return 'postgres (PostgreSQL) 18.4' } `
+            -PackageIdentityAction $package `
+            -ServiceIdentityAction { param($Name) $serviceIdentity } `
+            -PrepareLegacyAction { $events.Add('legacy-stop'); 'legacy-state' } `
+            -CommitLegacyAction { param($state) $events.Add("legacy-commit:$state") } `
+            -RollbackLegacyAction { param($state) $events.Add("legacy-restore:$state") }
+
+        $result.Installed | Should -BeTrue
+        $events | Should -Be @('legacy-stop','legacy-commit:legacy-state')
+    }
+
+    It 'reruns the installer when runtime files exist without the PostgreSQL 18 service' {
+        $events = [Collections.Generic.List[string]]::new()
+        $script:serviceLookupCount = 0
+        $serviceLookup = {
+            param($Name)
+            $script:serviceLookupCount++
+            if ($script:serviceLookupCount -eq 1) { return $null }
+            return $serviceIdentity
+        }
+        $process = {
+            param($FilePath,$Arguments,$Environment)
+            $events.Add("process:$([IO.Path]::GetFileName($FilePath))")
+            if ($FilePath -eq 'winget.exe') { return '' }
+            return 'postgres (PostgreSQL) 18.4'
+        }
+
+        $result = Install-ProductionPostgreSql -Config $config `
+            -AdministratorPassword 'administrator-partial-retry-secret' `
+            -ProcessAction $process -PackageIdentityAction { $packageIdentity } `
+            -ServiceIdentityAction $serviceLookup `
+            -ProtectOptionFileAction { param($Path) } `
+            -AssertOptionFileAction { param($Path) } `
+            -PrepareLegacyAction { $events.Add('legacy-stop'); 'legacy-state' } `
+            -CommitLegacyAction { param($state) $events.Add("legacy-commit:$state") } `
+            -RollbackLegacyAction { param($state) $events.Add("legacy-restore:$state") }
+
+        $result.Installed | Should -BeTrue
+        $events | Should -Be @('legacy-stop','process:winget.exe','process:postgres.exe',
+            'legacy-commit:legacy-state')
+        $script:serviceLookupCount | Should -Be 2
+    }
+
+    It 'rejects a mismatched registered package and restores the legacy service state' {
+        $events = [Collections.Generic.List[string]]::new()
+        $wrongPackage = [pscustomobject]@{
+            DisplayName='PostgreSQL 18'
+            DisplayVersion='18.6-1'
+            Publisher='PostgreSQL Global Development Group'
+            InstallLocation=(Split-Path -Parent $bin)
+        }
+
+        { Install-ProductionPostgreSql -Config $config `
+            -ProcessAction { param($FilePath,$Arguments,$Environment)
+                return 'postgres (PostgreSQL) 18.4' } `
+            -PackageIdentityAction { $wrongPackage } `
+            -ServiceIdentityAction { param($Name) $serviceIdentity } `
+            -PrepareLegacyAction { $events.Add('legacy-stop'); 'legacy-state' } `
+            -CommitLegacyAction { param($state) $events.Add("legacy-commit:$state") } `
+            -RollbackLegacyAction { param($state) $events.Add("legacy-restore:$state") } } |
+            Should -Throw '*package identity*18.4-1*'
+
+        $events | Should -Be @('legacy-stop','legacy-restore:legacy-state')
     }
 
     It 'restores the legacy startup mode when stopping PostgreSQL 16 fails inside preparation' {
@@ -571,23 +648,16 @@ Describe 'native PostgreSQL production operations' {
         $calls | Should -HaveCount 0
     }
 
-    It 'treats an exact installed signed PostgreSQL 18.4 runtime as idempotent' {
+    It 'treats an exact registered PostgreSQL 18.4 runtime as idempotent' {
         $calls = [Collections.Generic.List[object]]::new()
         $action = {
             param($FilePath,$Arguments,$Environment)
             $calls.Add([pscustomobject]@{ FilePath=$FilePath; Arguments=@($Arguments) })
             return 'postgres (PostgreSQL) 18.4'
         }
-        $signature = {
-            param($Path)
-            [pscustomobject]@{
-                Status = 'Valid'
-                SignerCertificate = [pscustomobject]@{ Subject = 'CN=EnterpriseDB Corporation' }
-            }
-        }
-
         $result = Install-ProductionPostgreSql -Config $config -ProcessAction $action `
-            -SignatureAction $signature `
+            -PackageIdentityAction { $packageIdentity } `
+            -ServiceIdentityAction { param($Name) $serviceIdentity } `
             -PrepareLegacyAction { 'legacy-state' } `
             -CommitLegacyAction { param($state) } `
             -RollbackLegacyAction { param($state) }
