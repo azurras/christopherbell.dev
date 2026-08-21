@@ -244,9 +244,13 @@ class FinalizeEvidenceLoaderTest {
     var posix = Files.getFileAttributeView(
         path, java.nio.file.attribute.PosixFileAttributeView.class);
     if (posix != null) {
-      posix.setPermissions(java.util.Set.of(
+      var permissions = java.util.EnumSet.of(
           java.nio.file.attribute.PosixFilePermission.OWNER_READ,
-          java.nio.file.attribute.PosixFilePermission.OWNER_WRITE));
+          java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
+      if (Files.isDirectory(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+        permissions.add(java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE);
+      }
+      posix.setPermissions(permissions);
       return;
     }
     var owner = Files.getOwner(path);
