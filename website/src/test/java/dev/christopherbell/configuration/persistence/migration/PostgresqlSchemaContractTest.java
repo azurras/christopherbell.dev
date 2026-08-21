@@ -696,6 +696,55 @@ class PostgresqlSchemaContractTest {
 
       assertThat(longScalar(connection, "select count(*) from " + sharedFolder
           + ".audit_event where account_id in ('system','unknown')")).isEqualTo(2);
+      var social = quoted(database.prefix() + "social");
+      var platform = quoted(database.prefix() + "platform");
+      execute(connection, "insert into " + identity
+          + ".account (account_id, email, normalized_email, role, status, username) values "
+          + "('reserved-owner', 'reserved@example.test', 'reserved@example.test', "
+          + "'USER', 'ACTIVE', 'reserved-owner')");
+      execute(connection, "insert into " + social
+          + ".post (post_id, account_id, post_text, root_post_id, created_on) values "
+          + "('reserved-post', 'reserved-owner', 'before', 'reserved-post', "
+          + "transaction_timestamp())");
+      execute(connection, "insert into " + social
+          + ".post_edit_audit (post_id, ordinal, editor_account_id, before_text, after_text, "
+          + "edited_on) values ('reserved-post', 0, 'reserved-owner', 'before', 'after', "
+          + "transaction_timestamp())");
+      execute(connection, "insert into " + social
+          + ".post_report (post_report_id, reported_account_id, reporter_account_id, report_type, "
+          + "target_type, reason, status, created_on) values "
+          + "('reserved-report', 'reserved-owner', 'reserved-owner', 'SPAM', 'POST', "
+          + "'reserved', 'OPEN', transaction_timestamp())");
+      execute(connection, "insert into " + platform
+          + ".admin_activity (admin_activity_id, actor_account_id, actor_username, action, "
+          + "target_type, target_id, target_label, reason, message, created_on) values "
+          + "('reserved-activity', 'reserved-owner', 'reserved-owner', 'GUARD', 'ACCOUNT', "
+          + "'reserved-owner', 'reserved-owner', 'reserved', 'reserved', "
+          + "transaction_timestamp())");
+      execute(connection, "insert into " + sharedFolder
+          + ".recycle_item (recycle_item_id, original_path, deleted_by_account_id, deleted_at, "
+          + "expires_at, payload_key, size_bytes, source_fingerprint, state, source_identity, "
+          + "retry_after) values ('reserved-recycle', '/reserved', 'reserved-owner', "
+          + "transaction_timestamp(), transaction_timestamp() + interval '1 day', 'payload', 1, "
+          + "'fingerprint', 'READY', 'source', transaction_timestamp())");
+
+      for (var reserved : List.of("system", "unknown")) {
+        assertForeignKeyViolation(() -> execute(connection, "update " + social
+            + ".post_edit_audit set editor_account_id = '" + reserved
+            + "' where post_id = 'reserved-post'"));
+        assertForeignKeyViolation(() -> execute(connection, "update " + social
+            + ".post_report set reported_account_id = '" + reserved
+            + "' where post_report_id = 'reserved-report'"));
+        assertForeignKeyViolation(() -> execute(connection, "update " + social
+            + ".post_report set reporter_account_id = '" + reserved
+            + "' where post_report_id = 'reserved-report'"));
+        assertForeignKeyViolation(() -> execute(connection, "update " + platform
+            + ".admin_activity set actor_account_id = '" + reserved
+            + "' where admin_activity_id = 'reserved-activity'"));
+        assertForeignKeyViolation(() -> execute(connection, "update " + sharedFolder
+            + ".recycle_item set deleted_by_account_id = '" + reserved
+            + "' where recycle_item_id = 'reserved-recycle'"));
+      }
       assertThatThrownBy(() -> execute(connection, "insert into " + sharedFolder
           + ".audit_event (audit_event_id,account_id,action,outcome,occurred_at,expires_at) values "
           + "('reserved-arbitrary','arbitrary','READ','SUCCESS','2026-08-01T00:00:02Z',"

@@ -7,7 +7,10 @@ DECLARE
 BEGIN
   retained_account_id := to_jsonb(NEW) ->> TG_ARGV[0];
   IF retained_account_id IS NULL
-      OR retained_account_id IN ('system', 'unknown') THEN
+      OR (retained_account_id IN ('system', 'unknown')
+        AND TG_TABLE_SCHEMA = '${schema_prefix}shared_folder'
+        AND TG_TABLE_NAME = 'audit_event'
+        AND TG_ARGV[0] = 'account_id') THEN
     RETURN NEW;
   END IF;
 

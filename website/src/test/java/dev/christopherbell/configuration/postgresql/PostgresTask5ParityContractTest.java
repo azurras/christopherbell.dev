@@ -55,6 +55,7 @@ import dev.christopherbell.whatsforlunch.restaurant.vote.RestaurantVoteRepositor
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 /** PostgreSQL runner for the identical Task 5 persistence contract. */
 @EnabledIfEnvironmentVariable(named = "POSTGRESQL_INTEGRATION_TESTS", matches = "enabled")
@@ -106,7 +107,10 @@ class PostgresTask5ParityContractTest implements Task5PersistenceParityContract 
   @Override public PendingActionStore pendingActions() { return new PostgresPendingActionStore(database.dsl()); }
   @Override public PendingActionStore pendingActionContender() { return new PostgresPendingActionStore(contender.dsl()); }
   @Override public ScheduledCollectorRunStore scheduledRuns() { return new PostgresScheduledCollectorRunStore(database.dsl()); }
-  @Override public DatabaseConnectivityProbe databaseProbe() { return new PostgresDatabaseConnectivityProbe(database.dsl()); }
+  @Override public DatabaseConnectivityProbe databaseProbe() {
+    return new PostgresDatabaseConnectivityProbe(
+        new SingleConnectionDataSource(database.connection(), true));
+  }
 
   private static Account account(String id, String username, String email) {
     return Account.builder().id(id).username(username).email(email).passwordHash("hash")
