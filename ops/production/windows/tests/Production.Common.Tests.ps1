@@ -12,10 +12,17 @@ Describe 'production common operations' {
         $script:node = New-Item -ItemType File -Force (Join-Path $TestDrive 'node.exe')
         $script:mongosh = New-Item -ItemType File -Force (Join-Path $TestDrive 'mongosh.exe')
         $script:configPath = Join-Path $TestDrive 'deploy.json'
+        New-Item -ItemType Directory -Force (Join-Path $TestDrive 'postgres-bin'),
+            (Join-Path $TestDrive 'postgres-backups') | Out-Null
         $script:validConfig = @{
             repositoryPath=$repo; remote='origin'; branch='main'; programDataRoot=(Join-Path $TestDrive 'data')
             javaExe=$java.FullName; nodeExe=$node.FullName; mongoToolsPath=$tools; mongoShellExe=$mongosh.FullName
             backupRoot=$backup
+            postgresqlVersion='18.4'; postgresqlBinPath=(Join-Path $TestDrive 'postgres-bin')
+            postgresqlServiceName='postgresql-x64-18'
+            postgresqlDataPath=(Join-Path $TestDrive 'postgres-data')
+            pgAdminExe=(New-Item -ItemType File -Force (Join-Path $TestDrive 'pgAdmin4.exe')).FullName
+            postgresqlBackupRoot=(Join-Path $TestDrive 'postgres-backups')
             cloudflaredExe=(New-Item -ItemType File -Force (Join-Path $TestDrive 'cloudflared.exe')).FullName
             publicUrl='https://www.christopherbell.dev/'
             publicUrls=@('https://christopherbell.dev/','https://www.christopherbell.dev/')
@@ -23,6 +30,7 @@ Describe 'production common operations' {
             sensorLibrariesEnabled=$false
             releaseRetention=5; autoDeployPollSeconds=60; autoDeployFailureBackoffSeconds=900
         }
+        New-Item -ItemType Directory -Force $validConfig.postgresqlDataPath | Out-Null
     }
 
     It 'loads a complete valid configuration' {
@@ -114,6 +122,17 @@ Describe 'production common operations' {
         { Read-ProductionConfig -Path $configPath } | Should -Throw '*javaExe*'
     }
 
+    It 'rejects unsupported PostgreSQL versions and non-absolute PostgreSQL paths' {
+        $validConfig.postgresqlVersion = '17.7'
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+        { Read-ProductionConfig -Path $configPath } | Should -Throw '*PostgreSQL*18.4*'
+
+        $validConfig.postgresqlVersion = '18.4'
+        $validConfig.postgresqlBinPath = '.\postgres-bin'
+        $validConfig | ConvertTo-Json | Set-Content $configPath
+        { Read-ProductionConfig -Path $configPath } | Should -Throw '*postgresqlBinPath*absolute*'
+    }
+
     It 'keeps junction targets below the release root' {
         $config = [pscustomobject]@{ programDataRoot = (Join-Path $TestDrive 'data') }
         { Assert-ReleasePath $config (Join-Path $TestDrive 'elsewhere') } | Should -Throw '*releases directory*'
@@ -171,6 +190,24 @@ Describe 'production common operations' {
         $path = Join-Path $TestDrive 'app.env'
         'UNSAFE_KEY=value' | Set-Content $path
         { Read-ProductionEnvironment $path } | Should -Throw '*Unsupported*'
+    }
+
+    It 'validates the PostgreSQL application environment without requiring MongoDB' {
+        $path = Join-Path $TestDrive 'app.env'
+        @('APP_JWT_SECRET=abcdefghijklmnopqrstuvwxyz123456','APP_MAIL_ENABLED=false',
+          'APP_PERSISTENCE_BACKEND=postgresql',
+          'SPRING_DATASOURCE_URL=jdbc:postgresql://127.0.0.1:5432/christopherbell',
+          'SPRING_DATASOURCE_USERNAME=christopherbell_app',
+          'SPRING_DATASOURCE_PASSWORD=database-secret-value') | Set-Content $path
+
+        $environment = Read-ProductionEnvironment $path
+
+        $environment.APP_PERSISTENCE_BACKEND | Should -Be 'postgresql'
+        $environment.ContainsKey('SPRING_MONGODB_URI') | Should -BeFalse
+
+        (Get-Content -LiteralPath $path) -replace '127\.0\.0\.1','db.example.com' |
+            Set-Content -LiteralPath $path
+        { Read-ProductionEnvironment $path } | Should -Throw '*loopback*'
     }
 
     It 'rejects placeholder secrets' {

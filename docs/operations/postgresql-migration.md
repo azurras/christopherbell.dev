@@ -1,5 +1,9 @@
 # MongoDB to PostgreSQL migration
 
+Prepare and verify the native database, roles, backups, restore proof, and
+unprivileged pgAdmin registrations first by following the
+[native Windows PostgreSQL runbook](postgresql.md).
+
 The standalone `postgresqlMigration` command supports `shadow`, `finalize`, `reconcile`, and
 `status`. It is not a web endpoint. `shadow` publishes deterministic typed rehearsal rows without
 deleting target rows. Only `finalize` may delete frozen-source rows that are absent from the source.
