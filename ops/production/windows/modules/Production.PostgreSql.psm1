@@ -536,7 +536,10 @@ function Get-ProductionPostgreSqlPackageIdentity {
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
     $matches = @(Get-ItemProperty $registryPaths -ErrorAction SilentlyContinue |
-        Where-Object { ([string]$_.DisplayName).Trim() -ceq 'PostgreSQL 18' })
+        Where-Object {
+            $displayName = $_.PSObject.Properties['DisplayName']
+            $displayName -and ([string]$displayName.Value).Trim() -ceq 'PostgreSQL 18'
+        })
     if ($matches.Count -ne 1) {
         throw 'Exactly one registered PostgreSQL 18 package is required.'
     }

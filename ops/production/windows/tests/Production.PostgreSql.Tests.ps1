@@ -373,6 +373,26 @@ Describe 'native PostgreSQL production operations' {
             'legacy-commit:legacy-state')
     }
 
+    It 'ignores unrelated uninstall entries without DisplayName under strict mode' {
+        InModuleScope Production.PostgreSql {
+            Mock Get-ItemProperty {
+                @(
+                    [pscustomobject]@{ PSPath='HKLM:\Software\Unrelated' },
+                    [pscustomobject]@{
+                        DisplayName='PostgreSQL 18 '
+                        DisplayVersion='18.4-1'
+                        Publisher='PostgreSQL Global Development Group'
+                        InstallLocation='C:\Program Files\PostgreSQL\18'
+                    })
+            }
+
+            $identity = Get-ProductionPostgreSqlPackageIdentity
+
+            $identity.DisplayVersion | Should -Be '18.4-1'
+            $identity.InstallLocation | Should -Be 'C:\Program Files\PostgreSQL\18'
+        }
+    }
+
     It 'accepts the exact registered EDB package when the PostgreSQL runtime is unsigned' {
         $events = [Collections.Generic.List[string]]::new()
         $package = {
