@@ -77,11 +77,18 @@ class GitHubAutomationConfigurationTest {
     var buildSteps = build.path("steps");
 
     assertThat(codegen.at("/services/postgres/image").asText()).isEqualTo("postgres:18.4");
+    var disposablePassword =
+        "${{ format('ci-only-{0}-{1}', github.run_id, github.run_attempt) }}";
+    assertThat(codegen.at("/services/postgres/env/POSTGRES_PASSWORD").asText())
+        .isEqualTo(disposablePassword);
     assertThat(stepNamed(codegenSteps, "Generate jOOQ sources").path("run").asText())
         .isEqualTo("./gradlew :website:jooqCodegen");
     assertThat(stepNamed(codegenSteps, "Generate jOOQ sources")
         .at("/env/JOOQ_CODEGEN_JDBC_URL").asText())
         .isEqualTo("jdbc:postgresql://127.0.0.1:5432/test");
+    assertThat(stepNamed(codegenSteps, "Generate jOOQ sources")
+        .at("/env/JOOQ_CODEGEN_PASSWORD").asText())
+        .isEqualTo(disposablePassword);
     assertThat(stepUsing(codegenSteps, UPLOAD_ARTIFACT).at("/with/name").asText())
         .isEqualTo("jooq-generated-${{ github.sha }}");
     assertThat(stepUsing(codegenSteps, UPLOAD_ARTIFACT).at("/with/if-no-files-found").asText())
@@ -167,11 +174,17 @@ class GitHubAutomationConfigurationTest {
         .at("/with/languages").asText()).isEqualTo("${{ matrix.language }}");
     assertThat(workflow.at("/jobs/analyze/services/postgres/image").asText())
         .isEqualTo("postgres:18.4");
+    var disposablePassword =
+        "${{ format('ci-only-{0}-{1}', github.run_id, github.run_attempt) }}";
+    assertThat(workflow.at("/jobs/analyze/services/postgres/env/POSTGRES_PASSWORD").asText())
+        .isEqualTo(disposablePassword);
     var javaBuild = stepRunning(steps, "./gradlew :website:jooqCodegen :website:classes");
     assertThat(javaBuild.path("if").asText())
         .isEqualTo("matrix.language == 'java-kotlin'");
     assertThat(javaBuild.at("/env/JOOQ_CODEGEN_JDBC_URL").asText())
         .isEqualTo("jdbc:postgresql://127.0.0.1:5432/test");
+    assertThat(javaBuild.at("/env/JOOQ_CODEGEN_PASSWORD").asText())
+        .isEqualTo(disposablePassword);
     assertThat(stepUsing(steps, CODEQL_ANALYZE).isMissingNode()).isFalse();
   }
 

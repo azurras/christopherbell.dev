@@ -123,15 +123,9 @@ function Assert-ProductionPostgreSqlRoleSecrets {
     }
 }
 
-function Read-ProductionPostgreSqlSecrets {
-    [CmdletBinding()]
+function Read-ProductionPostgreSqlSecretValuesCore {
     param([Parameter(Mandatory)][string]$Path)
 
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw 'The protected PostgreSQL role secret file is missing.'
-    }
-    Assert-ProductionPathNotReparse -Path $Path | Out-Null
-    Assert-ProtectedProductionPath -Path $Path | Out-Null
     $allowed = @('POSTGRES_ADMIN_PASSWORD','CB_MIGRATOR_PASSWORD','CB_APP_PASSWORD',
         'CB_BRIDGE_PASSWORD','CB_VIEWER_PASSWORD','CB_BACKUP_PASSWORD','CB_TEST_PASSWORD')
     $values = @{}
@@ -151,17 +145,105 @@ function Read-ProductionPostgreSqlSecrets {
             throw 'The protected PostgreSQL role secret file is incomplete.'
         }
     }
+    if (@($values.Values | Select-Object -Unique).Count -ne $allowed.Count) {
+        throw 'The protected PostgreSQL role secrets must be distinct.'
+    }
+    return $values
+}
+
+function ConvertTo-ProductionPostgreSqlSecrets {
+    param([Parameter(Mandatory)][Collections.IDictionary]$Values)
+
     return [pscustomobject]@{
-        Administrator = [string]$values.POSTGRES_ADMIN_PASSWORD
+        Administrator = [string]$Values.POSTGRES_ADMIN_PASSWORD
         Roles = [ordered]@{
-            Migrator = [string]$values.CB_MIGRATOR_PASSWORD
-            App = [string]$values.CB_APP_PASSWORD
-            Bridge = [string]$values.CB_BRIDGE_PASSWORD
-            Viewer = [string]$values.CB_VIEWER_PASSWORD
-            Backup = [string]$values.CB_BACKUP_PASSWORD
-            Test = [string]$values.CB_TEST_PASSWORD
+            Migrator = [string]$Values.CB_MIGRATOR_PASSWORD
+            App = [string]$Values.CB_APP_PASSWORD
+            Bridge = [string]$Values.CB_BRIDGE_PASSWORD
+            Viewer = [string]$Values.CB_VIEWER_PASSWORD
+            Backup = [string]$Values.CB_BACKUP_PASSWORD
+            Test = [string]$Values.CB_TEST_PASSWORD
         }
     }
+}
+
+function Read-ProductionPostgreSqlSecrets {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw 'The protected PostgreSQL role secret file is missing.'
+    }
+    Assert-ProductionPathNotReparse -Path $Path | Out-Null
+    Assert-ProtectedProductionPath -Path $Path | Out-Null
+    $values = Read-ProductionPostgreSqlSecretValuesCore -Path $Path
+    return ConvertTo-ProductionPostgreSqlSecrets -Values $values
+}
+
+function New-ProductionPostgreSqlRandomSecret {
+    $bytes = [byte[]]::new(32)
+    [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
+}
+
+function New-ProductionPostgreSqlSecretFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [scriptblock]$ProtectDirectoryAction = {
+            param($Directory) Protect-ProductionTree -Path $Directory
+        },
+        [scriptblock]$ProtectPathAction = {
+            param($SecretPath) Protect-ProductionPath -Path $SecretPath
+        },
+        [scriptblock]$AssertPathAction = {
+            param($SecretPath) Assert-ProtectedProductionPath -Path $SecretPath | Out-Null
+        }
+    )
+
+    $directory = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+        throw 'The protected PostgreSQL configuration directory is missing.'
+    }
+    & $ProtectDirectoryAction $directory
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        Assert-ProductionPathNotReparse -Path $Path | Out-Null
+        & $ProtectPathAction $Path
+        & $AssertPathAction $Path
+        $lines = @(Get-Content -LiteralPath $Path | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_) -and -not $_.TrimStart().StartsWith('#')
+        })
+        $placeholders = @($lines | Where-Object { $_ -match '=(?i:replace-with|placeholder)' })
+        if ($placeholders.Count -eq 0) {
+            Read-ProductionPostgreSqlSecretValuesCore -Path $Path | Out-Null
+            return [pscustomobject][ordered]@{ Created=$false; SecretCount=7 }
+        }
+        if ($placeholders.Count -ne 7 -or $lines.Count -ne 7) {
+            throw 'The protected PostgreSQL role secret file is partially configured.'
+        }
+    }
+
+    $keys = @('POSTGRES_ADMIN_PASSWORD','CB_MIGRATOR_PASSWORD','CB_APP_PASSWORD',
+        'CB_BRIDGE_PASSWORD','CB_VIEWER_PASSWORD','CB_BACKUP_PASSWORD','CB_TEST_PASSWORD')
+    $generated = foreach ($key in $keys) { "$key=$(New-ProductionPostgreSqlRandomSecret)" }
+    $temporary = Join-Path $directory ('.postgresql.env.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        $stream = [IO.File]::Open($temporary, [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $stream.Dispose()
+        & $ProtectPathAction $temporary
+        & $AssertPathAction $temporary
+        [IO.File]::WriteAllText($temporary, ($generated -join "`n") + "`n",
+            [Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporary -Destination $Path -Force
+        & $ProtectPathAction $Path
+        & $AssertPathAction $Path
+    } finally {
+        if (Test-Path -LiteralPath $temporary -PathType Leaf) {
+            Remove-Item -LiteralPath $temporary -Force
+        }
+    }
+    return [pscustomobject][ordered]@{ Created=$true; SecretCount=7 }
 }
 
 function Get-ProductionPostgreSqlBootstrapSql {
@@ -286,13 +368,190 @@ function Invoke-ProductionPostgreSqlSchemaMigrationCore {
         '-cp',$jar,'org.springframework.boot.loader.launch.PropertiesLauncher') $environment | Out-Null
 }
 
+function Invoke-ProductionPostgreSqlPreparationCore {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [scriptblock]$ConfigurationAction = {
+            param($PreparationRoot)
+            Install-ConfigurationExamples $PreparationRoot
+            Read-ProductionConfig (Join-Path $PreparationRoot 'config\deploy.json')
+        },
+        [scriptblock]$ProtectSecretsAction = {
+            param($PreparationRoot) Protect-ProductionSecrets $PreparationRoot
+        },
+        [scriptblock]$SecretFileAction = {
+            param($Path) New-ProductionPostgreSqlSecretFile -Path $Path
+        }
+    )
+
+    $lock = Enter-DeploymentLock -LockPath (Join-Path $Root 'locks\deploy.lock')
+    try {
+        & $ProtectSecretsAction $Root
+        $config = & $ConfigurationAction $Root
+        & $ProtectSecretsAction $Root
+        Assert-ProductionPostgreSqlConfig -Config $config | Out-Null
+        $secretResult = & $SecretFileAction (Join-Path $Root 'config\postgresql.env')
+        return [pscustomobject][ordered]@{
+            Prepared = $true
+            Configuration = 'Validated'
+            Credentials = if ($secretResult.Created) { 'Created' } else { 'Preserved' }
+            CredentialCount = [int]$secretResult.SecretCount
+        }
+    } finally {
+        $lock.Dispose()
+    }
+}
+
+function Initialize-ProductionPostgreSqlPreparation {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+
+    $root = 'C:\ProgramData\christopherbell.dev'
+    if (-not $PSCmdlet.ShouldProcess($root,
+        'merge PostgreSQL defaults and create protected credentials')) {
+        return
+    }
+    Assert-Administrator
+    return Invoke-ProductionPostgreSqlPreparationCore -Root $root
+}
+
+function Enter-ProductionPostgreSqlLegacyReplacement {
+    $serviceName = 'postgresql-x64-16'
+    $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    if (-not $service) {
+        return [pscustomobject][ordered]@{
+            Exists=$false; WasRunning=$false; StartMode=$null
+        }
+    }
+    $native = Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction Stop
+    $state = [pscustomobject][ordered]@{
+        Exists=$true
+        WasRunning=[string]$service.Status -ceq 'Running'
+        StartMode=[string]$native.StartMode
+    }
+    if ($state.WasRunning) {
+        $connections = @(Get-NetTCPConnection -LocalPort 5432 -State Established `
+            -ErrorAction SilentlyContinue)
+        if ($connections.Count -ne 0) {
+            throw 'PostgreSQL 16 has active client connections and cannot be replaced.'
+        }
+        try {
+            Set-Service -Name $serviceName -StartupType Disabled -ErrorAction Stop
+            Stop-Service -Name $serviceName -Force -ErrorAction Stop
+            (Get-Service -Name $serviceName -ErrorAction Stop).WaitForStatus(
+                [ServiceProcess.ServiceControllerStatus]::Stopped,
+                [timespan]::FromSeconds(30))
+        } catch {
+            $stopFailure = $_.Exception
+            try {
+                $startup = if ($state.StartMode -ceq 'Auto') { 'Automatic' } else {
+                    [string]$state.StartMode
+                }
+                Set-Service -Name $serviceName -StartupType $startup -ErrorAction Stop
+                $observed = Get-Service -Name $serviceName -ErrorAction Stop
+                if ($state.WasRunning -and [string]$observed.Status -cne 'Running') {
+                    Start-Service -Name $serviceName -ErrorAction Stop
+                }
+            } catch {
+                throw [AggregateException]::new(
+                    'PostgreSQL 16 stop and startup-mode restoration both failed.',
+                    [Exception[]]@($stopFailure,$_.Exception))
+            }
+            throw $stopFailure
+        }
+    }
+    return $state
+}
+
+function Complete-ProductionPostgreSqlLegacyReplacement {
+    param($State)
+    if ($State -and $State.Exists) {
+        Set-Service -Name 'postgresql-x64-16' -StartupType Manual -ErrorAction Stop
+    }
+}
+
+function Restore-ProductionPostgreSqlLegacyReplacement {
+    param($State)
+    if (-not $State -or -not $State.Exists) { return }
+    $postgres18 = Get-Service -Name $script:ExpectedServiceName -ErrorAction SilentlyContinue
+    if ($postgres18 -and [string]$postgres18.Status -ceq 'Running') {
+        Stop-Service -Name $script:ExpectedServiceName -Force -ErrorAction SilentlyContinue
+    }
+    $startup = switch ([string]$State.StartMode) {
+        'Auto' { 'Automatic' }
+        'Disabled' { 'Disabled' }
+        default { 'Manual' }
+    }
+    Set-Service -Name 'postgresql-x64-16' -StartupType $startup -ErrorAction Stop
+    if ($State.WasRunning) {
+        Start-Service -Name 'postgresql-x64-16' -ErrorAction Stop
+    }
+}
+
+function Write-ProductionPostgreSqlInstallerOptionFile {
+    param(
+        [Parameter(Mandatory)][pscustomobject]$Config,
+        [Parameter(Mandatory)][string]$AdministratorPassword,
+        [Parameter(Mandatory)][scriptblock]$ProtectAction,
+        [Parameter(Mandatory)][scriptblock]$AssertAction
+    )
+    if ($AdministratorPassword -cnotmatch '^[A-Za-z0-9_-]{16,128}$') {
+        throw 'The PostgreSQL administrator password is not option-file-safe.'
+    }
+    $path = Join-Path $Config.programDataRoot 'config\.postgresql-18-install.options'
+    if (Test-Path -LiteralPath $path) {
+        throw 'A PostgreSQL installer option file already exists.'
+    }
+    $completed = $false
+    try {
+        $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $stream.Dispose()
+        & $ProtectAction $path
+        & $AssertAction $path
+        $prefix = Split-Path -Parent ([string]$Config.postgresqlBinPath)
+        $lines = @(
+            'mode=unattended',
+            'unattendedmodeui=none',
+            "prefix=$prefix",
+            "datadir=$($Config.postgresqlDataPath)",
+            'serverport=5432',
+            "servicename=$($Config.postgresqlServiceName)",
+            'superaccount=postgres',
+            "superpassword=$AdministratorPassword",
+            "servicepassword=$AdministratorPassword")
+        [IO.File]::WriteAllText($path, ($lines -join "`n") + "`n",
+            [Text.UTF8Encoding]::new($false))
+        $completed = $true
+        return $path
+    } finally {
+        if (-not $completed -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+            Remove-Item -LiteralPath $path -Force
+        }
+    }
+}
+
 function Install-ProductionPostgreSql {
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][pscustomobject]$Config,
+        [string]$AdministratorPassword,
         [scriptblock]$ProcessAction = $script:DefaultProcessAction,
         [scriptblock]$SignatureAction = {
             param($Path) Get-AuthenticodeSignature -LiteralPath $Path
+        },
+        [scriptblock]$ProtectOptionFileAction = {
+            param($Path) Protect-ProductionPath -Path $Path
+        },
+        [scriptblock]$AssertOptionFileAction = {
+            param($Path) Assert-ProtectedProductionPath -Path $Path | Out-Null
+        },
+        [scriptblock]$PrepareLegacyAction = { Enter-ProductionPostgreSqlLegacyReplacement },
+        [scriptblock]$CommitLegacyAction = {
+            param($State) Complete-ProductionPostgreSqlLegacyReplacement -State $State
+        },
+        [scriptblock]$RollbackLegacyAction = {
+            param($State) Restore-ProductionPostgreSqlLegacyReplacement -State $State
         }
     )
     Assert-ProductionPostgreSqlConfig -Config $Config | Out-Null
@@ -302,27 +561,53 @@ function Install-ProductionPostgreSql {
     if (-not $PSCmdlet.ShouldProcess('PostgreSQL 18.4 native Windows runtime', $operation)) {
         return
     }
-    if (-not $alreadyInstalled) {
-        Invoke-WithProductionPostgreSqlLock -Config $Config -Action {
+    return Invoke-WithProductionPostgreSqlLock -Config $Config -Action {
+        $legacyState = $null
+        $legacyPrepared = $false
+        $optionPath = $null
+        try {
+            $legacyState = & $PrepareLegacyAction
+            $legacyPrepared = $true
+            if (-not $alreadyInstalled) {
+            if ([string]::IsNullOrWhiteSpace($AdministratorPassword)) {
+                $protected = Read-ProductionPostgreSqlSecrets -Path (
+                    Join-Path $Config.programDataRoot 'config\postgresql.env')
+                $AdministratorPassword = [string]$protected.Administrator
+            }
+            $optionPath = Write-ProductionPostgreSqlInstallerOptionFile `
+                -Config $Config -AdministratorPassword $AdministratorPassword `
+                -ProtectAction $ProtectOptionFileAction -AssertAction $AssertOptionFileAction
+            $override = "--mode unattended --unattendedmodeui none --optionfile `"$optionPath`""
             & $ProcessAction 'winget.exe' @('install','--id','PostgreSQL.PostgreSQL.18',
-                '--version','18.4-1','--exact','--interactive','--accept-package-agreements',
-                '--accept-source-agreements') @{} | Out-Null
+                '--version','18.4-1','--exact','--silent','--accept-package-agreements',
+                '--accept-source-agreements','--override',$override) @{} | Out-Null
+            }
+            Assert-ProductionPostgreSqlConfig -Config $Config -RequireInstalled | Out-Null
+            $signature = & $SignatureAction $postgres
+            $subject = if ($signature.SignerCertificate) {
+                [string]$signature.SignerCertificate.Subject
+            } else { '' }
+            if ([string]$signature.Status -cne 'Valid' -or
+                $subject -notmatch '(?i)(EnterpriseDB Corporation|PostgreSQL Global Development Group)') {
+                throw 'The PostgreSQL runtime must have a valid trusted publisher signature.'
+            }
+            $versionOutput = [string](& $ProcessAction $postgres @('--version') @{})
+            if ($versionOutput -notmatch '(?i)PostgreSQL\)\s+18\.4(?:\s|$)') {
+                throw 'The installed PostgreSQL runtime is not exact version 18.4.'
+            }
+            & $CommitLegacyAction $legacyState
+            return [pscustomobject][ordered]@{
+                Installed=$true; Version='18.4'; Path=$postgres
+            }
+        } catch {
+            if ($legacyPrepared) { & $RollbackLegacyAction $legacyState }
+            throw
+        } finally {
+            if ($optionPath -and (Test-Path -LiteralPath $optionPath -PathType Leaf)) {
+                Remove-Item -LiteralPath $optionPath -Force
+            }
         }
     }
-    Assert-ProductionPostgreSqlConfig -Config $Config -RequireInstalled | Out-Null
-    $signature = & $SignatureAction $postgres
-    $subject = if ($signature.SignerCertificate) {
-        [string]$signature.SignerCertificate.Subject
-    } else { '' }
-    if ([string]$signature.Status -cne 'Valid' -or
-        $subject -notmatch '(?i)(EnterpriseDB Corporation|PostgreSQL Global Development Group)') {
-        throw 'The PostgreSQL runtime must have a valid trusted publisher signature.'
-    }
-    $versionOutput = [string](& $ProcessAction $postgres @('--version') @{})
-    if ($versionOutput -notmatch '(?i)PostgreSQL\)\s+18\.4(?:\s|$)') {
-        throw 'The installed PostgreSQL runtime is not exact version 18.4.'
-    }
-    return [pscustomobject][ordered]@{ Installed = $true; Version = '18.4'; Path = $postgres }
 }
 
 function Initialize-ProductionPostgreSql {
@@ -679,6 +964,7 @@ select json_build_object(
 
 Export-ModuleMember -Function Assert-ProductionPostgreSqlConfig,
     Read-ProductionPostgreSqlSecrets,Get-ProductionPostgreSqlBootstrapSql,
+    Initialize-ProductionPostgreSqlPreparation,
     Install-ProductionPostgreSql,Set-ProductionPostgreSqlNetworkConfig,
     Initialize-ProductionPostgreSql,
     New-ProductionPgAdminServerRegistration,Install-ProductionPgAdmin,
