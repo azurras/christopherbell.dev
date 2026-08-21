@@ -63,6 +63,21 @@ class PostgresqlMigrationRunnerTest {
   }
 
   @Test
+  void completedShadowReplayUsesCapturedEvidenceWithoutRereadingAMovingSource() {
+    var target = new RecordingTarget();
+    var first = runner(target).run(request(PostgresqlMigrationCommand.SHADOW));
+    MigrationSourceReader movingSource = (context, kind, cursor, limit) -> {
+      throw new AssertionError("completed shadow replay must not reread the live source");
+    };
+
+    var replayed = runner(target, movingSource).run(request(PostgresqlMigrationCommand.SHADOW));
+
+    assertThat(replayed.statusDigest()).isEqualTo(first.statusDigest());
+    assertThat(target.rehearsals).isEqualTo(2);
+    assertThat(target.publications).isZero();
+  }
+
+  @Test
   void reconcileRejectsAMissingKindInsteadOfReportingSuccess() {
     var target = new StatusTarget(List.of());
 
@@ -93,6 +108,25 @@ class PostgresqlMigrationRunnerTest {
 
     assertThatThrownBy(() -> runner(target).run(request(PostgresqlMigrationCommand.RECONCILE)))
         .isInstanceOf(MigrationReconciliationException.class);
+  }
+
+  @Test
+  void reconcileReplaysImmutableStagingWithoutRereadingAMovingSource() {
+    var checkpoint = MigrationCheckpoint.initial().markComplete();
+    var target = new StatusTarget(List.of(new MigrationKindStatus(
+        "fixture", checkpoint, 0, false)));
+    MigrationSourceReader movingSource = (context, kind, cursor, limit) -> {
+      throw new AssertionError("reconcile must not reread the live source");
+    };
+
+    var result = runner(target, movingSource).run(request(PostgresqlMigrationCommand.RECONCILE));
+
+    assertThat(result.kinds()).singleElement().satisfies(status -> {
+      assertThat(status.sourceKind()).isEqualTo("fixture");
+      assertThat(status.checkpoint()).isEqualTo(checkpoint);
+    });
+    assertThat(target.existingRunPreparations).isOne();
+    assertThat(target.existingRunVerifications).isOne();
   }
 
   @Test

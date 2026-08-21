@@ -1,9 +1,33 @@
-ALTER TABLE ${schema_prefix}identity.deleted_account_pseudonym
-  DROP CONSTRAINT deleted_account_pseudonym_format_ck,
-  ADD CONSTRAINT deleted_account_pseudonym_format_ck CHECK (
-    pseudonym_id ~ '^deleted:[0-9a-f]{12}$'
-    OR pseudonym_id IN ('system', 'unknown'));
+CREATE OR REPLACE FUNCTION ${schema_prefix}identity.require_live_account_or_deleted_pseudonym()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  retained_account_id text;
+BEGIN
+  retained_account_id := to_jsonb(NEW) ->> TG_ARGV[0];
+  IF retained_account_id IS NULL
+      OR retained_account_id IN ('system', 'unknown') THEN
+    RETURN NEW;
+  END IF;
 
-INSERT INTO ${schema_prefix}identity.deleted_account_pseudonym (pseudonym_id)
-VALUES ('system'), ('unknown')
-ON CONFLICT (pseudonym_id) DO NOTHING;
+  PERFORM 1
+  FROM ${schema_prefix}identity.account account
+  WHERE account.account_id = retained_account_id
+  FOR KEY SHARE;
+  IF FOUND THEN
+    RETURN NEW;
+  END IF;
+
+  PERFORM 1
+  FROM ${schema_prefix}identity.deleted_account_pseudonym pseudonym
+  WHERE pseudonym.pseudonym_id = retained_account_id
+  FOR KEY SHARE;
+  IF FOUND THEN
+    RETURN NEW;
+  END IF;
+
+  RAISE EXCEPTION 'retained account identifier % is not registered', retained_account_id
+    USING ERRCODE = '23503';
+END
+$$;

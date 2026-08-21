@@ -2,13 +2,17 @@ package dev.christopherbell.admin.commandcenter.metrics;
 
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
 import java.time.Duration;
-import java.util.concurrent.FutureTask;
+import java.sql.Connection;
+import java.sql.SQLException;
 import org.jooq.DSLContext;
 
 /** Bounded PostgreSQL connectivity probe selected for the PostgreSQL backend. */
 @PostgresPersistence
 public class PostgresDatabaseConnectivityProbe
     implements DatabaseConnectivityProbe, PersistenceIdentityProbe {
+  private static final String IDENTITY_SQL = "select current_database(), version::text "
+      + "from public.flyway_schema_history where success "
+      + "order by installed_rank desc limit 1";
   private final DSLContext database;
 
   public PostgresDatabaseConnectivityProbe(DSLContext database) {
@@ -22,41 +26,49 @@ public class PostgresDatabaseConnectivityProbe
 
   @Override
   public boolean ping(Duration timeout) {
-    var task = new FutureTask<>(() -> database.fetchExists(database.selectOne()));
-    Thread.ofVirtual().name("command-center-postgresql-ping").start(task);
     try {
-      return task.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
-    } catch (InterruptedException failure) {
-      Thread.currentThread().interrupt();
-      task.cancel(true);
-      return false;
-    } catch (Exception failure) {
-      task.cancel(true);
+      var timeoutSeconds = timeoutSeconds(timeout);
+      return database.connectionResult(connection -> {
+        try (var statement = connection.prepareStatement("select 1")) {
+          statement.setQueryTimeout(timeoutSeconds);
+          try (var rows = statement.executeQuery()) {
+            return rows.next();
+          }
+        }
+      });
+    } catch (RuntimeException failure) {
       return false;
     }
   }
 
   @Override
   public PersistenceIdentity identity(Duration timeout) {
-    var task = new FutureTask<>(() -> database.fetchOne(
-        "select current_database(), version::text "
-            + "from public.flyway_schema_history where success "
-            + "order by installed_rank desc limit 1"));
-    Thread.ofVirtual().name("command-center-postgresql-identity").start(task);
     try {
-      var record = task.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
-      if (record == null || record.get(0) == null || record.get(1) == null) {
-        throw new IllegalStateException("The PostgreSQL identity is incomplete.");
-      }
-      return new PersistenceIdentity(
-          "postgresql", record.get(0).toString(), record.get(1).toString());
-    } catch (InterruptedException failure) {
-      Thread.currentThread().interrupt();
-      task.cancel(true);
-      throw new IllegalStateException("The PostgreSQL identity probe was interrupted.");
-    } catch (Exception failure) {
-      task.cancel(true);
-      throw new IllegalStateException("The PostgreSQL identity probe failed.");
+      return database.connectionResult(connection -> readIdentity(
+          connection, IDENTITY_SQL, timeoutSeconds(timeout)));
+    } catch (RuntimeException failure) {
+      throw new IllegalStateException("The PostgreSQL identity probe failed.", failure);
     }
+  }
+
+  static PersistenceIdentity readIdentity(
+      Connection connection, String query, int timeoutSeconds) throws SQLException {
+    try (var statement = connection.prepareStatement(query)) {
+      statement.setQueryTimeout(timeoutSeconds);
+      try (var rows = statement.executeQuery()) {
+        if (!rows.next() || rows.getString(1) == null || rows.getString(2) == null) {
+          throw new IllegalStateException("The PostgreSQL identity is incomplete.");
+        }
+        return new PersistenceIdentity("postgresql", rows.getString(1), rows.getString(2));
+      }
+    }
+  }
+
+  private static int timeoutSeconds(Duration timeout) {
+    if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+      throw new IllegalArgumentException("The PostgreSQL probe timeout must be positive.");
+    }
+    var seconds = Math.max(1L, timeout.plusMillis(999).toSeconds());
+    return Math.toIntExact(Math.min(seconds, Integer.MAX_VALUE));
   }
 }

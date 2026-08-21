@@ -36,7 +36,7 @@ class MongoMigrationSourceReaderTest {
     if (client != null) {
       client.getDatabase("test").getCollection("application_runtime")
           .deleteMany(new Document("_kind", new Document("$in", List.of(
-              "application_lease", "not_catalogued"))));
+              "application_lease", "scheduled_collector_run", "not_catalogued"))));
       client.close();
     }
   }
@@ -68,8 +68,7 @@ class MongoMigrationSourceReaderTest {
   @Test
   void excludesOnlyValidatedSpringTypeMetadataFromTheDomainPayload() throws IOException {
     var envelope = envelope("lease-metadata", 7);
-    envelope.get("payload", Document.class).append(
-        "_class", "dev.christopherbell.libs.mongo.lease.MongoApplicationLease");
+    envelope.get("payload", Document.class).append("_class", kind().sourceOwner());
     client.getDatabase("test").getCollection("application_runtime").insertOne(envelope);
 
     var batch = new MongoMigrationSourceReader(client)
@@ -79,6 +78,40 @@ class MongoMigrationSourceReaderTest {
       assertThat(document.payload()).doesNotContainKey("_class");
       assertThat(document.payload()).containsEntry("fenceToken", 7L);
     });
+  }
+
+  @Test
+  void rejectsUndeclaredSpringTypeMetadataWithoutReturningItsValue() throws IOException {
+    var envelope = envelope("lease-wrong-class", 8);
+    envelope.get("payload", Document.class).append(
+        "_class", "dev.christopherbell.untrusted.WrongLeaseType");
+    client.getDatabase("test").getCollection("application_runtime").insertOne(envelope);
+
+    assertThatThrownBy(() -> new MongoMigrationSourceReader(client)
+        .readAfter(context(), kind(), null, 1))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("PostgreSQL migration Mongo source envelope is invalid.")
+        .hasMessageNotContaining("WrongLeaseType");
+  }
+
+  @Test
+  void acceptsTheWitnessedLegacyScheduledCollectorPersistedClass() throws IOException {
+    var kind = catalog().kinds().stream()
+        .filter(candidate -> candidate.sourceKind().equals("scheduled_collector_run"))
+        .findFirst()
+        .orElseThrow();
+    var envelope = new Document(
+        "_id", new Document("kind", kind.sourceKind()).append("legacyId", "legacy-run"))
+        .append("_kind", kind.sourceKind())
+        .append("schemaVersion", kind.sourceSchemaVersion())
+        .append("payload", new Document(
+            "_class", "dev.christopherbell.configuration.mongo.lease.ScheduledCollectorRun"));
+    client.getDatabase("test").getCollection(kind.sourceCollection()).insertOne(envelope);
+
+    var batch = new MongoMigrationSourceReader(client).readAfter(context(), kind, null, 1);
+
+    assertThat(batch.documents()).singleElement().satisfies(document ->
+        assertThat(document.payload()).doesNotContainKey("_class"));
   }
 
   @Test

@@ -66,8 +66,13 @@ public final class PostgresqlMigrationRunner {
     var snapshots = new java.util.ArrayList<MigrationSourceSnapshot>(kinds.size());
     var reconciliations = new java.util.ArrayList<MigrationReconciliation>(kinds.size());
     for (var kind : kinds) {
-      engine.stageAndCheckpoint(context, kind);
       var checkpoint = target.checkpoint(context, kind);
+      if (!publish && checkpoint.complete()) {
+        reconciliations.add(reconciler.requireEquivalent(context, kind));
+        continue;
+      }
+      engine.stageAndCheckpoint(context, kind);
+      checkpoint = target.checkpoint(context, kind);
       snapshots.add(engine.requireSourceSnapshot(context, kind, checkpoint));
       reconciliations.add(reconciler.requireEquivalent(context, kind));
     }
@@ -138,7 +143,6 @@ public final class PostgresqlMigrationRunner {
       if (status == null || !status.checkpoint().complete()) {
         throw new MigrationReconciliationException();
       }
-      engine.requireSourceSnapshot(context, kind, status.checkpoint());
       reconciliations.add(reconciler.requireEquivalent(context, kind));
     }
     target.verifyExistingRun(context, kinds, List.copyOf(reconciliations));

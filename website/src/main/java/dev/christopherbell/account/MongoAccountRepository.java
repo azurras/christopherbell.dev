@@ -55,7 +55,7 @@ public class MongoAccountRepository extends KindScopedRepositorySupport<Account>
     return findOne(Query.query(Criteria.where("email").is(email)));
   }
   @Override public Optional<Account> findByEmailIgnoreCase(String email) {
-    return findOne(Query.query(Criteria.where("email").regex(exactIgnoreCase(email))));
+    return findUnique(Query.query(Criteria.where("email").regex(exactIgnoreCase(email))));
   }
   @Override public Optional<Account> findByPasswordResetTokenHash(String hash) {
     return findOne(Query.query(Criteria.where("passwordResetTokenHash").is(hash)));

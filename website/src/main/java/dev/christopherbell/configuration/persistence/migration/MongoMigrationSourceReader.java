@@ -26,6 +26,11 @@ public final class MongoMigrationSourceReader
       Set.of("_id", "_kind", "schemaVersion", "payload");
   private static final Set<String> ID_KEYS = Set.of("kind", "legacyId");
   private static final String SPRING_TYPE_METADATA = "_class";
+  private static final Map<String, Set<String>> LEGACY_PERSISTED_CLASSES = Map.of(
+      "scheduled_collector_run", Set.of(
+          "dev.christopherbell.configuration.mongo.lease.ScheduledCollectorRun"),
+      "vote", Set.of(
+          "dev.christopherbell.whatsforlunch.restaurant.model.RestaurantRating"));
   private static final int MAX_CURSOR_BYTES = 16 * 1024;
   private final MongoClient client;
 
@@ -194,7 +199,9 @@ public final class MongoMigrationSourceReader
     payload.forEach((key, value) -> {
       if (!SPRING_TYPE_METADATA.equals(key)) {
         values.put(key, value);
-      } else if (!(value instanceof String typeName) || typeName.isBlank()) {
+      } else if (!(value instanceof String typeName)
+          || typeName.isBlank()
+          || !allowedPersistedClasses(kind).contains(typeName)) {
         throw invalid();
       }
     });
@@ -203,6 +210,13 @@ public final class MongoMigrationSourceReader
             kind.sourceKind(), kind.sourceSchemaVersion(),
             canonicalIdentifier(kind.identifierType(), legacyId), values),
         encodeCursor(legacyId));
+  }
+
+  private static Set<String> allowedPersistedClasses(PostgresqlMigrationCatalog.Kind kind) {
+    var allowed = new java.util.HashSet<String>();
+    allowed.add(kind.sourceOwner());
+    allowed.addAll(LEGACY_PERSISTED_CLASSES.getOrDefault(kind.sourceKind(), Set.of()));
+    return Set.copyOf(allowed);
   }
 
   private static boolean validIdentifierType(String identifierType, Object legacyId) {

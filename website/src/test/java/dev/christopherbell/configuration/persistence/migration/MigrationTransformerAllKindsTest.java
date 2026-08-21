@@ -109,6 +109,31 @@ class MigrationTransformerAllKindsTest {
   }
 
   @Test
+  void legacyPostReportDerivationPreservesUntouchedSourceEvidence() throws IOException {
+    var catalog = loadCatalog();
+    var kind = catalog.kinds().stream()
+        .filter(candidate -> candidate.sourceKind().equals("post_report"))
+        .findFirst()
+        .orElseThrow();
+    var absent = representativePayload(kind);
+    absent.remove("reportType");
+    absent.remove("targetType");
+    absent.put("reason", "spam");
+    var explicit = new LinkedHashMap<String, Object>(absent);
+    explicit.put("reportType", "SPAM");
+    explicit.put("targetType", "POST");
+    var transformer = MigrationTransformerRegistry.from(catalog).require(kind.sourceKind());
+
+    var derived = transformer.transform(new MigrationSourceDocument(
+        kind.sourceKind(), kind.sourceSchemaVersion(), representativeSourceId(kind), absent));
+    var supplied = transformer.transform(new MigrationSourceDocument(
+        kind.sourceKind(), kind.sourceSchemaVersion(), representativeSourceId(kind), explicit));
+
+    assertThat(derived.rows()).isEqualTo(supplied.rows());
+    assertThat(derived.sourceHash()).isNotEqualTo(supplied.sourceHash());
+  }
+
+  @Test
   void legacyRestaurantDerivesSearchFieldsAndPreservesAbsentAddressDetails()
       throws IOException {
     var catalog = loadCatalog();
@@ -136,6 +161,36 @@ class MigrationTransformerAllKindsTest {
         .containsEntry("search_city", "cedar park")
         .containsEntry("search_state", "tx")
         .doesNotContainKeys("latitude", "longitude", "street_1");
+  }
+
+  @Test
+  void legacyRestaurantDerivationPreservesUntouchedSourceEvidence() throws IOException {
+    var catalog = loadCatalog();
+    var kind = catalog.kinds().stream()
+        .filter(candidate -> candidate.sourceKind().equals("restaurant"))
+        .findFirst()
+        .orElseThrow();
+    var absent = representativePayload(kind);
+    absent.put("name", "Legacy Cafe");
+    absent.remove("normalizedName");
+    absent.remove("dedupeKey");
+    absent.remove("searchCity");
+    absent.remove("searchState");
+    absent.put("address", Map.of("city", "Cedar Park", "country", "US", "state", "TX"));
+    var explicit = new LinkedHashMap<String, Object>(absent);
+    explicit.put("normalizedName", "legacy cafe");
+    explicit.put("dedupeKey", "legacy cafe");
+    explicit.put("searchCity", "cedar park");
+    explicit.put("searchState", "tx");
+    var transformer = MigrationTransformerRegistry.from(catalog).require(kind.sourceKind());
+
+    var derived = transformer.transform(new MigrationSourceDocument(
+        kind.sourceKind(), kind.sourceSchemaVersion(), "legacy-source-evidence", absent));
+    var supplied = transformer.transform(new MigrationSourceDocument(
+        kind.sourceKind(), kind.sourceSchemaVersion(), "legacy-source-evidence", explicit));
+
+    assertThat(derived.rows()).isEqualTo(supplied.rows());
+    assertThat(derived.sourceHash()).isNotEqualTo(supplied.sourceHash());
   }
 
   @Test

@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 
 @EnabledIfEnvironmentVariable(named = "POSTGRESQL_INTEGRATION_TESTS", matches = "enabled")
 class PostgresAccountRepositoryContractTest
@@ -84,6 +85,8 @@ class PostgresAccountRepositoryContractTest
         .contains(first.getId());
     assertThat(accounts.findByEmail(second.getEmail()).map(Account::getId))
         .contains(second.getId());
+    assertThatThrownBy(() -> accounts.findByEmailIgnoreCase("LEGACY.CASE@EXAMPLE.TEST"))
+        .isInstanceOf(IncorrectResultSizeDataAccessException.class);
   }
 
   @Test

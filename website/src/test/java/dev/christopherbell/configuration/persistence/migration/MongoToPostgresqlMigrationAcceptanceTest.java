@@ -114,6 +114,7 @@ class MongoToPostgresqlMigrationAcceptanceTest {
           assertThat(reconciled.statusDigest()).isEqualTo(first.statusDigest());
           assertThat(second.statusDigest()).isEqualTo(first.statusDigest());
           assertThat(sourceCounts(database)).containsExactly(53L, 52L);
+          assertThat(reservedPseudonymCount(database)).isZero();
           assertThat(verifiedKindCount(database)).isEqualTo(52L);
           assertThat(verifiedSourceCount(database)).isEqualTo(53L);
           var stagedTables = stagedTables(database);
@@ -172,10 +173,11 @@ class MongoToPostgresqlMigrationAcceptanceTest {
                 new Document("$set", new Document(
                     "payload.fenceToken", ((Number) originalFenceToken).longValue() + 1_000)));
             try {
-              assertThatThrownBy(() -> runner.run(reconcileFinal))
-                  .isInstanceOf(MigrationReconciliationException.class);
+              var driftIndependentReplay = runner.run(reconcileFinal);
+              assertThat(driftIndependentReplay.statusDigest())
+                  .isEqualTo(verifiedButUnpublished.statusDigest());
               assertPublicationState(
-                  database, lockToken, "RECONCILING", true, 0, 0, 0);
+                  database, lockToken, "READY", true, 53, 0, 0);
             } finally {
               leaseCollection.updateOne(
                   new Document("_id", leaseId),
@@ -671,6 +673,18 @@ class MongoToPostgresqlMigrationAcceptanceTest {
              + database.prefix() + "identity\".account_federation_identity")) {
       assertThat(rows.next()).isTrue();
       return List.of(rows.getBytes(1), rows.getBytes(2));
+    }
+  }
+
+  private static long reservedPseudonymCount(
+      PostgresqlSchemaTestSupport.MigratedDatabase database) throws java.sql.SQLException {
+    try (var connection = database.connect();
+         var statement = connection.createStatement();
+         var rows = statement.executeQuery("select count(*) from \"" + database.prefix()
+             + "identity\".deleted_account_pseudonym "
+             + "where pseudonym_id in ('system','unknown')")) {
+      assertThat(rows.next()).isTrue();
+      return rows.getLong(1);
     }
   }
 

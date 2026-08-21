@@ -363,15 +363,23 @@ function Wait-ProductionCandidateOwnedListener {
 }
 
 function Test-CandidateRelease {
-    param($Config, [Parameter(Mandatory)][string]$Release, [string]$Database)
-    $additionalEnvironment = @{
+    param(
+        $Config,
+        [Parameter(Mandatory)][string]$Release,
+        [string]$Database,
+        [hashtable]$AdditionalEnvironment = @{}
+    )
+    $environment = @{
         COMMAND_CENTER_SENSOR_LIBRARIES_ENABLED = 'false'
     }
+    foreach ($name in $AdditionalEnvironment.Keys) {
+        $environment[$name] = $AdditionalEnvironment[$name]
+    }
     if (-not [string]::IsNullOrWhiteSpace($Database)) {
-        $additionalEnvironment.SPRING_MONGODB_DATABASE = $Database
+        $environment.SPRING_MONGODB_DATABASE = $Database
     }
     Assert-ProductionCandidatePortUnused -Port ([int]$Config.candidatePort)
-    $process = Start-ProductionJar -Config $Config -Release $Release -Port $Config.candidatePort -Profiles 'prod,deploy-smoke' -AdditionalEnvironment $additionalEnvironment
+    $process = Start-ProductionJar -Config $Config -Release $Release -Port $Config.candidatePort -Profiles 'prod,deploy-smoke' -AdditionalEnvironment $environment
     $identity = $null
     try {
         $identity = Get-ProductionCandidateProcessIdentity -Process $process

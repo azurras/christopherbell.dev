@@ -672,11 +672,20 @@ class PostgresqlSchemaContractTest {
   }
 
   @Test
-  void versionTwentyOneUpgradeRegistersReservedAuditPrincipalsOnly() throws Exception {
+  void versionTwentyOneUpgradeAllowsReservedAuditPrincipalsWithoutInventingDomainRows()
+      throws Exception {
     try (var database = PostgresqlSchemaTestSupport.migrateThrough("21");
          var connection = database.connect()) {
+      var identity = quoted(database.prefix() + "identity");
+      var pseudonymsBefore = longScalar(connection, "select count(*) from " + identity
+          + ".deleted_account_pseudonym");
       assertThat(database.migrateToLatest()).isEqualTo(6);
       var sharedFolder = quoted(database.prefix() + "shared_folder");
+
+      assertThat(longScalar(connection, "select count(*) from " + identity
+          + ".deleted_account_pseudonym")).isEqualTo(pseudonymsBefore);
+      assertThat(longScalar(connection, "select count(*) from " + identity
+          + ".deleted_account_pseudonym where pseudonym_id in ('system','unknown')")).isZero();
 
       execute(connection, "insert into " + sharedFolder
           + ".audit_event (audit_event_id,account_id,action,outcome,occurred_at,expires_at) values "
@@ -692,6 +701,16 @@ class PostgresqlSchemaContractTest {
           + "('reserved-arbitrary','arbitrary','READ','SUCCESS','2026-08-01T00:00:02Z',"
           + "'2027-08-01T00:00:02Z')"))
           .isInstanceOf(SQLException.class);
+    }
+  }
+
+  @Test
+  void freshSchemaKeepsReservedAuditPrincipalsOutOfThePseudonymDomain() throws Exception {
+    try (var database = PostgresqlSchemaTestSupport.migrate();
+         var connection = database.connect()) {
+      var identity = quoted(database.prefix() + "identity");
+      assertThat(longScalar(connection, "select count(*) from " + identity
+          + ".deleted_account_pseudonym where pseudonym_id in ('system','unknown')")).isZero();
     }
   }
 

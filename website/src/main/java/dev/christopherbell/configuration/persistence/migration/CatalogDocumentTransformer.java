@@ -127,19 +127,20 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
 
   @Override
   public final TransformedMigrationDocument transform(MigrationSourceDocument source) {
-    source = normalizeLegacyPostReport(source);
-    source = normalizeLegacyRestaurant(source);
-    requireSource(source);
-    validateCrossFieldShape(source);
-    var rows = new RowSet(kind.targetSchema(), kind.targetTables(), source.sourceId());
+    var sourceEvidence = source;
+    var targetSource = normalizeLegacyPostReport(sourceEvidence);
+    targetSource = normalizeLegacyRestaurant(targetSource);
+    requireSource(targetSource);
+    validateCrossFieldShape(targetSource);
+    var rows = new RowSet(kind.targetSchema(), kind.targetTables(), targetSource.sourceId());
     var key = Target.parse(kind.keyMapping().targetColumn());
-    rows.root(key.table()).put(key.column(), source.sourceId());
+    rows.root(key.table()).put(key.column(), targetSource.sourceId());
 
     for (var entry : kind.fieldMappings().entrySet()) {
       var sourceField = entry.getKey();
       var mapping = entry.getValue();
-      var present = source.payload().containsKey(sourceField);
-      var value = source.payload().get(sourceField);
+      var present = targetSource.payload().containsKey(sourceField);
+      var value = targetSource.payload().get(sourceField);
       if (!present) {
         applyAbsent(mapping, mapping.missing(), rows, false);
       } else if (value == null) {
@@ -149,9 +150,9 @@ abstract class CatalogDocumentTransformer implements MigrationTransformer {
       }
     }
 
-    var sourceHash = MigrationCanonicalizationRegistry.sourceHash(kind, source);
+    var sourceHash = MigrationCanonicalizationRegistry.sourceHash(kind, sourceEvidence);
     return new TransformedMigrationDocument(
-        kind.sourceKind(), source.sourceId(), sourceHash, rows.finish());
+        kind.sourceKind(), targetSource.sourceId(), sourceHash, rows.finish());
   }
 
   private MigrationSourceDocument normalizeLegacyPostReport(MigrationSourceDocument source) {
