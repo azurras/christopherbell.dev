@@ -1,7 +1,5 @@
 package dev.christopherbell.notification.inbox;
 
-import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.database;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistenceSupport;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
@@ -30,21 +28,29 @@ public final class NotificationMigrationQueryVerifier {
   public static boolean verify(
       Connection connection, String schema, String sourceKind, String queryName,
       List<Map<String, Object>> sourceRows) throws SQLException {
-    var database = database(connection, schema);
+    var jdbc = org.springframework.jdbc.core.simple.JdbcClient.create(
+        new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true));
+    var schemas = dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+        .fromPhysicalSchema(schema);
     return switch (sourceKind + "/" + queryName) {
       case "notification/find-by-id" ->
           dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport
               .verifyOptionalLookup(sourceRows, "notification_id",
-                  new PostgresNotificationRepository(database)::findById);
+                  new PostgresNotificationRepository(jdbc, schemas)::findById);
       case "notification/account-page" -> verifyAccountPage(connection, schema, sourceRows);
-      case "notification/unread-by-account" -> verifyUnread(database, sourceRows);
+      case "notification/unread-by-account" -> verifyUnread(jdbc, schemas, sourceRows);
       case "notification_preference/find-by-account" ->
           dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport
               .verifyOptionalLookup(sourceRows, "account_id",
-                  new PostgresNotificationPreferenceRepository(database)::findByAccountId);
+                  new PostgresNotificationPreferenceRepository(
+                      org.springframework.jdbc.core.simple.JdbcClient.create(
+                          new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                              connection, true)),
+                      dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+                          .fromPhysicalSchema(schema))::findByAccountId);
       case "notification_delivery_guard/try-acquire",
           "notification_rate_limit/try-acquire" ->
-              verifyGuard(connection, database, sourceRows);
+              verifyGuard(connection, schema, sourceRows);
       default -> false;
     };
   }
@@ -52,7 +58,10 @@ public final class NotificationMigrationQueryVerifier {
   public static boolean verifyAccountPage(
       Connection connection, String communicationSchema, List<Map<String, Object>> sourceRows) {
     var repository = new PostgresNotificationQueryRepository(
-        database(connection, communicationSchema),
+        org.springframework.jdbc.core.simple.JdbcClient.create(
+            new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+        dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+            .fromPhysicalSchema(communicationSchema),
         new StableCursorCodec());
     for (var accountId : sourceRows.stream().map(row -> text(row.get("account_id")))
         .filter(Objects::nonNull).distinct().toList()) {
@@ -78,8 +87,10 @@ public final class NotificationMigrationQueryVerifier {
   }
 
   private static boolean verifyUnread(
-      org.jooq.DSLContext database, List<Map<String, Object>> rows) {
-    var repository = new PostgresNotificationRepository(database);
+      org.springframework.jdbc.core.simple.JdbcClient database,
+      dev.christopherbell.configuration.persistence.PostgresqlSchemaNames schemas,
+      List<Map<String, Object>> rows) {
+    var repository = new PostgresNotificationRepository(database, schemas);
     return rows.stream().map(row -> text(row.get("account_id")))
         .filter(Objects::nonNull).distinct().allMatch(accountId ->
             repository.countByAccountIdAndReadFalse(accountId)
@@ -89,7 +100,7 @@ public final class NotificationMigrationQueryVerifier {
 
   private static boolean verifyGuard(
       Connection connection,
-      org.jooq.DSLContext database,
+      String schema,
       List<Map<String, Object>> rows) throws SQLException {
     if (rows.isEmpty()) {
       return true;
@@ -97,7 +108,13 @@ public final class NotificationMigrationQueryVerifier {
     var row = rows.getFirst();
     return dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport
         .rollback(connection, () -> {
-          var guard = new PostgresNotificationFanoutGuard(database,
+          var guard = new PostgresNotificationFanoutGuard(
+              org.springframework.jdbc.core.simple.JdbcClient.create(
+                  new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                      connection, true)),
+              dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+                  .fromPhysicalSchema(schema),
+              org.springframework.transaction.support.TransactionOperations.withoutTransaction(),
               new NotificationDeliveryProperties(
                   Duration.ofMinutes(5), Duration.ofMinutes(5), 1));
           var identity = new NotificationEventIdentity(

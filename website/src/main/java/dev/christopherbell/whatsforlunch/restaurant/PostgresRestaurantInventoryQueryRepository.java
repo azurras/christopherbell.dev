@@ -1,16 +1,14 @@
 package dev.christopherbell.whatsforlunch.restaurant;
 
-import static dev.christopherbell.persistence.jooq.lunch.Tables.RESTAURANT;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.whatsforlunch.restaurant.model.Restaurant;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import org.jooq.Condition;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -18,32 +16,65 @@ import org.springframework.web.server.ResponseStatusException;
 @PostgresPersistence
 public class PostgresRestaurantInventoryQueryRepository implements RestaurantInventoryQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
-  private final DSLContext database;
-  public PostgresRestaurantInventoryQueryRepository(DSLContext database) { this.database = database; }
-  @Override public RestaurantInventoryQueryRepository.Page find(
+  private final JdbcClient database;
+  private final String table;
+
+  public PostgresRestaurantInventoryQueryRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas) {
+    this.database = database;
+    table = schemas.qualifiedTable("lunch", "restaurant");
+  }
+
+  @Override
+  public RestaurantInventoryQueryRepository.Page find(
       String name, String city, String state, String cursor, int size) {
-    if (size < 1 || size > MAX_PAGE_SIZE) throw new ResponseStatusException(
-        HttpStatus.BAD_REQUEST, "Inventory page size must be 1 through 100");
-    var normalizedName = normalized(name); var normalizedCity = normalized(city); var normalizedState = normalized(state);
+    if (size < 1 || size > MAX_PAGE_SIZE) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST, "Inventory page size must be 1 through 100");
+    }
+    var normalizedName = normalized(name);
+    var normalizedCity = normalized(city);
+    var normalizedState = normalized(state);
     var after = decodeCursor(cursor);
-    Condition filters = filters(normalizedName, normalizedCity, normalizedState);
-    Condition page = filters;
-    if (after != null) page = page.and(RESTAURANT.DEDUPE_KEY.gt(after.name())
-        .or(RESTAURANT.DEDUPE_KEY.eq(after.name()).and(RESTAURANT.RESTAURANT_ID.gt(after.id()))));
-    var rows = database.selectFrom(RESTAURANT).where(page)
-        .orderBy(RESTAURANT.DEDUPE_KEY.asc(), RESTAURANT.RESTAURANT_ID.asc()).limit(size + 1).fetch();
-    boolean hasMore = rows.size() > size;
-    var items = rows.stream().limit(size).map(PostgresRestaurantRepository::map).toList();
+    var parameters = new LinkedHashMap<String, Object>();
+    var filters = filters(normalizedName, normalizedCity, normalizedState, parameters);
+    var page = new StringBuilder(filters);
+    if (after != null) {
+      page.append(" and (dedupe_key > :afterName or (dedupe_key = :afterName and restaurant_id > :afterId))");
+      parameters.put("afterName", after.name());
+      parameters.put("afterId", after.id());
+    }
+    parameters.put("limit", size + 1);
+    var rows = database.sql("select * from %s where %s order by dedupe_key, restaurant_id limit :limit"
+            .formatted(table, page))
+        .params(parameters).query(PostgresRestaurantRepository::map).list();
+    var hasMore = rows.size() > size;
+    var items = rows.stream().limit(size).toList();
     String next = hasMore && !items.isEmpty() ? encodeCursor(items.getLast()) : null;
-    long total = database.selectCount().from(RESTAURANT).where(filters).fetchSingle(0, long.class);
+    parameters.remove("afterName");
+    parameters.remove("afterId");
+    parameters.remove("limit");
+    long total = database.sql("select count(*) from %s where %s".formatted(table, filters))
+        .params(parameters).query(Long.class).single();
     return new RestaurantInventoryQueryRepository.Page(items, next, total);
   }
-  private static Condition filters(String name, String city, String state) {
-    Condition condition = DSL.noCondition();
-    if (name != null) condition = condition.and(RESTAURANT.DEDUPE_KEY.startsWith(name));
-    if (city != null) condition = condition.and(RESTAURANT.SEARCH_CITY.eq(city));
-    if (state != null) condition = condition.and(RESTAURANT.SEARCH_STATE.eq(state));
-    return condition;
+
+  private static String filters(
+      String name, String city, String state, LinkedHashMap<String, Object> parameters) {
+    var clauses = new java.util.ArrayList<String>();
+    if (name != null) {
+      clauses.add("left(dedupe_key, length(:name)) = :name");
+      parameters.put("name", name);
+    }
+    if (city != null) {
+      clauses.add("search_city = :city");
+      parameters.put("city", city);
+    }
+    if (state != null) {
+      clauses.add("search_state = :state");
+      parameters.put("state", state);
+    }
+    return clauses.isEmpty() ? "true" : String.join(" and ", clauses);
   }
   private static String normalized(String value) {
     if (value == null || value.isBlank()) return null;

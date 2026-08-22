@@ -1,42 +1,11 @@
 package dev.christopherbell.account.deletion;
 
-import static dev.christopherbell.persistence.jooq.communication.Tables.CONVERSATION_ARCHIVE_PARTICIPANT;
-import static dev.christopherbell.persistence.jooq.communication.Tables.CONVERSATION_ARCHIVE_STATE;
-import static dev.christopherbell.persistence.jooq.communication.Tables.MESSAGE;
-import static dev.christopherbell.persistence.jooq.communication.Tables.NOTIFICATION;
-import static dev.christopherbell.persistence.jooq.communication.Tables.NOTIFICATION_DELIVERY_GUARD;
-import static dev.christopherbell.persistence.jooq.communication.Tables.NOTIFICATION_PREFERENCE;
-import static dev.christopherbell.persistence.jooq.communication.Tables.NOTIFICATION_RATE_LIMIT;
-import static dev.christopherbell.persistence.jooq.federation.Tables.FEDERATION_DELIVERY_JOB;
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT;
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT_FOLLOW;
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT_TRUST_RELATIONSHIP;
-import static dev.christopherbell.persistence.jooq.identity.Tables.BROWSER_SESSION;
-import static dev.christopherbell.persistence.jooq.identity.Tables.DELETED_ACCOUNT_PSEUDONYM;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_PREFERENCE;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_SESSION;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_SESSION_PARTICIPANT;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.RESTAURANT_FAVORITE;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.RESTAURANT_IMPORT_PREVIEW;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.RESTAURANT_VOTE;
-import static dev.christopherbell.persistence.jooq.music.Tables.METADATA_EDIT;
-import static dev.christopherbell.persistence.jooq.music.Tables.PLAYLIST;
-import static dev.christopherbell.persistence.jooq.platform.Tables.ADMIN_ACTIVITY;
-import static dev.christopherbell.persistence.jooq.platform.Tables.ADMIN_ACTIVITY_VALUE;
-import static dev.christopherbell.persistence.jooq.shared_folder.Tables.AUDIT_EVENT;
-import static dev.christopherbell.persistence.jooq.shared_folder.Tables.RECYCLE_ITEM;
-import static dev.christopherbell.persistence.jooq.social.Tables.HIDDEN_POST_THREAD;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST_EDIT_AUDIT;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST_LIKE;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST_REPORT;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST_REPORT_MODERATION_AUDIT;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** Idempotent PostgreSQL effects for durable account deletion steps. */
 @PostgresPersistence
@@ -45,100 +14,93 @@ public class PostgresAccountDeletionOperations implements AccountDeletionOperati
   private static final String RETAINED_MESSAGE =
       "Account-related activity retained after account deletion.";
 
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
   private final AccountDeletionResourceCleaner resources;
+  private final Tables tables;
 
   public PostgresAccountDeletionOperations(
-      DSLContext database, AccountDeletionResourceCleaner resources) {
+      JdbcClient database,
+      PostgresqlSchemaNames schemas,
+      TransactionOperations transactions,
+      AccountDeletionResourceCleaner resources) {
     this.database = database;
+    this.transactions = transactions;
     this.resources = resources;
+    tables = new Tables(schemas);
   }
 
   @Override
   public boolean accountExists(String accountId) {
-    return database.fetchExists(ACCOUNT, ACCOUNT.ACCOUNT_ID.eq(accountId));
+    return database.sql("select exists(select 1 from %s where account_id = :id)"
+            .formatted(tables.account))
+        .param("id", accountId).query(Boolean.class).single();
   }
 
   @Override
   public void ensureTombstone() {
     var now = OffsetDateTime.now(ZoneOffset.UTC);
-    database.insertInto(ACCOUNT)
-        .set(ACCOUNT.ACCOUNT_ID, TOMBSTONE)
-        .set(ACCOUNT.EMAIL, "deleted-user@invalid.local")
-        .set(ACCOUNT.NORMALIZED_EMAIL, "deleted-user@invalid.local")
-        .set(ACCOUNT.FIRST_NAME, "Deleted")
-        .set(ACCOUNT.LAST_NAME, "User")
-        .set(ACCOUNT.ROLE, "USER")
-        .set(ACCOUNT.STATUS, "INACTIVE")
-        .set(ACCOUNT.USERNAME, TOMBSTONE)
-        .set(ACCOUNT.CREATED_ON, now)
-        .set(ACCOUNT.LAST_UPDATED_ON, now)
-        .onConflict(ACCOUNT.ACCOUNT_ID).doNothing()
-        .execute();
+    database.sql("""
+            insert into %s (
+              account_id, email, normalized_email, first_name, last_name,
+              role, status, username, created_on, last_updated_on)
+            values (
+              :id, 'deleted-user@invalid.local', 'deleted-user@invalid.local',
+              'Deleted', 'User', 'USER', 'INACTIVE', :id, :now, :now)
+            on conflict (account_id) do nothing
+            """.formatted(tables.account))
+        .param("id", TOMBSTONE).param("now", now).update();
   }
 
   @Override
   public void anonymizePublicPosts(String accountId, String pseudonym) {
-    database.transaction(configuration -> {
-      var transaction = DSL.using(configuration);
-      registerPseudonym(transaction, pseudonym);
-      transaction.update(POST).set(POST.ACCOUNT_ID, TOMBSTONE)
-          .set(POST.VERSION, POST.VERSION.plus(1L))
-          .where(POST.ACCOUNT_ID.eq(accountId)).execute();
-      transaction.update(POST_EDIT_AUDIT).set(POST_EDIT_AUDIT.EDITOR_ACCOUNT_ID, pseudonym)
-          .where(POST_EDIT_AUDIT.EDITOR_ACCOUNT_ID.eq(accountId)).execute();
+    transactions.executeWithoutResult(ignored -> {
+      registerPseudonym(pseudonym);
+      execute("update %s set account_id = :tombstone, version = version + 1 where account_id = :id"
+          .formatted(tables.post), accountId, pseudonym);
+      database.sql("update %s set editor_account_id = :pseudonym where editor_account_id = :id"
+              .formatted(tables.postEditAudit))
+          .param("pseudonym", pseudonym).param("id", accountId).update();
     });
   }
 
   @Override
   public void removePrivateData(String accountId) {
-    database.transaction(configuration -> {
-      var transaction = DSL.using(configuration);
-      var ownedArchives = DSL.select(CONVERSATION_ARCHIVE_STATE.ARCHIVE_STATE_ID)
-          .from(CONVERSATION_ARCHIVE_STATE)
-          .leftJoin(CONVERSATION_ARCHIVE_PARTICIPANT)
-          .on(CONVERSATION_ARCHIVE_PARTICIPANT.ARCHIVE_STATE_ID
-              .eq(CONVERSATION_ARCHIVE_STATE.ARCHIVE_STATE_ID))
-          .where(CONVERSATION_ARCHIVE_STATE.OWNER_ACCOUNT_ID.eq(accountId)
-              .or(CONVERSATION_ARCHIVE_PARTICIPANT.ACCOUNT_ID.eq(accountId)));
-      transaction.deleteFrom(CONVERSATION_ARCHIVE_STATE)
-          .where(CONVERSATION_ARCHIVE_STATE.ARCHIVE_STATE_ID.in(ownedArchives)).execute();
-      transaction.deleteFrom(MESSAGE).where(MESSAGE.SENDER_ACCOUNT_ID.eq(accountId)
-          .or(MESSAGE.RECIPIENT_ACCOUNT_ID.eq(accountId))).execute();
-      transaction.deleteFrom(NOTIFICATION).where(NOTIFICATION.ACCOUNT_ID.eq(accountId)
-          .or(NOTIFICATION.ACTOR_ACCOUNT_ID.eq(accountId))).execute();
-      transaction.deleteFrom(NOTIFICATION_PREFERENCE)
-          .where(NOTIFICATION_PREFERENCE.ACCOUNT_ID.eq(accountId)).execute();
-      transaction.deleteFrom(NOTIFICATION_DELIVERY_GUARD)
-          .where(NOTIFICATION_DELIVERY_GUARD.ACCOUNT_ID.eq(accountId)
-              .or(NOTIFICATION_DELIVERY_GUARD.ACTOR_ACCOUNT_ID.eq(accountId))).execute();
-      transaction.deleteFrom(NOTIFICATION_RATE_LIMIT)
-          .where(NOTIFICATION_RATE_LIMIT.ACCOUNT_ID.eq(accountId)
-              .or(NOTIFICATION_RATE_LIMIT.ACTOR_ACCOUNT_ID.eq(accountId))).execute();
-      transaction.deleteFrom(BROWSER_SESSION).where(BROWSER_SESSION.ACCOUNT_ID.eq(accountId)).execute();
-      transaction.deleteFrom(ACCOUNT_TRUST_RELATIONSHIP)
-          .where(ACCOUNT_TRUST_RELATIONSHIP.OWNER_ACCOUNT_ID.eq(accountId)
-              .or(ACCOUNT_TRUST_RELATIONSHIP.TARGET_ACCOUNT_ID.eq(accountId))).execute();
-      transaction.deleteFrom(HIDDEN_POST_THREAD)
-          .where(HIDDEN_POST_THREAD.ACCOUNT_ID.eq(accountId)).execute();
-      transaction.deleteFrom(POST_LIKE).where(POST_LIKE.ACCOUNT_ID.eq(accountId)).execute();
-      transaction.deleteFrom(ACCOUNT_FOLLOW)
-          .where(ACCOUNT_FOLLOW.FOLLOWER_ACCOUNT_ID.eq(accountId)
-              .or(ACCOUNT_FOLLOW.FOLLOWED_ACCOUNT_ID.eq(accountId))).execute();
-      var ownedSessions = DSL.select(LUNCH_SESSION_PARTICIPANT.LUNCH_SESSION_ID)
-          .from(LUNCH_SESSION_PARTICIPANT)
-          .where(LUNCH_SESSION_PARTICIPANT.ACCOUNT_ID.eq(accountId));
-      transaction.deleteFrom(LUNCH_SESSION).where(LUNCH_SESSION.CREATED_BY_ACCOUNT_ID.eq(accountId)
-          .or(LUNCH_SESSION.LUNCH_SESSION_ID.in(ownedSessions))).execute();
-      transaction.deleteFrom(LUNCH_PREFERENCE).where(LUNCH_PREFERENCE.ACCOUNT_ID.eq(accountId)).execute();
-      transaction.deleteFrom(RESTAURANT_FAVORITE).where(RESTAURANT_FAVORITE.ACCOUNT_ID.eq(accountId)).execute();
-      transaction.deleteFrom(RESTAURANT_VOTE).where(RESTAURANT_VOTE.ACCOUNT_ID.eq(accountId)).execute();
-      transaction.deleteFrom(RESTAURANT_IMPORT_PREVIEW)
-          .where(RESTAURANT_IMPORT_PREVIEW.ACTOR_ACCOUNT_ID.eq(accountId)).execute();
-      transaction.update(PLAYLIST).set(PLAYLIST.UPDATED_BY_ACCOUNT_ID, TOMBSTONE)
-          .where(PLAYLIST.UPDATED_BY_ACCOUNT_ID.eq(accountId)).execute();
-      transaction.update(METADATA_EDIT).set(METADATA_EDIT.EDITED_BY_ACCOUNT_ID, TOMBSTONE)
-          .where(METADATA_EDIT.EDITED_BY_ACCOUNT_ID.eq(accountId)).execute();
+    transactions.executeWithoutResult(ignored -> {
+      database.sql("""
+              delete from %s where archive_state_id in (
+                select state.archive_state_id from %s state
+                left join %s participant
+                  on participant.archive_state_id = state.archive_state_id
+                where state.owner_account_id = :id or participant.account_id = :id)
+              """.formatted(tables.conversationArchiveState, tables.conversationArchiveState,
+              tables.conversationArchiveParticipant)).param("id", accountId).update();
+      deleteWhere(tables.message, "sender_account_id = :id or recipient_account_id = :id", accountId);
+      deleteWhere(tables.notification, "account_id = :id or actor_account_id = :id", accountId);
+      deleteWhere(tables.notificationPreference, "account_id = :id", accountId);
+      deleteWhere(tables.notificationDeliveryGuard,
+          "account_id = :id or actor_account_id = :id", accountId);
+      deleteWhere(tables.notificationRateLimit,
+          "account_id = :id or actor_account_id = :id", accountId);
+      deleteWhere(tables.browserSession, "account_id = :id", accountId);
+      deleteWhere(tables.accountTrust,
+          "owner_account_id = :id or target_account_id = :id", accountId);
+      deleteWhere(tables.hiddenPostThread, "account_id = :id", accountId);
+      deleteWhere(tables.postLike, "account_id = :id", accountId);
+      deleteWhere(tables.accountFollow,
+          "follower_account_id = :id or followed_account_id = :id", accountId);
+      database.sql("""
+              delete from %s where created_by_account_id = :id
+                or lunch_session_id in (
+                  select lunch_session_id from %s where account_id = :id)
+              """.formatted(tables.lunchSession, tables.lunchSessionParticipant))
+          .param("id", accountId).update();
+      deleteWhere(tables.lunchPreference, "account_id = :id", accountId);
+      deleteWhere(tables.restaurantFavorite, "account_id = :id", accountId);
+      deleteWhere(tables.restaurantVote, "account_id = :id", accountId);
+      deleteWhere(tables.restaurantImportPreview, "actor_account_id = :id", accountId);
+      updateOwner(tables.playlist, "updated_by_account_id", accountId, TOMBSTONE);
+      updateOwner(tables.metadataEdit, "edited_by_account_id", accountId, TOMBSTONE);
     });
   }
 
@@ -149,67 +111,153 @@ public class PostgresAccountDeletionOperations implements AccountDeletionOperati
 
   @Override
   public void pseudonymizeRetainedRecords(String accountId, String pseudonym) {
-    database.transaction(configuration -> {
-      var transaction = DSL.using(configuration);
-      registerPseudonym(transaction, pseudonym);
-      transaction.update(POST_REPORT)
-          .set(POST_REPORT.REPORTER_ACCOUNT_ID, pseudonym)
-          .set(POST_REPORT.REPORTER_USERNAME, TOMBSTONE)
-          .where(POST_REPORT.REPORTER_ACCOUNT_ID.eq(accountId)).execute();
-      transaction.update(POST_REPORT)
-          .set(POST_REPORT.REPORTED_ACCOUNT_ID, pseudonym)
-          .set(POST_REPORT.REPORTED_USERNAME, TOMBSTONE)
-          .where(POST_REPORT.REPORTED_ACCOUNT_ID.eq(accountId)).execute();
-      transaction.update(POST_REPORT).set(POST_REPORT.RESOLVED_BY, pseudonym)
-          .where(POST_REPORT.RESOLVED_BY.eq(accountId)).execute();
-      transaction.update(POST_REPORT_MODERATION_AUDIT)
-          .set(POST_REPORT_MODERATION_AUDIT.ACTOR_ACCOUNT_ID, pseudonym)
-          .set(POST_REPORT_MODERATION_AUDIT.ACTOR_USERNAME, TOMBSTONE)
-          .where(POST_REPORT_MODERATION_AUDIT.ACTOR_ACCOUNT_ID.eq(accountId)).execute();
-
-      var affectedActivities = DSL.select(ADMIN_ACTIVITY.ADMIN_ACTIVITY_ID)
-          .from(ADMIN_ACTIVITY)
-          .where(ADMIN_ACTIVITY.ACTOR_ACCOUNT_ID.eq(accountId)
-              .or(ADMIN_ACTIVITY.TARGET_ID.eq(accountId)));
-      transaction.deleteFrom(ADMIN_ACTIVITY_VALUE)
-          .where(ADMIN_ACTIVITY_VALUE.ADMIN_ACTIVITY_ID.in(affectedActivities)
-              .and(ADMIN_ACTIVITY_VALUE.PARTITION_NAME.eq("metadata"))).execute();
-      transaction.update(ADMIN_ACTIVITY)
-          .set(ADMIN_ACTIVITY.ACTOR_ACCOUNT_ID, pseudonym)
-          .set(ADMIN_ACTIVITY.ACTOR_USERNAME, TOMBSTONE)
-          .set(ADMIN_ACTIVITY.MESSAGE, RETAINED_MESSAGE)
-          .where(ADMIN_ACTIVITY.ACTOR_ACCOUNT_ID.eq(accountId)).execute();
-      transaction.update(ADMIN_ACTIVITY)
-          .set(ADMIN_ACTIVITY.TARGET_ID, pseudonym)
-          .set(ADMIN_ACTIVITY.TARGET_LABEL, TOMBSTONE)
-          .set(ADMIN_ACTIVITY.MESSAGE, RETAINED_MESSAGE)
-          .where(ADMIN_ACTIVITY.TARGET_ID.eq(accountId)).execute();
-      transaction.update(AUDIT_EVENT)
-          .set(AUDIT_EVENT.ACCOUNT_ID, pseudonym)
-          .set(AUDIT_EVENT.RELATIVE_PATH, TOMBSTONE)
-          .setNull(AUDIT_EVENT.CLIENT_IP)
-          .where(AUDIT_EVENT.ACCOUNT_ID.eq(accountId)).execute();
-      transaction.update(RECYCLE_ITEM).set(RECYCLE_ITEM.DELETED_BY_ACCOUNT_ID, pseudonym)
-          .where(RECYCLE_ITEM.DELETED_BY_ACCOUNT_ID.eq(accountId)).execute();
+    transactions.executeWithoutResult(ignored -> {
+      registerPseudonym(pseudonym);
+      database.sql("""
+              update %s set reporter_account_id = :pseudonym, reporter_username = :tombstone
+              where reporter_account_id = :id
+              """.formatted(tables.postReport)).param("pseudonym", pseudonym)
+          .param("tombstone", TOMBSTONE).param("id", accountId).update();
+      database.sql("""
+              update %s set reported_account_id = :pseudonym, reported_username = :tombstone
+              where reported_account_id = :id
+              """.formatted(tables.postReport)).param("pseudonym", pseudonym)
+          .param("tombstone", TOMBSTONE).param("id", accountId).update();
+      updateOwner(tables.postReport, "resolved_by", accountId, pseudonym);
+      database.sql("""
+              update %s set actor_account_id = :pseudonym, actor_username = :tombstone
+              where actor_account_id = :id
+              """.formatted(tables.postReportAudit)).param("pseudonym", pseudonym)
+          .param("tombstone", TOMBSTONE).param("id", accountId).update();
+      database.sql("""
+              delete from %s where partition_name = 'metadata' and admin_activity_id in (
+                select admin_activity_id from %s
+                where actor_account_id = :id or target_id = :id)
+              """.formatted(tables.adminActivityValue, tables.adminActivity))
+          .param("id", accountId).update();
+      database.sql("""
+              update %s set actor_account_id = :pseudonym, actor_username = :tombstone,
+                message = :message where actor_account_id = :id
+              """.formatted(tables.adminActivity)).param("pseudonym", pseudonym)
+          .param("tombstone", TOMBSTONE).param("message", RETAINED_MESSAGE)
+          .param("id", accountId).update();
+      database.sql("""
+              update %s set target_id = :pseudonym, target_label = :tombstone,
+                message = :message where target_id = :id
+              """.formatted(tables.adminActivity)).param("pseudonym", pseudonym)
+          .param("tombstone", TOMBSTONE).param("message", RETAINED_MESSAGE)
+          .param("id", accountId).update();
+      database.sql("""
+              update %s set account_id = :pseudonym, relative_path = :tombstone,
+                client_ip = null where account_id = :id
+              """.formatted(tables.auditEvent)).param("pseudonym", pseudonym)
+          .param("tombstone", TOMBSTONE).param("id", accountId).update();
+      updateOwner(tables.recycleItem, "deleted_by_account_id", accountId, pseudonym);
     });
   }
 
   @Override
   public void removeReferencesAndAccount(String accountId) {
-    database.transaction(configuration -> {
-      var transaction = DSL.using(configuration);
-      transaction.update(FEDERATION_DELIVERY_JOB).set(FEDERATION_DELIVERY_JOB.ACCOUNT_ID, TOMBSTONE)
-          .set(FEDERATION_DELIVERY_JOB.VERSION, FEDERATION_DELIVERY_JOB.VERSION.plus(1L))
-          .where(FEDERATION_DELIVERY_JOB.ACCOUNT_ID.eq(accountId)).execute();
-      transaction.deleteFrom(ACCOUNT).where(ACCOUNT.ACCOUNT_ID.eq(accountId)).execute();
+    transactions.executeWithoutResult(ignored -> {
+      database.sql("""
+              update %s set account_id = :tombstone, version = version + 1
+              where account_id = :id
+              """.formatted(tables.federationDeliveryJob)).param("tombstone", TOMBSTONE)
+          .param("id", accountId).update();
+      deleteWhere(tables.account, "account_id = :id", accountId);
     });
   }
 
-  private static void registerPseudonym(DSLContext transaction, String pseudonym) {
-    transaction.insertInto(DELETED_ACCOUNT_PSEUDONYM)
-        .set(DELETED_ACCOUNT_PSEUDONYM.PSEUDONYM_ID, pseudonym)
-        .onConflict(DELETED_ACCOUNT_PSEUDONYM.PSEUDONYM_ID)
-        .doNothing()
-        .execute();
+  private void execute(String sql, String accountId, String pseudonym) {
+    database.sql(sql).param("tombstone", TOMBSTONE).param("id", accountId)
+        .param("pseudonym", pseudonym).update();
+  }
+
+  private void deleteWhere(String table, String predicate, String accountId) {
+    database.sql("delete from %s where %s".formatted(table, predicate))
+        .param("id", accountId).update();
+  }
+
+  private void updateOwner(String table, String column, String accountId, String replacement) {
+    database.sql("update %s set %s = :replacement where %s = :id"
+            .formatted(table, column, column))
+        .param("replacement", replacement).param("id", accountId).update();
+  }
+
+  private void registerPseudonym(String pseudonym) {
+    database.sql("""
+            insert into %s (pseudonym_id) values (:id) on conflict (pseudonym_id) do nothing
+            """.formatted(tables.deletedPseudonym)).param("id", pseudonym).update();
+  }
+
+  private static final class Tables {
+    private final String account;
+    private final String accountFollow;
+    private final String accountTrust;
+    private final String adminActivity;
+    private final String adminActivityValue;
+    private final String auditEvent;
+    private final String browserSession;
+    private final String conversationArchiveParticipant;
+    private final String conversationArchiveState;
+    private final String deletedPseudonym;
+    private final String federationDeliveryJob;
+    private final String hiddenPostThread;
+    private final String lunchPreference;
+    private final String lunchSession;
+    private final String lunchSessionParticipant;
+    private final String message;
+    private final String metadataEdit;
+    private final String notification;
+    private final String notificationDeliveryGuard;
+    private final String notificationPreference;
+    private final String notificationRateLimit;
+    private final String playlist;
+    private final String post;
+    private final String postEditAudit;
+    private final String postLike;
+    private final String postReport;
+    private final String postReportAudit;
+    private final String recycleItem;
+    private final String restaurantFavorite;
+    private final String restaurantImportPreview;
+    private final String restaurantVote;
+
+    private Tables(PostgresqlSchemaNames schemas) {
+      account = schemas.qualifiedTable("identity", "account");
+      accountFollow = schemas.qualifiedTable("identity", "account_follow");
+      accountTrust = schemas.qualifiedTable("identity", "account_trust_relationship");
+      adminActivity = schemas.qualifiedTable("platform", "admin_activity");
+      adminActivityValue = schemas.qualifiedTable("platform", "admin_activity_value");
+      auditEvent = schemas.qualifiedTable("shared_folder", "audit_event");
+      browserSession = schemas.qualifiedTable("identity", "browser_session");
+      conversationArchiveParticipant = schemas.qualifiedTable(
+          "communication", "conversation_archive_participant");
+      conversationArchiveState = schemas.qualifiedTable(
+          "communication", "conversation_archive_state");
+      deletedPseudonym = schemas.qualifiedTable("identity", "deleted_account_pseudonym");
+      federationDeliveryJob = schemas.qualifiedTable("federation", "federation_delivery_job");
+      hiddenPostThread = schemas.qualifiedTable("social", "hidden_post_thread");
+      lunchPreference = schemas.qualifiedTable("lunch", "lunch_preference");
+      lunchSession = schemas.qualifiedTable("lunch", "lunch_session");
+      lunchSessionParticipant = schemas.qualifiedTable("lunch", "lunch_session_participant");
+      message = schemas.qualifiedTable("communication", "message");
+      metadataEdit = schemas.qualifiedTable("music", "metadata_edit");
+      notification = schemas.qualifiedTable("communication", "notification");
+      notificationDeliveryGuard = schemas.qualifiedTable(
+          "communication", "notification_delivery_guard");
+      notificationPreference = schemas.qualifiedTable("communication", "notification_preference");
+      notificationRateLimit = schemas.qualifiedTable("communication", "notification_rate_limit");
+      playlist = schemas.qualifiedTable("music", "playlist");
+      post = schemas.qualifiedTable("social", "post");
+      postEditAudit = schemas.qualifiedTable("social", "post_edit_audit");
+      postLike = schemas.qualifiedTable("social", "post_like");
+      postReport = schemas.qualifiedTable("social", "post_report");
+      postReportAudit = schemas.qualifiedTable("social", "post_report_moderation_audit");
+      recycleItem = schemas.qualifiedTable("shared_folder", "recycle_item");
+      restaurantFavorite = schemas.qualifiedTable("lunch", "restaurant_favorite");
+      restaurantImportPreview = schemas.qualifiedTable("lunch", "restaurant_import_preview");
+      restaurantVote = schemas.qualifiedTable("lunch", "restaurant_vote");
+    }
   }
 }

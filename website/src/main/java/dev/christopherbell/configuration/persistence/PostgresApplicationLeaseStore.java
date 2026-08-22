@@ -1,7 +1,5 @@
 package dev.christopherbell.configuration.persistence;
 
-import static dev.christopherbell.persistence.jooq.platform.Tables.APPLICATION_LEASE;
-
 import dev.christopherbell.libs.lease.LeaseGrant;
 import dev.christopherbell.libs.lease.LeaseIdentity;
 import dev.christopherbell.libs.lease.LeaseStore;
@@ -10,61 +8,84 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
-import org.jooq.DSLContext;
-import org.jooq.Field;
-import org.jooq.impl.DSL;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** PostgreSQL database-time lease adapter with monotonic fencing. */
 @PostgresPersistence
 public class PostgresApplicationLeaseStore implements LeaseStore {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final String table;
 
-  public PostgresApplicationLeaseStore(DSLContext database) { this.database = database; }
+  public PostgresApplicationLeaseStore(JdbcClient database, PostgresqlSchemaNames schemas) {
+    this.database = database;
+    table = schemas.qualifiedTable("platform", "application_lease");
+  }
 
   @Override public Optional<LeaseGrant> tryAcquire(
       String leaseName, String ownerId, Duration duration) {
     new LeaseIdentity(leaseName, ownerId);
-    Field<OffsetDateTime> now = DSL.currentOffsetDateTime();
-    Field<OffsetDateTime> expiresAt = expiry(duration);
-    var row = database.insertInto(APPLICATION_LEASE)
-        .set(APPLICATION_LEASE.LEASE_NAME, leaseName).set(APPLICATION_LEASE.OWNER_TOKEN, ownerId)
-        .set(APPLICATION_LEASE.FENCE_TOKEN, 1L).set(APPLICATION_LEASE.ACQUIRED_AT, now)
-        .set(APPLICATION_LEASE.EXPIRES_AT, expiresAt)
-        .onConflict(APPLICATION_LEASE.LEASE_NAME).doUpdate()
-        .set(APPLICATION_LEASE.OWNER_TOKEN, ownerId)
-        .set(APPLICATION_LEASE.FENCE_TOKEN,
-            DSL.coalesce(APPLICATION_LEASE.FENCE_TOKEN, 0L).plus(1L))
-        .set(APPLICATION_LEASE.ACQUIRED_AT, now).set(APPLICATION_LEASE.EXPIRES_AT, expiresAt)
-        .where(APPLICATION_LEASE.OWNER_TOKEN.eq(ownerId)
-            .or(APPLICATION_LEASE.EXPIRES_AT.le(now))).returning().fetchOne();
-    return row == null ? Optional.empty() : Optional.of(map(row));
+    return database.sql("""
+            insert into %s
+              (lease_name, owner_token, fence_token, acquired_at, expires_at)
+            values
+              (:leaseName, :ownerId, 1, current_timestamp,
+                current_timestamp + (:durationMicros * interval '1 microsecond'))
+            on conflict (lease_name) do update set
+              owner_token = excluded.owner_token,
+              fence_token = coalesce(%s.fence_token, 0) + 1,
+              acquired_at = current_timestamp,
+              expires_at = current_timestamp + (:durationMicros * interval '1 microsecond')
+            where %s.owner_token = :ownerId or %s.expires_at <= current_timestamp
+            returning lease_name, owner_token, fence_token, expires_at
+            """.formatted(table, table, table, table))
+        .param("leaseName", leaseName)
+        .param("ownerId", ownerId)
+        .param("durationMicros", durationMicroseconds(duration))
+        .query(PostgresApplicationLeaseStore::map)
+        .optional();
   }
 
   @Override public Optional<LeaseGrant> renew(LeaseGrant grant, Duration duration) {
-    Field<OffsetDateTime> now = DSL.currentOffsetDateTime();
-    var row = database.update(APPLICATION_LEASE).set(APPLICATION_LEASE.EXPIRES_AT, expiry(duration))
-        .where(APPLICATION_LEASE.LEASE_NAME.eq(grant.leaseName())
-            .and(APPLICATION_LEASE.OWNER_TOKEN.eq(grant.ownerId()))
-            .and(APPLICATION_LEASE.FENCE_TOKEN.eq(grant.fenceToken()))
-            .and(APPLICATION_LEASE.EXPIRES_AT.gt(now))).returning().fetchOne();
-    return row == null ? Optional.empty() : Optional.of(map(row));
+    return database.sql("""
+            update %s set
+              expires_at = current_timestamp + (:durationMicros * interval '1 microsecond')
+            where lease_name = :leaseName
+              and owner_token = :ownerId
+              and fence_token = :fenceToken
+              and expires_at > current_timestamp
+            returning lease_name, owner_token, fence_token, expires_at
+            """.formatted(table))
+        .param("durationMicros", durationMicroseconds(duration))
+        .param("leaseName", grant.leaseName())
+        .param("ownerId", grant.ownerId())
+        .param("fenceToken", grant.fenceToken())
+        .query(PostgresApplicationLeaseStore::map)
+        .optional();
   }
 
   @Override public boolean release(LeaseGrant grant) {
-    return database.update(APPLICATION_LEASE).set(APPLICATION_LEASE.OWNER_TOKEN, "released")
-        .set(APPLICATION_LEASE.EXPIRES_AT, Instant.EPOCH.atOffset(ZoneOffset.UTC))
-        .where(APPLICATION_LEASE.LEASE_NAME.eq(grant.leaseName())
-            .and(APPLICATION_LEASE.OWNER_TOKEN.eq(grant.ownerId()))
-            .and(APPLICATION_LEASE.FENCE_TOKEN.eq(grant.fenceToken()))).execute() == 1;
+    return database.sql("""
+            update %s set owner_token = 'released', expires_at = :epoch
+            where lease_name = :leaseName
+              and owner_token = :ownerId
+              and fence_token = :fenceToken
+            """.formatted(table))
+        .param("epoch", Instant.EPOCH.atOffset(ZoneOffset.UTC))
+        .param("leaseName", grant.leaseName())
+        .param("ownerId", grant.ownerId())
+        .param("fenceToken", grant.fenceToken())
+        .update() == 1;
   }
 
-  private static LeaseGrant map(
-      dev.christopherbell.persistence.jooq.platform.tables.records.ApplicationLeaseRecord row) {
-    return new LeaseGrant(row.getLeaseName(), row.getOwnerToken(), row.getFenceToken(),
-        row.getExpiresAt().toInstant());
+  private static LeaseGrant map(java.sql.ResultSet row, int rowNumber) throws java.sql.SQLException {
+    return new LeaseGrant(
+        row.getString("lease_name"),
+        row.getString("owner_token"),
+        row.getLong("fence_token"),
+        row.getObject("expires_at", OffsetDateTime.class).toInstant());
   }
 
-  private static Field<OffsetDateTime> expiry(Duration duration) {
+  private static long durationMicroseconds(Duration duration) {
     if (duration == null || duration.isZero() || duration.isNegative()) {
       throw new IllegalArgumentException("Lease duration must be positive.");
     }
@@ -75,7 +96,6 @@ public class PostgresApplicationLeaseStore implements LeaseStore {
     } catch (ArithmeticException overflow) {
       throw new IllegalArgumentException("Lease duration is too large.", overflow);
     }
-    return DSL.field("current_timestamp + ({0} * interval '1 microsecond')",
-        OffsetDateTime.class, DSL.val(microseconds));
+    return microseconds;
   }
 }

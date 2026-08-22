@@ -4,15 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 import dev.christopherbell.post.like.PostgresPostLikeStore;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.sharedfolder.maintenance.PostgresSharedFolderMaintenanceLeaseStore;
 import dev.christopherbell.sharedfolder.maintenance.SharedFolderMaintenanceLeaseStore;
-import org.jooq.DSLContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.dao.annotation.PersistenceExceptionTranslationPostProcessor;
 import org.springframework.dao.support.PersistenceExceptionTranslator;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 class PostgresBackendComponentContextTest {
 
@@ -41,7 +42,8 @@ class PostgresBackendComponentContextTest {
   private static AnnotationConfigApplicationContext contextFor(String backend) {
     var context = new AnnotationConfigApplicationContext();
     TestPropertyValues.of("app.persistence.backend=" + backend).applyTo(context);
-    context.registerBean(DSLContext.class, () -> mock(DSLContext.class));
+    context.registerBean(JdbcClient.class, () -> mock(JdbcClient.class));
+    context.registerBean(PostgresqlSchemaNames.class, PostgresqlSchemaNames::production);
     context.registerBean(
         PersistenceExceptionTranslator.class, () -> mock(PersistenceExceptionTranslator.class));
     context.registerBean(PersistenceExceptionTranslationPostProcessor.class, () -> {

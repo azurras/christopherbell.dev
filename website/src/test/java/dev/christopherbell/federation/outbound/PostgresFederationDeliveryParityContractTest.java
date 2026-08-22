@@ -27,15 +27,18 @@ class PostgresFederationDeliveryParityContractTest implements FederationDelivery
     database = schemas.openDatabase();
     var now = Instant.now().minus(Duration.ofMinutes(1)).truncatedTo(ChronoUnit.MILLIS);
     var accountId = "federation-parity-owner-" + RUN;
-    new PostgresAccountRepository(database.dsl()).save(Account.builder().id(accountId)
+    new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions()).save(Account.builder().id(accountId)
         .createdOn(now).email(accountId + "@example.test").passwordHash("hash")
         .role(Role.USER).status(AccountStatus.ACTIVE).username(accountId).build());
     post = Post.builder().id("federation-parity-post-" + RUN).accountId(accountId)
         .text("federation").rootId("federation-parity-post-" + RUN).level(0).createdOn(now)
         .expiresOn(now.plus(Duration.ofDays(1))).federationOutboundEligible(true)
         .likesCount(0).threadReplyLikesCount(0).threadReplyCount(0).build();
-    new PostgresPostRepository(database.dsl()).save(post);
-    deliveries = new PostgresFederationDeliveryJobRepository(database.dsl());
+    new PostgresPostRepository(
+        database.managedJdbc(), database.schemas(), database.transactions()).save(post);
+    deliveries = new PostgresFederationDeliveryJobRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
   }
 
   @AfterAll

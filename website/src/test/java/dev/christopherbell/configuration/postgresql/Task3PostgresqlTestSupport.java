@@ -4,6 +4,9 @@ import dev.christopherbell.configuration.persistence.PostgresqlDatabaseIdentity;
 import dev.christopherbell.configuration.persistence.PostgresqlTestDatabaseGuard;
 import dev.christopherbell.configuration.persistence.PostgresqlTestDatabaseGuardProperties;
 import dev.christopherbell.configuration.persistence.PostgresqlTestSchemaName;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
+import dev.christopherbell.configuration.persistence.PostgresqlPhysicalNamingStrategy;
+import dev.christopherbell.configuration.security.browser.PostgresBrowserSessionRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -15,12 +18,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 import org.flywaydb.core.Flyway;
-import org.jooq.DSLContext;
-import org.jooq.SQLDialect;
-import org.jooq.conf.MappedSchema;
-import org.jooq.conf.RenderMapping;
-import org.jooq.conf.Settings;
-import org.jooq.impl.DSL;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
+import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 /** Owns one isolated PostgreSQL schema set for Task 3 adapter integration tests. */
 public final class Task3PostgresqlTestSupport implements AutoCloseable {
@@ -78,13 +87,36 @@ public final class Task3PostgresqlTestSupport implements AutoCloseable {
   }
 
   public Database openDatabase() throws SQLException {
-    var connection = DriverManager.getConnection(url, username, password);
-    var mappedSchemas = DOMAINS.stream()
-        .map(domain -> new MappedSchema().withInput(domain).withOutput(prefix + domain))
-        .toList();
-    var settings = new Settings().withRenderMapping(
-        new RenderMapping().withSchemata(mappedSchemas));
-    return new Database(connection, DSL.using(connection, SQLDialect.POSTGRES, settings));
+    var poolConfiguration = new HikariConfig();
+    poolConfiguration.setJdbcUrl(url);
+    poolConfiguration.setUsername(username);
+    poolConfiguration.setPassword(password);
+    poolConfiguration.setMaximumPoolSize(4);
+    poolConfiguration.setMinimumIdle(0);
+    poolConfiguration.setPoolName("postgresql-adapter-contract-" + prefix);
+    var dataSource = new HikariDataSource(poolConfiguration);
+    var connection = dataSource.getConnection();
+    var schemas = PostgresqlSchemaNames.testOwned(prefix);
+    var jpa = new AnnotationConfigApplicationContext();
+    jpa.getEnvironment().getPropertySources().addFirst(
+        new org.springframework.core.env.MapPropertySource(
+            "postgresql-adapter-test", Map.of("app.persistence.backend", "postgresql")));
+    jpa.registerBean(javax.sql.DataSource.class, () -> dataSource);
+    jpa.registerBean(PostgresqlSchemaNames.class, () -> schemas);
+    jpa.register(JpaTestConfiguration.class);
+    jpa.registerBean(PostgresBrowserSessionRepository.class);
+    jpa.refresh();
+    var transactions = new org.springframework.transaction.support.TransactionTemplate(
+        jpa.getBean(PlatformTransactionManager.class));
+    return new Database(
+        connection,
+        dataSource,
+        JdbcClient.create(
+            new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+        JdbcClient.create(dataSource),
+        schemas,
+        transactions,
+        jpa);
   }
 
   public String prefix() {
@@ -150,10 +182,50 @@ public final class Task3PostgresqlTestSupport implements AutoCloseable {
     return value;
   }
 
-  public record Database(Connection connection, DSLContext dsl) implements AutoCloseable {
+  public record Database(
+      Connection connection,
+      HikariDataSource dataSource,
+      JdbcClient jdbc,
+      JdbcClient managedJdbc,
+      PostgresqlSchemaNames schemas,
+      org.springframework.transaction.support.TransactionOperations transactions,
+      AnnotationConfigApplicationContext jpa) implements AutoCloseable {
+    public <T> T bean(Class<T> type) {
+      return jpa.getBean(type);
+    }
+
     @Override
     public void close() throws SQLException {
       connection.close();
+      jpa.close();
+    }
+  }
+
+  @Configuration(proxyBeanMethods = false)
+  @EnableTransactionManagement
+  @EnableJpaRepositories(basePackages =
+      "dev.christopherbell.configuration.security.browser")
+  static class JpaTestConfiguration {
+    @Bean
+    LocalContainerEntityManagerFactoryBean entityManagerFactory(
+        javax.sql.DataSource dataSource, PostgresqlSchemaNames schemas) {
+      var factory = new LocalContainerEntityManagerFactoryBean();
+      factory.setDataSource(dataSource);
+      factory.setPackagesToScan("dev.christopherbell.configuration.security.browser");
+      factory.setJpaVendorAdapter(new HibernateJpaVendorAdapter());
+      var properties = new java.util.Properties();
+      properties.put("hibernate.hbm2ddl.auto", "none");
+      properties.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
+      properties.put("hibernate.physical_naming_strategy",
+          new PostgresqlPhysicalNamingStrategy(schemas));
+      factory.setJpaProperties(properties);
+      return factory;
+    }
+
+    @Bean
+    PlatformTransactionManager transactionManager(
+        jakarta.persistence.EntityManagerFactory entityManagerFactory) {
+      return new JpaTransactionManager(entityManagerFactory);
     }
   }
 }

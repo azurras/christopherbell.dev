@@ -1,46 +1,55 @@
 package dev.christopherbell.admin.activity;
 
-import static dev.christopherbell.persistence.jooq.platform.Tables.ADMIN_ACTIVITY;
-import static dev.christopherbell.persistence.jooq.platform.Tables.ADMIN_ACTIVITY_VALUE;
-
 import dev.christopherbell.admin.model.AdminActivity;
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
 import dev.christopherbell.configuration.persistence.PostgresqlConstraintViolationCause;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** PostgreSQL append-only admin audit repository. */
 @PostgresPersistence
 public class PostgresAdminActivityRepository implements AdminActivityRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
+  private final String activityTable;
+  private final String valueTable;
 
-  public PostgresAdminActivityRepository(DSLContext database) {
+  public PostgresAdminActivityRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas, TransactionOperations transactions) {
     this.database = database;
+    this.transactions = transactions;
+    activityTable = schemas.qualifiedTable("platform", "admin_activity");
+    valueTable = schemas.qualifiedTable("platform", "admin_activity_value");
   }
 
   @Override public AdminActivity insert(AdminActivity activity) { return append(activity); }
-
   @Override public AdminActivity save(AdminActivity activity) { return append(activity); }
 
-  @Override public Optional<AdminActivity> findById(String id) { return findById(database, id); }
+  @Override
+  public Optional<AdminActivity> findById(String id) {
+    return database.sql("select * from %s where admin_activity_id = :id".formatted(activityTable))
+        .param("id", id).query((row, ignored) -> map(row, id)).optional();
+  }
 
   @Override
   public List<AdminActivity> findTop25ByOrderByCreatedOnDesc() {
-    return database.select(ADMIN_ACTIVITY.ADMIN_ACTIVITY_ID)
-        .from(ADMIN_ACTIVITY)
-        .orderBy(ADMIN_ACTIVITY.CREATED_ON.desc(), ADMIN_ACTIVITY.ADMIN_ACTIVITY_ID.desc())
-        .limit(25)
-        .fetch(ADMIN_ACTIVITY.ADMIN_ACTIVITY_ID)
-        .stream()
-        .map(id -> findById(database, id).orElseThrow())
-        .toList();
+    return database.sql("""
+            select * from %s order by created_on desc, admin_activity_id desc limit 25
+            """.formatted(activityTable))
+        .query((row, ignored) -> map(row, row.getString("admin_activity_id"))).list();
   }
 
   private AdminActivity append(AdminActivity activity) {
@@ -48,79 +57,84 @@ public class PostgresAdminActivityRepository implements AdminActivityRepository 
     String id = activity.getId() == null || activity.getId().isBlank()
         ? UUID.randomUUID().toString() : activity.getId();
     try {
-      return database.transactionResult(configuration -> {
-        var transaction = DSL.using(configuration);
-        transaction.insertInto(ADMIN_ACTIVITY)
-          .set(ADMIN_ACTIVITY.ADMIN_ACTIVITY_ID, id)
-          .set(ADMIN_ACTIVITY.ACTOR_ACCOUNT_ID, activity.getActorAccountId())
-          .set(ADMIN_ACTIVITY.ACTOR_USERNAME, activity.getActorUsername())
-          .set(ADMIN_ACTIVITY.ACTION, activity.getAction())
-          .set(ADMIN_ACTIVITY.TARGET_TYPE, activity.getTargetType())
-          .set(ADMIN_ACTIVITY.TARGET_ID, activity.getTargetId())
-          .set(ADMIN_ACTIVITY.TARGET_LABEL, activity.getTargetLabel())
-          .set(ADMIN_ACTIVITY.REASON, activity.getReason())
-          .set(ADMIN_ACTIVITY.MESSAGE, activity.getMessage())
-          .set(ADMIN_ACTIVITY.BEFORE_VALUES_PRESENT, activity.getBeforeValues() != null)
-          .set(ADMIN_ACTIVITY.AFTER_VALUES_PRESENT, activity.getAfterValues() != null)
-          .set(ADMIN_ACTIVITY.METADATA_PRESENT, activity.getMetadata() != null)
-          .set(ADMIN_ACTIVITY.CREATED_ON, activity.getCreatedOn().atOffset(ZoneOffset.UTC))
-          .execute();
-        insertValues(transaction, id, "before", activity.getBeforeValues());
-        insertValues(transaction, id, "after", activity.getAfterValues());
-        insertValues(transaction, id, "metadata", activity.getMetadata());
-        return findById(transaction, id).orElseThrow();
+      var saved = transactions.execute(ignored -> {
+        database.sql("""
+                insert into %s (
+                  admin_activity_id, actor_account_id, actor_username, action,
+                  target_type, target_id, target_label, reason, message,
+                  before_values_present, after_values_present, metadata_present, created_on)
+                values (
+                  :id, :actorId, :actorUsername, :action,
+                  :targetType, :targetId, :targetLabel, :reason, :message,
+                  :beforePresent, :afterPresent, :metadataPresent, :createdOn)
+                """.formatted(activityTable))
+            .paramSource(new MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("actorId", activity.getActorAccountId(), Types.VARCHAR)
+                .addValue("actorUsername", activity.getActorUsername())
+                .addValue("action", activity.getAction())
+                .addValue("targetType", activity.getTargetType())
+                .addValue("targetId", activity.getTargetId())
+                .addValue("targetLabel", activity.getTargetLabel(), Types.VARCHAR)
+                .addValue("reason", activity.getReason(), Types.VARCHAR)
+                .addValue("message", activity.getMessage(), Types.VARCHAR)
+                .addValue("beforePresent", activity.getBeforeValues() != null)
+                .addValue("afterPresent", activity.getAfterValues() != null)
+                .addValue("metadataPresent", activity.getMetadata() != null)
+                .addValue("createdOn", activity.getCreatedOn().atOffset(ZoneOffset.UTC)))
+            .update();
+        insertValues(id, "before", activity.getBeforeValues());
+        insertValues(id, "after", activity.getAfterValues());
+        insertValues(id, "metadata", activity.getMetadata());
+        return findById(id).orElseThrow();
       });
-    } catch (org.jooq.exception.IntegrityConstraintViolationException failure) {
-      if ("23505".equals(failure.sqlState())) {
-        throw new DuplicateKeyException("PostgreSQL rejected a duplicate admin activity identity.",
-            new PostgresqlConstraintViolationCause(failure.sqlState()));
+      if (saved == null) throw new IllegalStateException("Admin activity transaction returned no value");
+      return saved;
+    } catch (DataIntegrityViolationException failure) {
+      var state = sqlState(failure);
+      if ("23505".equals(state)) {
+        throw new DuplicateKeyException(
+            "PostgreSQL rejected a duplicate admin activity identity.",
+            new PostgresqlConstraintViolationCause(state));
       }
       throw failure;
     }
   }
 
-  static Optional<AdminActivity> findById(DSLContext context, String id) {
-    return context.selectFrom(ADMIN_ACTIVITY)
-        .where(ADMIN_ACTIVITY.ADMIN_ACTIVITY_ID.eq(id))
-        .fetchOptional(row -> AdminActivity.builder()
-            .id(row.getAdminActivityId())
-            .actorAccountId(row.getActorAccountId())
-            .actorUsername(row.getActorUsername())
-            .action(row.getAction())
-            .targetType(row.getTargetType())
-            .targetId(row.getTargetId())
-            .targetLabel(row.getTargetLabel())
-            .reason(row.getReason())
-            .message(row.getMessage())
-            .beforeValues(values(context, id, "before", row.getBeforeValuesPresent()))
-            .afterValues(values(context, id, "after", row.getAfterValuesPresent()))
-            .metadata(values(context, id, "metadata", row.getMetadataPresent()))
-            .createdOn(row.getCreatedOn().toInstant())
-            .build());
-  }
-
-  private static void insertValues(
-      DSLContext context, String id, String partition, Map<String, String> values) {
+  private void insertValues(String id, String partition, Map<String, String> values) {
     if (values == null) return;
     values.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry ->
-        context.insertInto(ADMIN_ACTIVITY_VALUE)
-            .set(ADMIN_ACTIVITY_VALUE.ADMIN_ACTIVITY_ID, id)
-            .set(ADMIN_ACTIVITY_VALUE.PARTITION_NAME, partition)
-            .set(ADMIN_ACTIVITY_VALUE.VALUE_KEY, entry.getKey())
-            .set(ADMIN_ACTIVITY_VALUE.VALUE_TEXT, entry.getValue())
-            .execute());
+        database.sql("""
+                insert into %s (admin_activity_id, partition_name, value_key, value_text)
+                values (:id, :partition, :key, :value)
+                """.formatted(valueTable))
+            .param("id", id).param("partition", partition)
+            .param("key", entry.getKey()).param("value", entry.getValue()).update());
   }
 
-  private static Map<String, String> values(
-      DSLContext context, String id, String partition, Boolean present) {
-    if (!Boolean.TRUE.equals(present)) return null;
+  private AdminActivity map(java.sql.ResultSet row, String id) throws SQLException {
+    return AdminActivity.builder()
+        .id(id).actorAccountId(row.getString("actor_account_id"))
+        .actorUsername(row.getString("actor_username")).action(row.getString("action"))
+        .targetType(row.getString("target_type")).targetId(row.getString("target_id"))
+        .targetLabel(row.getString("target_label")).reason(row.getString("reason"))
+        .message(row.getString("message"))
+        .beforeValues(values(id, "before", row.getBoolean("before_values_present")))
+        .afterValues(values(id, "after", row.getBoolean("after_values_present")))
+        .metadata(values(id, "metadata", row.getBoolean("metadata_present")))
+        .createdOn(row.getObject("created_on", OffsetDateTime.class).toInstant()).build();
+  }
+
+  private Map<String, String> values(String id, String partition, boolean present) {
+    if (!present) return null;
     var result = new LinkedHashMap<String, String>();
-    context.select(ADMIN_ACTIVITY_VALUE.VALUE_KEY, ADMIN_ACTIVITY_VALUE.VALUE_TEXT)
-        .from(ADMIN_ACTIVITY_VALUE)
-        .where(ADMIN_ACTIVITY_VALUE.ADMIN_ACTIVITY_ID.eq(id)
-            .and(ADMIN_ACTIVITY_VALUE.PARTITION_NAME.eq(partition)))
-        .orderBy(ADMIN_ACTIVITY_VALUE.VALUE_KEY)
-        .forEach(row -> result.put(row.value1(), row.value2()));
+    database.sql("""
+            select value_key, value_text from %s
+            where admin_activity_id = :id and partition_name = :partition order by value_key
+            """.formatted(valueTable))
+        .param("id", id).param("partition", partition)
+        .query((row, ignored) -> Map.entry(row.getString(1), row.getString(2)))
+        .list().forEach(entry -> result.put(entry.getKey(), entry.getValue()));
     return result;
   }
 
@@ -133,4 +147,11 @@ public class PostgresAdminActivityRepository implements AdminActivityRepository 
   }
 
   private static boolean blank(String value) { return value == null || value.isBlank(); }
+
+  private static String sqlState(Throwable failure) {
+    for (var cause = failure; cause != null; cause = cause.getCause()) {
+      if (cause instanceof SQLException sqlFailure) return sqlFailure.getSQLState();
+    }
+    return null;
+  }
 }

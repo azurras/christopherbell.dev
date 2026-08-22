@@ -307,7 +307,7 @@ class MongoPersistenceBoundaryRulesTest {
   }
 
   @Test
-  void compiledRuleRejectsEveryDirectMongoApiAndSpringRepositoryBase() {
+  void compiledRuleRejectsEveryDirectMongoApiAndMongoRepositoryBase() {
     var fixtures = new ClassFileImporter().importPackages(FIXTURE_ROOT);
     var rules = new MongoPersistenceBoundaryRules(FIXTURE_ROOT, Set.of());
     var details = rules.zeroBypassRule().evaluate(fixtures).getFailureReport().getDetails();
@@ -317,9 +317,7 @@ class MongoPersistenceBoundaryRulesTest {
     AUDITED_MONGO_ACCESS_TYPES.forEach(target -> expected.add(
         ACCESS_FIXTURE + " directly depends on " + target));
     expected.add(FIXTURE_ROOT + ".ForbiddenSpringRepository directly depends on "
-        + "org.springframework.data.repository.CrudRepository");
-    expected.add(FIXTURE_ROOT + ".ForbiddenSpringRepository directly depends on "
-        + "org.springframework.data.repository.Repository");
+        + "org.springframework.data.mongodb.repository.MongoRepository");
     assertThat(details)
         .containsExactlyInAnyOrderElementsOf(expected);
   }

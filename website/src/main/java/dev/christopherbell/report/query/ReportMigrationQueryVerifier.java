@@ -12,11 +12,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import org.jooq.SQLDialect;
-import org.jooq.conf.MappedSchema;
-import org.jooq.conf.RenderMapping;
-import org.jooq.conf.Settings;
-import org.jooq.impl.DSL;
 
 /** Executes the production moderation-query service for cutover parity checks. */
 @PostgresPersistenceSupport
@@ -26,8 +21,13 @@ public final class ReportMigrationQueryVerifier {
   public static boolean verify(
       Connection connection, String schema, String queryName,
       List<Map<String, Object>> sourceRows) {
-    var database = DSL.using(connection, SQLDialect.POSTGRES, settings(schema));
-    var repository = new PostgresReportRepository(database);
+    var database = org.springframework.jdbc.core.simple.JdbcClient.create(
+        new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true));
+    var schemas = dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+        .fromPhysicalSchema(schema);
+    var repository = new PostgresReportRepository(
+        database, schemas,
+        org.springframework.transaction.support.TransactionOperations.withoutTransaction());
     return switch (queryName) {
       case "find-by-id" -> dev.christopherbell.configuration.persistence
           .PostgresqlMigrationVerificationSupport.verifyOptionalLookup(
@@ -46,8 +46,14 @@ public final class ReportMigrationQueryVerifier {
 
   public static boolean verifyModerationPage(
       Connection connection, String schema, List<Map<String, Object>> sourceRows) {
-    var database = DSL.using(connection, SQLDialect.POSTGRES, settings(schema));
-    var service = new PostgresReportQueryService(database, new PostgresReportRepository(database));
+    var database = org.springframework.jdbc.core.simple.JdbcClient.create(
+        new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true));
+    var schemas = dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+        .fromPhysicalSchema(schema);
+    var repository = new PostgresReportRepository(
+        database, schemas,
+        org.springframework.transaction.support.TransactionOperations.withoutTransaction());
+    var service = new PostgresReportQueryService(database, schemas, repository);
     var all = new ReportQuery(null, null, null, null, null, null, 0, 2);
     try {
       if (!matches(service.query(all), expected(sourceRows, all), 2)) {
@@ -100,20 +106,6 @@ public final class ReportMigrationQueryVerifier {
   private static boolean containsIgnoreCase(String value, String search) {
     return value != null && value.toLowerCase(Locale.ROOT)
         .contains(search.strip().toLowerCase(Locale.ROOT));
-  }
-
-  private static Settings settings(String schema) {
-    var prefix = prefix(schema, "social");
-    return new Settings().withRenderMapping(new RenderMapping().withSchemata(
-        new MappedSchema().withInput("social").withOutput(prefix + "social"),
-        new MappedSchema().withInput("identity").withOutput(prefix + "identity")));
-  }
-
-  private static String prefix(String schema, String suffix) {
-    if (!schema.endsWith(suffix)) {
-      throw new IllegalArgumentException("Unexpected PostgreSQL schema.");
-    }
-    return schema.substring(0, schema.length() - suffix.length());
   }
 
   private static Instant instant(Object value) {

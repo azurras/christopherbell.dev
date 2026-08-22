@@ -1,177 +1,159 @@
 package dev.christopherbell.federation.outbound;
 
-import static dev.christopherbell.persistence.jooq.federation.Tables.FEDERATION_DELIVERY_JOB;
-import static dev.christopherbell.persistence.jooq.federation.Tables.FEDERATION_SCAN_STATE;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
-import dev.christopherbell.persistence.jooq.federation.tables.records.FederationDeliveryJobRecord;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Types;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.Optional;
-import org.jooq.DSLContext;
-import org.jooq.Field;
-import org.jooq.impl.DSL;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** PostgreSQL owner of federation scan, enqueue, claim, and exact-owner transitions. */
 @PostgresPersistence
 class PostgresFederationDeliveryJobRepository implements FederationDeliveryStore {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
+  private final String jobTable;
+  private final String scanTable;
 
-  PostgresFederationDeliveryJobRepository(DSLContext database) {
+  PostgresFederationDeliveryJobRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas, TransactionOperations transactions) {
     this.database = database;
+    this.transactions = transactions;
+    jobTable = schemas.qualifiedTable("federation", "federation_delivery_job");
+    scanTable = schemas.qualifiedTable("federation", "federation_scan_state");
   }
 
   @Override
   public FederationScanCursor loadCursor() {
-    return database.selectFrom(FEDERATION_SCAN_STATE)
-        .where(FEDERATION_SCAN_STATE.SCAN_STATE_ID.eq(FederationScanState.OUTBOUND_CREATE))
-        .fetchOptional(record -> record.getCreatedOn() == null || record.getPostId() == null
-            ? null : new FederationScanCursor(record.getCreatedOn().toInstant(), record.getPostId()))
-        .orElse(null);
+    return database.sql("""
+            select created_on, post_id from %s where scan_state_id = :id
+            """.formatted(scanTable)).param("id", FederationScanState.OUTBOUND_CREATE)
+        .query((row, ignored) -> {
+          var created = row.getObject("created_on", OffsetDateTime.class);
+          var postId = row.getString("post_id");
+          return created == null || postId == null
+              ? null : new FederationScanCursor(created.toInstant(), postId);
+        }).optional().orElse(null);
   }
 
   @Override
-  public void enqueueIfAbsent(
-      String postId, String accountId, ControlledPeer peer, Instant now) {
-    database.insertInto(FEDERATION_DELIVERY_JOB)
-        .set(FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID, stableJobId(postId, peer.name()))
-        .set(FEDERATION_DELIVERY_JOB.POST_ID, postId)
-        .set(FEDERATION_DELIVERY_JOB.ACCOUNT_ID, accountId)
-        .set(FEDERATION_DELIVERY_JOB.PEER_NAME, peer.name())
-        .set(FEDERATION_DELIVERY_JOB.PEER_INBOX, peer.inbox().toString())
-        .set(FEDERATION_DELIVERY_JOB.STATE, FederationDeliveryState.PENDING.name())
-        .set(FEDERATION_DELIVERY_JOB.ATTEMPTS, 0)
-        .set(FEDERATION_DELIVERY_JOB.NEXT_ATTEMPT_ON, timestamp(now))
-        .set(FEDERATION_DELIVERY_JOB.CREATED_ON, timestamp(now))
-        .set(FEDERATION_DELIVERY_JOB.UPDATED_ON, timestamp(now))
-        .onConflict(FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID)
-        .doNothing()
-        .execute();
+  public void enqueueIfAbsent(String postId, String accountId, ControlledPeer peer, Instant now) {
+    database.sql("""
+            insert into %s (
+              delivery_job_id, post_id, account_id, peer_name, peer_inbox, state,
+              attempts, next_attempt_on, created_on, updated_on)
+            values (:id, :postId, :accountId, :peerName, :peerInbox, 'PENDING', 0, :now, :now, :now)
+            on conflict (delivery_job_id) do nothing
+            """.formatted(jobTable))
+        .param("id", stableJobId(postId, peer.name())).param("postId", postId)
+        .param("accountId", accountId).param("peerName", peer.name())
+        .param("peerInbox", peer.inbox().toString())
+        .param("now", timestamp(now)).update();
   }
 
   @Override
   public void saveCursor(FederationScanCursor cursor, Instant now) {
-    database.insertInto(FEDERATION_SCAN_STATE)
-        .set(FEDERATION_SCAN_STATE.SCAN_STATE_ID, FederationScanState.OUTBOUND_CREATE)
-        .set(FEDERATION_SCAN_STATE.CREATED_ON, timestamp(cursor.createdOn()))
-        .set(FEDERATION_SCAN_STATE.POST_ID, cursor.postId())
-        .set(FEDERATION_SCAN_STATE.UPDATED_ON, timestamp(now))
-        .onConflict(FEDERATION_SCAN_STATE.SCAN_STATE_ID)
-        .doUpdate()
-        .set(FEDERATION_SCAN_STATE.CREATED_ON, timestamp(cursor.createdOn()))
-        .set(FEDERATION_SCAN_STATE.POST_ID, cursor.postId())
-        .set(FEDERATION_SCAN_STATE.UPDATED_ON, timestamp(now))
-        .set(FEDERATION_SCAN_STATE.VERSION, FEDERATION_SCAN_STATE.VERSION.plus(1L))
-        .execute();
+    database.sql("""
+            insert into %s (scan_state_id, created_on, post_id, updated_on)
+            values (:id, :createdOn, :postId, :updatedOn)
+            on conflict (scan_state_id) do update set
+              created_on = excluded.created_on, post_id = excluded.post_id,
+              updated_on = excluded.updated_on, version = %s.version + 1
+            """.formatted(scanTable, scanTable))
+        .param("id", FederationScanState.OUTBOUND_CREATE)
+        .param("createdOn", timestamp(cursor.createdOn())).param("postId", cursor.postId())
+        .param("updatedOn", timestamp(now)).update();
   }
 
   @Override
-  public Optional<FederationDeliveryJob> claimDue(
-      String owner, Instant now, Instant leaseUntil) {
-    var leaseDuration = Duration.between(now, leaseUntil);
-    if (leaseDuration.isZero() || leaseDuration.isNegative()) {
+  public Optional<FederationDeliveryJob> claimDue(String owner, Instant now, Instant leaseUntil) {
+    var duration = Duration.between(now, leaseUntil);
+    if (duration.isZero() || duration.isNegative()) {
       throw new IllegalArgumentException("Federation delivery lease must be positive");
     }
-    return database.transactionResult(configuration -> {
-      var transaction = DSL.using(configuration);
-      var databaseTime = DSL.currentOffsetDateTime();
-      var due = FEDERATION_DELIVERY_JOB.STATE.in(
-              FederationDeliveryState.PENDING.name(), FederationDeliveryState.RETRY.name())
-          .and(FEDERATION_DELIVERY_JOB.NEXT_ATTEMPT_ON.le(databaseTime))
-          .or(FEDERATION_DELIVERY_JOB.STATE.eq(FederationDeliveryState.CLAIMED.name())
-              .and(FEDERATION_DELIVERY_JOB.CLAIM_UNTIL.le(databaseTime)));
-      var id = transaction.select(FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID)
-          .from(FEDERATION_DELIVERY_JOB)
-          .where(due)
-          .orderBy(FEDERATION_DELIVERY_JOB.NEXT_ATTEMPT_ON.asc().nullsFirst(),
-              FEDERATION_DELIVERY_JOB.CREATED_ON.asc(),
-              FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID.asc())
-          .limit(1)
-          .forUpdate()
-          .skipLocked()
-          .fetchOne(FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID);
-      if (id == null) return Optional.empty();
-      return transaction.update(FEDERATION_DELIVERY_JOB)
-          .set(FEDERATION_DELIVERY_JOB.STATE, FederationDeliveryState.CLAIMED.name())
-          .set(FEDERATION_DELIVERY_JOB.CLAIM_OWNER, owner)
-          .set(FEDERATION_DELIVERY_JOB.CLAIM_UNTIL, databaseLeaseUntil(leaseDuration))
-          .set(FEDERATION_DELIVERY_JOB.UPDATED_ON, databaseTime)
-          .set(FEDERATION_DELIVERY_JOB.ATTEMPTS,
-              FEDERATION_DELIVERY_JOB.ATTEMPTS.plus(1))
-          .set(FEDERATION_DELIVERY_JOB.VERSION, FEDERATION_DELIVERY_JOB.VERSION.plus(1L))
-          .where(FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID.eq(id))
-          .returning()
-          .fetchOptional(PostgresFederationDeliveryJobRepository::map);
+    var claimed = transactions.execute(ignored -> {
+      var id = database.sql("""
+              select delivery_job_id from %s
+              where (state in ('PENDING', 'RETRY') and next_attempt_on <= current_timestamp)
+                 or (state = 'CLAIMED' and claim_until <= current_timestamp)
+              order by next_attempt_on asc nulls first, created_on asc, delivery_job_id asc
+              limit 1 for update skip locked
+              """.formatted(jobTable)).query(String.class).optional();
+      if (id.isEmpty()) return Optional.<FederationDeliveryJob>empty();
+      return database.sql("""
+              update %s set state = 'CLAIMED', claim_owner = :owner,
+                claim_until = current_timestamp + (:milliseconds * interval '1 millisecond'),
+                updated_on = current_timestamp, attempts = attempts + 1, version = version + 1
+              where delivery_job_id = :id returning *
+              """.formatted(jobTable)).param("owner", owner)
+          .param("milliseconds", duration.toMillis()).param("id", id.orElseThrow())
+          .query(PostgresFederationDeliveryJobRepository::map).optional();
     });
+    return claimed == null ? Optional.empty() : claimed;
   }
 
   @Override
   public boolean succeed(String jobId, String owner, int status, Instant now) {
     return transition(jobId, owner, FederationDeliveryState.SUCCEEDED, status,
-        null, "DELIVERED", now);
+        null, "DELIVERED");
   }
 
   @Override
-  public boolean retry(
-      String jobId, String owner, Integer status, Instant nextAttempt, Instant now) {
+  public boolean retry(String jobId, String owner, Integer status, Instant nextAttempt, Instant now) {
     return transition(jobId, owner, FederationDeliveryState.RETRY, status,
-        nextAttempt, "RETRYABLE", now);
+        nextAttempt, "RETRYABLE");
   }
 
   @Override
-  public boolean dead(
-      String jobId, String owner, Integer status, String reason, Instant now) {
-    return transition(jobId, owner, FederationDeliveryState.DEAD, status,
-        null, bounded(reason), now);
+  public boolean dead(String jobId, String owner, Integer status, String reason, Instant now) {
+    return transition(jobId, owner, FederationDeliveryState.DEAD, status, null, bounded(reason));
   }
 
   @Override
   public boolean cancel(String jobId, String owner, String reason, Instant now) {
-    return transition(jobId, owner, FederationDeliveryState.CANCELLED, null,
-        null, bounded(reason), now);
+    return transition(jobId, owner, FederationDeliveryState.CANCELLED, null, null, bounded(reason));
   }
 
   private boolean transition(
-      String jobId,
-      String owner,
-      FederationDeliveryState state,
-      Integer status,
-      Instant nextAttempt,
-      String outcome,
-      Instant now) {
-    return database.update(FEDERATION_DELIVERY_JOB)
-        .set(FEDERATION_DELIVERY_JOB.STATE, state.name())
-        .set(FEDERATION_DELIVERY_JOB.NEXT_ATTEMPT_ON,
-            nextAttempt == null
-                ? FEDERATION_DELIVERY_JOB.NEXT_ATTEMPT_ON
-                : DSL.val(timestamp(nextAttempt)))
-        .set(FEDERATION_DELIVERY_JOB.LAST_STATUS, status)
-        .set(FEDERATION_DELIVERY_JOB.LAST_OUTCOME, outcome)
-        .set(FEDERATION_DELIVERY_JOB.UPDATED_ON, DSL.currentOffsetDateTime())
-        .setNull(FEDERATION_DELIVERY_JOB.CLAIM_OWNER)
-        .setNull(FEDERATION_DELIVERY_JOB.CLAIM_UNTIL)
-        .set(FEDERATION_DELIVERY_JOB.VERSION, FEDERATION_DELIVERY_JOB.VERSION.plus(1L))
-        .where(FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID.eq(jobId)
-            .and(FEDERATION_DELIVERY_JOB.STATE.eq(FederationDeliveryState.CLAIMED.name()))
-            .and(FEDERATION_DELIVERY_JOB.CLAIM_OWNER.eq(owner))
-            .and(FEDERATION_DELIVERY_JOB.CLAIM_UNTIL.gt(DSL.currentOffsetDateTime())))
-        .execute() == 1;
+      String jobId, String owner, FederationDeliveryState state, Integer status,
+      Instant nextAttempt, String outcome) {
+    return database.sql("""
+            update %s set state = :state,
+              next_attempt_on = coalesce(:nextAttempt, next_attempt_on),
+              last_status = :status, last_outcome = :outcome, updated_on = current_timestamp,
+              claim_owner = null, claim_until = null, version = version + 1
+            where delivery_job_id = :id and state = 'CLAIMED' and claim_owner = :owner
+              and claim_until > current_timestamp
+            """.formatted(jobTable))
+        .paramSource(new MapSqlParameterSource()
+            .addValue("state", state.name())
+            .addValue("nextAttempt", timestamp(nextAttempt), Types.TIMESTAMP_WITH_TIMEZONE)
+            .addValue("status", status, Types.INTEGER).addValue("outcome", outcome)
+            .addValue("id", jobId).addValue("owner", owner))
+        .update() == 1;
   }
 
-  private static FederationDeliveryJob map(FederationDeliveryJobRecord record) {
+  private static FederationDeliveryJob map(ResultSet row, int rowNumber) throws SQLException {
+    Integer status = (Integer) row.getObject("last_status");
     return new FederationDeliveryJob(
-        record.getDeliveryJobId(), record.getPostId(), record.getAccountId(),
-        record.getPeerName(), record.getPeerInbox(), FederationDeliveryState.valueOf(record.getState()),
-        record.getAttempts(), instant(record.getNextAttemptOn()), record.getClaimOwner(),
-        instant(record.getClaimUntil()), record.getLastStatus(), record.getLastOutcome(),
-        record.getCreatedOn().toInstant(), record.getUpdatedOn().toInstant());
+        row.getString("delivery_job_id"), row.getString("post_id"), row.getString("account_id"),
+        row.getString("peer_name"), row.getString("peer_inbox"),
+        FederationDeliveryState.valueOf(row.getString("state")), row.getInt("attempts"),
+        instant(row, "next_attempt_on"), row.getString("claim_owner"),
+        instant(row, "claim_until"), status, row.getString("last_outcome"),
+        instant(row, "created_on"), instant(row, "updated_on"));
   }
 
   private static String stableJobId(String postId, String peerName) {
@@ -194,15 +176,8 @@ class PostgresFederationDeliveryJobRepository implements FederationDeliveryStore
     return value == null ? null : value.atOffset(ZoneOffset.UTC);
   }
 
-  private static Instant instant(OffsetDateTime value) {
+  private static Instant instant(ResultSet row, String column) throws SQLException {
+    var value = row.getObject(column, OffsetDateTime.class);
     return value == null ? null : value.toInstant();
-  }
-
-  private static Field<OffsetDateTime> databaseLeaseUntil(Duration leaseDuration) {
-    return DSL.field(
-        "{0} + ({1} * interval '1 millisecond')",
-        OffsetDateTime.class,
-        DSL.currentOffsetDateTime(),
-        DSL.val(leaseDuration.toMillis()));
   }
 }

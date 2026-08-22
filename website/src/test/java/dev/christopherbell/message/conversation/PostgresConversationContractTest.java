@@ -24,11 +24,16 @@ class PostgresConversationContractTest implements ConversationParityContract {
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    messages = new PostgresMessageRepository(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    messages = new PostgresMessageRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     cursors = new StableCursorCodec();
-    queries = new PostgresConversationQueryRepository(database.dsl(), cursors);
-    archives = new PostgresConversationArchiveService(database.dsl());
+    queries = new PostgresConversationQueryRepository(
+        database.jdbc(), database.schemas(), database.transactions(), cursors);
+    archives = new PostgresConversationArchiveService(
+        database.managedJdbc(), database.schemas(), database.transactions(),
+        java.time.Clock.systemUTC());
   }
 
   @AfterAll

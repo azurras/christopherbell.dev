@@ -17,17 +17,20 @@ class PostgresReportContractTest implements ReportParityContract {
   private static Task3PostgresqlTestSupport.Database database;
   private static PostgresAccountRepository accounts;
   private static PostgresPostRepository posts;
-  private static ReportRepository reports;
+  private static PostgresReportRepository reports;
   private static ReportQueryPort queries;
 
   @BeforeAll
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    posts = new PostgresPostRepository(database.dsl());
-    reports = new PostgresReportRepository(database.dsl());
-    queries = new PostgresReportQueryService(database.dsl(), reports);
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    posts = new PostgresPostRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    reports = new PostgresReportRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    queries = new PostgresReportQueryService(database.jdbc(), database.schemas(), reports);
   }
 
   @AfterAll

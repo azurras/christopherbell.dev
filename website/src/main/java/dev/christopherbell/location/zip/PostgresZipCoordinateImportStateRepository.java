@@ -1,54 +1,103 @@
 package dev.christopherbell.location.zip;
 
-import static dev.christopherbell.persistence.jooq.mobility.Tables.ZIP_IMPORT_STATE;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.location.model.ZipCoordinateImportResult;
 import dev.christopherbell.location.model.ZipCoordinateImportState;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
-import org.jooq.DSLContext;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** PostgreSQL ZIP import checkpoint adapter. */
 @PostgresPersistence
-public class PostgresZipCoordinateImportStateRepository implements ZipCoordinateImportStateRepository {
-  private final DSLContext database;
+public class PostgresZipCoordinateImportStateRepository
+    implements ZipCoordinateImportStateRepository {
+  private final JdbcClient database;
+  private final String table;
 
-  public PostgresZipCoordinateImportStateRepository(DSLContext database) { this.database = database; }
-
-  @Override public Optional<ZipCoordinateImportState> findById(String id) {
-    return database.selectFrom(ZIP_IMPORT_STATE).where(ZIP_IMPORT_STATE.IMPORT_STATE_ID.eq(id))
-        .fetchOptional(row -> ZipCoordinateImportState.builder().id(row.getImportStateId())
-            .checksum(row.getChecksum()).source(row.getSource()).sourceYear(row.getSourceYear())
-            .importedOn(row.getImportedOn().toInstant())
-            .result(new ZipCoordinateImportResult(row.getResultProcessed(), row.getResultCreated(),
-                row.getResultUpdated(), row.getResultUnchanged(), row.getResultDeleted(),
-                row.getResultSource(), row.getResultSourceYear(), row.getResultChecksum(),
-                row.getResultImportedOn().toInstant(), row.getResultNoOp())).build());
+  public PostgresZipCoordinateImportStateRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas) {
+    this.database = database;
+    table = schemas.qualifiedTable("mobility", "zip_import_state");
   }
 
-  @Override public ZipCoordinateImportState save(ZipCoordinateImportState state) {
+  @Override
+  public Optional<ZipCoordinateImportState> findById(String id) {
+    return database.sql("select * from %s where import_state_id = :id".formatted(table))
+        .param("id", id)
+        .query(PostgresZipCoordinateImportStateRepository::map)
+        .optional();
+  }
+
+  @Override
+  public ZipCoordinateImportState save(ZipCoordinateImportState state) {
     var result = java.util.Objects.requireNonNull(state.getResult(), "ZIP import result");
-    database.insertInto(ZIP_IMPORT_STATE)
-        .set(ZIP_IMPORT_STATE.IMPORT_STATE_ID, state.getId()).set(ZIP_IMPORT_STATE.CHECKSUM, state.getChecksum())
-        .set(ZIP_IMPORT_STATE.IMPORTED_ON, state.getImportedOn().atOffset(ZoneOffset.UTC))
-        .set(ZIP_IMPORT_STATE.SOURCE, state.getSource()).set(ZIP_IMPORT_STATE.SOURCE_YEAR, state.getSourceYear())
-        .set(ZIP_IMPORT_STATE.RESULT_CHECKSUM, result.checksum())
-        .set(ZIP_IMPORT_STATE.RESULT_CREATED, result.created()).set(ZIP_IMPORT_STATE.RESULT_DELETED, result.deleted())
-        .set(ZIP_IMPORT_STATE.RESULT_IMPORTED_ON, result.importedOn().atOffset(ZoneOffset.UTC))
-        .set(ZIP_IMPORT_STATE.RESULT_NO_OP, result.noOp()).set(ZIP_IMPORT_STATE.RESULT_PROCESSED, result.processed())
-        .set(ZIP_IMPORT_STATE.RESULT_SOURCE, result.source()).set(ZIP_IMPORT_STATE.RESULT_SOURCE_YEAR, result.sourceYear())
-        .set(ZIP_IMPORT_STATE.RESULT_UNCHANGED, result.unchanged()).set(ZIP_IMPORT_STATE.RESULT_UPDATED, result.updated())
-        .onConflict(ZIP_IMPORT_STATE.IMPORT_STATE_ID).doUpdate()
-        .set(ZIP_IMPORT_STATE.CHECKSUM, state.getChecksum())
-        .set(ZIP_IMPORT_STATE.IMPORTED_ON, state.getImportedOn().atOffset(ZoneOffset.UTC))
-        .set(ZIP_IMPORT_STATE.SOURCE, state.getSource()).set(ZIP_IMPORT_STATE.SOURCE_YEAR, state.getSourceYear())
-        .set(ZIP_IMPORT_STATE.RESULT_CHECKSUM, result.checksum())
-        .set(ZIP_IMPORT_STATE.RESULT_CREATED, result.created()).set(ZIP_IMPORT_STATE.RESULT_DELETED, result.deleted())
-        .set(ZIP_IMPORT_STATE.RESULT_IMPORTED_ON, result.importedOn().atOffset(ZoneOffset.UTC))
-        .set(ZIP_IMPORT_STATE.RESULT_NO_OP, result.noOp()).set(ZIP_IMPORT_STATE.RESULT_PROCESSED, result.processed())
-        .set(ZIP_IMPORT_STATE.RESULT_SOURCE, result.source()).set(ZIP_IMPORT_STATE.RESULT_SOURCE_YEAR, result.sourceYear())
-        .set(ZIP_IMPORT_STATE.RESULT_UNCHANGED, result.unchanged()).set(ZIP_IMPORT_STATE.RESULT_UPDATED, result.updated()).execute();
-    return findById(state.getId()).orElseThrow();
+    return database.sql("""
+            insert into %s
+              (import_state_id, checksum, imported_on, source, source_year,
+               result_checksum, result_created, result_deleted, result_imported_on,
+               result_no_op, result_processed, result_source, result_source_year,
+               result_unchanged, result_updated)
+            values
+              (:id, :checksum, :importedOn, :source, :sourceYear,
+               :resultChecksum, :created, :deleted, :resultImportedOn,
+               :noOp, :processed, :resultSource, :resultSourceYear, :unchanged, :updated)
+            on conflict (import_state_id) do update set
+              checksum = excluded.checksum,
+              imported_on = excluded.imported_on,
+              source = excluded.source,
+              source_year = excluded.source_year,
+              result_checksum = excluded.result_checksum,
+              result_created = excluded.result_created,
+              result_deleted = excluded.result_deleted,
+              result_imported_on = excluded.result_imported_on,
+              result_no_op = excluded.result_no_op,
+              result_processed = excluded.result_processed,
+              result_source = excluded.result_source,
+              result_source_year = excluded.result_source_year,
+              result_unchanged = excluded.result_unchanged,
+              result_updated = excluded.result_updated
+            returning *
+            """.formatted(table))
+        .param("id", state.getId())
+        .param("checksum", state.getChecksum())
+        .param("importedOn", state.getImportedOn().atOffset(ZoneOffset.UTC))
+        .param("source", state.getSource())
+        .param("sourceYear", state.getSourceYear())
+        .param("resultChecksum", result.checksum())
+        .param("created", result.created())
+        .param("deleted", result.deleted())
+        .param("resultImportedOn", result.importedOn().atOffset(ZoneOffset.UTC))
+        .param("noOp", result.noOp())
+        .param("processed", result.processed())
+        .param("resultSource", result.source())
+        .param("resultSourceYear", result.sourceYear())
+        .param("unchanged", result.unchanged())
+        .param("updated", result.updated())
+        .query(PostgresZipCoordinateImportStateRepository::map)
+        .single();
+  }
+
+  private static ZipCoordinateImportState map(java.sql.ResultSet row, int rowNumber)
+      throws java.sql.SQLException {
+    return ZipCoordinateImportState.builder()
+        .id(row.getString("import_state_id"))
+        .checksum(row.getString("checksum"))
+        .source(row.getString("source"))
+        .sourceYear(row.getInt("source_year"))
+        .importedOn(row.getObject("imported_on", OffsetDateTime.class).toInstant())
+        .result(new ZipCoordinateImportResult(
+            row.getInt("result_processed"),
+            row.getInt("result_created"),
+            row.getInt("result_updated"),
+            row.getInt("result_unchanged"),
+            row.getInt("result_deleted"),
+            row.getString("result_source"),
+            row.getInt("result_source_year"),
+            row.getString("result_checksum"),
+            row.getObject("result_imported_on", OffsetDateTime.class).toInstant(),
+            row.getBoolean("result_no_op")))
+        .build();
   }
 }

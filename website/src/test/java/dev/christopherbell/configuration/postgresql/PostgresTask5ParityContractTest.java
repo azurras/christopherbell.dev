@@ -69,7 +69,8 @@ class PostgresTask5ParityContractTest implements Task5PersistenceParityContract 
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
     contender = schemas.openDatabase();
-    var accounts = new PostgresAccountRepository(database.dsl());
+    var accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     accounts.save(account(OWNER_ID, "task5-owner", "task5-owner@example.test"));
     accounts.save(account(MEMBER_ID, "task5-member", "task5-member@example.test"));
   }
@@ -81,32 +82,95 @@ class PostgresTask5ParityContractTest implements Task5PersistenceParityContract 
     if (schemas != null) schemas.close();
   }
 
-  @Override public VehicleRepository vehicles() { return new PostgresVehicleRepository(database.dsl()); }
-  @Override public VehicleRepository vehicleContender() { return new PostgresVehicleRepository(contender.dsl()); }
-  @Override public VehicleVinDecodeCacheRepository vinCache() { return new PostgresVehicleVinDecodeCacheRepository(database.dsl()); }
-  @Override public NhtsaVinImportStateRepository nhtsaState() { return new PostgresNhtsaVinImportStateRepository(database.dsl()); }
-  @Override public RandomVinImportStateRepository randomVinState() { return new PostgresRandomVinImportStateRepository(database.dsl()); }
-  @Override public ZipCoordinateRepository zipCoordinates() { return new PostgresZipCoordinateRepository(database.dsl()); }
-  @Override public ZipCoordinateImportStateRepository zipImportState() { return new PostgresZipCoordinateImportStateRepository(database.dsl()); }
-  @Override public RestaurantRepository restaurants() { return new PostgresRestaurantRepository(database.dsl()); }
-  @Override public RestaurantRepository restaurantContender() { return new PostgresRestaurantRepository(contender.dsl()); }
-  @Override public DailyLunchPicksRepository dailyPicks() { return new PostgresDailyLunchPicksRepository(database.dsl()); }
-  @Override public RestaurantImportStateRepository restaurantImportState() { return new PostgresRestaurantImportStateRepository(database.dsl()); }
-  @Override public RestaurantImportPreviewPort importPreviews() { return new PostgresRestaurantImportPreviewStore(database.dsl()); }
-  @Override public RestaurantFavoriteRepository favorites() { return new PostgresRestaurantFavoriteRepository(database.dsl()); }
-  @Override public WhatsForLunchPreferenceRepository preferences() { return new PostgresWhatsForLunchPreferenceRepository(database.dsl()); }
-  @Override public WhatsForLunchSessionRepository sessions() { return new PostgresWhatsForLunchSessionRepository(database.dsl()); }
-  @Override public WhatsForLunchSessionMutationPort sessionMutations() { return new PostgresWhatsForLunchSessionMutationStore(database.dsl()); }
-  @Override public RestaurantVoteRepository votes() { return new PostgresRestaurantVoteRepository(database.dsl()); }
-  @Override public RestaurantVoteQueryPort voteQueries() { return new PostgresRestaurantVoteQueryRepository(database.dsl()); }
-  @Override public RestaurantInventoryQueryPort inventoryQueries() { return new PostgresRestaurantInventoryQueryRepository(database.dsl()); }
-  @Override public RestaurantDuplicateQueryPort duplicateQueries() { return new PostgresRestaurantDuplicateQueryRepository(database.dsl()); }
-  @Override public CanesBoxPriceSnapshotRepository canesSnapshots() { return new PostgresCanesBoxPriceSnapshotRepository(database.dsl()); }
-  @Override public AdminActivityRepository adminActivities() { return new PostgresAdminActivityRepository(database.dsl()); }
-  @Override public AdminActivityQueryPort adminActivityQueries() { return new PostgresAdminActivityQueryRepository(database.dsl()); }
-  @Override public PendingActionStore pendingActions() { return new PostgresPendingActionStore(database.dsl()); }
-  @Override public PendingActionStore pendingActionContender() { return new PostgresPendingActionStore(contender.dsl()); }
-  @Override public ScheduledCollectorRunStore scheduledRuns() { return new PostgresScheduledCollectorRunStore(database.dsl()); }
+  @Override public VehicleRepository vehicles() {
+    return new PostgresVehicleRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+  }
+  @Override public VehicleRepository vehicleContender() {
+    return new PostgresVehicleRepository(
+        contender.managedJdbc(), contender.schemas(), contender.transactions());
+  }
+  @Override public VehicleVinDecodeCacheRepository vinCache() {
+    return new PostgresVehicleVinDecodeCacheRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+  }
+  @Override public NhtsaVinImportStateRepository nhtsaState() {
+    return new PostgresNhtsaVinImportStateRepository(database.jdbc(), database.schemas());
+  }
+  @Override public RandomVinImportStateRepository randomVinState() {
+    return new PostgresRandomVinImportStateRepository(database.jdbc(), database.schemas());
+  }
+  @Override public ZipCoordinateRepository zipCoordinates() {
+    return new PostgresZipCoordinateRepository(database.jdbc(), database.schemas());
+  }
+  @Override public ZipCoordinateImportStateRepository zipImportState() {
+    return new PostgresZipCoordinateImportStateRepository(database.jdbc(), database.schemas());
+  }
+  @Override public RestaurantRepository restaurants() {
+    return new PostgresRestaurantRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+  }
+  @Override public RestaurantRepository restaurantContender() {
+    return new PostgresRestaurantRepository(
+        contender.managedJdbc(), contender.schemas(), contender.transactions());
+  }
+  @Override public DailyLunchPicksRepository dailyPicks() {
+    return new PostgresDailyLunchPicksRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+  }
+  @Override public RestaurantImportStateRepository restaurantImportState() {
+    return new PostgresRestaurantImportStateRepository(database.jdbc(), database.schemas());
+  }
+  @Override public RestaurantImportPreviewPort importPreviews() {
+    return new PostgresRestaurantImportPreviewStore(database.jdbc(), database.schemas());
+  }
+  @Override public RestaurantFavoriteRepository favorites() {
+    return new PostgresRestaurantFavoriteRepository(database.jdbc(), database.schemas());
+  }
+  @Override public WhatsForLunchPreferenceRepository preferences() {
+    return new PostgresWhatsForLunchPreferenceRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+  }
+  @Override public WhatsForLunchSessionRepository sessions() {
+    return new PostgresWhatsForLunchSessionRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+  }
+  @Override public WhatsForLunchSessionMutationPort sessionMutations() {
+    return new PostgresWhatsForLunchSessionMutationStore(
+        database.managedJdbc(), database.schemas(), database.transactions());
+  }
+  @Override public RestaurantVoteRepository votes() {
+    return new PostgresRestaurantVoteRepository(database.jdbc(), database.schemas());
+  }
+  @Override public RestaurantVoteQueryPort voteQueries() {
+    return new PostgresRestaurantVoteQueryRepository(database.jdbc(), database.schemas());
+  }
+  @Override public RestaurantInventoryQueryPort inventoryQueries() {
+    return new PostgresRestaurantInventoryQueryRepository(database.jdbc(), database.schemas());
+  }
+  @Override public RestaurantDuplicateQueryPort duplicateQueries() {
+    return new PostgresRestaurantDuplicateQueryRepository(database.jdbc(), database.schemas());
+  }
+  @Override public CanesBoxPriceSnapshotRepository canesSnapshots() {
+    return new PostgresCanesBoxPriceSnapshotRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+  }
+  @Override public AdminActivityRepository adminActivities() {
+    return new PostgresAdminActivityRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+  }
+  @Override public AdminActivityQueryPort adminActivityQueries() {
+    return new PostgresAdminActivityQueryRepository(database.jdbc(), database.schemas());
+  }
+  @Override public PendingActionStore pendingActions() {
+    return new PostgresPendingActionStore(database.jdbc(), database.schemas());
+  }
+  @Override public PendingActionStore pendingActionContender() {
+    return new PostgresPendingActionStore(contender.jdbc(), contender.schemas());
+  }
+  @Override public ScheduledCollectorRunStore scheduledRuns() {
+    return new PostgresScheduledCollectorRunStore(database.jdbc(), database.schemas());
+  }
   @Override public DatabaseConnectivityProbe databaseProbe() {
     return new PostgresDatabaseConnectivityProbe(
         new SingleConnectionDataSource(database.connection(), true));

@@ -21,9 +21,11 @@ class PostgresHiddenPostThreadContractTest implements HiddenPostThreadParityCont
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    posts = new PostgresPostRepository(database.dsl());
-    hiddenThreads = new PostgresHiddenPostThreadRepository(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    posts = new PostgresPostRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    hiddenThreads = new PostgresHiddenPostThreadRepository(database.jdbc(), database.schemas());
   }
 
   @AfterAll

@@ -14,11 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import org.jooq.SQLDialect;
-import org.jooq.conf.MappedSchema;
-import org.jooq.conf.RenderMapping;
-import org.jooq.conf.Settings;
-import org.jooq.impl.DSL;
 
 /** Published post-module verification path used by the Mongo-to-PostgreSQL cutover. */
 @PostgresPersistenceSupport
@@ -42,13 +37,11 @@ public final class PostMigrationFeedVerifier {
         || !(queryName.equals(AUTHOR_FEED) || queryName.equals(PUBLIC_FEED))) {
       return false;
     }
-    var prefix = socialSchema.substring(0, socialSchema.length() - "social".length());
-    var mapping = new RenderMapping().withSchemata(
-        new MappedSchema().withInput("social").withOutput(prefix + "social"),
-        new MappedSchema().withInput("identity").withOutput(prefix + "identity"));
     var repository = new PostgresPostFeedQueryRepository(
-        DSL.using(connection, SQLDialect.POSTGRES,
-            new Settings().withRenderMapping(mapping)),
+        org.springframework.jdbc.core.simple.JdbcClient.create(
+            new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+        dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+            .fromPhysicalSchema(socialSchema),
         new StableCursorCodec());
     var account = sourceRows.stream().map(row -> text(row.get("account_id")))
         .filter(Objects::nonNull).findFirst().orElse(null);

@@ -1,7 +1,5 @@
 package dev.christopherbell.admin.api;
 
-import static dev.christopherbell.persistence.jooq.platform.Tables.PENDING_ACTION;
-import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.database;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.instant;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.rollback;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.text;
@@ -20,6 +18,9 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** Published admin-module adapter operations used by cutover parity. */
 @PostgresPersistenceSupport
@@ -29,24 +30,32 @@ public final class AdminMigrationVerifier {
   public static boolean verify(
       Connection connection, String schema, String sourceKind, String queryName,
       List<Map<String, Object>> rows) throws SQLException {
-    var context = database(connection, schema);
+    var dataSource = new SingleConnectionDataSource(connection, true);
+    var database = JdbcClient.create(dataSource);
+    var schemas = dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+        .fromPhysicalSchema(schema);
+    var transactions = new TransactionTemplate(
+        new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
     return switch (sourceKind + "/" + queryName) {
       case "admin_activity/find-by-id" -> verifyOptionalLookup(
-          rows, "admin_activity_id", new PostgresAdminActivityRepository(context)::findById);
-      case "admin_activity/query" -> verifyQuery(context, rows);
-      case "pending_action/active" -> verifyActive(connection, context, rows);
-      case "pending_action/reserve" -> verifyReserve(connection, context);
+          rows, "admin_activity_id",
+          new PostgresAdminActivityRepository(database, schemas, transactions)::findById);
+      case "admin_activity/query" -> verifyQuery(database, schemas, rows);
+      case "pending_action/active" -> verifyActive(connection, schema, rows);
+      case "pending_action/reserve" -> verifyReserve(connection, schema);
       default -> false;
     };
   }
 
   private static boolean verifyQuery(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
+      JdbcClient database,
+      dev.christopherbell.configuration.persistence.PostgresqlSchemaNames schemas,
+      List<Map<String, Object>> rows) {
     var expected = rows.stream().sorted(Comparator.comparing(
         (Map<String, Object> row) -> instant(row.get("created_on"))).reversed()
         .thenComparing(row -> text(row.get("admin_activity_id")), Comparator.reverseOrder()))
         .toList();
-    var actual = new PostgresAdminActivityQueryRepository(context)
+    var actual = new PostgresAdminActivityQueryRepository(database, schemas)
         .query(new AdminActivityQuery(null, null, null, null, null, 0, 2));
     return actual.totalElements() == expected.size()
         && actual.items().stream().map(value -> value.getId()).toList()
@@ -55,22 +64,25 @@ public final class AdminMigrationVerifier {
   }
 
   private static boolean verifyActive(
-      Connection connection, org.jooq.DSLContext context, List<Map<String, Object>> rows)
+      Connection connection, String schema, List<Map<String, Object>> rows)
       throws SQLException {
     if (rows.size() > 1) {
       return false;
     }
-    var targetDeadline = context.select(PENDING_ACTION.EXECUTE_AT)
-        .from(PENDING_ACTION)
-        .where(PENDING_ACTION.PENDING_ACTION_ID.eq("machine-power"))
-        .fetchOptional(PENDING_ACTION.EXECUTE_AT)
+    var jdbc = org.springframework.jdbc.core.simple.JdbcClient.create(
+        new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true));
+    var schemas = dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+        .fromPhysicalSchema(schema);
+    var targetDeadline = jdbc.sql("select execute_at from %s where pending_action_id = :id"
+            .formatted(schemas.qualifiedTable("platform", "pending_action")))
+        .param("id", "machine-power").query(java.time.OffsetDateTime.class).optional()
         .map(value -> value.toInstant());
     var deadline = rows.isEmpty()
         ? targetDeadline.orElse(Instant.EPOCH)
         : instant(rows.getFirst().get("execute_at"));
     var observationTime = deadline.minusNanos(1);
     return rollback(connection, () -> {
-      var actual = new PostgresPendingActionStore(context).active(observationTime);
+      var actual = new PostgresPendingActionStore(jdbc, schemas).active(observationTime);
       if (rows.isEmpty()) {
         return actual.isEmpty();
       }
@@ -83,9 +95,13 @@ public final class AdminMigrationVerifier {
   }
 
   private static boolean verifyReserve(
-      Connection connection, org.jooq.DSLContext context) throws SQLException {
+      Connection connection, String schema) throws SQLException {
     return rollback(connection, () -> {
-      var store = new PostgresPendingActionStore(context);
+      var store = new PostgresPendingActionStore(
+          org.springframework.jdbc.core.simple.JdbcClient.create(
+              new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+          dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+              .fromPhysicalSchema(schema));
       var accepted = Instant.parse("2099-01-01T00:00:00Z");
       var reservation = new Reservation(
           CommandCenterActionType.RESTART_COMPUTER, accepted, accepted.plusSeconds(60));

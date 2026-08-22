@@ -1,63 +1,102 @@
 package dev.christopherbell.vehicle.nhtsa.enrichment;
 
-import static dev.christopherbell.persistence.jooq.mobility.Tables.NHTSA_IMPORT_STATE;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.vehicle.nhtsa.model.NhtsaVinImportState;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
-import org.jooq.DSLContext;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** PostgreSQL NHTSA import-state adapter. */
 @PostgresPersistence
 public class PostgresNhtsaVinImportStateRepository implements NhtsaVinImportStateRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final String table;
 
-  public PostgresNhtsaVinImportStateRepository(DSLContext database) { this.database = database; }
-
-  @Override public Optional<NhtsaVinImportState> findById(String id) {
-    return database.selectFrom(NHTSA_IMPORT_STATE)
-        .where(NHTSA_IMPORT_STATE.IMPORT_STATE_ID.eq(id)).fetchOptional(row -> NhtsaVinImportState.builder()
-            .id(row.getImportStateId()).callsOnDate(row.getCallsOnDate()).callsToday(row.getCallsToday())
-            .disabledUntil(instant(row.getDisabledUntil())).forbiddenOn(instant(row.getForbiddenOn()))
-            .lastAttemptOn(instant(row.getLastAttemptOn())).lastFailureOn(instant(row.getLastFailureOn()))
-            .lastFailureStatus(row.getLastFailureStatus()).lifetimeCalls(row.getLifetimeCalls())
-            .lifetimeVinsProcessed(row.getLifetimeVinsProcessed()).notes(row.getNotes())
-            .permanentlyDisabled(row.getPermanentlyDisabled())
-            .vinsProcessedToday(row.getVinsProcessedToday()).build());
+  public PostgresNhtsaVinImportStateRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas) {
+    this.database = database;
+    table = schemas.qualifiedTable("mobility", "nhtsa_import_state");
   }
 
-  @Override public NhtsaVinImportState save(NhtsaVinImportState state) {
-    database.insertInto(NHTSA_IMPORT_STATE)
-        .set(NHTSA_IMPORT_STATE.IMPORT_STATE_ID, state.getId())
-        .set(NHTSA_IMPORT_STATE.CALLS_ON_DATE, state.getCallsOnDate())
-        .set(NHTSA_IMPORT_STATE.CALLS_TODAY, state.getCallsToday())
-        .set(NHTSA_IMPORT_STATE.DISABLED_UNTIL, offset(state.getDisabledUntil()))
-        .set(NHTSA_IMPORT_STATE.FORBIDDEN_ON, offset(state.getForbiddenOn()))
-        .set(NHTSA_IMPORT_STATE.LAST_ATTEMPT_ON, offset(state.getLastAttemptOn()))
-        .set(NHTSA_IMPORT_STATE.LAST_FAILURE_ON, offset(state.getLastFailureOn()))
-        .set(NHTSA_IMPORT_STATE.LAST_FAILURE_STATUS, state.getLastFailureStatus())
-        .set(NHTSA_IMPORT_STATE.LIFETIME_CALLS, state.getLifetimeCalls())
-        .set(NHTSA_IMPORT_STATE.LIFETIME_VINS_PROCESSED, state.getLifetimeVinsProcessed())
-        .set(NHTSA_IMPORT_STATE.NOTES, state.getNotes())
-        .set(NHTSA_IMPORT_STATE.PERMANENTLY_DISABLED, state.getPermanentlyDisabled())
-        .set(NHTSA_IMPORT_STATE.VINS_PROCESSED_TODAY, state.getVinsProcessedToday())
-        .onConflict(NHTSA_IMPORT_STATE.IMPORT_STATE_ID).doUpdate()
-        .set(NHTSA_IMPORT_STATE.CALLS_ON_DATE, state.getCallsOnDate())
-        .set(NHTSA_IMPORT_STATE.CALLS_TODAY, state.getCallsToday())
-        .set(NHTSA_IMPORT_STATE.DISABLED_UNTIL, offset(state.getDisabledUntil()))
-        .set(NHTSA_IMPORT_STATE.FORBIDDEN_ON, offset(state.getForbiddenOn()))
-        .set(NHTSA_IMPORT_STATE.LAST_ATTEMPT_ON, offset(state.getLastAttemptOn()))
-        .set(NHTSA_IMPORT_STATE.LAST_FAILURE_ON, offset(state.getLastFailureOn()))
-        .set(NHTSA_IMPORT_STATE.LAST_FAILURE_STATUS, state.getLastFailureStatus())
-        .set(NHTSA_IMPORT_STATE.LIFETIME_CALLS, state.getLifetimeCalls())
-        .set(NHTSA_IMPORT_STATE.LIFETIME_VINS_PROCESSED, state.getLifetimeVinsProcessed())
-        .set(NHTSA_IMPORT_STATE.NOTES, state.getNotes())
-        .set(NHTSA_IMPORT_STATE.PERMANENTLY_DISABLED, state.getPermanentlyDisabled())
-        .set(NHTSA_IMPORT_STATE.VINS_PROCESSED_TODAY, state.getVinsProcessedToday()).execute();
-    return findById(state.getId()).orElseThrow();
+  @Override
+  public Optional<NhtsaVinImportState> findById(String id) {
+    return database.sql("select * from %s where import_state_id = :id".formatted(table))
+        .param("id", id)
+        .query(PostgresNhtsaVinImportStateRepository::map)
+        .optional();
   }
 
-  private static java.time.OffsetDateTime offset(java.time.Instant value) { return value == null ? null : value.atOffset(ZoneOffset.UTC); }
-  private static java.time.Instant instant(java.time.OffsetDateTime value) { return value == null ? null : value.toInstant(); }
+  @Override
+  public NhtsaVinImportState save(NhtsaVinImportState state) {
+    return database.sql("""
+            insert into %s
+              (import_state_id, calls_on_date, calls_today, disabled_until, forbidden_on,
+               last_attempt_on, last_failure_on, last_failure_status, lifetime_calls,
+               lifetime_vins_processed, notes, permanently_disabled, vins_processed_today)
+            values
+              (:id, :callsOnDate, :callsToday, :disabledUntil, :forbiddenOn,
+               :lastAttemptOn, :lastFailureOn, :lastFailureStatus, :lifetimeCalls,
+               :lifetimeVinsProcessed, :notes, :permanentlyDisabled, :vinsProcessedToday)
+            on conflict (import_state_id) do update set
+              calls_on_date = excluded.calls_on_date,
+              calls_today = excluded.calls_today,
+              disabled_until = excluded.disabled_until,
+              forbidden_on = excluded.forbidden_on,
+              last_attempt_on = excluded.last_attempt_on,
+              last_failure_on = excluded.last_failure_on,
+              last_failure_status = excluded.last_failure_status,
+              lifetime_calls = excluded.lifetime_calls,
+              lifetime_vins_processed = excluded.lifetime_vins_processed,
+              notes = excluded.notes,
+              permanently_disabled = excluded.permanently_disabled,
+              vins_processed_today = excluded.vins_processed_today
+            returning *
+            """.formatted(table))
+        .param("id", state.getId())
+        .param("callsOnDate", state.getCallsOnDate(), Types.DATE)
+        .param("callsToday", state.getCallsToday(), Types.INTEGER)
+        .param("disabledUntil", offset(state.getDisabledUntil()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .param("forbiddenOn", offset(state.getForbiddenOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .param("lastAttemptOn", offset(state.getLastAttemptOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .param("lastFailureOn", offset(state.getLastFailureOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .param("lastFailureStatus", state.getLastFailureStatus(), Types.INTEGER)
+        .param("lifetimeCalls", state.getLifetimeCalls(), Types.BIGINT)
+        .param("lifetimeVinsProcessed", state.getLifetimeVinsProcessed(), Types.BIGINT)
+        .param("notes", state.getNotes(), Types.VARCHAR)
+        .param("permanentlyDisabled", state.getPermanentlyDisabled(), Types.BOOLEAN)
+        .param("vinsProcessedToday", state.getVinsProcessedToday(), Types.INTEGER)
+        .query(PostgresNhtsaVinImportStateRepository::map)
+        .single();
+  }
+
+  private static NhtsaVinImportState map(java.sql.ResultSet row, int rowNumber)
+      throws SQLException {
+    return NhtsaVinImportState.builder()
+        .id(row.getString("import_state_id"))
+        .callsOnDate(row.getObject("calls_on_date", java.time.LocalDate.class))
+        .callsToday(row.getObject("calls_today", Integer.class))
+        .disabledUntil(instant(row.getObject("disabled_until", OffsetDateTime.class)))
+        .forbiddenOn(instant(row.getObject("forbidden_on", OffsetDateTime.class)))
+        .lastAttemptOn(instant(row.getObject("last_attempt_on", OffsetDateTime.class)))
+        .lastFailureOn(instant(row.getObject("last_failure_on", OffsetDateTime.class)))
+        .lastFailureStatus(row.getObject("last_failure_status", Integer.class))
+        .lifetimeCalls(row.getObject("lifetime_calls", Long.class))
+        .lifetimeVinsProcessed(row.getObject("lifetime_vins_processed", Long.class))
+        .notes(row.getString("notes"))
+        .permanentlyDisabled(row.getObject("permanently_disabled", Boolean.class))
+        .vinsProcessedToday(row.getObject("vins_processed_today", Integer.class))
+        .build();
+  }
+
+  private static OffsetDateTime offset(java.time.Instant value) {
+    return value == null ? null : value.atOffset(ZoneOffset.UTC);
+  }
+
+  private static java.time.Instant instant(OffsetDateTime value) {
+    return value == null ? null : value.toInstant();
+  }
 }

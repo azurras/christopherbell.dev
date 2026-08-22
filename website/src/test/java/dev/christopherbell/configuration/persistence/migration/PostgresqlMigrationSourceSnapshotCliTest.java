@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TreeMap;
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -19,7 +20,7 @@ class PostgresqlMigrationSourceSnapshotCliTest {
   @EnabledIfEnvironmentVariable(named = "MONGODB_MIGRATION_TEST_URI", matches = ".+")
   void snapshotsEveryCatalogKindWithoutWritingEitherDatabase() throws Exception {
     var mongoUri = System.getenv("MONGODB_MIGRATION_TEST_URI");
-    var jdbcUrl = System.getenv("POSTGRES_INTEGRATION_JDBC_URL");
+    var jdbcUrl = System.getenv("SPRING_DATASOURCE_URL");
     assertThat(mongoUri).endsWith("/test");
     assertThat(jdbcUrl).endsWith("/test");
     var environment = new HashMap<String, String>();
@@ -36,7 +37,8 @@ class PostgresqlMigrationSourceSnapshotCliTest {
     environment.put("POSTGRESQL_MIGRATION_BATCH_SIZE", "500");
     environment.put("POSTGRESQL_MIGRATION_TARGET_USERNAME", "christopherbell_test");
     environment.put("POSTGRESQL_MIGRATION_TARGET_PASSWORD",
-        System.getenv().getOrDefault("POSTGRES_INTEGRATION_PASSWORD", "unused"));
+        System.getenv().getOrDefault("SPRING_DATASOURCE_PASSWORD", "unused"));
+    clearMongoTestFixtures(mongoUri);
     var mongoBefore = mongoShape(mongoUri);
     Map<String, Long> postgresBefore;
     try (var connection = new DriverManagerDataSource(
@@ -130,6 +132,15 @@ class PostgresqlMigrationSourceSnapshotCliTest {
       }
     }
     return shape;
+  }
+
+  private static void clearMongoTestFixtures(String uri) {
+    try (var mongo = MongoClients.create(uri)) {
+      var database = mongo.getDatabase("test");
+      for (var collection : database.listCollectionNames()) {
+        database.getCollection(collection).deleteMany(new Document());
+      }
+    }
   }
 
   private static Map<String, Long> postgresShape(java.sql.Statement statement)

@@ -1,108 +1,138 @@
 package dev.christopherbell.music.library;
 
-import static dev.christopherbell.persistence.jooq.music.Tables.PLAYLIST;
-import static dev.christopherbell.persistence.jooq.music.Tables.PLAYLIST_TRACK;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
-import dev.christopherbell.persistence.jooq.music.tables.records.PlaylistRecord;
+import dev.christopherbell.configuration.persistence.PostgresqlIntegrityViolationTranslator;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** PostgreSQL implementation of global optimistic Music playlists. */
 @PostgresPersistence
 public class PostgresMusicPlaylistRepository implements MusicPlaylistRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
+  private final String playlistTable;
+  private final String trackTable;
 
-  public PostgresMusicPlaylistRepository(DSLContext database) {
+  public PostgresMusicPlaylistRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas, TransactionOperations transactions) {
     this.database = database;
+    this.transactions = transactions;
+    playlistTable = schemas.qualifiedTable("music", "playlist");
+    trackTable = schemas.qualifiedTable("music", "playlist_track");
   }
 
   @Override
   public MusicPlaylist save(MusicPlaylist playlist) {
     try {
-      return database.transactionResult(configuration -> {
-        DSLContext transaction = DSL.using(configuration);
-        long nextVersion;
+      var saved = transactions.execute(ignored -> {
         if (playlist.version() == null) {
-          transaction.insertInto(PLAYLIST).set(PLAYLIST.PLAYLIST_ID, playlist.id())
-              .set(PLAYLIST.NORMALIZED_NAME, playlist.normalizedName())
-              .set(PLAYLIST.NAME, playlist.name()).set(PLAYLIST.VERSION, 0L)
-              .set(PLAYLIST.UPDATED_BY_ACCOUNT_ID, playlist.updatedByAccountId())
-              .set(PLAYLIST.UPDATED_AT, playlist.updatedAt().atOffset(ZoneOffset.UTC)).execute();
-          nextVersion = 0;
+          database.sql("""
+                  insert into %s (
+                    playlist_id, normalized_name, name, version,
+                    updated_by_account_id, updated_at)
+                  values (:id, :normalizedName, :name, 0, :accountId, :updatedAt)
+                  """.formatted(playlistTable))
+              .param("id", playlist.id()).param("normalizedName", playlist.normalizedName())
+              .param("name", playlist.name()).param("accountId", playlist.updatedByAccountId())
+              .param("updatedAt", playlist.updatedAt().atOffset(ZoneOffset.UTC)).update();
         } else {
-          nextVersion = Math.incrementExact(playlist.version());
-          int changed = transaction.update(PLAYLIST)
-              .set(PLAYLIST.NORMALIZED_NAME, playlist.normalizedName())
-              .set(PLAYLIST.NAME, playlist.name()).set(PLAYLIST.VERSION, nextVersion)
-              .set(PLAYLIST.UPDATED_BY_ACCOUNT_ID, playlist.updatedByAccountId())
-              .set(PLAYLIST.UPDATED_AT, playlist.updatedAt().atOffset(ZoneOffset.UTC))
-              .where(PLAYLIST.PLAYLIST_ID.eq(playlist.id())
-                  .and(PLAYLIST.VERSION.eq(playlist.version())))
-              .execute();
+          int changed = database.sql("""
+                  update %s set normalized_name = :normalizedName, name = :name,
+                    version = :nextVersion, updated_by_account_id = :accountId,
+                    updated_at = :updatedAt
+                  where playlist_id = :id and version = :expectedVersion
+                  """.formatted(playlistTable))
+              .param("id", playlist.id()).param("normalizedName", playlist.normalizedName())
+              .param("name", playlist.name())
+              .param("nextVersion", Math.incrementExact(playlist.version()))
+              .param("expectedVersion", playlist.version())
+              .param("accountId", playlist.updatedByAccountId())
+              .param("updatedAt", playlist.updatedAt().atOffset(ZoneOffset.UTC)).update();
           if (changed != 1) {
             throw new OptimisticLockingFailureException("Music playlist changed during save.");
           }
         }
-        transaction.deleteFrom(PLAYLIST_TRACK)
-            .where(PLAYLIST_TRACK.PLAYLIST_ID.eq(playlist.id())).execute();
+        database.sql("delete from %s where playlist_id = :id".formatted(trackTable))
+            .param("id", playlist.id()).update();
         for (int ordinal = 0; ordinal < playlist.trackIds().size(); ordinal++) {
-          transaction.insertInto(PLAYLIST_TRACK).set(PLAYLIST_TRACK.PLAYLIST_ID, playlist.id())
-              .set(PLAYLIST_TRACK.ORDINAL, ordinal)
-              .set(PLAYLIST_TRACK.TRACK_ID, playlist.trackIds().get(ordinal)).execute();
+          database.sql("""
+                  insert into %s (playlist_id, ordinal, track_id)
+                  values (:id, :ordinal, :trackId)
+                  """.formatted(trackTable))
+              .param("id", playlist.id()).param("ordinal", ordinal)
+              .param("trackId", playlist.trackIds().get(ordinal)).update();
         }
-        return requirePlaylist(transaction, playlist.id());
+        return findById(playlist.id()).orElseThrow();
       });
-    } catch (org.jooq.exception.IntegrityConstraintViolationException failure) {
-      if ("23505".equals(failure.sqlState())) {
-        throw new DuplicateKeyException("PostgreSQL rejected a duplicate Music playlist.", failure);
+      if (saved == null) {
+        throw new IllegalStateException("Music playlist transaction returned no value.");
       }
-      throw new DataIntegrityViolationException(
-          "PostgreSQL rejected a Music playlist relationship.", failure);
+      return saved;
+    } catch (DataIntegrityViolationException failure) {
+      throw PostgresqlIntegrityViolationTranslator.translate(
+          sqlState(failure),
+          "PostgreSQL rejected a duplicate music playlist identity.",
+          "PostgreSQL rejected music playlist data.");
     }
   }
 
-  @Override public Optional<MusicPlaylist> findById(String id) {
-    return find(database, id);
+  private static String sqlState(Throwable failure) {
+    for (var cause = failure; cause != null; cause = cause.getCause()) {
+      if (cause instanceof SQLException sqlFailure) {
+        return sqlFailure.getSQLState();
+      }
+    }
+    return null;
   }
 
-  @Override public List<MusicPlaylist> findTop100ByOrderByNormalizedNameAsc() {
-    return database.selectFrom(PLAYLIST).orderBy(PLAYLIST.NORMALIZED_NAME.asc(), PLAYLIST.PLAYLIST_ID.asc())
-        .limit(100).fetch(row -> map(database, row));
+  @Override
+  public Optional<MusicPlaylist> findById(String id) {
+    return database.sql("select * from %s where playlist_id = :id".formatted(playlistTable))
+        .param("id", id).query(this::map).optional();
   }
 
-  @Override public long count() {
-    return database.fetchCount(PLAYLIST);
+  @Override
+  public List<MusicPlaylist> findTop100ByOrderByNormalizedNameAsc() {
+    return database.sql("""
+            select * from %s order by normalized_name asc, playlist_id asc limit 100
+            """.formatted(playlistTable)).query(this::map).list();
   }
 
-  @Override public void delete(MusicPlaylist playlist) {
-    var condition = PLAYLIST.PLAYLIST_ID.eq(playlist.id());
-    if (playlist.version() != null) condition = condition.and(PLAYLIST.VERSION.eq(playlist.version()));
-    if (database.deleteFrom(PLAYLIST).where(condition).execute() != 1) {
+  @Override
+  public long count() {
+    return database.sql("select count(*) from %s".formatted(playlistTable))
+        .query(Long.class).single();
+  }
+
+  @Override
+  public void delete(MusicPlaylist playlist) {
+    var statement = playlist.version() == null
+        ? database.sql("delete from %s where playlist_id = :id".formatted(playlistTable))
+            .param("id", playlist.id())
+        : database.sql("delete from %s where playlist_id = :id and version = :version"
+                .formatted(playlistTable))
+            .param("id", playlist.id()).param("version", playlist.version());
+    if (statement.update() != 1) {
       throw new OptimisticLockingFailureException("Music playlist changed during deletion.");
     }
   }
 
-  private static Optional<MusicPlaylist> find(DSLContext context, String id) {
-    return context.selectFrom(PLAYLIST).where(PLAYLIST.PLAYLIST_ID.eq(id))
-        .fetchOptional(row -> map(context, row));
-  }
-
-  private static MusicPlaylist requirePlaylist(DSLContext context, String id) {
-    return find(context, id).orElseThrow();
-  }
-
-  private static MusicPlaylist map(DSLContext context, PlaylistRecord row) {
-    List<String> trackIds = context.select(PLAYLIST_TRACK.TRACK_ID).from(PLAYLIST_TRACK)
-        .where(PLAYLIST_TRACK.PLAYLIST_ID.eq(row.getPlaylistId()))
-        .orderBy(PLAYLIST_TRACK.ORDINAL.asc()).fetch(PLAYLIST_TRACK.TRACK_ID);
-    return new MusicPlaylist(row.getPlaylistId(), row.getNormalizedName(), row.getName(), trackIds,
-        row.getVersion(), row.getUpdatedByAccountId(), row.getUpdatedAt().toInstant());
+  private MusicPlaylist map(ResultSet row, int rowNumber) throws SQLException {
+    String id = row.getString("playlist_id");
+    var tracks = database.sql("""
+            select track_id from %s where playlist_id = :id order by ordinal asc
+            """.formatted(trackTable)).param("id", id).query(String.class).list();
+    return new MusicPlaylist(id, row.getString("normalized_name"), row.getString("name"), tracks,
+        row.getLong("version"), row.getString("updated_by_account_id"),
+        row.getObject("updated_at", OffsetDateTime.class).toInstant());
   }
 }
