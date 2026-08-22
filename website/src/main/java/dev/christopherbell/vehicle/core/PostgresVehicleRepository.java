@@ -1,41 +1,47 @@
 package dev.christopherbell.vehicle.core;
 
-import static dev.christopherbell.persistence.jooq.mobility.Tables.VEHICLE;
-import static dev.christopherbell.persistence.jooq.mobility.Tables.VEHICLE_DECODED_VALUE;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
-import dev.christopherbell.configuration.persistence.PostgresqlConstraintViolationCause;
-import dev.christopherbell.persistence.jooq.mobility.tables.records.VehicleRecord;
+import dev.christopherbell.configuration.persistence.PostgresqlIntegrityViolationTranslator;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.vehicle.model.Vehicle;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** PostgreSQL vehicle aggregate adapter with exact VIN ownership. */
 @PostgresPersistence
 public class PostgresVehicleRepository implements VehicleRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
+  private final String vehicleTable;
+  private final String decodedTable;
 
-  public PostgresVehicleRepository(DSLContext database) {
+  public PostgresVehicleRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas, TransactionOperations transactions) {
     this.database = database;
+    this.transactions = transactions;
+    vehicleTable = schemas.qualifiedTable("mobility", "vehicle");
+    decodedTable = schemas.qualifiedTable("mobility", "vehicle_decoded_value");
   }
 
   @Override
   public Vehicle save(Vehicle vehicle) {
     try {
-      return database.transactionResult(configuration -> save(DSL.using(configuration), vehicle));
-    } catch (org.jooq.exception.IntegrityConstraintViolationException failure) {
-      if ("23505".equals(failure.sqlState())) {
-        throw new DuplicateKeyException("PostgreSQL rejected a duplicate vehicle identity.",
-            new PostgresqlConstraintViolationCause(failure.sqlState()));
-      }
-      throw new DataIntegrityViolationException("PostgreSQL rejected vehicle data.",
-          new PostgresqlConstraintViolationCause(failure.sqlState()));
+      return transactions.execute(status -> saveInsideTransaction(vehicle));
+    } catch (DataIntegrityViolationException failure) {
+      throw PostgresqlIntegrityViolationTranslator.translate(
+          sqlState(failure),
+          "PostgreSQL rejected a duplicate vehicle identity.",
+          "PostgreSQL rejected vehicle data.");
     }
   }
 
@@ -46,171 +52,189 @@ public class PostgresVehicleRepository implements VehicleRepository {
     return List.copyOf(saved);
   }
 
-  private static Vehicle save(DSLContext transaction, Vehicle vehicle) {
-    transaction.insertInto(VEHICLE)
-        .set(VEHICLE.VEHICLE_ID, vehicle.getId())
-        .set(VEHICLE.BODY_STYLE, vehicle.getBodyStyle())
-        .set(VEHICLE.BODY_CLASS, vehicle.getBodyClass())
-        .set(VEHICLE.COLOR, vehicle.getColor())
-        .set(VEHICLE.CREATED_BY, vehicle.getCreatedBy())
-        .set(VEHICLE.CREATED_ON, offset(vehicle.getCreatedOn()))
-        .set(VEHICLE.DRIVETRAIN, vehicle.getDrivetrain())
-        .set(VEHICLE.DOORS, vehicle.getDoors())
-        .set(VEHICLE.ENGINE, vehicle.getEngine())
-        .set(VEHICLE.FUEL_TYPE, vehicle.getFuelType())
-        .set(VEHICLE.GVWR, vehicle.getGvwr())
-        .set(VEHICLE.LAST_MODIFIED_BY, vehicle.getLastModifiedBy())
-        .set(VEHICLE.LAST_UPDATED_ON, offset(vehicle.getLastUpdatedOn()))
-        .set(VEHICLE.LICENSE_PLATE, vehicle.getLicensePlate())
-        .set(VEHICLE.LICENSE_PLATE_STATE, vehicle.getLicensePlateState())
-        .set(VEHICLE.MAKE, vehicle.getMake())
-        .set(VEHICLE.MANUFACTURER, vehicle.getManufacturer())
-        .set(VEHICLE.MANUFACTURER_ID, vehicle.getManufacturerId())
-        .set(VEHICLE.MILEAGE, vehicle.getMileage() == null ? null : vehicle.getMileage().longValue())
-        .set(VEHICLE.MODEL, vehicle.getModel())
-        .set(VEHICLE.MODEL_YEAR, vehicle.getYear())
-        .set(VEHICLE.NHTSA_ERROR_CODE, vehicle.getNhtsaErrorCode())
-        .set(VEHICLE.NHTSA_ERROR_TEXT, vehicle.getNhtsaErrorText())
-        .set(VEHICLE.NHTSA_LAST_DECODED_ON, offset(vehicle.getNhtsaLastDecodedOn()))
-        .set(VEHICLE.NICKNAME, vehicle.getNickname())
-        .set(VEHICLE.NOTES, vehicle.getNotes())
-        .set(VEHICLE.PLANT_CITY, vehicle.getPlantCity())
-        .set(VEHICLE.PLANT_COUNTRY, vehicle.getPlantCountry())
-        .set(VEHICLE.PLANT_STATE, vehicle.getPlantState())
-        .set(VEHICLE.PURCHASE_DATE, vehicle.getPurchaseDate())
-        .set(VEHICLE.SERIES, vehicle.getSeries())
-        .set(VEHICLE.TRANSMISSION, vehicle.getTransmission())
-        .set(VEHICLE.TRIM, vehicle.getTrim())
-        .set(VEHICLE.VEHICLE_TYPE, vehicle.getVehicleType())
-        .set(VEHICLE.VIN, vehicle.getVin())
-        .onConflict(VEHICLE.VEHICLE_ID).doUpdate()
-        .set(VEHICLE.BODY_STYLE, vehicle.getBodyStyle())
-        .set(VEHICLE.BODY_CLASS, vehicle.getBodyClass())
-        .set(VEHICLE.COLOR, vehicle.getColor())
-        .set(VEHICLE.CREATED_BY, vehicle.getCreatedBy())
-        .set(VEHICLE.CREATED_ON, offset(vehicle.getCreatedOn()))
-        .set(VEHICLE.DRIVETRAIN, vehicle.getDrivetrain())
-        .set(VEHICLE.DOORS, vehicle.getDoors())
-        .set(VEHICLE.ENGINE, vehicle.getEngine())
-        .set(VEHICLE.FUEL_TYPE, vehicle.getFuelType())
-        .set(VEHICLE.GVWR, vehicle.getGvwr())
-        .set(VEHICLE.LAST_MODIFIED_BY, vehicle.getLastModifiedBy())
-        .set(VEHICLE.LAST_UPDATED_ON, offset(vehicle.getLastUpdatedOn()))
-        .set(VEHICLE.LICENSE_PLATE, vehicle.getLicensePlate())
-        .set(VEHICLE.LICENSE_PLATE_STATE, vehicle.getLicensePlateState())
-        .set(VEHICLE.MAKE, vehicle.getMake())
-        .set(VEHICLE.MANUFACTURER, vehicle.getManufacturer())
-        .set(VEHICLE.MANUFACTURER_ID, vehicle.getManufacturerId())
-        .set(VEHICLE.MILEAGE, vehicle.getMileage() == null ? null : vehicle.getMileage().longValue())
-        .set(VEHICLE.MODEL, vehicle.getModel())
-        .set(VEHICLE.MODEL_YEAR, vehicle.getYear())
-        .set(VEHICLE.NHTSA_ERROR_CODE, vehicle.getNhtsaErrorCode())
-        .set(VEHICLE.NHTSA_ERROR_TEXT, vehicle.getNhtsaErrorText())
-        .set(VEHICLE.NHTSA_LAST_DECODED_ON, offset(vehicle.getNhtsaLastDecodedOn()))
-        .set(VEHICLE.NICKNAME, vehicle.getNickname())
-        .set(VEHICLE.NOTES, vehicle.getNotes())
-        .set(VEHICLE.PLANT_CITY, vehicle.getPlantCity())
-        .set(VEHICLE.PLANT_COUNTRY, vehicle.getPlantCountry())
-        .set(VEHICLE.PLANT_STATE, vehicle.getPlantState())
-        .set(VEHICLE.PURCHASE_DATE, vehicle.getPurchaseDate())
-        .set(VEHICLE.SERIES, vehicle.getSeries())
-        .set(VEHICLE.TRANSMISSION, vehicle.getTransmission())
-        .set(VEHICLE.TRIM, vehicle.getTrim())
-        .set(VEHICLE.VEHICLE_TYPE, vehicle.getVehicleType())
-        .set(VEHICLE.VIN, vehicle.getVin())
-        .execute();
-    transaction.deleteFrom(VEHICLE_DECODED_VALUE)
-        .where(VEHICLE_DECODED_VALUE.VEHICLE_ID.eq(vehicle.getId())).execute();
+  private Vehicle saveInsideTransaction(Vehicle vehicle) {
+    database.sql("""
+            insert into %s
+              (vehicle_id, body_style, body_class, color, created_by, created_on, drivetrain,
+               doors, engine, fuel_type, gvwr, last_modified_by, last_updated_on, license_plate,
+               license_plate_state, make, manufacturer, manufacturer_id, mileage, model,
+               model_year, nhtsa_error_code, nhtsa_error_text, nhtsa_last_decoded_on, nickname,
+               notes, plant_city, plant_country, plant_state, purchase_date, series,
+               transmission, trim, vehicle_type, vin)
+            values
+              (:id, :bodyStyle, :bodyClass, :color, :createdBy, :createdOn, :drivetrain,
+               :doors, :engine, :fuelType, :gvwr, :modifiedBy, :updatedOn, :licensePlate,
+               :licensePlateState, :make, :manufacturer, :manufacturerId, :mileage, :model,
+               :modelYear, :errorCode, :errorText, :decodedOn, :nickname, :notes, :plantCity,
+               :plantCountry, :plantState, :purchaseDate, :series, :transmission, :trim,
+               :vehicleType, :vin)
+            on conflict (vehicle_id) do update set
+              body_style=excluded.body_style, body_class=excluded.body_class, color=excluded.color,
+              created_by=excluded.created_by, created_on=excluded.created_on,
+              drivetrain=excluded.drivetrain, doors=excluded.doors, engine=excluded.engine,
+              fuel_type=excluded.fuel_type, gvwr=excluded.gvwr,
+              last_modified_by=excluded.last_modified_by, last_updated_on=excluded.last_updated_on,
+              license_plate=excluded.license_plate, license_plate_state=excluded.license_plate_state,
+              make=excluded.make, manufacturer=excluded.manufacturer,
+              manufacturer_id=excluded.manufacturer_id, mileage=excluded.mileage,
+              model=excluded.model, model_year=excluded.model_year,
+              nhtsa_error_code=excluded.nhtsa_error_code,
+              nhtsa_error_text=excluded.nhtsa_error_text,
+              nhtsa_last_decoded_on=excluded.nhtsa_last_decoded_on,
+              nickname=excluded.nickname, notes=excluded.notes, plant_city=excluded.plant_city,
+              plant_country=excluded.plant_country, plant_state=excluded.plant_state,
+              purchase_date=excluded.purchase_date, series=excluded.series,
+              transmission=excluded.transmission, trim=excluded.trim,
+              vehicle_type=excluded.vehicle_type, vin=excluded.vin
+            """.formatted(vehicleTable))
+        .param("id", vehicle.getId())
+        .param("bodyStyle", vehicle.getBodyStyle(), Types.VARCHAR)
+        .param("bodyClass", vehicle.getBodyClass(), Types.VARCHAR)
+        .param("color", vehicle.getColor(), Types.VARCHAR)
+        .param("createdBy", vehicle.getCreatedBy(), Types.VARCHAR)
+        .param("createdOn", offset(vehicle.getCreatedOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .param("drivetrain", vehicle.getDrivetrain(), Types.VARCHAR)
+        .param("doors", vehicle.getDoors(), Types.INTEGER)
+        .param("engine", vehicle.getEngine(), Types.VARCHAR)
+        .param("fuelType", vehicle.getFuelType(), Types.VARCHAR)
+        .param("gvwr", vehicle.getGvwr(), Types.VARCHAR)
+        .param("modifiedBy", vehicle.getLastModifiedBy(), Types.VARCHAR)
+        .param("updatedOn", offset(vehicle.getLastUpdatedOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .param("licensePlate", vehicle.getLicensePlate(), Types.VARCHAR)
+        .param("licensePlateState", vehicle.getLicensePlateState(), Types.VARCHAR)
+        .param("make", vehicle.getMake(), Types.VARCHAR)
+        .param("manufacturer", vehicle.getManufacturer(), Types.VARCHAR)
+        .param("manufacturerId", vehicle.getManufacturerId(), Types.VARCHAR)
+        .param("mileage", vehicle.getMileage() == null ? null : vehicle.getMileage().longValue(), Types.BIGINT)
+        .param("model", vehicle.getModel(), Types.VARCHAR)
+        .param("modelYear", vehicle.getYear(), Types.INTEGER)
+        .param("errorCode", vehicle.getNhtsaErrorCode(), Types.VARCHAR)
+        .param("errorText", vehicle.getNhtsaErrorText(), Types.VARCHAR)
+        .param("decodedOn", offset(vehicle.getNhtsaLastDecodedOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .param("nickname", vehicle.getNickname(), Types.VARCHAR)
+        .param("notes", vehicle.getNotes(), Types.VARCHAR)
+        .param("plantCity", vehicle.getPlantCity(), Types.VARCHAR)
+        .param("plantCountry", vehicle.getPlantCountry(), Types.VARCHAR)
+        .param("plantState", vehicle.getPlantState(), Types.VARCHAR)
+        .param("purchaseDate", vehicle.getPurchaseDate(), Types.DATE)
+        .param("series", vehicle.getSeries(), Types.VARCHAR)
+        .param("transmission", vehicle.getTransmission(), Types.VARCHAR)
+        .param("trim", vehicle.getTrim(), Types.VARCHAR)
+        .param("vehicleType", vehicle.getVehicleType(), Types.VARCHAR)
+        .param("vin", vehicle.getVin(), Types.VARCHAR).update();
+    database.sql("delete from %s where vehicle_id = :id".formatted(decodedTable))
+        .param("id", vehicle.getId()).update();
     if (vehicle.getNhtsaDecodedValues() != null) {
-      vehicle.getNhtsaDecodedValues().forEach((name, value) -> transaction
-          .insertInto(VEHICLE_DECODED_VALUE)
-          .set(VEHICLE_DECODED_VALUE.VEHICLE_ID, vehicle.getId())
-          .set(VEHICLE_DECODED_VALUE.FIELD_NAME, name)
-          .set(VEHICLE_DECODED_VALUE.FIELD_VALUE, value)
-          .execute());
+      vehicle.getNhtsaDecodedValues().entrySet().stream().sorted(Map.Entry.comparingByKey())
+          .forEach(entry -> database.sql("""
+                  insert into %s (vehicle_id, field_name, field_value)
+                  values (:id, :name, :value)
+                  """.formatted(decodedTable))
+              .param("id", vehicle.getId()).param("name", entry.getKey())
+              .param("value", entry.getValue()).update());
     }
-    return map(transaction, transaction.selectFrom(VEHICLE)
-        .where(VEHICLE.VEHICLE_ID.eq(vehicle.getId())).fetchSingle());
+    return findById(vehicle.getId()).orElseThrow();
   }
 
   @Override
   public Optional<Vehicle> findById(String id) {
-    return database.selectFrom(VEHICLE).where(VEHICLE.VEHICLE_ID.eq(id))
-        .fetchOptional(row -> map(database, row));
+    return database.sql("select * from %s where vehicle_id = :id".formatted(vehicleTable))
+        .param("id", id).query(this::map).optional();
   }
 
   @Override
   public void delete(Vehicle vehicle) {
-    database.deleteFrom(VEHICLE).where(VEHICLE.VEHICLE_ID.eq(vehicle.getId())).execute();
+    database.sql("delete from %s where vehicle_id = :id".formatted(vehicleTable))
+        .param("id", vehicle.getId()).update();
   }
 
   @Override
   public boolean existsByVin(String vin) {
-    return database.fetchExists(VEHICLE, VEHICLE.VIN.eq(vin));
+    return database.sql("select exists(select 1 from %s where vin = :vin)".formatted(vehicleTable))
+        .param("vin", vin).query(Boolean.class).single();
   }
 
   @Override
   public List<Vehicle> findByNotes(String notes) {
-    return database.selectFrom(VEHICLE).where(VEHICLE.NOTES.eq(notes))
-        .orderBy(VEHICLE.VEHICLE_ID).fetch(row -> map(database, row));
+    return database.sql("select * from %s where notes = :notes order by vehicle_id"
+            .formatted(vehicleTable))
+        .param("notes", notes).query(this::map).list();
   }
 
   @Override
   public List<Vehicle> findByVinIsNotNull() {
-    return database.selectFrom(VEHICLE).where(VEHICLE.VIN.isNotNull())
-        .orderBy(VEHICLE.VEHICLE_ID).fetch(row -> map(database, row));
+    return database.sql("select * from %s where vin is not null order by vehicle_id"
+            .formatted(vehicleTable))
+        .query(this::map).list();
   }
 
   @Override
   public List<Vehicle> findByMakeIgnoreCase(String make) {
-    return database.selectFrom(VEHICLE).where(VEHICLE.MAKE.equalIgnoreCase(make))
-        .orderBy(VEHICLE.VEHICLE_ID).fetch(row -> map(database, row));
+    return database.sql("select * from %s where lower(make) = lower(:make) order by vehicle_id"
+            .formatted(vehicleTable))
+        .param("make", make).query(this::map).list();
   }
 
   @Override
   public List<Vehicle> findAllByOrderByMakeAscModelAscYearDesc() {
-    return database.selectFrom(VEHICLE)
-        .orderBy(VEHICLE.MAKE.asc().nullsLast(), VEHICLE.MODEL.asc().nullsLast(),
-            VEHICLE.MODEL_YEAR.desc().nullsLast(), VEHICLE.VEHICLE_ID.asc())
-        .fetch(row -> map(database, row));
+    return database.sql("""
+            select * from %s
+            order by make asc nulls last, model asc nulls last,
+                     model_year desc nulls last, vehicle_id asc
+            """.formatted(vehicleTable))
+        .query(this::map).list();
   }
 
-  private static Vehicle map(DSLContext context, VehicleRecord row) {
+  private Vehicle map(ResultSet row, int rowNumber) throws SQLException {
     var decoded = new LinkedHashMap<String, String>();
-    context.selectFrom(VEHICLE_DECODED_VALUE)
-        .where(VEHICLE_DECODED_VALUE.VEHICLE_ID.eq(row.getVehicleId()))
-        .orderBy(VEHICLE_DECODED_VALUE.FIELD_NAME)
-        .forEach(value -> decoded.put(value.getFieldName(), value.getFieldValue()));
-    return Vehicle.builder()
-        .id(row.getVehicleId()).bodyStyle(row.getBodyStyle()).bodyClass(row.getBodyClass())
-        .color(row.getColor()).createdBy(row.getCreatedBy()).createdOn(instant(row.getCreatedOn()))
-        .drivetrain(row.getDrivetrain()).doors(row.getDoors()).engine(row.getEngine())
-        .fuelType(row.getFuelType()).gvwr(row.getGvwr()).lastModifiedBy(row.getLastModifiedBy())
-        .lastUpdatedOn(instant(row.getLastUpdatedOn())).licensePlate(row.getLicensePlate())
-        .licensePlateState(row.getLicensePlateState()).make(row.getMake())
-        .manufacturer(row.getManufacturer()).manufacturerId(row.getManufacturerId())
-        .mileage(row.getMileage() == null ? null : Math.toIntExact(row.getMileage()))
-        .model(row.getModel()).nhtsaDecodedValues(MapCopy.copy(decoded))
-        .nhtsaErrorCode(row.getNhtsaErrorCode()).nhtsaErrorText(row.getNhtsaErrorText())
-        .nhtsaLastDecodedOn(instant(row.getNhtsaLastDecodedOn())).nickname(row.getNickname())
-        .notes(row.getNotes()).plantCity(row.getPlantCity()).plantCountry(row.getPlantCountry())
-        .plantState(row.getPlantState()).purchaseDate(row.getPurchaseDate()).series(row.getSeries())
-        .transmission(row.getTransmission()).trim(row.getTrim()).vehicleType(row.getVehicleType())
-        .vin(row.getVin()).year(row.getModelYear()).build();
+    database.sql("""
+            select field_name, field_value from %s where vehicle_id = :id order by field_name
+            """.formatted(decodedTable))
+        .param("id", row.getString("vehicle_id"))
+        .query((value, ignored) -> Map.entry(
+            value.getString("field_name"), value.getString("field_value")))
+        .list().forEach(value -> decoded.put(value.getKey(), value.getValue()));
+    var mileage = row.getObject("mileage", Long.class);
+    return Vehicle.builder().id(row.getString("vehicle_id"))
+        .bodyStyle(row.getString("body_style")).bodyClass(row.getString("body_class"))
+        .color(row.getString("color")).createdBy(row.getString("created_by"))
+        .createdOn(instant(row.getObject("created_on", OffsetDateTime.class)))
+        .drivetrain(row.getString("drivetrain")).doors(row.getObject("doors", Integer.class))
+        .engine(row.getString("engine")).fuelType(row.getString("fuel_type"))
+        .gvwr(row.getString("gvwr")).lastModifiedBy(row.getString("last_modified_by"))
+        .lastUpdatedOn(instant(row.getObject("last_updated_on", OffsetDateTime.class)))
+        .licensePlate(row.getString("license_plate"))
+        .licensePlateState(row.getString("license_plate_state")).make(row.getString("make"))
+        .manufacturer(row.getString("manufacturer"))
+        .manufacturerId(row.getString("manufacturer_id"))
+        .mileage(mileage == null ? null : Math.toIntExact(mileage)).model(row.getString("model"))
+        .nhtsaDecodedValues(decoded.isEmpty() ? Map.of() : Map.copyOf(decoded))
+        .nhtsaErrorCode(row.getString("nhtsa_error_code"))
+        .nhtsaErrorText(row.getString("nhtsa_error_text"))
+        .nhtsaLastDecodedOn(instant(row.getObject("nhtsa_last_decoded_on", OffsetDateTime.class)))
+        .nickname(row.getString("nickname")).notes(row.getString("notes"))
+        .plantCity(row.getString("plant_city")).plantCountry(row.getString("plant_country"))
+        .plantState(row.getString("plant_state"))
+        .purchaseDate(row.getObject("purchase_date", java.time.LocalDate.class))
+        .series(row.getString("series")).transmission(row.getString("transmission"))
+        .trim(row.getString("trim")).vehicleType(row.getString("vehicle_type"))
+        .vin(row.getString("vin")).year(row.getObject("model_year", Integer.class)).build();
   }
 
-  private static java.time.OffsetDateTime offset(java.time.Instant value) {
+  private static OffsetDateTime offset(java.time.Instant value) {
     return value == null ? null : value.atOffset(ZoneOffset.UTC);
   }
 
-  private static java.time.Instant instant(java.time.OffsetDateTime value) {
+  private static java.time.Instant instant(OffsetDateTime value) {
     return value == null ? null : value.toInstant();
   }
 
-  private static final class MapCopy {
-    private MapCopy() {}
-    static java.util.Map<String, String> copy(java.util.Map<String, String> values) {
-      return values.isEmpty() ? java.util.Map.of() : java.util.Map.copyOf(values);
+  private static String sqlState(Throwable failure) {
+    for (var cause = failure; cause != null; cause = cause.getCause()) {
+      if (cause instanceof SQLException sqlFailure) {
+        return sqlFailure.getSQLState();
+      }
     }
+    return null;
   }
 }

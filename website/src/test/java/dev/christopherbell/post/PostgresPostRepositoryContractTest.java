@@ -19,11 +19,13 @@ class PostgresPostRepositoryContractTest implements PostRepositoryParityContract
   static void migrate() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    new PostgresAccountRepository(database.dsl()).save(Account.builder()
+    new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions()).save(Account.builder()
         .id(OWNER).createdOn(CREATED.minusSeconds(1))
         .email(OWNER + "@example.test").passwordHash("hash")
         .role(Role.USER).status(AccountStatus.ACTIVE).username(OWNER).build());
-    posts = new PostgresPostRepository(database.dsl());
+    posts = new PostgresPostRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
   }
 
   @AfterAll static void cleanup() throws Exception {

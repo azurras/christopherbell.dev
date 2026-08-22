@@ -10,8 +10,6 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:}
   flyway:
     enabled: false
-  jooq:
-    sql-dialect: POSTGRES
   mail:
     host: smtp.resend.com
     port: 587

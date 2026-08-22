@@ -1,68 +1,66 @@
 package dev.christopherbell.message.conversation;
 
-import static dev.christopherbell.persistence.jooq.communication.Tables.CONVERSATION_ARCHIVE_PARTICIPANT;
-import static dev.christopherbell.persistence.jooq.communication.Tables.CONVERSATION_ARCHIVE_STATE;
-import static dev.christopherbell.persistence.jooq.communication.Tables.MESSAGE;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.Set;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** PostgreSQL owner-scoped conversation archive transition. */
 @PostgresPersistence
 public class PostgresConversationArchiveService implements ConversationArchivePort {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
   private final Clock clock;
+  private final String messageTable;
+  private final String archiveTable;
+  private final String participantTable;
 
-  PostgresConversationArchiveService(DSLContext database) {
-    this(database, Clock.systemUTC());
-  }
-
-  @Autowired
-  public PostgresConversationArchiveService(DSLContext database, Clock clock) {
+  public PostgresConversationArchiveService(
+      JdbcClient database, PostgresqlSchemaNames schemas,
+      TransactionOperations transactions, Clock clock) {
     this.database = database;
+    this.transactions = transactions;
     this.clock = clock;
+    messageTable = schemas.qualifiedTable("communication", "message");
+    archiveTable = schemas.qualifiedTable("communication", "conversation_archive_state");
+    participantTable = schemas.qualifiedTable("communication", "conversation_archive_participant");
   }
 
   @Override
   public ConversationArchiveResult archive(
       String ownerAccountId, String conversationKey, Set<String> participantIds) {
     var archivedAt = clock.instant();
-    database.transaction(configuration -> {
-      var transaction = DSL.using(configuration);
-      var latestId = transaction.select(MESSAGE.MESSAGE_ID).from(MESSAGE)
-          .where(MESSAGE.CONVERSATION_KEY.eq(conversationKey))
-          .orderBy(MESSAGE.CREATED_ON.desc(), MESSAGE.MESSAGE_ID.desc())
-          .limit(1).fetchOne(MESSAGE.MESSAGE_ID);
+    transactions.executeWithoutResult(status -> {
+      var latestId = database.sql("""
+              select message_id from %s where conversation_key = :conversationKey
+              order by created_on desc, message_id desc limit 1
+              """.formatted(messageTable))
+          .param("conversationKey", conversationKey).query(String.class).optional().orElse(null);
       var archiveId = ownerAccountId + ":" + conversationKey;
-      transaction.insertInto(CONVERSATION_ARCHIVE_STATE)
-          .set(CONVERSATION_ARCHIVE_STATE.ARCHIVE_STATE_ID, archiveId)
-          .set(CONVERSATION_ARCHIVE_STATE.OWNER_ACCOUNT_ID, ownerAccountId)
-          .set(CONVERSATION_ARCHIVE_STATE.CONVERSATION_KEY, conversationKey)
-          .set(CONVERSATION_ARCHIVE_STATE.ARCHIVED_THROUGH_MESSAGE_ID, latestId)
-          .set(CONVERSATION_ARCHIVE_STATE.ARCHIVED_AT,
-              archivedAt.atOffset(ZoneOffset.UTC))
-          .onConflict(CONVERSATION_ARCHIVE_STATE.OWNER_ACCOUNT_ID,
-              CONVERSATION_ARCHIVE_STATE.CONVERSATION_KEY)
-          .doUpdate()
-          .set(CONVERSATION_ARCHIVE_STATE.ARCHIVED_THROUGH_MESSAGE_ID, latestId)
-          .set(CONVERSATION_ARCHIVE_STATE.ARCHIVED_AT,
-              archivedAt.atOffset(ZoneOffset.UTC))
-          .set(CONVERSATION_ARCHIVE_STATE.VERSION,
-              CONVERSATION_ARCHIVE_STATE.VERSION.plus(1L))
-          .execute();
-      transaction.deleteFrom(CONVERSATION_ARCHIVE_PARTICIPANT)
-          .where(CONVERSATION_ARCHIVE_PARTICIPANT.ARCHIVE_STATE_ID.eq(archiveId))
-          .execute();
+      database.sql("""
+              insert into %s
+                (archive_state_id, owner_account_id, conversation_key,
+                 archived_through_message_id, archived_at)
+              values (:id, :owner, :conversationKey, :latestId, :archivedAt)
+              on conflict (owner_account_id, conversation_key) do update set
+                archived_through_message_id = excluded.archived_through_message_id,
+                archived_at = excluded.archived_at,
+                version = %s.version + 1
+              """.formatted(archiveTable, archiveTable))
+          .param("id", archiveId).param("owner", ownerAccountId)
+          .param("conversationKey", conversationKey)
+          .param("latestId", latestId, java.sql.Types.VARCHAR)
+          .param("archivedAt", archivedAt.atOffset(ZoneOffset.UTC)).update();
+      database.sql("delete from %s where archive_state_id = :id".formatted(participantTable))
+          .param("id", archiveId).update();
       for (var participantId : Set.copyOf(participantIds)) {
-        transaction.insertInto(CONVERSATION_ARCHIVE_PARTICIPANT)
-            .set(CONVERSATION_ARCHIVE_PARTICIPANT.ARCHIVE_STATE_ID, archiveId)
-            .set(CONVERSATION_ARCHIVE_PARTICIPANT.ACCOUNT_ID, participantId)
-            .execute();
+        database.sql("""
+                insert into %s (archive_state_id, account_id) values (:id, :accountId)
+                """.formatted(participantTable))
+            .param("id", archiveId).param("accountId", participantId).update();
       }
     });
     return new ConversationArchiveResult(conversationKey, archivedAt);

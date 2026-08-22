@@ -20,11 +20,13 @@ class PostgresNotificationCleanupContractTest implements NotificationCleanupPari
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    var accounts = new PostgresAccountRepository(database.dsl());
+    var accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     accounts.save(account("cleanup-recipient-a", "cleanup-recipient-a"));
     accounts.save(account("cleanup-recipient-b", "cleanup-recipient-b"));
     accounts.save(account("cleanup-actor", "cleanup-actor"));
-    fanout = new PostgresNotificationFanoutGuard(database.dsl(),
+    fanout = new PostgresNotificationFanoutGuard(
+        database.managedJdbc(), database.schemas(), database.transactions(),
         new NotificationDeliveryProperties(Duration.ofMinutes(5), Duration.ofMinutes(1), 10));
   }
 

@@ -17,10 +17,12 @@ class PostgresMessageRepositoryContractTest implements MessageRepositoryParityCo
   @BeforeAll static void migrate() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    var accounts = new PostgresAccountRepository(database.dsl());
+    var accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     accounts.save(account("message-parity-owner"));
     accounts.save(account("message-parity-recipient"));
-    messages = new PostgresMessageRepository(database.dsl());
+    messages = new PostgresMessageRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
   }
   @AfterAll static void cleanup() throws Exception {
     if (database != null) database.close();

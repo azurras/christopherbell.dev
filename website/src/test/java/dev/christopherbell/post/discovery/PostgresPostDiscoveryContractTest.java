@@ -24,11 +24,14 @@ class PostgresPostDiscoveryContractTest implements PostDiscoveryParityContract {
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    posts = new PostgresPostRepository(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    posts = new PostgresPostRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     cursors = new StableCursorCodec();
-    discovery = new PostgresVoidDiscoveryQueryRepository(database.dsl(), cursors);
-    people = new PostgresVoidPeopleDiscoveryQueryRepository(database.dsl());
+    discovery = new PostgresVoidDiscoveryQueryRepository(
+        database.jdbc(), database.schemas(), cursors);
+    people = new PostgresVoidPeopleDiscoveryQueryRepository(database.jdbc(), database.schemas());
   }
 
   @AfterAll

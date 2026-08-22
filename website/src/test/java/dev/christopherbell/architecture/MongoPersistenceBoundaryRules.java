@@ -168,16 +168,14 @@ final class MongoPersistenceBoundaryRules {
           .filter(MongoPersistenceBoundaryRules::isForbiddenMongoType)
           .map(JavaClass::getName)
           .forEach(violations::add);
-      if (source.isAssignableTo(Repository.class)) {
-        violations.add(Repository.class.getName());
-      }
       violations.forEach(target -> events.add(SimpleConditionEvent.violated(
           source, source.getName() + " directly depends on " + target)));
     }
   }
 
   static boolean isForbiddenMongoType(JavaClass target) {
-    if (target.isAssignableTo(Repository.class)) {
+    if (target.getName().startsWith(SPRING_MONGO_ROOT)
+        && target.isAssignableTo(Repository.class)) {
       return true;
     }
     var name = target.getName();

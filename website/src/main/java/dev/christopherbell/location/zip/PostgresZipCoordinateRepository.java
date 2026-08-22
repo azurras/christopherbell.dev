@@ -1,40 +1,49 @@
 package dev.christopherbell.location.zip;
 
-import static dev.christopherbell.persistence.jooq.mobility.Tables.ZIP_COORDINATE;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.location.model.ZipCoordinate;
 import java.math.BigDecimal;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import org.jooq.DSLContext;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** PostgreSQL ZIP-coordinate adapter with exact decimal coordinate storage. */
 @PostgresPersistence
 public class PostgresZipCoordinateRepository implements ZipCoordinateRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final String table;
 
-  public PostgresZipCoordinateRepository(DSLContext database) { this.database = database; }
+  public PostgresZipCoordinateRepository(JdbcClient database, PostgresqlSchemaNames schemas) {
+    this.database = database;
+    table = schemas.qualifiedTable("mobility", "zip_coordinate");
+  }
 
   @Override public List<ZipCoordinate> saveAll(Iterable<ZipCoordinate> coordinates) {
     var saved = new ArrayList<ZipCoordinate>();
     coordinates.forEach(value -> {
-      database.insertInto(ZIP_COORDINATE)
-          .set(ZIP_COORDINATE.ZIP_CODE, value.getZipCode())
-          .set(ZIP_COORDINATE.LATITUDE, BigDecimal.valueOf(value.getLatitude()))
-          .set(ZIP_COORDINATE.LONGITUDE, BigDecimal.valueOf(value.getLongitude()))
-          .set(ZIP_COORDINATE.SOURCE, value.getSource()).set(ZIP_COORDINATE.SOURCE_YEAR, value.getSourceYear())
-          .set(ZIP_COORDINATE.CREATED_ON, offset(value.getCreatedOn()))
-          .set(ZIP_COORDINATE.LAST_UPDATED_ON, offset(value.getLastUpdatedOn()))
-          .onConflict(ZIP_COORDINATE.ZIP_CODE).doUpdate()
-          .set(ZIP_COORDINATE.LATITUDE, BigDecimal.valueOf(value.getLatitude()))
-          .set(ZIP_COORDINATE.LONGITUDE, BigDecimal.valueOf(value.getLongitude()))
-          .set(ZIP_COORDINATE.SOURCE, value.getSource()).set(ZIP_COORDINATE.SOURCE_YEAR, value.getSourceYear())
-          .set(ZIP_COORDINATE.CREATED_ON, offset(value.getCreatedOn()))
-          .set(ZIP_COORDINATE.LAST_UPDATED_ON, offset(value.getLastUpdatedOn())).execute();
-      saved.add(findById(value.getZipCode()).orElseThrow());
+      saved.add(database.sql("""
+              insert into %s
+                (zip_code, latitude, longitude, source, source_year, created_on, last_updated_on)
+              values (:zipCode, :latitude, :longitude, :source, :sourceYear, :createdOn, :updatedOn)
+              on conflict (zip_code) do update set
+                latitude = excluded.latitude, longitude = excluded.longitude,
+                source = excluded.source, source_year = excluded.source_year,
+                created_on = excluded.created_on, last_updated_on = excluded.last_updated_on
+              returning *
+              """.formatted(table))
+          .param("zipCode", value.getZipCode())
+          .param("latitude", BigDecimal.valueOf(value.getLatitude()))
+          .param("longitude", BigDecimal.valueOf(value.getLongitude()))
+          .param("source", value.getSource()).param("sourceYear", value.getSourceYear())
+          .param("createdOn", offset(value.getCreatedOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+          .param("updatedOn", offset(value.getLastUpdatedOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+          .query(PostgresZipCoordinateRepository::map).single());
     });
     return List.copyOf(saved);
   }
@@ -42,32 +51,36 @@ public class PostgresZipCoordinateRepository implements ZipCoordinateRepository 
   @Override public void deleteAll(Iterable<ZipCoordinate> coordinates) {
     var ids = new ArrayList<String>();
     coordinates.forEach(value -> ids.add(value.getZipCode()));
-    if (!ids.isEmpty()) database.deleteFrom(ZIP_COORDINATE).where(ZIP_COORDINATE.ZIP_CODE.in(ids)).execute();
+    if (!ids.isEmpty()) {
+      database.sql("delete from %s where zip_code in (:ids)".formatted(table))
+          .param("ids", ids).update();
+    }
   }
 
   @Override public Optional<ZipCoordinate> findById(String id) {
-    return database.selectFrom(ZIP_COORDINATE).where(ZIP_COORDINATE.ZIP_CODE.eq(id))
-        .fetchOptional(row -> ZipCoordinate.builder().zipCode(row.getZipCode())
-            .latitude(row.getLatitude().doubleValue()).longitude(row.getLongitude().doubleValue())
-            .source(row.getSource()).sourceYear(row.getSourceYear())
-            .createdOn(instant(row.getCreatedOn())).lastUpdatedOn(instant(row.getLastUpdatedOn()))
-            .build());
+    return database.sql("select * from %s where zip_code = :id".formatted(table))
+        .param("id", id).query(PostgresZipCoordinateRepository::map).optional();
   }
 
   @Override public List<ZipCoordinate> findAllBySource(String source) {
-    return database.selectFrom(ZIP_COORDINATE).where(ZIP_COORDINATE.SOURCE.eq(source))
-        .orderBy(ZIP_COORDINATE.ZIP_CODE).fetch(row -> ZipCoordinate.builder().zipCode(row.getZipCode())
-            .latitude(row.getLatitude().doubleValue()).longitude(row.getLongitude().doubleValue())
-            .source(row.getSource()).sourceYear(row.getSourceYear())
-            .createdOn(instant(row.getCreatedOn())).lastUpdatedOn(instant(row.getLastUpdatedOn()))
-            .build());
+    return database.sql("select * from %s where source = :source order by zip_code".formatted(table))
+        .param("source", source).query(PostgresZipCoordinateRepository::map).list();
   }
 
-  private static java.time.OffsetDateTime offset(java.time.Instant value) {
+  private static ZipCoordinate map(java.sql.ResultSet row, int rowNumber) throws SQLException {
+    return ZipCoordinate.builder().zipCode(row.getString("zip_code"))
+        .latitude(row.getBigDecimal("latitude").doubleValue())
+        .longitude(row.getBigDecimal("longitude").doubleValue())
+        .source(row.getString("source")).sourceYear(row.getInt("source_year"))
+        .createdOn(instant(row.getObject("created_on", OffsetDateTime.class)))
+        .lastUpdatedOn(instant(row.getObject("last_updated_on", OffsetDateTime.class))).build();
+  }
+
+  private static OffsetDateTime offset(java.time.Instant value) {
     return value == null ? null : value.atOffset(ZoneOffset.UTC);
   }
 
-  private static java.time.Instant instant(java.time.OffsetDateTime value) {
+  private static java.time.Instant instant(OffsetDateTime value) {
     return value == null ? null : value.toInstant();
   }
 }

@@ -1,6 +1,5 @@
 package dev.christopherbell.location.api;
 
-import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.database;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.verifyOptionalLookup;
 
 import dev.christopherbell.configuration.persistence.PostgresPersistenceSupport;
@@ -18,12 +17,21 @@ public final class LocationMigrationVerifier {
   public static boolean verify(
       Connection connection, String schema, String sourceKind,
       List<Map<String, Object>> rows) {
-    var context = database(connection, schema);
     return switch (sourceKind) {
       case "zip_coordinate" -> verifyOptionalLookup(
-          rows, "zip_code", new PostgresZipCoordinateRepository(context)::findById);
+          rows, "zip_code", new PostgresZipCoordinateRepository(
+              org.springframework.jdbc.core.simple.JdbcClient.create(
+                  new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                      connection, true)),
+              dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+                  .fromPhysicalSchema(schema))::findById);
       case "zip_import_state" -> verifyOptionalLookup(
-          rows, "import_state_id", new PostgresZipCoordinateImportStateRepository(context)::findById);
+          rows, "import_state_id", new PostgresZipCoordinateImportStateRepository(
+              org.springframework.jdbc.core.simple.JdbcClient.create(
+                  new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                      connection, true)),
+              dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+                  .fromPhysicalSchema(schema))::findById);
       default -> false;
     };
   }

@@ -4,11 +4,8 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.UUID;
-import org.jooq.SQLDialect;
-import org.jooq.conf.MappedSchema;
-import org.jooq.conf.RenderMapping;
-import org.jooq.conf.Settings;
-import org.jooq.impl.DSL;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 /** Exercises the production application-lease adapter under a rollback-only savepoint. */
 @PostgresPersistenceSupport
@@ -21,8 +18,9 @@ public final class ApplicationLeaseMigrationVerifier {
     }
     var savepoint = connection.setSavepoint("verify_application_lease");
     try {
-      var database = DSL.using(connection, SQLDialect.POSTGRES, settings(platformSchema));
-      var store = new PostgresApplicationLeaseStore(database);
+      var database = JdbcClient.create(new SingleConnectionDataSource(connection, true));
+      var schemas = PostgresqlSchemaNames.fromPhysicalSchema(platformSchema);
+      var store = new PostgresApplicationLeaseStore(database, schemas);
       var leaseName = "migration-verifier-" + UUID.randomUUID();
       var first = store.tryAcquire(leaseName, "owner-a", Duration.ofMinutes(1)).orElseThrow();
       if (first.fenceToken() != 1L
@@ -30,11 +28,11 @@ public final class ApplicationLeaseMigrationVerifier {
           || store.renew(first, Duration.ofMinutes(2)).isEmpty()) {
         return false;
       }
-      database.update(dev.christopherbell.persistence.jooq.platform.Tables.APPLICATION_LEASE)
-          .set(dev.christopherbell.persistence.jooq.platform.Tables.APPLICATION_LEASE.EXPIRES_AT,
-              java.time.Instant.EPOCH.atOffset(java.time.ZoneOffset.UTC))
-          .where(dev.christopherbell.persistence.jooq.platform.Tables.APPLICATION_LEASE.LEASE_NAME
-              .eq(leaseName)).execute();
+      database.sql("update %s set expires_at = :epoch where lease_name = :leaseName".formatted(
+              schemas.qualifiedTable("platform", "application_lease")))
+          .param("epoch", java.time.Instant.EPOCH.atOffset(java.time.ZoneOffset.UTC))
+          .param("leaseName", leaseName)
+          .update();
       var second = store.tryAcquire(leaseName, "owner-b", Duration.ofMinutes(1)).orElseThrow();
       return second.fenceToken() == 2L
           && store.renew(first, Duration.ofMinutes(1)).isEmpty()
@@ -46,11 +44,4 @@ public final class ApplicationLeaseMigrationVerifier {
     }
   }
 
-  private static Settings settings(String schema) {
-    if (!schema.endsWith("platform")) {
-      throw new IllegalArgumentException("Unexpected PostgreSQL schema.");
-    }
-    return new Settings().withRenderMapping(new RenderMapping().withSchemata(
-        new MappedSchema().withInput("platform").withOutput(schema)));
-  }
 }

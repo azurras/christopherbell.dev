@@ -18,8 +18,10 @@ class PostgresAccountLoginContractTest implements AccountLoginParityContract {
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    logins = new PostgresAccountLoginStore(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    logins = new PostgresAccountLoginStore(
+        database.managedJdbc(), database.schemas(), database.transactions());
   }
 
   @AfterAll

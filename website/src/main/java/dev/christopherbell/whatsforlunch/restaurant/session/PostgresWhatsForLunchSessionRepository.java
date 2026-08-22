@@ -1,160 +1,231 @@
 package dev.christopherbell.whatsforlunch.restaurant.session;
 
-import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_SESSION;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_SESSION_PARTICIPANT;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_SESSION_RESET_AUDIT;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_SESSION_RESET_RESTAURANT;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_SESSION_RESTAURANT;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.LUNCH_SESSION_VOTE;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchRestaurantResetAudit;
 import dev.christopherbell.whatsforlunch.restaurant.model.WhatsForLunchSession;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** PostgreSQL shared-lunch-session aggregate adapter. */
 @PostgresPersistence
 public class PostgresWhatsForLunchSessionRepository implements WhatsForLunchSessionRepository {
-  private final DSLContext database;
-  public PostgresWhatsForLunchSessionRepository(DSLContext database) { this.database = database; }
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
+  final Tables tables;
 
-  @Override public WhatsForLunchSession save(WhatsForLunchSession value) {
-    return database.transactionResult(configuration -> {
-      var transaction = DSL.using(configuration);
-      transaction.insertInto(LUNCH_SESSION)
-          .set(LUNCH_SESSION.LUNCH_SESSION_ID, value.getId())
-          .set(LUNCH_SESSION.ACTIVE_UNTIL, offset(value.getActiveUntil()))
-          .set(LUNCH_SESSION.CREATED_BY_ACCOUNT_ID, value.getCreatedByAccountId())
-          .set(LUNCH_SESSION.CREATED_BY_USERNAME, value.getCreatedByUsername())
-          .set(LUNCH_SESSION.CREATED_ON, offset(value.getCreatedOn()))
-          .set(LUNCH_SESSION.DELETE_ON, offset(value.getDeleteOn()))
-          .set(LUNCH_SESSION.LAST_UPDATED_ON, offset(value.getLastUpdatedOn()))
-          .set(LUNCH_SESSION.RESTAURANT_RESET_COUNT, value.getRestaurantResetCount())
-          .set(LUNCH_SESSION.REVISION, value.getRevision())
-          .onConflict(LUNCH_SESSION.LUNCH_SESSION_ID).doUpdate()
-          .set(LUNCH_SESSION.ACTIVE_UNTIL, offset(value.getActiveUntil()))
-          .set(LUNCH_SESSION.CREATED_BY_ACCOUNT_ID, value.getCreatedByAccountId())
-          .set(LUNCH_SESSION.CREATED_BY_USERNAME, value.getCreatedByUsername())
-          .set(LUNCH_SESSION.CREATED_ON, offset(value.getCreatedOn()))
-          .set(LUNCH_SESSION.DELETE_ON, offset(value.getDeleteOn()))
-          .set(LUNCH_SESSION.LAST_UPDATED_ON, offset(value.getLastUpdatedOn()))
-          .set(LUNCH_SESSION.RESTAURANT_RESET_COUNT, value.getRestaurantResetCount())
-          .set(LUNCH_SESSION.REVISION, value.getRevision()).execute();
-      replaceChildren(transaction, value);
-      return findById(transaction, value.getId()).orElseThrow();
-    });
+  public PostgresWhatsForLunchSessionRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas, TransactionOperations transactions) {
+    this.database = database;
+    this.transactions = transactions;
+    tables = new Tables(schemas);
   }
 
-  static void replaceChildren(DSLContext transaction, WhatsForLunchSession value) {
-    transaction.deleteFrom(LUNCH_SESSION_PARTICIPANT)
-        .where(LUNCH_SESSION_PARTICIPANT.LUNCH_SESSION_ID.eq(value.getId())).execute();
-    var participants = value.getParticipantAccountIds() == null ? List.<String>of() : value.getParticipantAccountIds();
-    var usernames = value.getParticipantUsernamesByAccountId() == null ? java.util.Map.<String, String>of()
-        : value.getParticipantUsernamesByAccountId();
+  @Override
+  public WhatsForLunchSession save(WhatsForLunchSession value) {
+    var saved = transactions.execute(ignored -> {
+      database.sql("""
+              insert into %s (
+                lunch_session_id, active_until, created_by_account_id, created_by_username,
+                created_on, delete_on, last_updated_on, restaurant_reset_count, revision)
+              values (:id, :activeUntil, :creatorId, :creatorUsername, :createdOn,
+                :deleteOn, :updatedOn, :resetCount, :revision)
+              on conflict (lunch_session_id) do update set
+                active_until = excluded.active_until,
+                created_by_account_id = excluded.created_by_account_id,
+                created_by_username = excluded.created_by_username,
+                created_on = excluded.created_on, delete_on = excluded.delete_on,
+                last_updated_on = excluded.last_updated_on,
+                restaurant_reset_count = excluded.restaurant_reset_count,
+                revision = excluded.revision
+              """.formatted(tables.session))
+          .param("id", value.getId()).param("activeUntil", offset(value.getActiveUntil()))
+          .param("creatorId", value.getCreatedByAccountId())
+          .param("creatorUsername", value.getCreatedByUsername())
+          .param("createdOn", offset(value.getCreatedOn()))
+          .param("deleteOn", offset(value.getDeleteOn()))
+          .param("updatedOn", offset(value.getLastUpdatedOn()))
+          .param("resetCount", value.getRestaurantResetCount())
+          .param("revision", value.getRevision()).update();
+      replaceChildren(database, tables, value);
+      return findById(value.getId()).orElseThrow();
+    });
+    if (saved == null) throw new IllegalStateException("Lunch session transaction returned no value.");
+    return saved;
+  }
+
+  static void replaceChildren(JdbcClient database, Tables tables, WhatsForLunchSession value) {
+    deleteChildren(database, tables.participant, value.getId());
+    var participants = value.getParticipantAccountIds() == null
+        ? List.<String>of() : value.getParticipantAccountIds();
+    var usernames = value.getParticipantUsernamesByAccountId() == null
+        ? Map.<String, String>of() : value.getParticipantUsernamesByAccountId();
     for (int ordinal = 0; ordinal < participants.size(); ordinal++) {
       String accountId = participants.get(ordinal);
-      transaction.insertInto(LUNCH_SESSION_PARTICIPANT)
-          .set(LUNCH_SESSION_PARTICIPANT.LUNCH_SESSION_ID, value.getId())
-          .set(LUNCH_SESSION_PARTICIPANT.ORDINAL, ordinal)
-          .set(LUNCH_SESSION_PARTICIPANT.ACCOUNT_ID, accountId)
-          .set(LUNCH_SESSION_PARTICIPANT.USERNAME, usernames.get(accountId)).execute();
+      database.sql("""
+              insert into %s (lunch_session_id, ordinal, account_id, username)
+              values (:id, :ordinal, :accountId, :username)
+              """.formatted(tables.participant)).param("id", value.getId())
+          .param("ordinal", ordinal).param("accountId", accountId)
+          .param("username", usernames.get(accountId)).update();
     }
-    transaction.deleteFrom(LUNCH_SESSION_RESTAURANT)
-        .where(LUNCH_SESSION_RESTAURANT.LUNCH_SESSION_ID.eq(value.getId())).execute();
+    deleteChildren(database, tables.restaurant, value.getId());
     var restaurants = value.getRestaurantIds() == null ? List.<String>of() : value.getRestaurantIds();
     for (int ordinal = 0; ordinal < restaurants.size(); ordinal++) {
-      transaction.insertInto(LUNCH_SESSION_RESTAURANT)
-          .set(LUNCH_SESSION_RESTAURANT.LUNCH_SESSION_ID, value.getId())
-          .set(LUNCH_SESSION_RESTAURANT.ORDINAL, ordinal)
-          .set(LUNCH_SESSION_RESTAURANT.RESTAURANT_ID, restaurants.get(ordinal)).execute();
+      database.sql("""
+              insert into %s (lunch_session_id, ordinal, restaurant_id)
+              values (:id, :ordinal, :restaurantId)
+              """.formatted(tables.restaurant)).param("id", value.getId())
+          .param("ordinal", ordinal).param("restaurantId", restaurants.get(ordinal)).update();
     }
-    transaction.deleteFrom(LUNCH_SESSION_VOTE)
-        .where(LUNCH_SESSION_VOTE.LUNCH_SESSION_ID.eq(value.getId())).execute();
-    if (value.getVotesByAccountId() != null) value.getVotesByAccountId().forEach((accountId, restaurantId) ->
-        transaction.insertInto(LUNCH_SESSION_VOTE).set(LUNCH_SESSION_VOTE.LUNCH_SESSION_ID, value.getId())
-            .set(LUNCH_SESSION_VOTE.ACCOUNT_ID, accountId).set(LUNCH_SESSION_VOTE.RESTAURANT_ID, restaurantId).execute());
-    transaction.deleteFrom(LUNCH_SESSION_RESET_AUDIT)
-        .where(LUNCH_SESSION_RESET_AUDIT.LUNCH_SESSION_ID.eq(value.getId())).execute();
-    var audits = value.getRestaurantResetAudit() == null ? List.<WhatsForLunchRestaurantResetAudit>of()
-        : value.getRestaurantResetAudit();
+    deleteChildren(database, tables.vote, value.getId());
+    if (value.getVotesByAccountId() != null) {
+      value.getVotesByAccountId().forEach((accountId, restaurantId) -> database.sql("""
+              insert into %s (lunch_session_id, account_id, restaurant_id)
+              values (:id, :accountId, :restaurantId)
+              """.formatted(tables.vote)).param("id", value.getId())
+          .param("accountId", accountId).param("restaurantId", restaurantId).update());
+    }
+    deleteChildren(database, tables.resetAudit, value.getId());
+    var audits = value.getRestaurantResetAudit() == null
+        ? List.<WhatsForLunchRestaurantResetAudit>of() : value.getRestaurantResetAudit();
     for (int ordinal = 0; ordinal < audits.size(); ordinal++) {
       var audit = audits.get(ordinal);
-      transaction.insertInto(LUNCH_SESSION_RESET_AUDIT)
-          .set(LUNCH_SESSION_RESET_AUDIT.LUNCH_SESSION_ID, value.getId())
-          .set(LUNCH_SESSION_RESET_AUDIT.ORDINAL, ordinal)
-          .set(LUNCH_SESSION_RESET_AUDIT.ACCOUNT_ID, audit.accountId())
-          .set(LUNCH_SESSION_RESET_AUDIT.USERNAME, audit.username())
-          .set(LUNCH_SESSION_RESET_AUDIT.OCCURRED_ON, offset(audit.occurredOn()))
-          .set(LUNCH_SESSION_RESET_AUDIT.REVISION, audit.revision()).execute();
-      for (int restaurantOrdinal = 0; restaurantOrdinal < audit.restaurantIds().size(); restaurantOrdinal++) {
-        transaction.insertInto(LUNCH_SESSION_RESET_RESTAURANT)
-            .set(LUNCH_SESSION_RESET_RESTAURANT.LUNCH_SESSION_ID, value.getId())
-            .set(LUNCH_SESSION_RESET_RESTAURANT.RESET_ORDINAL, ordinal)
-            .set(LUNCH_SESSION_RESET_RESTAURANT.RESTAURANT_ORDINAL, restaurantOrdinal)
-            .set(LUNCH_SESSION_RESET_RESTAURANT.RESTAURANT_ID, audit.restaurantIds().get(restaurantOrdinal)).execute();
+      database.sql("""
+              insert into %s (
+                lunch_session_id, ordinal, account_id, username, occurred_on, revision)
+              values (:id, :ordinal, :accountId, :username, :occurredOn, :revision)
+              """.formatted(tables.resetAudit)).param("id", value.getId())
+          .param("ordinal", ordinal).param("accountId", audit.accountId())
+          .param("username", audit.username()).param("occurredOn", offset(audit.occurredOn()))
+          .param("revision", audit.revision()).update();
+      for (int restaurantOrdinal = 0;
+           restaurantOrdinal < audit.restaurantIds().size(); restaurantOrdinal++) {
+        database.sql("""
+                insert into %s (
+                  lunch_session_id, reset_ordinal, restaurant_ordinal, restaurant_id)
+                values (:id, :resetOrdinal, :restaurantOrdinal, :restaurantId)
+                """.formatted(tables.resetRestaurant)).param("id", value.getId())
+            .param("resetOrdinal", ordinal).param("restaurantOrdinal", restaurantOrdinal)
+            .param("restaurantId", audit.restaurantIds().get(restaurantOrdinal)).update();
       }
     }
   }
 
-  @Override public Optional<WhatsForLunchSession> findById(String id) { return findById(database, id); }
-  static Optional<WhatsForLunchSession> findById(DSLContext context, String id) {
-    return context.selectFrom(LUNCH_SESSION).where(LUNCH_SESSION.LUNCH_SESSION_ID.eq(id))
-        .fetchOptional(row -> map(context, row));
-  }
-  @Override public List<WhatsForLunchSession> findByParticipantAccountIdsContainingAndDeleteOnAfterOrderByCreatedOnDesc(
-      String accountId, Instant now, Pageable pageable) {
-    var ids = contextIds(database, accountId, now, pageable);
-    return ids.stream().map(id -> findById(database, id).orElseThrow()).toList();
-  }
-  private static List<String> contextIds(DSLContext context, String accountId, Instant now, Pageable pageable) {
-    var query = context.select(LUNCH_SESSION.LUNCH_SESSION_ID).from(LUNCH_SESSION)
-        .join(LUNCH_SESSION_PARTICIPANT).using(LUNCH_SESSION.LUNCH_SESSION_ID)
-        .where(LUNCH_SESSION_PARTICIPANT.ACCOUNT_ID.eq(accountId)
-            .and(LUNCH_SESSION.DELETE_ON.gt(offset(now))))
-        .orderBy(LUNCH_SESSION.CREATED_ON.desc(), LUNCH_SESSION.LUNCH_SESSION_ID.asc());
-    return pageable.isPaged()
-        ? query.limit(pageable.getPageSize()).offset(Math.toIntExact(pageable.getOffset())).fetch(LUNCH_SESSION.LUNCH_SESSION_ID)
-        : query.fetch(LUNCH_SESSION.LUNCH_SESSION_ID);
+  @Override
+  public Optional<WhatsForLunchSession> findById(String id) {
+    return database.sql("select * from %s where lunch_session_id = :id".formatted(tables.session))
+        .param("id", id).query(this::map).optional();
   }
 
-  private static WhatsForLunchSession map(DSLContext context,
-      dev.christopherbell.persistence.jooq.lunch.tables.records.LunchSessionRecord row) {
-    var participants = context.selectFrom(LUNCH_SESSION_PARTICIPANT)
-        .where(LUNCH_SESSION_PARTICIPANT.LUNCH_SESSION_ID.eq(row.getLunchSessionId()))
-        .orderBy(LUNCH_SESSION_PARTICIPANT.ORDINAL).fetch();
-    var usernames = new LinkedHashMap<String, String>();
-    participants.forEach(value -> usernames.put(value.getAccountId(), value.getUsername()));
-    var restaurants = context.select(LUNCH_SESSION_RESTAURANT.RESTAURANT_ID).from(LUNCH_SESSION_RESTAURANT)
-        .where(LUNCH_SESSION_RESTAURANT.LUNCH_SESSION_ID.eq(row.getLunchSessionId()))
-        .orderBy(LUNCH_SESSION_RESTAURANT.ORDINAL).fetch(LUNCH_SESSION_RESTAURANT.RESTAURANT_ID);
-    var votes = new LinkedHashMap<String, String>();
-    context.selectFrom(LUNCH_SESSION_VOTE).where(LUNCH_SESSION_VOTE.LUNCH_SESSION_ID.eq(row.getLunchSessionId()))
-        .orderBy(LUNCH_SESSION_VOTE.ACCOUNT_ID)
-        .forEach(value -> votes.put(value.getAccountId(), value.getRestaurantId()));
-    var audits = context.selectFrom(LUNCH_SESSION_RESET_AUDIT)
-        .where(LUNCH_SESSION_RESET_AUDIT.LUNCH_SESSION_ID.eq(row.getLunchSessionId()))
-        .orderBy(LUNCH_SESSION_RESET_AUDIT.ORDINAL).fetch(value -> new WhatsForLunchRestaurantResetAudit(
-            value.getRevision(), value.getAccountId(), value.getUsername(),
-            context.select(LUNCH_SESSION_RESET_RESTAURANT.RESTAURANT_ID).from(LUNCH_SESSION_RESET_RESTAURANT)
-                .where(LUNCH_SESSION_RESET_RESTAURANT.LUNCH_SESSION_ID.eq(row.getLunchSessionId())
-                    .and(LUNCH_SESSION_RESET_RESTAURANT.RESET_ORDINAL.eq(value.getOrdinal())))
-                .orderBy(LUNCH_SESSION_RESET_RESTAURANT.RESTAURANT_ORDINAL)
-                .fetch(LUNCH_SESSION_RESET_RESTAURANT.RESTAURANT_ID), value.getOccurredOn().toInstant()));
-    return WhatsForLunchSession.builder().id(row.getLunchSessionId())
-        .createdByAccountId(row.getCreatedByAccountId()).createdByUsername(row.getCreatedByUsername())
-        .participantAccountIds(participants.map(value -> value.getAccountId()))
-        .participantUsernamesByAccountId(java.util.Map.copyOf(usernames)).restaurantIds(restaurants)
-        .votesByAccountId(java.util.Map.copyOf(votes)).revision(row.getRevision())
-        .activeUntil(row.getActiveUntil().toInstant()).deleteOn(row.getDeleteOn().toInstant())
-        .restaurantResetCount(row.getRestaurantResetCount()).restaurantResetAudit(audits)
-        .createdOn(row.getCreatedOn().toInstant()).lastUpdatedOn(row.getLastUpdatedOn().toInstant()).build();
+  @Override
+  public List<WhatsForLunchSession>
+      findByParticipantAccountIdsContainingAndDeleteOnAfterOrderByCreatedOnDesc(
+          String accountId, Instant now, Pageable pageable) {
+    var statement = database.sql("""
+            select session.lunch_session_id from %s session
+            join %s participant using (lunch_session_id)
+            where participant.account_id = :accountId and session.delete_on > :now
+            order by session.created_on desc, session.lunch_session_id asc
+            limit :limit offset :offset
+            """.formatted(tables.session, tables.participant))
+        .param("accountId", accountId).param("now", offset(now))
+        .param("limit", pageable.isPaged() ? pageable.getPageSize() : Integer.MAX_VALUE)
+        .param("offset", pageable.isPaged() ? Math.toIntExact(pageable.getOffset()) : 0);
+    return statement.query(String.class).list().stream()
+        .map(id -> findById(id).orElseThrow()).toList();
   }
-  static java.time.OffsetDateTime offset(Instant value) { return value == null ? null : value.atOffset(ZoneOffset.UTC); }
+
+  WhatsForLunchSession lock(String id) {
+    return database.sql("""
+            select lunch_session_id from %s where lunch_session_id = :id for update
+            """.formatted(tables.session)).param("id", id).query(String.class).optional()
+        .flatMap(this::findById).orElse(null);
+  }
+
+  private WhatsForLunchSession map(ResultSet row, int rowNumber) throws SQLException {
+    String id = row.getString("lunch_session_id");
+    var participantRows = database.sql("""
+            select account_id, username from %s where lunch_session_id = :id order by ordinal
+            """.formatted(tables.participant)).param("id", id)
+        .query((child, ignored) -> Map.entry(child.getString(1), child.getString(2))).list();
+    var usernames = new LinkedHashMap<String, String>();
+    participantRows.forEach(entry -> usernames.put(entry.getKey(), entry.getValue()));
+    var restaurants = database.sql("""
+            select restaurant_id from %s where lunch_session_id = :id order by ordinal
+            """.formatted(tables.restaurant)).param("id", id).query(String.class).list();
+    var votes = new LinkedHashMap<String, String>();
+    database.sql("""
+            select account_id, restaurant_id from %s
+            where lunch_session_id = :id order by account_id
+            """.formatted(tables.vote)).param("id", id)
+        .query((child, ignored) -> Map.entry(child.getString(1), child.getString(2))).list()
+        .forEach(entry -> votes.put(entry.getKey(), entry.getValue()));
+    var audits = database.sql("""
+            select * from %s where lunch_session_id = :id order by ordinal
+            """.formatted(tables.resetAudit)).param("id", id).query((audit, ignored) -> {
+          int ordinal = audit.getInt("ordinal");
+          var resetRestaurants = database.sql("""
+                  select restaurant_id from %s where lunch_session_id = :id
+                    and reset_ordinal = :ordinal order by restaurant_ordinal
+                  """.formatted(tables.resetRestaurant)).param("id", id)
+              .param("ordinal", ordinal).query(String.class).list();
+          return new WhatsForLunchRestaurantResetAudit(
+              audit.getLong("revision"), audit.getString("account_id"),
+              audit.getString("username"), resetRestaurants,
+              audit.getObject("occurred_on", OffsetDateTime.class).toInstant());
+        }).list();
+    return WhatsForLunchSession.builder().id(id)
+        .createdByAccountId(row.getString("created_by_account_id"))
+        .createdByUsername(row.getString("created_by_username"))
+        .participantAccountIds(participantRows.stream().map(Map.Entry::getKey).toList())
+        .participantUsernamesByAccountId(Map.copyOf(usernames)).restaurantIds(restaurants)
+        .votesByAccountId(Map.copyOf(votes)).revision(row.getLong("revision"))
+        .activeUntil(instant(row, "active_until")).deleteOn(instant(row, "delete_on"))
+        .restaurantResetCount(row.getLong("restaurant_reset_count"))
+        .restaurantResetAudit(audits).createdOn(instant(row, "created_on"))
+        .lastUpdatedOn(instant(row, "last_updated_on")).build();
+  }
+
+  private static void deleteChildren(JdbcClient database, String table, String id) {
+    database.sql("delete from %s where lunch_session_id = :id".formatted(table))
+        .param("id", id).update();
+  }
+
+  static OffsetDateTime offset(Instant value) {
+    return value == null ? null : value.atOffset(ZoneOffset.UTC);
+  }
+
+  private static Instant instant(ResultSet row, String column) throws SQLException {
+    var value = row.getObject(column, OffsetDateTime.class);
+    return value == null ? null : value.toInstant();
+  }
+
+  static final class Tables {
+    final String session;
+    final String participant;
+    final String restaurant;
+    final String vote;
+    final String resetAudit;
+    final String resetRestaurant;
+
+    Tables(PostgresqlSchemaNames schemas) {
+      session = schemas.qualifiedTable("lunch", "lunch_session");
+      participant = schemas.qualifiedTable("lunch", "lunch_session_participant");
+      restaurant = schemas.qualifiedTable("lunch", "lunch_session_restaurant");
+      vote = schemas.qualifiedTable("lunch", "lunch_session_vote");
+      resetAudit = schemas.qualifiedTable("lunch", "lunch_session_reset_audit");
+      resetRestaurant = schemas.qualifiedTable("lunch", "lunch_session_reset_restaurant");
+    }
+  }
 }

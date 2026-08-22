@@ -1,14 +1,5 @@
 package dev.christopherbell.configuration.postgresql;
 
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT;
-import static dev.christopherbell.persistence.jooq.lunch.Tables.RESTAURANT_IMPORT_PREVIEW;
-import static dev.christopherbell.persistence.jooq.music.Tables.METADATA_EDIT;
-import static dev.christopherbell.persistence.jooq.music.Tables.PLAYLIST;
-import static dev.christopherbell.persistence.jooq.music.Tables.TRACK;
-import static dev.christopherbell.persistence.jooq.communication.Tables.MESSAGE;
-import static dev.christopherbell.persistence.jooq.communication.Tables.NOTIFICATION;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST_REPORT;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.christopherbell.account.AccountMapperImpl;
@@ -46,6 +37,10 @@ import dev.christopherbell.report.query.PostgresReportQueryService;
 import dev.christopherbell.report.query.ReportQuery;
 import java.time.Duration;
 import java.time.Instant;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -55,23 +50,23 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-import org.jooq.DSLContext;
-import org.jooq.ExecuteContext;
-import org.jooq.impl.DSL;
-import org.jooq.impl.DefaultExecuteListener;
 import org.springframework.data.domain.Sort;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.AbstractDataSource;
 
 @EnabledIfEnvironmentVariable(named = "POSTGRESQL_INTEGRATION_TESTS", matches = "enabled")
 class PostgresTask3BehaviorContractTest {
   private static final Instant NOW = Instant.parse("2026-08-13T15:00:00Z");
   private static Task3PostgresqlTestSupport schemas;
   private static Task3PostgresqlTestSupport.Database database;
+  private static PostgresAccountRepository accounts;
 
   @BeforeAll
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    var accounts = new PostgresAccountRepository(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     accounts.save(account("behavior-a", "behavior-a@example.test", "behaviora"));
     accounts.save(account("behavior-b", "behavior-b@example.test", "behaviorb"));
   }
@@ -84,102 +79,112 @@ class PostgresTask3BehaviorContractTest {
 
   @Test
   void discoveryAdminReportAndExpirationQueriesPreserveOrderingAndCounters() throws Exception {
-    var posts = new PostgresPostRepository(database.dsl());
+    var posts = new PostgresPostRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     posts.save(post("behavior-post-a", "behavior-a", NOW));
     posts.save(post("behavior-post-b", "behavior-b", NOW.plusSeconds(1)));
 
     var discovery = new PostgresVoidDiscoveryQueryRepository(
-        database.dsl(), new StableCursorCodec());
+        database.jdbc(), database.schemas(), new StableCursorCodec());
     assertThat(discovery.newArrivals(Optional.empty(), 1, NOW.minusSeconds(1)).items())
         .extracting(Post::getId).containsExactly("behavior-post-b");
 
-    var admin = new PostgresAdminAccountQueryService(database.dsl(), new AccountMapperImpl());
+    var admin = new PostgresAdminAccountQueryService(accounts, new AccountMapperImpl());
     var accountPage = admin.getAccounts(new AdminAccountQuery(
         0, 10, "username", Sort.Direction.ASC, AccountStatus.ACTIVE, Role.USER, "behavior"));
     assertThat(accountPage.items()).extracting("id")
         .containsExactly("behavior-a", "behavior-b");
 
-    var reports = new PostgresReportRepository(database.dsl());
+    var reports = new PostgresReportRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     reports.save(report("behavior-report", "behavior-post-a"));
-    var reportPage = new PostgresReportQueryService(database.dsl(), reports).query(
+    var reportPage = new PostgresReportQueryService(
+        database.jdbc(), database.schemas(), reports).query(
         new ReportQuery(ReportStatus.OPEN, ReportType.SPAM, ReportTargetType.POST,
             "BEHAVIORB", NOW.minusSeconds(1), NOW.plusSeconds(10), 0, 10));
     assertThat(reportPage.items()).extracting(PostReport::getId)
         .containsExactly("behavior-report");
 
-    var expiration = new PostgresPostExpirationStore(database.dsl());
+    var expiration = new PostgresPostExpirationStore(database.jdbc(), database.schemas());
     var updated = expiration.incrementCounter(
         "behavior-post-a", "likesCount", 1, NOW.plusSeconds(2), true).orElseThrow();
     assertThat(updated.getLikesCount()).isOne();
     assertThat(updated.getLastExtendedOn()).isEqualTo(NOW.plusSeconds(2));
 
-    database.dsl().execute("set enable_seqscan = off");
-    var plan = database.dsl().explain(database.dsl().selectFrom(ACCOUNT)
-        .where(ACCOUNT.EMAIL.eq("behavior-a@example.test"))).plan();
+    database.jdbc().sql("set enable_seqscan = off").update();
+    var plan = explain("select * from %s where email = 'behavior-a@example.test'"
+        .formatted(table("identity", "account")));
     assertThat(plan).contains("account__email_asc");
-    database.dsl().execute("reset enable_seqscan");
+    database.jdbc().sql("reset enable_seqscan").update();
   }
 
   @Test
   void productionShapedPagesUseConstantQueryCountsAndCursorIndexes() throws Exception {
     seedProductionShapedPages(30);
-    database.dsl().execute("analyze " + database.dsl().render(POST));
-    database.dsl().execute("analyze " + database.dsl().render(MESSAGE));
-    database.dsl().execute("analyze " + database.dsl().render(NOTIFICATION));
-    database.dsl().execute("analyze " + database.dsl().render(POST_REPORT));
+    database.jdbc().sql("analyze " + table("social", "post")).update();
+    database.jdbc().sql("analyze " + table("communication", "message")).update();
+    database.jdbc().sql("analyze " + table("communication", "notification")).update();
+    database.jdbc().sql("analyze " + table("social", "post_report")).update();
     var executions = new AtomicInteger();
-    var counted = countedDatabase(executions);
     var cursors = new StableCursorCodec();
 
-    var feed = new PostgresPostFeedQueryRepository(counted, cursors);
+    var feed = new PostgresPostFeedQueryRepository(
+        countedJdbc(executions), database.schemas(), cursors);
     assertConstantQueries(executions, 4,
         () -> feed.global(Optional.empty(), 5),
         () -> feed.global(Optional.empty(), 24));
-    var conversation = new PostgresConversationQueryRepository(counted, cursors);
+    var conversation = new PostgresConversationQueryRepository(
+        countedJdbc(executions), database.schemas(), database.transactions(), cursors);
     assertConstantQueries(executions, 2,
         () -> conversation.page("behavior-a:behavior-b", Optional.empty(), 5),
         () -> conversation.page("behavior-a:behavior-b", Optional.empty(), 24));
-    var discovery = new PostgresVoidDiscoveryQueryRepository(counted, cursors);
+    var discovery = new PostgresVoidDiscoveryQueryRepository(
+        countedJdbc(executions), database.schemas(), cursors);
     assertConstantQueries(executions, 4,
         () -> discovery.newArrivals(Optional.empty(), 5, NOW.minusSeconds(1)),
         () -> discovery.newArrivals(Optional.empty(), 24, NOW.minusSeconds(1)));
-    var notifications = new PostgresNotificationQueryRepository(counted, cursors);
+    var notifications = new PostgresNotificationQueryRepository(
+        countedJdbc(executions), database.schemas(), cursors);
     assertConstantQueries(executions, 1,
         () -> notifications.page("behavior-b", Optional.empty(), 5),
         () -> notifications.page("behavior-b", Optional.empty(), 24));
-    var reports = new PostgresReportQueryService(counted, new PostgresReportRepository(counted));
+    var reportRepository = new PostgresReportRepository(
+        countedJdbc(executions), database.schemas(), database.transactions());
+    var reports = new PostgresReportQueryService(
+        countedJdbc(executions), database.schemas(), reportRepository);
     assertConstantQueries(executions, 5,
         () -> reports.query(reportQuery(5)),
         () -> reports.query(reportQuery(24)));
 
-    database.dsl().execute("set enable_seqscan = off");
+    database.jdbc().sql("set enable_seqscan = off").update();
     try {
-      assertThat(database.dsl().explain(database.dsl().selectFrom(POST)
-          .orderBy(POST.CREATED_ON.desc(), POST.POST_ID.desc()).limit(24)).plan())
+      assertThat(explain("select * from %s order by created_on desc, post_id desc limit 24"
+          .formatted(table("social", "post"))))
           .contains("post__post_created_id_desc");
-      assertThat(database.dsl().explain(database.dsl().selectFrom(POST)
-          .where(POST.PARENT_POST_ID.isNull().and(POST.EXPIRES_ON.gt(NOW.atOffset(java.time.ZoneOffset.UTC))))
-          .orderBy(POST.CREATED_ON.desc(), POST.POST_ID.desc()).limit(24)).plan())
+      assertThat(explain(("select * from %s where parent_post_id is null "
+          + "and expires_on > timestamptz '2026-08-13T15:00:00Z' "
+          + "order by created_on desc, post_id desc limit 24")
+          .formatted(table("social", "post"))))
           .contains("Index Scan using")
           .containsAnyOf("post__void_discovery_new", "post__post_created_id_desc");
-      assertThat(database.dsl().explain(database.dsl().selectFrom(MESSAGE)
-          .where(MESSAGE.CONVERSATION_KEY.eq("behavior-a:behavior-b"))
-          .orderBy(MESSAGE.CREATED_ON.desc(), MESSAGE.MESSAGE_ID.desc()).limit(24)).plan())
+      assertThat(explain(("select * from %s where conversation_key = 'behavior-a:behavior-b' "
+          + "order by created_on desc, message_id desc limit 24")
+          .formatted(table("communication", "message"))))
           .contains("Index Scan using")
           .containsAnyOf("message__message_conversation_created_id_desc",
               "message__participant_created_parent");
-      assertThat(database.dsl().explain(database.dsl().selectFrom(NOTIFICATION)
-          .where(NOTIFICATION.ACCOUNT_ID.eq("behavior-b"))
-          .orderBy(NOTIFICATION.CREATED_ON.desc(), NOTIFICATION.NOTIFICATION_ID.desc()).limit(24)).plan())
+      assertThat(explain(("select * from %s where account_id = 'behavior-b' "
+          + "order by created_on desc, notification_id desc limit 24")
+          .formatted(table("communication", "notification"))))
           .contains("notification__notification_account_created_id_desc");
-      assertThat(database.dsl().explain(database.dsl().selectFrom(POST_REPORT)
-          .where(POST_REPORT.STATUS.eq(ReportStatus.OPEN.name()))
-          .orderBy(POST_REPORT.CREATED_ON.desc(), POST_REPORT.POST_REPORT_ID.desc()).limit(24)).plan())
+      assertThat(explain(("select * from %s where status = 'OPEN' "
+          + "order by created_on desc, post_report_id desc limit 24")
+          .formatted(table("social", "post_report"))))
           .contains("Index Scan using")
           .containsAnyOf("post_report__report_status_created_id_desc",
               "post_report__report_created_id_desc");
     } finally {
-      database.dsl().execute("reset enable_seqscan");
+      database.jdbc().sql("reset enable_seqscan").update();
     }
   }
 
@@ -195,12 +200,14 @@ class PostgresTask3BehaviorContractTest {
       var start = new CountDownLatch(1);
       var first = executor.submit(() -> {
         start.await();
-        return new PostgresNotificationFanoutGuard(firstDatabase.dsl(), properties)
+        return new PostgresNotificationFanoutGuard(
+            firstDatabase.managedJdbc(), firstDatabase.schemas(), firstDatabase.transactions(), properties)
             .tryAcquire(identity, NOW);
       });
       var second = executor.submit(() -> {
         start.await();
-        return new PostgresNotificationFanoutGuard(secondDatabase.dsl(), properties)
+        return new PostgresNotificationFanoutGuard(
+            secondDatabase.managedJdbc(), secondDatabase.schemas(), secondDatabase.transactions(), properties)
             .tryAcquire(identity, NOW);
       });
       start.countDown();
@@ -211,7 +218,7 @@ class PostgresTask3BehaviorContractTest {
 
   @Test
   void expirationCleanupIsBatchLimitedObservableAndIdempotent() {
-    var previews = new PostgresPostLinkPreviewCacheRepository(database.dsl());
+    var previews = new PostgresPostLinkPreviewCacheRepository(database.jdbc(), database.schemas());
     previews.save(PostLinkPreviewCacheEntry.failure(
         "https://expired-a.example", "FETCH_FAILED", NOW.minusSeconds(10), NOW.minusSeconds(2)));
     previews.save(PostLinkPreviewCacheEntry.failure(
@@ -226,7 +233,8 @@ class PostgresTask3BehaviorContractTest {
 
     var properties = new NotificationDeliveryProperties(
         Duration.ofMinutes(5), Duration.ofMinutes(1), 10);
-    var fanout = new PostgresNotificationFanoutGuard(database.dsl(), properties);
+    var fanout = new PostgresNotificationFanoutGuard(
+        database.managedJdbc(), database.schemas(), database.transactions(), properties);
     var expired = NOW.minus(Duration.ofDays(1));
     assertThat(fanout.tryAcquire(new NotificationEventIdentity(
         "behavior-a", "behavior-b", NotificationType.LIKE, "cleanup-a"), expired)).isPresent();
@@ -242,58 +250,56 @@ class PostgresTask3BehaviorContractTest {
 
   @Test
   void accountDeletionPseudonymizesRetainedRowsBeforeDeletingAccount() {
-    var accounts = new PostgresAccountRepository(database.dsl());
+    var accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     accounts.save(account("delete-me", "delete-me@example.test", "deleteme"));
-    var posts = new PostgresPostRepository(database.dsl());
+    var posts = new PostgresPostRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     posts.save(post("delete-post", "delete-me", NOW.plusSeconds(20)));
-    var reports = new PostgresReportRepository(database.dsl());
+    var reports = new PostgresReportRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     reports.save(PostReport.builder()
         .id("delete-report").postId("delete-post").postText("retained")
         .reportedAccountId("delete-me").reportedUsername("deleteme")
         .reporterAccountId("behavior-b").reporterUsername("behaviorb")
         .reportType(ReportType.SPAM).targetType(ReportTargetType.POST)
         .reason("retained").status(ReportStatus.OPEN).createdOn(NOW.plusSeconds(21)).build());
-    database.dsl().insertInto(TRACK)
-        .set(TRACK.TRACK_ID, "delete-track")
-        .set(TRACK.RELATIVE_PATH, "delete-track.mp3")
-        .set(TRACK.TITLE, "Delete Track")
-        .set(TRACK.INDEX_STATUS, "READY")
-        .execute();
-    database.dsl().insertInto(PLAYLIST)
-        .set(PLAYLIST.PLAYLIST_ID, "delete-playlist")
-        .set(PLAYLIST.NORMALIZED_NAME, "delete-playlist")
-        .set(PLAYLIST.NAME, "Delete Playlist")
-        .set(PLAYLIST.UPDATED_BY_ACCOUNT_ID, "delete-me")
-        .set(PLAYLIST.UPDATED_AT, NOW.atOffset(java.time.ZoneOffset.UTC))
-        .execute();
-    database.dsl().insertInto(METADATA_EDIT)
-        .set(METADATA_EDIT.METADATA_EDIT_ID, "delete-metadata-edit")
-        .set(METADATA_EDIT.TRACK_ID, "delete-track")
-        .set(METADATA_EDIT.SOURCE_PATH, "delete-track.mp3")
-        .set(METADATA_EDIT.BACKUP_FILE_NAME, "delete-track.backup")
-        .set(METADATA_EDIT.BACKUP_SHA256, "a".repeat(64))
-        .set(METADATA_EDIT.ORIGINAL_OBSERVED_TOKEN, "before")
-        .set(METADATA_EDIT.EDITED_BY_ACCOUNT_ID, "delete-me")
-        .set(METADATA_EDIT.CREATED_AT, NOW.atOffset(java.time.ZoneOffset.UTC))
-        .set(METADATA_EDIT.EXPIRES_AT, NOW.plusSeconds(3600).atOffset(java.time.ZoneOffset.UTC))
-        .set(METADATA_EDIT.STATUS, "READY")
-        .execute();
-    database.dsl().insertInto(RESTAURANT_IMPORT_PREVIEW)
-        .set(RESTAURANT_IMPORT_PREVIEW.IMPORT_PREVIEW_ID, "delete-import-preview")
-        .set(RESTAURANT_IMPORT_PREVIEW.ACTOR_ACCOUNT_ID, "delete-me")
-        .set(RESTAURANT_IMPORT_PREVIEW.CHECKSUM, "checksum")
-        .set(RESTAURANT_IMPORT_PREVIEW.CREATED_COUNT, 0)
-        .set(RESTAURANT_IMPORT_PREVIEW.CREATED_ON, NOW.atOffset(java.time.ZoneOffset.UTC))
-        .set(RESTAURANT_IMPORT_PREVIEW.DELETED_COUNT, 0)
-        .set(RESTAURANT_IMPORT_PREVIEW.EXPIRES_ON,
-            NOW.plusSeconds(3600).atOffset(java.time.ZoneOffset.UTC))
-        .set(RESTAURANT_IMPORT_PREVIEW.FETCHED_COUNT, 0)
-        .set(RESTAURANT_IMPORT_PREVIEW.INVALID_COUNT, 0)
-        .set(RESTAURANT_IMPORT_PREVIEW.UNCHANGED_COUNT, 0)
-        .set(RESTAURANT_IMPORT_PREVIEW.UPDATED_COUNT, 0)
-        .execute();
+    database.jdbc().sql("""
+            insert into %s (track_id, relative_path, title, index_status)
+            values ('delete-track', 'delete-track.mp3', 'Delete Track', 'READY')
+            """.formatted(table("music", "track"))).update();
+    database.jdbc().sql("""
+            insert into %s
+              (playlist_id, normalized_name, name, updated_by_account_id, updated_at)
+            values ('delete-playlist', 'delete-playlist', 'Delete Playlist',
+              'delete-me', :updatedAt)
+            """.formatted(table("music", "playlist")))
+        .param("updatedAt", NOW.atOffset(java.time.ZoneOffset.UTC)).update();
+    database.jdbc().sql("""
+            insert into %s
+              (metadata_edit_id, track_id, source_path, backup_file_name,
+               backup_sha256, original_observed_token, edited_by_account_id,
+               created_at, expires_at, status)
+            values ('delete-metadata-edit', 'delete-track', 'delete-track.mp3',
+              'delete-track.backup', :sha, 'before', 'delete-me', :createdAt,
+              :expiresAt, 'READY')
+            """.formatted(table("music", "metadata_edit")))
+        .param("sha", "a".repeat(64))
+        .param("createdAt", NOW.atOffset(java.time.ZoneOffset.UTC))
+        .param("expiresAt", NOW.plusSeconds(3600).atOffset(java.time.ZoneOffset.UTC)).update();
+    database.jdbc().sql("""
+            insert into %s
+              (import_preview_id, actor_account_id, checksum, created_count, created_on,
+               deleted_count, expires_on, fetched_count, invalid_count, unchanged_count,
+               updated_count)
+            values ('delete-import-preview', 'delete-me', 'checksum', 0, :createdOn,
+              0, :expiresOn, 0, 0, 0, 0)
+            """.formatted(table("lunch", "restaurant_import_preview")))
+        .param("createdOn", NOW.atOffset(java.time.ZoneOffset.UTC))
+        .param("expiresOn", NOW.plusSeconds(3600).atOffset(java.time.ZoneOffset.UTC)).update();
 
-    var operations = new PostgresAccountDeletionOperations(database.dsl(), ignored -> {});
+    var operations = new PostgresAccountDeletionOperations(
+        database.managedJdbc(), database.schemas(), database.transactions(), ignored -> {});
     operations.ensureTombstone();
     operations.anonymizePublicPosts("delete-me", "deleted:abcdef012345");
     operations.removePrivateData("delete-me");
@@ -303,17 +309,22 @@ class PostgresTask3BehaviorContractTest {
     assertThat(accounts.findById("delete-me")).isEmpty();
     assertThat(posts.findById("delete-post").orElseThrow().getAccountId())
         .isEqualTo("deleted-user");
-    assertThat(database.dsl().select(POST_REPORT.REPORTED_ACCOUNT_ID)
-        .from(POST_REPORT).where(POST_REPORT.POST_REPORT_ID.eq("delete-report"))
-        .fetchOne(POST_REPORT.REPORTED_ACCOUNT_ID)).isEqualTo("deleted:abcdef012345");
-    assertThat(database.dsl().select(PLAYLIST.UPDATED_BY_ACCOUNT_ID)
-        .from(PLAYLIST).where(PLAYLIST.PLAYLIST_ID.eq("delete-playlist"))
-        .fetchOne(PLAYLIST.UPDATED_BY_ACCOUNT_ID)).isEqualTo("deleted-user");
-    assertThat(database.dsl().select(METADATA_EDIT.EDITED_BY_ACCOUNT_ID)
-        .from(METADATA_EDIT).where(METADATA_EDIT.METADATA_EDIT_ID.eq("delete-metadata-edit"))
-        .fetchOne(METADATA_EDIT.EDITED_BY_ACCOUNT_ID)).isEqualTo("deleted-user");
-    assertThat(database.dsl().fetchCount(RESTAURANT_IMPORT_PREVIEW,
-        RESTAURANT_IMPORT_PREVIEW.IMPORT_PREVIEW_ID.eq("delete-import-preview"))).isZero();
+    assertThat(database.jdbc().sql("""
+            select reported_account_id from %s where post_report_id = 'delete-report'
+            """.formatted(table("social", "post_report"))).query(String.class).single())
+        .isEqualTo("deleted:abcdef012345");
+    assertThat(database.jdbc().sql("""
+            select updated_by_account_id from %s where playlist_id = 'delete-playlist'
+            """.formatted(table("music", "playlist"))).query(String.class).single())
+        .isEqualTo("deleted-user");
+    assertThat(database.jdbc().sql("""
+            select edited_by_account_id from %s where metadata_edit_id = 'delete-metadata-edit'
+            """.formatted(table("music", "metadata_edit"))).query(String.class).single())
+        .isEqualTo("deleted-user");
+    assertThat(database.jdbc().sql("""
+            select count(*) from %s where import_preview_id = 'delete-import-preview'
+            """.formatted(table("lunch", "restaurant_import_preview")))
+        .query(Long.class).single()).isZero();
   }
 
   private static Account account(String id, String email, String username) {
@@ -321,13 +332,41 @@ class PostgresTask3BehaviorContractTest {
         .role(Role.USER).status(AccountStatus.ACTIVE).username(username).build();
   }
 
-  private static DSLContext countedDatabase(AtomicInteger executions) {
-    return DSL.using(database.dsl().configuration().deriveAppending(new DefaultExecuteListener() {
+  private static JdbcClient countedJdbc(AtomicInteger executions) {
+    return JdbcClient.create(new AbstractDataSource() {
       @Override
-      public void executeStart(ExecuteContext context) {
-        executions.incrementAndGet();
+      public Connection getConnection() throws SQLException {
+        return countingConnection(database.dataSource().getConnection(), executions);
       }
-    }));
+
+      @Override
+      public Connection getConnection(String username, String password) throws SQLException {
+        return countingConnection(
+            database.dataSource().getConnection(username, password), executions);
+      }
+    });
+  }
+
+  private static String table(String schema, String name) {
+    return database.schemas().qualifiedTable(schema, name);
+  }
+
+  private static String explain(String statement) {
+    return String.join("\n", database.jdbc().sql("explain " + statement)
+        .query(String.class).list());
+  }
+
+  private static Connection countingConnection(Connection delegate, AtomicInteger executions) {
+    return (Connection) Proxy.newProxyInstance(
+        Connection.class.getClassLoader(), new Class<?>[] {Connection.class},
+        (proxy, method, arguments) -> {
+          if (method.getName().startsWith("prepareStatement")) executions.incrementAndGet();
+          try {
+            return method.invoke(delegate, arguments);
+          } catch (InvocationTargetException failure) {
+            throw failure.getCause();
+          }
+        });
   }
 
   private static void assertConstantQueries(
@@ -342,10 +381,13 @@ class PostgresTask3BehaviorContractTest {
   }
 
   private static void seedProductionShapedPages(int count) {
-    var posts = new PostgresPostRepository(database.dsl());
-    var messages = new PostgresMessageRepository(database.dsl());
-    var notifications = new PostgresNotificationRepository(database.dsl());
-    var reports = new PostgresReportRepository(database.dsl());
+    var posts = new PostgresPostRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    var messages = new PostgresMessageRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    var notifications = new PostgresNotificationRepository(database.jdbc(), database.schemas());
+    var reports = new PostgresReportRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     for (int index = 0; index < count; index++) {
       var suffix = "%02d".formatted(index);
       var createdOn = NOW.minusSeconds(100 + index);

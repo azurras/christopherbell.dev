@@ -1,68 +1,69 @@
 package dev.christopherbell.account.deletion;
 
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT_DELETION_JOB;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
-import dev.christopherbell.persistence.jooq.identity.tables.records.AccountDeletionJobRecord;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
+import java.sql.SQLException;
+import java.sql.Types;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
-import org.jooq.DSLContext;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** PostgreSQL persistence for durable account-deletion checkpoints. */
 @PostgresPersistence
 public class PostgresAccountDeletionJobRepository implements AccountDeletionJobRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final String table;
 
-  public PostgresAccountDeletionJobRepository(DSLContext database) {
+  public PostgresAccountDeletionJobRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas) {
     this.database = database;
+    table = schemas.qualifiedTable("identity", "account_deletion_job");
   }
 
   @Override
   public Optional<AccountDeletionJob> findById(String id) {
-    return database.selectFrom(ACCOUNT_DELETION_JOB)
-        .where(ACCOUNT_DELETION_JOB.ACCOUNT_DELETION_JOB_ID.eq(id))
-        .fetchOptional(PostgresAccountDeletionJobRepository::map);
+    return database.sql("select * from %s where account_deletion_job_id = :id".formatted(table))
+        .param("id", id).query(PostgresAccountDeletionJobRepository::map).optional();
   }
 
   @Override
   public AccountDeletionJob save(AccountDeletionJob job) {
-    database.insertInto(ACCOUNT_DELETION_JOB)
-        .set(ACCOUNT_DELETION_JOB.ACCOUNT_DELETION_JOB_ID, job.getId())
-        .set(ACCOUNT_DELETION_JOB.STATUS, job.getStatus().name())
-        .set(ACCOUNT_DELETION_JOB.NEXT_STEP,
-            job.getNextStep() == null ? null : job.getNextStep().name())
-        .set(ACCOUNT_DELETION_JOB.FAILURE_CATEGORY, job.getFailureCategory())
-        .set(ACCOUNT_DELETION_JOB.CREATED_ON, job.getCreatedOn().atOffset(ZoneOffset.UTC))
-        .set(ACCOUNT_DELETION_JOB.LAST_UPDATED_ON,
-            job.getLastUpdatedOn().atOffset(ZoneOffset.UTC))
-        .set(ACCOUNT_DELETION_JOB.COMPLETED_ON, job.getCompletedOn() == null
-            ? null : job.getCompletedOn().atOffset(ZoneOffset.UTC))
-        .onConflict(ACCOUNT_DELETION_JOB.ACCOUNT_DELETION_JOB_ID)
-        .doUpdate()
-        .set(ACCOUNT_DELETION_JOB.STATUS, job.getStatus().name())
-        .set(ACCOUNT_DELETION_JOB.NEXT_STEP,
-            job.getNextStep() == null ? null : job.getNextStep().name())
-        .set(ACCOUNT_DELETION_JOB.FAILURE_CATEGORY, job.getFailureCategory())
-        .set(ACCOUNT_DELETION_JOB.LAST_UPDATED_ON,
-            job.getLastUpdatedOn().atOffset(ZoneOffset.UTC))
-        .set(ACCOUNT_DELETION_JOB.COMPLETED_ON, job.getCompletedOn() == null
-            ? null : job.getCompletedOn().atOffset(ZoneOffset.UTC))
-        .set(ACCOUNT_DELETION_JOB.VERSION, ACCOUNT_DELETION_JOB.VERSION.plus(1L))
-        .execute();
-    return findById(job.getId()).orElseThrow();
+    return database.sql("""
+            insert into %s
+              (account_deletion_job_id, status, next_step, failure_category,
+               created_on, last_updated_on, completed_on)
+            values (:id, :status, :nextStep, :failureCategory, :createdOn, :updatedOn, :completedOn)
+            on conflict (account_deletion_job_id) do update set
+              status = excluded.status,
+              next_step = excluded.next_step,
+              failure_category = excluded.failure_category,
+              last_updated_on = excluded.last_updated_on,
+              completed_on = excluded.completed_on,
+              version = %s.version + 1
+            returning *
+            """.formatted(table, table))
+        .param("id", job.getId()).param("status", job.getStatus().name())
+        .param("nextStep", job.getNextStep() == null ? null : job.getNextStep().name(), Types.VARCHAR)
+        .param("failureCategory", job.getFailureCategory(), Types.VARCHAR)
+        .param("createdOn", job.getCreatedOn().atOffset(ZoneOffset.UTC))
+        .param("updatedOn", job.getLastUpdatedOn().atOffset(ZoneOffset.UTC))
+        .param("completedOn", job.getCompletedOn() == null
+            ? null : job.getCompletedOn().atOffset(ZoneOffset.UTC), Types.TIMESTAMP_WITH_TIMEZONE)
+        .query(PostgresAccountDeletionJobRepository::map).single();
   }
 
-  private static AccountDeletionJob map(AccountDeletionJobRecord record) {
+  private static AccountDeletionJob map(java.sql.ResultSet record, int rowNumber)
+      throws SQLException {
     var job = new AccountDeletionJob();
-    job.setId(record.getAccountDeletionJobId());
-    job.setStatus(AccountDeletionStatus.valueOf(record.getStatus()));
-    job.setNextStep(record.getNextStep() == null
-        ? null : AccountDeletionStep.valueOf(record.getNextStep()));
-    job.setFailureCategory(record.getFailureCategory());
-    job.setCreatedOn(record.getCreatedOn().toInstant());
-    job.setLastUpdatedOn(record.getLastUpdatedOn().toInstant());
-    job.setCompletedOn(instant(record.getCompletedOn()));
+    job.setId(record.getString("account_deletion_job_id"));
+    job.setStatus(AccountDeletionStatus.valueOf(record.getString("status")));
+    var nextStep = record.getString("next_step");
+    job.setNextStep(nextStep == null ? null : AccountDeletionStep.valueOf(nextStep));
+    job.setFailureCategory(record.getString("failure_category"));
+    job.setCreatedOn(record.getObject("created_on", OffsetDateTime.class).toInstant());
+    job.setLastUpdatedOn(record.getObject("last_updated_on", OffsetDateTime.class).toInstant());
+    job.setCompletedOn(instant(record.getObject("completed_on", OffsetDateTime.class)));
     return job;
   }
 

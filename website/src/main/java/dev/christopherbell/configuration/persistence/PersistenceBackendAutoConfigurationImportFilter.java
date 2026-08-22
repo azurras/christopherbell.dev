@@ -15,10 +15,12 @@ public final class PersistenceBackendAutoConfigurationImportFilter
       "org.springframework.boot.data.mongodb.";
   private static final String JDBC_AUTO_CONFIGURATION_PREFIX =
       "org.springframework.boot.jdbc.";
-  private static final String JOOQ_AUTO_CONFIGURATION_PREFIX =
-      "org.springframework.boot.jooq.";
   private static final String FLYWAY_AUTO_CONFIGURATION_PREFIX =
       "org.springframework.boot.flyway.";
+  private static final String DATA_JPA_AUTO_CONFIGURATION_PREFIX =
+      "org.springframework.boot.data.jpa.";
+  private static final String HIBERNATE_AUTO_CONFIGURATION_PREFIX =
+      "org.springframework.boot.hibernate.";
   private PersistenceBackend backend;
 
   @Override
@@ -43,7 +45,7 @@ public final class PersistenceBackendAutoConfigurationImportFilter
   }
 
   /**
-   * Classifies every Boot 4.1 MongoDB, JDBC, jOOQ, and Flyway auto-configuration family
+   * Classifies every Boot 4.1 MongoDB, JDBC, JPA, and Flyway auto-configuration family
    * available to this application. The resolved-import contract test requires review when that
    * set grows.
    */
@@ -56,8 +58,9 @@ public final class PersistenceBackendAutoConfigurationImportFilter
       return PersistenceBackend.MONGODB;
     }
     if (autoConfigurationClass.startsWith(JDBC_AUTO_CONFIGURATION_PREFIX)
-        || autoConfigurationClass.startsWith(JOOQ_AUTO_CONFIGURATION_PREFIX)
-        || autoConfigurationClass.startsWith(FLYWAY_AUTO_CONFIGURATION_PREFIX)) {
+        || autoConfigurationClass.startsWith(FLYWAY_AUTO_CONFIGURATION_PREFIX)
+        || autoConfigurationClass.startsWith(DATA_JPA_AUTO_CONFIGURATION_PREFIX)
+        || autoConfigurationClass.startsWith(HIBERNATE_AUTO_CONFIGURATION_PREFIX)) {
       return PersistenceBackend.POSTGRESQL;
     }
     return null;

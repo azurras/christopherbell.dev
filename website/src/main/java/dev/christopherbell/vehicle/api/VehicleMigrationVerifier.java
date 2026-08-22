@@ -1,6 +1,5 @@
 package dev.christopherbell.vehicle.api;
 
-import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.database;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.text;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.verifyOptionalLookup;
 
@@ -21,26 +20,53 @@ public final class VehicleMigrationVerifier {
   public static boolean verify(
       Connection connection, String schema, String sourceKind, String queryName,
       List<Map<String, Object>> rows) {
-    var context = database(connection, schema);
     return switch (sourceKind + "/" + queryName) {
       case "vehicle/find-by-id" -> verifyOptionalLookup(
-          rows, "vehicle_id", new PostgresVehicleRepository(context)::findById);
-      case "vehicle/find-by-vin" -> verifyVins(context, rows);
+          rows, "vehicle_id", vehicles(connection, schema)::findById);
+      case "vehicle/find-by-vin" -> verifyVins(connection, schema, rows);
       case "vin_decode_cache/find-by-vin" -> verifyOptionalLookup(
-          rows, "vin", new PostgresVehicleVinDecodeCacheRepository(context)::findById);
+          rows, "vin", new PostgresVehicleVinDecodeCacheRepository(
+              org.springframework.jdbc.core.simple.JdbcClient.create(
+                  new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                      connection, true)),
+              dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+                  .fromPhysicalSchema(schema),
+              org.springframework.transaction.support.TransactionOperations.withoutTransaction())
+              ::findById);
       case "nhtsa_import_state/find-by-id" -> verifyOptionalLookup(
-          rows, "import_state_id", new PostgresNhtsaVinImportStateRepository(context)::findById);
+          rows, "import_state_id",
+          new PostgresNhtsaVinImportStateRepository(
+              org.springframework.jdbc.core.simple.JdbcClient.create(
+                  new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                      connection, true)),
+              dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+                  .fromPhysicalSchema(schema))::findById);
       case "random_vin_import_state/find-by-id" -> verifyOptionalLookup(
-          rows, "import_state_id", new PostgresRandomVinImportStateRepository(context)::findById);
+          rows, "import_state_id",
+          new PostgresRandomVinImportStateRepository(
+              org.springframework.jdbc.core.simple.JdbcClient.create(
+                  new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                      connection, true)),
+              dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+                  .fromPhysicalSchema(schema))::findById);
       default -> false;
     };
   }
 
   private static boolean verifyVins(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var repository = new PostgresVehicleRepository(context);
+      Connection connection, String schema, List<Map<String, Object>> rows) {
+    var repository = vehicles(connection, schema);
     return rows.stream().map(row -> text(row.get("vin")))
         .filter(java.util.Objects::nonNull).allMatch(repository::existsByVin)
         && !repository.existsByVin("MIGRATIONVERIFIER0");
+  }
+
+  private static PostgresVehicleRepository vehicles(Connection connection, String schema) {
+    return new PostgresVehicleRepository(
+        org.springframework.jdbc.core.simple.JdbcClient.create(
+            new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+        dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+            .fromPhysicalSchema(schema),
+        org.springframework.transaction.support.TransactionOperations.withoutTransaction());
   }
 }

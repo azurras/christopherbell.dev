@@ -28,5 +28,3 @@ spring:
     enabled: true
     default-schema: ${APP_TEST_SCHEMA:public}
     schemas: ${APP_TEST_SCHEMA:public}
-  jooq:
-    sql-dialect: POSTGRES

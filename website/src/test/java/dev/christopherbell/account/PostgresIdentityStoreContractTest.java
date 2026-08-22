@@ -33,7 +33,8 @@ class PostgresIdentityStoreContractTest {
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     accounts.save(account("identity-a", "a@example.test", "alpha"));
     accounts.save(account("identity-b", "b@example.test", "beta"));
   }
@@ -46,8 +47,8 @@ class PostgresIdentityStoreContractTest {
 
   @Test
   void followAndTrustEdgesPreserveDuplicateAndLookupSemantics() {
-    var follows = new PostgresAccountFollowStore(database.dsl());
-    var trust = new PostgresAccountTrustRepository(database.dsl());
+    var follows = new PostgresAccountFollowStore(database.jdbc(), database.schemas());
+    var trust = new PostgresAccountTrustRepository(database.jdbc(), database.schemas());
     var now = Instant.parse("2026-08-13T13:00:00Z");
 
     assertThat(follows.follow("identity-a", "identity-b", now).created()).isTrue();
@@ -75,7 +76,8 @@ class PostgresIdentityStoreContractTest {
     observed.setPasswordSalt("salt-a");
     observed.setPasswordHash("legacy-hash");
     accounts.save(observed);
-    var logins = new PostgresAccountLoginStore(database.dsl());
+    var logins = new PostgresAccountLoginStore(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var loginOn = Instant.parse("2026-08-13T13:01:00Z");
 
     var completed = logins.completeLogin(observed, "current-hash", loginOn).orElseThrow();
@@ -83,9 +85,10 @@ class PostgresIdentityStoreContractTest {
     assertThat(completed.getPasswordSalt()).isNull();
     assertThat(logins.completeLogin(observed, "wrong", loginOn.plusSeconds(1))).isEmpty();
 
-    var sessions = new PostgresBrowserSessionRepository(database.dsl());
-    var activity = new PostgresBrowserSessionActivityStore(database.dsl());
-    var authentication = new PostgresBrowserSessionAuthenticationStore(database.dsl());
+    var sessions = database.bean(PostgresBrowserSessionRepository.class);
+    var activity = new PostgresBrowserSessionActivityStore(database.jdbc(), database.schemas());
+    var authentication = new PostgresBrowserSessionAuthenticationStore(
+        database.jdbc(), database.schemas());
     var session = BrowserSession.builder()
         .id("session-a")
         .accountId("identity-a")
@@ -107,7 +110,7 @@ class PostgresIdentityStoreContractTest {
 
   @Test
   void deletionJobRoundTripsLifecycleCheckpoint() {
-    var jobs = new PostgresAccountDeletionJobRepository(database.dsl());
+    var jobs = new PostgresAccountDeletionJobRepository(database.jdbc(), database.schemas());
     var job = AccountDeletionJob.started("deletion-pseudonym");
     job.setCreatedOn(Instant.parse("2026-08-13T13:10:00Z"));
     job.setLastUpdatedOn(Instant.parse("2026-08-13T13:10:00Z"));

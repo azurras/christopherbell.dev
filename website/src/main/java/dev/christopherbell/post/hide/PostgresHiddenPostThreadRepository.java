@@ -1,72 +1,75 @@
 package dev.christopherbell.post.hide;
 
-import static dev.christopherbell.persistence.jooq.social.Tables.HIDDEN_POST_THREAD;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
+import java.sql.SQLException;
+import java.sql.Types;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
-import org.jooq.DSLContext;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** PostgreSQL persistence for per-account hidden post threads. */
 @PostgresPersistence
 public class PostgresHiddenPostThreadRepository implements HiddenPostThreadRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final String table;
 
-  public PostgresHiddenPostThreadRepository(DSLContext database) {
+  public PostgresHiddenPostThreadRepository(JdbcClient database, PostgresqlSchemaNames schemas) {
     this.database = database;
+    table = schemas.qualifiedTable("social", "hidden_post_thread");
   }
 
   @Override
   public HiddenPostThread save(HiddenPostThread hiddenThread) {
-    database.insertInto(HIDDEN_POST_THREAD)
-        .set(HIDDEN_POST_THREAD.HIDDEN_POST_THREAD_ID, hiddenThread.getId())
-        .set(HIDDEN_POST_THREAD.ACCOUNT_ID, hiddenThread.getAccountId())
-        .set(HIDDEN_POST_THREAD.ROOT_POST_ID, hiddenThread.getRootPostId())
-        .set(HIDDEN_POST_THREAD.CREATED_ON, hiddenThread.getCreatedOn() == null
-            ? null : hiddenThread.getCreatedOn().atOffset(ZoneOffset.UTC))
-        .onConflict(HIDDEN_POST_THREAD.ACCOUNT_ID, HIDDEN_POST_THREAD.ROOT_POST_ID)
-        .doUpdate()
-        .set(HIDDEN_POST_THREAD.CREATED_ON, hiddenThread.getCreatedOn() == null
-            ? null : hiddenThread.getCreatedOn().atOffset(ZoneOffset.UTC))
-        .set(HIDDEN_POST_THREAD.VERSION, HIDDEN_POST_THREAD.VERSION.plus(1L))
-        .execute();
-    return findByAccountIdAndRootPostId(
-        hiddenThread.getAccountId(), hiddenThread.getRootPostId()).orElseThrow();
+    return database.sql("""
+            insert into %s (hidden_post_thread_id, account_id, root_post_id, created_on)
+            values (:id, :accountId, :rootPostId, :createdOn)
+            on conflict (account_id, root_post_id) do update set
+              created_on = excluded.created_on,
+              version = %s.version + 1
+            returning *
+            """.formatted(table, table))
+        .param("id", hiddenThread.getId()).param("accountId", hiddenThread.getAccountId())
+        .param("rootPostId", hiddenThread.getRootPostId())
+        .param("createdOn", hiddenThread.getCreatedOn() == null
+            ? null : hiddenThread.getCreatedOn().atOffset(ZoneOffset.UTC),
+            Types.TIMESTAMP_WITH_TIMEZONE)
+        .query(PostgresHiddenPostThreadRepository::map).single();
   }
 
   @Override
   public Optional<HiddenPostThread> findByAccountIdAndRootPostId(
       String accountId, String rootPostId) {
-    return database.selectFrom(HIDDEN_POST_THREAD)
-        .where(HIDDEN_POST_THREAD.ACCOUNT_ID.eq(accountId)
-            .and(HIDDEN_POST_THREAD.ROOT_POST_ID.eq(rootPostId)))
-        .fetchOptional(PostgresHiddenPostThreadRepository::map);
+    return database.sql("""
+            select * from %s where account_id = :accountId and root_post_id = :rootPostId
+            """.formatted(table))
+        .param("accountId", accountId).param("rootPostId", rootPostId)
+        .query(PostgresHiddenPostThreadRepository::map).optional();
   }
 
   @Override
   public List<HiddenPostThread> findByAccountId(String accountId) {
-    return database.selectFrom(HIDDEN_POST_THREAD)
-        .where(HIDDEN_POST_THREAD.ACCOUNT_ID.eq(accountId))
-        .fetch(PostgresHiddenPostThreadRepository::map);
+    return database.sql("select * from %s where account_id = :accountId".formatted(table))
+        .param("accountId", accountId).query(PostgresHiddenPostThreadRepository::map).list();
   }
 
   @Override
   public void deleteByAccountIdAndRootPostId(String accountId, String rootPostId) {
-    database.deleteFrom(HIDDEN_POST_THREAD)
-        .where(HIDDEN_POST_THREAD.ACCOUNT_ID.eq(accountId)
-            .and(HIDDEN_POST_THREAD.ROOT_POST_ID.eq(rootPostId)))
-        .execute();
+    database.sql("""
+            delete from %s where account_id = :accountId and root_post_id = :rootPostId
+            """.formatted(table))
+        .param("accountId", accountId).param("rootPostId", rootPostId).update();
   }
 
-  private static HiddenPostThread map(
-      dev.christopherbell.persistence.jooq.social.tables.records.HiddenPostThreadRecord record) {
+  private static HiddenPostThread map(java.sql.ResultSet record, int rowNumber)
+      throws SQLException {
     return HiddenPostThread.builder()
-        .id(record.getHiddenPostThreadId())
-        .accountId(record.getAccountId())
-        .rootPostId(record.getRootPostId())
-        .createdOn(instant(record.getCreatedOn()))
+        .id(record.getString("hidden_post_thread_id"))
+        .accountId(record.getString("account_id"))
+        .rootPostId(record.getString("root_post_id"))
+        .createdOn(instant(record.getObject("created_on", OffsetDateTime.class)))
         .build();
   }
 

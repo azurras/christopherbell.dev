@@ -7,11 +7,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import org.jooq.SQLDialect;
-import org.jooq.conf.MappedSchema;
-import org.jooq.conf.RenderMapping;
-import org.jooq.conf.Settings;
-import org.jooq.impl.DSL;
 import org.springframework.data.domain.PageRequest;
 
 /** Executes the production recycle adapter for cutover parity checks. */
@@ -22,7 +17,10 @@ public final class SharedFolderRecycleMigrationQueryVerifier {
   public static boolean verifyStateDeletedPage(
       Connection connection, String schema, List<Map<String, Object>> sourceRows) {
     var repository = new PostgresSharedFolderRecycleRepository(
-        DSL.using(connection, SQLDialect.POSTGRES, settings(schema)));
+        org.springframework.jdbc.core.simple.JdbcClient.create(
+            new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+        dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+            .fromPhysicalSchema(schema));
     for (var state : sourceRows.stream().map(row -> text(row.get("state")))
         .filter(Objects::nonNull).distinct().map(SharedFolderRecycleState::valueOf).toList()) {
       var expected = sourceRows.stream().filter(row -> state.name().equals(text(row.get("state"))))
@@ -46,20 +44,6 @@ public final class SharedFolderRecycleMigrationQueryVerifier {
   private static List<String> ids(List<Map<String, Object>> rows, int offset) {
     return rows.stream().skip(offset).limit(1)
         .map(row -> text(row.get("recycle_item_id"))).toList();
-  }
-
-  private static Settings settings(String schema) {
-    var prefix = prefix(schema, "shared_folder");
-    return new Settings().withRenderMapping(new RenderMapping().withSchemata(
-        new MappedSchema().withInput("shared_folder").withOutput(prefix + "shared_folder"),
-        new MappedSchema().withInput("identity").withOutput(prefix + "identity")));
-  }
-
-  private static String prefix(String schema, String suffix) {
-    if (!schema.endsWith(suffix)) {
-      throw new IllegalArgumentException("Unexpected PostgreSQL schema.");
-    }
-    return schema.substring(0, schema.length() - suffix.length());
   }
 
   private static Instant deletedAt(Map<String, Object> row) {

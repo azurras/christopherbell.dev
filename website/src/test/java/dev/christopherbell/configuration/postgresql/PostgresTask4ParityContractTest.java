@@ -7,10 +7,7 @@ import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.persistence.PostgresApplicationLeaseStore;
 import dev.christopherbell.libs.lease.LeaseStore;
 import dev.christopherbell.libs.lease.LeaseGrant;
-import static dev.christopherbell.persistence.jooq.platform.Tables.APPLICATION_LEASE;
-import static dev.christopherbell.persistence.jooq.shared_folder.Tables.MAINTENANCE_LEASE;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import dev.christopherbell.music.catalog.MusicCatalogQueryRepository;
 import dev.christopherbell.music.catalog.MusicTrackRepository;
 import dev.christopherbell.music.catalog.PostgresMusicCatalogQueryRepository;
@@ -74,32 +71,44 @@ class PostgresTask4ParityContractTest implements Task4PersistenceParityContract 
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
     contenderDatabase = schemas.openDatabase();
-    new PostgresAccountRepository(database.dsl()).save(Account.builder()
+    new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions()).save(Account.builder()
         .id(OWNER_ID).createdOn(FIXTURE_TIME).email("task4-parity@example.test")
         .passwordHash("hash").role(Role.USER).status(AccountStatus.ACTIVE)
         .username("task4-parity-owner").build());
-    applicationLeases = new PostgresApplicationLeaseStore(database.dsl());
-    applicationLeaseContender = new PostgresApplicationLeaseStore(contenderDatabase.dsl());
-    tracks = new PostgresMusicTrackRepository(database.dsl());
-    catalog = new PostgresMusicCatalogQueryRepository(database.dsl());
-    playlists = new PostgresMusicPlaylistRepository(database.dsl());
-    metadataEdits = new PostgresMusicMetadataEditRepository(database.dsl());
-    radioHistory = new PostgresMusicRadioHistoryRepository(database.dsl());
-    runtimeState = new PostgresMusicRuntimeStateRepository(database.dsl());
-    accessAttempts = new PostgresMusicAccessAttemptRepository(database.dsl());
-    audits = new PostgresSharedFolderAuditRepository(database.dsl());
-    maintenanceLeases = new PostgresSharedFolderMaintenanceLeaseStore(database.dsl());
+    applicationLeases = new PostgresApplicationLeaseStore(database.jdbc(), database.schemas());
+    applicationLeaseContender = new PostgresApplicationLeaseStore(
+        contenderDatabase.jdbc(), contenderDatabase.schemas());
+    tracks = new PostgresMusicTrackRepository(database.jdbc(), database.schemas());
+    catalog = new PostgresMusicCatalogQueryRepository(database.jdbc(), database.schemas());
+    playlists = new PostgresMusicPlaylistRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    metadataEdits = new PostgresMusicMetadataEditRepository(database.jdbc(), database.schemas());
+    radioHistory = new PostgresMusicRadioHistoryRepository(database.jdbc(), database.schemas());
+    runtimeState = new PostgresMusicRuntimeStateRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    accessAttempts = new PostgresMusicAccessAttemptRepository(database.jdbc(), database.schemas());
+    audits = new PostgresSharedFolderAuditRepository(database.jdbc(), database.schemas());
+    maintenanceLeases = new PostgresSharedFolderMaintenanceLeaseStore(
+        database.jdbc(), database.schemas());
     maintenanceLeaseContender =
-        new PostgresSharedFolderMaintenanceLeaseStore(contenderDatabase.dsl());
-    mediaJobs = new PostgresMediaJobRepository(database.dsl());
-    recoveries = new PostgresSharedFolderMutationRecoveryRepository(database.dsl());
+        new PostgresSharedFolderMaintenanceLeaseStore(
+            contenderDatabase.jdbc(), contenderDatabase.schemas());
+    mediaJobs = new PostgresMediaJobRepository(database.jdbc(), database.schemas());
+    recoveries = new PostgresSharedFolderMutationRecoveryRepository(
+        database.jdbc(), database.schemas());
     recoveryContender =
-        new PostgresSharedFolderMutationRecoveryRepository(contenderDatabase.dsl());
-    sharedRadio = new PostgresSharedFolderRadioRepository(database.dsl());
-    recycleItems = new PostgresSharedFolderRecycleRepository(database.dsl());
-    uploadSessions = new PostgresSharedFolderUploadSessionRepository(database.dsl());
+        new PostgresSharedFolderMutationRecoveryRepository(
+            contenderDatabase.jdbc(), contenderDatabase.schemas());
+    sharedRadio = new PostgresSharedFolderRadioRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    recycleItems = new PostgresSharedFolderRecycleRepository(database.jdbc(), database.schemas());
+    uploadSessions = new PostgresSharedFolderUploadSessionRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     uploadSessionContender =
-        new PostgresSharedFolderUploadSessionRepository(contenderDatabase.dsl());
+        new PostgresSharedFolderUploadSessionRepository(
+            contenderDatabase.managedJdbc(), contenderDatabase.schemas(),
+            contenderDatabase.transactions());
   }
 
   @AfterAll
@@ -112,15 +121,17 @@ class PostgresTask4ParityContractTest implements Task4PersistenceParityContract 
   @Override public LeaseStore applicationLeases() { return applicationLeases; }
   @Override public LeaseStore applicationLeaseContender() { return applicationLeaseContender; }
   @Override public Instant persistenceNow() {
-    return database.dsl().select(org.jooq.impl.DSL.currentOffsetDateTime())
-        .fetchOne(0, java.time.OffsetDateTime.class).toInstant();
+    return database.jdbc().sql("select current_timestamp")
+        .query(java.time.OffsetDateTime.class).single().toInstant();
   }
   @Override public void expireApplicationLease(LeaseGrant grant) {
-    database.dsl().update(APPLICATION_LEASE)
-        .set(APPLICATION_LEASE.EXPIRES_AT, Instant.EPOCH.atOffset(ZoneOffset.UTC))
-        .where(APPLICATION_LEASE.LEASE_NAME.eq(grant.leaseName())
-            .and(APPLICATION_LEASE.FENCE_TOKEN.eq(grant.fenceToken())))
-        .execute();
+    database.jdbc().sql("""
+            update %s set expires_at = :expiresAt
+            where lease_name = :leaseName and fence_token = :fenceToken
+            """.formatted(database.schemas().qualifiedTable("platform", "application_lease")))
+        .param("expiresAt", Instant.EPOCH.atOffset(java.time.ZoneOffset.UTC))
+        .param("leaseName", grant.leaseName())
+        .param("fenceToken", grant.fenceToken()).update();
   }
   @Override public MusicTrackRepository tracks() { return tracks; }
   @Override public MusicCatalogQueryRepository catalog() { return catalog; }
@@ -135,11 +146,14 @@ class PostgresTask4ParityContractTest implements Task4PersistenceParityContract 
     return maintenanceLeaseContender;
   }
   @Override public void expireMaintenanceLease(LeaseGrant grant) {
-    database.dsl().update(MAINTENANCE_LEASE)
-        .set(MAINTENANCE_LEASE.EXPIRES_AT, Instant.EPOCH.atOffset(ZoneOffset.UTC))
-        .where(MAINTENANCE_LEASE.LEASE_NAME.eq(grant.leaseName())
-            .and(MAINTENANCE_LEASE.FENCE_TOKEN.eq(grant.fenceToken())))
-        .execute();
+    database.jdbc().sql("""
+            update %s set expires_at = :expiresAt
+            where lease_name = :leaseName and fence_token = :fenceToken
+            """.formatted(
+                database.schemas().qualifiedTable("shared_folder", "maintenance_lease")))
+        .param("expiresAt", Instant.EPOCH.atOffset(java.time.ZoneOffset.UTC))
+        .param("leaseName", grant.leaseName())
+        .param("fenceToken", grant.fenceToken()).update();
   }
   @Override public MediaJobRepository mediaJobs() { return mediaJobs; }
   @Override public SharedFolderMutationRecoveryRepository recoveries() { return recoveries; }

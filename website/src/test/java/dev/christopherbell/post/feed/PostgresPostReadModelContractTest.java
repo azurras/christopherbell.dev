@@ -24,11 +24,13 @@ class PostgresPostReadModelContractTest implements PostReadModelParityContract {
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    posts = new PostgresPostRepository(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    posts = new PostgresPostRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     cursors = new StableCursorCodec();
-    feed = new PostgresPostFeedQueryRepository(database.dsl(), cursors);
-    engagement = new PostgresPostEngagementQueryRepository(database.dsl());
+    feed = new PostgresPostFeedQueryRepository(database.jdbc(), database.schemas(), cursors);
+    engagement = new PostgresPostEngagementQueryRepository(database.jdbc(), database.schemas());
   }
 
   @AfterAll

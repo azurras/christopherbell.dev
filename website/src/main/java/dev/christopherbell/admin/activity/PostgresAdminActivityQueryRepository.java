@@ -1,109 +1,102 @@
 package dev.christopherbell.admin.activity;
 
-import static dev.christopherbell.persistence.jooq.platform.Tables.ADMIN_ACTIVITY;
-import static dev.christopherbell.persistence.jooq.platform.Tables.ADMIN_ACTIVITY_VALUE;
-
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.christopherbell.admin.model.AdminActivity;
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
+import java.sql.SQLException;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Map;
-import org.jooq.Condition;
-import org.jooq.DSLContext;
-import org.jooq.Field;
-import org.jooq.Record2;
-import org.jooq.impl.DSL;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** PostgreSQL bounded, stable admin activity page query. */
 @PostgresPersistence
 public class PostgresAdminActivityQueryRepository implements AdminActivityQueryPort {
-  private final DSLContext database;
+  private static final ObjectMapper JSON = new ObjectMapper();
+  private static final TypeReference<Map<String, String>> STRING_MAP = new TypeReference<>() {};
+  private final JdbcClient database;
+  private final String activityTable;
+  private final String valueTable;
 
-  public PostgresAdminActivityQueryRepository(DSLContext database) {
+  public PostgresAdminActivityQueryRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas) {
     this.database = database;
+    activityTable = schemas.qualifiedTable("platform", "admin_activity");
+    valueTable = schemas.qualifiedTable("platform", "admin_activity_value");
   }
 
   @Override
   public AdminActivityPage query(AdminActivityQuery request) {
-    Condition filter = DSL.noCondition();
-    if (hasText(request.action())) {
-      filter = filter.and(ADMIN_ACTIVITY.ACTION.eq(request.action().strip()));
-    }
-    if (hasText(request.targetType())) {
-      filter = filter.and(ADMIN_ACTIVITY.TARGET_TYPE.eq(request.targetType().strip()));
-    }
-    if (hasText(request.actor())) {
-      filter = filter.and(ADMIN_ACTIVITY.ACTOR_USERNAME.containsIgnoreCase(request.actor().strip()));
-    }
+    var clauses = new ArrayList<String>();
+    var parameters = new HashMap<String, Object>();
+    if (hasText(request.action())) { clauses.add("action = :action"); parameters.put("action", request.action().strip()); }
+    if (hasText(request.targetType())) { clauses.add("target_type = :targetType"); parameters.put("targetType", request.targetType().strip()); }
+    if (hasText(request.actor())) { clauses.add("lower(actor_username) like :actor"); parameters.put("actor", "%" + escapeLike(request.actor().strip().toLowerCase(java.util.Locale.ROOT)) + "%"); }
     if (request.from() != null) {
-      filter = filter.and(ADMIN_ACTIVITY.CREATED_ON.between(
-          request.from().atOffset(java.time.ZoneOffset.UTC),
-          request.to().atOffset(java.time.ZoneOffset.UTC)));
+      clauses.add("created_on between :from and :to");
+      parameters.put("from", request.from().atOffset(ZoneOffset.UTC));
+      parameters.put("to", request.to().atOffset(ZoneOffset.UTC));
     }
-
-    long total = database.fetchCount(ADMIN_ACTIVITY, filter);
-    Field<Map<String, String>> before = values("before").as("before_values");
-    Field<Map<String, String>> after = values("after").as("after_values");
-    Field<Map<String, String>> metadata = values("metadata").as("metadata_values");
-    var items = database.select(
-            ADMIN_ACTIVITY.ADMIN_ACTIVITY_ID,
-            ADMIN_ACTIVITY.ACTOR_ACCOUNT_ID,
-            ADMIN_ACTIVITY.ACTOR_USERNAME,
-            ADMIN_ACTIVITY.ACTION,
-            ADMIN_ACTIVITY.TARGET_TYPE,
-            ADMIN_ACTIVITY.TARGET_ID,
-            ADMIN_ACTIVITY.TARGET_LABEL,
-            ADMIN_ACTIVITY.REASON,
-            ADMIN_ACTIVITY.MESSAGE,
-            ADMIN_ACTIVITY.BEFORE_VALUES_PRESENT,
-            ADMIN_ACTIVITY.AFTER_VALUES_PRESENT,
-            ADMIN_ACTIVITY.METADATA_PRESENT,
-            ADMIN_ACTIVITY.CREATED_ON,
-            before,
-            after,
-            metadata)
-        .from(ADMIN_ACTIVITY)
-        .where(filter)
-        .orderBy(ADMIN_ACTIVITY.CREATED_ON.desc(), ADMIN_ACTIVITY.ADMIN_ACTIVITY_ID.desc())
-        .offset(Math.multiplyExact(request.page(), request.size()))
-        .limit(request.size())
-        .fetch(row -> AdminActivity.builder()
-            .id(row.get(ADMIN_ACTIVITY.ADMIN_ACTIVITY_ID))
-            .actorAccountId(row.get(ADMIN_ACTIVITY.ACTOR_ACCOUNT_ID))
-            .actorUsername(row.get(ADMIN_ACTIVITY.ACTOR_USERNAME))
-            .action(row.get(ADMIN_ACTIVITY.ACTION))
-            .targetType(row.get(ADMIN_ACTIVITY.TARGET_TYPE))
-            .targetId(row.get(ADMIN_ACTIVITY.TARGET_ID))
-            .targetLabel(row.get(ADMIN_ACTIVITY.TARGET_LABEL))
-            .reason(row.get(ADMIN_ACTIVITY.REASON))
-            .message(row.get(ADMIN_ACTIVITY.MESSAGE))
-            .createdOn(row.get(ADMIN_ACTIVITY.CREATED_ON).toInstant())
-            .beforeValues(whenPresent(
-                row.get(before), row.get(ADMIN_ACTIVITY.BEFORE_VALUES_PRESENT)))
-            .afterValues(whenPresent(
-                row.get(after), row.get(ADMIN_ACTIVITY.AFTER_VALUES_PRESENT)))
-            .metadata(whenPresent(
-                row.get(metadata), row.get(ADMIN_ACTIVITY.METADATA_PRESENT)))
-            .build());
-    int pages = total == 0 ? 0 : Math.toIntExact((total + request.size() - 1) / request.size());
-    return new AdminActivityPage(items, request.page(), request.size(), total, pages);
+    var where = clauses.isEmpty() ? "true" : String.join(" and ", clauses);
+    var count = statement("select count(*) from %s where %s".formatted(activityTable, where), parameters)
+        .query(Long.class).single();
+    var items = statement("""
+            select activity.*,
+              (select jsonb_object_agg(value_key, value_text order by value_key)
+                from %2$s where admin_activity_id = activity.admin_activity_id
+                  and partition_name = 'before')::text as before_values,
+              (select jsonb_object_agg(value_key, value_text order by value_key)
+                from %2$s where admin_activity_id = activity.admin_activity_id
+                  and partition_name = 'after')::text as after_values,
+              (select jsonb_object_agg(value_key, value_text order by value_key)
+                from %2$s where admin_activity_id = activity.admin_activity_id
+                  and partition_name = 'metadata')::text as metadata_values
+            from %1$s activity where %3$s
+            order by created_on desc, admin_activity_id desc limit :limit offset :offset
+            """.formatted(activityTable, valueTable, where), parameters)
+        .param("limit", request.size())
+        .param("offset", Math.multiplyExact(request.page(), request.size()))
+        .query(PostgresAdminActivityQueryRepository::map).list();
+    int pages = count == 0 ? 0 : Math.toIntExact((count + request.size() - 1) / request.size());
+    return new AdminActivityPage(items, request.page(), request.size(), count, pages);
   }
 
-  private static Field<Map<String, String>> values(String partition) {
-    return DSL.multiset(DSL.select(
-            ADMIN_ACTIVITY_VALUE.VALUE_KEY,
-            ADMIN_ACTIVITY_VALUE.VALUE_TEXT)
-        .from(ADMIN_ACTIVITY_VALUE)
-        .where(ADMIN_ACTIVITY_VALUE.ADMIN_ACTIVITY_ID.eq(ADMIN_ACTIVITY.ADMIN_ACTIVITY_ID)
-            .and(ADMIN_ACTIVITY_VALUE.PARTITION_NAME.eq(partition)))
-        .orderBy(ADMIN_ACTIVITY_VALUE.VALUE_KEY))
-        .convertFrom(rows -> rows.intoMap(Record2::value1, Record2::value2));
+  private JdbcClient.StatementSpec statement(String sql, Map<String, ?> parameters) {
+    var result = database.sql(sql);
+    for (var entry : parameters.entrySet()) result.param(entry.getKey(), entry.getValue());
+    return result;
   }
 
-  private static Map<String, String> whenPresent(
-      Map<String, String> values, Boolean present) {
-    return Boolean.TRUE.equals(present) ? values : null;
+  private static AdminActivity map(java.sql.ResultSet row, int rowNumber) throws SQLException {
+    return AdminActivity.builder()
+        .id(row.getString("admin_activity_id")).actorAccountId(row.getString("actor_account_id"))
+        .actorUsername(row.getString("actor_username")).action(row.getString("action"))
+        .targetType(row.getString("target_type")).targetId(row.getString("target_id"))
+        .targetLabel(row.getString("target_label")).reason(row.getString("reason"))
+        .message(row.getString("message"))
+        .createdOn(row.getObject("created_on", OffsetDateTime.class).toInstant())
+        .beforeValues(whenPresent(row.getString("before_values"), row.getBoolean("before_values_present")))
+        .afterValues(whenPresent(row.getString("after_values"), row.getBoolean("after_values_present")))
+        .metadata(whenPresent(row.getString("metadata_values"), row.getBoolean("metadata_present")))
+        .build();
   }
 
-  private static boolean hasText(String value) {
-    return value != null && !value.isBlank();
+  private static Map<String, String> whenPresent(String json, boolean present) throws SQLException {
+    if (!present) return null;
+    if (json == null) return Map.of();
+    try {
+      return JSON.readValue(json, STRING_MAP);
+    } catch (java.io.IOException failure) {
+      throw new SQLException("PostgreSQL returned invalid admin activity JSON.", failure);
+    }
+  }
+
+  private static boolean hasText(String value) { return value != null && !value.isBlank(); }
+  private static String escapeLike(String value) {
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
   }
 }

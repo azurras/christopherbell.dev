@@ -17,10 +17,11 @@ class PostgresNotificationRepositoryContractTest implements NotificationReposito
   @BeforeAll static void migrate() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    var accounts = new PostgresAccountRepository(database.dsl());
+    var accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     accounts.save(account("notification-parity-owner"));
     accounts.save(account("notification-parity-actor"));
-    notifications = new PostgresNotificationRepository(database.dsl());
+    notifications = new PostgresNotificationRepository(database.jdbc(), database.schemas());
   }
   @AfterAll static void cleanup() throws Exception {
     if (database != null) database.close();

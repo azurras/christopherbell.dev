@@ -1,6 +1,5 @@
 package dev.christopherbell.whatsforlunch.api;
 
-import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.database;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.instant;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.rollback;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.text;
@@ -31,46 +30,75 @@ public final class WhatsForLunchMigrationVerifier {
   public static boolean verify(
       Connection connection, String schema, String sourceKind, String queryName,
       Map<String, List<Map<String, Object>>> tables) throws SQLException {
-    var context = database(connection, schema);
+    var jdbc = org.springframework.jdbc.core.simple.JdbcClient.create(
+        new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true));
+    var schemas = dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+        .fromPhysicalSchema(schema);
+    var transactions = org.springframework.transaction.support.TransactionOperations
+        .withoutTransaction();
     return switch (sourceKind + "/" + queryName) {
       case "restaurant/find-by-id" -> verifyOptionalLookup(
           tables.get("restaurant"), "restaurant_id",
-          new PostgresRestaurantRepository(context)::findById);
-      case "restaurant/find-by-normalized-name" -> verifyRestaurantNames(context, tables.get("restaurant"));
-      case "restaurant/coordinate-bounds" -> verifyCoordinates(context, tables.get("restaurant"));
-      case "vote/find-by-restaurant-and-account" -> verifyVotes(context, tables.get("restaurant_vote"));
+          restaurants(connection, schema)::findById);
+      case "restaurant/find-by-normalized-name" ->
+          verifyRestaurantNames(connection, schema, tables.get("restaurant"));
+      case "restaurant/coordinate-bounds" ->
+          verifyCoordinates(connection, schema, tables.get("restaurant"));
+      case "vote/find-by-restaurant-and-account" ->
+          verifyVotes(connection, schema, tables.get("restaurant_vote"));
       case "favorite/find-by-restaurant-and-account" ->
-          verifyFavorites(context, tables.get("restaurant_favorite"));
+          verifyFavorites(connection, schema, tables.get("restaurant_favorite"));
       case "favorite/account-favorite-page" ->
-          verifyFavoritePage(context, tables.get("restaurant_favorite"));
+          verifyFavoritePage(connection, schema, tables.get("restaurant_favorite"));
       case "preference/find-by-account" -> verifyOptionalLookup(
           tables.get("lunch_preference"), "account_id",
-          new PostgresWhatsForLunchPreferenceRepository(context)::findById);
+          new PostgresWhatsForLunchPreferenceRepository(
+              org.springframework.jdbc.core.simple.JdbcClient.create(
+                  new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                      connection, true)),
+              dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+                  .fromPhysicalSchema(schema),
+              org.springframework.transaction.support.TransactionOperations.withoutTransaction())
+              ::findById);
       case "session/find-by-id" -> verifyOptionalLookup(
           tables.get("lunch_session"), "lunch_session_id",
-          new PostgresWhatsForLunchSessionRepository(context)::findById);
-      case "session/participant-session-page" -> verifyParticipantSessions(context, tables);
+          new PostgresWhatsForLunchSessionRepository(jdbc, schemas, transactions)::findById);
+      case "session/participant-session-page" ->
+          verifyParticipantSessions(jdbc, schemas, transactions, tables);
       case "daily_picks/find-by-id" -> verifyOptionalLookup(
           tables.get("daily_lunch_picks"), "daily_lunch_picks_id",
-          new PostgresDailyLunchPicksRepository(context)::findById);
+          new PostgresDailyLunchPicksRepository(
+              org.springframework.jdbc.core.simple.JdbcClient.create(
+                  new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                      connection, true)),
+              dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+                  .fromPhysicalSchema(schema),
+              org.springframework.transaction.support.TransactionOperations.withoutTransaction())
+              ::findById);
       case "import_state/find-by-id" -> verifyOptionalLookup(
           tables.get("restaurant_import_state"), "import_state_id",
-          new PostgresRestaurantImportStateRepository(context)::findById);
-      case "import_preview/claim" -> verifyPreviewClaim(connection, context, tables.get("restaurant_import_preview"));
+          new PostgresRestaurantImportStateRepository(
+              org.springframework.jdbc.core.simple.JdbcClient.create(
+                  new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                      connection, true)),
+              dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+                  .fromPhysicalSchema(schema))::findById);
+      case "import_preview/claim" ->
+          verifyPreviewClaim(connection, schema, tables.get("restaurant_import_preview"));
       default -> false;
     };
   }
 
   private static boolean verifyRestaurantNames(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var repository = new PostgresRestaurantRepository(context);
+      Connection connection, String schema, List<Map<String, Object>> rows) {
+    var repository = restaurants(connection, schema);
     return rows.stream().allMatch(row -> repository.findByNormalizedName(
         text(row.get("normalized_name"))).isPresent())
         && repository.findByNormalizedName("migration-verifier-missing-name").isEmpty();
   }
 
   private static boolean verifyCoordinates(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
+      Connection connection, String schema, List<Map<String, Object>> rows) {
     var sample = rows.stream()
         .filter(row -> row.get("latitude") instanceof Number
             && row.get("longitude") instanceof Number)
@@ -87,7 +115,7 @@ public final class WhatsForLunchMigrationVerifier {
         Math.abs(((Number) row.get("latitude")).doubleValue() - latitude) <= 0.000001
             && Math.abs(((Number) row.get("longitude")).doubleValue() - longitude) <= 0.000001)
         .map(row -> text(row.get("restaurant_id"))).sorted().toList();
-    var actual = new PostgresRestaurantRepository(context)
+    var actual = restaurants(connection, schema)
         .findByCoordinateBounds(latitude - 0.000001, latitude + 0.000001,
             longitude - 0.000001, longitude + 0.000001).stream()
         .map(value -> value.getId()).sorted().toList();
@@ -95,8 +123,12 @@ public final class WhatsForLunchMigrationVerifier {
   }
 
   private static boolean verifyVotes(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var repository = new PostgresRestaurantVoteRepository(context);
+      Connection connection, String schema, List<Map<String, Object>> rows) {
+    var repository = new PostgresRestaurantVoteRepository(
+        org.springframework.jdbc.core.simple.JdbcClient.create(
+            new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+        dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+            .fromPhysicalSchema(schema));
     return rows.stream().allMatch(row -> repository.findByRestaurantIdAndAccountId(
         text(row.get("restaurant_id")), text(row.get("account_id"))).isPresent())
         && repository.findByRestaurantIdAndAccountId(
@@ -104,8 +136,8 @@ public final class WhatsForLunchMigrationVerifier {
   }
 
   private static boolean verifyFavorites(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var repository = new PostgresRestaurantFavoriteRepository(context);
+      Connection connection, String schema, List<Map<String, Object>> rows) {
+    var repository = favorites(connection, schema);
     return rows.stream().allMatch(row -> repository.findByRestaurantIdAndAccountId(
         text(row.get("restaurant_id")), text(row.get("account_id"))).isPresent())
         && repository.findByRestaurantIdAndAccountId(
@@ -113,8 +145,8 @@ public final class WhatsForLunchMigrationVerifier {
   }
 
   private static boolean verifyFavoritePage(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var repository = new PostgresRestaurantFavoriteRepository(context);
+      Connection connection, String schema, List<Map<String, Object>> rows) {
+    var repository = favorites(connection, schema);
     for (var account : rows.stream().map(row -> text(row.get("account_id"))).distinct().toList()) {
       var expected = rows.stream().filter(row -> account.equals(text(row.get("account_id"))))
           .sorted(Comparator.comparing(
@@ -131,11 +163,33 @@ public final class WhatsForLunchMigrationVerifier {
     return true;
   }
 
+  private static PostgresRestaurantFavoriteRepository favorites(
+      Connection connection, String schema) {
+    return new PostgresRestaurantFavoriteRepository(
+        org.springframework.jdbc.core.simple.JdbcClient.create(
+            new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+        dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+            .fromPhysicalSchema(schema));
+  }
+
+  private static PostgresRestaurantRepository restaurants(
+      Connection connection, String schema) {
+    return new PostgresRestaurantRepository(
+        org.springframework.jdbc.core.simple.JdbcClient.create(
+            new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+        dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+            .fromPhysicalSchema(schema),
+        org.springframework.transaction.support.TransactionOperations.withoutTransaction());
+  }
+
   private static boolean verifyParticipantSessions(
-      org.jooq.DSLContext context, Map<String, List<Map<String, Object>>> tables) {
+      org.springframework.jdbc.core.simple.JdbcClient database,
+      dev.christopherbell.configuration.persistence.PostgresqlSchemaNames schemas,
+      org.springframework.transaction.support.TransactionOperations transactions,
+      Map<String, List<Map<String, Object>>> tables) {
     var sessions = tables.get("lunch_session");
     var participants = tables.get("lunch_session_participant");
-    var repository = new PostgresWhatsForLunchSessionRepository(context);
+    var repository = new PostgresWhatsForLunchSessionRepository(database, schemas, transactions);
     for (var account : participants.stream().map(row -> text(row.get("account_id"))).distinct().toList()) {
       var membership = participants.stream()
           .filter(row -> account.equals(text(row.get("account_id"))))
@@ -166,7 +220,7 @@ public final class WhatsForLunchMigrationVerifier {
   }
 
   private static boolean verifyPreviewClaim(
-      Connection connection, org.jooq.DSLContext context, List<Map<String, Object>> rows)
+      Connection connection, String schema, List<Map<String, Object>> rows)
       throws SQLException {
     if (rows.isEmpty()) {
       return true;
@@ -175,7 +229,11 @@ public final class WhatsForLunchMigrationVerifier {
     var expiry = instant(row.get("expires_on"));
     var now = expiry.minusSeconds(1);
     return rollback(connection, () -> {
-      var store = new PostgresRestaurantImportPreviewStore(context);
+      var store = new PostgresRestaurantImportPreviewStore(
+          org.springframework.jdbc.core.simple.JdbcClient.create(
+              new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+          dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+              .fromPhysicalSchema(schema));
       var first = store.claim(
           text(row.get("import_preview_id")), text(row.get("actor_account_id")), now);
       return first.isPresent()

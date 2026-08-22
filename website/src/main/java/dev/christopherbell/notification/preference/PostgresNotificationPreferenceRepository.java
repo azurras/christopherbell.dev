@@ -1,63 +1,79 @@
 package dev.christopherbell.notification.preference;
 
-import static dev.christopherbell.persistence.jooq.communication.Tables.NOTIFICATION_PREFERENCE;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
+import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
-import org.jooq.DSLContext;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** PostgreSQL persistence for account notification preferences. */
 @PostgresPersistence
 public class PostgresNotificationPreferenceRepository
     implements NotificationPreferenceRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final String table;
 
-  public PostgresNotificationPreferenceRepository(DSLContext database) {
+  public PostgresNotificationPreferenceRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas) {
     this.database = database;
+    table = schemas.qualifiedTable("communication", "notification_preference");
   }
 
   @Override
   public NotificationPreference save(NotificationPreference preference) {
-    database.insertInto(NOTIFICATION_PREFERENCE)
-        .set(NOTIFICATION_PREFERENCE.NOTIFICATION_PREFERENCE_ID, preference.getId())
-        .set(NOTIFICATION_PREFERENCE.ACCOUNT_ID, preference.getAccountId())
-        .set(NOTIFICATION_PREFERENCE.MENTIONS, preference.isMentions())
-        .set(NOTIFICATION_PREFERENCE.LIKES, preference.isLikes())
-        .set(NOTIFICATION_PREFERENCE.COMMENTS, preference.isComments())
-        .set(NOTIFICATION_PREFERENCE.MESSAGES, preference.isMessages())
-        .set(NOTIFICATION_PREFERENCE.WFL_SESSIONS, preference.isWflSessions())
-        .set(NOTIFICATION_PREFERENCE.CREATED_ON, timestamp(preference.getCreatedOn()))
-        .set(NOTIFICATION_PREFERENCE.LAST_UPDATED_ON, timestamp(preference.getLastUpdatedOn()))
-        .onConflict(NOTIFICATION_PREFERENCE.ACCOUNT_ID)
-        .doUpdate()
-        .set(NOTIFICATION_PREFERENCE.MENTIONS, preference.isMentions())
-        .set(NOTIFICATION_PREFERENCE.LIKES, preference.isLikes())
-        .set(NOTIFICATION_PREFERENCE.COMMENTS, preference.isComments())
-        .set(NOTIFICATION_PREFERENCE.MESSAGES, preference.isMessages())
-        .set(NOTIFICATION_PREFERENCE.WFL_SESSIONS, preference.isWflSessions())
-        .set(NOTIFICATION_PREFERENCE.LAST_UPDATED_ON, timestamp(preference.getLastUpdatedOn()))
-        .set(NOTIFICATION_PREFERENCE.VERSION, NOTIFICATION_PREFERENCE.VERSION.plus(1L))
-        .execute();
-    return findByAccountId(preference.getAccountId()).orElseThrow();
+    return database.sql("""
+            insert into %s
+              (notification_preference_id, account_id, mentions, likes, comments, messages,
+               wfl_sessions, created_on, last_updated_on)
+            values
+              (:id, :accountId, :mentions, :likes, :comments, :messages,
+               :wflSessions, :createdOn, :lastUpdatedOn)
+            on conflict (account_id) do update set
+              mentions = excluded.mentions,
+              likes = excluded.likes,
+              comments = excluded.comments,
+              messages = excluded.messages,
+              wfl_sessions = excluded.wfl_sessions,
+              last_updated_on = excluded.last_updated_on,
+              version = %s.version + 1
+            returning *
+            """.formatted(table, table))
+        .param("id", preference.getId())
+        .param("accountId", preference.getAccountId())
+        .param("mentions", preference.isMentions())
+        .param("likes", preference.isLikes())
+        .param("comments", preference.isComments())
+        .param("messages", preference.isMessages())
+        .param("wflSessions", preference.isWflSessions())
+        .param("createdOn", timestamp(preference.getCreatedOn()))
+        .param("lastUpdatedOn", timestamp(preference.getLastUpdatedOn()))
+        .query(PostgresNotificationPreferenceRepository::map)
+        .single();
   }
 
   @Override
   public Optional<NotificationPreference> findByAccountId(String accountId) {
-    return database.selectFrom(NOTIFICATION_PREFERENCE)
-        .where(NOTIFICATION_PREFERENCE.ACCOUNT_ID.eq(accountId))
-        .fetchOptional(record -> NotificationPreference.builder()
-            .id(record.getNotificationPreferenceId())
-            .accountId(record.getAccountId())
-            .mentions(record.getMentions())
-            .likes(record.getLikes())
-            .comments(record.getComments())
-            .messages(record.getMessages())
-            .wflSessions(record.getWflSessions())
-            .createdOn(instant(record.getCreatedOn()))
-            .lastUpdatedOn(instant(record.getLastUpdatedOn()))
-            .build());
+    return database.sql("select * from %s where account_id = :accountId".formatted(table))
+        .param("accountId", accountId)
+        .query(PostgresNotificationPreferenceRepository::map)
+        .optional();
+  }
+
+  private static NotificationPreference map(java.sql.ResultSet row, int rowNumber)
+      throws SQLException {
+    return NotificationPreference.builder()
+        .id(row.getString("notification_preference_id"))
+        .accountId(row.getString("account_id"))
+        .mentions(row.getBoolean("mentions"))
+        .likes(row.getBoolean("likes"))
+        .comments(row.getBoolean("comments"))
+        .messages(row.getBoolean("messages"))
+        .wflSessions(row.getBoolean("wfl_sessions"))
+        .createdOn(instant(row.getObject("created_on", OffsetDateTime.class)))
+        .lastUpdatedOn(instant(row.getObject("last_updated_on", OffsetDateTime.class)))
+        .build();
   }
 
   private static OffsetDateTime timestamp(java.time.Instant value) {

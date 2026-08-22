@@ -1,9 +1,7 @@
 package dev.christopherbell.post.feed;
 
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT_FOLLOW;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.libs.pagination.StableCursor;
 import dev.christopherbell.libs.pagination.StableCursorCodec;
 import dev.christopherbell.post.PostgresPostMapper;
@@ -11,110 +9,111 @@ import dev.christopherbell.post.model.Post;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
-import org.jooq.Condition;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** PostgreSQL keyset queries for deterministic global, author, and following feeds. */
 @PostgresPersistence
 public class PostgresPostFeedQueryRepository implements PostFeedQueryPort {
   private static final int MAX_PAGE_SIZE = 100;
-  private final DSLContext database;
+  private final JdbcClient database;
   private final StableCursorCodec cursors;
+  private final PostgresPostMapper mapper;
+  private final String postTable;
+  private final String followTable;
 
-  public PostgresPostFeedQueryRepository(DSLContext database, StableCursorCodec cursors) {
+  public PostgresPostFeedQueryRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas, StableCursorCodec cursors) {
     this.database = database;
     this.cursors = cursors;
+    mapper = new PostgresPostMapper(database, schemas);
+    postTable = schemas.qualifiedTable("social", "post");
+    followTable = schemas.qualifiedTable("identity", "account_follow");
   }
 
-  @Override
-  public PostFeedSlice global(Optional<StableCursor> cursor, int requestedSize) {
-    return global(cursor, requestedSize, PostFeedVisibility.unrestricted());
+  @Override public PostFeedSlice global(Optional<StableCursor> cursor, int size) {
+    return global(cursor, size, PostFeedVisibility.unrestricted());
   }
 
   @Override
   public PostFeedSlice global(
-      Optional<StableCursor> cursor, int requestedSize, PostFeedVisibility visibility) {
-    return page(DSL.trueCondition(), cursor, requestedSize, visibility);
+      Optional<StableCursor> cursor, int size, PostFeedVisibility visibility) {
+    return page("true", new HashMap<>(), cursor, size, visibility);
+  }
+
+  @Override public PostFeedSlice account(String id, Optional<StableCursor> cursor, int size) {
+    return account(id, cursor, size, PostFeedVisibility.unrestricted());
   }
 
   @Override
   public PostFeedSlice account(
-      String accountId, Optional<StableCursor> cursor, int requestedSize) {
-    return account(accountId, cursor, requestedSize, PostFeedVisibility.unrestricted());
-  }
-
-  @Override
-  public PostFeedSlice account(
-      String accountId,
-      Optional<StableCursor> cursor,
-      int requestedSize,
-      PostFeedVisibility visibility) {
-    return page(POST.ACCOUNT_ID.eq(accountId), cursor, requestedSize, visibility);
+      String id, Optional<StableCursor> cursor, int size, PostFeedVisibility visibility) {
+    var parameters = new HashMap<String, Object>();
+    parameters.put("accountId", id);
+    return page("account_id = :accountId", parameters, cursor, size, visibility);
   }
 
   @Override
   public PostFeedSlice accounts(
-      Collection<String> accountIds, Optional<StableCursor> cursor, int requestedSize) {
-    return page(accountIds.isEmpty() ? DSL.falseCondition() : POST.ACCOUNT_ID.in(accountIds),
-        cursor, requestedSize, PostFeedVisibility.unrestricted());
+      Collection<String> ids, Optional<StableCursor> cursor, int size) {
+    if (ids.isEmpty()) return new PostFeedSlice(List.of(), null);
+    var parameters = new HashMap<String, Object>();
+    parameters.put("accountIds", ids);
+    return page("account_id in (:accountIds)", parameters, cursor, size,
+        PostFeedVisibility.unrestricted());
   }
 
   @Override
   public PostFeedSlice following(
-      String followerId,
-      Optional<StableCursor> cursor,
-      int requestedSize,
-      PostFeedVisibility visibility) {
-    var followed = database.select(ACCOUNT_FOLLOW.FOLLOWED_ACCOUNT_ID)
-        .from(ACCOUNT_FOLLOW)
-        .where(ACCOUNT_FOLLOW.FOLLOWER_ACCOUNT_ID.eq(followerId));
-    return page(POST.ACCOUNT_ID.in(followed), cursor, requestedSize, visibility);
+      String followerId, Optional<StableCursor> cursor, int size, PostFeedVisibility visibility) {
+    var parameters = new HashMap<String, Object>();
+    parameters.put("followerId", followerId);
+    return page("account_id in (select followed_account_id from %s where follower_account_id = :followerId)"
+            .formatted(followTable), parameters, cursor, size, visibility);
   }
 
   private PostFeedSlice page(
-      Condition scope,
-      Optional<StableCursor> cursor,
-      int requestedSize,
-      PostFeedVisibility visibility) {
-    var condition = scope.and(visible(cursor, visibility));
-    var size = Math.max(1, Math.min(requestedSize, MAX_PAGE_SIZE));
-    var loaded = database.selectFrom(POST)
-        .where(condition)
-        .orderBy(POST.CREATED_ON.desc(), POST.POST_ID.desc())
-        .limit(size + 1)
-        .fetch();
-    return slice(PostgresPostMapper.mapAll(database, loaded), size);
-  }
-
-  private static Condition visible(
-      Optional<StableCursor> cursor, PostFeedVisibility visibility) {
-    var clauses = new ArrayList<Condition>();
-    cursor.ifPresent(boundary -> clauses.add(
-        POST.CREATED_ON.lt(boundary.timestamp().atOffset(ZoneOffset.UTC))
-            .or(POST.CREATED_ON.eq(boundary.timestamp().atOffset(ZoneOffset.UTC))
-                .and(POST.POST_ID.lt(boundary.id())))));
-    visibility.expiresAfter().ifPresent(cutoff ->
-        clauses.add(POST.EXPIRES_ON.gt(cutoff.atOffset(ZoneOffset.UTC))));
+      String scope, HashMap<String, Object> parameters, Optional<StableCursor> cursor,
+      int requestedSize, PostFeedVisibility visibility) {
+    var clauses = new ArrayList<String>();
+    clauses.add(scope);
+    cursor.ifPresent(boundary -> {
+      clauses.add("(created_on < :cursorTime or (created_on = :cursorTime and post_id < :cursorId))");
+      parameters.put("cursorTime", boundary.timestamp().atOffset(ZoneOffset.UTC));
+      parameters.put("cursorId", boundary.id());
+    });
+    visibility.expiresAfter().ifPresent(cutoff -> {
+      clauses.add("expires_on > :expiresAfter");
+      parameters.put("expiresAfter", cutoff.atOffset(ZoneOffset.UTC));
+    });
     if (!visibility.excludedAccountIds().isEmpty()) {
-      clauses.add(POST.ACCOUNT_ID.notIn(visibility.excludedAccountIds()));
+      clauses.add("account_id not in (:excludedAccounts)");
+      parameters.put("excludedAccounts", visibility.excludedAccountIds());
     }
     if (!visibility.excludedRootIds().isEmpty()) {
-      clauses.add(POST.ROOT_POST_ID.notIn(visibility.excludedRootIds()));
+      clauses.add("root_post_id not in (:excludedRoots)");
+      parameters.put("excludedRoots", visibility.excludedRootIds());
     }
-    return clauses.stream().reduce(DSL.trueCondition(), Condition::and);
+    int size = Math.max(1, Math.min(requestedSize, MAX_PAGE_SIZE));
+    var statement = database.sql("""
+            select * from %s where %s
+            order by created_on desc, post_id desc limit :limit
+            """.formatted(postTable, String.join(" and ", clauses)));
+    for (var entry : parameters.entrySet()) statement.param(entry.getKey(), entry.getValue());
+    var rows = statement.param("limit", size + 1).query(mapper::row).list();
+    return slice(mapper.mapAll(rows), size);
   }
 
   private PostFeedSlice slice(List<Post> loaded, int size) {
-    var hasNext = loaded.size() > size;
+    boolean hasNext = loaded.size() > size;
     var items = loaded.stream().limit(size).toList();
-    String nextCursor = null;
+    String next = null;
     if (hasNext && !items.isEmpty()) {
       var boundary = items.getLast();
-      nextCursor = cursors.encode(new StableCursor(boundary.getCreatedOn(), boundary.getId()));
+      next = cursors.encode(new StableCursor(boundary.getCreatedOn(), boundary.getId()));
     }
-    return new PostFeedSlice(items, nextCursor);
+    return new PostFeedSlice(items, next);
   }
 }

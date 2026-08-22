@@ -19,9 +19,11 @@ class PostgresAccountDeletionContractTest implements AccountDeletionParityContra
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    jobs = new PostgresAccountDeletionJobRepository(database.dsl());
-    operations = new PostgresAccountDeletionOperations(database.dsl(), accountId -> {});
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    jobs = new PostgresAccountDeletionJobRepository(database.jdbc(), database.schemas());
+    operations = new PostgresAccountDeletionOperations(
+        database.managedJdbc(), database.schemas(), database.transactions(), accountId -> {});
   }
 
   @AfterAll

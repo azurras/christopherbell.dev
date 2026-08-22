@@ -1,85 +1,96 @@
 package dev.christopherbell.post;
 
-import static dev.christopherbell.persistence.jooq.social.Tables.POST_EDIT_AUDIT;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST_LINK_PREVIEW;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST_TOPIC;
-
-import dev.christopherbell.persistence.jooq.social.tables.records.PostRecord;
 import dev.christopherbell.configuration.persistence.PostgresPersistenceSupport;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.post.editing.PostEditAuditEvent;
 import dev.christopherbell.post.model.Post;
 import dev.christopherbell.post.model.PostLinkPreview;
 import dev.christopherbell.post.model.PostTopic;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.jooq.DSLContext;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
-/** Reconstructs one PostgreSQL post aggregate for adapters that query post rows. */
+/** Reconstructs PostgreSQL post aggregates without generated query-model classes. */
 @PostgresPersistenceSupport
 public final class PostgresPostMapper {
-  private PostgresPostMapper() {}
+  private final JdbcClient database;
+  private final String auditTable;
+  private final String topicTable;
+  private final String previewTable;
 
-  public static Post map(DSLContext context, PostRecord record) {
-    return mapAll(context, List.of(record)).getFirst();
+  public PostgresPostMapper(JdbcClient database, PostgresqlSchemaNames schemas) {
+    this.database = database;
+    auditTable = schemas.qualifiedTable("social", "post_edit_audit");
+    topicTable = schemas.qualifiedTable("social", "post_topic");
+    previewTable = schemas.qualifiedTable("social", "post_link_preview");
   }
 
-  public static List<Post> mapAll(DSLContext context, List<PostRecord> records) {
-    if (records.isEmpty()) return List.of();
-    var postIds = records.stream().map(PostRecord::getPostId).toList();
-    Map<String, List<PostEditAuditEvent>> audits = initializedLists(postIds);
-    Map<String, List<PostTopic>> topics = initializedLists(postIds);
-    Map<String, List<PostLinkPreview>> previews = initializedLists(postIds);
-    context.selectFrom(POST_EDIT_AUDIT)
-        .where(POST_EDIT_AUDIT.POST_ID.in(postIds))
-        .orderBy(POST_EDIT_AUDIT.POST_ID.asc(), POST_EDIT_AUDIT.ORDINAL.asc())
-        .forEach(row -> audits.get(row.getPostId()).add(new PostEditAuditEvent(
-            row.getEditorAccountId(), row.getBeforeText(), row.getAfterText(),
-            row.getEditedOn().toInstant())));
-    context.selectFrom(POST_TOPIC)
-        .where(POST_TOPIC.POST_ID.in(postIds))
-        .orderBy(POST_TOPIC.POST_ID.asc(), POST_TOPIC.ORDINAL.asc())
-        .forEach(row -> topics.get(row.getPostId())
-            .add(new PostTopic(row.getCanonical(), row.getDisplay())));
-    context.selectFrom(POST_LINK_PREVIEW)
-        .where(POST_LINK_PREVIEW.POST_ID.in(postIds))
-        .orderBy(POST_LINK_PREVIEW.POST_ID.asc(), POST_LINK_PREVIEW.ORDINAL.asc())
-        .forEach(row -> previews.get(row.getPostId()).add(PostLinkPreview.builder()
-            .url(row.getUrl()).domain(row.getDomainName()).title(row.getTitle())
-            .description(row.getDescription()).imageUrl(row.getImageUrl()).build()));
-    return records.stream().map(record -> map(
-        record, audits.get(record.getPostId()), topics.get(record.getPostId()),
-        previews.get(record.getPostId()))).toList();
+  public Post map(ResultSet row, int rowNumber) throws SQLException {
+    return mapAll(List.of(row(row, rowNumber))).getFirst();
+  }
+
+  public PostRow row(ResultSet row, int rowNumber) throws SQLException {
+    return new PostRow(
+        row.getString("post_id"), row.getString("account_id"), row.getString("post_text"),
+        row.getString("root_post_id"), row.getString("parent_post_id"),
+        row.getInt("thread_level"), instant(row, "created_on"),
+        instant(row, "last_updated_on"), instant(row, "edited_on"),
+        instant(row, "expires_on"), row.getBoolean("federation_outbound_eligible"),
+        instant(row, "last_extended_on"), row.getInt("likes_count"),
+        row.getInt("thread_reply_likes_count"), row.getInt("thread_reply_count"));
+  }
+
+  public List<Post> mapAll(List<PostRow> rows) {
+    if (rows.isEmpty()) return List.of();
+    var ids = rows.stream().map(PostRow::id).toList();
+    Map<String, List<PostEditAuditEvent>> audits = initializedLists(ids);
+    Map<String, List<PostTopic>> topics = initializedLists(ids);
+    Map<String, List<PostLinkPreview>> previews = initializedLists(ids);
+    database.sql("""
+            select * from %s where post_id in (:ids) order by post_id asc, ordinal asc
+            """.formatted(auditTable)).param("ids", ids).query((row, ignored) -> {
+          audits.get(row.getString("post_id")).add(new PostEditAuditEvent(
+              row.getString("editor_account_id"), row.getString("before_text"),
+              row.getString("after_text"), instant(row, "edited_on")));
+          return 0;
+        }).list();
+    database.sql("""
+            select * from %s where post_id in (:ids) order by post_id asc, ordinal asc
+            """.formatted(topicTable)).param("ids", ids).query((row, ignored) -> {
+          topics.get(row.getString("post_id")).add(
+              new PostTopic(row.getString("canonical"), row.getString("display")));
+          return 0;
+        }).list();
+    database.sql("""
+            select * from %s where post_id in (:ids) order by post_id asc, ordinal asc
+            """.formatted(previewTable)).param("ids", ids).query((row, ignored) -> {
+          previews.get(row.getString("post_id")).add(PostLinkPreview.builder()
+              .url(row.getString("url")).domain(row.getString("domain_name"))
+              .title(row.getString("title")).description(row.getString("description"))
+              .imageUrl(row.getString("image_url")).build());
+          return 0;
+        }).list();
+    return rows.stream().map(row -> map(
+        row, audits.get(row.id()), topics.get(row.id()), previews.get(row.id()))).toList();
   }
 
   private static Post map(
-      PostRecord record,
-      List<PostEditAuditEvent> audit,
-      List<PostTopic> topics,
-      List<PostLinkPreview> previews) {
-    return Post.builder()
-        .id(record.getPostId())
-        .accountId(record.getAccountId())
-        .text(record.getPostText())
-        .rootId(record.getRootPostId())
-        .parentId(record.getParentPostId())
-        .level(record.getThreadLevel())
-        .createdOn(record.getCreatedOn().toInstant())
-        .lastUpdatedOn(instant(record.getLastUpdatedOn()))
-        .editedOn(instant(record.getEditedOn()))
-        .editAudit(audit)
-        .expiresOn(instant(record.getExpiresOn()))
-        .federationOutboundEligible(record.getFederationOutboundEligible())
-        .lastExtendedOn(instant(record.getLastExtendedOn()))
-        .topics(topics)
-        .likesCount(record.getLikesCount())
-        .threadReplyLikesCount(record.getThreadReplyLikesCount())
-        .threadReplyCount(record.getThreadReplyCount())
-        .linkPreviews(previews)
-        .build();
+      PostRow row, List<PostEditAuditEvent> audits,
+      List<PostTopic> topics, List<PostLinkPreview> previews) {
+    return Post.builder().id(row.id()).accountId(row.accountId()).text(row.text())
+        .rootId(row.rootId()).parentId(row.parentId()).level(row.level())
+        .createdOn(row.createdOn()).lastUpdatedOn(row.lastUpdatedOn()).editedOn(row.editedOn())
+        .editAudit(audits).expiresOn(row.expiresOn())
+        .federationOutboundEligible(row.federationOutboundEligible())
+        .lastExtendedOn(row.lastExtendedOn()).topics(topics).likesCount(row.likesCount())
+        .threadReplyLikesCount(row.threadReplyLikesCount())
+        .threadReplyCount(row.threadReplyCount()).linkPreviews(previews).build();
   }
 
   private static <T> Map<String, List<T>> initializedLists(List<String> ids) {
@@ -88,7 +99,14 @@ public final class PostgresPostMapper {
     return result;
   }
 
-  private static Instant instant(OffsetDateTime value) {
+  private static Instant instant(ResultSet row, String column) throws SQLException {
+    var value = row.getObject(column, OffsetDateTime.class);
     return value == null ? null : value.toInstant();
   }
+
+  public record PostRow(
+      String id, String accountId, String text, String rootId, String parentId, int level,
+      Instant createdOn, Instant lastUpdatedOn, Instant editedOn, Instant expiresOn,
+      boolean federationOutboundEligible, Instant lastExtendedOn, int likesCount,
+      int threadReplyLikesCount, int threadReplyCount) {}
 }

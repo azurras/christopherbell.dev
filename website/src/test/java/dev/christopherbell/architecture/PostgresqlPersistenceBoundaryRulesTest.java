@@ -121,7 +121,25 @@ class PostgresqlPersistenceBoundaryRulesTest {
       "task5-platform");
 
   @Test
-  void jooqDependenciesStayInsidePostgresqlConfigurationGeneratedCodeAndAdapters() {
+  void handwrittenProductionCodeDoesNotDependOnJooqOrGeneratedTypes() {
+    var classes = new ClassFileImporter().importPackages("dev.christopherbell");
+    var violations = classes.stream()
+        .filter(javaClass -> !javaClass.getPackageName()
+            .startsWith("dev.christopherbell.persistence.jooq"))
+        .filter(javaClass -> !javaClass.getName().contains("Test"))
+        .filter(javaClass -> javaClass.getDirectDependenciesFromSelf().stream()
+            .map(dependency -> dependency.getTargetClass().getPackageName())
+            .anyMatch(packageName -> packageName.startsWith("org.jooq")
+                || packageName.startsWith("dev.christopherbell.persistence.jooq")))
+        .map(javaClass -> javaClass.getName())
+        .sorted()
+        .toList();
+
+    assertThat(violations).isEmpty();
+  }
+
+  @Test
+  void relationalDependenciesStayInsidePostgresqlConfigurationAndAdapters() {
     var classes = new ClassFileImporter().importPackages("dev.christopherbell");
     var violations = classes.stream()
         .filter(javaClass -> !javaClass.getPackageName()

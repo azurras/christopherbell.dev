@@ -48,7 +48,8 @@ class PostgresSocialCommunicationPortContractTest {
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    var accounts = new PostgresAccountRepository(database.dsl());
+    var accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     accounts.save(account("social-a", "social-a@example.test", "sociala"));
     accounts.save(account("social-b", "social-b@example.test", "socialb"));
   }
@@ -61,7 +62,8 @@ class PostgresSocialCommunicationPortContractTest {
 
   @Test
   void postsLikesHidesPreviewsAndReportsRoundTrip() throws Exception {
-    var posts = new PostgresPostRepository(database.dsl());
+    var posts = new PostgresPostRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var post = Post.builder()
         .id("post-root")
         .accountId("social-a")
@@ -84,14 +86,14 @@ class PostgresSocialCommunicationPortContractTest {
     assertThat(posts.save(post)).isEqualTo(post);
     assertThat(posts.findByRootIdOrderByCreatedOnAsc("post-root")).containsExactly(post);
 
-    var likes = new PostgresPostLikeStore(database.dsl());
+    var likes = new PostgresPostLikeStore(database.jdbc(), database.schemas());
     assertThat(likes.like("post-root", "social-b", NOW.plusSeconds(1)).created()).isTrue();
     assertThat(likes.like("post-root", "social-b", NOW.plusSeconds(1)).created()).isFalse();
     assertThat(likes.counts(List.of("post-root"))).containsEntry("post-root", 1);
     assertThat(likes.likedPostIds("social-b", List.of("post-root")))
         .containsExactly("post-root");
 
-    var hidden = new PostgresHiddenPostThreadRepository(database.dsl());
+    var hidden = new PostgresHiddenPostThreadRepository(database.jdbc(), database.schemas());
     var hiddenThread = HiddenPostThread.builder()
         .id("hidden-thread")
         .accountId("social-b")
@@ -100,7 +102,7 @@ class PostgresSocialCommunicationPortContractTest {
         .build();
     assertThat(hidden.save(hiddenThread)).isEqualTo(hiddenThread);
 
-    var cache = new PostgresPostLinkPreviewCacheRepository(database.dsl());
+    var cache = new PostgresPostLinkPreviewCacheRepository(database.jdbc(), database.schemas());
     var cacheEntry = PostLinkPreviewCacheEntry.success(
         "https://example.test/page",
         post.getLinkPreviews().getFirst(),
@@ -109,7 +111,8 @@ class PostgresSocialCommunicationPortContractTest {
     assertThat(cache.save(cacheEntry)).isEqualTo(cacheEntry);
     assertThat(cache.findById(cacheEntry.getUrl())).contains(cacheEntry);
 
-    var reports = new PostgresReportRepository(database.dsl());
+    var reports = new PostgresReportRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var report = PostReport.builder()
         .id("report-root")
         .postId("post-root")
@@ -141,7 +144,8 @@ class PostgresSocialCommunicationPortContractTest {
 
   @Test
   void messagesNotificationsAndPreferencesRoundTripWithBoundedQueries() {
-    var messages = new PostgresMessageRepository(database.dsl());
+    var messages = new PostgresMessageRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var message = Message.builder()
         .id("message-a-b")
         .conversationKey("social-a:social-b")
@@ -156,7 +160,7 @@ class PostgresSocialCommunicationPortContractTest {
     assertThat(messages.findByConversationKeyOrderByCreatedOnAsc(
         message.getConversationKey(), PageRequest.of(0, 10))).containsExactly(message);
 
-    var notifications = new PostgresNotificationRepository(database.dsl());
+    var notifications = new PostgresNotificationRepository(database.jdbc(), database.schemas());
     var notification = Notification.builder()
         .id("notification-message")
         .accountId("social-b")
@@ -171,7 +175,7 @@ class PostgresSocialCommunicationPortContractTest {
     assertThat(notifications.save(notification)).isEqualTo(notification);
     assertThat(notifications.countByAccountIdAndReadFalse("social-b")).isOne();
 
-    var preferences = new PostgresNotificationPreferenceRepository(database.dsl());
+    var preferences = new PostgresNotificationPreferenceRepository(database.jdbc(), database.schemas());
     var preference = NotificationPreference.builder()
         .id("preference-b")
         .accountId("social-b")

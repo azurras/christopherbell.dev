@@ -21,9 +21,10 @@ class PostgresIdentityRelationshipContractTest implements IdentityRelationshipPa
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    follows = new PostgresAccountFollowStore(database.dsl());
-    trust = new PostgresAccountTrustRepository(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    follows = new PostgresAccountFollowStore(database.jdbc(), database.schemas());
+    trust = new PostgresAccountTrustRepository(database.jdbc(), database.schemas());
   }
 
   @AfterAll

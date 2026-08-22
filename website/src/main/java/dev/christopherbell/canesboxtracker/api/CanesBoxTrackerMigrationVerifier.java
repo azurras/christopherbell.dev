@@ -1,6 +1,5 @@
 package dev.christopherbell.canesboxtracker.api;
 
-import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.database;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.verifyOptionalLookup;
 
 import dev.christopherbell.canesboxtracker.PostgresCanesBoxPriceSnapshotRepository;
@@ -18,7 +17,12 @@ public final class CanesBoxTrackerMigrationVerifier {
   public static boolean verify(
       Connection connection, String schema, String queryName,
       List<Map<String, Object>> rows) {
-    var repository = new PostgresCanesBoxPriceSnapshotRepository(database(connection, schema));
+    var repository = new PostgresCanesBoxPriceSnapshotRepository(
+        org.springframework.jdbc.core.simple.JdbcClient.create(
+            new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+        dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+            .fromPhysicalSchema(schema),
+        org.springframework.transaction.support.TransactionOperations.withoutTransaction());
     return switch (queryName) {
       case "find-by-id" -> verifyOptionalLookup(
           rows, "price_snapshot_id", repository::findById);

@@ -29,16 +29,21 @@ class MongoMigrationSourceReaderTest {
     client = MongoClients.create(uri);
     assertThat(client.getDatabase("test").runCommand(new Document("ping", 1)).getDouble("ok"))
         .isEqualTo(1.0);
+    clearApplicationRuntimeFixtures();
   }
 
   @AfterEach
   void close() {
     if (client != null) {
-      client.getDatabase("test").getCollection("application_runtime")
-          .deleteMany(new Document("_kind", new Document("$in", List.of(
-              "application_lease", "scheduled_collector_run", "not_catalogued"))));
+      clearApplicationRuntimeFixtures();
       client.close();
     }
+  }
+
+  private void clearApplicationRuntimeFixtures() {
+    client.getDatabase("test").getCollection("application_runtime")
+        .deleteMany(new Document("_kind", new Document("$in", List.of(
+            "application_lease", "scheduled_collector_run", "not_catalogued"))));
   }
 
   @Test

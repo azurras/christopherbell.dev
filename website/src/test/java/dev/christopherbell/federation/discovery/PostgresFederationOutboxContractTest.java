@@ -23,10 +23,13 @@ class PostgresFederationOutboxContractTest implements FederationOutboxParityCont
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    posts = new PostgresPostRepository(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    posts = new PostgresPostRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     cursors = new StableCursorCodec();
-    outbox = new PostgresFederationOutboxQueryRepository(database.dsl(), cursors);
+    outbox = new PostgresFederationOutboxQueryRepository(
+        database.jdbc(), database.schemas(), cursors);
   }
 
   @AfterAll

@@ -9,7 +9,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import javax.sql.DataSource;
-import org.jooq.DSLContext;
+import jakarta.persistence.EntityManagerFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -32,7 +32,7 @@ class PersistenceBackendAutoConfigurationTest {
           assertThat(context.getStartupFailure()).isNull();
           assertThat(context).hasSingleBean(MongoClient.class);
           assertThat(context).doesNotHaveBean(DataSource.class);
-          assertThat(context).doesNotHaveBean(DSLContext.class);
+          assertThat(context).doesNotHaveBean(EntityManagerFactory.class);
         });
   }
 
@@ -43,11 +43,13 @@ class PersistenceBackendAutoConfigurationTest {
             "spring.datasource.type=org.springframework.jdbc.datasource.SimpleDriverDataSource",
             "spring.datasource.driver-class-name=org.postgresql.Driver",
             "spring.datasource.url=jdbc:postgresql://127.0.0.1:5432/test",
+            "spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect",
+            "spring.jpa.hibernate.ddl-auto=none",
             "spring.flyway.enabled=false")
         .run(context -> {
           assertThat(context.getStartupFailure()).isNull();
           assertThat(context).hasSingleBean(DataSource.class);
-          assertThat(context).hasSingleBean(DSLContext.class);
+          assertThat(context).hasSingleBean(EntityManagerFactory.class);
           assertThat(context).doesNotHaveBean(MongoClient.class);
         });
   }
@@ -62,8 +64,9 @@ class PersistenceBackendAutoConfigurationTest {
         "org.springframework.boot.mongodb.autoconfigure.MongoAutoConfiguration",
         "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
         "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration",
-        "org.springframework.boot.jooq.autoconfigure.JooqAutoConfiguration"
-    }, null)).containsExactly(false, true, true, true);
+        "org.springframework.boot.data.jpa.autoconfigure.DataJpaRepositoriesAutoConfiguration",
+        "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration",
+    }, null)).containsExactly(false, true, true, true, true);
   }
 
   @Test
@@ -108,8 +111,9 @@ class PersistenceBackendAutoConfigurationTest {
   private static boolean isPersistenceAutoConfiguration(String candidate) {
     return candidate.contains(".mongodb.")
         || candidate.contains(".jdbc.")
-        || candidate.contains(".jooq.")
-        || candidate.contains(".flyway.");
+        || candidate.contains(".flyway.")
+        || candidate.contains(".data.jpa.")
+        || candidate.contains(".hibernate.");
   }
 
   private static void assertSelectorMatches(List<String> candidates, String backend) {

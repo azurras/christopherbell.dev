@@ -1,6 +1,5 @@
 package dev.christopherbell.configuration.postgresql;
 
-import static dev.christopherbell.persistence.jooq.platform.Tables.ADMIN_ACTIVITY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
@@ -35,19 +34,21 @@ import dev.christopherbell.whatsforlunch.restaurant.vote.PostgresRestaurantVoteR
 import java.time.Clock;
 import java.time.Instant;
 import java.math.BigDecimal;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.jooq.DSLContext;
-import org.jooq.ExecuteContext;
-import org.jooq.impl.DSL;
-import org.jooq.impl.DefaultExecuteListener;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.AbstractDataSource;
 
 /** PostgreSQL-specific Task 5 query-shape and failure-redaction contracts. */
 @EnabledIfEnvironmentVariable(named = "POSTGRESQL_INTEGRATION_TESTS", matches = "enabled")
@@ -70,10 +71,12 @@ class PostgresTask5BehaviorContractTest {
 
   @Test
   void adminActivityPageUsesTwoQueriesAtEveryPageSizeAndTheDeclaredOrderingIndex() {
-    var activities = new PostgresAdminActivityRepository(database.dsl());
+    var activities = new PostgresAdminActivityRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     activities.insert(activity("task5-query-a", "QUERY_TEST"));
     var executions = new AtomicInteger();
-    var queries = new PostgresAdminActivityQueryRepository(countedDatabase(executions));
+    var queries = new PostgresAdminActivityQueryRepository(
+        countedJdbc(executions), database.schemas());
 
     assertQueryCount(executions, 2,
         () -> queries.query(new AdminActivityQuery(
@@ -82,25 +85,28 @@ class PostgresTask5BehaviorContractTest {
         () -> queries.query(new AdminActivityQuery(
             "QUERY_TEST", null, null, null, null, 0, 100)));
 
-    database.dsl().execute("set enable_seqscan = off");
+    database.jdbc().sql("set enable_seqscan = off").update();
     try {
-      assertThat(database.dsl().explain(database.dsl().selectFrom(ADMIN_ACTIVITY)
-          .where(ADMIN_ACTIVITY.ACTION.eq("QUERY_TEST"))
-          .orderBy(ADMIN_ACTIVITY.CREATED_ON.desc(), ADMIN_ACTIVITY.ADMIN_ACTIVITY_ID.desc())
-          .limit(100)).plan())
+      var table = database.schemas().qualifiedTable("platform", "admin_activity");
+      var plan = String.join("\n", database.jdbc().sql("explain select * from " + table
+          + " where action = 'QUERY_TEST' order by created_on desc, admin_activity_id desc"
+          + " limit 100").query(String.class).list());
+      assertThat(plan)
           .contains("admin_activity__admin_activity_action_created_id_desc");
     } finally {
-      database.dsl().execute("reset enable_seqscan");
+      database.jdbc().sql("reset enable_seqscan").update();
     }
   }
 
   @Test
   void canesHistoryLoadsEverySnapshotAndMetroListInTwoQueries() {
-    var snapshots = new PostgresCanesBoxPriceSnapshotRepository(database.dsl());
+    var snapshots = new PostgresCanesBoxPriceSnapshotRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     snapshots.save(canesSnapshot("task5-canes-query-a", "2026-08-03", "10.01"));
     snapshots.save(canesSnapshot("task5-canes-query-b", "2026-08-10", "10.02"));
     var executions = new AtomicInteger();
-    var counted = new PostgresCanesBoxPriceSnapshotRepository(countedDatabase(executions));
+    var counted = new PostgresCanesBoxPriceSnapshotRepository(
+        countedJdbc(executions), database.schemas(), database.transactions());
 
     executions.set(0);
     assertThat(counted.findTop60ByOrderByWeekStartDateDesc())
@@ -111,20 +117,23 @@ class PostgresTask5BehaviorContractTest {
 
   @Test
   void uniqueConstraintFailuresExposeOnlyTheirSqlStateCategory() {
-    var vehicles = new PostgresVehicleRepository(database.dsl());
+    var vehicles = new PostgresVehicleRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var sensitiveVin = "T5SENSITIVEVIN001";
     vehicles.save(vehicle("task5-redaction-vehicle-a", sensitiveVin));
     assertSafeDuplicate(
         () -> vehicles.save(vehicle("task5-redaction-vehicle-b", sensitiveVin)), sensitiveVin);
 
-    var restaurants = new PostgresRestaurantRepository(database.dsl());
+    var restaurants = new PostgresRestaurantRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var sensitiveName = "task5 sensitive normalized name";
     restaurants.save(restaurant("task5-redaction-restaurant-a", sensitiveName));
     assertSafeDuplicate(
         () -> restaurants.save(restaurant("task5-redaction-restaurant-b", sensitiveName)),
         sensitiveName);
 
-    var activities = new PostgresAdminActivityRepository(database.dsl());
+    var activities = new PostgresAdminActivityRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var sensitiveActivityId = "task5-sensitive-activity-id";
     activities.insert(activity(sensitiveActivityId, "REDACTION_TEST"));
     assertSafeDuplicate(
@@ -134,7 +143,8 @@ class PostgresTask5BehaviorContractTest {
 
   @Test
   void vehiclePreservesHistoricalModifierWithoutLiveAccount() {
-    var vehicles = new PostgresVehicleRepository(database.dsl());
+    var vehicles = new PostgresVehicleRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var historical = Vehicle.builder().id("task8-historical-vehicle")
         .vin("TASK8HISTORYVIN02").make("Task8").model("History").year(2026)
         .lastModifiedBy("task8-retired-account").createdOn(NOW).lastUpdatedOn(NOW).build();
@@ -149,7 +159,7 @@ class PostgresTask5BehaviorContractTest {
 
   @Test
   void zipCoordinatePreservesMissingCreationTimestamp() {
-    var coordinates = new PostgresZipCoordinateRepository(database.dsl());
+    var coordinates = new PostgresZipCoordinateRepository(database.jdbc(), database.schemas());
     var legacy = ZipCoordinate.builder().zipCode("78702").latitude(30.2638)
         .longitude(-97.7169).source("TASK8").sourceYear(2026)
         .createdOn(null).lastUpdatedOn(NOW).build();
@@ -165,13 +175,16 @@ class PostgresTask5BehaviorContractTest {
   @Test
   void favoriteAndVoteClassifyOnlyUniqueViolationsAsDuplicates() {
     var ownerId = "task5-integrity-owner";
-    new PostgresAccountRepository(database.dsl()).save(Account.builder()
+    new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions()).save(Account.builder()
         .id(ownerId).username(ownerId).email(ownerId + "@example.test").passwordHash("hash")
         .role(Role.USER).status(AccountStatus.ACTIVE).createdOn(NOW).build());
     var restaurantId = "task5-integrity-restaurant";
-    new PostgresRestaurantRepository(database.dsl()).save(restaurant(restaurantId, restaurantId));
+    new PostgresRestaurantRepository(
+        database.managedJdbc(), database.schemas(), database.transactions())
+        .save(restaurant(restaurantId, restaurantId));
 
-    var favorites = new PostgresRestaurantFavoriteRepository(database.dsl());
+    var favorites = new PostgresRestaurantFavoriteRepository(database.jdbc(), database.schemas());
     favorites.save(RestaurantFavorite.builder().id("task5-integrity-favorite-a")
         .accountId(ownerId).restaurantId(restaurantId).createdOn(NOW).build());
     assertSafeDuplicate(() -> favorites.save(RestaurantFavorite.builder()
@@ -181,7 +194,7 @@ class PostgresTask5BehaviorContractTest {
         .id("task5-integrity-favorite-fk").accountId("task5-missing-account")
         .restaurantId(restaurantId).createdOn(NOW).build()), "task5-missing-account", "23503");
 
-    var votes = new PostgresRestaurantVoteRepository(database.dsl());
+    var votes = new PostgresRestaurantVoteRepository(database.jdbc(), database.schemas());
     votes.save(RestaurantVote.builder().id("task5-integrity-vote-a").accountId(ownerId)
         .restaurantId(restaurantId).vote(RestaurantVoteValue.UP)
         .createdOn(NOW).lastUpdatedOn(NOW).build());
@@ -197,9 +210,11 @@ class PostgresTask5BehaviorContractTest {
   @Test
   void realImportContinuesAfterConstraintCollisionToPersistLaterCandidate() throws Exception {
     var owner = restaurant("task5-import-owner", "task5 import collision");
-    var stored = new PostgresRestaurantRepository(database.dsl());
+    var stored = new PostgresRestaurantRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     stored.save(owner);
-    var importRepository = new PostgresRestaurantRepository(database.dsl()) {
+    var importRepository = new PostgresRestaurantRepository(
+        database.managedJdbc(), database.schemas(), database.transactions()) {
       @Override
       public java.util.Optional<Restaurant> findByNormalizedName(String normalizedName) {
         return normalizedName.equals(owner.getNormalizedName())
@@ -227,13 +242,32 @@ class PostgresTask5BehaviorContractTest {
         .get().extracting(Restaurant::getId).isEqualTo(owner.getId());
   }
 
-  private static DSLContext countedDatabase(AtomicInteger executions) {
-    return DSL.using(database.dsl().configuration().deriveAppending(new DefaultExecuteListener() {
+  private static JdbcClient countedJdbc(AtomicInteger executions) {
+    return JdbcClient.create(new AbstractDataSource() {
       @Override
-      public void executeStart(ExecuteContext context) {
-        executions.incrementAndGet();
+      public Connection getConnection() throws SQLException {
+        return countingConnection(database.dataSource().getConnection(), executions);
       }
-    }));
+
+      @Override
+      public Connection getConnection(String username, String password) throws SQLException {
+        return countingConnection(
+            database.dataSource().getConnection(username, password), executions);
+      }
+    });
+  }
+
+  private static Connection countingConnection(Connection delegate, AtomicInteger executions) {
+    return (Connection) Proxy.newProxyInstance(
+        Connection.class.getClassLoader(), new Class<?>[] {Connection.class},
+        (proxy, method, arguments) -> {
+          if (method.getName().startsWith("prepareStatement")) executions.incrementAndGet();
+          try {
+            return method.invoke(delegate, arguments);
+          } catch (InvocationTargetException failure) {
+            throw failure.getCause();
+          }
+        });
   }
 
   private static void assertQueryCount(

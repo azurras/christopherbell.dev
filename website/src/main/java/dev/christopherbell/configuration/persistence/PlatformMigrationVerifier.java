@@ -1,6 +1,5 @@
 package dev.christopherbell.configuration.persistence;
 
-import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.database;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.instant;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.rollback;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.text;
@@ -32,13 +31,16 @@ public final class PlatformMigrationVerifier {
   public static boolean verify(
       Connection connection, String schema, String sourceKind,
       List<Map<String, Object>> rows) throws SQLException {
-    var context = database(connection, schema);
     return switch (sourceKind) {
       case "browser_session" -> verifyOptionalLookup(
           rows, "browser_session_id",
-          new PostgresBrowserSessionAuthenticationStore(context)::findById);
+          new PostgresBrowserSessionAuthenticationStore(
+              org.springframework.jdbc.core.simple.JdbcClient.create(
+                  new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                      connection, true)),
+              PostgresqlSchemaNames.fromPhysicalSchema(schema))::findById);
       case "application_lease" -> ApplicationLeaseMigrationVerifier.verify(connection, schema);
-      case "scheduled_collector_run" -> verifyScheduled(connection, context, rows);
+      case "scheduled_collector_run" -> verifyScheduled(connection, schema, rows);
       default -> false;
     };
   }
@@ -160,10 +162,14 @@ public final class PlatformMigrationVerifier {
   }
 
   private static boolean verifyScheduled(
-      Connection connection, org.jooq.DSLContext context, List<Map<String, Object>> rows)
+      Connection connection, String schema, List<Map<String, Object>> rows)
       throws SQLException {
     return rollback(connection, () -> {
-      var store = new PostgresScheduledCollectorRunStore(context);
+      var store = new PostgresScheduledCollectorRunStore(
+          org.springframework.jdbc.core.simple.JdbcClient.create(
+              new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                  connection, true)),
+          PostgresqlSchemaNames.fromPhysicalSchema(schema));
       for (var row : rows) {
         var run = ScheduledCollectorRun.builder()
             .id(text(row.get("collector_run_id")))

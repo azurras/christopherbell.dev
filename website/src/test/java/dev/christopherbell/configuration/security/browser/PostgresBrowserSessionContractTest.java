@@ -20,10 +20,12 @@ class PostgresBrowserSessionContractTest implements BrowserSessionParityContract
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    sessions = new PostgresBrowserSessionRepository(database.dsl());
-    authentication = new PostgresBrowserSessionAuthenticationStore(database.dsl());
-    activity = new PostgresBrowserSessionActivityStore(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    sessions = database.bean(PostgresBrowserSessionRepository.class);
+    authentication = new PostgresBrowserSessionAuthenticationStore(
+        database.jdbc(), database.schemas());
+    activity = new PostgresBrowserSessionActivityStore(database.jdbc(), database.schemas());
   }
 
   @AfterAll
@@ -42,13 +44,12 @@ class PostgresBrowserSessionContractTest implements BrowserSessionParityContract
   @Override public void createAccount(Account account) { accounts.save(account); }
   @Override
   public void resetFixture() {
-    var browserSession = dev.christopherbell.persistence.jooq.identity.Tables.BROWSER_SESSION;
-    var account = dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT;
-    database.dsl().deleteFrom(browserSession)
-        .where(browserSession.BROWSER_SESSION_ID.eq(SESSION_ID))
-        .execute();
-    database.dsl().deleteFrom(account)
-        .where(account.ACCOUNT_ID.eq(ACCOUNT_ID))
-        .execute();
+    database.jdbc().sql("delete from %s where browser_session_id = :id".formatted(
+            database.schemas().qualifiedTable("identity", "browser_session")))
+        .param("id", SESSION_ID)
+        .update();
+    database.jdbc().sql("delete from %s where account_id = :id".formatted(
+            database.schemas().qualifiedTable("identity", "account")))
+        .param("id", ACCOUNT_ID).update();
   }
 }

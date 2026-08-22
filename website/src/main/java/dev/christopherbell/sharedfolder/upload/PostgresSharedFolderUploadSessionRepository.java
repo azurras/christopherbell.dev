@@ -1,13 +1,13 @@
 package dev.christopherbell.sharedfolder.upload;
 
-import static dev.christopherbell.persistence.jooq.shared_folder.Tables.UPLOAD_CHUNK;
-import static dev.christopherbell.persistence.jooq.shared_folder.Tables.UPLOAD_SESSION;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
 import dev.christopherbell.configuration.persistence.PostgresqlLeaseFields;
-import java.time.Duration;
 import dev.christopherbell.configuration.persistence.PostgresqlRelativePath;
-import dev.christopherbell.persistence.jooq.shared_folder.tables.records.UploadSessionRecord;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -16,326 +16,397 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import org.jooq.Condition;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.domain.SliceImpl;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** PostgreSQL repository for owner-scoped resumable-upload metadata and claims. */
 @PostgresPersistence
 public class PostgresSharedFolderUploadSessionRepository
     implements SharedFolderUploadSessionRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
+  private final String sessionTable;
+  private final String chunkTable;
 
-  public PostgresSharedFolderUploadSessionRepository(DSLContext database) {
+  public PostgresSharedFolderUploadSessionRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas, TransactionOperations transactions) {
     this.database = database;
+    this.transactions = transactions;
+    sessionTable = schemas.qualifiedTable("shared_folder", "upload_session");
+    chunkTable = schemas.qualifiedTable("shared_folder", "upload_chunk");
   }
 
-  @Override public SharedFolderUploadSession save(SharedFolderUploadSession session) {
-    return database.transactionResult(configuration -> {
-      DSLContext transaction = DSL.using(configuration);
-      String parent = PostgresqlRelativePath.requireRootAllowed(session.getParentPath(), "Upload parent path");
-      String staging = PostgresqlRelativePath.require(session.getStagingKey(), "Upload staging key");
+  @Override
+  public SharedFolderUploadSession save(SharedFolderUploadSession session) {
+    return transactions.execute(status -> {
+      String parent = PostgresqlRelativePath.requireRootAllowed(
+          session.getParentPath(), "Upload parent path");
+      String staging = PostgresqlRelativePath.require(
+          session.getStagingKey(), "Upload staging key");
       String quarantine = session.getFinalizingQuarantineKey() == null ? null
-          : PostgresqlRelativePath.require(session.getFinalizingQuarantineKey(), "Upload quarantine key");
+          : PostgresqlRelativePath.require(
+              session.getFinalizingQuarantineKey(), "Upload quarantine key");
+      var parameters = parameters(session, parent, staging, quarantine);
       if (session.getVersion() == null) {
-        transaction.insertInto(UPLOAD_SESSION).set(UPLOAD_SESSION.UPLOAD_SESSION_ID, session.getId())
-            .set(UPLOAD_SESSION.VERSION, 0L).set(UPLOAD_SESSION.OWNER_ID, session.getOwnerId())
-            .set(UPLOAD_SESSION.PARENT_PATH, parent).set(UPLOAD_SESSION.ENTRY_NAME, session.getName())
-            .set(UPLOAD_SESSION.EXPECTED_BYTES, session.getExpectedBytes())
-            .set(UPLOAD_SESSION.EXPECTED_SHA256, session.getExpectedSha256())
-            .set(UPLOAD_SESSION.TARGET_OBSERVED_TOKEN, session.getTargetObservedToken())
-            .set(UPLOAD_SESSION.NEXT_OFFSET, session.getNextOffset()).set(UPLOAD_SESSION.STAGING_KEY, staging)
-            .set(UPLOAD_SESSION.APPEND_LEASE_TOKEN, session.getAppendLeaseToken())
-            .set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT, offset(session.getAppendLeaseExpiresAt()))
-            .set(UPLOAD_SESSION.APPEND_OFFSET, session.getAppendOffset())
-            .set(UPLOAD_SESSION.APPEND_LENGTH, session.getAppendLength())
-            .set(UPLOAD_SESSION.APPEND_DIGEST, session.getAppendDigest())
-            .set(UPLOAD_SESSION.APPEND_CHUNK_KEY, session.getAppendChunkKey())
-            .set(UPLOAD_SESSION.FINALIZING_IDENTITY, session.getFinalizingIdentity())
-            .set(UPLOAD_SESSION.FINALIZING_REPLACE, session.getFinalizingReplace())
-            .set(UPLOAD_SESSION.FINALIZING_TARGET_IDENTITY, session.getFinalizingTargetIdentity())
-            .set(UPLOAD_SESSION.FINALIZING_QUARANTINE_KEY, quarantine)
-            .set(UPLOAD_SESSION.FINALIZATION_STATE,
-                session.getFinalizationState() == null ? null : session.getFinalizationState().name())
-            .set(UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN, session.getFinalizationLeaseToken())
-            .set(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT, offset(session.getFinalizationLeaseExpiresAt()))
-            .set(UPLOAD_SESSION.EXPIRES_AT, offset(session.getExpiresAt()))
-            .set(UPLOAD_SESSION.DELETE_AT, offset(session.getDeleteAt()))
-            .set(UPLOAD_SESSION.MAINTENANCE_RETRY_AT, offset(session.getMaintenanceRetryAt()))
-            .set(UPLOAD_SESSION.MAINTENANCE_ATTEMPTS, session.getMaintenanceAttempts())
-            .set(UPLOAD_SESSION.STATE, session.getState().name())
-            .set(UPLOAD_SESSION.CREATED_AT, offset(session.getCreatedAt()))
-            .set(UPLOAD_SESSION.UPDATED_AT, offset(session.getUpdatedAt())).execute();
+        database.sql("""
+                insert into %s (
+                  upload_session_id, version, owner_id, parent_path, entry_name,
+                  expected_bytes, expected_sha256, target_observed_token, next_offset,
+                  staging_key, append_lease_token, append_lease_expires_at, append_offset,
+                  append_length, append_digest, append_chunk_key, finalizing_identity,
+                  finalizing_replace, finalizing_target_identity, finalizing_quarantine_key,
+                  finalization_state, finalization_lease_token,
+                  finalization_lease_expires_at, expires_at, delete_at,
+                  maintenance_retry_at, maintenance_attempts, state, created_at, updated_at)
+                values (
+                  :id, 0, :ownerId, :parentPath, :entryName, :expectedBytes,
+                  :expectedSha256, :targetObservedToken, :nextOffset, :stagingKey,
+                  :appendLeaseToken, :appendLeaseExpiresAt, :appendOffset, :appendLength,
+                  :appendDigest, :appendChunkKey, :finalizingIdentity, :finalizingReplace,
+                  :finalizingTargetIdentity, :finalizingQuarantineKey, :finalizationState,
+                  :finalizationLeaseToken, :finalizationLeaseExpiresAt, :expiresAt,
+                  :deleteAt, :maintenanceRetryAt, :maintenanceAttempts, :state,
+                  :createdAt, :updatedAt)
+                """.formatted(sessionTable)).paramSource(parameters).update();
       } else {
-        long nextVersion = Math.incrementExact(session.getVersion());
-        int changed = transaction.update(UPLOAD_SESSION).set(UPLOAD_SESSION.VERSION, nextVersion)
-            .set(UPLOAD_SESSION.OWNER_ID, session.getOwnerId()).set(UPLOAD_SESSION.PARENT_PATH, parent)
-            .set(UPLOAD_SESSION.ENTRY_NAME, session.getName()).set(UPLOAD_SESSION.EXPECTED_BYTES, session.getExpectedBytes())
-            .set(UPLOAD_SESSION.EXPECTED_SHA256, session.getExpectedSha256())
-            .set(UPLOAD_SESSION.TARGET_OBSERVED_TOKEN, session.getTargetObservedToken())
-            .set(UPLOAD_SESSION.NEXT_OFFSET, session.getNextOffset()).set(UPLOAD_SESSION.STAGING_KEY, staging)
-            .set(UPLOAD_SESSION.APPEND_LEASE_TOKEN, session.getAppendLeaseToken())
-            .set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT, offset(session.getAppendLeaseExpiresAt()))
-            .set(UPLOAD_SESSION.APPEND_OFFSET, session.getAppendOffset()).set(UPLOAD_SESSION.APPEND_LENGTH, session.getAppendLength())
-            .set(UPLOAD_SESSION.APPEND_DIGEST, session.getAppendDigest()).set(UPLOAD_SESSION.APPEND_CHUNK_KEY, session.getAppendChunkKey())
-            .set(UPLOAD_SESSION.FINALIZING_IDENTITY, session.getFinalizingIdentity())
-            .set(UPLOAD_SESSION.FINALIZING_REPLACE, session.getFinalizingReplace())
-            .set(UPLOAD_SESSION.FINALIZING_TARGET_IDENTITY, session.getFinalizingTargetIdentity())
-            .set(UPLOAD_SESSION.FINALIZING_QUARANTINE_KEY, quarantine)
-            .set(UPLOAD_SESSION.FINALIZATION_STATE,
-                session.getFinalizationState() == null ? null : session.getFinalizationState().name())
-            .set(UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN, session.getFinalizationLeaseToken())
-            .set(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT, offset(session.getFinalizationLeaseExpiresAt()))
-            .set(UPLOAD_SESSION.EXPIRES_AT, offset(session.getExpiresAt())).set(UPLOAD_SESSION.DELETE_AT, offset(session.getDeleteAt()))
-            .set(UPLOAD_SESSION.MAINTENANCE_RETRY_AT, offset(session.getMaintenanceRetryAt()))
-            .set(UPLOAD_SESSION.MAINTENANCE_ATTEMPTS, session.getMaintenanceAttempts())
-            .set(UPLOAD_SESSION.STATE, session.getState().name()).set(UPLOAD_SESSION.CREATED_AT, offset(session.getCreatedAt()))
-            .set(UPLOAD_SESSION.UPDATED_AT, offset(session.getUpdatedAt()))
-            .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(session.getId())
-                .and(UPLOAD_SESSION.VERSION.eq(session.getVersion()))).execute();
-        if (changed != 1) throw new OptimisticLockingFailureException("Upload session changed during save.");
+        int changed = database.sql("""
+                update %s set version = :nextVersion, owner_id = :ownerId,
+                  parent_path = :parentPath, entry_name = :entryName,
+                  expected_bytes = :expectedBytes, expected_sha256 = :expectedSha256,
+                  target_observed_token = :targetObservedToken, next_offset = :nextOffset,
+                  staging_key = :stagingKey, append_lease_token = :appendLeaseToken,
+                  append_lease_expires_at = :appendLeaseExpiresAt,
+                  append_offset = :appendOffset, append_length = :appendLength,
+                  append_digest = :appendDigest, append_chunk_key = :appendChunkKey,
+                  finalizing_identity = :finalizingIdentity,
+                  finalizing_replace = :finalizingReplace,
+                  finalizing_target_identity = :finalizingTargetIdentity,
+                  finalizing_quarantine_key = :finalizingQuarantineKey,
+                  finalization_state = :finalizationState,
+                  finalization_lease_token = :finalizationLeaseToken,
+                  finalization_lease_expires_at = :finalizationLeaseExpiresAt,
+                  expires_at = :expiresAt, delete_at = :deleteAt,
+                  maintenance_retry_at = :maintenanceRetryAt,
+                  maintenance_attempts = :maintenanceAttempts, state = :state,
+                  created_at = :createdAt, updated_at = :updatedAt
+                where upload_session_id = :id and version = :expectedVersion
+                """.formatted(sessionTable)).paramSource(parameters
+                    .addValue("nextVersion", Math.incrementExact(session.getVersion()))
+                    .addValue("expectedVersion", session.getVersion())).update();
+        if (changed != 1) {
+          throw new OptimisticLockingFailureException("Upload session changed during save.");
+        }
       }
-      transaction.deleteFrom(UPLOAD_CHUNK)
-          .where(UPLOAD_CHUNK.UPLOAD_SESSION_ID.eq(session.getId())).execute();
+      database.sql("delete from %s where upload_session_id = :id".formatted(chunkTable))
+          .param("id", session.getId()).update();
       var keys = new HashSet<String>();
       keys.addAll(session.getChunkDigests().keySet());
       keys.addAll(session.getChunkLengths().keySet());
       for (String key : keys) {
-        transaction.insertInto(UPLOAD_CHUNK).set(UPLOAD_CHUNK.UPLOAD_SESSION_ID, session.getId())
-            .set(UPLOAD_CHUNK.CHUNK_KEY, key).set(UPLOAD_CHUNK.DIGEST, session.getChunkDigests().get(key))
-            .set(UPLOAD_CHUNK.CHUNK_LENGTH, session.getChunkLengths().get(key)).execute();
+        database.sql("""
+                insert into %s (upload_session_id, chunk_key, digest, chunk_length)
+                values (:id, :key, :digest, :length)
+                """.formatted(chunkTable))
+            .param("id", session.getId()).param("key", key)
+            .param("digest", session.getChunkDigests().get(key), Types.VARCHAR)
+            .param("length", session.getChunkLengths().get(key), Types.BIGINT).update();
       }
-      return find(transaction, session.getId()).orElseThrow();
+      return findById(session.getId()).orElseThrow();
     });
   }
 
-  @Override public Optional<SharedFolderUploadSession> findById(String id) { return find(database, id); }
-  @Override public void deleteById(String id) {
-    database.deleteFrom(UPLOAD_SESSION).where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)).execute();
+  @Override
+  public Optional<SharedFolderUploadSession> findById(String id) {
+    return database.sql("select * from %s where upload_session_id = :id".formatted(sessionTable))
+        .param("id", id).query(this::map).optional();
   }
 
-  @Override public long countByOwnerIdAndStateIn(String ownerId,
-      Collection<SharedFolderUploadState> states) {
-    return database.fetchCount(UPLOAD_SESSION, UPLOAD_SESSION.OWNER_ID.eq(ownerId)
-        .and(UPLOAD_SESSION.STATE.in(states.stream().map(Enum::name).toList())));
+  @Override
+  public void deleteById(String id) {
+    database.sql("delete from %s where upload_session_id = :id".formatted(sessionTable))
+        .param("id", id).update();
   }
 
-  @Override public Slice<SharedFolderUploadSession> findByOwnerIdOrderByIdAsc(
+  @Override
+  public long countByOwnerIdAndStateIn(
+      String ownerId, Collection<SharedFolderUploadState> states) {
+    return database.sql("""
+            select count(*) from %s where owner_id = :ownerId and state in (:states)
+            """.formatted(sessionTable)).param("ownerId", ownerId)
+        .param("states", states.stream().map(Enum::name).toList())
+        .query(Long.class).single();
+  }
+
+  @Override
+  public Slice<SharedFolderUploadSession> findByOwnerIdOrderByIdAsc(
       String ownerId, Pageable pageable) {
-    return slice(UPLOAD_SESSION.OWNER_ID.eq(ownerId), pageable, UPLOAD_SESSION.UPLOAD_SESSION_ID.asc());
+    return slice(
+        "owner_id = :ownerId", new MapSqlParameterSource("ownerId", ownerId), pageable,
+        "upload_session_id asc");
   }
 
-  @Override public Slice<SharedFolderUploadSession> findDueForMaintenance(
+  @Override
+  public Slice<SharedFolderUploadSession> findDueForMaintenance(
       Instant dueAtOrBefore, Pageable pageable) {
-    var due = dueAtOrBefore.atOffset(ZoneOffset.UTC);
-    Condition active = UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.ACTIVE.name())
-        .and(UPLOAD_SESSION.EXPIRES_AT.le(due));
-    Condition expired = UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.EXPIRED.name())
-        .and(UPLOAD_SESSION.MAINTENANCE_RETRY_AT.isNull()
-            .or(UPLOAD_SESSION.MAINTENANCE_RETRY_AT.le(due)));
-    return slice(active.or(expired), pageable, UPLOAD_SESSION.MAINTENANCE_RETRY_AT.asc().nullsFirst(),
-        UPLOAD_SESSION.EXPIRES_AT.asc(), UPLOAD_SESSION.UPLOAD_SESSION_ID.asc());
+    return slice("""
+        ((state = :active and expires_at <= :dueAt)
+          or (state = :expired
+            and (maintenance_retry_at is null or maintenance_retry_at <= :dueAt)))
+        """, new MapSqlParameterSource()
+            .addValue("active", SharedFolderUploadState.ACTIVE.name())
+            .addValue("expired", SharedFolderUploadState.EXPIRED.name())
+            .addValue("dueAt", offset(dueAtOrBefore), Types.TIMESTAMP_WITH_TIMEZONE),
+        pageable,
+        "maintenance_retry_at asc nulls first, expires_at asc, upload_session_id asc");
   }
 
-  @Override public long expireActive(String id, Instant expiresAtOrBefore, Instant updatedAt) {
-    return database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.STATE, SharedFolderUploadState.EXPIRED.name())
-        .set(UPLOAD_SESSION.MAINTENANCE_RETRY_AT, offset(updatedAt)).set(UPLOAD_SESSION.MAINTENANCE_ATTEMPTS, 0)
-        .set(UPLOAD_SESSION.UPDATED_AT, offset(updatedAt)).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
-            .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.ACTIVE.name()))
-            .and(UPLOAD_SESSION.EXPIRES_AT.le(expiresAtOrBefore.atOffset(ZoneOffset.UTC)))).execute();
+  @Override
+  public long expireActive(String id, Instant expiresAtOrBefore, Instant updatedAt) {
+    return database.sql("""
+            update %s set state = :expired, maintenance_retry_at = :updatedAt,
+              maintenance_attempts = 0, updated_at = :updatedAt, version = version + 1
+            where upload_session_id = :id and state = :active and expires_at <= :expiresAt
+            """.formatted(sessionTable)).param("expired", SharedFolderUploadState.EXPIRED.name())
+        .param("updatedAt", offset(updatedAt)).param("id", id)
+        .param("active", SharedFolderUploadState.ACTIVE.name())
+        .param("expiresAt", offset(expiresAtOrBefore)).update();
   }
 
-  @Override public long deferExpiredMaintenance(String id, int expectedAttempts, Instant retryAt,
-      int newAttempts, Instant updatedAt) {
-    return database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.MAINTENANCE_RETRY_AT, offset(retryAt))
-        .set(UPLOAD_SESSION.MAINTENANCE_ATTEMPTS, newAttempts).set(UPLOAD_SESSION.UPDATED_AT, offset(updatedAt))
-        .set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
-            .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.EXPIRED.name()))
-            .and(UPLOAD_SESSION.MAINTENANCE_ATTEMPTS.eq(expectedAttempts))).execute();
+  @Override
+  public long deferExpiredMaintenance(
+      String id, int expectedAttempts, Instant retryAt, int newAttempts, Instant updatedAt) {
+    return database.sql("""
+            update %s set maintenance_retry_at = :retryAt,
+              maintenance_attempts = :newAttempts, updated_at = :updatedAt,
+              version = version + 1
+            where upload_session_id = :id and state = :expired
+              and maintenance_attempts = :expectedAttempts
+            """.formatted(sessionTable)).param("retryAt", offset(retryAt))
+        .param("newAttempts", newAttempts).param("updatedAt", offset(updatedAt))
+        .param("id", id).param("expired", SharedFolderUploadState.EXPIRED.name())
+        .param("expectedAttempts", expectedAttempts).update();
   }
 
-  @Override public Optional<Instant> acquireAppendLease(
+  @Override
+  public Optional<Instant> acquireAppendLease(
       String id, String token, long appendOffset, Duration duration) {
-    var now = DSL.currentOffsetDateTime();
-    var row = database.update(UPLOAD_SESSION)
-        .set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT, PostgresqlLeaseFields.expiresAfter(duration))
-        .set(UPLOAD_SESSION.APPEND_LEASE_TOKEN, token)
-        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
-            .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.APPENDING.name()))
-            .and(UPLOAD_SESSION.APPEND_LEASE_TOKEN.isNull())
-            .and(UPLOAD_SESSION.APPEND_OFFSET.eq(appendOffset))
-            .and(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT.isNull()))
-        .returning(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT).fetchOne();
-    return row == null ? Optional.empty() : Optional.of(row.getAppendLeaseExpiresAt().toInstant());
+    return lease("append", "append_lease_token is null and append_lease_expires_at is null",
+        id, null, token, appendOffset, null, duration);
   }
 
-  @Override public Optional<Instant> acquireFinalizationLease(String id, String token,
-      SharedFolderUploadFinalizationState state, Duration duration) {
-    var now = DSL.currentOffsetDateTime();
-    var row = database.update(UPLOAD_SESSION)
-        .set(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT,
-            PostgresqlLeaseFields.expiresAfter(duration))
-        .set(UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN, token)
-        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
-            .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.FINALIZING.name()))
-            .and(UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN.isNull())
-            .and(UPLOAD_SESSION.FINALIZATION_STATE.eq(state.name()))
-            .and(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT.isNull()))
-        .returning(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT).fetchOne();
-    return row == null ? Optional.empty()
-        : Optional.of(row.getFinalizationLeaseExpiresAt().toInstant());
+  @Override
+  public Optional<Instant> acquireFinalizationLease(
+      String id, String token, SharedFolderUploadFinalizationState state, Duration duration) {
+    return lease("finalization",
+        "finalization_lease_token is null and finalization_lease_expires_at is null",
+        id, null, token, null, state, duration);
   }
 
-  @Override public boolean relinquishAppendLease(String id, String token, long appendOffset) {
-    var now = DSL.currentOffsetDateTime();
-    return database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT, now)
-        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
-            .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.APPENDING.name()))
-            .and(UPLOAD_SESSION.APPEND_LEASE_TOKEN.eq(token))
-            .and(UPLOAD_SESSION.APPEND_OFFSET.eq(appendOffset))
-            .and(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT.gt(now))).execute() == 1;
+  @Override
+  public boolean relinquishAppendLease(String id, String token, long appendOffset) {
+    return relinquish("append", id, token, appendOffset, null);
   }
 
-  @Override public boolean relinquishFinalizationLease(String id, String token,
-      SharedFolderUploadFinalizationState state) {
-    var now = DSL.currentOffsetDateTime();
-    return database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT, now)
-        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
-            .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.FINALIZING.name()))
-            .and(UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN.eq(token))
-            .and(UPLOAD_SESSION.FINALIZATION_STATE.eq(state.name()))
-            .and(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT.gt(now))).execute() == 1;
+  @Override
+  public boolean relinquishFinalizationLease(
+      String id, String token, SharedFolderUploadFinalizationState state) {
+    return relinquish("finalization", id, token, null, state);
   }
 
-  @Override public Optional<Instant> renewFinalizationLease(String id, String token,
-      SharedFolderUploadFinalizationState state, Duration duration) {
-    var now = DSL.currentOffsetDateTime();
-    var row = database.update(UPLOAD_SESSION)
-        .set(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT,
-            PostgresqlLeaseFields.expiresAfter(duration))
-        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
-            .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.FINALIZING.name()))
-            .and(UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN.eq(token))
-            .and(UPLOAD_SESSION.FINALIZATION_STATE.eq(state.name()))
-            .and(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT.gt(now)))
-        .returning(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT).fetchOne();
-    return row == null ? Optional.empty()
-        : Optional.of(row.getFinalizationLeaseExpiresAt().toInstant());
+  @Override
+  public Optional<Instant> renewFinalizationLease(
+      String id, String token, SharedFolderUploadFinalizationState state, Duration duration) {
+    return lease("finalization", "finalization_lease_token = :expectedToken"
+        + " and finalization_lease_expires_at > current_timestamp",
+        id, token, token, null, state, duration);
   }
 
-  @Override public Optional<Instant> claimExpiredFinalizationLease(String id, String oldToken,
-      SharedFolderUploadFinalizationState state, String newToken, Duration duration) {
-    var now = DSL.currentOffsetDateTime();
-    var row = database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN, newToken)
-        .set(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT,
-            PostgresqlLeaseFields.expiresAfter(duration))
-        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
-            .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.FINALIZING.name()))
-            .and(oldToken == null
-                ? UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN.isNull()
-                : UPLOAD_SESSION.FINALIZATION_LEASE_TOKEN.eq(oldToken))
-            .and(UPLOAD_SESSION.FINALIZATION_STATE.eq(state.name()))
-            .and(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT.isNull()
-                .or(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT.le(now))))
-        .returning(UPLOAD_SESSION.FINALIZATION_LEASE_EXPIRES_AT).fetchOne();
-    return row == null ? Optional.empty()
-        : Optional.of(row.getFinalizationLeaseExpiresAt().toInstant());
+  @Override
+  public Optional<Instant> claimExpiredFinalizationLease(
+      String id, String oldToken, SharedFolderUploadFinalizationState state,
+      String newToken, Duration duration) {
+    String token = oldToken == null
+        ? "finalization_lease_token is null" : "finalization_lease_token = :expectedToken";
+    return lease("finalization", token
+        + " and (finalization_lease_expires_at is null"
+        + " or finalization_lease_expires_at <= current_timestamp)",
+        id, oldToken, newToken, null, state, duration);
   }
 
-  @Override public Optional<Instant> renewAppendLease(String id, String token, long appendOffset,
+  @Override
+  public Optional<Instant> renewAppendLease(
+      String id, String token, long appendOffset, Duration duration) {
+    return lease("append", "append_lease_token = :expectedToken"
+        + " and append_lease_expires_at > current_timestamp",
+        id, token, token, appendOffset, null, duration);
+  }
+
+  @Override
+  public Optional<Instant> claimExpiredAppendLease(
+      String id, String oldToken, long appendOffset, String newToken, Duration duration) {
+    String token = oldToken == null
+        ? "append_lease_token is null" : "append_lease_token = :expectedToken";
+    return lease("append", token
+        + " and (append_lease_expires_at is null"
+        + " or append_lease_expires_at <= current_timestamp)",
+        id, oldToken, newToken, appendOffset, null, duration);
+  }
+
+  private Optional<Instant> lease(
+      String prefix, String predicate, String id, String expectedToken, String token,
+      Long appendOffset, SharedFolderUploadFinalizationState finalizationState,
       Duration duration) {
-    var now = DSL.currentOffsetDateTime();
-    var row = database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT,
-            PostgresqlLeaseFields.expiresAfter(duration))
-        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
-            .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.APPENDING.name()))
-            .and(UPLOAD_SESSION.APPEND_LEASE_TOKEN.eq(token)).and(UPLOAD_SESSION.APPEND_OFFSET.eq(appendOffset))
-            .and(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT.gt(now)))
-        .returning(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT).fetchOne();
-    return row == null ? Optional.empty()
-        : Optional.of(row.getAppendLeaseExpiresAt().toInstant());
+    String state = prefix.equals("append")
+        ? SharedFolderUploadState.APPENDING.name() : SharedFolderUploadState.FINALIZING.name();
+    String statePredicate = prefix.equals("append")
+        ? "and append_offset = :appendOffset" : "and finalization_state = :finalizationState";
+    var statement = database.sql("""
+            update %s set
+              %s_lease_expires_at = current_timestamp + (:micros * interval '1 microsecond'),
+              %s_lease_token = :token, updated_at = current_timestamp, version = version + 1
+            where upload_session_id = :id and state = :state %s and %s
+            returning %s_lease_expires_at
+            """.formatted(sessionTable, prefix, prefix, statePredicate, predicate, prefix))
+        .param("micros", PostgresqlLeaseFields.microseconds(duration))
+        .param("token", token).param("id", id).param("state", state);
+    if (expectedToken != null) statement.param("expectedToken", expectedToken);
+    if (appendOffset != null) statement.param("appendOffset", appendOffset);
+    if (finalizationState != null) statement.param("finalizationState", finalizationState.name());
+    return statement.query(OffsetDateTime.class).optional().map(OffsetDateTime::toInstant);
   }
 
-  @Override public Optional<Instant> claimExpiredAppendLease(String id, String oldToken,
-      long appendOffset, String newToken, Duration duration) {
-    var now = DSL.currentOffsetDateTime();
-    var row = database.update(UPLOAD_SESSION).set(UPLOAD_SESSION.APPEND_LEASE_TOKEN, newToken)
-        .set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT,
-            PostgresqlLeaseFields.expiresAfter(duration))
-        .set(UPLOAD_SESSION.UPDATED_AT, now).set(UPLOAD_SESSION.VERSION, UPLOAD_SESSION.VERSION.plus(1L))
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id)
-            .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.APPENDING.name()))
-            .and(oldToken == null
-                ? UPLOAD_SESSION.APPEND_LEASE_TOKEN.isNull()
-                : UPLOAD_SESSION.APPEND_LEASE_TOKEN.eq(oldToken))
-            .and(UPLOAD_SESSION.APPEND_OFFSET.eq(appendOffset))
-            .and(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT.isNull()
-                .or(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT.le(now))))
-        .returning(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT).fetchOne();
-    return row == null ? Optional.empty()
-        : Optional.of(row.getAppendLeaseExpiresAt().toInstant());
+  private boolean relinquish(
+      String prefix, String id, String token, Long appendOffset,
+      SharedFolderUploadFinalizationState finalizationState) {
+    String state = prefix.equals("append")
+        ? SharedFolderUploadState.APPENDING.name() : SharedFolderUploadState.FINALIZING.name();
+    String statePredicate = prefix.equals("append")
+        ? "and append_offset = :appendOffset" : "and finalization_state = :finalizationState";
+    var statement = database.sql("""
+            update %s set %s_lease_expires_at = current_timestamp,
+              updated_at = current_timestamp, version = version + 1
+            where upload_session_id = :id and state = :state %s
+              and %s_lease_token = :token and %s_lease_expires_at > current_timestamp
+            """.formatted(sessionTable, prefix, statePredicate, prefix, prefix))
+        .param("id", id).param("state", state).param("token", token);
+    if (appendOffset != null) statement.param("appendOffset", appendOffset);
+    if (finalizationState != null) statement.param("finalizationState", finalizationState.name());
+    return statement.update() == 1;
   }
 
   private Slice<SharedFolderUploadSession> slice(
-      Condition condition, Pageable pageable, org.jooq.SortField<?>... order) {
+      String predicate, MapSqlParameterSource parameters, Pageable pageable, String order) {
     int size = pageable.isPaged() ? pageable.getPageSize() : Integer.MAX_VALUE - 1;
     int offset = pageable.isPaged() ? Math.toIntExact(pageable.getOffset()) : 0;
-    List<SharedFolderUploadSession> rows = database.selectFrom(UPLOAD_SESSION).where(condition)
-        .orderBy(order).limit(pageable.isPaged() ? size + 1 : size).offset(offset)
-        .fetch(row -> map(database, row));
+    List<SharedFolderUploadSession> rows = database.sql("""
+            select * from %s where %s order by %s limit :limit offset :offset
+            """.formatted(sessionTable, predicate, order))
+        .paramSource(parameters.addValue("limit", pageable.isPaged() ? size + 1 : size)
+            .addValue("offset", offset)).query(this::map).list();
     boolean next = pageable.isPaged() && rows.size() > size;
-    return new SliceImpl<>(next ? List.copyOf(rows.subList(0, size)) : List.copyOf(rows), pageable, next);
+    return new SliceImpl<>(
+        next ? List.copyOf(rows.subList(0, size)) : List.copyOf(rows), pageable, next);
   }
 
-  private static Optional<SharedFolderUploadSession> find(DSLContext context, String id) {
-    return context.selectFrom(UPLOAD_SESSION).where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(id))
-        .fetchOptional(row -> map(context, row));
-  }
-
-  private static SharedFolderUploadSession map(DSLContext context, UploadSessionRecord row) {
+  private SharedFolderUploadSession map(ResultSet row, int rowNumber) throws SQLException {
     var session = new SharedFolderUploadSession();
-    session.setId(row.getUploadSessionId()); session.setVersion(row.getVersion());
-    session.setOwnerId(row.getOwnerId()); session.setParentPath(row.getParentPath()); session.setName(row.getEntryName());
-    session.setExpectedBytes(row.getExpectedBytes()); session.setExpectedSha256(row.getExpectedSha256());
-    session.setTargetObservedToken(row.getTargetObservedToken()); session.setNextOffset(row.getNextOffset());
-    var digests = new HashMap<String, String>(); var lengths = new HashMap<String, Long>();
-    context.selectFrom(UPLOAD_CHUNK).where(UPLOAD_CHUNK.UPLOAD_SESSION_ID.eq(row.getUploadSessionId()))
-        .forEach(chunk -> { if (chunk.getDigest() != null) digests.put(chunk.getChunkKey(), chunk.getDigest());
-          if (chunk.getChunkLength() != null) lengths.put(chunk.getChunkKey(), chunk.getChunkLength()); });
-    session.setChunkDigests(digests); session.setChunkLengths(lengths); session.setStagingKey(row.getStagingKey());
-    session.setAppendLeaseToken(row.getAppendLeaseToken()); session.setAppendLeaseExpiresAt(instant(row.getAppendLeaseExpiresAt()));
-    session.setAppendOffset(row.getAppendOffset()); session.setAppendLength(row.getAppendLength());
-    session.setAppendDigest(row.getAppendDigest()); session.setAppendChunkKey(row.getAppendChunkKey());
-    session.setFinalizingIdentity(row.getFinalizingIdentity()); session.setFinalizingReplace(row.getFinalizingReplace());
-    session.setFinalizingTargetIdentity(row.getFinalizingTargetIdentity());
-    session.setFinalizingQuarantineKey(row.getFinalizingQuarantineKey());
-    session.setFinalizationState(row.getFinalizationState() == null ? null
-        : SharedFolderUploadFinalizationState.valueOf(row.getFinalizationState()));
-    session.setFinalizationLeaseToken(row.getFinalizationLeaseToken());
-    session.setFinalizationLeaseExpiresAt(instant(row.getFinalizationLeaseExpiresAt()));
-    session.setExpiresAt(instant(row.getExpiresAt())); session.setDeleteAt(instant(row.getDeleteAt()));
-    session.setMaintenanceRetryAt(instant(row.getMaintenanceRetryAt()));
-    session.setMaintenanceAttempts(row.getMaintenanceAttempts());
-    session.setState(SharedFolderUploadState.valueOf(row.getState()));
-    session.setCreatedAt(instant(row.getCreatedAt())); session.setUpdatedAt(instant(row.getUpdatedAt()));
+    session.setId(row.getString("upload_session_id"));
+    session.setVersion(row.getLong("version"));
+    session.setOwnerId(row.getString("owner_id"));
+    session.setParentPath(row.getString("parent_path"));
+    session.setName(row.getString("entry_name"));
+    session.setExpectedBytes(row.getLong("expected_bytes"));
+    session.setExpectedSha256(row.getString("expected_sha256"));
+    session.setTargetObservedToken(row.getString("target_observed_token"));
+    session.setNextOffset(row.getLong("next_offset"));
+    var digests = new HashMap<String, String>();
+    var lengths = new HashMap<String, Long>();
+    database.sql("""
+            select chunk_key, digest, chunk_length from %s
+            where upload_session_id = :id order by chunk_key
+            """.formatted(chunkTable)).param("id", session.getId())
+        .query((chunk, ignored) -> {
+              String key = chunk.getString("chunk_key");
+              String digest = chunk.getString("digest");
+              Long length = (Long) chunk.getObject("chunk_length");
+              if (digest != null) digests.put(key, digest);
+              if (length != null) lengths.put(key, length);
+              return key;
+            }).list();
+    session.setChunkDigests(digests);
+    session.setChunkLengths(lengths);
+    session.setStagingKey(row.getString("staging_key"));
+    session.setAppendLeaseToken(row.getString("append_lease_token"));
+    session.setAppendLeaseExpiresAt(instant(row, "append_lease_expires_at"));
+    session.setAppendOffset((Long) row.getObject("append_offset"));
+    session.setAppendLength((Long) row.getObject("append_length"));
+    session.setAppendDigest(row.getString("append_digest"));
+    session.setAppendChunkKey(row.getString("append_chunk_key"));
+    session.setFinalizingIdentity(row.getString("finalizing_identity"));
+    session.setFinalizingReplace((Boolean) row.getObject("finalizing_replace"));
+    session.setFinalizingTargetIdentity(row.getString("finalizing_target_identity"));
+    session.setFinalizingQuarantineKey(row.getString("finalizing_quarantine_key"));
+    String finalizationState = row.getString("finalization_state");
+    session.setFinalizationState(finalizationState == null ? null
+        : SharedFolderUploadFinalizationState.valueOf(finalizationState));
+    session.setFinalizationLeaseToken(row.getString("finalization_lease_token"));
+    session.setFinalizationLeaseExpiresAt(instant(row, "finalization_lease_expires_at"));
+    session.setExpiresAt(instant(row, "expires_at"));
+    session.setDeleteAt(instant(row, "delete_at"));
+    session.setMaintenanceRetryAt(instant(row, "maintenance_retry_at"));
+    session.setMaintenanceAttempts(row.getInt("maintenance_attempts"));
+    session.setState(SharedFolderUploadState.valueOf(row.getString("state")));
+    session.setCreatedAt(instant(row, "created_at"));
+    session.setUpdatedAt(instant(row, "updated_at"));
     return session;
+  }
+
+  private static MapSqlParameterSource parameters(
+      SharedFolderUploadSession session, String parent, String staging, String quarantine) {
+    return new MapSqlParameterSource()
+        .addValue("id", session.getId()).addValue("ownerId", session.getOwnerId())
+        .addValue("parentPath", parent).addValue("entryName", session.getName())
+        .addValue("expectedBytes", session.getExpectedBytes())
+        .addValue("expectedSha256", session.getExpectedSha256())
+        .addValue("targetObservedToken", session.getTargetObservedToken(), Types.VARCHAR)
+        .addValue("nextOffset", session.getNextOffset()).addValue("stagingKey", staging)
+        .addValue("appendLeaseToken", session.getAppendLeaseToken(), Types.VARCHAR)
+        .addValue("appendLeaseExpiresAt", offset(session.getAppendLeaseExpiresAt()),
+            Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("appendOffset", session.getAppendOffset(), Types.BIGINT)
+        .addValue("appendLength", session.getAppendLength(), Types.BIGINT)
+        .addValue("appendDigest", session.getAppendDigest(), Types.VARCHAR)
+        .addValue("appendChunkKey", session.getAppendChunkKey(), Types.VARCHAR)
+        .addValue("finalizingIdentity", session.getFinalizingIdentity(), Types.VARCHAR)
+        .addValue("finalizingReplace", session.getFinalizingReplace(), Types.BOOLEAN)
+        .addValue("finalizingTargetIdentity", session.getFinalizingTargetIdentity(), Types.VARCHAR)
+        .addValue("finalizingQuarantineKey", quarantine, Types.VARCHAR)
+        .addValue("finalizationState", session.getFinalizationState() == null ? null
+            : session.getFinalizationState().name(), Types.VARCHAR)
+        .addValue("finalizationLeaseToken", session.getFinalizationLeaseToken(), Types.VARCHAR)
+        .addValue("finalizationLeaseExpiresAt", offset(session.getFinalizationLeaseExpiresAt()),
+            Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("expiresAt", offset(session.getExpiresAt()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("deleteAt", offset(session.getDeleteAt()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("maintenanceRetryAt", offset(session.getMaintenanceRetryAt()),
+            Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("maintenanceAttempts", session.getMaintenanceAttempts())
+        .addValue("state", session.getState().name())
+        .addValue("createdAt", offset(session.getCreatedAt()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("updatedAt", offset(session.getUpdatedAt()), Types.TIMESTAMP_WITH_TIMEZONE);
   }
 
   private static OffsetDateTime offset(Instant value) {
     return value == null ? null : value.atOffset(ZoneOffset.UTC);
   }
-  private static Instant instant(OffsetDateTime value) { return value == null ? null : value.toInstant(); }
+
+  private static Instant instant(ResultSet row, String column) throws SQLException {
+    var value = row.getObject(column, OffsetDateTime.class);
+    return value == null ? null : value.toInstant();
+  }
 }
