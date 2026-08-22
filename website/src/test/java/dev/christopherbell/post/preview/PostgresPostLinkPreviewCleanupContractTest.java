@@ -15,7 +15,7 @@ class PostgresPostLinkPreviewCleanupContractTest implements PostLinkPreviewClean
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    repository = new PostgresPostLinkPreviewCacheRepository(database.dsl());
+    repository = new PostgresPostLinkPreviewCacheRepository(database.jdbc(), database.schemas());
   }
 
   @AfterAll

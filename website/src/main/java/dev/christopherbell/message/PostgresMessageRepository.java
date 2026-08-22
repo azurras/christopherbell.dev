@@ -1,131 +1,164 @@
 package dev.christopherbell.message;
 
-import static dev.christopherbell.persistence.jooq.communication.Tables.MESSAGE;
-import static dev.christopherbell.persistence.jooq.communication.Tables.MESSAGE_PARTICIPANT;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.message.model.Message;
-import dev.christopherbell.persistence.jooq.communication.tables.records.MessageRecord;
+import java.sql.SQLException;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
+import java.util.Collection;
 import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.LinkedHashSet;
 import java.util.List;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
+import java.util.Map;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** PostgreSQL implementation of the direct-message persistence port. */
 @PostgresPersistence
 public class PostgresMessageRepository implements MessageRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
+  private final String messageTable;
+  private final String participantTable;
 
-  public PostgresMessageRepository(DSLContext database) {
+  public PostgresMessageRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas, TransactionOperations transactions) {
     this.database = database;
+    this.transactions = transactions;
+    messageTable = schemas.qualifiedTable("communication", "message");
+    participantTable = schemas.qualifiedTable("communication", "message_participant");
   }
 
   @Override
   public Message save(Message message) {
-    return database.transactionResult(configuration -> save(DSL.using(configuration), message));
+    var saved = transactions.execute(ignored -> saveInTransaction(message));
+    if (saved == null) throw new IllegalStateException("Message transaction returned no value");
+    return saved;
   }
 
-  private static Message save(DSLContext transaction, Message message) {
-    transaction.insertInto(MESSAGE)
-        .set(MESSAGE.MESSAGE_ID, message.getId())
-        .set(MESSAGE.CONVERSATION_KEY, message.getConversationKey())
-        .set(MESSAGE.SENDER_ACCOUNT_ID, message.getSenderAccountId())
-        .set(MESSAGE.RECIPIENT_ACCOUNT_ID, message.getRecipientAccountId())
-        .set(MESSAGE.MESSAGE_TEXT, message.getText())
-        .set(MESSAGE.IS_READ, Boolean.TRUE.equals(message.getRead()))
-        .set(MESSAGE.CREATED_ON, message.getCreatedOn().atOffset(ZoneOffset.UTC))
-        .onConflict(MESSAGE.MESSAGE_ID)
-        .doUpdate()
-        .set(MESSAGE.CONVERSATION_KEY, message.getConversationKey())
-        .set(MESSAGE.SENDER_ACCOUNT_ID, message.getSenderAccountId())
-        .set(MESSAGE.RECIPIENT_ACCOUNT_ID, message.getRecipientAccountId())
-        .set(MESSAGE.MESSAGE_TEXT, message.getText())
-        .set(MESSAGE.IS_READ, Boolean.TRUE.equals(message.getRead()))
-        .set(MESSAGE.VERSION, MESSAGE.VERSION.plus(1L))
-        .execute();
-    transaction.deleteFrom(MESSAGE_PARTICIPANT)
-        .where(MESSAGE_PARTICIPANT.MESSAGE_ID.eq(message.getId())).execute();
-    var participants = message.getParticipantIds() == null
-        ? java.util.Set.<String>of() : message.getParticipantIds();
-    for (var participant : participants) {
-      transaction.insertInto(MESSAGE_PARTICIPANT)
-          .set(MESSAGE_PARTICIPANT.MESSAGE_ID, message.getId())
-          .set(MESSAGE_PARTICIPANT.ACCOUNT_ID, participant)
-          .execute();
+  private Message saveInTransaction(Message message) {
+    database.sql("""
+            insert into %s (
+              message_id, conversation_key, sender_account_id, recipient_account_id,
+              message_text, is_read, created_on)
+            values (:id, :conversationKey, :senderId, :recipientId, :text, :read, :createdOn)
+            on conflict (message_id) do update set
+              conversation_key = excluded.conversation_key,
+              sender_account_id = excluded.sender_account_id,
+              recipient_account_id = excluded.recipient_account_id,
+              message_text = excluded.message_text,
+              is_read = excluded.is_read,
+              version = %s.version + 1
+            """.formatted(messageTable, messageTable))
+        .param("id", message.getId()).param("conversationKey", message.getConversationKey())
+        .param("senderId", message.getSenderAccountId())
+        .param("recipientId", message.getRecipientAccountId())
+        .param("text", message.getText()).param("read", Boolean.TRUE.equals(message.getRead()))
+        .param("createdOn", message.getCreatedOn().atOffset(ZoneOffset.UTC)).update();
+    database.sql("delete from %s where message_id = :id".formatted(participantTable))
+        .param("id", message.getId()).update();
+    if (message.getParticipantIds() != null) {
+      for (var participant : message.getParticipantIds()) {
+        database.sql("""
+                insert into %s (message_id, account_id) values (:messageId, :accountId)
+                """.formatted(participantTable))
+            .param("messageId", message.getId()).param("accountId", participant).update();
+      }
     }
-    return transaction.selectFrom(MESSAGE).where(MESSAGE.MESSAGE_ID.eq(message.getId()))
-        .fetchOne(record -> map(transaction, record));
+    return loadByIds(List.of(message.getId())).getFirst();
   }
 
   @Override
   public Iterable<Message> saveAll(Iterable<Message> messages) {
-    return database.transactionResult(configuration -> {
-      var transaction = DSL.using(configuration);
+    var result = transactions.execute(ignored -> {
       var saved = new ArrayList<Message>();
-      messages.forEach(message -> saved.add(save(transaction, message)));
+      messages.forEach(message -> saved.add(saveInTransaction(message)));
       return List.copyOf(saved);
     });
+    return result == null ? List.of() : result;
   }
 
   @Override
   public List<Message> findByConversationKeyOrderByCreatedOnAsc(
       String conversationKey, Pageable pageable) {
-    var query = database.selectFrom(MESSAGE)
-        .where(MESSAGE.CONVERSATION_KEY.eq(conversationKey))
-        .orderBy(MESSAGE.CREATED_ON.asc(), MESSAGE.MESSAGE_ID.asc());
-    var records = pageable.isPaged()
-        ? query.limit(pageable.getPageSize()).offset(Math.toIntExact(pageable.getOffset()))
-            .fetch()
-        : query.fetch();
-    return mapAll(database, records);
+    return queryMessages(
+        "conversation_key = :conversationKey",
+        Map.of("conversationKey", conversationKey),
+        "order by created_on asc, message_id asc " + pageClause(pageable),
+        pageParameters(pageable));
   }
 
   @Override
   public List<Message> findByParticipantIdsContainingOrderByCreatedOnDesc(
       String accountId, Pageable pageable) {
-    var query = database.select(MESSAGE.fields()).from(MESSAGE)
-        .join(MESSAGE_PARTICIPANT).on(MESSAGE_PARTICIPANT.MESSAGE_ID.eq(MESSAGE.MESSAGE_ID))
-        .where(MESSAGE_PARTICIPANT.ACCOUNT_ID.eq(accountId))
-        .orderBy(MESSAGE.CREATED_ON.desc(), MESSAGE.MESSAGE_ID.desc());
-    var records = pageable.isPaged()
-        ? query.limit(pageable.getPageSize()).offset(Math.toIntExact(pageable.getOffset()))
-            .fetch(record -> record.into(MESSAGE))
-        : query.fetch(record -> record.into(MESSAGE));
-    return mapAll(database, records);
+    var suffix = pageClause(pageable);
+    var statement = database.sql("""
+            select message_id from %s where account_id = :accountId
+            order by message_id
+            """.formatted(participantTable)).param("accountId", accountId);
+    var participantIds = statement.query(String.class).list();
+    if (participantIds.isEmpty()) return List.of();
+    return queryMessages(
+        "message_id in (:ids)", Map.of("ids", participantIds),
+        "order by created_on desc, message_id desc " + suffix, pageParameters(pageable));
   }
 
-  public static Message map(DSLContext context, MessageRecord record) {
-    return mapAll(context, List.of(record)).getFirst();
+  /** Loads exact message identities in the caller's stable order, including participants. */
+  public List<Message> loadByIds(List<String> ids) {
+    if (ids.isEmpty()) return List.of();
+    var loaded = queryMessages("message_id in (:ids)", Map.of("ids", ids), "", Map.of());
+    var byId = new LinkedHashMap<String, Message>();
+    loaded.forEach(message -> byId.put(message.getId(), message));
+    return ids.stream().map(byId::get).filter(java.util.Objects::nonNull).toList();
   }
 
-  public static List<Message> mapAll(DSLContext context, List<MessageRecord> records) {
-    if (records.isEmpty()) return List.of();
+  private List<Message> queryMessages(
+      String where, Map<String, ?> parameters, String suffix, Map<String, ?> suffixParameters) {
+    var query = database.sql("select * from %s where %s %s".formatted(messageTable, where, suffix));
+    for (var entry : parameters.entrySet()) query.param(entry.getKey(), entry.getValue());
+    for (var entry : suffixParameters.entrySet()) query.param(entry.getKey(), entry.getValue());
+    return attachParticipants(query.query(PostgresMessageRepository::mapBase).list());
+  }
+
+  /** Attaches ordered participant identities to already loaded message rows. */
+  public List<Message> attachParticipants(List<Message> messages) {
+    if (messages.isEmpty()) return List.of();
     Map<String, LinkedHashSet<String>> participants = new LinkedHashMap<>();
-    records.forEach(record -> participants.put(record.getMessageId(), new LinkedHashSet<>()));
-    context.select(MESSAGE_PARTICIPANT.MESSAGE_ID, MESSAGE_PARTICIPANT.ACCOUNT_ID)
-        .from(MESSAGE_PARTICIPANT)
-        .where(MESSAGE_PARTICIPANT.MESSAGE_ID.in(participants.keySet()))
-        .orderBy(MESSAGE_PARTICIPANT.MESSAGE_ID.asc(), MESSAGE_PARTICIPANT.ACCOUNT_ID.asc())
-        .forEach(row -> participants.get(row.value1()).add(row.value2()));
-    return records.stream().map(record -> map(record, participants.get(record.getMessageId())))
-        .toList();
+    messages.forEach(message -> participants.put(message.getId(), new LinkedHashSet<>()));
+    database.sql("""
+            select message_id, account_id from %s where message_id in (:ids)
+            order by message_id asc, account_id asc
+            """.formatted(participantTable))
+        .param("ids", participants.keySet())
+        .query((row, ignored) -> Map.entry(row.getString(1), row.getString(2)))
+        .list().forEach(value -> participants.get(value.getKey()).add(value.getValue()));
+    messages.forEach(message -> message.setParticipantIds(participants.get(message.getId())));
+    return List.copyOf(messages);
   }
 
-  private static Message map(MessageRecord record, LinkedHashSet<String> participants) {
+  /** Maps one base message row; participant loading remains a separate bounded query. */
+  public static Message mapBase(java.sql.ResultSet row, int rowNumber) throws SQLException {
     return Message.builder()
-        .id(record.getMessageId())
-        .conversationKey(record.getConversationKey())
-        .participantIds(participants)
-        .senderAccountId(record.getSenderAccountId())
-        .recipientAccountId(record.getRecipientAccountId())
-        .text(record.getMessageText())
-        .read(record.getIsRead())
-        .createdOn(record.getCreatedOn().toInstant())
+        .id(row.getString("message_id"))
+        .conversationKey(row.getString("conversation_key"))
+        .senderAccountId(row.getString("sender_account_id"))
+        .recipientAccountId(row.getString("recipient_account_id"))
+        .text(row.getString("message_text"))
+        .read(row.getBoolean("is_read"))
+        .createdOn(row.getObject("created_on", OffsetDateTime.class).toInstant())
         .build();
+  }
+
+  private static String pageClause(Pageable pageable) {
+    return pageable.isPaged() ? "limit :limit offset :offset" : "";
+  }
+
+  private static Map<String, ?> pageParameters(Pageable pageable) {
+    return pageable.isPaged()
+        ? Map.of("limit", pageable.getPageSize(), "offset", Math.toIntExact(pageable.getOffset()))
+        : Map.of();
   }
 }

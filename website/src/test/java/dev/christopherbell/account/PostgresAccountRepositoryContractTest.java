@@ -32,7 +32,8 @@ class PostgresAccountRepositoryContractTest
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
   }
 
   @AfterAll

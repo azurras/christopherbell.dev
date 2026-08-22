@@ -16,8 +16,10 @@ class PostgresAdminAccountQueryContractTest implements AdminAccountQueryParityCo
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    queries = new PostgresAdminAccountQueryService(database.dsl(), new AccountMapperImpl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    queries = new PostgresAdminAccountQueryService(
+        (PostgresAccountRepository) accounts, new AccountMapperImpl());
   }
 
   @AfterAll

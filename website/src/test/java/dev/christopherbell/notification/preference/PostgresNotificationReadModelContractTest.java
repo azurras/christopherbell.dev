@@ -26,11 +26,12 @@ class PostgresNotificationReadModelContractTest implements NotificationReadModel
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    accounts = new PostgresAccountRepository(database.dsl());
-    notifications = new PostgresNotificationRepository(database.dsl());
+    accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
+    notifications = new PostgresNotificationRepository(database.jdbc(), database.schemas());
     cursors = new StableCursorCodec();
-    queries = new PostgresNotificationQueryRepository(database.dsl(), cursors);
-    preferences = new PostgresNotificationPreferenceRepository(database.dsl());
+    queries = new PostgresNotificationQueryRepository(database.jdbc(), database.schemas(), cursors);
+    preferences = new PostgresNotificationPreferenceRepository(database.jdbc(), database.schemas());
   }
 
   @AfterAll

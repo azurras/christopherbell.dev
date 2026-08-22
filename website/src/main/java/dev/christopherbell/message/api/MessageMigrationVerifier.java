@@ -1,6 +1,5 @@
 package dev.christopherbell.message.api;
 
-import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.database;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.instant;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.rollback;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.text;
@@ -28,18 +27,23 @@ public final class MessageMigrationVerifier {
   public static boolean verify(
       Connection connection, String schema, String queryName,
       Map<String, List<Map<String, Object>>> tables) throws SQLException {
-    var context = database(connection, schema);
+    var repository = new PostgresMessageRepository(
+        org.springframework.jdbc.core.simple.JdbcClient.create(
+            new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+        dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+            .fromPhysicalSchema(schema),
+        org.springframework.transaction.support.TransactionOperations.withoutTransaction());
     return switch (queryName) {
-      case "archive-conversation" -> verifyArchive(connection, context, tables);
-      case "conversation-page" -> verifyConversation(context, tables.get("message"));
-      case "participant-page" -> verifyParticipant(context, tables);
+      case "archive-conversation" -> verifyArchive(connection, schema, tables);
+      case "conversation-page" -> verifyConversation(repository, tables.get("message"));
+      case "participant-page" -> verifyParticipant(repository, tables);
       default -> false;
     };
   }
 
   private static boolean verifyArchive(
       Connection connection,
-      org.jooq.DSLContext context,
+      String schema,
       Map<String, List<Map<String, Object>>> tables) throws SQLException {
     var states = tables.get("conversation_archive_state");
     if (states.isEmpty()) {
@@ -54,7 +58,12 @@ public final class MessageMigrationVerifier {
           .collect(java.util.stream.Collectors.toUnmodifiableSet());
       var archivedAt = instant(row.get("archived_at"));
       var service = new PostgresConversationArchiveService(
-          context, Clock.fixed(archivedAt == null ? Instant.EPOCH : archivedAt, ZoneOffset.UTC));
+          org.springframework.jdbc.core.simple.JdbcClient.create(
+              new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true)),
+          dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+              .fromPhysicalSchema(schema),
+          org.springframework.transaction.support.TransactionOperations.withoutTransaction(),
+          Clock.fixed(archivedAt == null ? Instant.EPOCH : archivedAt, ZoneOffset.UTC));
       var result = service.archive(
           text(row.get("owner_account_id")), text(row.get("conversation_key")), participantIds);
       return text(row.get("conversation_key")).equals(result.conversationKey());
@@ -62,8 +71,7 @@ public final class MessageMigrationVerifier {
   }
 
   private static boolean verifyConversation(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var repository = new PostgresMessageRepository(context);
+      PostgresMessageRepository repository, List<Map<String, Object>> rows) {
     for (var key : values(rows, "conversation_key")) {
       var expected = rows.stream().filter(row -> key.equals(text(row.get("conversation_key"))))
           .sorted(Comparator.comparing(MessageMigrationVerifier::createdOn)
@@ -81,10 +89,9 @@ public final class MessageMigrationVerifier {
   }
 
   private static boolean verifyParticipant(
-      org.jooq.DSLContext context, Map<String, List<Map<String, Object>>> tables) {
+      PostgresMessageRepository repository, Map<String, List<Map<String, Object>>> tables) {
     var messages = tables.get("message");
     var participants = tables.get("message_participant");
-    var repository = new PostgresMessageRepository(context);
     for (var account : values(participants, "account_id")) {
       var idsForAccount = participants.stream()
           .filter(row -> account.equals(text(row.get("account_id"))))

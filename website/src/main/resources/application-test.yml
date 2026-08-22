@@ -15,5 +15,3 @@ spring:
   flyway:
     default-schema: ${APP_TEST_SCHEMA:}
     schemas: ${APP_TEST_SCHEMA:}
-  jooq:
-    sql-dialect: POSTGRES

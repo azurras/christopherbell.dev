@@ -1,177 +1,207 @@
 package dev.christopherbell.canesboxtracker;
 
-import static dev.christopherbell.persistence.jooq.canes.Tables.METRO_PRICE;
-import static dev.christopherbell.persistence.jooq.canes.Tables.PRICE_SNAPSHOT;
-
 import dev.christopherbell.canesboxtracker.model.CanesBoxMetroPrice;
 import dev.christopherbell.canesboxtracker.model.CanesBoxPriceSnapshot;
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.sql.SQLException;
+import java.sql.Types;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** PostgreSQL weekly Canes price-snapshot adapter with ordered exact-money children. */
 @PostgresPersistence
 public class PostgresCanesBoxPriceSnapshotRepository
     implements CanesBoxPriceSnapshotRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
+  private final String snapshotTable;
+  private final String metroPriceTable;
 
-  public PostgresCanesBoxPriceSnapshotRepository(DSLContext database) {
+  public PostgresCanesBoxPriceSnapshotRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas, TransactionOperations transactions) {
     this.database = database;
+    this.transactions = transactions;
+    snapshotTable = schemas.qualifiedTable("canes", "price_snapshot");
+    metroPriceTable = schemas.qualifiedTable("canes", "metro_price");
   }
 
   @Override
   public CanesBoxPriceSnapshot save(CanesBoxPriceSnapshot snapshot) {
     requireSnapshot(snapshot);
-    return database.transactionResult(configuration -> {
-      var transaction = DSL.using(configuration);
-      transaction.insertInto(PRICE_SNAPSHOT)
-          .set(PRICE_SNAPSHOT.PRICE_SNAPSHOT_ID, snapshot.getId())
-          .set(PRICE_SNAPSHOT.WEEK_START_DATE, LocalDate.parse(snapshot.getWeekStartDate()))
-          .set(PRICE_SNAPSHOT.COLLECTED_ON, snapshot.getCollectedOn().atOffset(ZoneOffset.UTC))
-          .set(PRICE_SNAPSHOT.AVERAGE_PRICE, money(snapshot.getAveragePrice(), "average price"))
-          .set(PRICE_SNAPSHOT.CURRENCY, snapshot.getCurrency())
-          .set(PRICE_SNAPSHOT.SUCCESSFUL_METRO_COUNT, snapshot.getSuccessfulMetroCount())
-          .set(PRICE_SNAPSHOT.TOTAL_METRO_COUNT, snapshot.getTotalMetroCount())
-          .set(PRICE_SNAPSHOT.VERIFIED_METRO_COUNT, snapshot.getVerifiedMetroCount())
-          .set(PRICE_SNAPSHOT.PROVISIONAL_METRO_COUNT, snapshot.getProvisionalMetroCount())
-          .set(PRICE_SNAPSHOT.EXCLUDED_METRO_COUNT, snapshot.getExcludedMetroCount())
-          .onConflict(PRICE_SNAPSHOT.PRICE_SNAPSHOT_ID).doUpdate()
-          .set(PRICE_SNAPSHOT.WEEK_START_DATE, LocalDate.parse(snapshot.getWeekStartDate()))
-          .set(PRICE_SNAPSHOT.COLLECTED_ON, snapshot.getCollectedOn().atOffset(ZoneOffset.UTC))
-          .set(PRICE_SNAPSHOT.AVERAGE_PRICE, money(snapshot.getAveragePrice(), "average price"))
-          .set(PRICE_SNAPSHOT.CURRENCY, snapshot.getCurrency())
-          .set(PRICE_SNAPSHOT.SUCCESSFUL_METRO_COUNT, snapshot.getSuccessfulMetroCount())
-          .set(PRICE_SNAPSHOT.TOTAL_METRO_COUNT, snapshot.getTotalMetroCount())
-          .set(PRICE_SNAPSHOT.VERIFIED_METRO_COUNT, snapshot.getVerifiedMetroCount())
-          .set(PRICE_SNAPSHOT.PROVISIONAL_METRO_COUNT, snapshot.getProvisionalMetroCount())
-          .set(PRICE_SNAPSHOT.EXCLUDED_METRO_COUNT, snapshot.getExcludedMetroCount())
-          .execute();
-      transaction.deleteFrom(METRO_PRICE)
-          .where(METRO_PRICE.PRICE_SNAPSHOT_ID.eq(snapshot.getId()))
-          .execute();
+    var saved = transactions.execute(ignored -> {
+      database.sql("""
+              insert into %s (
+                price_snapshot_id, week_start_date, collected_on, average_price, currency,
+                successful_metro_count, total_metro_count, verified_metro_count,
+                provisional_metro_count, excluded_metro_count)
+              values (
+                :id, :week, :collectedOn, :averagePrice, :currency,
+                :successful, :total, :verified, :provisional, :excluded)
+              on conflict (price_snapshot_id) do update set
+                week_start_date = excluded.week_start_date,
+                collected_on = excluded.collected_on,
+                average_price = excluded.average_price,
+                currency = excluded.currency,
+                successful_metro_count = excluded.successful_metro_count,
+                total_metro_count = excluded.total_metro_count,
+                verified_metro_count = excluded.verified_metro_count,
+                provisional_metro_count = excluded.provisional_metro_count,
+                excluded_metro_count = excluded.excluded_metro_count
+              """.formatted(snapshotTable))
+          .param("id", snapshot.getId())
+          .param("week", LocalDate.parse(snapshot.getWeekStartDate()))
+          .param("collectedOn", snapshot.getCollectedOn().atOffset(ZoneOffset.UTC))
+          .param("averagePrice", money(snapshot.getAveragePrice(), "average price"))
+          .param("currency", snapshot.getCurrency())
+          .param("successful", snapshot.getSuccessfulMetroCount())
+          .param("total", snapshot.getTotalMetroCount())
+          .param("verified", snapshot.getVerifiedMetroCount())
+          .param("provisional", snapshot.getProvisionalMetroCount())
+          .param("excluded", snapshot.getExcludedMetroCount()).update();
+      database.sql("delete from %s where price_snapshot_id = :id".formatted(metroPriceTable))
+          .param("id", snapshot.getId()).update();
       var prices = snapshot.getMetroPrices() == null ? List.<CanesBoxMetroPrice>of()
           : snapshot.getMetroPrices();
       for (int ordinal = 0; ordinal < prices.size(); ordinal++) {
-        insertMetroPrice(transaction, snapshot.getId(), ordinal, prices.get(ordinal));
+        insertMetroPrice(snapshot.getId(), ordinal, prices.get(ordinal));
       }
-      return findById(transaction, snapshot.getId()).orElseThrow();
+      return findById(snapshot.getId()).orElseThrow();
     });
+    if (saved == null) throw new IllegalStateException("Canes snapshot transaction returned no value");
+    return saved;
   }
 
   @Override
   public Optional<CanesBoxPriceSnapshot> findById(String id) {
-    return findById(database, id);
+    return database.sql("select * from %s where price_snapshot_id = :id".formatted(snapshotTable))
+        .param("id", id).query(PostgresCanesBoxPriceSnapshotRepository::mapSnapshotRow)
+        .optional().map(snapshot -> {
+          snapshot.setMetroPrices(metroPrices(List.of(id)).getOrDefault(id, List.of()));
+          return snapshot;
+        });
   }
 
   @Override
   public List<CanesBoxPriceSnapshot> findTop60ByOrderByWeekStartDateDesc() {
-    var rows = database.selectFrom(PRICE_SNAPSHOT)
-        .orderBy(PRICE_SNAPSHOT.WEEK_START_DATE.desc(), PRICE_SNAPSHOT.PRICE_SNAPSHOT_ID.desc())
-        .limit(60)
-        .fetch();
-    if (rows.isEmpty()) return List.of();
-    var pricesBySnapshot = new LinkedHashMap<String, List<CanesBoxMetroPrice>>();
-    rows.forEach(row -> pricesBySnapshot.put(row.getPriceSnapshotId(), new ArrayList<>()));
-    database.selectFrom(METRO_PRICE)
-        .where(METRO_PRICE.PRICE_SNAPSHOT_ID.in(pricesBySnapshot.keySet()))
-        .orderBy(METRO_PRICE.PRICE_SNAPSHOT_ID, METRO_PRICE.ORDINAL)
-        .forEach(row -> pricesBySnapshot.get(row.getPriceSnapshotId()).add(mapMetroPrice(row)));
-    return rows.stream()
-        .map(row -> mapSnapshot(row, pricesBySnapshot.get(row.getPriceSnapshotId())))
-        .toList();
+    var snapshots = database.sql("""
+            select * from %s
+            order by week_start_date desc, price_snapshot_id desc limit 60
+            """.formatted(snapshotTable))
+        .query(PostgresCanesBoxPriceSnapshotRepository::mapSnapshotRow).list();
+    if (snapshots.isEmpty()) return List.of();
+    var prices = metroPrices(snapshots.stream().map(CanesBoxPriceSnapshot::getId).toList());
+    snapshots.forEach(snapshot -> snapshot.setMetroPrices(
+        List.copyOf(prices.getOrDefault(snapshot.getId(), List.of()))));
+    return List.copyOf(snapshots);
   }
 
-  private static Optional<CanesBoxPriceSnapshot> findById(DSLContext context, String id) {
-    return context.selectFrom(PRICE_SNAPSHOT)
-        .where(PRICE_SNAPSHOT.PRICE_SNAPSHOT_ID.eq(id))
-        .fetchOptional(row -> mapSnapshot(row, context.selectFrom(METRO_PRICE)
-            .where(METRO_PRICE.PRICE_SNAPSHOT_ID.eq(id))
-            .orderBy(METRO_PRICE.ORDINAL)
-            .fetch(PostgresCanesBoxPriceSnapshotRepository::mapMetroPrice)));
+  private LinkedHashMap<String, List<CanesBoxMetroPrice>> metroPrices(List<String> snapshotIds) {
+    var result = new LinkedHashMap<String, List<CanesBoxMetroPrice>>();
+    snapshotIds.forEach(id -> result.put(id, new ArrayList<>()));
+    database.sql("""
+            select * from %s where price_snapshot_id in (:ids)
+            order by price_snapshot_id, ordinal
+            """.formatted(metroPriceTable))
+        .param("ids", snapshotIds)
+        .query((row, ignored) -> new MetroRow(
+            row.getString("price_snapshot_id"), mapMetroPrice(row)))
+        .list().forEach(row -> result.get(row.snapshotId()).add(row.price()));
+    return result;
   }
 
-  private static CanesBoxPriceSnapshot mapSnapshot(
-      dev.christopherbell.persistence.jooq.canes.tables.records.PriceSnapshotRecord row,
-      List<CanesBoxMetroPrice> metroPrices) {
-    var snapshot = new CanesBoxPriceSnapshot();
-    snapshot.setId(row.getPriceSnapshotId());
-    snapshot.setWeekStartDate(row.getWeekStartDate().toString());
-    snapshot.setCollectedOn(row.getCollectedOn().toInstant());
-    snapshot.setAveragePrice(row.getAveragePrice());
-    snapshot.setCurrency(row.getCurrency());
-    snapshot.setSuccessfulMetroCount(row.getSuccessfulMetroCount());
-    snapshot.setTotalMetroCount(row.getTotalMetroCount());
-    snapshot.setVerifiedMetroCount(row.getVerifiedMetroCount());
-    snapshot.setProvisionalMetroCount(row.getProvisionalMetroCount());
-    snapshot.setExcludedMetroCount(row.getExcludedMetroCount());
-    snapshot.setMetroPrices(List.copyOf(metroPrices));
-    return snapshot;
-  }
-
-  private static void insertMetroPrice(
-      DSLContext context, String snapshotId, int ordinal, CanesBoxMetroPrice price) {
+  private void insertMetroPrice(String snapshotId, int ordinal, CanesBoxMetroPrice price) {
     if (price == null || price.getMetroName() == null || price.getMetroName().isBlank()
         || price.getStatus() == null || price.getStatus().isBlank()
         || price.getCollectedOn() == null) {
       throw new IllegalArgumentException("A metro price requires metro, status, and collection time.");
     }
-    context.insertInto(METRO_PRICE)
-        .set(METRO_PRICE.PRICE_SNAPSHOT_ID, snapshotId)
-        .set(METRO_PRICE.ORDINAL, ordinal)
-        .set(METRO_PRICE.METRO_NAME, price.getMetroName())
-        .set(METRO_PRICE.CITY, price.getCity())
-        .set(METRO_PRICE.REGION, price.getState())
-        .set(METRO_PRICE.RESTAURANT_REF, price.getRestaurantRef())
-        .set(METRO_PRICE.RESTAURANT_NAME, price.getRestaurantName())
-        .set(METRO_PRICE.ADDRESS, price.getAddress())
-        .set(METRO_PRICE.SOURCE_URL, price.getSourceUrl())
-        .set(METRO_PRICE.PRICE, price.getPrice() == null ? null : money(price.getPrice(), "metro price"))
-        .set(METRO_PRICE.CURRENCY, price.getCurrency())
-        .set(METRO_PRICE.STATUS, price.getStatus())
-        .set(METRO_PRICE.SOURCE_NAME, price.getSourceName())
-        .set(METRO_PRICE.QUALITY_STATUS, price.getQualityStatus())
-        .set(METRO_PRICE.CONFIDENCE_LEVEL, price.getConfidenceLevel())
-        .set(METRO_PRICE.RAW_RESPONSE_HASH, price.getRawResponseHash())
-        .set(METRO_PRICE.MATCHED_ITEM_NAME, price.getMatchedItemName())
-        .set(METRO_PRICE.FAILURE_REASON, price.getFailureReason())
-        .set(METRO_PRICE.REVIEW_NOTE, price.getReviewNote())
-        .set(METRO_PRICE.COLLECTED_ON, price.getCollectedOn().atOffset(ZoneOffset.UTC))
-        .set(METRO_PRICE.SOURCE_FETCHED_ON, offset(price.getSourceFetchedOn()))
-        .set(METRO_PRICE.REVIEWED_ON, offset(price.getReviewedOn()))
-        .execute();
+    database.sql("""
+            insert into %s (
+              price_snapshot_id, ordinal, metro_name, city, region, restaurant_ref,
+              restaurant_name, address, source_url, price, currency, status, source_name,
+              quality_status, confidence_level, raw_response_hash, matched_item_name,
+              failure_reason, review_note, collected_on, source_fetched_on, reviewed_on)
+            values (
+              :snapshotId, :ordinal, :metroName, :city, :region, :restaurantRef,
+              :restaurantName, :address, :sourceUrl, :price, :currency, :status, :sourceName,
+              :qualityStatus, :confidence, :rawHash, :matchedName,
+              :failureReason, :reviewNote, :collectedOn, :sourceFetchedOn, :reviewedOn)
+            """.formatted(metroPriceTable))
+        .paramSource(new MapSqlParameterSource()
+            .addValue("snapshotId", snapshotId).addValue("ordinal", ordinal)
+            .addValue("metroName", price.getMetroName()).addValue("city", price.getCity(), Types.VARCHAR)
+            .addValue("region", price.getState(), Types.VARCHAR)
+            .addValue("restaurantRef", price.getRestaurantRef(), Types.VARCHAR)
+            .addValue("restaurantName", price.getRestaurantName(), Types.VARCHAR)
+            .addValue("address", price.getAddress(), Types.VARCHAR)
+            .addValue("sourceUrl", price.getSourceUrl(), Types.VARCHAR)
+            .addValue("price", price.getPrice() == null ? null : money(price.getPrice(), "metro price"), Types.NUMERIC)
+            .addValue("currency", price.getCurrency(), Types.VARCHAR).addValue("status", price.getStatus())
+            .addValue("sourceName", price.getSourceName(), Types.VARCHAR)
+            .addValue("qualityStatus", price.getQualityStatus(), Types.VARCHAR)
+            .addValue("confidence", price.getConfidenceLevel(), Types.VARCHAR)
+            .addValue("rawHash", price.getRawResponseHash(), Types.VARCHAR)
+            .addValue("matchedName", price.getMatchedItemName(), Types.VARCHAR)
+            .addValue("failureReason", price.getFailureReason(), Types.VARCHAR)
+            .addValue("reviewNote", price.getReviewNote(), Types.VARCHAR)
+            .addValue("collectedOn", price.getCollectedOn().atOffset(ZoneOffset.UTC))
+            .addValue("sourceFetchedOn", offset(price.getSourceFetchedOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+            .addValue("reviewedOn", offset(price.getReviewedOn()), Types.TIMESTAMP_WITH_TIMEZONE))
+        .update();
   }
 
-  private static CanesBoxMetroPrice mapMetroPrice(
-      dev.christopherbell.persistence.jooq.canes.tables.records.MetroPriceRecord row) {
+  private static CanesBoxPriceSnapshot mapSnapshotRow(java.sql.ResultSet row, int rowNumber)
+      throws SQLException {
+    var snapshot = new CanesBoxPriceSnapshot();
+    snapshot.setId(row.getString("price_snapshot_id"));
+    snapshot.setWeekStartDate(row.getObject("week_start_date", LocalDate.class).toString());
+    snapshot.setCollectedOn(row.getObject("collected_on", OffsetDateTime.class).toInstant());
+    snapshot.setAveragePrice(row.getBigDecimal("average_price"));
+    snapshot.setCurrency(row.getString("currency"));
+    snapshot.setSuccessfulMetroCount(row.getInt("successful_metro_count"));
+    snapshot.setTotalMetroCount(row.getInt("total_metro_count"));
+    snapshot.setVerifiedMetroCount(row.getInt("verified_metro_count"));
+    snapshot.setProvisionalMetroCount(row.getInt("provisional_metro_count"));
+    snapshot.setExcludedMetroCount(row.getInt("excluded_metro_count"));
+    return snapshot;
+  }
+
+  private static CanesBoxMetroPrice mapMetroPrice(java.sql.ResultSet row) throws SQLException {
     return new CanesBoxMetroPrice(
-        row.getMetroName(), row.getCity(), row.getRegion(), row.getRestaurantRef(),
-        row.getRestaurantName(), row.getAddress(), row.getSourceUrl(), row.getPrice(),
-        row.getCurrency(), row.getStatus(), row.getSourceName(), row.getQualityStatus(),
-        row.getConfidenceLevel(), row.getRawResponseHash(), row.getMatchedItemName(),
-        row.getFailureReason(), row.getReviewNote(), row.getCollectedOn().toInstant(),
-        instant(row.getSourceFetchedOn()), instant(row.getReviewedOn()));
+        row.getString("metro_name"), row.getString("city"), row.getString("region"),
+        row.getString("restaurant_ref"), row.getString("restaurant_name"),
+        row.getString("address"), row.getString("source_url"), row.getBigDecimal("price"),
+        row.getString("currency"), row.getString("status"), row.getString("source_name"),
+        row.getString("quality_status"), row.getString("confidence_level"),
+        row.getString("raw_response_hash"), row.getString("matched_item_name"),
+        row.getString("failure_reason"), row.getString("review_note"),
+        row.getObject("collected_on", OffsetDateTime.class).toInstant(),
+        instant(row.getObject("source_fetched_on", OffsetDateTime.class)),
+        instant(row.getObject("reviewed_on", OffsetDateTime.class)));
   }
 
   private static void requireSnapshot(CanesBoxPriceSnapshot snapshot) {
     if (snapshot == null || snapshot.getId() == null || snapshot.getId().isBlank()
         || snapshot.getWeekStartDate() == null || snapshot.getCollectedOn() == null
         || snapshot.getAveragePrice() == null || snapshot.getCurrency() == null) {
-      throw new IllegalArgumentException("A price snapshot requires identity, week, money, and collection time.");
+      throw new IllegalArgumentException(
+          "A price snapshot requires identity, week, money, and collection time.");
     }
   }
 
   private static BigDecimal money(BigDecimal value, String field) {
-    if (value.signum() < 0) {
-      throw new IllegalArgumentException(field + " cannot be negative.");
-    }
+    if (value.signum() < 0) throw new IllegalArgumentException(field + " cannot be negative.");
     try {
       return value.setScale(2, RoundingMode.UNNECESSARY);
     } catch (ArithmeticException imprecise) {
@@ -179,11 +209,13 @@ public class PostgresCanesBoxPriceSnapshotRepository
     }
   }
 
-  private static java.time.OffsetDateTime offset(java.time.Instant value) {
+  private static OffsetDateTime offset(java.time.Instant value) {
     return value == null ? null : value.atOffset(ZoneOffset.UTC);
   }
 
-  private static java.time.Instant instant(java.time.OffsetDateTime value) {
+  private static java.time.Instant instant(OffsetDateTime value) {
     return value == null ? null : value.toInstant();
   }
+
+  private record MetroRow(String snapshotId, CanesBoxMetroPrice price) {}
 }

@@ -1,10 +1,8 @@
 package dev.christopherbell.federation.outbound;
 
-import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.database;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.instant;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.rollback;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.text;
-import static dev.christopherbell.persistence.jooq.federation.Tables.FEDERATION_DELIVERY_JOB;
 
 import dev.christopherbell.configuration.persistence.PostgresPersistenceSupport;
 import dev.christopherbell.federation.configuration.FederationOutboundProperties.ControlledPeer;
@@ -13,7 +11,6 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -25,14 +22,19 @@ public final class FederationMigrationAdapterVerifier {
   public static boolean verify(
       Connection connection, String schema, String sourceKind, String queryName,
       List<Map<String, Object>> rows) throws SQLException {
-    var context = database(connection, schema);
-    var repository = new PostgresFederationDeliveryJobRepository(context);
+    var database = org.springframework.jdbc.core.simple.JdbcClient.create(
+        new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true));
+    var schemas = dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+        .fromPhysicalSchema(schema);
+    var repository = new PostgresFederationDeliveryJobRepository(
+        database, schemas,
+        org.springframework.transaction.support.TransactionOperations.withoutTransaction());
     return switch (sourceKind + "/" + queryName) {
       case "federation_scan_state/load-cursor" -> verifyCursor(repository, rows);
       case "federation_delivery_job/claim-due" ->
-          verifyClaim(connection, context, repository, rows);
+          verifyClaim(connection, database, schemas, repository, rows);
       case "federation_delivery_job/enqueue-if-absent" ->
-          verifyEnqueue(connection, context, repository, rows);
+          verifyEnqueue(connection, database, schemas, repository, rows);
       default -> false;
     };
   }
@@ -55,7 +57,8 @@ public final class FederationMigrationAdapterVerifier {
 
   private static boolean verifyClaim(
       Connection connection,
-      org.jooq.DSLContext context,
+      org.springframework.jdbc.core.simple.JdbcClient database,
+      dev.christopherbell.configuration.persistence.PostgresqlSchemaNames schemas,
       PostgresFederationDeliveryJobRepository repository,
       List<Map<String, Object>> rows) throws SQLException {
     if (rows.isEmpty()) {
@@ -63,12 +66,12 @@ public final class FederationMigrationAdapterVerifier {
     }
     var id = text(rows.getFirst().get("delivery_job_id"));
     return rollback(connection, () -> {
-      context.update(FEDERATION_DELIVERY_JOB)
-          .set(FEDERATION_DELIVERY_JOB.STATE, FederationDeliveryState.PENDING.name())
-          .set(FEDERATION_DELIVERY_JOB.NEXT_ATTEMPT_ON, Instant.EPOCH.atOffset(ZoneOffset.UTC))
-          .setNull(FEDERATION_DELIVERY_JOB.CLAIM_OWNER)
-          .setNull(FEDERATION_DELIVERY_JOB.CLAIM_UNTIL)
-          .where(FEDERATION_DELIVERY_JOB.DELIVERY_JOB_ID.eq(id)).execute();
+      database.sql("""
+              update %s set state = 'PENDING', next_attempt_on = :epoch,
+                claim_owner = null, claim_until = null where delivery_job_id = :id
+              """.formatted(schemas.qualifiedTable("federation", "federation_delivery_job")))
+          .param("epoch", Instant.EPOCH.atOffset(java.time.ZoneOffset.UTC))
+          .param("id", id).update();
       var now = Instant.now();
       var claim = repository.claimDue(
           "migration-verifier-owner", now, now.plus(Duration.ofMinutes(1)));
@@ -80,7 +83,8 @@ public final class FederationMigrationAdapterVerifier {
 
   private static boolean verifyEnqueue(
       Connection connection,
-      org.jooq.DSLContext context,
+      org.springframework.jdbc.core.simple.JdbcClient database,
+      dev.christopherbell.configuration.persistence.PostgresqlSchemaNames schemas,
       PostgresFederationDeliveryJobRepository repository,
       List<Map<String, Object>> rows) throws SQLException {
     if (rows.isEmpty()) {
@@ -88,7 +92,9 @@ public final class FederationMigrationAdapterVerifier {
     }
     var row = rows.getFirst();
     return rollback(connection, () -> {
-      var before = context.fetchCount(FEDERATION_DELIVERY_JOB);
+      var before = database.sql("select count(*) from %s".formatted(
+              schemas.qualifiedTable("federation", "federation_delivery_job")))
+          .query(Long.class).single();
       var peer = new ControlledPeer(
           "migration-verifier-peer", URI.create(text(row.get("peer_inbox"))));
       var now = Instant.now();
@@ -96,7 +102,10 @@ public final class FederationMigrationAdapterVerifier {
           text(row.get("post_id")), text(row.get("account_id")), peer, now);
       repository.enqueueIfAbsent(
           text(row.get("post_id")), text(row.get("account_id")), peer, now);
-      return context.fetchCount(FEDERATION_DELIVERY_JOB) == before + 1;
+      var after = database.sql("select count(*) from %s".formatted(
+              schemas.qualifiedTable("federation", "federation_delivery_job")))
+          .query(Long.class).single();
+      return after == before + 1;
     });
   }
 }

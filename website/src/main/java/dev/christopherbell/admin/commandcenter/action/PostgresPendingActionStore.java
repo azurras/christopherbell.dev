@@ -1,38 +1,42 @@
 package dev.christopherbell.admin.commandcenter.action;
 
-import static dev.christopherbell.persistence.jooq.platform.Tables.PENDING_ACTION;
-
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
+import java.sql.SQLException;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
-import org.jooq.DSLContext;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** PostgreSQL atomic fixed-key machine power-action reservation. */
 @PostgresPersistence
 public class PostgresPendingActionStore implements PendingActionStore {
   private static final String ID = "machine-power";
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final String table;
 
-  public PostgresPendingActionStore(DSLContext database) {
+  public PostgresPendingActionStore(JdbcClient database, PostgresqlSchemaNames schemas) {
     this.database = database;
+    table = schemas.qualifiedTable("platform", "pending_action");
   }
 
   @Override
   public boolean reserve(Reservation reservation, Instant now) {
-    var row = database.insertInto(PENDING_ACTION)
-        .set(PENDING_ACTION.PENDING_ACTION_ID, ID)
-        .set(PENDING_ACTION.ACTION, reservation.action().name())
-        .set(PENDING_ACTION.ACCEPTED_AT, reservation.acceptedAt().atOffset(ZoneOffset.UTC))
-        .set(PENDING_ACTION.EXECUTE_AT, reservation.executeAt().atOffset(ZoneOffset.UTC))
-        .onConflict(PENDING_ACTION.PENDING_ACTION_ID).doUpdate()
-        .set(PENDING_ACTION.ACTION, reservation.action().name())
-        .set(PENDING_ACTION.ACCEPTED_AT, reservation.acceptedAt().atOffset(ZoneOffset.UTC))
-        .set(PENDING_ACTION.EXECUTE_AT, reservation.executeAt().atOffset(ZoneOffset.UTC))
-        .where(PENDING_ACTION.EXECUTE_AT.le(now.atOffset(ZoneOffset.UTC)))
-        .returning(PENDING_ACTION.PENDING_ACTION_ID)
-        .fetchOne();
-    return row != null;
+    return database.sql("""
+            insert into %s (pending_action_id, action, accepted_at, execute_at)
+            values (:id, :action, :acceptedAt, :executeAt)
+            on conflict (pending_action_id) do update set
+              action = excluded.action,
+              accepted_at = excluded.accepted_at,
+              execute_at = excluded.execute_at
+            where %s.execute_at <= :now
+            returning pending_action_id
+            """.formatted(table, table))
+        .param("id", ID).param("action", reservation.action().name())
+        .param("acceptedAt", reservation.acceptedAt().atOffset(ZoneOffset.UTC))
+        .param("executeAt", reservation.executeAt().atOffset(ZoneOffset.UTC))
+        .param("now", now.atOffset(ZoneOffset.UTC)).query(String.class).optional().isPresent();
   }
 
   @Override
@@ -49,28 +53,31 @@ public class PostgresPendingActionStore implements PendingActionStore {
 
   @Override
   public boolean clear(Reservation reservation) {
-    return database.deleteFrom(PENDING_ACTION)
-        .where(PENDING_ACTION.PENDING_ACTION_ID.eq(ID)
-            .and(PENDING_ACTION.ACTION.eq(reservation.action().name()))
-            .and(PENDING_ACTION.ACCEPTED_AT.eq(reservation.acceptedAt().atOffset(ZoneOffset.UTC)))
-            .and(PENDING_ACTION.EXECUTE_AT.eq(reservation.executeAt().atOffset(ZoneOffset.UTC))))
-        .execute() == 1;
+    return database.sql("""
+            delete from %s where pending_action_id = :id and action = :action
+              and accepted_at = :acceptedAt and execute_at = :executeAt
+            """.formatted(table))
+        .param("id", ID).param("action", reservation.action().name())
+        .param("acceptedAt", reservation.acceptedAt().atOffset(ZoneOffset.UTC))
+        .param("executeAt", reservation.executeAt().atOffset(ZoneOffset.UTC)).update() == 1;
   }
 
   @Override
   public void reconcile(Instant now) {
-    database.deleteFrom(PENDING_ACTION)
-        .where(PENDING_ACTION.PENDING_ACTION_ID.eq(ID)
-            .and(PENDING_ACTION.EXECUTE_AT.le(now.atOffset(ZoneOffset.UTC))))
-        .execute();
+    database.sql("delete from %s where pending_action_id = :id and execute_at <= :now"
+            .formatted(table))
+        .param("id", ID).param("now", now.atOffset(ZoneOffset.UTC)).update();
   }
 
   private Optional<Reservation> findReservation() {
-    return database.selectFrom(PENDING_ACTION)
-        .where(PENDING_ACTION.PENDING_ACTION_ID.eq(ID))
-        .fetchOptional(row -> new Reservation(
-            CommandCenterActionType.valueOf(row.getAction()),
-            row.getAcceptedAt().toInstant(),
-            row.getExecuteAt().toInstant()));
+    return database.sql("select * from %s where pending_action_id = :id".formatted(table))
+        .param("id", ID).query(PostgresPendingActionStore::map).optional();
+  }
+
+  private static Reservation map(java.sql.ResultSet row, int rowNumber) throws SQLException {
+    return new Reservation(
+        CommandCenterActionType.valueOf(row.getString("action")),
+        row.getObject("accepted_at", OffsetDateTime.class).toInstant(),
+        row.getObject("execute_at", OffsetDateTime.class).toInstant());
   }
 }

@@ -1,6 +1,5 @@
 package dev.christopherbell.account.api;
 
-import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.database;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.text;
 import static dev.christopherbell.configuration.persistence.PostgresqlMigrationVerificationSupport.verifyOptionalLookup;
 
@@ -15,6 +14,9 @@ import java.sql.Connection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** Published account-module adapter operations used by cutover parity. */
 @PostgresPersistenceSupport
@@ -24,25 +26,34 @@ public final class AccountMigrationVerifier {
   public static boolean verify(
       Connection connection, String schema, String sourceKind, String queryName,
       List<Map<String, Object>> rows) {
-    var context = database(connection, schema);
+    var jdbc = JdbcClient.create(new SingleConnectionDataSource(connection, true));
+    var schemas = dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+        .fromPhysicalSchema(schema);
+    var accounts = new PostgresAccountRepository(
+        jdbc, schemas, TransactionOperations.withoutTransaction());
     return switch (sourceKind + "/" + queryName) {
       case "account/find-by-id" -> verifyOptionalLookup(
-          rows, "account_id", new PostgresAccountRepository(context)::findById);
-      case "account/find-by-email" -> verifyEmails(context, rows);
-      case "account/find-by-username" -> verifyUsernames(context, rows);
-      case "account/federation-actor-page" -> verifyFederationActors(context, rows);
+          rows, "account_id", accounts::findById);
+      case "account/find-by-email" -> verifyEmails(accounts, rows);
+      case "account/find-by-username" -> verifyUsernames(accounts, rows);
+      case "account/federation-actor-page" -> verifyFederationActors(accounts, rows);
       case "account_deletion_job/find-by-id" -> verifyOptionalLookup(
           rows, "account_deletion_job_id",
-          new PostgresAccountDeletionJobRepository(context)::findById);
-      case "account_follow/follow-exists" -> verifyFollow(context, rows);
-      case "account_trust_relationship/relationship-exists" -> verifyTrust(context, rows);
+          new PostgresAccountDeletionJobRepository(
+              org.springframework.jdbc.core.simple.JdbcClient.create(
+                  new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+                      connection, true)),
+              dev.christopherbell.configuration.persistence.PostgresqlSchemaNames
+                  .fromPhysicalSchema(schema))::findById);
+      case "account_follow/follow-exists" -> verifyFollow(jdbc, schemas, rows);
+      case "account_trust_relationship/relationship-exists" -> verifyTrust(
+          jdbc, schemas, rows);
       default -> false;
     };
   }
 
   private static boolean verifyEmails(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var repository = new PostgresAccountRepository(context);
+      PostgresAccountRepository repository, List<Map<String, Object>> rows) {
     return rows.stream().allMatch(row -> repository.findByEmail(text(row.get("email")))
         .map(account -> account.getId().equals(text(row.get("account_id"))))
         .orElse(false))
@@ -50,8 +61,7 @@ public final class AccountMigrationVerifier {
   }
 
   private static boolean verifyUsernames(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var repository = new PostgresAccountRepository(context);
+      PostgresAccountRepository repository, List<Map<String, Object>> rows) {
     return rows.stream().allMatch(row -> repository.findByUsername(text(row.get("username")))
         .map(account -> account.getId().equals(text(row.get("account_id"))))
         .orElse(false))
@@ -59,8 +69,7 @@ public final class AccountMigrationVerifier {
   }
 
   private static boolean verifyFederationActors(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var repository = new PostgresAccountRepository(context);
+      PostgresAccountRepository repository, List<Map<String, Object>> rows) {
     for (var row : rows) {
       var expected = "ACTIVE".equals(text(row.get("status")))
           && Boolean.TRUE.equals(row.get("federation_enabled"));
@@ -76,16 +85,20 @@ public final class AccountMigrationVerifier {
   }
 
   private static boolean verifyFollow(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var store = new PostgresAccountFollowStore(context);
+      JdbcClient jdbc,
+      dev.christopherbell.configuration.persistence.PostgresqlSchemaNames schemas,
+      List<Map<String, Object>> rows) {
+    var store = new PostgresAccountFollowStore(jdbc, schemas);
     return rows.stream().allMatch(row -> store.exists(
         text(row.get("follower_account_id")), text(row.get("followed_account_id"))))
         && !store.exists("migration-verifier-missing-follower", "migration-verifier-missing-followed");
   }
 
   private static boolean verifyTrust(
-      org.jooq.DSLContext context, List<Map<String, Object>> rows) {
-    var repository = new PostgresAccountTrustRepository(context);
+      JdbcClient jdbc,
+      dev.christopherbell.configuration.persistence.PostgresqlSchemaNames schemas,
+      List<Map<String, Object>> rows) {
+    var repository = new PostgresAccountTrustRepository(jdbc, schemas);
     return rows.stream().allMatch(row -> repository.existsByOwnerAccountIdAndTargetAccountIdAndType(
         text(row.get("owner_account_id")), text(row.get("target_account_id")),
         AccountTrustType.valueOf(text(row.get("trust_type")))))

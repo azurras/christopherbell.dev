@@ -27,21 +27,6 @@ jobs:
             build-mode: none
           - language: actions
             build-mode: none
-    services:
-      postgres:
-        image: postgres:18.4
-        env:
-          POSTGRES_DB: test
-          POSTGRES_USER: christopherbell_test
-          # Disposable job-local database credential; this is not a production secret.
-          POSTGRES_PASSWORD: ${{ format('ci-only-{0}-{1}', github.run_id, github.run_attempt) }}
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U christopherbell_test -d test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
@@ -58,12 +43,7 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
       - if: matrix.language == 'java-kotlin'
-        env:
-          JOOQ_CODEGEN_JDBC_URL: jdbc:postgresql://127.0.0.1:5432/test
-          JOOQ_CODEGEN_USERNAME: christopherbell_test
-          JOOQ_CODEGEN_PASSWORD: ${{ format('ci-only-{0}-{1}', github.run_id, github.run_attempt) }}
-          JOOQ_CODEGEN_SCHEMA_PREFIX: cbtest_codeql_${{ github.run_id }}_${{ github.run_attempt }}_
-        run: ./gradlew :website:jooqCodegen :website:classes
+        run: ./gradlew :website:classes
       - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
         with:
           category: '/language:${{ matrix.language }}'

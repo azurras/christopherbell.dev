@@ -1,238 +1,271 @@
 package dev.christopherbell.account;
 
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT;
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT_FEDERATION_IDENTITY;
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT_MODERATION_AUDIT;
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT_MODERATION_AUDIT_VALUE;
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT_PERMISSION;
-
 import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
-import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import dev.christopherbell.federation.api.EncryptedPrivateKey;
 import dev.christopherbell.federation.api.FederationIdentity;
-import dev.christopherbell.persistence.jooq.identity.tables.records.AccountRecord;
-import dev.christopherbell.persistence.jooq.identity.tables.records.AccountFederationIdentityRecord;
-import dev.christopherbell.persistence.jooq.identity.tables.records.AccountModerationAuditRecord;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Types;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.HashMap;
-import org.jooq.DSLContext;
-import org.jooq.Field;
-import org.jooq.SortField;
-import org.jooq.impl.DSL;
-import org.springframework.dao.IncorrectResultSizeDataAccessException;
+import java.util.UUID;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.IncorrectResultSizeDataAccessException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** PostgreSQL implementation of the service-facing account persistence port. */
 @PostgresPersistence
 public class PostgresAccountRepository implements AccountRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
+  private final String accountTable;
+  private final String permissionTable;
+  private final String federationIdentityTable;
+  private final String moderationAuditTable;
+  private final String moderationAuditValueTable;
 
-  public PostgresAccountRepository(DSLContext database) {
+  public PostgresAccountRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas, TransactionOperations transactions) {
     this.database = database;
+    this.transactions = transactions;
+    accountTable = schemas.qualifiedTable("identity", "account");
+    permissionTable = schemas.qualifiedTable("identity", "account_permission");
+    federationIdentityTable = schemas.qualifiedTable("identity", "account_federation_identity");
+    moderationAuditTable = schemas.qualifiedTable("identity", "account_moderation_audit");
+    moderationAuditValueTable = schemas.qualifiedTable("identity", "account_moderation_audit_value");
   }
 
   @Override
   public Account save(Account account) {
     try {
-      var saved = database.transactionResult(
-          configuration -> save(DSL.using(configuration), account));
+      var saved = transactions.execute(ignored -> saveInTransaction(account));
+      if (saved == null) {
+        throw new IllegalStateException("Account transaction returned no value");
+      }
       account.setVersion(saved.getVersion());
       return saved;
-    } catch (org.jooq.exception.IntegrityConstraintViolationException failure) {
-      if ("23505".equals(failure.sqlState())) {
+    } catch (DataIntegrityViolationException failure) {
+      if ("23505".equals(sqlState(failure))) {
         throw new DuplicateKeyException("PostgreSQL rejected a duplicate account identity", failure);
       }
       throw failure;
     }
   }
 
-  private static Account save(DSLContext transaction, Account account) {
-    int affected = account.getVersion() == null
-        ? insert(transaction, account)
-        : update(transaction, account);
+  private Account saveInTransaction(Account account) {
+    int affected = account.getVersion() == null ? insert(account) : update(account);
     if (affected != 1) {
       throw new OptimisticLockingFailureException(
           "Account " + account.getId() + " was changed by another writer");
     }
-    replacePermissions(transaction, account);
-    replaceFederationIdentity(transaction, account);
-    replaceModerationAudit(transaction, account);
-    return findById(transaction, account.getId()).orElseThrow();
+    replacePermissions(account);
+    replaceFederationIdentity(account);
+    replaceModerationAudit(account);
+    return findById(account.getId()).orElseThrow();
   }
 
-  private static int insert(DSLContext transaction, Account account) {
-    return transaction.insertInto(ACCOUNT)
-        .set(ACCOUNT.ACCOUNT_ID, account.getId())
-        .set(ACCOUNT.CREATED_BY, account.getCreatedBy())
-        .set(ACCOUNT.CREATED_ON, timestamp(account.getCreatedOn()))
-        .set(ACCOUNT.EMAIL, account.getEmail())
-        .set(ACCOUNT.NORMALIZED_EMAIL, normalize(account.getEmail()))
-        .set(ACCOUNT.FEDERATION_ENABLED, account.isFederationEnabled())
-        .set(ACCOUNT.FEDERATION_ENABLED_ON, timestamp(account.getFederationEnabledOn()))
-        .set(ACCOUNT.FIRST_NAME, account.getFirstName())
-        .set(ACCOUNT.INVITE_CODE, account.getInviteCode())
-        .set(ACCOUNT.INVITE_CODE_OWNER, account.getInviteCodeOwner())
-        .set(ACCOUNT.LAST_LOGIN_ON, timestamp(account.getLastLoginOn()))
-        .set(ACCOUNT.LAST_NAME, account.getLastName())
-        .set(ACCOUNT.LAST_MODIFIED_BY, account.getLastModifiedBy())
-        .set(ACCOUNT.LAST_UPDATED_ON, timestamp(account.getLastUpdatedOn()))
-        .set(ACCOUNT.LOGIN_TOKEN, account.getLoginToken())
-        .set(ACCOUNT.PASSWORD_SALT, account.getPasswordSalt())
-        .set(ACCOUNT.PASSWORD_HASH, account.getPasswordHash())
-        .set(ACCOUNT.PASSWORD_RESET_TOKEN_HASH, account.getPasswordResetTokenHash())
-        .set(ACCOUNT.PASSWORD_RESET_TOKEN_EXPIRES_ON,
-            timestamp(account.getPasswordResetTokenExpiresOn()))
-        .set(ACCOUNT.ROLE, account.getRole().name())
-        .set(ACCOUNT.STATUS, account.getStatus().name())
-        .set(ACCOUNT.USERNAME, account.getUsername())
-        .set(ACCOUNT.VERSION, 0L)
-        .execute();
+  private int insert(Account account) {
+    return database.sql("""
+            insert into %s (
+              account_id, created_by, created_on, email, normalized_email,
+              federation_enabled, federation_enabled_on, first_name, invite_code,
+              invite_code_owner, last_login_on, last_name, last_modified_by,
+              last_updated_on, login_token, password_salt, password_hash,
+              password_reset_token_hash, password_reset_token_expires_on, role,
+              status, username, version)
+            values (
+              :id, :createdBy, :createdOn, :email, :normalizedEmail,
+              :federationEnabled, :federationEnabledOn, :firstName, :inviteCode,
+              :inviteCodeOwner, :lastLoginOn, :lastName, :lastModifiedBy,
+              :lastUpdatedOn, :loginToken, :passwordSalt, :passwordHash,
+              :passwordResetTokenHash, :passwordResetTokenExpiresOn, :role,
+              :status, :username, 0)
+            """.formatted(accountTable))
+        .paramSource(parameters(account))
+        .update();
   }
 
-  private static int update(DSLContext transaction, Account account) {
-    return transaction.update(ACCOUNT)
-        .set(ACCOUNT.CREATED_BY, account.getCreatedBy())
-        .set(ACCOUNT.CREATED_ON, timestamp(account.getCreatedOn()))
-        .set(ACCOUNT.EMAIL, account.getEmail())
-        .set(ACCOUNT.NORMALIZED_EMAIL, normalize(account.getEmail()))
-        .set(ACCOUNT.FEDERATION_ENABLED, account.isFederationEnabled())
-        .set(ACCOUNT.FEDERATION_ENABLED_ON, timestamp(account.getFederationEnabledOn()))
-        .set(ACCOUNT.FIRST_NAME, account.getFirstName())
-        .set(ACCOUNT.INVITE_CODE, account.getInviteCode())
-        .set(ACCOUNT.INVITE_CODE_OWNER, account.getInviteCodeOwner())
-        .set(ACCOUNT.LAST_LOGIN_ON, timestamp(account.getLastLoginOn()))
-        .set(ACCOUNT.LAST_NAME, account.getLastName())
-        .set(ACCOUNT.LAST_MODIFIED_BY, account.getLastModifiedBy())
-        .set(ACCOUNT.LAST_UPDATED_ON, timestamp(account.getLastUpdatedOn()))
-        .set(ACCOUNT.LOGIN_TOKEN, account.getLoginToken())
-        .set(ACCOUNT.PASSWORD_SALT, account.getPasswordSalt())
-        .set(ACCOUNT.PASSWORD_HASH, account.getPasswordHash())
-        .set(ACCOUNT.PASSWORD_RESET_TOKEN_HASH, account.getPasswordResetTokenHash())
-        .set(ACCOUNT.PASSWORD_RESET_TOKEN_EXPIRES_ON,
-            timestamp(account.getPasswordResetTokenExpiresOn()))
-        .set(ACCOUNT.ROLE, account.getRole().name())
-        .set(ACCOUNT.STATUS, account.getStatus().name())
-        .set(ACCOUNT.USERNAME, account.getUsername())
-        .set(ACCOUNT.VERSION, ACCOUNT.VERSION.plus(1L))
-        .where(ACCOUNT.ACCOUNT_ID.eq(account.getId())
-            .and(ACCOUNT.VERSION.eq(account.getVersion())))
-        .execute();
+  private int update(Account account) {
+    return database.sql("""
+            update %s set
+              created_by = :createdBy,
+              created_on = :createdOn,
+              email = :email,
+              normalized_email = :normalizedEmail,
+              federation_enabled = :federationEnabled,
+              federation_enabled_on = :federationEnabledOn,
+              first_name = :firstName,
+              invite_code = :inviteCode,
+              invite_code_owner = :inviteCodeOwner,
+              last_login_on = :lastLoginOn,
+              last_name = :lastName,
+              last_modified_by = :lastModifiedBy,
+              last_updated_on = :lastUpdatedOn,
+              login_token = :loginToken,
+              password_salt = :passwordSalt,
+              password_hash = :passwordHash,
+              password_reset_token_hash = :passwordResetTokenHash,
+              password_reset_token_expires_on = :passwordResetTokenExpiresOn,
+              role = :role,
+              status = :status,
+              username = :username,
+              version = version + 1
+            where account_id = :id and version = :version
+            """.formatted(accountTable))
+        .paramSource(parameters(account).addValue("version", account.getVersion()))
+        .update();
   }
 
-  private static void replacePermissions(DSLContext transaction, Account account) {
-    transaction.deleteFrom(ACCOUNT_PERMISSION)
-        .where(ACCOUNT_PERMISSION.ACCOUNT_ID.eq(account.getId()))
-        .execute();
-    var permissions = account.getPermissions();
-    if (permissions == null || permissions.isEmpty()) return;
-    var insert = transaction.insertInto(
-        ACCOUNT_PERMISSION, ACCOUNT_PERMISSION.ACCOUNT_ID, ACCOUNT_PERMISSION.PERMISSION);
-    for (var permission : permissions) {
-      insert = insert.values(account.getId(), permission.name());
+  private static MapSqlParameterSource parameters(Account account) {
+    return new MapSqlParameterSource()
+        .addValue("id", account.getId())
+        .addValue("createdBy", account.getCreatedBy(), Types.VARCHAR)
+        .addValue("createdOn", timestamp(account.getCreatedOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("email", account.getEmail())
+        .addValue("normalizedEmail", normalize(account.getEmail()))
+        .addValue("federationEnabled", account.isFederationEnabled())
+        .addValue("federationEnabledOn", timestamp(account.getFederationEnabledOn()),
+            Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("firstName", account.getFirstName(), Types.VARCHAR)
+        .addValue("inviteCode", account.getInviteCode(), Types.OTHER)
+        .addValue("inviteCodeOwner", account.getInviteCodeOwner(), Types.OTHER)
+        .addValue("lastLoginOn", timestamp(account.getLastLoginOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("lastName", account.getLastName(), Types.VARCHAR)
+        .addValue("lastModifiedBy", account.getLastModifiedBy(), Types.VARCHAR)
+        .addValue("lastUpdatedOn", timestamp(account.getLastUpdatedOn()),
+            Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("loginToken", account.getLoginToken(), Types.VARCHAR)
+        .addValue("passwordSalt", account.getPasswordSalt(), Types.VARCHAR)
+        .addValue("passwordHash", account.getPasswordHash())
+        .addValue("passwordResetTokenHash", account.getPasswordResetTokenHash(), Types.VARCHAR)
+        .addValue("passwordResetTokenExpiresOn", timestamp(account.getPasswordResetTokenExpiresOn()),
+            Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("role", account.getRole().name())
+        .addValue("status", account.getStatus().name())
+        .addValue("username", account.getUsername());
+  }
+
+  private void replacePermissions(Account account) {
+    database.sql("delete from %s where account_id = :id".formatted(permissionTable))
+        .param("id", account.getId()).update();
+    if (account.getPermissions() == null) return;
+    for (var permission : account.getPermissions()) {
+      database.sql("insert into %s (account_id, permission) values (:id, :permission)"
+              .formatted(permissionTable))
+          .param("id", account.getId()).param("permission", permission.name()).update();
     }
-    insert.execute();
   }
 
-  private static void replaceFederationIdentity(DSLContext transaction, Account account) {
-    transaction.deleteFrom(ACCOUNT_FEDERATION_IDENTITY)
-        .where(ACCOUNT_FEDERATION_IDENTITY.ACCOUNT_ID.eq(account.getId()))
-        .execute();
+  private void replaceFederationIdentity(Account account) {
+    database.sql("delete from %s where account_id = :id".formatted(federationIdentityTable))
+        .param("id", account.getId()).update();
     var identity = account.getFederationIdentity();
     if (identity == null) return;
-    transaction.insertInto(ACCOUNT_FEDERATION_IDENTITY)
-        .set(ACCOUNT_FEDERATION_IDENTITY.ACCOUNT_ID, account.getId())
-        .set(ACCOUNT_FEDERATION_IDENTITY.ACTOR_ID, identity.actorId())
-        .set(ACCOUNT_FEDERATION_IDENTITY.KEY_ID, identity.keyId())
-        .set(ACCOUNT_FEDERATION_IDENTITY.PUBLIC_KEY_PEM, identity.publicKeyPem())
-        .set(ACCOUNT_FEDERATION_IDENTITY.PRIVATE_KEY_NONCE, identity.encryptedPrivateKey().nonce())
-        .set(ACCOUNT_FEDERATION_IDENTITY.PRIVATE_KEY_CIPHERTEXT,
-            identity.encryptedPrivateKey().ciphertext())
-        .set(ACCOUNT_FEDERATION_IDENTITY.KEY_VERSION, identity.keyVersion())
-        .set(ACCOUNT_FEDERATION_IDENTITY.CREATED_ON, timestamp(identity.createdOn()))
-        .execute();
+    database.sql("""
+            insert into %s (
+              account_id, actor_id, key_id, public_key_pem, private_key_nonce,
+              private_key_ciphertext, key_version, created_on)
+            values (
+              :accountId, :actorId, :keyId, :publicKeyPem, :nonce,
+              :ciphertext, :keyVersion, :createdOn)
+            """.formatted(federationIdentityTable))
+        .param("accountId", account.getId())
+        .param("actorId", identity.actorId())
+        .param("keyId", identity.keyId())
+        .param("publicKeyPem", identity.publicKeyPem())
+        .param("nonce", identity.encryptedPrivateKey().nonce())
+        .param("ciphertext", identity.encryptedPrivateKey().ciphertext())
+        .param("keyVersion", identity.keyVersion())
+        .param("createdOn", timestamp(identity.createdOn()))
+        .update();
   }
 
-  private static void replaceModerationAudit(DSLContext transaction, Account account) {
-    transaction.deleteFrom(ACCOUNT_MODERATION_AUDIT)
-        .where(ACCOUNT_MODERATION_AUDIT.ACCOUNT_ID.eq(account.getId()))
-        .execute();
+  private void replaceModerationAudit(Account account) {
+    database.sql("delete from %s where account_id = :id".formatted(moderationAuditTable))
+        .param("id", account.getId()).update();
     var audit = account.getPendingModerationAudit();
     if (audit == null) return;
-    transaction.insertInto(ACCOUNT_MODERATION_AUDIT)
-        .set(ACCOUNT_MODERATION_AUDIT.ACCOUNT_ID, account.getId())
-        .set(ACCOUNT_MODERATION_AUDIT.EVENT_ID, audit.eventId())
-        .set(ACCOUNT_MODERATION_AUDIT.ACTOR_ACCOUNT_ID, audit.actorAccountId())
-        .set(ACCOUNT_MODERATION_AUDIT.ACTOR_USERNAME, audit.actorUsername())
-        .set(ACCOUNT_MODERATION_AUDIT.ACTION, audit.action())
-        .set(ACCOUNT_MODERATION_AUDIT.TARGET_TYPE, audit.targetType())
-        .set(ACCOUNT_MODERATION_AUDIT.TARGET_ID, audit.targetId())
-        .set(ACCOUNT_MODERATION_AUDIT.TARGET_LABEL, audit.targetLabel())
-        .set(ACCOUNT_MODERATION_AUDIT.REASON, audit.reason())
-        .set(ACCOUNT_MODERATION_AUDIT.MESSAGE, audit.message())
-        .execute();
-    insertAuditValues(transaction, account.getId(), "before", audit.beforeValues());
-    insertAuditValues(transaction, account.getId(), "after", audit.afterValues());
-    insertAuditValues(transaction, account.getId(), "metadata", audit.metadata());
+    database.sql("""
+            insert into %s (
+              account_id, event_id, actor_account_id, actor_username, action,
+              target_type, target_id, target_label, reason, message)
+            values (
+              :accountId, :eventId, :actorAccountId, :actorUsername, :action,
+              :targetType, :targetId, :targetLabel, :reason, :message)
+            """.formatted(moderationAuditTable))
+        .paramSource(new MapSqlParameterSource()
+            .addValue("accountId", account.getId())
+            .addValue("eventId", audit.eventId())
+            .addValue("actorAccountId", audit.actorAccountId(), Types.VARCHAR)
+            .addValue("actorUsername", audit.actorUsername(), Types.VARCHAR)
+            .addValue("action", audit.action())
+            .addValue("targetType", audit.targetType())
+            .addValue("targetId", audit.targetId())
+            .addValue("targetLabel", audit.targetLabel(), Types.VARCHAR)
+            .addValue("reason", audit.reason(), Types.VARCHAR)
+            .addValue("message", audit.message(), Types.VARCHAR))
+        .update();
+    insertAuditValues(account.getId(), "before", audit.beforeValues());
+    insertAuditValues(account.getId(), "after", audit.afterValues());
+    insertAuditValues(account.getId(), "metadata", audit.metadata());
   }
 
-  private static void insertAuditValues(
-      DSLContext transaction, String accountId, String partition, Map<String, String> values) {
-    if (values.isEmpty()) return;
-    var insert = transaction.insertInto(
-        ACCOUNT_MODERATION_AUDIT_VALUE,
-        ACCOUNT_MODERATION_AUDIT_VALUE.ACCOUNT_ID,
-        ACCOUNT_MODERATION_AUDIT_VALUE.PARTITION_NAME,
-        ACCOUNT_MODERATION_AUDIT_VALUE.VALUE_KEY,
-        ACCOUNT_MODERATION_AUDIT_VALUE.VALUE);
+  private void insertAuditValues(String accountId, String partition, Map<String, String> values) {
     for (var entry : values.entrySet()) {
-      insert = insert.values(accountId, partition, entry.getKey(), entry.getValue());
+      database.sql("""
+              insert into %s (account_id, partition_name, value_key, value)
+              values (:accountId, :partition, :key, :value)
+              """.formatted(moderationAuditValueTable))
+          .param("accountId", accountId).param("partition", partition)
+          .param("key", entry.getKey()).param("value", entry.getValue()).update();
     }
-    insert.execute();
   }
 
   @Override
   public Optional<Account> findById(String id) {
-    return findById(database, id);
-  }
-
-  private static Optional<Account> findById(DSLContext context, String id) {
-    return context.selectFrom(ACCOUNT)
-        .where(ACCOUNT.ACCOUNT_ID.eq(id))
-        .fetchOptional(record -> map(context, record));
+    return findOne("account_id = :value", Map.of("value", id), false);
   }
 
   @Override
   public boolean existsById(String id) {
-    return database.fetchExists(ACCOUNT, ACCOUNT.ACCOUNT_ID.eq(id));
+    return database.sql("select exists (select 1 from %s where account_id = :id)"
+            .formatted(accountTable))
+        .param("id", id).query(Boolean.class).single();
   }
 
   @Override
   public void deleteById(String id) {
-    database.deleteFrom(ACCOUNT).where(ACCOUNT.ACCOUNT_ID.eq(id)).execute();
+    database.sql("delete from %s where account_id = :id".formatted(accountTable))
+        .param("id", id).update();
   }
 
   @Override
   public Page<Account> findAll(Pageable pageable) {
-    return page(ACCOUNT.ACCOUNT_ID.isNotNull(), pageable);
+    return page("true", Map.of(), pageable);
   }
 
   @Override
@@ -240,234 +273,285 @@ public class PostgresAccountRepository implements AccountRepository {
     var requested = new ArrayList<String>();
     ids.forEach(requested::add);
     if (requested.isEmpty()) return List.of();
-    var records = database.selectFrom(ACCOUNT)
-        .where(ACCOUNT.ACCOUNT_ID.in(requested))
-        .fetch();
-    return mapAll(database, records);
+    return queryAccounts("account_id in (:values)", Map.of("values", requested), "");
   }
 
   @Override
   public Optional<Account> findByEmail(String email) {
-    return findOne(ACCOUNT.EMAIL.eq(email), false);
+    return findOne("email = :value", Map.of("value", email), false);
   }
 
   @Override
   public Optional<Account> findByEmailIgnoreCase(String email) {
-    return findOne(ACCOUNT.NORMALIZED_EMAIL.eq(normalize(email)), true);
+    return findOne("normalized_email = :value", Map.of("value", normalize(email)), true);
   }
 
   @Override
-  public Optional<Account> findByPasswordResetTokenHash(String passwordResetTokenHash) {
-    return findOne(ACCOUNT.PASSWORD_RESET_TOKEN_HASH.eq(passwordResetTokenHash), false);
+  public Optional<Account> findByPasswordResetTokenHash(String hash) {
+    return findOne("password_reset_token_hash = :value", Map.of("value", hash), false);
   }
 
   @Override
   public Optional<Account> findByUsername(String username) {
-    return findOne(ACCOUNT.USERNAME.eq(username), false);
+    return findOne("username = :value", Map.of("value", username), false);
   }
 
   @Override
   public Optional<Account> findByUsernameAndStatus(String username, AccountStatus status) {
-    return findOne(ACCOUNT.USERNAME.eq(username).and(ACCOUNT.STATUS.eq(status.name())), false);
+    return findOne("username = :username and status = :status",
+        Map.of("username", username, "status", status.name()), false);
   }
 
   @Override
   public Optional<Account> findByUsernameIgnoreCase(String username) {
-    return findOne(DSL.lower(ACCOUNT.USERNAME).eq(normalize(username)), true);
+    return findOne("lower(username) = :value", Map.of("value", normalize(username)), true);
   }
 
   @Override
   public Optional<Account> findByUsernameIgnoreCaseAndStatusAndFederationEnabledTrue(
       String username, AccountStatus status) {
-    return findOne(DSL.lower(ACCOUNT.USERNAME).eq(normalize(username))
-        .and(ACCOUNT.STATUS.eq(status.name()))
-        .and(ACCOUNT.FEDERATION_ENABLED.isTrue()), true);
+    return findOne("lower(username) = :username and status = :status and federation_enabled",
+        Map.of("username", normalize(username), "status", status.name()), true);
   }
 
   @Override
   public long countByStatus(AccountStatus status) {
-    return database.fetchCount(ACCOUNT, ACCOUNT.STATUS.eq(status.name()));
+    return count("status = :status", Map.of("status", status.name()));
   }
 
   @Override
   public Page<Account> findByStatus(AccountStatus status, Pageable pageable) {
-    return page(ACCOUNT.STATUS.eq(status.name()), pageable);
+    return page("status = :status", Map.of("status", status.name()), pageable);
   }
 
   @Override
   public List<Account> findByUsernameStartingWithIgnoreCaseAndStatusOrderByUsernameAsc(
-      String usernamePrefix, AccountStatus status, Pageable pageable) {
-    var records = database.selectFrom(ACCOUNT)
-        .where(DSL.lower(ACCOUNT.USERNAME).like(escapeLike(normalize(usernamePrefix)) + '%', '\\')
-            .and(ACCOUNT.STATUS.eq(status.name())))
-        .orderBy(ACCOUNT.USERNAME.asc(), ACCOUNT.ACCOUNT_ID.asc())
-        .limit(pageable.isPaged() ? pageable.getPageSize() : Integer.MAX_VALUE)
-        .offset(pageable.isPaged() ? Math.toIntExact(pageable.getOffset()) : 0)
-        .fetch();
-    return mapAll(database, records);
+      String prefix, AccountStatus status, Pageable pageable) {
+    return queryAccounts(
+        "lower(username) like :prefix escape '\\\\' and status = :status",
+        Map.of("prefix", escapeLike(normalize(prefix)) + '%', "status", status.name()),
+        "order by username asc, account_id asc " + pageClause(pageable), pageParameters(pageable));
   }
 
   @Override
   public List<Account> findByIdInAndStatusAndFederationEnabledTrueOrderByUsernameAsc(
       Collection<String> accountIds, AccountStatus status, Pageable pageable) {
     if (accountIds.isEmpty()) return List.of();
-    var records = database.selectFrom(ACCOUNT)
-        .where(ACCOUNT.ACCOUNT_ID.in(accountIds)
-            .and(ACCOUNT.STATUS.eq(status.name()))
-            .and(ACCOUNT.FEDERATION_ENABLED.isTrue()))
-        .orderBy(ACCOUNT.USERNAME.asc(), ACCOUNT.ACCOUNT_ID.asc())
-        .limit(pageable.isPaged() ? pageable.getPageSize() : Integer.MAX_VALUE)
-        .offset(pageable.isPaged() ? Math.toIntExact(pageable.getOffset()) : 0)
-        .fetch();
-    return mapAll(database, records);
+    return queryAccounts(
+        "account_id in (:ids) and status = :status and federation_enabled",
+        Map.of("ids", accountIds, "status", status.name()),
+        "order by username asc, account_id asc " + pageClause(pageable), pageParameters(pageable));
   }
 
-  private Optional<Account> findOne(org.jooq.Condition condition, boolean requireUnique) {
-    var records = database.selectFrom(ACCOUNT)
-        .where(condition)
-        .limit(requireUnique ? 2 : 1)
-        .fetch();
-    var matches = mapAll(database, records);
-    if (requireUnique && matches.size() > 1) {
+  Page<Account> findAdminPage(AdminAccountQuery request) {
+    var clauses = new ArrayList<String>();
+    var parameters = new HashMap<String, Object>();
+    if (request.status() != null) {
+      clauses.add("status = :status");
+      parameters.put("status", request.status().name());
+    }
+    if (request.role() != null) {
+      clauses.add("role = :role");
+      parameters.put("role", request.role().name());
+    }
+    if (request.text() != null) {
+      clauses.add("""
+          (lower(username) like :text escape '\\'
+            or lower(email) like :text escape '\\'
+            or lower(first_name) like :text escape '\\'
+            or lower(last_name) like :text escape '\\')
+          """);
+      parameters.put("text", "%" + escapeLike(normalize(request.text())) + "%");
+    }
+    var where = clauses.isEmpty() ? "true" : String.join(" and ", clauses);
+    var direction = request.direction() == Sort.Direction.ASC ? "asc" : "desc";
+    var column = switch (request.sort()) {
+      case "createdOn" -> "created_on";
+      case "lastUpdatedOn" -> "last_updated_on";
+      case "lastLoginOn" -> "last_login_on";
+      case "username" -> "username";
+      case "email" -> "email";
+      case "status" -> "status";
+      case "role" -> "role";
+      default -> throw new IllegalArgumentException("Unsupported account sort field.");
+    };
+    var total = count(where, parameters);
+    var values = queryAccounts(where, parameters,
+        "order by %s %s, account_id %s limit :limit offset :offset"
+            .formatted(column, direction, direction),
+        Map.of("limit", request.size(), "offset", Math.multiplyExact(request.page(), request.size())));
+    return new PageImpl<>(values, org.springframework.data.domain.PageRequest.of(
+        request.page(), request.size()), total);
+  }
+
+  private Optional<Account> findOne(String where, Map<String, ?> parameters, boolean unique) {
+    var matches = queryAccounts(where, parameters, "limit " + (unique ? 2 : 1));
+    if (unique && matches.size() > 1) {
       throw new IncorrectResultSizeDataAccessException(1);
     }
     return matches.stream().findFirst();
   }
 
-  private Page<Account> page(org.jooq.Condition condition, Pageable pageable) {
-    var total = database.fetchCount(ACCOUNT, condition);
-    var query = database.selectFrom(ACCOUNT)
-        .where(condition)
-        .orderBy(sortFields(pageable));
-    var records = pageable.isPaged()
-        ? query.limit(pageable.getPageSize()).offset(Math.toIntExact(pageable.getOffset()))
-            .fetch()
-        : query.fetch();
-    var values = mapAll(database, records);
+  private Page<Account> page(String where, Map<String, ?> parameters, Pageable pageable) {
+    var total = count(where, parameters);
+    var suffix = "order by " + sortClause(pageable) + " " + pageClause(pageable);
+    var values = queryAccounts(where, parameters, suffix, pageParameters(pageable));
     return new PageImpl<>(values, pageable, total);
   }
 
-  private static List<SortField<?>> sortFields(Pageable pageable) {
-    var fields = new ArrayList<SortField<?>>();
-    for (var order : pageable.getSort()) {
-      var field = sortableField(order.getProperty());
-      fields.add(order.getDirection() == Sort.Direction.ASC ? field.asc() : field.desc());
-    }
-    if (fields.isEmpty()) fields.add(ACCOUNT.ACCOUNT_ID.asc());
-    if (fields.stream().noneMatch(field -> field.getName().equals(ACCOUNT.ACCOUNT_ID.getName()))) {
-      fields.add(ACCOUNT.ACCOUNT_ID.asc());
-    }
-    return List.copyOf(fields);
+  private long count(String where, Map<String, ?> parameters) {
+    var query = database.sql("select count(*) from %s where %s".formatted(accountTable, where));
+    for (var entry : parameters.entrySet()) query.param(entry.getKey(), entry.getValue());
+    return query.query(Long.class).single();
   }
 
-  private static Field<?> sortableField(String property) {
-    return switch (property) {
-      case "id" -> ACCOUNT.ACCOUNT_ID;
-      case "createdOn" -> ACCOUNT.CREATED_ON;
-      case "lastUpdatedOn" -> ACCOUNT.LAST_UPDATED_ON;
-      case "username" -> ACCOUNT.USERNAME;
-      default -> throw new IllegalArgumentException("Unsupported account sort property: " + property);
-    };
+  private List<Account> queryAccounts(String where, Map<String, ?> parameters, String suffix) {
+    return queryAccounts(where, parameters, suffix, Map.of());
   }
 
-  public static Account map(DSLContext context, AccountRecord record) {
-    return mapAll(context, List.of(record)).getFirst();
+  private List<Account> queryAccounts(
+      String where, Map<String, ?> parameters, String suffix, Map<String, ?> suffixParameters) {
+    var query = database.sql("select * from %s where %s %s".formatted(accountTable, where, suffix));
+    for (var entry : parameters.entrySet()) query.param(entry.getKey(), entry.getValue());
+    for (var entry : suffixParameters.entrySet()) query.param(entry.getKey(), entry.getValue());
+    return enrich(query.query(PostgresAccountRepository::mapBase).list());
   }
 
-  public static List<Account> mapAll(DSLContext context, List<AccountRecord> records) {
-    if (records.isEmpty()) return List.of();
-    var accountIds = records.stream().map(AccountRecord::getAccountId).toList();
+  private List<Account> enrich(List<Account> accounts) {
+    if (accounts.isEmpty()) return List.of();
+    var ids = accounts.stream().map(Account::getId).toList();
     var permissions = new HashMap<String, HashSet<AccountPermission>>();
-    accountIds.forEach(id -> permissions.put(id, new HashSet<>()));
-    context.select(ACCOUNT_PERMISSION.ACCOUNT_ID, ACCOUNT_PERMISSION.PERMISSION)
-        .from(ACCOUNT_PERMISSION)
-        .where(ACCOUNT_PERMISSION.ACCOUNT_ID.in(accountIds))
-        .forEach(row -> permissions.get(row.value1()).add(AccountPermission.valueOf(row.value2())));
-    Map<String, AccountFederationIdentityRecord> identities = context
-        .selectFrom(ACCOUNT_FEDERATION_IDENTITY)
-        .where(ACCOUNT_FEDERATION_IDENTITY.ACCOUNT_ID.in(accountIds))
-        .fetchMap(ACCOUNT_FEDERATION_IDENTITY.ACCOUNT_ID);
-    Map<String, AccountModerationAuditRecord> audits = context
-        .selectFrom(ACCOUNT_MODERATION_AUDIT)
-        .where(ACCOUNT_MODERATION_AUDIT.ACCOUNT_ID.in(accountIds))
-        .fetchMap(ACCOUNT_MODERATION_AUDIT.ACCOUNT_ID);
+    ids.forEach(id -> permissions.put(id, new HashSet<>()));
+    database.sql("select account_id, permission from %s where account_id in (:ids)"
+            .formatted(permissionTable))
+        .param("ids", ids)
+        .query((row, ignored) -> new String[] {row.getString(1), row.getString(2)})
+        .list()
+        .forEach(value -> permissions.get(value[0]).add(AccountPermission.valueOf(value[1])));
+
+    var identities = new HashMap<String, FederationIdentity>();
+    database.sql("select * from %s where account_id in (:ids)".formatted(federationIdentityTable))
+        .param("ids", ids)
+        .query((row, ignored) -> Map.entry(row.getString("account_id"), federationIdentity(row)))
+        .list().forEach(value -> identities.put(value.getKey(), value.getValue()));
+
+    var audits = new HashMap<String, AuditRow>();
+    database.sql("select * from %s where account_id in (:ids)".formatted(moderationAuditTable))
+        .param("ids", ids).query(PostgresAccountRepository::auditRow).list()
+        .forEach(value -> audits.put(value.accountId(), value));
+
     var auditValues = new HashMap<AuditPartition, LinkedHashMap<String, String>>();
-    context.selectFrom(ACCOUNT_MODERATION_AUDIT_VALUE)
-        .where(ACCOUNT_MODERATION_AUDIT_VALUE.ACCOUNT_ID.in(accountIds))
-        .orderBy(ACCOUNT_MODERATION_AUDIT_VALUE.ACCOUNT_ID.asc(),
-            ACCOUNT_MODERATION_AUDIT_VALUE.PARTITION_NAME.asc(),
-            ACCOUNT_MODERATION_AUDIT_VALUE.VALUE_KEY.asc())
-        .forEach(row -> auditValues.computeIfAbsent(
-            new AuditPartition(row.getAccountId(), row.getPartitionName()),
-            ignored -> new LinkedHashMap<>()).put(row.getValueKey(), row.getValue()));
-    return records.stream().map(record -> map(
-        record,
-        permissions.get(record.getAccountId()),
-        federationIdentity(identities.get(record.getAccountId())),
-        moderationAudit(audits.get(record.getAccountId()), auditValues))).toList();
+    database.sql("""
+            select * from %s where account_id in (:ids)
+            order by account_id, partition_name, value_key
+            """.formatted(moderationAuditValueTable))
+        .param("ids", ids)
+        .query((row, ignored) -> new AuditValue(
+            row.getString("account_id"), row.getString("partition_name"),
+            row.getString("value_key"), row.getString("value")))
+        .list()
+        .forEach(value -> auditValues.computeIfAbsent(
+            new AuditPartition(value.accountId(), value.partition()),
+            ignored -> new LinkedHashMap<>()).put(value.key(), value.value()));
+
+    for (var account : accounts) {
+      account.setPermissions(permissions.get(account.getId()));
+      account.setFederationIdentity(identities.get(account.getId()));
+      account.setPendingModerationAudit(moderationAudit(audits.get(account.getId()), auditValues));
+    }
+    return List.copyOf(accounts);
   }
 
-  private static Account map(
-      AccountRecord record,
-      HashSet<AccountPermission> permissions,
-      FederationIdentity federationIdentity,
-      ModerationAuditCommand moderationAudit) {
+  private static Account mapBase(ResultSet row, int rowNumber) throws SQLException {
     return Account.builder()
-        .id(record.getAccountId())
-        .version(record.getVersion())
-        .createdBy(record.getCreatedBy())
-        .createdOn(instant(record.getCreatedOn()))
-        .email(record.getEmail())
-        .federationEnabled(record.getFederationEnabled())
-        .federationEnabledOn(instant(record.getFederationEnabledOn()))
-        .federationIdentity(federationIdentity)
-        .firstName(record.getFirstName())
-        .inviteCode(record.getInviteCode())
-        .inviteCodeOwner(record.getInviteCodeOwner())
-        .lastLoginOn(instant(record.getLastLoginOn()))
-        .lastName(record.getLastName())
-        .lastModifiedBy(record.getLastModifiedBy())
-        .lastUpdatedOn(instant(record.getLastUpdatedOn()))
-        .loginToken(record.getLoginToken())
-        .passwordSalt(record.getPasswordSalt())
-        .passwordHash(record.getPasswordHash())
-        .passwordResetTokenHash(record.getPasswordResetTokenHash())
-        .passwordResetTokenExpiresOn(instant(record.getPasswordResetTokenExpiresOn()))
-        .pendingModerationAudit(moderationAudit)
-        .role(Role.valueOf(record.getRole()))
-        .permissions(permissions)
-        .status(AccountStatus.valueOf(record.getStatus()))
-        .username(record.getUsername())
+        .id(row.getString("account_id"))
+        .version(row.getLong("version"))
+        .createdBy(row.getString("created_by"))
+        .createdOn(instant(row.getObject("created_on", OffsetDateTime.class)))
+        .email(row.getString("email"))
+        .federationEnabled(row.getObject("federation_enabled", Boolean.class))
+        .federationEnabledOn(instant(row.getObject("federation_enabled_on", OffsetDateTime.class)))
+        .firstName(row.getString("first_name"))
+        .inviteCode(row.getObject("invite_code", UUID.class))
+        .inviteCodeOwner(row.getObject("invite_code_owner", UUID.class))
+        .lastLoginOn(instant(row.getObject("last_login_on", OffsetDateTime.class)))
+        .lastName(row.getString("last_name"))
+        .lastModifiedBy(row.getString("last_modified_by"))
+        .lastUpdatedOn(instant(row.getObject("last_updated_on", OffsetDateTime.class)))
+        .loginToken(row.getString("login_token"))
+        .passwordSalt(row.getString("password_salt"))
+        .passwordHash(row.getString("password_hash"))
+        .passwordResetTokenHash(row.getString("password_reset_token_hash"))
+        .passwordResetTokenExpiresOn(
+            instant(row.getObject("password_reset_token_expires_on", OffsetDateTime.class)))
+        .role(Role.valueOf(row.getString("role")))
+        .status(AccountStatus.valueOf(row.getString("status")))
+        .username(row.getString("username"))
         .build();
   }
 
-  private static FederationIdentity federationIdentity(AccountFederationIdentityRecord identity) {
-    if (identity == null) return null;
+  private static FederationIdentity federationIdentity(ResultSet row) throws SQLException {
     return new FederationIdentity(
-        identity.getActorId(), identity.getKeyId(), identity.getPublicKeyPem(),
-        new EncryptedPrivateKey(identity.getPrivateKeyNonce(), identity.getPrivateKeyCiphertext()),
-        identity.getKeyVersion(), instant(identity.getCreatedOn()));
+        row.getString("actor_id"), row.getString("key_id"), row.getString("public_key_pem"),
+        new EncryptedPrivateKey(row.getBytes("private_key_nonce"),
+            row.getBytes("private_key_ciphertext")),
+        row.getInt("key_version"), instant(row.getObject("created_on", OffsetDateTime.class)));
+  }
+
+  private static AuditRow auditRow(ResultSet row, int rowNumber) throws SQLException {
+    return new AuditRow(
+        row.getString("account_id"), row.getString("event_id"),
+        row.getString("actor_account_id"), row.getString("actor_username"),
+        row.getString("action"), row.getString("target_type"), row.getString("target_id"),
+        row.getString("target_label"), row.getString("reason"), row.getString("message"));
   }
 
   private static ModerationAuditCommand moderationAudit(
-      AccountModerationAuditRecord audit,
-      Map<AuditPartition, LinkedHashMap<String, String>> values) {
+      AuditRow audit, Map<AuditPartition, LinkedHashMap<String, String>> values) {
     if (audit == null) return null;
     return new ModerationAuditCommand(
-        audit.getEventId(), audit.getActorAccountId(), audit.getActorUsername(),
-        audit.getAction(), audit.getTargetType(), audit.getTargetId(), audit.getTargetLabel(),
-        audit.getReason(), audit.getMessage(),
-        auditValues(values, audit.getAccountId(), "before"),
-        auditValues(values, audit.getAccountId(), "after"),
-        auditValues(values, audit.getAccountId(), "metadata"));
+        audit.eventId(), audit.actorAccountId(), audit.actorUsername(), audit.action(),
+        audit.targetType(), audit.targetId(), audit.targetLabel(), audit.reason(), audit.message(),
+        auditValues(values, audit.accountId(), "before"),
+        auditValues(values, audit.accountId(), "after"),
+        auditValues(values, audit.accountId(), "metadata"));
   }
 
   private static Map<String, String> auditValues(
       Map<AuditPartition, LinkedHashMap<String, String>> values,
-      String accountId,
-      String partition) {
+      String accountId, String partition) {
     return Map.copyOf(values.getOrDefault(
         new AuditPartition(accountId, partition), new LinkedHashMap<>()));
+  }
+
+  private static String sortClause(Pageable pageable) {
+    var fields = new ArrayList<String>();
+    for (var order : pageable.getSort()) {
+      var column = switch (order.getProperty()) {
+        case "id" -> "account_id";
+        case "createdOn" -> "created_on";
+        case "lastUpdatedOn" -> "last_updated_on";
+        case "username" -> "username";
+        default -> throw new IllegalArgumentException(
+            "Unsupported account sort property: " + order.getProperty());
+      };
+      fields.add(column + (order.getDirection() == Sort.Direction.ASC ? " asc" : " desc"));
+    }
+    if (fields.isEmpty()) fields.add("account_id asc");
+    if (fields.stream().noneMatch(value -> value.startsWith("account_id "))) {
+      fields.add("account_id asc");
+    }
+    return String.join(", ", fields);
+  }
+
+  private static String pageClause(Pageable pageable) {
+    return pageable.isPaged() ? "limit :limit offset :offset" : "";
+  }
+
+  private static Map<String, ?> pageParameters(Pageable pageable) {
+    return pageable.isPaged()
+        ? Map.of("limit", pageable.getPageSize(), "offset", Math.toIntExact(pageable.getOffset()))
+        : Map.of();
   }
 
   private static String normalize(String value) {
@@ -486,5 +570,17 @@ public class PostgresAccountRepository implements AccountRepository {
     return value == null ? null : value.toInstant();
   }
 
+  private static String sqlState(Throwable failure) {
+    for (var cause = failure; cause != null; cause = cause.getCause()) {
+      if (cause instanceof SQLException sqlFailure) return sqlFailure.getSQLState();
+    }
+    return null;
+  }
+
   private record AuditPartition(String accountId, String partition) {}
+  private record AuditValue(String accountId, String partition, String key, String value) {}
+  private record AuditRow(
+      String accountId, String eventId, String actorAccountId, String actorUsername,
+      String action, String targetType, String targetId, String targetLabel,
+      String reason, String message) {}
 }

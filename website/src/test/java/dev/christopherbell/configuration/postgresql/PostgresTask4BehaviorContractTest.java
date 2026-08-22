@@ -1,16 +1,5 @@
 package dev.christopherbell.configuration.postgresql;
 
-import static dev.christopherbell.persistence.jooq.platform.Tables.APPLICATION_LEASE;
-import static dev.christopherbell.persistence.jooq.music.Tables.ACCESS_ATTEMPT;
-import static dev.christopherbell.persistence.jooq.music.Tables.RUNTIME_STATE;
-import static dev.christopherbell.persistence.jooq.music.Tables.QUEUE_ENTRY;
-import static dev.christopherbell.persistence.jooq.music.Tables.TRACK;
-import static dev.christopherbell.persistence.jooq.shared_folder.Tables.AUDIT_EVENT;
-import static dev.christopherbell.persistence.jooq.shared_folder.Tables.MAINTENANCE_LEASE;
-import static dev.christopherbell.persistence.jooq.shared_folder.Tables.MEDIA_JOB;
-import static dev.christopherbell.persistence.jooq.shared_folder.Tables.MUTATION_RECOVERY;
-import static dev.christopherbell.persistence.jooq.shared_folder.Tables.RECYCLE_ITEM;
-import static dev.christopherbell.persistence.jooq.shared_folder.Tables.UPLOAD_SESSION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -19,6 +8,7 @@ import dev.christopherbell.account.model.Account;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.persistence.PostgresApplicationLeaseStore;
+import dev.christopherbell.configuration.persistence.PostgresqlConstraintViolationCause;
 import dev.christopherbell.music.catalog.MusicIndexStatus;
 import dev.christopherbell.music.catalog.MusicQuery;
 import dev.christopherbell.music.catalog.MusicTrack;
@@ -58,16 +48,18 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.jooq.DSLContext;
-import org.jooq.ExecuteContext;
-import org.jooq.impl.DSL;
-import org.jooq.impl.DefaultExecuteListener;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.AbstractDataSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -76,6 +68,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.PageRequest;
 
@@ -90,7 +83,8 @@ class PostgresTask4BehaviorContractTest {
   static void migrateDatabase() throws Exception {
     schemas = Task3PostgresqlTestSupport.migrate();
     database = schemas.openDatabase();
-    var accounts = new PostgresAccountRepository(database.dsl());
+    var accounts = new PostgresAccountRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     accounts.save(account("media-a", "media-a@example.test", "mediaa"));
     accounts.save(account("media-b", "media-b@example.test", "mediab"));
   }
@@ -103,9 +97,9 @@ class PostgresTask4BehaviorContractTest {
 
   @Test
   void musicContractsPreservePathsOrderingCasAggregationAndBoundedQueries() {
-    database.dsl().deleteFrom(QUEUE_ENTRY).execute();
-    database.dsl().deleteFrom(RUNTIME_STATE).execute();
-    var tracks = new PostgresMusicTrackRepository(database.dsl());
+    database.jdbc().sql("delete from " + table("music", "queue_entry")).update();
+    database.jdbc().sql("delete from " + table("music", "runtime_state")).update();
+    var tracks = new PostgresMusicTrackRepository(database.jdbc(), database.schemas());
     tracks.save(track("track-a", "album/a.mp3", "Alpha", true));
     tracks.save(track("track-b", "album/b.mp3", "Beta", false));
     assertThat(tracks.findByPath("album/a.mp3")).isPresent();
@@ -114,12 +108,13 @@ class PostgresTask4BehaviorContractTest {
     assertThatThrownBy(() -> tracks.save(track("track-invalid", "album\\bad.mp3", "Bad", false)))
         .isInstanceOf(IllegalArgumentException.class);
 
-    var catalog = new PostgresMusicCatalogQueryRepository(database.dsl());
+    var catalog = new PostgresMusicCatalogQueryRepository(database.jdbc(), database.schemas());
     assertThat(catalog.search(new MusicQuery("alpha", null, null, null, null, null, 0, 10))
         .tracks()).extracting(MusicTrack::id).containsExactly("track-a");
     assertThat(catalog.radioCandidates(10)).extracting(MusicTrack::id).containsExactly("track-b");
 
-    var playlists = new PostgresMusicPlaylistRepository(database.dsl());
+    var playlists = new PostgresMusicPlaylistRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var saved = playlists.save(new MusicPlaylist("playlist", "ordered", "Ordered",
         List.of("track-b", "track-a"), null, "media-a", NOW));
     assertThat(saved.trackIds()).containsExactly("track-b", "track-a");
@@ -130,12 +125,28 @@ class PostgresTask4BehaviorContractTest {
     assertThatThrownBy(() -> playlists.save(stale)).isInstanceOf(OptimisticLockingFailureException.class);
     assertThatThrownBy(() -> playlists.save(new MusicPlaylist(changed.id(), changed.normalizedName(),
         changed.name(), List.of("missing-track"), changed.version(), changed.updatedByAccountId(),
-        NOW.plusSeconds(2)))).isInstanceOf(DataIntegrityViolationException.class)
-        .hasCauseInstanceOf(org.jooq.exception.IntegrityConstraintViolationException.class);
+        NOW.plusSeconds(2))))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .isNotInstanceOf(DuplicateKeyException.class)
+        .hasCauseInstanceOf(PostgresqlConstraintViolationCause.class)
+        .hasMessage("PostgreSQL rejected music playlist data.")
+        .hasMessageNotContaining("missing-track")
+        .hasMessageNotContaining("insert into");
     assertThat(playlists.findById("playlist").orElseThrow().trackIds())
         .containsExactly("track-a", "track-b");
 
-    var edits = new PostgresMusicMetadataEditRepository(database.dsl());
+    assertThatThrownBy(() -> playlists.save(new MusicPlaylist(
+        "playlist-duplicate", changed.normalizedName(), "Duplicate", List.of(), null,
+        changed.updatedByAccountId(), NOW.plusSeconds(3))))
+        .isInstanceOf(DuplicateKeyException.class)
+        .hasCauseInstanceOf(PostgresqlConstraintViolationCause.class)
+        .hasMessage("PostgreSQL rejected a duplicate music playlist identity.")
+        .hasMessageNotContaining(changed.normalizedName())
+        .hasMessageNotContaining("insert into");
+    assertThat(playlists.findById("playlist").orElseThrow().trackIds())
+        .containsExactly("track-a", "track-b");
+
+    var edits = new PostgresMusicMetadataEditRepository(database.jdbc(), database.schemas());
     var edit = edits.save(metadataEdit(null));
     assertThat(edits.findTop100ByExpiresAtBeforeOrderByExpiresAtAsc(NOW.plusSeconds(3_601)))
         .containsExactly(edit);
@@ -144,13 +155,14 @@ class PostgresTask4BehaviorContractTest {
         .isInstanceOf(OptimisticLockingFailureException.class);
     assertThat(applied.version()).isEqualTo(1);
 
-    var history = new PostgresMusicRadioHistoryRepository(database.dsl());
+    var history = new PostgresMusicRadioHistoryRepository(database.jdbc(), database.schemas());
     history.save(history("history-1", 1, "track-a"));
     history.save(history("history-2", 2, "track-b"));
     assertThat(history.findTop100ByOrderByStationSequenceDesc())
         .extracting(MusicRadioHistoryEvent::id).containsExactly("history-2", "history-1");
 
-    var runtime = new PostgresMusicRuntimeStateRepository(database.dsl());
+    var runtime = new PostgresMusicRuntimeStateRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var queue = runtime.saveQueue(queue(null, "queue-a", "track-a"));
     var radio = runtime.saveRadio(radio(null, 1, "track-a"));
     var updatedQueue = runtime.saveQueue(queue(queue.version(), "queue-b", "track-b"));
@@ -159,7 +171,7 @@ class PostgresTask4BehaviorContractTest {
         .isInstanceOf(OptimisticLockingFailureException.class);
     assertThat(runtime.findRadio()).contains(radio);
 
-    var attempts = new PostgresMusicAccessAttemptRepository(database.dsl());
+    var attempts = new PostgresMusicAccessAttemptRepository(database.jdbc(), database.schemas());
     attempts.record("attempt", MusicAccessPrincipalType.IP, "127.0.0.1", "denied", NOW,
         NOW.plus(Duration.ofDays(30)));
     var aggregated = attempts.record("attempt", MusicAccessPrincipalType.IP, "127.0.0.1", "denied",
@@ -172,32 +184,32 @@ class PostgresTask4BehaviorContractTest {
 
   @Test
   void musicRuntimeRepositoryPreservesAndUpdatesLegacyStateIdentity() {
-    database.dsl().deleteFrom(QUEUE_ENTRY).execute();
-    database.dsl().deleteFrom(RUNTIME_STATE).execute();
-    database.dsl().insertInto(RUNTIME_STATE)
-        .set(RUNTIME_STATE.RUNTIME_STATE_ID, "legacy-queue-state")
-        .set(RUNTIME_STATE.STATE_KIND, "QUEUE")
-        .set(RUNTIME_STATE.VERSION, 4L)
-        .execute();
-    var runtime = new PostgresMusicRuntimeStateRepository(database.dsl());
+    database.jdbc().sql("delete from " + table("music", "queue_entry")).update();
+    database.jdbc().sql("delete from " + table("music", "runtime_state")).update();
+    database.jdbc().sql("""
+            insert into %s (runtime_state_id, state_kind, version)
+            values ('legacy-queue-state', 'QUEUE', 4)
+            """.formatted(table("music", "runtime_state"))).update();
+    var runtime = new PostgresMusicRuntimeStateRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
 
     var loaded = runtime.findQueue().orElseThrow();
     var saved = runtime.saveQueue(
         new MusicQueueState(MusicQueueState.ID, List.of(), loaded.version()));
 
     assertThat(saved.version()).isEqualTo(5L);
-    assertThat(database.dsl().select(RUNTIME_STATE.RUNTIME_STATE_ID, RUNTIME_STATE.VERSION)
-        .from(RUNTIME_STATE).where(RUNTIME_STATE.STATE_KIND.eq("QUEUE")).fetchOne())
-        .satisfies(row -> {
-          assertThat(row.value1()).isEqualTo("legacy-queue-state");
-          assertThat(row.value2()).isEqualTo(5L);
-        });
+    assertThat(database.jdbc().sql("""
+            select runtime_state_id, version from %s where state_kind = 'QUEUE'
+            """.formatted(table("music", "runtime_state")))
+        .query((row, ignored) -> Map.entry(
+            row.getString("runtime_state_id"), row.getLong("version"))).single())
+        .isEqualTo(Map.entry("legacy-queue-state", 5L));
   }
 
   @ParameterizedTest(name = "rejects Windows-unsafe persisted path: {0}")
   @MethodSource("windowsUnsafePersistedPaths")
   void postgresAdaptersRejectEveryWindowsUnsafeRelativePath(String path) {
-    var tracks = new PostgresMusicTrackRepository(database.dsl());
+    var tracks = new PostgresMusicTrackRepository(database.jdbc(), database.schemas());
 
     assertThatThrownBy(() -> tracks.save(track("unsafe-" + Integer.toUnsignedString(path.hashCode()),
         path, "Unsafe", false)))
@@ -217,13 +229,13 @@ class PostgresTask4BehaviorContractTest {
   @MethodSource("invalidLeaseIdentities")
   void applicationLeaseRejectsInvalidIdentityWithoutChangingAnyRow(
       String leaseName, String ownerId) {
-    var leases = new PostgresApplicationLeaseStore(database.dsl());
-    int rowsBefore = database.dsl().fetchCount(APPLICATION_LEASE);
+    var leases = new PostgresApplicationLeaseStore(database.jdbc(), database.schemas());
+    long rowsBefore = count("platform", "application_lease");
 
     assertThatThrownBy(() -> leases.tryAcquire(leaseName, ownerId, Duration.ofMinutes(1)))
         .isInstanceOf(IllegalArgumentException.class);
 
-    assertThat(database.dsl().fetchCount(APPLICATION_LEASE)).isEqualTo(rowsBefore);
+    assertThat(count("platform", "application_lease")).isEqualTo(rowsBefore);
   }
 
   static List<Arguments> invalidLeaseIdentities() {
@@ -236,27 +248,29 @@ class PostgresTask4BehaviorContractTest {
 
   @Test
   void databaseTimeLeasesHaveOneWinnerAndMonotonicFencingAcrossConnections() throws Exception {
-    database.dsl().deleteFrom(MAINTENANCE_LEASE).execute();
-    database.dsl().deleteFrom(APPLICATION_LEASE).execute();
-    var maintenance = new PostgresSharedFolderMaintenanceLeaseStore(database.dsl());
+    database.jdbc().sql("delete from " + table("shared_folder", "maintenance_lease")).update();
+    database.jdbc().sql("delete from " + table("platform", "application_lease")).update();
+    var maintenance = new PostgresSharedFolderMaintenanceLeaseStore(
+        database.jdbc(), database.schemas());
     assertThat(maintenance.tryAcquire("owner-a", Duration.ofMinutes(1))).isPresent();
     assertThat(maintenance.tryAcquire("owner-b", Duration.ofMinutes(1))).isEmpty();
-    long firstFence = database.dsl().select(MAINTENANCE_LEASE.FENCE_TOKEN)
-        .from(MAINTENANCE_LEASE).fetchOne(MAINTENANCE_LEASE.FENCE_TOKEN);
-    database.dsl().update(MAINTENANCE_LEASE)
-        .set(MAINTENANCE_LEASE.EXPIRES_AT, expiredDatabaseTime())
-        .execute();
+    long firstFence = database.jdbc().sql("select fence_token from "
+        + table("shared_folder", "maintenance_lease")).query(Long.class).single();
+    database.jdbc().sql("update %s set expires_at = current_timestamp - interval '1 second'"
+        .formatted(table("shared_folder", "maintenance_lease"))).update();
     assertSingleWinner(
         () -> claimMaintenance("owner-b"), () -> claimMaintenance("owner-c"));
-    assertThat(database.dsl().select(MAINTENANCE_LEASE.FENCE_TOKEN).from(MAINTENANCE_LEASE)
-        .fetchOne(MAINTENANCE_LEASE.FENCE_TOKEN)).isGreaterThan(firstFence);
+    assertThat(database.jdbc().sql("select fence_token from "
+        + table("shared_folder", "maintenance_lease")).query(Long.class).single())
+        .isGreaterThan(firstFence);
 
-    var application = new PostgresApplicationLeaseStore(database.dsl());
+    var application = new PostgresApplicationLeaseStore(database.jdbc(), database.schemas());
     var first = application.tryAcquire("music", "owner-a", Duration.ofMinutes(1)).orElseThrow();
     assertThat(application.tryAcquire("music", "owner-b", Duration.ofMinutes(1))).isEmpty();
-    database.dsl().update(APPLICATION_LEASE)
-        .set(APPLICATION_LEASE.EXPIRES_AT, expiredDatabaseTime())
-        .where(APPLICATION_LEASE.LEASE_NAME.eq("music")).execute();
+    database.jdbc().sql("""
+            update %s set expires_at = current_timestamp - interval '1 second'
+            where lease_name = 'music'
+            """.formatted(table("platform", "application_lease"))).update();
     var next = application.tryAcquire("music", "owner-b", Duration.ofMinutes(1)).orElseThrow();
     assertThat(next.fenceToken()).isGreaterThan(first.fenceToken());
     assertThat(application.renew(first, Duration.ofMinutes(1))).isEmpty();
@@ -266,18 +280,15 @@ class PostgresTask4BehaviorContractTest {
 
   @Test
   void maintenanceLeaseTakesOverAnExpiredLegacyRowWithoutOwnershipAtFenceOne() {
-    database.dsl().deleteFrom(MAINTENANCE_LEASE).execute();
-    database.dsl().insertInto(MAINTENANCE_LEASE)
-        .set(MAINTENANCE_LEASE.LEASE_NAME, "shared-folder-maintenance")
-        .set(MAINTENANCE_LEASE.OWNER_TOKEN, (String) null)
-        .set(MAINTENANCE_LEASE.FENCE_TOKEN, (Long) null)
-        .set(MAINTENANCE_LEASE.ACQUIRED_AT,
-            Instant.parse("2026-08-01T00:00:00Z").atOffset(ZoneOffset.UTC))
-        .set(MAINTENANCE_LEASE.EXPIRES_AT,
-            Instant.parse("2026-08-01T00:01:00Z").atOffset(ZoneOffset.UTC))
-        .execute();
+    database.jdbc().sql("delete from " + table("shared_folder", "maintenance_lease")).update();
+    database.jdbc().sql("""
+            insert into %s
+              (lease_name, owner_token, fence_token, acquired_at, expires_at)
+            values ('shared-folder-maintenance', null, null,
+              timestamptz '2026-08-01T00:00:00Z', timestamptz '2026-08-01T00:01:00Z')
+            """.formatted(table("shared_folder", "maintenance_lease"))).update();
 
-    var grant = new PostgresSharedFolderMaintenanceLeaseStore(database.dsl())
+    var grant = new PostgresSharedFolderMaintenanceLeaseStore(database.jdbc(), database.schemas())
         .tryAcquire("legacy-takeover", Duration.ofMinutes(1))
         .orElseThrow();
 
@@ -287,18 +298,15 @@ class PostgresTask4BehaviorContractTest {
 
   @Test
   void applicationLeaseTakesOverAnExpiredLegacyRowWithoutOwnershipAtFenceOne() {
-    database.dsl().deleteFrom(APPLICATION_LEASE).execute();
-    database.dsl().insertInto(APPLICATION_LEASE)
-        .set(APPLICATION_LEASE.LEASE_NAME, "legacy-application")
-        .set(APPLICATION_LEASE.OWNER_TOKEN, (String) null)
-        .set(APPLICATION_LEASE.FENCE_TOKEN, (Long) null)
-        .set(APPLICATION_LEASE.ACQUIRED_AT,
-            Instant.parse("2026-08-01T00:00:00Z").atOffset(ZoneOffset.UTC))
-        .set(APPLICATION_LEASE.EXPIRES_AT,
-            Instant.parse("2026-08-01T00:01:00Z").atOffset(ZoneOffset.UTC))
-        .execute();
+    database.jdbc().sql("delete from " + table("platform", "application_lease")).update();
+    database.jdbc().sql("""
+            insert into %s
+              (lease_name, owner_token, fence_token, acquired_at, expires_at)
+            values ('legacy-application', null, null,
+              timestamptz '2026-08-01T00:00:00Z', timestamptz '2026-08-01T00:01:00Z')
+            """.formatted(table("platform", "application_lease"))).update();
 
-    var grant = new PostgresApplicationLeaseStore(database.dsl())
+    var grant = new PostgresApplicationLeaseStore(database.jdbc(), database.schemas())
         .tryAcquire("legacy-application", "legacy-owner", Duration.ofMinutes(1))
         .orElseThrow();
 
@@ -308,7 +316,7 @@ class PostgresTask4BehaviorContractTest {
 
   @Test
   void sharedFolderAuditPreservesUnknownClientOrigin() {
-    var event = new PostgresSharedFolderAuditRepository(database.dsl()).save(
+    var event = new PostgresSharedFolderAuditRepository(database.jdbc(), database.schemas()).save(
         new SharedFolderAuditEvent("unknown-origin", "unknown", "READ", "folder/file.txt",
             1L, "SUCCESS", null, "unknown", Instant.parse("2026-08-01T00:00:00Z"),
             Instant.parse("2027-08-01T00:00:00Z")));
@@ -320,7 +328,7 @@ class PostgresTask4BehaviorContractTest {
   void retentionDeleteRechecksRowsRefreshedByAnIndependentConnection() throws Exception {
     Instant cutoff = Instant.parse("1900-01-02T00:00:00Z");
     Instant refreshedExpiry = Instant.parse("2200-01-01T00:00:00Z");
-    var attempts = new PostgresMusicAccessAttemptRepository(database.dsl());
+    var attempts = new PostgresMusicAccessAttemptRepository(database.jdbc(), database.schemas());
     attempts.record("retention-race-access", MusicAccessPrincipalType.IP, "127.0.0.1", "denied",
         cutoff.minusSeconds(2), cutoff.minusSeconds(1));
 
@@ -328,23 +336,28 @@ class PostgresTask4BehaviorContractTest {
          var refresher = schemas.openDatabase();
          var deleter = schemas.openDatabase()) {
       refresher.connection().setAutoCommit(false);
-      refresher.dsl().update(ACCESS_ATTEMPT)
-          .set(ACCESS_ATTEMPT.EXPIRES_AT, refreshedExpiry.atOffset(ZoneOffset.UTC))
-          .where(ACCESS_ATTEMPT.ACCESS_ATTEMPT_ID.eq("retention-race-access")).execute();
-      int deletingBackend = deleter.dsl()
-          .select(DSL.field("pg_backend_pid()", Integer.class)).fetchSingle().value1();
+      refresher.jdbc().sql("""
+              update %s set expires_at = :expiresAt where access_attempt_id = :id
+              """.formatted(refresher.schemas().qualifiedTable("music", "access_attempt")))
+          .param("expiresAt", refreshedExpiry.atOffset(ZoneOffset.UTC))
+          .param("id", "retention-race-access").update();
+      int deletingBackend = deleter.jdbc().sql("select pg_backend_pid()")
+          .query(Integer.class).single();
       var deletion = executor.submit(() ->
-          new PostgresMusicAccessAttemptRepository(deleter.dsl()).deleteExpired(cutoff, 1));
+          new PostgresMusicAccessAttemptRepository(deleter.jdbc(), deleter.schemas())
+              .deleteExpired(cutoff, 1));
       awaitBlockedByRefresh(deletingBackend);
       refresher.connection().commit();
 
       assertThat(deletion.get(10, TimeUnit.SECONDS)).isZero();
     }
-    assertThat(database.dsl().select(ACCESS_ATTEMPT.EXPIRES_AT).from(ACCESS_ATTEMPT)
-        .where(ACCESS_ATTEMPT.ACCESS_ATTEMPT_ID.eq("retention-race-access"))
-        .fetchOne(ACCESS_ATTEMPT.EXPIRES_AT)).isEqualTo(refreshedExpiry.atOffset(ZoneOffset.UTC));
+    assertThat(database.jdbc().sql("""
+            select expires_at from %s where access_attempt_id = :id
+            """.formatted(table("music", "access_attempt")))
+        .param("id", "retention-race-access").query(OffsetDateTime.class).single())
+        .isEqualTo(refreshedExpiry.atOffset(ZoneOffset.UTC));
 
-    var audits = new PostgresSharedFolderAuditRepository(database.dsl());
+    var audits = new PostgresSharedFolderAuditRepository(database.jdbc(), database.schemas());
     audits.save(new SharedFolderAuditEvent(
         "retention-race-audit", "media-a", "READ", null, null, "SUCCESS", null,
         "127.0.0.1", cutoff.minusSeconds(2), cutoff.minusSeconds(1)));
@@ -352,29 +365,34 @@ class PostgresTask4BehaviorContractTest {
          var refresher = schemas.openDatabase();
          var deleter = schemas.openDatabase()) {
       refresher.connection().setAutoCommit(false);
-      refresher.dsl().update(AUDIT_EVENT)
-          .set(AUDIT_EVENT.EXPIRES_AT, refreshedExpiry.atOffset(ZoneOffset.UTC))
-          .where(AUDIT_EVENT.AUDIT_EVENT_ID.eq("retention-race-audit")).execute();
-      int deletingBackend = deleter.dsl()
-          .select(DSL.field("pg_backend_pid()", Integer.class)).fetchSingle().value1();
+      refresher.jdbc().sql("""
+              update %s set expires_at = :expiresAt where audit_event_id = :id
+              """.formatted(refresher.schemas().qualifiedTable("shared_folder", "audit_event")))
+          .param("expiresAt", refreshedExpiry.atOffset(ZoneOffset.UTC))
+          .param("id", "retention-race-audit").update();
+      int deletingBackend = deleter.jdbc().sql("select pg_backend_pid()")
+          .query(Integer.class).single();
       var deletion = executor.submit(() ->
-          new PostgresSharedFolderAuditRepository(deleter.dsl()).deleteExpired(cutoff, 1));
+          new PostgresSharedFolderAuditRepository(deleter.jdbc(), deleter.schemas())
+              .deleteExpired(cutoff, 1));
       awaitBlockedByRefresh(deletingBackend);
       refresher.connection().commit();
 
       assertThat(deletion.get(10, TimeUnit.SECONDS)).isZero();
     }
-    assertThat(database.dsl().select(AUDIT_EVENT.EXPIRES_AT).from(AUDIT_EVENT)
-        .where(AUDIT_EVENT.AUDIT_EVENT_ID.eq("retention-race-audit"))
-        .fetchOne(AUDIT_EVENT.EXPIRES_AT)).isEqualTo(refreshedExpiry.atOffset(ZoneOffset.UTC));
+    assertThat(database.jdbc().sql("""
+            select expires_at from %s where audit_event_id = :id
+            """.formatted(table("shared_folder", "audit_event")))
+        .param("id", "retention-race-audit").query(OffsetDateTime.class).single())
+        .isEqualTo(refreshedExpiry.atOffset(ZoneOffset.UTC));
   }
 
   private static void awaitBlockedByRefresh(int deletingBackend) throws InterruptedException {
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
     while (System.nanoTime() < deadline) {
-      Integer blockers = database.dsl().select(DSL.field(
-          "cardinality(pg_blocking_pids({0}))", Integer.class, DSL.val(deletingBackend)))
-          .fetchSingle().value1();
+      Integer blockers = database.jdbc()
+          .sql("select cardinality(pg_blocking_pids(:backend))")
+          .param("backend", deletingBackend).query(Integer.class).single();
       if (blockers != null && blockers > 0) {
         return;
       }
@@ -386,64 +404,57 @@ class PostgresTask4BehaviorContractTest {
   @Test
   void boundedTaskFourQueriesHaveConstantCountsAndUseDeclaredIndexes() throws Exception {
     var executions = new AtomicInteger();
-    var catalog = new PostgresMusicCatalogQueryRepository(countedDatabase(executions));
+    var catalog = new PostgresMusicCatalogQueryRepository(
+        countedJdbc(executions), database.schemas());
     assertConstantQueries(executions, 6,
         () -> catalog.search(new MusicQuery(null, null, null, null, null, null, 0, 1)),
         () -> catalog.search(new MusicQuery(null, null, null, null, null, null, 0, 100)));
 
-    database.dsl().execute("set enable_seqscan = off");
+    database.jdbc().sql("set enable_seqscan = off").update();
     try {
-      assertThat(database.dsl().explain(database.dsl().selectFrom(TRACK)
-          .where(TRACK.EXCLUDED_FROM_RADIO.isFalse().and(TRACK.MISSING_SINCE.isNull())
-              .and(TRACK.INDEX_STATUS.eq(MusicIndexStatus.READY.name())))
-          .orderBy(TRACK.EXCLUDED_FROM_RADIO.asc(), TRACK.FAVORITE.desc(),
-              TRACK.ARTIST.asc(), TRACK.ALBUM.asc(), TRACK.TRACK_ID.asc()).limit(100)).plan())
+      assertThat(explain(("select * from %s where excluded_from_radio = false "
+          + "and missing_since is null and index_status = 'READY' order by "
+          + "excluded_from_radio, favorite desc, artist, album, track_id limit 100")
+          .formatted(table("music", "track"))))
           .contains("track__track_radio_candidate");
-      assertThat(database.dsl().explain(database.dsl().selectFrom(ACCESS_ATTEMPT)
-          .where(ACCESS_ATTEMPT.EXPIRES_AT.le(NOW.atOffset(ZoneOffset.UTC)))
-          .orderBy(ACCESS_ATTEMPT.EXPIRES_AT.asc(), ACCESS_ATTEMPT.ACCESS_ATTEMPT_ID.asc())
-          .limit(100)).plan()).contains("access_attempt__access_attempt_expiration");
-      assertThat(database.dsl().explain(database.dsl().selectFrom(AUDIT_EVENT)
-          .where(AUDIT_EVENT.EXPIRES_AT.le(NOW.atOffset(ZoneOffset.UTC)))
-          .orderBy(AUDIT_EVENT.EXPIRES_AT.asc(), AUDIT_EVENT.AUDIT_EVENT_ID.asc())
-          .limit(100)).plan()).contains("audit_event__audit_event_expiration");
-      assertThat(database.dsl().explain(database.dsl().selectFrom(MEDIA_JOB)
-          .where(MEDIA_JOB.ARTIFACTS_CLEANED.isFalse()
-              .and(MEDIA_JOB.CLEANUP_AFTER.le(NOW.atOffset(ZoneOffset.UTC))))
-          .orderBy(MEDIA_JOB.CLEANUP_AFTER.asc(), MEDIA_JOB.LAST_ACCESSED_AT.asc(),
-              MEDIA_JOB.MEDIA_JOB_ID.asc()).limit(100)).plan())
+      assertThat(explainDue("music", "access_attempt", "expires_at",
+          "expires_at, access_attempt_id")).contains("access_attempt__access_attempt_expiration");
+      assertThat(explainDue("shared_folder", "audit_event", "expires_at",
+          "expires_at, audit_event_id")).contains("audit_event__audit_event_expiration");
+      assertThat(explain(("select * from %s where artifacts_cleaned = false "
+          + "and cleanup_after <= timestamptz '2026-08-13T20:00:00Z' "
+          + "order by cleanup_after, last_accessed_at, media_job_id limit 100")
+          .formatted(table("shared_folder", "media_job"))))
           .contains("media_job__media_cleanup_due");
-      assertThat(database.dsl().explain(database.dsl().selectFrom(MUTATION_RECOVERY)
-          .where(MUTATION_RECOVERY.OPERATION_LEASE_EXPIRES_AT.le(NOW.atOffset(ZoneOffset.UTC)))
-          .orderBy(MUTATION_RECOVERY.OPERATION_LEASE_EXPIRES_AT.asc(),
-              MUTATION_RECOVERY.UPDATED_AT.asc(), MUTATION_RECOVERY.MUTATION_RECOVERY_ID.asc())
-          .limit(100)).plan()).contains("mutation_recovery__mutation_recovery_lease");
-      assertThat(database.dsl().explain(database.dsl().selectFrom(RECYCLE_ITEM)
-          .where(RECYCLE_ITEM.STATE.eq(SharedFolderRecycleState.RECYCLED.name())
-              .and(RECYCLE_ITEM.RETRY_AFTER.le(NOW.atOffset(ZoneOffset.UTC))))
-          .orderBy(RECYCLE_ITEM.STATE.asc(), RECYCLE_ITEM.RETRY_AFTER.asc(),
-              RECYCLE_ITEM.RECYCLE_ITEM_ID.asc()).limit(100)).plan())
+      assertThat(explain(("select * from %s where operation_lease_expires_at "
+          + "<= timestamptz '2026-08-13T20:00:00Z' order by "
+          + "operation_lease_expires_at, updated_at, mutation_recovery_id limit 100")
+          .formatted(table("shared_folder", "mutation_recovery"))))
+          .contains("mutation_recovery__mutation_recovery_lease");
+      assertThat(explain(("select * from %s where state = 'RECYCLED' and retry_after "
+          + "<= timestamptz '2026-08-13T20:00:00Z' order by "
+          + "state, retry_after, recycle_item_id limit 100")
+          .formatted(table("shared_folder", "recycle_item"))))
           .contains("recycle_item__recycle_recovery_due");
-      assertThat(database.dsl().explain(database.dsl().selectFrom(UPLOAD_SESSION)
-          .where(UPLOAD_SESSION.OWNER_ID.eq("media-a")
-              .and(UPLOAD_SESSION.STATE.eq(SharedFolderUploadState.ACTIVE.name())))
-          .orderBy(UPLOAD_SESSION.UPDATED_AT.desc(), UPLOAD_SESSION.UPLOAD_SESSION_ID.asc())
-          .limit(100)).plan()).contains("upload_session__upload_owner_state");
+      assertThat(explain(("select * from %s where owner_id = 'media-a' and state = 'ACTIVE' "
+          + "order by updated_at desc, upload_session_id limit 100")
+          .formatted(table("shared_folder", "upload_session"))))
+          .contains("upload_session__upload_owner_state");
     } finally {
-      database.dsl().execute("reset enable_seqscan");
+      database.jdbc().sql("reset enable_seqscan").update();
     }
   }
 
   @Test
   void sharedFolderRepositoriesPreserveDurableIntentOrderingAndOptimisticState() {
-    var audit = new PostgresSharedFolderAuditRepository(database.dsl());
+    var audit = new PostgresSharedFolderAuditRepository(database.jdbc(), database.schemas());
     var event = audit.save(new SharedFolderAuditEvent(null, "media-a", "DOWNLOAD", "folder/file.mp4",
         100L, "SUCCESS", null, "127.0.0.1", NOW, NOW.plus(Duration.ofDays(30))));
     assertThat(event.id()).isNotBlank();
     assertThat(audit.search("media-a", "DOWNLOAD", "SUCCESS", "folder/file.mp4",
         NOW.minusSeconds(1), NOW.plusSeconds(1), 10)).containsExactly(event);
 
-    var media = new PostgresMediaJobRepository(database.dsl());
+    var media = new PostgresMediaJobRepository(database.jdbc(), database.schemas());
     var mediaJob = media.save(mediaJob());
     assertThat(media.findFirstByCacheKeyAndStatusInOrderByCreatedAtAsc(
         "cache", MediaJobStatus.active())).contains(mediaJob);
@@ -452,7 +463,8 @@ class PostgresTask4BehaviorContractTest {
     assertThat(media.findById(mediaJob.getId()).orElseThrow().getStatus())
         .isEqualTo(MediaJobStatus.CANCELED);
 
-    var radio = new PostgresSharedFolderRadioRepository(database.dsl());
+    var radio = new PostgresSharedFolderRadioRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var station = radio.save(SharedFolderRadioDocument.playing(1, "Music/a.mp3", NOW, 90.0,
         List.of(new SharedFolderRadioDocument.TrackDuration("Music/b.mp3", "token-b", 91.0))));
     assertThat(radio.findById(SharedFolderRadioDocument.ID).orElseThrow().knownDurations())
@@ -460,14 +472,15 @@ class PostgresTask4BehaviorContractTest {
     radio.save(SharedFolderRadioDocument.empty(2, station.knownDurations(), station.version()));
     assertThatThrownBy(() -> radio.save(station)).isInstanceOf(OptimisticLockingFailureException.class);
 
-    var recycle = new PostgresSharedFolderRecycleRepository(database.dsl());
+    var recycle = new PostgresSharedFolderRecycleRepository(database.jdbc(), database.schemas());
     recycle.save(recycle("recycle-a", NOW));
     recycle.save(recycle("recycle-b", NOW.plusSeconds(1)));
     assertThat(recycle.findByStateOrderByDeletedAtDescIdDesc(
         SharedFolderRecycleState.RECYCLED, PageRequest.of(0, 1)).getContent())
         .extracting(SharedFolderRecycleItem::id).containsExactly("recycle-b");
 
-    var uploads = new PostgresSharedFolderUploadSessionRepository(database.dsl());
+    var uploads = new PostgresSharedFolderUploadSessionRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var upload = uploads.save(upload("upload-active", SharedFolderUploadState.ACTIVE, null));
     assertThat(uploads.findById(upload.getId()).orElseThrow().getChunkDigests())
         .containsEntry("chunk-0", "a".repeat(64));
@@ -480,30 +493,28 @@ class PostgresTask4BehaviorContractTest {
 
   @Test
   void recoveryAndUploadClaimsAreAtomicAndRetryableAfterCrash() throws Exception {
-    var recoveries = new PostgresSharedFolderMutationRecoveryRepository(database.dsl());
+    var recoveries = new PostgresSharedFolderMutationRecoveryRepository(
+        database.jdbc(), database.schemas());
     var recovery = recoveries.save(recovery());
-    database.dsl().update(MUTATION_RECOVERY)
-        .set(MUTATION_RECOVERY.OPERATION_LEASE_EXPIRES_AT, unexpiredDatabaseTime())
-        .where(MUTATION_RECOVERY.MUTATION_RECOVERY_ID.eq(recovery.getId())).execute();
+    setDatabaseRelativeTime("shared_folder", "mutation_recovery",
+        "operation_lease_expires_at", "mutation_recovery_id", recovery.getId(), "1 minute");
     assertThat(claimRecovery("recovery-too-early")).isFalse();
-    database.dsl().update(MUTATION_RECOVERY)
-        .set(MUTATION_RECOVERY.OPERATION_LEASE_EXPIRES_AT, expiredDatabaseTime())
-        .where(MUTATION_RECOVERY.MUTATION_RECOVERY_ID.eq(recovery.getId())).execute();
+    setDatabaseRelativeTime("shared_folder", "mutation_recovery",
+        "operation_lease_expires_at", "mutation_recovery_id", recovery.getId(), "-1 second");
     assertSingleWinner(
         () -> claimRecovery("recovery-owner-a"),
         () -> claimRecovery("recovery-owner-b"));
     assertThat(recoveries.findById(recovery.getId()).orElseThrow().getOperationLeaseToken())
         .isIn("recovery-owner-a", "recovery-owner-b");
 
-    var uploads = new PostgresSharedFolderUploadSessionRepository(database.dsl());
+    var uploads = new PostgresSharedFolderUploadSessionRepository(
+        database.managedJdbc(), database.schemas(), database.transactions());
     var upload = uploads.save(upload("upload-claim", SharedFolderUploadState.APPENDING, "append-owner"));
-    database.dsl().update(UPLOAD_SESSION)
-        .set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT, unexpiredDatabaseTime())
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(upload.getId())).execute();
+    setDatabaseRelativeTime("shared_folder", "upload_session",
+        "append_lease_expires_at", "upload_session_id", upload.getId(), "1 minute");
     assertThat(claimUpload("append-too-early")).isFalse();
-    database.dsl().update(UPLOAD_SESSION)
-        .set(UPLOAD_SESSION.APPEND_LEASE_EXPIRES_AT, expiredDatabaseTime())
-        .where(UPLOAD_SESSION.UPLOAD_SESSION_ID.eq(upload.getId())).execute();
+    setDatabaseRelativeTime("shared_folder", "upload_session",
+        "append_lease_expires_at", "upload_session_id", upload.getId(), "-1 second");
     assertSingleWinner(
         () -> claimUpload("append-recovery-a"),
         () -> claimUpload("append-recovery-b"));
@@ -513,7 +524,8 @@ class PostgresTask4BehaviorContractTest {
 
   private static boolean claimRecovery(String token) throws Exception {
     try (var connection = schemas.openDatabase()) {
-      return new PostgresSharedFolderMutationRecoveryRepository(connection.dsl())
+      return new PostgresSharedFolderMutationRecoveryRepository(
+          connection.jdbc(), connection.schemas())
           .claimExpiredOperationLease("recovery", "operation-owner",
               SharedFolderMutationRecoveryState.PREPARED, token,
               Duration.ofMinutes(1)).isPresent();
@@ -522,14 +534,16 @@ class PostgresTask4BehaviorContractTest {
 
   private static boolean claimMaintenance(String token) throws Exception {
     try (var connection = schemas.openDatabase()) {
-      return new PostgresSharedFolderMaintenanceLeaseStore(connection.dsl())
+      return new PostgresSharedFolderMaintenanceLeaseStore(
+          connection.jdbc(), connection.schemas())
           .tryAcquire(token, Duration.ofMinutes(1)).isPresent();
     }
   }
 
   private static boolean claimUpload(String token) throws Exception {
     try (var connection = schemas.openDatabase()) {
-      return new PostgresSharedFolderUploadSessionRepository(connection.dsl())
+      return new PostgresSharedFolderUploadSessionRepository(
+          connection.managedJdbc(), connection.schemas(), connection.transactions())
           .claimExpiredAppendLease("upload-claim", "append-owner", 0, token,
               Duration.ofMinutes(1)).isPresent();
     }
@@ -545,10 +559,32 @@ class PostgresTask4BehaviorContractTest {
     }
   }
 
-  private static DSLContext countedDatabase(AtomicInteger executions) {
-    return DSL.using(database.dsl().configuration().deriveAppending(new DefaultExecuteListener() {
-      @Override public void executeStart(ExecuteContext context) { executions.incrementAndGet(); }
-    }));
+  private static JdbcClient countedJdbc(AtomicInteger executions) {
+    return JdbcClient.create(new AbstractDataSource() {
+      @Override
+      public Connection getConnection() throws SQLException {
+        return countingConnection(database.dataSource().getConnection(), executions);
+      }
+
+      @Override
+      public Connection getConnection(String username, String password) throws SQLException {
+        return countingConnection(
+            database.dataSource().getConnection(username, password), executions);
+      }
+    });
+  }
+
+  private static Connection countingConnection(Connection delegate, AtomicInteger executions) {
+    return (Connection) Proxy.newProxyInstance(
+        Connection.class.getClassLoader(), new Class<?>[] {Connection.class},
+        (proxy, method, arguments) -> {
+          if (method.getName().startsWith("prepareStatement")) executions.incrementAndGet();
+          try {
+            return method.invoke(delegate, arguments);
+          } catch (InvocationTargetException failure) {
+            throw failure.getCause();
+          }
+        });
   }
 
   private static void assertConstantQueries(
@@ -562,12 +598,32 @@ class PostgresTask4BehaviorContractTest {
     assertThat(executions).hasValue(expected);
   }
 
-  private static org.jooq.Field<OffsetDateTime> expiredDatabaseTime() {
-    return org.jooq.impl.DSL.field("CURRENT_TIMESTAMP - INTERVAL '1 second'", OffsetDateTime.class);
+  private static String table(String schema, String name) {
+    return database.schemas().qualifiedTable(schema, name);
   }
 
-  private static org.jooq.Field<OffsetDateTime> unexpiredDatabaseTime() {
-    return org.jooq.impl.DSL.field("CURRENT_TIMESTAMP + INTERVAL '1 minute'", OffsetDateTime.class);
+  private static long count(String schema, String name) {
+    return database.jdbc().sql("select count(*) from " + table(schema, name))
+        .query(Long.class).single();
+  }
+
+  private static String explain(String statement) {
+    return String.join("\n", database.jdbc().sql("explain " + statement)
+        .query(String.class).list());
+  }
+
+  private static String explainDue(
+      String schema, String name, String dueColumn, String order) {
+    return explain(("select * from %s where %s <= timestamptz '2026-08-13T20:00:00Z' "
+        + "order by %s limit 100").formatted(table(schema, name), dueColumn, order));
+  }
+
+  private static void setDatabaseRelativeTime(
+      String schema, String tableName, String timeColumn, String idColumn,
+      String id, String interval) {
+    database.jdbc().sql("update %s set %s = current_timestamp + interval '%s' where %s = :id"
+        .formatted(table(schema, tableName), timeColumn, interval, idColumn))
+        .param("id", id).update();
   }
 
   private static Account account(String id, String email, String username) {

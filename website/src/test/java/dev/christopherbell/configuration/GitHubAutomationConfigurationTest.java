@@ -23,8 +23,6 @@ class GitHubAutomationConfigurationTest {
       "gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92";
   private static final String UPLOAD_ARTIFACT =
       "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a";
-  private static final String DOWNLOAD_ARTIFACT =
-      "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131";
   private static final String CODEQL_INIT =
       "github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81";
   private static final String CODEQL_ANALYZE =
@@ -69,37 +67,17 @@ class GitHubAutomationConfigurationTest {
   }
 
   @Test
-  void ciGeneratesJooqSourcesForTheExactCommitBeforeEveryPlatformBuild() throws IOException {
+  void ciBuildsEveryPlatformWithoutGeneratedDatabaseSources() throws IOException {
     var workflow = readYaml(".github/workflows/ci.yml");
-    var codegen = workflow.at("/jobs/jooq-codegen");
-    var codegenSteps = codegen.path("steps");
     var build = workflow.at("/jobs/build");
     var buildSteps = build.path("steps");
 
-    assertThat(codegen.at("/services/postgres/image").asText()).isEqualTo("postgres:18.4");
-    var disposablePassword =
-        "${{ format('ci-only-{0}-{1}', github.run_id, github.run_attempt) }}";
-    assertThat(codegen.at("/services/postgres/env/POSTGRES_PASSWORD").asText())
-        .isEqualTo(disposablePassword);
-    assertThat(stepNamed(codegenSteps, "Generate jOOQ sources").path("run").asText())
-        .isEqualTo("./gradlew :website:jooqCodegen");
-    assertThat(stepNamed(codegenSteps, "Generate jOOQ sources")
-        .at("/env/JOOQ_CODEGEN_JDBC_URL").asText())
-        .isEqualTo("jdbc:postgresql://127.0.0.1:5432/test");
-    assertThat(stepNamed(codegenSteps, "Generate jOOQ sources")
-        .at("/env/JOOQ_CODEGEN_PASSWORD").asText())
-        .isEqualTo(disposablePassword);
-    assertThat(stepUsing(codegenSteps, UPLOAD_ARTIFACT).at("/with/name").asText())
-        .isEqualTo("jooq-generated-${{ github.sha }}");
-    assertThat(stepUsing(codegenSteps, UPLOAD_ARTIFACT).at("/with/if-no-files-found").asText())
-        .isEqualTo("error");
-
-    assertThat(build.path("needs").asText()).isEqualTo("jooq-codegen");
-    var download = stepUsing(buildSteps, DOWNLOAD_ARTIFACT);
-    assertThat(download.at("/with/name").asText())
-        .isEqualTo("jooq-generated-${{ github.sha }}");
-    assertThat(download.at("/with/path").asText())
-        .isEqualTo("website/build/generated-src/jooq/main");
+    assertThat(workflow.at("/jobs/jooq-codegen").isMissingNode()).isTrue();
+    assertThat(build.path("needs").isMissingNode()).isTrue();
+    assertThat(stepNamed(buildSteps, "Build and Test").path("run").asText())
+        .isEqualTo("./gradlew build");
+    assertThat(stepNamed(buildSteps, "Build and Test on Windows").path("run").asText())
+        .isEqualTo(".\\gradlew.bat build");
   }
 
   @Test
@@ -172,19 +150,11 @@ class GitHubAutomationConfigurationTest {
     var steps = workflow.at("/jobs/analyze/steps");
     assertThat(stepUsing(steps, CODEQL_INIT)
         .at("/with/languages").asText()).isEqualTo("${{ matrix.language }}");
-    assertThat(workflow.at("/jobs/analyze/services/postgres/image").asText())
-        .isEqualTo("postgres:18.4");
-    var disposablePassword =
-        "${{ format('ci-only-{0}-{1}', github.run_id, github.run_attempt) }}";
-    assertThat(workflow.at("/jobs/analyze/services/postgres/env/POSTGRES_PASSWORD").asText())
-        .isEqualTo(disposablePassword);
-    var javaBuild = stepRunning(steps, "./gradlew :website:jooqCodegen :website:classes");
+    assertThat(workflow.at("/jobs/analyze/services").isMissingNode()).isTrue();
+    var javaBuild = stepRunning(steps, "./gradlew :website:classes");
     assertThat(javaBuild.path("if").asText())
         .isEqualTo("matrix.language == 'java-kotlin'");
-    assertThat(javaBuild.at("/env/JOOQ_CODEGEN_JDBC_URL").asText())
-        .isEqualTo("jdbc:postgresql://127.0.0.1:5432/test");
-    assertThat(javaBuild.at("/env/JOOQ_CODEGEN_PASSWORD").asText())
-        .isEqualTo(disposablePassword);
+    assertThat(javaBuild.path("env").isMissingNode()).isTrue();
     assertThat(stepUsing(steps, CODEQL_ANALYZE).isMissingNode()).isFalse();
   }
 

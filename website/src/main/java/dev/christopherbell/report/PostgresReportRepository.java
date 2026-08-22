@@ -1,265 +1,274 @@
 package dev.christopherbell.report;
 
-import static dev.christopherbell.persistence.jooq.social.Tables.POST_REPORT;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST_REPORT_MODERATION_AUDIT;
-import static dev.christopherbell.persistence.jooq.social.Tables.POST_REPORT_MODERATION_AUDIT_VALUE;
-
-import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
-import dev.christopherbell.persistence.jooq.social.tables.records.PostReportRecord;
-import dev.christopherbell.persistence.jooq.social.tables.records.PostReportModerationAuditRecord;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
+import dev.christopherbell.libs.moderation.ModerationAuditCommand;
 import dev.christopherbell.report.model.PostReport;
 import dev.christopherbell.report.model.ReportResolution;
 import dev.christopherbell.report.model.ReportStatus;
 import dev.christopherbell.report.model.ReportTargetType;
 import dev.christopherbell.report.model.ReportType;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.List;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionOperations;
 
 /** PostgreSQL implementation of the post-report persistence port. */
 @PostgresPersistence
 public class PostgresReportRepository implements ReportRepository {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final TransactionOperations transactions;
+  private final String reportTable;
+  private final String auditTable;
+  private final String valueTable;
 
-  public PostgresReportRepository(DSLContext database) {
+  public PostgresReportRepository(
+      JdbcClient database, PostgresqlSchemaNames schemas, TransactionOperations transactions) {
     this.database = database;
+    this.transactions = transactions;
+    reportTable = schemas.qualifiedTable("social", "post_report");
+    auditTable = schemas.qualifiedTable("social", "post_report_moderation_audit");
+    valueTable = schemas.qualifiedTable("social", "post_report_moderation_audit_value");
   }
 
   @Override
   public PostReport save(PostReport report) {
-    return database.transactionResult(configuration -> save(DSL.using(configuration), report));
-  }
-
-  private static PostReport save(DSLContext transaction, PostReport report) {
-    var insert = transaction.insertInto(POST_REPORT)
-        .set(POST_REPORT.POST_REPORT_ID, report.getId())
-        .set(POST_REPORT.POST_ID, report.getPostId())
-        .set(POST_REPORT.POST_TEXT, report.getPostText())
-        .set(POST_REPORT.REPORTED_ACCOUNT_ID, report.getReportedAccountId())
-        .set(POST_REPORT.REPORTED_USERNAME, report.getReportedUsername())
-        .set(POST_REPORT.REPORTER_ACCOUNT_ID, report.getReporterAccountId())
-        .set(POST_REPORT.REPORTER_USERNAME, report.getReporterUsername())
-        .set(POST_REPORT.OPEN_DEDUPE_KEY, report.getOpenDedupeKey())
-        .set(POST_REPORT.REPORT_TYPE, report.getReportType().name())
-        .set(POST_REPORT.TARGET_TYPE, report.getTargetType().name())
-        .set(POST_REPORT.REASON, report.getReason())
-        .set(POST_REPORT.DETAILS, report.getDetails())
-        .set(POST_REPORT.STATUS, report.getStatus().name())
-        .set(POST_REPORT.RESOLUTION,
-            report.getResolution() == null ? null : report.getResolution().name())
-        .set(POST_REPORT.RESOLVED_BY, report.getResolvedBy())
-        .set(POST_REPORT.OPEN_REPORTS_FOR_ACCOUNT, report.getOpenReportsForAccount())
-        .set(POST_REPORT.RESOLVED_REPORTS_FOR_ACCOUNT, report.getResolvedReportsForAccount())
-        .set(POST_REPORT.CREATED_ON, report.getCreatedOn().atOffset(ZoneOffset.UTC))
-        .set(POST_REPORT.LAST_UPDATED_ON, timestamp(report.getLastUpdatedOn()))
-        .set(POST_REPORT.RESOLVED_ON, timestamp(report.getResolvedOn()));
-    insert.onConflict(POST_REPORT.POST_REPORT_ID).doUpdate()
-        .set(POST_REPORT.POST_ID, report.getPostId())
-        .set(POST_REPORT.POST_TEXT, report.getPostText())
-        .set(POST_REPORT.REPORTED_ACCOUNT_ID, report.getReportedAccountId())
-        .set(POST_REPORT.REPORTED_USERNAME, report.getReportedUsername())
-        .set(POST_REPORT.REPORTER_ACCOUNT_ID, report.getReporterAccountId())
-        .set(POST_REPORT.REPORTER_USERNAME, report.getReporterUsername())
-        .set(POST_REPORT.OPEN_DEDUPE_KEY, report.getOpenDedupeKey())
-        .set(POST_REPORT.REPORT_TYPE, report.getReportType().name())
-        .set(POST_REPORT.TARGET_TYPE, report.getTargetType().name())
-        .set(POST_REPORT.REASON, report.getReason())
-        .set(POST_REPORT.DETAILS, report.getDetails())
-        .set(POST_REPORT.STATUS, report.getStatus().name())
-        .set(POST_REPORT.RESOLUTION,
-            report.getResolution() == null ? null : report.getResolution().name())
-        .set(POST_REPORT.RESOLVED_BY, report.getResolvedBy())
-        .set(POST_REPORT.OPEN_REPORTS_FOR_ACCOUNT, report.getOpenReportsForAccount())
-        .set(POST_REPORT.RESOLVED_REPORTS_FOR_ACCOUNT, report.getResolvedReportsForAccount())
-        .set(POST_REPORT.LAST_UPDATED_ON, timestamp(report.getLastUpdatedOn()))
-        .set(POST_REPORT.RESOLVED_ON, timestamp(report.getResolvedOn()))
-        .set(POST_REPORT.VERSION, POST_REPORT.VERSION.plus(1L))
-        .execute();
-    replaceModerationAudit(transaction, report);
-    return findById(transaction, report.getId()).orElseThrow();
+    var saved = transactions.execute(ignored -> {
+      database.sql("""
+              insert into %s (
+                post_report_id, post_id, post_text, reported_account_id, reported_username,
+                reporter_account_id, reporter_username, open_dedupe_key, report_type,
+                target_type, reason, details, status, resolution, resolved_by,
+                open_reports_for_account, resolved_reports_for_account,
+                created_on, last_updated_on, resolved_on)
+              values (:id, :postId, :postText, :reportedId, :reportedUsername,
+                :reporterId, :reporterUsername, :dedupe, :reportType, :targetType,
+                :reason, :details, :status, :resolution, :resolvedBy,
+                :openCount, :resolvedCount, :createdOn, :updatedOn, :resolvedOn)
+              on conflict (post_report_id) do update set
+                post_id = excluded.post_id, post_text = excluded.post_text,
+                reported_account_id = excluded.reported_account_id,
+                reported_username = excluded.reported_username,
+                reporter_account_id = excluded.reporter_account_id,
+                reporter_username = excluded.reporter_username,
+                open_dedupe_key = excluded.open_dedupe_key,
+                report_type = excluded.report_type, target_type = excluded.target_type,
+                reason = excluded.reason, details = excluded.details, status = excluded.status,
+                resolution = excluded.resolution, resolved_by = excluded.resolved_by,
+                open_reports_for_account = excluded.open_reports_for_account,
+                resolved_reports_for_account = excluded.resolved_reports_for_account,
+                last_updated_on = excluded.last_updated_on, resolved_on = excluded.resolved_on,
+                version = %s.version + 1
+              """.formatted(reportTable, reportTable)).paramSource(parameters(report)).update();
+      replaceModerationAudit(report);
+      return findById(report.getId()).orElseThrow();
+    });
+    if (saved == null) throw new IllegalStateException("Report transaction returned no value.");
+    return saved;
   }
 
   @Override
   public Optional<PostReport> findById(String id) {
-    return findById(database, id);
+    return mapAll(database.sql("select * from %s where post_report_id = :id".formatted(reportTable))
+        .param("id", id).query(PostgresReportRepository::row).list()).stream().findFirst();
   }
 
-  private static Optional<PostReport> findById(DSLContext context, String id) {
-    return context.selectFrom(POST_REPORT).where(POST_REPORT.POST_REPORT_ID.eq(id))
-        .fetchOptional(record -> map(context, record));
-  }
-
-  private static void replaceModerationAudit(DSLContext transaction, PostReport report) {
-    transaction.deleteFrom(POST_REPORT_MODERATION_AUDIT)
-        .where(POST_REPORT_MODERATION_AUDIT.POST_REPORT_ID.eq(report.getId()))
-        .execute();
+  private void replaceModerationAudit(PostReport report) {
+    database.sql("delete from %s where post_report_id = :id".formatted(auditTable))
+        .param("id", report.getId()).update();
     var audit = report.getPendingModerationAudit();
     if (audit == null) return;
-    transaction.insertInto(POST_REPORT_MODERATION_AUDIT)
-        .set(POST_REPORT_MODERATION_AUDIT.POST_REPORT_ID, report.getId())
-        .set(POST_REPORT_MODERATION_AUDIT.EVENT_ID, audit.eventId())
-        .set(POST_REPORT_MODERATION_AUDIT.ACTOR_ACCOUNT_ID, audit.actorAccountId())
-        .set(POST_REPORT_MODERATION_AUDIT.ACTOR_USERNAME, audit.actorUsername())
-        .set(POST_REPORT_MODERATION_AUDIT.ACTION, audit.action())
-        .set(POST_REPORT_MODERATION_AUDIT.TARGET_TYPE, audit.targetType())
-        .set(POST_REPORT_MODERATION_AUDIT.TARGET_ID, audit.targetId())
-        .set(POST_REPORT_MODERATION_AUDIT.TARGET_LABEL, audit.targetLabel())
-        .set(POST_REPORT_MODERATION_AUDIT.REASON, audit.reason())
-        .set(POST_REPORT_MODERATION_AUDIT.MESSAGE, audit.message())
-        .execute();
-    insertAuditValues(transaction, report.getId(), "before", audit.beforeValues());
-    insertAuditValues(transaction, report.getId(), "after", audit.afterValues());
-    insertAuditValues(transaction, report.getId(), "metadata", audit.metadata());
+    database.sql("""
+            insert into %s (
+              post_report_id, event_id, actor_account_id, actor_username, action,
+              target_type, target_id, target_label, reason, message)
+            values (:id, :eventId, :actorId, :actorUsername, :action,
+              :targetType, :targetId, :targetLabel, :reason, :message)
+            """.formatted(auditTable)).param("id", report.getId())
+        .param("eventId", audit.eventId()).param("actorId", audit.actorAccountId())
+        .param("actorUsername", audit.actorUsername()).param("action", audit.action())
+        .param("targetType", audit.targetType()).param("targetId", audit.targetId())
+        .param("targetLabel", audit.targetLabel()).param("reason", audit.reason())
+        .param("message", audit.message()).update();
+    insertValues(report.getId(), "before", audit.beforeValues());
+    insertValues(report.getId(), "after", audit.afterValues());
+    insertValues(report.getId(), "metadata", audit.metadata());
   }
 
-  private static void insertAuditValues(
-      DSLContext transaction, String reportId, String partition, Map<String, String> values) {
-    if (values.isEmpty()) return;
-    var insert = transaction.insertInto(
-        POST_REPORT_MODERATION_AUDIT_VALUE,
-        POST_REPORT_MODERATION_AUDIT_VALUE.POST_REPORT_ID,
-        POST_REPORT_MODERATION_AUDIT_VALUE.PARTITION_NAME,
-        POST_REPORT_MODERATION_AUDIT_VALUE.VALUE_KEY,
-        POST_REPORT_MODERATION_AUDIT_VALUE.VALUE);
-    for (var entry : values.entrySet()) {
-      insert = insert.values(reportId, partition, entry.getKey(), entry.getValue());
-    }
-    insert.execute();
+  private void insertValues(String reportId, String partition, Map<String, String> values) {
+    values.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry ->
+        database.sql("""
+                insert into %s (post_report_id, partition_name, value_key, value)
+                values (:id, :partition, :key, :value)
+                """.formatted(valueTable)).param("id", reportId).param("partition", partition)
+            .param("key", entry.getKey()).param("value", entry.getValue()).update());
   }
 
   @Override
   public List<PostReport> findByStatusOrderByCreatedOnDesc(ReportStatus status) {
-    var records = database.selectFrom(POST_REPORT).where(POST_REPORT.STATUS.eq(status.name()))
-        .orderBy(POST_REPORT.CREATED_ON.desc(), POST_REPORT.POST_REPORT_ID.desc())
-        .fetch();
-    return mapAll(database, records);
+    return mapAll(database.sql("""
+            select * from %s where status = :status
+            order by created_on desc, post_report_id desc
+            """.formatted(reportTable)).param("status", status.name())
+        .query(PostgresReportRepository::row).list());
   }
 
-  @Override
-  public List<PostReport> findAllByOrderByCreatedOnDesc() {
+  @Override public List<PostReport> findAllByOrderByCreatedOnDesc() {
     return findAllByOrderByCreatedOnDesc(Pageable.unpaged());
   }
 
   @Override
   public List<PostReport> findAllByOrderByCreatedOnDesc(Pageable pageable) {
-    var query = database.selectFrom(POST_REPORT)
-        .orderBy(POST_REPORT.CREATED_ON.desc(), POST_REPORT.POST_REPORT_ID.desc());
-    var records = pageable.isPaged()
-        ? query.limit(pageable.getPageSize()).offset(Math.toIntExact(pageable.getOffset()))
-            .fetch()
-        : query.fetch();
-    return mapAll(database, records);
+    var statement = database.sql("""
+            select * from %s order by created_on desc, post_report_id desc
+            limit :limit offset :offset
+            """.formatted(reportTable))
+        .param("limit", pageable.isPaged() ? pageable.getPageSize() : Integer.MAX_VALUE)
+        .param("offset", pageable.isPaged() ? Math.toIntExact(pageable.getOffset()) : 0);
+    return mapAll(statement.query(PostgresReportRepository::row).list());
   }
 
   @Override
-  public Optional<PostReport> findByOpenDedupeKey(String openDedupeKey) {
-    return database.selectFrom(POST_REPORT).where(POST_REPORT.OPEN_DEDUPE_KEY.eq(openDedupeKey))
-        .fetchOptional(record -> map(database, record));
+  public Optional<PostReport> findByOpenDedupeKey(String key) {
+    return mapAll(database.sql("select * from %s where open_dedupe_key = :key".formatted(reportTable))
+        .param("key", key).query(PostgresReportRepository::row).list()).stream().findFirst();
   }
 
   @Override
   public Optional<PostReport> findFirstByReporterAccountIdAndPostIdAndStatus(
-      String reporterAccountId, String postId, ReportStatus status) {
-    return database.selectFrom(POST_REPORT)
-        .where(POST_REPORT.REPORTER_ACCOUNT_ID.eq(reporterAccountId)
-            .and(POST_REPORT.POST_ID.eq(postId)).and(POST_REPORT.STATUS.eq(status.name())))
-        .limit(1).fetchOptional(record -> map(database, record));
+      String reporterId, String postId, ReportStatus status) {
+    return mapAll(database.sql("""
+            select * from %s where reporter_account_id = :reporterId
+              and post_id = :postId and status = :status limit 1
+            """.formatted(reportTable)).param("reporterId", reporterId).param("postId", postId)
+        .param("status", status.name()).query(PostgresReportRepository::row).list())
+        .stream().findFirst();
   }
 
   @Override
-  public long countByReportedAccountIdAndStatus(String reportedAccountId, ReportStatus status) {
-    return database.fetchCount(POST_REPORT,
-        POST_REPORT.REPORTED_ACCOUNT_ID.eq(reportedAccountId)
-            .and(POST_REPORT.STATUS.eq(status.name())));
+  public long countByReportedAccountIdAndStatus(String accountId, ReportStatus status) {
+    return database.sql("""
+            select count(*) from %s where reported_account_id = :accountId and status = :status
+            """.formatted(reportTable)).param("accountId", accountId).param("status", status.name())
+        .query(Long.class).single();
   }
 
-  public static PostReport map(DSLContext context, PostReportRecord record) {
-    return mapAll(context, List.of(record)).getFirst();
-  }
-
-  public static List<PostReport> mapAll(DSLContext context, List<PostReportRecord> records) {
-    if (records.isEmpty()) return List.of();
-    var reportIds = records.stream().map(PostReportRecord::getPostReportId).toList();
-    Map<String, PostReportModerationAuditRecord> audits = context
-        .selectFrom(POST_REPORT_MODERATION_AUDIT)
-        .where(POST_REPORT_MODERATION_AUDIT.POST_REPORT_ID.in(reportIds))
-        .fetchMap(POST_REPORT_MODERATION_AUDIT.POST_REPORT_ID);
+  public List<PostReport> mapAll(List<ReportRow> rows) {
+    if (rows.isEmpty()) return List.of();
+    var ids = rows.stream().map(ReportRow::id).toList();
+    var audits = database.sql("select * from %s where post_report_id in (:ids)".formatted(auditTable))
+        .param("ids", ids).query(PostgresReportRepository::audit).list().stream()
+        .collect(java.util.stream.Collectors.toMap(AuditRow::reportId, value -> value));
     var values = new HashMap<AuditPartition, LinkedHashMap<String, String>>();
-    context.selectFrom(POST_REPORT_MODERATION_AUDIT_VALUE)
-        .where(POST_REPORT_MODERATION_AUDIT_VALUE.POST_REPORT_ID.in(reportIds))
-        .orderBy(POST_REPORT_MODERATION_AUDIT_VALUE.POST_REPORT_ID.asc(),
-            POST_REPORT_MODERATION_AUDIT_VALUE.PARTITION_NAME.asc(),
-            POST_REPORT_MODERATION_AUDIT_VALUE.VALUE_KEY.asc())
-        .forEach(row -> values.computeIfAbsent(
-            new AuditPartition(row.getPostReportId(), row.getPartitionName()),
-            ignored -> new LinkedHashMap<>()).put(row.getValueKey(), row.getValue()));
-    return records.stream().map(record -> map(record, moderationAudit(
-        audits.get(record.getPostReportId()), values))).toList();
+    database.sql("""
+            select * from %s where post_report_id in (:ids)
+            order by post_report_id, partition_name, value_key
+            """.formatted(valueTable)).param("ids", ids).query((value, ignored) -> {
+          values.computeIfAbsent(new AuditPartition(
+              value.getString("post_report_id"), value.getString("partition_name")),
+              key -> new LinkedHashMap<>()).put(value.getString("value_key"), value.getString("value"));
+          return 0;
+        }).list();
+    return rows.stream().map(row -> map(row, moderationAudit(audits.get(row.id()), values))).toList();
   }
 
-  private static PostReport map(PostReportRecord record, ModerationAuditCommand audit) {
-    return PostReport.builder()
-        .id(record.getPostReportId())
-        .postId(record.getPostId())
-        .postText(record.getPostText())
-        .reportedAccountId(record.getReportedAccountId())
-        .reportedUsername(record.getReportedUsername())
-        .reporterAccountId(record.getReporterAccountId())
-        .reporterUsername(record.getReporterUsername())
-        .openDedupeKey(record.getOpenDedupeKey())
-        .reportType(ReportType.valueOf(record.getReportType()))
-        .targetType(ReportTargetType.valueOf(record.getTargetType()))
-        .reason(record.getReason())
-        .details(record.getDetails())
-        .status(ReportStatus.valueOf(record.getStatus()))
-        .resolution(record.getResolution() == null
-            ? null : ReportResolution.valueOf(record.getResolution()))
-        .resolvedBy(record.getResolvedBy())
-        .openReportsForAccount(record.getOpenReportsForAccount())
-        .resolvedReportsForAccount(record.getResolvedReportsForAccount())
-        .pendingModerationAudit(audit)
-        .createdOn(record.getCreatedOn().toInstant())
-        .lastUpdatedOn(instant(record.getLastUpdatedOn()))
-        .resolvedOn(instant(record.getResolvedOn()))
-        .build();
+  public static ReportRow row(ResultSet row, int ignored) throws SQLException {
+    return new ReportRow(row.getString("post_report_id"), row.getString("post_id"),
+        row.getString("post_text"), row.getString("reported_account_id"),
+        row.getString("reported_username"), row.getString("reporter_account_id"),
+        row.getString("reporter_username"), row.getString("open_dedupe_key"),
+        row.getString("report_type"), row.getString("target_type"), row.getString("reason"),
+        row.getString("details"), row.getString("status"), row.getString("resolution"),
+        row.getString("resolved_by"), (Long) row.getObject("open_reports_for_account"),
+        (Long) row.getObject("resolved_reports_for_account"), instant(row, "created_on"),
+        instant(row, "last_updated_on"), instant(row, "resolved_on"));
+  }
+
+  private static AuditRow audit(ResultSet row, int ignored) throws SQLException {
+    return new AuditRow(row.getString("post_report_id"), row.getString("event_id"),
+        row.getString("actor_account_id"), row.getString("actor_username"),
+        row.getString("action"), row.getString("target_type"), row.getString("target_id"),
+        row.getString("target_label"), row.getString("reason"), row.getString("message"));
+  }
+
+  private static PostReport map(ReportRow row, ModerationAuditCommand audit) {
+    return PostReport.builder().id(row.id()).postId(row.postId()).postText(row.postText())
+        .reportedAccountId(row.reportedId()).reportedUsername(row.reportedUsername())
+        .reporterAccountId(row.reporterId()).reporterUsername(row.reporterUsername())
+        .openDedupeKey(row.dedupe()).reportType(ReportType.valueOf(row.reportType()))
+        .targetType(ReportTargetType.valueOf(row.targetType())).reason(row.reason())
+        .details(row.details()).status(ReportStatus.valueOf(row.status()))
+        .resolution(row.resolution() == null ? null : ReportResolution.valueOf(row.resolution()))
+        .resolvedBy(row.resolvedBy()).openReportsForAccount(row.openCount())
+        .resolvedReportsForAccount(row.resolvedCount()).pendingModerationAudit(audit)
+        .createdOn(row.createdOn()).lastUpdatedOn(row.updatedOn()).resolvedOn(row.resolvedOn()).build();
   }
 
   private static ModerationAuditCommand moderationAudit(
-      PostReportModerationAuditRecord audit,
-      Map<AuditPartition, LinkedHashMap<String, String>> values) {
+      AuditRow audit, Map<AuditPartition, LinkedHashMap<String, String>> values) {
     if (audit == null) return null;
-    return new ModerationAuditCommand(
-        audit.getEventId(), audit.getActorAccountId(), audit.getActorUsername(),
-        audit.getAction(), audit.getTargetType(), audit.getTargetId(), audit.getTargetLabel(),
-        audit.getReason(), audit.getMessage(),
-        auditValues(values, audit.getPostReportId(), "before"),
-        auditValues(values, audit.getPostReportId(), "after"),
-        auditValues(values, audit.getPostReportId(), "metadata"));
+    return new ModerationAuditCommand(audit.eventId(), audit.actorId(), audit.actorUsername(),
+        audit.action(), audit.targetType(), audit.targetId(), audit.targetLabel(), audit.reason(),
+        audit.message(), auditValues(values, audit.reportId(), "before"),
+        auditValues(values, audit.reportId(), "after"),
+        auditValues(values, audit.reportId(), "metadata"));
   }
 
   private static Map<String, String> auditValues(
-      Map<AuditPartition, LinkedHashMap<String, String>> values,
-      String reportId,
-      String partition) {
-    return Map.copyOf(values.getOrDefault(
-        new AuditPartition(reportId, partition), new LinkedHashMap<>()));
+      Map<AuditPartition, LinkedHashMap<String, String>> values, String id, String partition) {
+    return Map.copyOf(values.getOrDefault(new AuditPartition(id, partition), new LinkedHashMap<>()));
   }
 
-  private static OffsetDateTime timestamp(java.time.Instant value) {
+  private static MapSqlParameterSource parameters(PostReport report) {
+    return new MapSqlParameterSource().addValue("id", report.getId())
+        .addValue("postId", report.getPostId(), Types.VARCHAR)
+        .addValue("postText", report.getPostText(), Types.VARCHAR)
+        .addValue("reportedId", report.getReportedAccountId(), Types.VARCHAR)
+        .addValue("reportedUsername", report.getReportedUsername(), Types.VARCHAR)
+        .addValue("reporterId", report.getReporterAccountId())
+        .addValue("reporterUsername", report.getReporterUsername())
+        .addValue("dedupe", report.getOpenDedupeKey(), Types.VARCHAR)
+        .addValue("reportType", report.getReportType().name())
+        .addValue("targetType", report.getTargetType().name()).addValue("reason", report.getReason())
+        .addValue("details", report.getDetails(), Types.VARCHAR)
+        .addValue("status", report.getStatus().name())
+        .addValue("resolution", report.getResolution() == null ? null : report.getResolution().name(),
+            Types.VARCHAR).addValue("resolvedBy", report.getResolvedBy(), Types.VARCHAR)
+        .addValue("openCount", report.getOpenReportsForAccount())
+        .addValue("resolvedCount", report.getResolvedReportsForAccount())
+        .addValue("createdOn", timestamp(report.getCreatedOn()))
+        .addValue("updatedOn", timestamp(report.getLastUpdatedOn()), Types.TIMESTAMP_WITH_TIMEZONE)
+        .addValue("resolvedOn", timestamp(report.getResolvedOn()), Types.TIMESTAMP_WITH_TIMEZONE);
+  }
+
+  private static OffsetDateTime timestamp(Instant value) {
     return value == null ? null : value.atOffset(ZoneOffset.UTC);
   }
 
-  private static java.time.Instant instant(OffsetDateTime value) {
+  private static Instant instant(ResultSet row, String column) throws SQLException {
+    var value = row.getObject(column, OffsetDateTime.class);
     return value == null ? null : value.toInstant();
   }
 
+  public record ReportRow(
+      String id, String postId, String postText, String reportedId, String reportedUsername,
+      String reporterId, String reporterUsername, String dedupe, String reportType,
+      String targetType, String reason, String details, String status, String resolution,
+      String resolvedBy, Long openCount, Long resolvedCount, Instant createdOn,
+      Instant updatedOn, Instant resolvedOn) {}
+  private record AuditRow(
+      String reportId, String eventId, String actorId, String actorUsername, String action,
+      String targetType, String targetId, String targetLabel, String reason, String message) {}
   private record AuditPartition(String reportId, String partition) {}
 }

@@ -1,51 +1,64 @@
 package dev.christopherbell.configuration.security.browser;
 
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT;
-import static dev.christopherbell.persistence.jooq.identity.Tables.ACCOUNT_PERMISSION;
-import static dev.christopherbell.persistence.jooq.identity.Tables.BROWSER_SESSION;
-
 import dev.christopherbell.account.model.AccountPermission;
 import dev.christopherbell.account.model.AccountStatus;
 import dev.christopherbell.account.model.Role;
 import dev.christopherbell.configuration.persistence.PostgresPersistence;
+import dev.christopherbell.configuration.persistence.PostgresqlSchemaNames;
 import java.util.Optional;
 import java.util.Set;
-import org.jooq.DSLContext;
-import org.jooq.impl.DSL;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /** PostgreSQL join for a browser session and current account security state. */
 @PostgresPersistence
 public class PostgresBrowserSessionAuthenticationStore
     implements BrowserSessionAuthenticationStore {
-  private final DSLContext database;
+  private final JdbcClient database;
+  private final String browserSessionTable;
+  private final String accountTable;
+  private final String permissionTable;
 
-  public PostgresBrowserSessionAuthenticationStore(DSLContext database) {
+  public PostgresBrowserSessionAuthenticationStore(
+      JdbcClient database, PostgresqlSchemaNames schemas) {
     this.database = database;
+    browserSessionTable = schemas.qualifiedTable("identity", "browser_session");
+    accountTable = schemas.qualifiedTable("identity", "account");
+    permissionTable = schemas.qualifiedTable("identity", "account_permission");
   }
 
   @Override
   public Optional<BrowserSessionAuthentication> findById(String sessionId) {
-    var permissions = DSL.multiset(database.select(ACCOUNT_PERMISSION.PERMISSION)
-            .from(ACCOUNT_PERMISSION)
-            .where(ACCOUNT_PERMISSION.ACCOUNT_ID.eq(ACCOUNT.ACCOUNT_ID)))
-        .as("permissions");
-    return database.select(BROWSER_SESSION.asterisk(), ACCOUNT.asterisk(), permissions)
-        .from(BROWSER_SESSION)
-        .join(ACCOUNT).on(ACCOUNT.ACCOUNT_ID.eq(BROWSER_SESSION.ACCOUNT_ID))
-        .where(BROWSER_SESSION.BROWSER_SESSION_ID.eq(sessionId))
-        .limit(1)
-        .fetchOptional(record -> {
-          var session = PostgresBrowserSessionMapper.map(record.into(BROWSER_SESSION));
-          Set<AccountPermission> currentPermissions = record.get(permissions).stream()
-              .map(row -> AccountPermission.valueOf(row.value1()))
-              .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    return database.sql("""
+            select browser_session.*,
+              account.account_id as current_account_id,
+              account.password_hash as current_password_hash,
+              account.role as current_role,
+              account.status as current_status
+            from %s browser_session
+            join %s account on account.account_id = browser_session.account_id
+            where browser_session.browser_session_id = :sessionId
+            limit 1
+            """.formatted(browserSessionTable, accountTable))
+        .param("sessionId", sessionId)
+        .query((record, rowNumber) -> {
+          var session = PostgresBrowserSessionMapper.map(record, rowNumber);
+          var accountId = record.getString("current_account_id");
+          Set<AccountPermission> permissions = database.sql("""
+                  select permission from %s
+                  where account_id = :accountId
+                  """.formatted(permissionTable))
+              .param("accountId", accountId)
+              .query((permission, permissionRow) ->
+                  AccountPermission.valueOf(permission.getString("permission")))
+              .set();
           var account = new BrowserSessionAccount(
-              record.get(ACCOUNT.ACCOUNT_ID),
-              record.get(ACCOUNT.PASSWORD_HASH),
-              Role.valueOf(record.get(ACCOUNT.ROLE)),
-              currentPermissions,
-              AccountStatus.valueOf(record.get(ACCOUNT.STATUS)));
+              accountId,
+              record.getString("current_password_hash"),
+              Role.valueOf(record.getString("current_role")),
+              permissions,
+              AccountStatus.valueOf(record.getString("current_status")));
           return new BrowserSessionAuthentication(session, account);
-        });
+        })
+        .optional();
   }
 }
