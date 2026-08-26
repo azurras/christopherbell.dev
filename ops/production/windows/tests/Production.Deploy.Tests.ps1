@@ -761,6 +761,255 @@ Describe 'native Windows deployment' {
             Should -Invoke Invoke-CheckedProcess -ParameterFilter { $ArgumentList -contains 'fetch' }
         }
 
+        It 'removes only an unregistered stale SHA worktree before retrying a release build' {
+            $root = Join-Path $TestDrive 'stale-worktree-retry'
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+            $worktree = Join-Path $root "worktrees\$sha"
+            $unrelated = Join-Path $root 'worktrees\unrelated'
+            New-Item -ItemType Directory -Path $worktree,$unrelated -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $worktree 'partial-checkout.txt') -Value 'stale'
+            Set-Content -LiteralPath (Join-Path $unrelated 'keep.txt') -Value 'keep'
+            $script:staleWorktreeExistedAtAdd = $null
+            Mock Invoke-CheckedProcess {
+                if ($ArgumentList -contains 'list') { return "worktree A:/repository`n" }
+                if ($ArgumentList -contains 'add') {
+                    $script:staleWorktreeExistedAtAdd = Test-Path -LiteralPath $worktree
+                    throw 'simulated worktree add failure'
+                }
+                return ''
+            }
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                repositoryPath = 'A:\repository'
+                remote = 'origin'
+                branch = 'main'
+            }
+
+            { New-ReleaseFromOriginMain -Config $config -Sha $sha } |
+                Should -Throw '*simulated worktree add failure*'
+
+            $script:staleWorktreeExistedAtAdd | Should -BeFalse
+            Test-Path -LiteralPath $worktree | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $unrelated 'keep.txt') | Should -BeTrue
+        }
+
+        It 'refuses to delete a worktree that Git still registers' {
+            $root = Join-Path $TestDrive 'registered-worktree'
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+            $worktree = Join-Path $root "worktrees\$sha"
+            New-Item -ItemType Directory -Path $worktree -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $worktree 'owned.txt') -Value 'keep'
+            $gitWorktree = $worktree.Replace('\','/')
+            Mock Invoke-CheckedProcess {
+                if ($ArgumentList -contains 'list') { return "worktree $gitWorktree`n" }
+                throw 'release build must not start'
+            }
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                repositoryPath = 'A:\repository'
+                remote = 'origin'
+                branch = 'main'
+            }
+
+            { New-ReleaseFromOriginMain -Config $config -Sha $sha } |
+                Should -Throw '*already registered*'
+
+            Test-Path -LiteralPath (Join-Path $worktree 'owned.txt') | Should -BeTrue
+            Should -Invoke Invoke-CheckedProcess -Times 0 -Exactly -ParameterFilter {
+                $ArgumentList -contains 'add'
+            }
+        }
+
+        It 'removes a partial SHA worktree created by a failed Git add' {
+            $root = Join-Path $TestDrive 'partial-worktree-add'
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+            $worktree = Join-Path $root "worktrees\$sha"
+            Mock Invoke-CheckedProcess {
+                if ($ArgumentList -contains 'list') { return "worktree A:/repository`n" }
+                if ($ArgumentList -contains 'add') {
+                    New-Item -ItemType Directory -Path $worktree -Force | Out-Null
+                    Set-Content -LiteralPath (Join-Path $worktree 'partial-checkout.txt') -Value 'partial'
+                    throw 'simulated partial checkout failure'
+                }
+                return ''
+            }
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                repositoryPath = 'A:\repository'
+                remote = 'origin'
+                branch = 'main'
+            }
+
+            { New-ReleaseFromOriginMain -Config $config -Sha $sha } |
+                Should -Throw '*simulated partial checkout failure*'
+
+            Test-Path -LiteralPath $worktree | Should -BeFalse
+        }
+
+        It 'rejects a non-SHA release identity before touching worktree paths' {
+            $root = Join-Path $TestDrive 'worktree-boundary'
+            $unrelated = Join-Path $root 'outside\keep.txt'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $unrelated) -Force | Out-Null
+            Set-Content -LiteralPath $unrelated -Value 'keep'
+            Mock Invoke-CheckedProcess { throw 'Git must not run' }
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                repositoryPath = 'A:\repository'
+                remote = 'origin'
+                branch = 'main'
+            }
+
+            { New-ReleaseFromOriginMain -Config $config -Sha '..\outside' } | Should -Throw
+
+            Test-Path -LiteralPath $unrelated | Should -BeTrue
+            Should -Invoke Invoke-CheckedProcess -Times 0 -Exactly
+        }
+
+        It 'rejects a reparse-point worktree parent without deleting its external target' {
+            $root = Join-Path $TestDrive 'worktree-parent-reparse'
+            $external = Join-Path $TestDrive 'external-worktree-target'
+            $worktrees = Join-Path $root 'worktrees'
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+            $externalWorktree = Join-Path $external $sha
+            New-Item -ItemType Directory -Path $root,$externalWorktree -Force | Out-Null
+            $marker = Join-Path $externalWorktree 'keep.txt'
+            Set-Content -LiteralPath $marker -Value 'keep'
+            New-Item -ItemType Junction -Path $worktrees -Target $external | Out-Null
+            Mock Invoke-CheckedProcess { return "worktree A:/repository`n" }
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                repositoryPath = 'A:\repository'
+                remote = 'origin'
+                branch = 'main'
+            }
+
+            try {
+                { New-ReleaseFromOriginMain -Config $config -Sha $sha } |
+                    Should -Throw '*reparse*'
+
+                Test-Path -LiteralPath $marker | Should -BeTrue
+                Should -Invoke Invoke-CheckedProcess -Times 0 -Exactly -ParameterFilter {
+                    $ArgumentList -contains 'add'
+                }
+            } finally {
+                if (Test-Path -LiteralPath $worktrees) {
+                    Remove-Item -LiteralPath $worktrees -Force
+                }
+            }
+        }
+
+        It 'does not claim a registered worktree created during a failed Git add' {
+            $root = Join-Path $TestDrive 'worktree-add-registration-race'
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+            $worktree = Join-Path $root "worktrees\$sha"
+            $gitWorktree = $worktree.Replace('\','/')
+            $script:worktreeListCalls = 0
+            Mock Invoke-CheckedProcess {
+                if ($ArgumentList -contains 'list') {
+                    $script:worktreeListCalls++
+                    if ($script:worktreeListCalls -eq 1) { return "worktree A:/repository`n" }
+                    return "worktree $gitWorktree`n"
+                }
+                if ($ArgumentList -contains 'add') {
+                    New-Item -ItemType Directory -Path $worktree -Force | Out-Null
+                    Set-Content -LiteralPath (Join-Path $worktree 'registered.txt') -Value 'keep'
+                    throw 'simulated add failure after external registration'
+                }
+                throw 'registered worktree must not be removed'
+            }
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                repositoryPath = 'A:\repository'
+                remote = 'origin'
+                branch = 'main'
+            }
+
+            $failure = { New-ReleaseFromOriginMain -Config $config -Sha $sha } |
+                Should -Throw -PassThru
+
+            $failure.Exception.Message | Should -Match 'simulated add failure after external registration'
+            $failure.Exception.Message | Should -Match 'already registered'
+            Test-Path -LiteralPath (Join-Path $worktree 'registered.txt') | Should -BeTrue
+            Should -Invoke Invoke-CheckedProcess -Times 0 -Exactly -ParameterFilter {
+                $ArgumentList -contains 'remove'
+            }
+        }
+
+        It 'publishes a release and removes only the successfully added worktree' {
+            $root = Join-Path $TestDrive 'successful-worktree-build'
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+            $worktree = Join-Path $root "worktrees\$sha"
+            $release = Join-Path $root "releases\$sha"
+            $gitWorktree = $worktree.Replace('\','/')
+            $script:worktreeRegistered = $false
+            Mock Get-ProductionReleaseDomainSchema { 'LEGACY' }
+            Mock Invoke-CheckedProcess {
+                if ($ArgumentList -contains 'list') {
+                    if ($script:worktreeRegistered) { return "worktree $gitWorktree`n" }
+                    return "worktree A:/repository`n"
+                }
+                if ($ArgumentList -contains 'add') {
+                    $script:worktreeRegistered = $true
+                    New-Item -ItemType Directory -Path (Join-Path $worktree 'website\build\libs') -Force |
+                        Out-Null
+                    Set-Content -LiteralPath (Join-Path $worktree 'gradlew.bat') -Value '@exit /b 0'
+                    return ''
+                }
+                if ($ArgumentList -contains 'remove') {
+                    $script:worktreeRegistered = $false
+                    Remove-Item -LiteralPath $worktree -Recurse -Force
+                    return ''
+                }
+                if ([IO.Path]::GetFileName($FilePath) -ceq 'gradlew.bat') {
+                    Set-Content -LiteralPath `
+                        (Join-Path $worktree 'website\build\libs\website.jar') -Value 'jar'
+                    return ''
+                }
+                return ''
+            }
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                repositoryPath = 'A:\repository'
+                remote = 'origin'
+                branch = 'main'
+                nodeExe = 'C:\node.exe'
+            }
+
+            $result = New-ReleaseFromOriginMain -Config $config -Sha $sha
+
+            $result | Should -Be $release
+            Test-Path -LiteralPath (Join-Path $release 'app.jar') | Should -BeTrue
+            Test-Path -LiteralPath $worktree | Should -BeFalse
+            $script:worktreeRegistered | Should -BeFalse
+        }
+
+        It 'preserves both release-build and owned-worktree cleanup failures' {
+            $root = Join-Path $TestDrive 'worktree-cleanup-failure'
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+            Mock Remove-OwnedProductionReleaseWorktree { throw 'simulated owned cleanup failure' }
+            Mock Invoke-CheckedProcess {
+                if ($ArgumentList -contains 'list') { return "worktree A:/repository`n" }
+                if ($ArgumentList -contains 'add') { return '' }
+                if ([IO.Path]::GetFileName($FilePath) -ceq 'gradlew.bat') {
+                    throw 'simulated release build failure'
+                }
+                return ''
+            }
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                repositoryPath = 'A:\repository'
+                remote = 'origin'
+                branch = 'main'
+                nodeExe = 'C:\node.exe'
+            }
+
+            $failure = { New-ReleaseFromOriginMain -Config $config -Sha $sha } |
+                Should -Throw -PassThru
+
+            $failure.Exception.Message | Should -Match 'simulated release build failure'
+            $failure.Exception.Message | Should -Match 'simulated owned cleanup failure'
+        }
+
         It 'stops the old writer before the new release can start against live data' {
             Mock Assert-ReleasePath { $Path }
             Mock Get-JunctionTarget { 'C:\data\releases\old' }

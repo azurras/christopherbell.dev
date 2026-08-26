@@ -176,16 +176,127 @@ function Resolve-OriginMainRelease {
     return $sha
 }
 
+function Get-ProductionReleaseWorktreePath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[0-9a-f]{40}$')]
+        [string]$Sha
+    )
+
+    $root = [IO.Path]::GetFullPath((Join-Path $Config.programDataRoot 'worktrees'))
+    $worktree = [IO.Path]::GetFullPath((Join-Path $root $Sha))
+    $parent = [IO.Path]::GetDirectoryName($worktree)
+    if (-not [string]::Equals($parent,$root,[StringComparison]::OrdinalIgnoreCase) -or
+        (Split-Path -Leaf $worktree) -cne $Sha) {
+        throw 'Production release worktree must be an exact full Git SHA below the worktrees directory.'
+    }
+    return $worktree
+}
+
+function Test-ProductionGitWorktreeRegistered {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Worktree
+    )
+
+    $arguments = Get-TrustedGitArguments $Config.repositoryPath @('worktree','list','--porcelain')
+    $output = Invoke-CheckedProcess 'git.exe' $arguments $Config.repositoryPath
+    foreach ($line in $output -split '\r?\n') {
+        if (-not $line.StartsWith('worktree ',[StringComparison]::Ordinal)) { continue }
+        $registered = [IO.Path]::GetFullPath($line.Substring('worktree '.Length))
+        if ([string]::Equals($registered,$Worktree,[StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Assert-ProductionReleaseWorktreeParent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Worktree
+    )
+
+    $root = [IO.Path]::GetFullPath((Join-Path $Config.programDataRoot 'worktrees'))
+    $parent = [IO.Path]::GetFullPath((Split-Path -Parent $Worktree))
+    if (-not [string]::Equals($parent,$root,[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Production release worktree parent escaped the exact worktrees directory.'
+    }
+    Assert-ProductionPathNotReparse -Path $root | Out-Null
+}
+
+function Remove-UnregisteredProductionReleaseWorktree {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Worktree
+    )
+
+    Assert-ProductionReleaseWorktreeParent -Config $Config -Worktree $Worktree
+    if (Test-ProductionGitWorktreeRegistered -Config $Config -Worktree $Worktree) {
+        throw "Production release worktree is already registered; refusing automatic deletion: $Worktree"
+    }
+    if (-not (Test-Path -LiteralPath $Worktree)) { return }
+    Assert-ProductionReleaseWorktreeParent -Config $Config -Worktree $Worktree
+    Assert-ProductionTreeNotReparse -Path $Worktree
+    Remove-Item -LiteralPath $Worktree -Recurse -Force
+    if (Test-Path -LiteralPath $Worktree) {
+        throw "Stale production release worktree cleanup did not remove the exact target: $Worktree"
+    }
+}
+
+function Remove-OwnedProductionReleaseWorktree {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Worktree
+    )
+
+    Assert-ProductionReleaseWorktreeParent -Config $Config -Worktree $Worktree
+    if (Test-ProductionGitWorktreeRegistered -Config $Config -Worktree $Worktree) {
+        $arguments = Get-TrustedGitArguments $Config.repositoryPath @(
+            'worktree','remove','--force',$Worktree)
+        Invoke-CheckedProcess 'git.exe' $arguments $Config.repositoryPath | Out-Null
+    }
+    if (Test-Path -LiteralPath $Worktree) {
+        Assert-ProductionReleaseWorktreeParent -Config $Config -Worktree $Worktree
+        Assert-ProductionTreeNotReparse -Path $Worktree
+        Remove-Item -LiteralPath $Worktree -Recurse -Force
+        if (Test-Path -LiteralPath $Worktree) {
+            throw "Owned production release worktree cleanup did not remove the exact target: $Worktree"
+        }
+    }
+}
+
 function New-ReleaseFromOriginMain {
-    param($Config, [Parameter(Mandatory)][string]$Sha)
-    $worktree = Join-Path $Config.programDataRoot "worktrees\$Sha"
+    param(
+        $Config,
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[0-9a-f]{40}$')]
+        [string]$Sha
+    )
+    Assert-ProductionFixedRootBoundary `
+        -Config $Config `
+        -FixedRoot $script:FixedProductionRoot | Out-Null
+    $worktree = Get-ProductionReleaseWorktreePath -Config $Config -Sha $Sha
     $release = Join-Path $Config.programDataRoot "releases\$Sha"
     $staging = "$release.staging"
     if (Test-Path -LiteralPath $release -PathType Container) { return $release }
     New-Item -ItemType Directory -Force (Split-Path -Parent $worktree),(Split-Path -Parent $release) | Out-Null
+    Assert-ProductionReleaseWorktreeParent -Config $Config -Worktree $worktree
+    $addAttempted = $false
+    $addSucceeded = $false
+    $operationFailure = $null
     try {
+        Remove-UnregisteredProductionReleaseWorktree -Config $Config -Worktree $worktree
+        $addAttempted = $true
         $addArguments = Get-TrustedGitArguments $Config.repositoryPath @('worktree','add','--detach',$worktree,$Sha)
         Invoke-CheckedProcess 'git.exe' $addArguments $Config.repositoryPath | Out-Null
+        $addSucceeded = $true
         $environment = @{
             GRADLE_USER_HOME = Join-Path $Config.programDataRoot 'gradle-home'
             NODE_EXE = $Config.nodeExe
@@ -211,18 +322,49 @@ function New-ReleaseFromOriginMain {
             ConvertTo-Json | Set-Content (Join-Path $staging 'release.json') -Encoding utf8
         Move-Item -LiteralPath $staging -Destination $release
         return $release
+    } catch {
+        $operationFailure = $_.Exception
     } finally {
-        if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
-        if (Test-Path -LiteralPath $worktree) {
+        $cleanupFailures = [Collections.Generic.List[Exception]]::new()
+        if (Test-Path -LiteralPath $staging) {
             try {
-                $removeArguments = Get-TrustedGitArguments $Config.repositoryPath @('worktree','remove','--force',$worktree)
-                Invoke-CheckedProcess 'git.exe' $removeArguments $Config.repositoryPath | Out-Null
-            } catch { }
+                Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Stop
+            } catch {
+                [void]$cleanupFailures.Add($_.Exception)
+            }
+        }
+        if ($addAttempted) {
+            try {
+                if ($addSucceeded) {
+                    Remove-OwnedProductionReleaseWorktree -Config $Config -Worktree $worktree
+                } else {
+                    Remove-UnregisteredProductionReleaseWorktree -Config $Config -Worktree $worktree
+                }
+            } catch {
+                [void]$cleanupFailures.Add($_.Exception)
+            }
         }
         try {
             $pruneArguments = Get-TrustedGitArguments $Config.repositoryPath @('worktree','prune')
             Invoke-CheckedProcess 'git.exe' $pruneArguments $Config.repositoryPath | Out-Null
-        } catch { }
+        } catch {
+            [void]$cleanupFailures.Add($_.Exception)
+        }
+        if ($operationFailure -and $cleanupFailures.Count -gt 0) {
+            $failures = [Collections.Generic.List[Exception]]::new()
+            [void]$failures.Add($operationFailure)
+            foreach ($failure in $cleanupFailures) { [void]$failures.Add($failure) }
+            throw [AggregateException]::new(
+                'Production release creation failed and cleanup did not complete.',
+                [Exception[]]$failures.ToArray())
+        }
+        if ($operationFailure) { throw $operationFailure }
+        if ($cleanupFailures.Count -eq 1) { throw $cleanupFailures[0] }
+        if ($cleanupFailures.Count -gt 1) {
+            throw [AggregateException]::new(
+                'Production release cleanup did not complete.',
+                [Exception[]]$cleanupFailures.ToArray())
+        }
     }
 }
 
