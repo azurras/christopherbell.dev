@@ -1660,55 +1660,83 @@ function Assert-ProductionPostgreSqlCutoverMongoUnlocked {
 function New-ProductionPostgreSqlCutoverActions {
     param([Parameter(Mandatory)][pscustomobject]$Config)
     $cutoverConfig = $Config
+    $commands = @{
+        Preflight = Get-Command New-ProductionPostgreSqlCutoverPreflight `
+            -CommandType Function -ErrorAction Stop
+        StopWriters = Get-Command Stop-ProductionPostgreSqlCutoverWriters `
+            -CommandType Function -ErrorAction Stop
+        ArchiveMongo = Get-Command New-ProductionPostgreSqlCutoverMongoArchive `
+            -CommandType Function -ErrorAction Stop
+        FinalizePostgreSql = Get-Command Invoke-ProductionPostgreSqlCutoverFinalize `
+            -CommandType Function -ErrorAction Stop
+        ReconcilePostgreSql = Get-Command Invoke-ProductionPostgreSqlCutoverReconcile `
+            -CommandType Function -ErrorAction Stop
+        BackupPostgreSql = Get-Command New-ProductionPostgreSqlCutoverBackup `
+            -CommandType Function -ErrorAction Stop
+        VerifyCandidate = Get-Command Test-ProductionPostgreSqlCutoverCandidate `
+            -CommandType Function -ErrorAction Stop
+        PrepareAuthority = Get-Command New-ProductionPostgreSqlCutoverAuthorityIntent `
+            -CommandType Function -ErrorAction Stop
+        PublishAuthority = Get-Command Publish-ProductionPostgreSqlCutoverAuthority `
+            -CommandType Function -ErrorAction Stop
+        ActivateProduction = Get-Command Start-ProductionPostgreSqlCutoverRelease `
+            -CommandType Function -ErrorAction Stop
+        VerifyProduction = Get-Command Test-ProductionPostgreSqlCutoverProduction `
+            -CommandType Function -ErrorAction Stop
+        EnterSoak = Get-Command Enter-ProductionPostgreSqlCutoverSoak `
+            -CommandType Function -ErrorAction Stop
+        RestorePreAuthority = Get-Command Restore-ProductionPostgreSqlCutoverPreAuthority `
+            -CommandType Function -ErrorAction Stop
+    }
     $actions = @{
-        Preflight = { param($Value,$Existing) New-ProductionPostgreSqlCutoverPreflight `
+        Preflight = { param($Value,$Existing) & $commands.Preflight `
             -Config $Value -ExistingJournal $Existing }.GetNewClosure()
         StopWriters = {
-            param($State) Stop-ProductionPostgreSqlCutoverWriters `
+            param($State) & $commands.StopWriters `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
         ArchiveMongo = {
-            param($State) New-ProductionPostgreSqlCutoverMongoArchive `
+            param($State) & $commands.ArchiveMongo `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
         FinalizePostgreSql = {
-            param($State) Invoke-ProductionPostgreSqlCutoverFinalize `
+            param($State) & $commands.FinalizePostgreSql `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
         ReconcilePostgreSql = {
-            param($State) Invoke-ProductionPostgreSqlCutoverReconcile `
+            param($State) & $commands.ReconcilePostgreSql `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
         BackupPostgreSql = {
-            param($State) New-ProductionPostgreSqlCutoverBackup `
+            param($State) & $commands.BackupPostgreSql `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
         VerifyCandidate = {
-            param($State) Test-ProductionPostgreSqlCutoverCandidate `
+            param($State) & $commands.VerifyCandidate `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
         PublishAuthority = {
-            param($State) Publish-ProductionPostgreSqlCutoverAuthority `
+            param($State) & $commands.PublishAuthority `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
         PrepareAuthority = {
-            param($State) New-ProductionPostgreSqlCutoverAuthorityIntent `
+            param($State) & $commands.PrepareAuthority `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
         ActivateProduction = {
-            param($State) Start-ProductionPostgreSqlCutoverRelease `
+            param($State) & $commands.ActivateProduction `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
         VerifyProduction = {
-            param($State) Test-ProductionPostgreSqlCutoverProduction `
+            param($State) & $commands.VerifyProduction `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
         EnterSoak = {
-            param($State) Enter-ProductionPostgreSqlCutoverSoak `
+            param($State) & $commands.EnterSoak `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
         RestorePreAuthority = {
-            param($State) Restore-ProductionPostgreSqlCutoverPreAuthority `
+            param($State) & $commands.RestorePreAuthority `
                 -Config $cutoverConfig -Journal $State
         }.GetNewClosure()
     }

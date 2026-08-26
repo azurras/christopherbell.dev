@@ -225,6 +225,20 @@ Describe 'PostgreSQL cutover default command boundaries' {
         $script:Module = Get-Module Production.PostgreSqlMigration -ErrorAction Stop
     }
 
+    It 'keeps private default action helpers resolvable after module import' {
+        $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' }
+
+        $actions = InModuleScope Production.PostgreSqlMigration -Parameters @{
+            Config=$config
+        } {
+            New-ProductionPostgreSqlCutoverActions -Config $Config
+        }
+
+        $preflightAction = $actions['Preflight']
+        { & $preflightAction $config $null } |
+            Should -Throw '*Missing PostgreSQL configuration value: javaExe*'
+    }
+
     It 'passes the bridge secret only through the child environment' {
         $root = Join-Path $TestDrive 'program-data'
         $release = Join-Path $root ('releases\' + ('a' * 40))
