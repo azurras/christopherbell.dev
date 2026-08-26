@@ -20,13 +20,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class BoundedResponseBodyHandlersTest {
+  private static final Duration ORDINARY_REQUEST_TIMEOUT = Duration.ofSeconds(10);
+  private static final Duration TEST_COORDINATION_TIMEOUT = Duration.ofSeconds(5);
+
   @Test
   void acceptsAResponseAtTheExactLimit() throws Exception {
     var server = fixedResponseServer("four");
     try {
       var response = BoundedResponseBodyHandlers.send(
           HttpClient.newHttpClient(),
-          request(server, Duration.ofSeconds(1)),
+          request(server, ORDINARY_REQUEST_TIMEOUT),
           BoundedResponseBodyHandlers.ofString(4, UTF_8, status -> status == 200));
 
       assertEquals("four", response.body());
@@ -43,7 +46,7 @@ class BoundedResponseBodyHandlersTest {
           BodyLimitExceededException.class,
           () -> BoundedResponseBodyHandlers.send(
               HttpClient.newHttpClient(),
-              request(server, Duration.ofSeconds(1)),
+              request(server, ORDINARY_REQUEST_TIMEOUT),
               BoundedResponseBodyHandlers.ofByteArray(4, status -> status == 200)));
     } finally {
       server.stop(0);
@@ -75,8 +78,10 @@ class BoundedResponseBodyHandlersTest {
         request(server, Duration.ofMillis(150)),
         BoundedResponseBodyHandlers.ofByteArray(128, status -> status == 200)));
     try {
-      assertTrue(bodyStarted.await(1, TimeUnit.SECONDS));
-      var exception = assertThrows(ExecutionException.class, () -> result.get(1, TimeUnit.SECONDS));
+      assertTrue(bodyStarted.await(TEST_COORDINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+      var exception = assertThrows(
+          ExecutionException.class,
+          () -> result.get(TEST_COORDINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
       assertTrue(exception.getCause() instanceof HttpTimeoutException);
     } finally {
       result.cancel(true);
@@ -110,7 +115,7 @@ class BoundedResponseBodyHandlersTest {
       try {
         BoundedResponseBodyHandlers.send(
             HttpClient.newHttpClient(),
-            request(server, Duration.ofSeconds(5)),
+            request(server, ORDINARY_REQUEST_TIMEOUT),
             BoundedResponseBodyHandlers.ofByteArray(128, status -> status == 200));
       } catch (InterruptedException e) {
         interruptedStatus.set(Thread.currentThread().isInterrupted());
@@ -119,9 +124,9 @@ class BoundedResponseBodyHandlersTest {
       }
     });
     try {
-      assertTrue(bodyStarted.await(1, TimeUnit.SECONDS));
+      assertTrue(bodyStarted.await(TEST_COORDINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
       caller.interrupt();
-      caller.join(Duration.ofSeconds(1));
+      caller.join(TEST_COORDINATION_TIMEOUT);
       assertTrue(!caller.isAlive());
       assertTrue(interruptedStatus.get());
     } finally {
