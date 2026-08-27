@@ -878,8 +878,9 @@ function Get-ProductionPostgreSqlCutoverCatalogDigest {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead((Join-Path $Release 'app.jar'))
     try {
-        $entries = @($archive.Entries | Where-Object FullName -eq
-            'BOOT-INF/classes/db/migration/postgresql-migration-catalog.yml')
+        $entries = @($archive.Entries | Where-Object {
+            $_.FullName -eq 'BOOT-INF/classes/db/migration/postgresql-migration-catalog.yml'
+        })
         if ($entries.Count -ne 1) { throw 'The migration catalog resource is missing.' }
         $stream = $entries[0].Open()
         try {
