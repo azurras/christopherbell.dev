@@ -225,6 +225,50 @@ Describe 'PostgreSQL cutover default command boundaries' {
         $script:Module = Get-Module Production.PostgreSqlMigration -ErrorAction Stop
     }
 
+    It 'writes the initial cutover journal through the production file boundary' {
+        $root = Join-Path $TestDrive 'journal-program-data'
+        $config = [pscustomobject]@{ programDataRoot=$root }
+        $journal = [pscustomobject][ordered]@{
+            version=1; phase='PLANNED'; release='a' * 40
+        }
+
+        InModuleScope Production.PostgreSqlMigration -Parameters @{
+            Config=$config; Journal=$journal
+        } {
+            Mock Protect-ProductionPath {}
+            Mock Assert-ProtectedProductionPath {}
+
+            Write-ProductionPostgreSqlCutoverJournal -Config $Config -Journal $Journal
+
+            $path = Join-Path $Config.programDataRoot `
+                'migration\postgresql-cutover.json'
+            $written = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+            $written.phase | Should -BeExactly 'PLANNED'
+            $written.release | Should -BeExactly ('a' * 40)
+        }
+    }
+
+    It 'calls production path protection with declared parameters only' {
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile(
+            $script:ModulePath, [ref]$tokens, [ref]$parseErrors)
+        $declared = (Get-Command Protect-ProductionPath -ErrorAction Stop).Parameters.Keys
+        $invalid = @($ast.FindAll({
+            param($node)
+            $node -is [Management.Automation.Language.CommandAst] -and
+                $node.GetCommandName() -ceq 'Protect-ProductionPath'
+        }, $true) | ForEach-Object {
+            $_.CommandElements | Where-Object {
+                $_ -is [Management.Automation.Language.CommandParameterAst] -and
+                    $declared -cnotcontains $_.ParameterName
+            } | ForEach-Object ParameterName
+        })
+
+        $parseErrors | Should -BeNullOrEmpty
+        $invalid | Should -BeNullOrEmpty
+    }
+
     It 'hashes the exact migration catalog embedded in the release JAR' {
         $release = Join-Path $TestDrive 'catalog-release'
         $archiveRoot = Join-Path $TestDrive 'catalog-archive'

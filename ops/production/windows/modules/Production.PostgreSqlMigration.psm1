@@ -364,7 +364,7 @@ function Write-ProductionMigrationToken {
     $directory = Split-Path -Parent $path
     if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
         New-Item -ItemType Directory -Path $directory | Out-Null
-        Protect-ProductionPath -Path $directory -Directory | Out-Null
+        Protect-ProductionPath -Path $directory | Out-Null
     }
     [ordered]@{ lockToken = $LockToken.ToString() } | ConvertTo-Json -Compress |
         Set-Content -LiteralPath $path -Encoding utf8
@@ -681,7 +681,7 @@ function Write-ProductionPostgreSqlCutoverJournal {
     if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
         New-Item -ItemType Directory -Path $parent | Out-Null
     }
-    Protect-ProductionPath -Path $parent -Directory | Out-Null
+    Protect-ProductionPath -Path $parent | Out-Null
     Assert-ProtectedProductionPath -Path $parent | Out-Null
     $temporary = "$path.$PID.$([guid]::NewGuid().ToString('N')).tmp"
     try {
@@ -806,7 +806,7 @@ function Write-ProductionPostgreSqlCutoverSidecar {
     if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
         New-Item -ItemType Directory -Path $parent | Out-Null
     }
-    Protect-ProductionPath -Path $parent -Directory | Out-Null
+    Protect-ProductionPath -Path $parent | Out-Null
     Assert-ProtectedProductionPath -Path $parent | Out-Null
     $temporary = "$path.$PID.$([guid]::NewGuid().ToString('N')).tmp"
     try {
@@ -1126,7 +1126,7 @@ function Protect-ProductionPostgreSqlCutoverAuthority {
     if (-not (Test-Path -LiteralPath $root -PathType Container)) {
         New-Item -ItemType Directory -Path $root | Out-Null
     }
-    Protect-ProductionPath -Path $root -Directory | Out-Null
+    Protect-ProductionPath -Path $root | Out-Null
     Assert-ProtectedProductionPath -Path $root | Out-Null
     $keyPath = Join-Path $root 'authority.key'
     if (-not (Test-Path -LiteralPath $keyPath -PathType Leaf)) {

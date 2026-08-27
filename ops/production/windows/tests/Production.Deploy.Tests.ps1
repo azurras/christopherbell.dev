@@ -761,6 +761,59 @@ Describe 'native Windows deployment' {
             Should -Invoke Invoke-CheckedProcess -ParameterFilter { $ArgumentList -contains 'fetch' }
         }
 
+        It 'finishes exact cleanup when Git unregisters an owned worktree before failing' {
+            $root = Join-Path $TestDrive 'partial-worktree-remove'
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+            $worktree = Join-Path $root "worktrees\$sha"
+            $gitWorktree = $worktree.Replace('\','/')
+            New-Item -ItemType Directory -Path $worktree -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $worktree 'partial.txt') -Value 'partial'
+            $script:worktreeRegistered = $true
+            Mock Invoke-CheckedProcess {
+                if ($ArgumentList -contains 'list') {
+                    if ($script:worktreeRegistered) { return "worktree $gitWorktree`n" }
+                    return "worktree A:/repository`n"
+                }
+                if ($ArgumentList -contains 'remove') {
+                    $script:worktreeRegistered = $false
+                    throw 'simulated Git removal failure after unregister'
+                }
+                return ''
+            }
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                repositoryPath = 'A:\repository'
+            }
+
+            Remove-OwnedProductionReleaseWorktree -Config $config -Worktree $worktree
+
+            $script:worktreeRegistered | Should -BeFalse
+            Test-Path -LiteralPath $worktree | Should -BeFalse
+        }
+
+        It 'preserves an owned worktree when failed Git removal leaves it registered' {
+            $root = Join-Path $TestDrive 'registered-worktree-remove-failure'
+            $sha = '0123456789abcdef0123456789abcdef01234567'
+            $worktree = Join-Path $root "worktrees\$sha"
+            $gitWorktree = $worktree.Replace('\','/')
+            New-Item -ItemType Directory -Path $worktree -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $worktree 'keep.txt') -Value 'keep'
+            Mock Invoke-CheckedProcess {
+                if ($ArgumentList -contains 'list') { return "worktree $gitWorktree`n" }
+                if ($ArgumentList -contains 'remove') { throw 'simulated registered removal failure' }
+                return ''
+            }
+            $config = [pscustomobject]@{
+                programDataRoot = $root
+                repositoryPath = 'A:\repository'
+            }
+
+            { Remove-OwnedProductionReleaseWorktree -Config $config -Worktree $worktree } |
+                Should -Throw '*simulated registered removal failure*'
+
+            Test-Path -LiteralPath (Join-Path $worktree 'keep.txt') | Should -BeTrue
+        }
+
         It 'removes only an unregistered stale SHA worktree before retrying a release build' {
             $root = Join-Path $TestDrive 'stale-worktree-retry'
             $sha = '0123456789abcdef0123456789abcdef01234567'
