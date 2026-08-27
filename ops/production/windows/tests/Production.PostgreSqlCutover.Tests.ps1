@@ -225,6 +225,29 @@ Describe 'PostgreSQL cutover default command boundaries' {
         $script:Module = Get-Module Production.PostgreSqlMigration -ErrorAction Stop
     }
 
+    It 'hashes the exact migration catalog embedded in the release JAR' {
+        $release = Join-Path $TestDrive 'catalog-release'
+        $archiveRoot = Join-Path $TestDrive 'catalog-archive'
+        $catalog = Join-Path $archiveRoot `
+            'BOOT-INF\classes\db\migration\postgresql-migration-catalog.yml'
+        New-Item -ItemType Directory -Path $release,(Split-Path $catalog) -Force |
+            Out-Null
+        $catalogBytes = [Text.Encoding]::UTF8.GetBytes("catalog-version: 1`n")
+        [IO.File]::WriteAllBytes($catalog, $catalogBytes)
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [IO.Compression.ZipFile]::CreateFromDirectory(
+            $archiveRoot, (Join-Path $release 'app.jar'))
+        $expected = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($catalogBytes)).ToLowerInvariant()
+
+        $actual = & $script:Module {
+            param($Release)
+            Get-ProductionPostgreSqlCutoverCatalogDigest -Release $Release
+        } $release
+
+        $actual | Should -BeExactly $expected
+    }
+
     It 'keeps private default action helpers resolvable after module import' {
         $config = [pscustomobject]@{ programDataRoot='C:\ProgramData\christopherbell.dev' }
 
