@@ -260,7 +260,14 @@ function Remove-OwnedProductionReleaseWorktree {
     if (Test-ProductionGitWorktreeRegistered -Config $Config -Worktree $Worktree) {
         $arguments = Get-TrustedGitArguments $Config.repositoryPath @(
             'worktree','remove','--force',$Worktree)
-        Invoke-CheckedProcess 'git.exe' $arguments $Config.repositoryPath | Out-Null
+        try {
+            Invoke-CheckedProcess 'git.exe' $arguments $Config.repositoryPath | Out-Null
+        } catch {
+            $removeFailure = $_.Exception
+            if (Test-ProductionGitWorktreeRegistered -Config $Config -Worktree $Worktree) {
+                throw $removeFailure
+            }
+        }
     }
     if (Test-Path -LiteralPath $Worktree) {
         Assert-ProductionReleaseWorktreeParent -Config $Config -Worktree $Worktree
