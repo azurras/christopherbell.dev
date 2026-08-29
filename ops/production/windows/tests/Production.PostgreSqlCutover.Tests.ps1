@@ -339,6 +339,81 @@ Describe 'PostgreSQL cutover default command boundaries' {
         $observed.Capture.Arguments[-1] | Should -BeExactly 'snapshot'
     }
 
+    It 'extracts one exact <Command> evidence line from Java stdout logs' -TestCases @(
+        @{
+            Command='snapshot'
+            Evidence='catalogDigest=' + ('b' * 64) +
+                ' sourceDigest=' + ('c' * 64) + ' kinds=52'
+        }
+        @{
+            Command='finalize'
+            Evidence='command=finalize kinds=52 statusDigest=' + ('d' * 64)
+        }
+        @{
+            Command='reconcile'
+            Evidence='command=reconcile kinds=52 statusDigest=' + ('e' * 64)
+        }
+    ) {
+        $root = Join-Path $TestDrive 'logged-java-output'
+        $release = Join-Path $root ('releases\' + ('a' * 40))
+        New-Item -ItemType Directory -Path $release -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $release 'app.jar') -Value 'fixture'
+        $config = [pscustomobject]@{ programDataRoot=$root; javaExe='java.exe' }
+        $journal = [pscustomobject]@{
+            release='a' * 40; lockToken='11111111-2222-4333-8444-555555555555'
+        }
+        $process = {
+            param($FilePath,$Arguments,$Environment)
+            "2026-08-29 INFO MongoClient - initialized`r`n$Evidence`r`n" +
+                '2026-08-29 INFO MongoClient - closed'
+        }.GetNewClosure()
+
+        $actual = & $script:Module {
+            param($Config,$Journal,$Process,$Command)
+            Invoke-ProductionPostgreSqlCutoverJava -Config $Config `
+                -Journal $Journal -Command $Command -BridgePassword 'fixture-secret' `
+                -ProcessAction $Process
+        } $config $journal $process $Command
+
+        $actual | Should -BeExactly $Evidence
+    }
+
+    It 'rejects <Label> <Command> evidence in Java stdout' -TestCases @(
+        @{ Label='missing'; Command='snapshot'; Output='INFO MongoClient - initialized' }
+        @{
+            Label='malformed'
+            Command='finalize'
+            Output='command=finalize kinds=51 statusDigest=' + ('d' * 64)
+        }
+        @{
+            Label='duplicated'
+            Command='reconcile'
+            Output=('command=reconcile kinds=52 statusDigest=' + ('e' * 64)) +
+                "`r`n" + ('command=reconcile kinds=52 statusDigest=' + ('e' * 64))
+        }
+    ) {
+        $root = Join-Path $TestDrive 'invalid-java-output'
+        $release = Join-Path $root ('releases\' + ('a' * 40))
+        New-Item -ItemType Directory -Path $release -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $release 'app.jar') -Value 'fixture'
+        $config = [pscustomobject]@{ programDataRoot=$root; javaExe='java.exe' }
+        $journal = [pscustomobject]@{
+            release='a' * 40; lockToken='11111111-2222-4333-8444-555555555555'
+        }
+        $process = {
+            param($FilePath,$Arguments,$Environment)
+            $Output
+        }.GetNewClosure()
+
+        { & $script:Module {
+            param($Config,$Journal,$Process,$Command)
+            Invoke-ProductionPostgreSqlCutoverJava -Config $Config `
+                -Journal $Journal -Command $Command -BridgePassword 'fixture-secret' `
+                -ProcessAction $Process
+        } $config $journal $process $Command } |
+            Should -Throw "*Java $Command evidence is invalid*"
+    }
+
     It 'fails closed when MongoDB remains fsync locked before recovery' {
         $config = [pscustomobject]@{ mongoShellExe='mongosh.exe' }
         $process = { param($FilePath,$Arguments,$Environment) '{"fsyncLock":true}' }

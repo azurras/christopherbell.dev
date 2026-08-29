@@ -960,7 +960,20 @@ function Invoke-ProductionPostgreSqlCutoverJava {
         'org.springframework.boot.loader.launch.PropertiesLauncher',$Command
     ) (Get-ProductionPostgreSqlCutoverJavaEnvironment `
         -Config $Config -Journal $Journal -BridgePassword $BridgePassword)
-    return ([string]$output).Trim()
+    $pattern = switch ($Command) {
+        'snapshot' {
+            '^catalogDigest=[0-9a-f]{64} sourceDigest=[0-9a-f]{64} kinds=52$'
+        }
+        'finalize' { '^command=finalize kinds=52 statusDigest=[0-9a-f]{64}$' }
+        'reconcile' { '^command=reconcile kinds=52 statusDigest=[0-9a-f]{64}$' }
+    }
+    $evidence = @(([string]$output -split '\r?\n') | Where-Object {
+        $_ -cmatch $pattern
+    })
+    if ($evidence.Count -ne 1) {
+        throw "The PostgreSQL cutover Java $Command evidence is invalid."
+    }
+    return [string]$evidence[0]
 }
 
 function New-ProductionPostgreSqlCutoverPreflight {
