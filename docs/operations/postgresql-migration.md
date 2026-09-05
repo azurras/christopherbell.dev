@@ -12,10 +12,12 @@ Production operators must not invoke `finalize` directly. The sole public
 production entry point is:
 
 ```powershell
-.\ops\production\windows\prod.cmd postgres-cutover -ConfirmPostgreSqlCutover
+.\ops\production\windows\prod.ps1 postgres-cutover -ConfirmPostgreSqlCutover
 ```
 
 Use it only after explicit approval for an up-to-30-minute maintenance window.
+Run from the repository root in elevated PowerShell 7.5 or newer. Journal loading
+preserves timestamp strings exactly so checksum verification survives a disk round trip.
 It owns the writer stop, final archive and restore proof, signed finalization
 authority, reconciliation, PostgreSQL backup and restore proof, candidate,
 one-way authority marker, listener activation, verification, and soak journal.
@@ -63,6 +65,11 @@ Every transition is hash-bound to its prior phase and an immutable evidence
 sidecar. A resumed command revalidates the release, lock token, database
 identities, catalog digest, target JDBC digest, transition order, and journal
 digest before performing another effect.
+
+Standalone Java commands can emit MongoDB informational logs around their result.
+The wrapper accepts exactly one command-specific evidence record and rejects missing,
+duplicate, malformed, or conflicting records. Catalog and reconciliation digests must
+still match the journal and prior evidence.
 
 Before `AUTHORITY_PUBLICATION_STARTED`, a failure may return to MongoDB only
 when the authority marker is absent and MongoDB `currentOp` explicitly reports

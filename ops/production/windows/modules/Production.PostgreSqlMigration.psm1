@@ -662,7 +662,7 @@ function Read-ProductionPostgreSqlCutoverJournal {
     Assert-ProtectedProductionPath -Path $path | Out-Null
     try {
         $journal = Get-Content -LiteralPath $path -Raw |
-            ConvertFrom-Json -Depth 30 -ErrorAction Stop
+            ConvertFrom-Json -Depth 30 -DateKind String -ErrorAction Stop
         return Assert-ProductionPostgreSqlCutoverJournal -Journal $journal
     } catch {
         if ($_.Exception.Message -like '*cutover journal is invalid*') { throw }
@@ -967,10 +967,11 @@ function Invoke-ProductionPostgreSqlCutoverJava {
         'finalize' { '^command=finalize kinds=52 statusDigest=[0-9a-f]{64}$' }
         'reconcile' { '^command=reconcile kinds=52 statusDigest=[0-9a-f]{64}$' }
     }
+    # Logs are not evidence; any record-shaped line must pass the exact protocol.
     $evidence = @(([string]$output -split '\r?\n') | Where-Object {
-        $_ -cmatch $pattern
+        $_ -match '^\s*(catalogDigest|sourceDigest|command|statusDigest)\s*='
     })
-    if ($evidence.Count -ne 1) {
+    if ($evidence.Count -ne 1 -or $evidence[0] -cnotmatch $pattern) {
         throw "The PostgreSQL cutover Java $Command evidence is invalid."
     }
     return [string]$evidence[0]

@@ -225,6 +225,29 @@ Describe 'PostgreSQL cutover default command boundaries' {
         $script:Module = Get-Module Production.PostgreSqlMigration -ErrorAction Stop
     }
 
+    It 'round trips signed journal timestamps through the actual disk reader' {
+        InModuleScope Production.PostgreSqlMigration -Parameters @{ Root=$TestDrive } {
+            Mock Protect-ProductionPath {}
+            Mock Assert-ProtectedProductionPath {}
+            $config = [pscustomobject]@{ programDataRoot=$Root }
+            $preflight = [pscustomobject]@{
+                release='a' * 40; lockToken='11111111-2222-4333-8444-555555555555'
+                sourceDatabase='christopherbell'; targetDatabase='christopherbell'
+                catalogDigest='b' * 64; targetJdbcDigest='c' * 64
+            }
+            $journal = New-ProductionPostgreSqlCutoverJournal -Preflight $preflight `
+                -Now ([datetimeoffset]'2026-09-05T12:34:56.1234567Z') -MaintenanceBudgetMinutes 30
+            $journal = Add-ProductionPostgreSqlCutoverTransition -Journal $journal `
+                -Next WRITERS_STOPPED -EvidenceDigest ('d' * 64) `
+                -Now ([datetimeoffset]'2026-09-05T12:35:00.7654321Z')
+            Write-ProductionPostgreSqlCutoverJournal -Config $config -Journal $journal
+            $loaded = Read-ProductionPostgreSqlCutoverJournal -Config $config
+            $loaded.startedAt | Should -BeExactly '2026-09-05T12:34:56.1234567+00:00'
+            $loaded.transitions[0].at | Should -BeExactly '2026-09-05T12:35:00.7654321+00:00'
+            $loaded.journalDigest | Should -BeExactly $journal.journalDigest
+        }
+    }
+
     It 'writes the initial cutover journal through the production file boundary' {
         $root = Join-Path $TestDrive 'journal-program-data'
         $config = [pscustomobject]@{ programDataRoot=$root }
@@ -380,6 +403,18 @@ Describe 'PostgreSQL cutover default command boundaries' {
 
     It 'rejects <Label> <Command> evidence in Java stdout' -TestCases @(
         @{ Label='missing'; Command='snapshot'; Output='INFO MongoClient - initialized' }
+        @{
+            Label='malformed alongside valid'
+            Command='snapshot'
+            Output="catalogDigest=malformed`n" + ('catalogDigest=' + ('b' * 64) +
+                ' sourceDigest=' + ('c' * 64) + ' kinds=52')
+        }
+        @{
+            Label='wrong command alongside valid'
+            Command='finalize'
+            Output=('command=reconcile kinds=52 statusDigest=' + ('e' * 64)) +
+                "`n" + ('command=finalize kinds=52 statusDigest=' + ('d' * 64))
+        }
         @{
             Label='malformed'
             Command='finalize'
