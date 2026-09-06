@@ -248,6 +248,88 @@ Describe 'PostgreSQL cutover default command boundaries' {
         }
     }
 
+    It 'encodes the writer lease as an ISO instant accepted by Java' {
+        $text = & $script:Module {
+            Get-ProductionPostgreSqlCutoverWriterLockText -Journal ([pscustomobject]@{
+                release='a' * 40; lockToken='11111111-2222-4333-8444-555555555555'
+                deadlineAt='2026-09-05T12:34:56.1234567+00:00'
+            })
+        }
+        @($text -split "`n")[-1] |
+            Should -BeExactly 'leaseExpiresAt=2026-09-05T12:34:56.1234567+00:00'
+    }
+
+    It 'records the activated release for subsequent writer starts without losing domain evidence' {
+        InModuleScope Production.PostgreSqlMigration {
+            Mock Read-ProductionMusicSchemaDirection { [pscustomobject]@{
+                version=2; state='TARGET_ACTIVE'; targetRelease='b' * 40
+                legacyRelease='c' * 40; evidenceDigest='d' * 64
+                backupIdentity='e' * 64; legacyDropped=$true
+            } }
+            Mock Write-ProductionDomainSchemaDirection {}
+            Update-ProductionPostgreSqlCutoverReleaseMarker -Config ([pscustomobject]@{}) `
+                -Journal ([pscustomobject]@{release='a' * 40})
+            Should -Invoke Write-ProductionDomainSchemaDirection -Times 1 -Exactly -ParameterFilter {
+                $CurrentRelease -ceq ('a' * 40) -and $TargetRelease -ceq ('b' * 40) -and
+                $LegacyRelease -ceq ('c' * 40) -and $EvidenceDigest -ceq ('d' * 64) -and
+                $BackupIdentity -ceq ('e' * 64) -and $LegacyDropped
+            }
+        }
+    }
+
+    It 'uses a database-enforced read-only identity for pre-authority candidate acceptance' {
+        InModuleScope Production.PostgreSqlMigration {
+            Mock Invoke-WithProductionPostgreSqlCutoverLock { & $Action }
+            Mock Assert-ProductionPostgreSqlCutoverWriterStopped {}
+            Mock Get-ProductionPostgreSqlCutoverRelease { 'fixture-release' }
+            Mock Get-ProductionPostgreSqlCutoverSecrets { [pscustomobject]@{
+                Roles=@{ App='fixture-app'; Viewer='fixture-viewer' }
+            } }
+            Mock Test-CandidateRelease {}
+            Mock Write-ProductionPostgreSqlCutoverSidecar { 'a' * 64 }
+            $null = Test-ProductionPostgreSqlCutoverCandidate `
+                -Config ([pscustomobject]@{candidatePort=8081}) `
+                -Journal ([pscustomobject]@{release='b' * 40})
+            Should -Invoke Test-CandidateRelease -Times 1 -Exactly -ParameterFilter {
+                $AdditionalEnvironment.SPRING_DATASOURCE_USERNAME -ceq 'christopherbell_viewer' -and
+                $AdditionalEnvironment.SPRING_DATASOURCE_PASSWORD -ceq 'fixture-viewer'
+            }
+        }
+    }
+
+    It 'replaces the Mongo service dependency and disables Mongo startup before activation' {
+        InModuleScope Production.PostgreSqlMigration {
+            Mock Assert-ProductionPostgreSqlCutoverWriterStopped {}
+            Mock Invoke-CheckedProcess {}
+            Mock Get-Service { [pscustomobject]@{
+                ServicesDependedOn=@([pscustomobject]@{Name='postgresql-x64-18'})
+            } }
+            Mock Set-Service {}
+            Set-ProductionPostgreSqlCutoverServiceDependency -Config ([pscustomobject]@{})
+            Should -Invoke Invoke-CheckedProcess -Times 1 -Exactly -ParameterFilter {
+                $FilePath -eq 'sc.exe' -and ($ArgumentList -join ' ') -eq
+                    'config ChristopherBellDev depend= postgresql-x64-18'
+            }
+            Should -Invoke Set-Service -Times 1 -Exactly -ParameterFilter {
+                $Name -eq 'MongoDB' -and $StartupType -eq 'Disabled'
+            }
+        }
+    }
+
+    It 'rejects dependency readback drift before disabling Mongo startup' {
+        InModuleScope Production.PostgreSqlMigration {
+            Mock Assert-ProductionPostgreSqlCutoverWriterStopped {}
+            Mock Invoke-CheckedProcess {}
+            Mock Get-Service { [pscustomobject]@{
+                ServicesDependedOn=@([pscustomobject]@{Name='MongoDB'})
+            } }
+            Mock Set-Service {}
+            { Set-ProductionPostgreSqlCutoverServiceDependency -Config ([pscustomobject]@{}) } |
+                Should -Throw '*dependency*'
+            Should -Invoke Set-Service -Times 0 -Exactly
+        }
+    }
+
     It 'writes the initial cutover journal through the production file boundary' {
         $root = Join-Path $TestDrive 'journal-program-data'
         $config = [pscustomobject]@{ programDataRoot=$root }
@@ -514,6 +596,8 @@ Describe 'PostgreSQL cutover default command boundaries' {
             Mock Test-ProductionEndpoints {}
             Mock Test-ProductionPublicEndpoints { $true }
             Mock Write-ProductionPostgreSqlCutoverSidecar { 'a' * 64 }
+            Mock Update-ProductionPostgreSqlCutoverReleaseMarker {}
+            Mock Set-ProductionWebsiteRecoveryPolicy {}
             Mock Switch-ProductionRelease { throw 'must not switch an already-active release' }
 
             $result = Start-ProductionPostgreSqlCutoverRelease `

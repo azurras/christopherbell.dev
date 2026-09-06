@@ -21,6 +21,12 @@ preserves timestamp strings exactly so checksum verification survives a disk rou
 It owns the writer stop, final archive and restore proof, signed finalization
 authority, reconciliation, PostgreSQL backup and restore proof, candidate,
 one-way authority marker, listener activation, verification, and soak journal.
+Candidate acceptance uses the database-enforced read-only viewer role. The
+`deploy-smoke` profile suppresses mutating startup recovery and legacy VIN cleanup;
+normal production readiness still dispatches those handlers. After the
+authority intent is durable, cutover replaces the website's MongoDB service dependency
+with PostgreSQL, disables MongoDB startup, and updates the persistent release marker
+so future website restarts recognize the activated release.
 
 ## Finalization write exclusion
 

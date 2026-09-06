@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Production.Common.psm1') -Global -Force
 Import-Module (Join-Path $PSScriptRoot 'Production.PostgreSql.psm1')
 Import-Module (Join-Path $PSScriptRoot 'Production.Deploy.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Production.WriterStart.psm1')
 
 $script:OwnedSchemas = @('identity','social','communication','federation','music',
     'shared_folder','mobility','lunch','canes','platform')
@@ -1050,7 +1051,7 @@ function Get-ProductionPostgreSqlCutoverSecrets {
     param([Parameter(Mandatory)][pscustomobject]$Config)
     $secrets = Read-ProductionPostgreSqlSecrets -Path (
         Join-Path $Config.programDataRoot 'config\postgresql.env')
-    foreach ($role in 'Bridge','App','Backup') {
+    foreach ($role in 'Bridge','App','Backup','Viewer') {
         Assert-ProductionMigrationSecret -Role $role.ToLowerInvariant() `
             -Secret ([string]$secrets.Roles[$role])
     }
@@ -1125,6 +1126,16 @@ function New-ProductionPostgreSqlCutoverMongoArchive {
     }
 }
 
+function Get-ProductionPostgreSqlCutoverWriterLockText {
+    param([Parameter(Mandatory)]$Journal)
+    @(
+        "lockToken=$($Journal.lockToken)",
+        "release=$($Journal.release)",
+        'state=frozen',
+        "leaseExpiresAt=$(([datetimeoffset][string]$Journal.deadlineAt).ToUniversalTime().ToString('o'))"
+    ) -join "`n"
+}
+
 function Protect-ProductionPostgreSqlCutoverAuthority {
     param(
         [Parameter(Mandatory)][pscustomobject]$Config,
@@ -1154,12 +1165,7 @@ function Protect-ProductionPostgreSqlCutoverAuthority {
     $key = [IO.File]::ReadAllBytes($keyPath)
     if ($key.Length -lt 32) { throw 'The PostgreSQL cutover authority key is invalid.' }
     $writerLockPath = Join-Path $root 'writer.lock'
-    $writerLock = @(
-        "lockToken=$($Journal.lockToken)",
-        "release=$($Journal.release)",
-        'state=frozen',
-        "leaseExpiresAt=$([datetimeoffset][string]$Journal.deadlineAt)"
-    ) -join "`n"
+    $writerLock = Get-ProductionPostgreSqlCutoverWriterLockText -Journal $Journal
     [IO.File]::WriteAllText($writerLockPath, $writerLock, [Text.UTF8Encoding]::new($false))
     Protect-ProductionPath -Path $writerLockPath | Out-Null
     Assert-ProtectedProductionPath -Path $writerLockPath | Out-Null
@@ -1338,13 +1344,14 @@ function Test-ProductionPostgreSqlCutoverCandidate {
         Test-CandidateRelease -Config $Config -Release $release -AdditionalEnvironment @{
             APP_PERSISTENCE_BACKEND = 'postgresql'
             SPRING_DATASOURCE_URL = 'jdbc:postgresql://127.0.0.1:5432/christopherbell'
-            SPRING_DATASOURCE_USERNAME = 'christopherbell_app'
-            SPRING_DATASOURCE_PASSWORD = [string]$secrets.Roles.App
+            SPRING_DATASOURCE_USERNAME = 'christopherbell_viewer'
+            SPRING_DATASOURCE_PASSWORD = [string]$secrets.Roles.Viewer
         } | Out-Null
         $value = [pscustomobject][ordered]@{
             release = [string]$Journal.release
             database = 'christopherbell'
-            role = 'christopherbell_app'
+            role = 'christopherbell_viewer'
+            readOnly = $true
             port = [int]$Config.candidatePort
             backend = 'postgresql'
             verified = $true
@@ -1431,6 +1438,19 @@ function Get-ProductionPostgreSqlCutoverAuthorityPrerequisites {
     }
 }
 
+function Set-ProductionPostgreSqlCutoverServiceDependency {
+    param([Parameter(Mandatory)][pscustomobject]$Config)
+    Assert-ProductionPostgreSqlCutoverWriterStopped -Config $Config
+    Invoke-CheckedProcess -FilePath 'sc.exe' -ArgumentList @(
+        'config','ChristopherBellDev','depend=','postgresql-x64-18') | Out-Null
+    $website = Get-Service -Name 'ChristopherBellDev' -ErrorAction Stop
+    $dependencies = @($website.ServicesDependedOn | ForEach-Object Name)
+    if ($dependencies.Count -ne 1 -or $dependencies[0] -cne 'postgresql-x64-18') {
+        throw 'The PostgreSQL cutover website service dependency readback failed.'
+    }
+    Set-Service -Name 'MongoDB' -StartupType Disabled -ErrorAction Stop
+}
+
 function Publish-ProductionPostgreSqlCutoverAuthority {
     param(
         [Parameter(Mandatory)][pscustomobject]$Config,
@@ -1446,6 +1466,7 @@ function Publish-ProductionPostgreSqlCutoverAuthority {
         Set-ProductionPostgreSqlCutoverEnvironment -Config $Config `
             -AppPassword ([string]$secrets.Roles.App)
         Ensure-ProductionWriterStartGuardUnderHeldLock -Config $Config
+        Set-ProductionPostgreSqlCutoverServiceDependency -Config $Config
         Stop-Service -Name 'MongoDB' -ErrorAction Stop
         $mongo = Get-Service -Name 'MongoDB' -ErrorAction Stop
         $mongo.WaitForStatus(
@@ -1506,6 +1527,30 @@ function New-ProductionPostgreSqlCutoverAuthorityIntent {
     }
 }
 
+function Update-ProductionPostgreSqlCutoverReleaseMarker {
+    param(
+        [Parameter(Mandatory)][pscustomobject]$Config,
+        [Parameter(Mandatory)]$Journal
+    )
+    $direction = Read-ProductionMusicSchemaDirection -Config $Config
+    if (-not $direction -or [string]$direction.state -cne 'TARGET_ACTIVE') {
+        throw 'The PostgreSQL cutover requires an active schema-direction marker.'
+    }
+    if ([int]$direction.version -eq 2) {
+        Write-ProductionDomainSchemaDirection -Config $Config -State TARGET_ACTIVE `
+            -TargetRelease ([string]$direction.targetRelease) `
+            -CurrentRelease ([string]$Journal.release) `
+            -LegacyRelease ([string]$direction.legacyRelease) `
+            -EvidenceDigest ([string]$direction.evidenceDigest) `
+            -BackupIdentity ([string]$direction.backupIdentity) `
+            -LegacyDropped ([bool]$direction.legacyDropped) | Out-Null
+    } else {
+        Write-ProductionMusicSchemaDirection -Config $Config -State TARGET_ACTIVE `
+            -TargetRelease ([string]$Journal.release) `
+            -LegacyRelease ([string]$direction.legacyRelease)
+    }
+}
+
 function Start-ProductionPostgreSqlCutoverRelease {
     param(
         [Parameter(Mandatory)][pscustomobject]$Config,
@@ -1541,8 +1586,9 @@ function Start-ProductionPostgreSqlCutoverRelease {
                 -AuthorizationPurpose 'TARGET_DEPLOY' `
                 -AuthorizationRelease ([string]$Journal.release) `
                 -KeepRecoverySuspended -WriterAlreadyStopped
-            Set-ProductionWebsiteRecoveryPolicy -Policy Normal
         }
+        Update-ProductionPostgreSqlCutoverReleaseMarker -Config $Config -Journal $Journal
+        Set-ProductionWebsiteRecoveryPolicy -Policy Normal
         $value = [pscustomobject][ordered]@{
             release = [string]$Journal.release
             port = [int]$Config.productionPort

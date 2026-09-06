@@ -106,7 +106,9 @@ public class RestaurantImportWorkflowService {
     }
   }
 
-  @EventListener(ApplicationReadyEvent.class)
+  @EventListener(
+      value = ApplicationReadyEvent.class,
+      condition = "!@environment.acceptsProfiles('deploy-smoke')")
   public void runMissedMonthlyOpenStreetMapImport() {
     if (!properties.getRestaurantImport().getMonthly().isEnabled()) {
       return;

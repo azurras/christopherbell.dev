@@ -16,7 +16,9 @@ class PendingActionReconciler {
     this.clock = clock;
   }
 
-  @EventListener(ApplicationReadyEvent.class)
+  @EventListener(
+      value = ApplicationReadyEvent.class,
+      condition = "!@environment.acceptsProfiles('deploy-smoke')")
   void reconcileAtApplicationReadiness() {
     pendingActions.reconcile(clock.instant());
   }
