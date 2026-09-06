@@ -9,7 +9,6 @@ import dev.christopherbell.vehicle.model.VehicleProperties;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinImportState;
 import dev.christopherbell.vehicle.randomvin.model.RandomVinRobotsPolicyState;
 import dev.christopherbell.vehicle.randomvin.policy.RandomVinRobotsPolicy;
-import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
@@ -21,6 +20,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -92,7 +93,9 @@ public class RandomVinImportService {
   /**
    * Removes legacy per-vehicle RandomVIN source notes from imported vehicle records.
    */
-  @PostConstruct
+  @EventListener(
+      value = ApplicationReadyEvent.class,
+      condition = "!@environment.acceptsProfiles('deploy-smoke')")
   public void removeLegacyRandomVinNotes() {
     vehicleRepository.findByNotes(properties.getLegacyImportNote()).forEach(vehicle -> {
       vehicle.setNotes(null);

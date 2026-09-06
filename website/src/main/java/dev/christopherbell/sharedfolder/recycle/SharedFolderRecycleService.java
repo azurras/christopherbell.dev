@@ -283,7 +283,9 @@ public class SharedFolderRecycleService {
   }
 
   /** Reconciles durable intermediate states after process or persistence interruption. */
-  @EventListener(ApplicationReadyEvent.class)
+  @EventListener(
+      value = ApplicationReadyEvent.class,
+      condition = "!@environment.acceptsProfiles('deploy-smoke')")
   public synchronized int reconcilePending() {
     if (!properties.enabled()) return 0;
     int reconciled = 0;

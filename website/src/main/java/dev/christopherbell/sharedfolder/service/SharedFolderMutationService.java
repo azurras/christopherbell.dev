@@ -665,7 +665,9 @@ public class SharedFolderMutationService {
   }
 
   /** Reconciles a bounded oldest-first journal batch once native roots are initialized. */
-  @EventListener(ApplicationReadyEvent.class)
+  @EventListener(
+      value = ApplicationReadyEvent.class,
+      condition = "!@environment.acceptsProfiles('deploy-smoke')")
   public void reconcileStartup() {
     if (recoveries == null
         || !nativeBoundary.nativeMode() && !nativeBoundary.testOnlyPortableMode()) {
