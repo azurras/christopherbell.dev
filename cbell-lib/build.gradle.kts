@@ -6,11 +6,11 @@ plugins {
 
 dependencyManagement {
     imports {
-        mavenBom("org.springframework.boot:spring-boot-dependencies:4.1.0")
+        mavenBom("org.springframework.boot:spring-boot-dependencies:4.1.1")
     }
     dependencies {
-        dependency("net.bytebuddy:byte-buddy:1.18.11")
-        dependency("net.bytebuddy:byte-buddy-agent:1.18.11")
+        dependency("net.bytebuddy:byte-buddy:1.18.13")
+        dependency("net.bytebuddy:byte-buddy-agent:1.18.13")
     }
 }
 
@@ -19,13 +19,13 @@ dependencies {
     implementation("org.springframework:spring-web")
     implementation("org.springframework:spring-context")
     implementation("org.springframework.security:spring-security-core")
-    implementation("org.slf4j:slf4j-api:2.0.18")
+    implementation("org.slf4j:slf4j-api:2.0.19")
     implementation("tools.jackson.core:jackson-databind")
 
-    compileOnly("org.projectlombok:lombok:1.18.46")
-    annotationProcessor("org.projectlombok:lombok:1.18.46")
-    testCompileOnly("org.projectlombok:lombok:1.18.46")
-    testAnnotationProcessor("org.projectlombok:lombok:1.18.46")
+    compileOnly("org.projectlombok:lombok:1.18.48")
+    annotationProcessor("org.projectlombok:lombok:1.18.48")
+    testCompileOnly("org.projectlombok:lombok:1.18.48")
+    testAnnotationProcessor("org.projectlombok:lombok:1.18.48")
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.assertj:assertj-core")
     testImplementation("org.mockito:mockito-junit-jupiter")

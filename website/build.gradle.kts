@@ -21,11 +21,11 @@ plugins {
 
 dependencyManagement {
     imports {
-        mavenBom("org.springframework.modulith:spring-modulith-bom:2.1.0")
+        mavenBom("org.springframework.modulith:spring-modulith-bom:2.1.1")
     }
     dependencies {
-        dependency("net.bytebuddy:byte-buddy:1.18.11")
-        dependency("net.bytebuddy:byte-buddy-agent:1.18.11")
+        dependency("net.bytebuddy:byte-buddy:1.18.13")
+        dependency("net.bytebuddy:byte-buddy-agent:1.18.13")
     }
 }
 
@@ -53,28 +53,28 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
 
     // Host metrics; Windows sensor binaries are pinned generated resources below.
-    implementation("com.github.oshi:oshi-core:7.4.2")
+    implementation("com.github.oshi:oshi-core:7.6.1")
     implementation("net.java.dev.jna:jna-platform-jpms:5.19.1")
 
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0")
     implementation("org.webjars:bootstrap:5.3.8")
 
     // Rate Limiting
     implementation("com.github.vladimir-bukhtoyarov:bucket4j-core:8.0.1")
 
     // Azure SDK
-    implementation("com.azure:azure-data-tables:12.5.11")
+    implementation("com.azure:azure-data-tables:12.5.12")
 
     // JSoup
-    implementation("org.jsoup:jsoup:1.22.2")
+    implementation("org.jsoup:jsoup:1.23.2")
 
     // MapStruct
     implementation("org.mapstruct:mapstruct:1.6.3")
     annotationProcessor("org.mapstruct:mapstruct-processor:1.6.3")
 
     // Lombok
-    compileOnly("org.projectlombok:lombok:1.18.46")
-    annotationProcessor("org.projectlombok:lombok:1.18.46")
+    compileOnly("org.projectlombok:lombok:1.18.48")
+    annotationProcessor("org.projectlombok:lombok:1.18.48")
     annotationProcessor("org.projectlombok:lombok-mapstruct-binding:0.2.0")
 
     // Testing
@@ -84,8 +84,8 @@ dependencies {
     testImplementation("org.springframework.modulith:spring-modulith-starter-test")
     testImplementation(testFixtures(project(":cbell-lib")))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testAnnotationProcessor("org.projectlombok:lombok:1.18.46")
-    testCompileOnly("org.projectlombok:lombok:1.18.46")
+    testAnnotationProcessor("org.projectlombok:lombok:1.18.48")
+    testCompileOnly("org.projectlombok:lombok:1.18.48")
 }
 
 tasks.register<JavaExec>("postgresqlMigration") {
