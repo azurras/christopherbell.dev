@@ -34,16 +34,16 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
-      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
         if: matrix.language == 'java-kotlin'
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
-      - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
       - if: matrix.language == 'java-kotlin'
         run: ./gradlew :website:classes
-      - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           category: '/language:${{ matrix.language }}'
