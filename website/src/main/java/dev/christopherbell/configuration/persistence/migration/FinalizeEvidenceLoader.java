@@ -287,7 +287,7 @@ final class FinalizeEvidenceLoader {
             java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE));
       }
       var owner = Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName();
-      if (production && !trustedProductionPrincipal(owner)) {
+      if (production && !trustedProductionWritePrincipal(owner)) {
         return false;
       }
       var acl = Files.getFileAttributeView(
