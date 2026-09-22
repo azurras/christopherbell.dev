@@ -2,6 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'Production.Common.psm1') -Global -Force
+Import-Module (Join-Path $PSScriptRoot 'Production.Deploy.psm1') -Global -Force
 
 $script:ExpectedVersion = '18.4'
 $script:ExpectedServiceName = 'postgresql-x64-18'
@@ -354,12 +355,12 @@ function Invoke-ProductionPostgreSqlSchemaMigrationCore {
     if (-not (Test-Path -LiteralPath $Config.javaExe -PathType Leaf)) {
         throw 'The configured Java runtime is missing.'
     }
-    $release = Get-JunctionTarget (Join-Path $Config.programDataRoot 'current')
-    if (-not $release) { throw 'The active production release is missing.' }
+    $sha = Resolve-OriginMainRelease -Config $Config
+    $release = New-ReleaseFromOriginMain -Config $Config -Sha $sha
     $release = Assert-ReleasePath -Config $Config -Path $release
     $jar = Join-Path $release 'app.jar'
     if (-not (Test-Path -LiteralPath $jar -PathType Leaf)) {
-        throw 'The active production application archive is missing.'
+        throw 'The current origin/main application archive is missing.'
     }
     $environment = @{
         SPRING_DATASOURCE_URL = 'jdbc:postgresql://127.0.0.1:5432/christopherbell'
