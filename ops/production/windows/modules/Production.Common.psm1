@@ -179,7 +179,7 @@ function Invoke-CheckedProcess {
         [string[]]$ArgumentList = @(),
         [string]$WorkingDirectory = (Get-Location).Path,
         [hashtable]$Environment = @{},
-        [switch]$IncludeSafeFailureTypeLines
+        [switch]$IncludeSafeFailureLines
     )
     $start = New-ProductionProcessStartInfo `
         -FilePath $FilePath `
@@ -196,12 +196,12 @@ function Invoke-CheckedProcess {
     $stderr = $stderrTask.GetAwaiter().GetResult()
     if ($process.ExitCode -ne 0) {
         $failure = "$([IO.Path]::GetFileName($FilePath)) exited with code $($process.ExitCode)."
-        if ($IncludeSafeFailureTypeLines) {
-            $failureTypes = @($stderr -split '\r?\n' | Where-Object {
-                $_ -cmatch '^failureType=[A-Za-z_$][A-Za-z0-9_.$]{0,255}$'
-            } | Select-Object -First 4)
-            if ($failureTypes.Count -gt 0) {
-                throw "$failure`n$($failureTypes -join "`n")"
+        if ($IncludeSafeFailureLines) {
+            $failureDetails = @($stderr -split '\r?\n' | Where-Object {
+                $_ -cmatch '^(failureType=[A-Za-z_$][A-Za-z0-9_.$]{0,255}|sqlState=[0-9A-Z]{5})$'
+            } | Select-Object -First 8)
+            if ($failureDetails.Count -gt 0) {
+                throw "$failure`n$($failureDetails -join "`n")"
             }
         }
         throw $failure
