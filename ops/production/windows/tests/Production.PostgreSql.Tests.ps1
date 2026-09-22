@@ -56,6 +56,8 @@ Describe 'native PostgreSQL production operations' {
                 "-N `"postgresql-x64-18`" -D `"$dataPath`" -w"
             StartName='NT AUTHORITY\NetworkService'
         }
+        Mock Resolve-OriginMainRelease { '1' * 40 } -ModuleName Production.PostgreSql
+        Mock New-ReleaseFromOriginMain { $script:release } -ModuleName Production.PostgreSql
     }
 
     It 'holds the protected deployment lock across bootstrap process effects' {
