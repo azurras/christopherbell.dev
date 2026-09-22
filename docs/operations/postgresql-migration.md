@@ -18,6 +18,8 @@ production entry point is:
 Use it only after explicit approval for an up-to-30-minute maintenance window.
 Run from the repository root in elevated PowerShell 7.5 or newer. Journal loading
 preserves timestamp strings exactly so checksum verification survives a disk round trip.
+Java authority validation accepts the Administrators ownership established by the
+Windows protection routine; untrusted owners and write permissions remain rejected.
 It owns the writer stop, final archive and restore proof, signed finalization
 authority, reconciliation, PostgreSQL backup and restore proof, candidate,
 one-way authority marker, listener activation, verification, and soak journal.

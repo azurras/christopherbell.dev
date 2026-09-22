@@ -101,6 +101,11 @@ class FinalizeEvidenceLoaderTest {
     protect(directory);
     var selfMinted = directory.resolve("finalize.properties");
     Files.writeString(selfMinted, "self-minted", StandardCharsets.UTF_8);
+    if (System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).contains("win")) {
+      // Elevated Windows runners otherwise create Administrators-owned files.
+      Files.setOwner(selfMinted, selfMinted.getFileSystem().getUserPrincipalLookupService()
+          .lookupPrincipalByName(System.getProperty("user.name")));
+    }
     protect(selfMinted);
 
     assertThat(FinalizeEvidenceLoader.productionRoot().toString())
