@@ -11,7 +11,9 @@ $script:OwnedSchemas = @('identity','social','communication','federation','music
 $script:DefaultProcessAction = {
     param($FilePath,$Arguments,$Environment)
     $includeSafeFailureTypeLines = @($Arguments) -ccontains `
-        '-Dloader.main=dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationSourceSnapshotCli'
+        '-Dloader.main=dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationSourceSnapshotCli' -or `
+        @($Arguments) -ccontains `
+        '-Dloader.main=dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationCli'
     Invoke-CheckedProcess -FilePath $FilePath -ArgumentList @($Arguments) `
         -Environment (@{} + $Environment) `
         -IncludeSafeFailureTypeLines:$includeSafeFailureTypeLines

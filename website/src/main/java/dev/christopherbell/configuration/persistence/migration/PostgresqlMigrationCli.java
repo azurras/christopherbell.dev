@@ -62,6 +62,15 @@ public final class PostgresqlMigrationCli {
       return 0;
     } catch (RuntimeException | IOException failure) {
       error.println("PostgreSQL migration command failed.");
+      Throwable cause = failure;
+      for (int depth = 0; cause != null && depth < 4; depth++) {
+        error.println("failureType=" + cause.getClass().getName());
+        var next = cause.getCause();
+        if (next == cause) {
+          break;
+        }
+        cause = next;
+      }
       return 2;
     }
   }
