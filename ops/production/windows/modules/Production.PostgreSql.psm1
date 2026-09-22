@@ -15,8 +15,11 @@ $script:RoleNames = [ordered]@{
 }
 $script:DefaultProcessAction = {
     param($FilePath,$Arguments,$Environment)
+    $includeSafeFailureLines = @($Arguments) -ccontains `
+        '-Dloader.main=dev.christopherbell.configuration.persistence.migration.ProductionPostgresqlSchemaMigrator'
     Invoke-CheckedProcess -FilePath $FilePath -ArgumentList @($Arguments) `
-        -Environment (@{} + $Environment)
+        -Environment (@{} + $Environment) `
+        -IncludeSafeFailureLines:$includeSafeFailureLines
 }
 
 function Assert-ProductionPostgreSqlConfig {

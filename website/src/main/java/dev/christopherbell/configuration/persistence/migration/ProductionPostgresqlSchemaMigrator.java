@@ -1,5 +1,6 @@
 package dev.christopherbell.configuration.persistence.migration;
 
+import java.io.PrintStream;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.List;
@@ -25,13 +26,37 @@ public final class ProductionPostgresqlSchemaMigrator {
   private ProductionPostgresqlSchemaMigrator() {}
 
   /** Validates production identity, migrates through V27, applies runtime grants, and exits. */
-  public static void main(String[] arguments) throws SQLException {
-    if (arguments.length != 0) {
-      throw new IllegalArgumentException("The production schema migrator accepts no arguments.");
+  public static void main(String[] arguments) {
+    try {
+      if (arguments.length != 0) {
+        throw new IllegalArgumentException("The production schema migrator accepts no arguments.");
+      }
+      var settings = Settings.production(System.getenv());
+      migrate(settings, "", "christopherbell", MIGRATOR_ROLE, 5432, PRODUCTION_ROLES);
+      System.out.println("postgresql-schema-migration:success");
+    } catch (RuntimeException | SQLException failure) {
+      writeSafeFailureDetails(failure, System.err);
+      System.exit(1);
     }
-    var settings = Settings.production(System.getenv());
-    migrate(settings, "", "christopherbell", MIGRATOR_ROLE, 5432, PRODUCTION_ROLES);
-    System.out.println("postgresql-schema-migration:success");
+  }
+
+  private static void writeSafeFailureDetails(Throwable failure, PrintStream error) {
+    error.println("PostgreSQL schema migration failed.");
+    Throwable cause = failure;
+    for (int depth = 0; cause != null && depth < 4; depth++) {
+      error.println("failureType=" + cause.getClass().getName());
+      if (cause instanceof SQLException sqlFailure) {
+        var sqlState = sqlFailure.getSQLState();
+        if (sqlState != null && sqlState.matches("[0-9A-Z]{5}")) {
+          error.println("sqlState=" + sqlState);
+        }
+      }
+      var next = cause.getCause();
+      if (next == cause) {
+        break;
+      }
+      cause = next;
+    }
   }
 
   static void migrate(
