@@ -35,6 +35,15 @@ public final class PostgresqlMigrationSourceSnapshotCli {
       return 0;
     } catch (RuntimeException | IOException failure) {
       error.println("PostgreSQL migration source snapshot command failed.");
+      Throwable cause = failure;
+      for (int depth = 0; cause != null && depth < 4; depth++) {
+        error.println("failureType=" + cause.getClass().getName());
+        var next = cause.getCause();
+        if (next == cause) {
+          break;
+        }
+        cause = next;
+      }
       return 2;
     }
   }
