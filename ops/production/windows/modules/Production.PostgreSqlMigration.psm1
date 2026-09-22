@@ -16,7 +16,7 @@ $script:DefaultProcessAction = {
         '-Dloader.main=dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationCli'
     Invoke-CheckedProcess -FilePath $FilePath -ArgumentList @($Arguments) `
         -Environment (@{} + $Environment) `
-        -IncludeSafeFailureTypeLines:$includeSafeFailureTypeLines
+        -IncludeSafeFailureLines:$includeSafeFailureTypeLines
 }
 $script:DefaultLockAction = {
     param($Path) Enter-DeploymentLock -LockPath $Path

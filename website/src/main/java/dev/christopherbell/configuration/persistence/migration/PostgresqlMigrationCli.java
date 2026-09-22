@@ -3,6 +3,7 @@ package dev.christopherbell.configuration.persistence.migration;
 import com.mongodb.client.MongoClients;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.sql.SQLException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -65,6 +66,12 @@ public final class PostgresqlMigrationCli {
       Throwable cause = failure;
       for (int depth = 0; cause != null && depth < 4; depth++) {
         error.println("failureType=" + cause.getClass().getName());
+        if (cause instanceof SQLException sqlFailure) {
+          var sqlState = sqlFailure.getSQLState();
+          if (sqlState != null && sqlState.matches("[0-9A-Z]{5}")) {
+            error.println("sqlState=" + sqlState);
+          }
+        }
         var next = cause.getCause();
         if (next == cause) {
           break;
