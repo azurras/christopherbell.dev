@@ -10,8 +10,11 @@ $script:OwnedSchemas = @('identity','social','communication','federation','music
     'shared_folder','mobility','lunch','canes','platform')
 $script:DefaultProcessAction = {
     param($FilePath,$Arguments,$Environment)
+    $includeSafeFailureTypeLines = @($Arguments) -ccontains `
+        '-Dloader.main=dev.christopherbell.configuration.persistence.migration.PostgresqlMigrationSourceSnapshotCli'
     Invoke-CheckedProcess -FilePath $FilePath -ArgumentList @($Arguments) `
-        -Environment (@{} + $Environment)
+        -Environment (@{} + $Environment) `
+        -IncludeSafeFailureTypeLines:$includeSafeFailureTypeLines
 }
 $script:DefaultLockAction = {
     param($Path) Enter-DeploymentLock -LockPath $Path
