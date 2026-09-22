@@ -118,7 +118,9 @@ class PostgresqlMigrationSourceSnapshotCliTest {
     assertThat(exit).isEqualTo(2);
     assertThat(output.toString(StandardCharsets.UTF_8)).isEmpty();
     assertThat(error.toString(StandardCharsets.UTF_8).lines())
-        .containsExactly("PostgreSQL migration source snapshot command failed.");
+        .containsExactly(
+            "PostgreSQL migration source snapshot command failed.",
+            "failureType=java.lang.IllegalArgumentException");
     assertThat(error.toString(StandardCharsets.UTF_8))
         .doesNotContain(secret);
   }
